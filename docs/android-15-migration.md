@@ -31,7 +31,7 @@ NDK r29 aligns the 64-bit libraries to 16 KB by default. Verified on the built l
 Check:
 
 ```sh
-readelf -l */jniLibs/arm64-v8a/libcardamum.so | awk '/LOAD/{getline; print $NF}' | sort -u
+readelf -l */jniLibs/arm64-v8a/libpimalaya.so | awk '/LOAD/{getline; print $NF}' | sort -u
 ```
 
 ## Verify
@@ -45,5 +45,5 @@ nix develop --command gradle :app:assembleRelease :app:assembleGoogle :app:testD
 
 ## Notes
 
-- The strip step logs "Unable to strip libcardamum.so" and packages it as-is; this is a benign AGP or cargo-ndk note, not a migration regression, and the library is valid.
+- The strip step logs "Unable to strip libpimalaya.so" and packages it as-is; this is a benign AGP or cargo-ndk note, not a migration regression, and the library is valid.
 - The temporary edge-to-edge opt-out (`windowOptOutEdgeToEdgeEnforcement`) was not used; the insets are handled directly, so nothing breaks when targeting 36 later.

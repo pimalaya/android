@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "org.pimalaya.cardamum.client"
+    namespace = "org.pimalaya.client"
     compileSdk = 35
     buildToolsVersion = "36.1.0"
 
@@ -25,7 +25,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    // libcardamum.so lands here, one folder per ABI (see cargoNdkBuild).
+    // libpimalaya.so lands here, one folder per ABI (see cargoNdkBuild).
     sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
 }
 
@@ -38,7 +38,7 @@ dependencies {
 }
 
 // Cross-compiles the Rust bridge for every ABI and drops each
-// libcardamum.so into jniLibs. Runs before the Android build so the
+// libpimalaya.so into jniLibs. Runs before the Android build so the
 // .so is always in sync with the bridge source.
 val cargoNdkBuild by
     tasks.registering(Exec::class) {

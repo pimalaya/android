@@ -14,12 +14,12 @@ use crate::{
 };
 
 /// `Native.offlineSync`: reconciles the collection with its remote
-/// through the io-offline engine, servicing every engine yield via the
-/// given `OfflineDriver`. With `full` the checkpoint is ignored and the
+/// through the io-replica engine, servicing every engine yield via the
+/// given `ReplicaDriver`. With `full` the checkpoint is ignored and the
 /// whole remote is enumerated. Returns the sync report
 /// `{"pulled", "pushed", "conflicts", "rejected", "refreshed"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineSync<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     driver: JObject<'local>,
@@ -40,11 +40,11 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineSync<'loc
 }
 
 /// `Native.offlineUpgrade`: raises the given handles (a JSON string
-/// array) to the full detail tier through the io-offline engine,
-/// servicing every engine yield via the given `OfflineDriver`. Returns
+/// array) to the full detail tier through the io-replica engine,
+/// servicing every engine yield via the given `ReplicaDriver`. Returns
 /// the upgrade report `{"upgraded", "fetched", "deduped"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineUpgrade<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     driver: JObject<'local>,
@@ -70,10 +70,10 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineUpgrade<'
 
 /// `Native.offlineMutate`: stages a local mutation (a JSON object,
 /// e.g. `{"op": "edit", "handle", "hash", "size", "body", "meta"}`)
-/// through the io-offline engine, servicing the storage yields via the
-/// given `OfflineDriver`; the remote is never touched. Returns `{}`.
+/// through the io-replica engine, servicing the storage yields via the
+/// given `ReplicaDriver`; the remote is never touched. Returns `{}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineMutate<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_offlineMutate<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     driver: JObject<'local>,
@@ -100,7 +100,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineMutate<'l
 /// `{"listed": {handle: etag}?, "complete", "handle", "ifMatch"?}`,
 /// returns `{"retry": bool}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineRetryUnguarded<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_offlineRetryUnguarded<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     facts: JString<'local>,
@@ -121,7 +121,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineRetryUngu
 /// books, known}], "vanished"}`, returns `{"members": [index],
 /// "vanished": [handle]}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineAccountSnapshot<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_offlineAccountSnapshot<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     facts: JString<'local>,
@@ -141,7 +141,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineAccountSn
 /// computation, no transport. Takes `{"op", "collection", "bookId"?,
 /// "origin", "deleted"}`, returns `{"action", "postCreateBooks"?}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlinePushPlan<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_offlinePushPlan<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     facts: JString<'local>,
@@ -161,7 +161,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlinePushPlan<
 /// transport. Takes the row facts (see the store module), returns
 /// `{"placement": {..} | null}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlinePlacement<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_offlinePlacement<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     facts: JString<'local>,
@@ -181,7 +181,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlinePlacement
 /// the row facts (see the store module), returns
 /// `{"placement": {..} | null}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlinePhonePlacement<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_offlinePhonePlacement<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     facts: JString<'local>,
@@ -201,7 +201,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlinePhonePlac
 /// placement and row facts (see the store module), returns
 /// `{"action", "row"?, "memberState"?}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineUpsertPlan<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpsertPlan<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     facts: JString<'local>,
@@ -220,7 +220,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlineUpsertPla
 /// computation, no transport. Takes the placement and row facts (see
 /// the store module), returns `{"action", "row"?, "axis"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlinePhoneUpsertPlan<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_offlinePhoneUpsertPlan<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     facts: JString<'local>,
@@ -240,7 +240,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlinePhoneUpse
 /// transport. Takes `{"collection", "deleted", "otherMemberships"}`,
 /// returns `{"action"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_offlinePhoneDropPlan<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_offlinePhoneDropPlan<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     facts: JString<'local>,

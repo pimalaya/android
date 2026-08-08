@@ -19,7 +19,7 @@ use crate::{
 /// `extras` is a JSON object of provider-specific query parameters
 /// (empty or null for none). Returns `{"url": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthAuthorizeUrl<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_oauthAuthorizeUrl<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     authorization_endpoint: JString<'local>,
@@ -62,7 +62,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthAuthorizeUr
 /// authorization code; pure computation, no transport. Returns
 /// `{"code": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthValidateRedirect<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_oauthValidateRedirect<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     redirect_url: JString<'local>,
@@ -86,7 +86,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthValidateRed
 /// CSRF state and PKCE verifier; pure computation, no transport.
 /// Returns `{"state": "..", "verifier": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthSessionParams<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_oauthSessionParams<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
 ) -> JObject<'local> {
@@ -104,7 +104,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthSessionPara
 /// advertised scopes (empty for none); pure computation, no transport.
 /// Returns `{"scope": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthContactsScope<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_oauthContactsScope<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     scopes_supported: JString<'local>,
@@ -126,7 +126,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthContactsSco
 /// §5.1 success params as JSON (`access_token`, `token_type`,
 /// `expires_in`, `refresh_token`, `scope`, `issued_at`).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthRequestAccessToken<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_oauthRequestAccessToken<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -172,7 +172,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthRequestAcce
 /// Returns the metadata JSON (issuer, endpoints, `registration_endpoint`
 /// when the server supports RFC 7591, grants, scopes).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthServerMetadata<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_oauthServerMetadata<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -201,7 +201,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthServerMetad
 /// the given redirect URI, code + refresh grants, client name and
 /// scope). Returns `{"client_id": "..", "client_secret": ".." | null}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthRegisterClient<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_oauthRegisterClient<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -237,7 +237,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthRegisterCli
 /// secret rides along when the registration issued one (empty means
 /// none). Returns the same JSON shape as `oauthRequestAccessToken`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_oauthRefreshAccessToken<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_oauthRefreshAccessToken<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,

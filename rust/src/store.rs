@@ -3,7 +3,7 @@
 //!
 //! The Java store owns SQLite and gathers row facts; every decision
 //! about them lives here: the placement codec mapping card and
-//! membership rows to io-offline placements ([`placement`],
+//! membership rows to io-replica placements ([`placement`],
 //! [`phone_placement`]) and engine upserts back to row writes
 //! ([`upsert_plan`], [`phone_upsert_plan`], [`phone_drop_plan`]), the
 //! driver's push planning ([`push_plan`]), the account-wide delta

@@ -1,4 +1,4 @@
-# Cardamum for Android: design
+# Pimalaya for Android: design
 
 The core idea and the target structure of the app. The current code implements the connection flow, the contacts screen and the hub-and-spoke sync engine on io-offline, both spokes included (docs/io-offline-migration.md for the server spoke, docs/phone-sync-plan.md for the phone one).
 
@@ -6,14 +6,14 @@ The core idea and the target structure of the app. The current code implements t
 
 One activity, one ViewFlipper, one panel per screen:
 
-1. **Connection** (email, config, password panels). Shown on first launch and, later, when configuring a new account. The user enters an email; Cardamum detects the provider family from the domain and proposes matching configurations:
+1. **Connection** (email, config, password panels). Shown on first launch and, later, when configuring a new account. The user enters an email; Pimalaya detects the provider family from the domain and proposes matching configurations:
    - Google account: Google Contacts API (io-people) or Google CardDAV over OAuth. Both pending; password CardDAV is not proposed because Google does not accept it.
    - Microsoft account: Microsoft Graph (io-msgraph contacts) over OAuth. Wired end to end behind the same operations as CardDAV (the account's msgraph:// base URL routes them); the Rust bridge projects Graph contacts to and from the vCard document of record, since Graph has no vCard representation. Waits only on the Entra app registration client id.
    - Anyone else: standard CardDAV, resolved via pimconf RFC 6764 discovery (SRV, TXT, .well-known over a DNS-over-TCP resolver), plus JMAP for Contacts (RFC 9610) once io-jmap grows contacts support.
 
    Picking CardDAV asks for the password, verifies the connection (the addressbook discovery walk doubles as the check) and stores the account AES-GCM-encrypted under an Android Keystore key.
 
-   Straight after a successful connection comes the **addressbook selection** step: the discovered addressbooks are listed with checkboxes and the user picks which ones to sync locally. Each selected addressbook becomes one Android account of Cardamum's own account type (the DAVx5 pattern; Android has accounts, not addressbooks), created via AccountManager with an authenticator stub. Per-account raw contacts carry the vCard UID and ETag in their sync columns, deleting the account cleanly removes its projected contacts, and the user can toggle visibility per addressbook in any contacts app.
+   Straight after a successful connection comes the **addressbook selection** step: the discovered addressbooks are listed with checkboxes and the user picks which ones to sync locally. Each selected addressbook becomes one Android account of Pimalaya's own account type (the DAVx5 pattern; Android has accounts, not addressbooks), created via AccountManager with an authenticator stub. Per-account raw contacts carry the vCard UID and ETag in their sync columns, deleting the account cleanly removes its projected contacts, and the user can toggle visibility per addressbook in any contacts app.
 
 2. **Sync**. Two manual actions matching the two spokes; the in-app Sync (the drawer row, or pulling down on the contacts list) runs both in one pass, while Sync local remains as a headless hook:
    - *Sync remote* (store to server, the only moment the app touches the network): per addressbook, the io-offline engine reconciles the store with the remote (docs/io-offline-migration.md): it enumerates the member spine incrementally from the stored checkpoint (RFC 6578 sync-collection, Graph delta, JMAP /changes, People sync tokens; a complete round when the cursor is missing or expired), three-way merges each placement against its base, pushes the local-won changes (creates, If-Match-guarded updates and deletes, membership patches), batch-fetches the bodies the spine misses, and resolves conflicts by merging both sides against the staged base (the local side wins same-field collisions, an update beats a removal) before a second reconcile pushes the resolutions. When the remote is unreachable the screens fall back to the store of the last sync.
@@ -30,7 +30,7 @@ One activity, one ViewFlipper, one panel per screen:
 Hub and spoke. The vCard store is the hub replica: the document set the app actually edits, full vCard fidelity, offline by construction (SQLite today, a vdir or io-m2dir-style backend tomorrow; the spokes do not care). The phone contacts and the remote are two spokes, and a Sync pass reconciles the hub with each spoke pairwise, reusing io-offline twice with two backends:
 
 - **store to remote**: full fidelity, merged in vCard space with the vcard-rs three-way merge; per-card identity is the ETag plus the base vCard. This is io-offline with the CardDAV backend (or a provider API later). DONE: this spoke runs on the engine today, see docs/io-offline-migration.md.
-- **store to phone**: lossy at the boundary, lossless in the hub; the phone is just another io-offline remote whose items are raw-contact rows, whose content revision is the raw contact VERSION, and whose reads and writes go through the Java converter (Mapping both ways, the read-back applied onto the last converged vCard as a field-space patch). Cardamum owns one raw-contact account per selected addressbook (the DAVx5 pattern) and keeps the card id in SOURCE_ID and the vCard UID in SYNC2. DONE: this spoke runs on the engine too, see docs/phone-sync-plan.md.
+- **store to phone**: lossy at the boundary, lossless in the hub; the phone is just another io-offline remote whose items are raw-contact rows, whose content revision is the raw contact VERSION, and whose reads and writes go through the Java converter (Mapping both ways, the read-back applied onto the last converged vCard as a field-space patch). Pimalaya owns one raw-contact account per selected addressbook (the DAVx5 pattern) and keeps the card id in SOURCE_ID and the vCard UID in SYNC2. DONE: this spoke runs on the engine too, see docs/phone-sync-plan.md.
 
 Two pairwise syncs beat one tri-directional merge: each merge stays in a single representation space (whole vCards on one spoke, lossy field models on the other), and the spokes fail independently (no network still syncs the phone exactly; no contacts permission still syncs the remote).
 

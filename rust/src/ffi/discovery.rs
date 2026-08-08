@@ -23,7 +23,7 @@ use crate::{
 /// or an RFC 8484 `https://…/dns-query` URL; empty or null falls back
 /// to a public DNS-over-HTTPS one). Returns `{"url": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_discover<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_discover<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -49,7 +49,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_discover<'local>
 /// the fixed provider rules. Returns a JSON array of service configs,
 /// empty when no rule matched.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_searchProvider<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_searchProvider<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -72,7 +72,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_searchProvider<'
 /// `Native.searchPacc`: discovers the email domain's PACC document.
 /// Returns a JSON array of service configs.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_searchPacc<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_searchPacc<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -89,7 +89,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_searchPacc<'loca
 /// `Native.searchCarddav`: resolves the email domain's CardDAV context
 /// root (RFC 6764). Returns a JSON array of service configs.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_searchCarddav<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_searchCarddav<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -107,7 +107,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_searchCarddav<'l
 /// `Native.searchJmap`: resolves the email domain's JMAP session URL
 /// (RFC 8620). Returns a JSON array of service configs.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_searchJmap<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_searchJmap<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -126,7 +126,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_searchJmap<'loca
 /// deduplicated list, restricted to the services the app drives
 /// (CardDAV, JMAP). Returns a JSON array of service configs.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_searchMerge<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_searchMerge<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     lists: JString<'local>,
@@ -146,7 +146,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_searchMerge<'loc
 /// refines its password and bearer methods. Returns the (possibly
 /// refined) config as JSON.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_searchProbe<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_searchProbe<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,

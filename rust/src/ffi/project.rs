@@ -22,7 +22,7 @@ use crate::{
 /// computation, no transport. Returns
 /// `{"name", "email", "phone", "uid", "hash"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_indexCard<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_indexCard<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     vcard: JString<'local>,
@@ -46,7 +46,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_indexCard<'local
 /// computation, no transport. Returns
 /// `{"vcard", "model", "alternatives"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_mergeCards<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_mergeCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     cards: JString<'local>,
@@ -72,7 +72,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_mergeCards<'loca
 /// base; the local side wins same-field collisions); pure computation,
 /// no transport. Returns `{"vcard", "conflicts"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_mergeCardChanges<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_mergeCardChanges<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     base: JString<'local>,
@@ -100,7 +100,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_mergeCardChanges
 /// computation, no transport. Returns `{"vcard", "model", "alternatives",
 /// "changed"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_mergeConflictForm<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_mergeConflictForm<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     base: JString<'local>,
@@ -126,7 +126,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_mergeConflictFor
 /// identity); pure computation, no transport. Returns
 /// `{"vcard": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_setCardUid<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_setCardUid<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     vcard: JString<'local>,
@@ -152,7 +152,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_setCardUid<'loca
 /// `{"ref", "vcard"}` pairs, returns
 /// `{"groups": [{"refs": [...], "reasons": [...]}]}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_findDuplicates<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_findDuplicates<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     cards: JString<'local>,
@@ -177,7 +177,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_findDuplicates<'
 /// advanced editor; pure computation, no transport. Returns
 /// `{"props": ["VERSION:4.0", ...]}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardProps<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_cardProps<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     vcard: JString<'local>,
@@ -199,7 +199,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardProps<'local
 /// advanced editor (a blank line removes, index -1 appends); pure
 /// computation, no transport. Returns `{"vcard": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardSetProp<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_cardSetProp<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     vcard: JString<'local>,
@@ -225,7 +225,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardSetProp<'loc
 /// "value"}`) and rewrites it (index -1 appends); pure computation, no
 /// transport. Returns `{"vcard": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardSetPropParts<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_cardSetPropParts<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     vcard: JString<'local>,
@@ -254,7 +254,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardSetPropParts
 /// advanced editor's value form; pure computation, no transport.
 /// Returns `{"labels": [...]}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardPropLabels<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_cardPropLabels<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     name: JString<'local>,
@@ -273,7 +273,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardPropLabels<'
 /// the Android string-arrays must mirror; pure computation, no
 /// transport. Returns `{"order": [[..], ..]}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardTypeOrder<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_cardTypeOrder<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     kind: JString<'local>,
@@ -290,7 +290,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardTypeOrder<'l
 /// reparse) and returns it re-serialized; pure computation, no
 /// transport. Returns `{"vcard": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardSource<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_cardSource<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     vcard: JString<'local>,
@@ -312,7 +312,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_cardSource<'loca
 /// the app maps to ContactsContract rows (docs/contacts-mapping.md).
 /// Returns the model JSON.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_projectCard<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_projectCard<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     vcard: JString<'local>,
@@ -334,7 +334,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_projectCard<'loc
 /// vCard, preserving every unmanaged property (docs/contacts-mapping.md).
 /// Returns `{"vcard": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_applyCard<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_applyCard<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     vcard: JString<'local>,
@@ -363,7 +363,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_applyCard<'local
 /// "gender"?, "birthday"?, "anniversary"?, "phones", "emails",
 /// "relations", "addresses"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_formView<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_formView<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     model: JString<'local>,
@@ -387,7 +387,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_formView<'local>
 /// `gender` the GENDER object, empty when unset); pure computation, no
 /// transport.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_formEntry<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_formEntry<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     kind: JString<'local>,
@@ -413,7 +413,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_formEntry<'local
 /// `yyyy-mm-dd` form, 1-based month); pure computation, no transport.
 /// Returns `{"value": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_formDate<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_formDate<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     year: jint,
@@ -435,7 +435,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_formDate<'local>
 /// [{ref, uid, name, id}], "links": {member: cluster}, "detached":
 /// [ref]}`, returns `{"groups": [{key, replicas: [index]}]}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_groupContacts<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_groupContacts<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     input: JString<'local>,
@@ -460,7 +460,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_groupContacts<'l
 /// dismissal key and the Link eligibility; pure computation, no
 /// transport. Takes `[{ref, book}]`, returns `{"key", "linkable"}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_duplicateGroup<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_duplicateGroup<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     members: JString<'local>,

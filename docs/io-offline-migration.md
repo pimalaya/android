@@ -1,6 +1,6 @@
 # Migrating the sync base to io-offline
 
-Cardamum's offline base (CardStore plus the hand-rolled sync loops in MainActivity) predates io-offline's mutable-content support and taught us what a contacts engine needs. This plan moves the replica mechanics onto io-offline, one shippable stage at a time, keeping the merged view and every screen untouched. Naming note: the crate stays io-offline for now; it is accurate, an engine for building offline-first apps.
+Pimalaya's offline base (CardStore plus the hand-rolled sync loops in MainActivity) predates io-offline's mutable-content support and taught us what a contacts engine needs. This plan moves the replica mechanics onto io-offline, one shippable stage at a time, keeping the merged view and every screen untouched. Naming note: the crate stays io-offline for now; it is accurate, an engine for building offline-first apps.
 
 Status: DONE, landed in one pass instead of the staged flag-guarded rollout (the pre-migration state is one commit back, which is the rollback path the legacy flag would have bought). See the Landed section at the bottom for what shipped and where the implementation deviates from the stages below.
 

@@ -1,6 +1,6 @@
-//! io-offline engine bridge: runs the offline-first replica engine's
+//! io-replica engine bridge: runs the offline-first replica engine's
 //! coroutines (sync, upgrade, mutate) to completion, upcalling a Java
-//! `OfflineDriver` with one JSON envelope per yield.
+//! `ReplicaDriver` with one JSON envelope per yield.
 //!
 //! The engine is I/O-free: storage yields are serviced by the Java
 //! CardStore and remote yields by the Java backend clients, so this
@@ -17,23 +17,23 @@ use core::fmt::Display;
 
 use std::collections::BTreeMap;
 
-use io_offline::{
-    change::{OfflineChange, OfflineWriteOp},
-    collection::OfflineCheckpoint,
+use io_replica::{
+    change::{ReplicaChange, ReplicaWriteOp},
+    collection::ReplicaCheckpoint,
     coroutine::*,
-    mutate::{OfflineMutate, OfflineMutation},
-    object::{OfflineHash, OfflineObject},
+    mutate::{ReplicaMutate, ReplicaMutation},
+    object::{ReplicaHash, ReplicaObject},
     placement::{
-        OfflineBase, OfflineFlags, OfflineHandle, OfflineLevel, OfflineLinkId, OfflineMeta,
-        OfflineOrigin, OfflinePlacement, OfflineStatus,
+        ReplicaBase, ReplicaFlags, ReplicaHandle, ReplicaLevel, ReplicaLinkId, ReplicaMeta,
+        ReplicaOrigin, ReplicaPlacement, ReplicaStatus,
     },
     remote::{
-        OfflineFetchedItem, OfflinePushOutcome, OfflinePushResult, OfflineRemoteItem,
-        OfflineRemoteSnapshot, OfflineTier,
+        ReplicaFetchedBody, ReplicaFetchedItem, ReplicaPushOutcome, ReplicaPushResult,
+        ReplicaRemoteItem, ReplicaRemoteSnapshot, ReplicaTier,
     },
-    storage::OfflineLoaded,
-    sync::{OfflineSync, OfflineSyncOptions},
-    upgrade::OfflineUpgrade,
+    storage::ReplicaLoaded,
+    sync::{ReplicaSync, ReplicaSyncOptions},
+    upgrade::ReplicaUpgrade,
 };
 use jni::{
     Env, JValue, jni_sig, jni_str,
@@ -53,8 +53,12 @@ pub fn sync<'local>(
     collection: &str,
     full: bool,
 ) -> Result<Value, BridgeError> {
-    let opts = OfflineSyncOptions { push: true, full };
-    let report = Driver::new(env, driver).run(OfflineSync::new(collection, opts))?;
+    let opts = ReplicaSyncOptions {
+        push: true,
+        full,
+        ..Default::default()
+    };
+    let report = Driver::new(env, driver).run(ReplicaSync::new(collection, opts))?;
 
     Ok(json!({
         "pulled": report.pulled,
@@ -74,8 +78,8 @@ pub fn upgrade<'local>(
     collection: &str,
     handles: Vec<String>,
 ) -> Result<Value, BridgeError> {
-    let handles = handles.into_iter().map(OfflineHandle::from).collect();
-    let coroutine = OfflineUpgrade::new(collection, handles, OfflineTier::Full);
+    let handles = handles.into_iter().map(ReplicaHandle::from).collect();
+    let coroutine = ReplicaUpgrade::new(collection, handles, ReplicaTier::Full);
     let report = Driver::new(env, driver).run(coroutine)?;
 
     Ok(json!({
@@ -95,10 +99,10 @@ pub fn mutate<'local>(
 ) -> Result<(), BridgeError> {
     let mutation: MutationJson =
         from_str(mutation).map_err(|err| format!("Invalid mutation: {err}"))?;
-    Driver::new(env, driver).run(OfflineMutate::new(collection, mutation.into()))
+    Driver::new(env, driver).run(ReplicaMutate::new(collection, mutation.into()))
 }
 
-/// Upcall handle to the Java `OfflineDriver` servicing engine yields.
+/// Upcall handle to the Java `ReplicaDriver` servicing engine yields.
 struct Driver<'a, 'local> {
     env: &'a mut Env<'local>,
     driver: &'a JObject<'local>,
@@ -113,16 +117,16 @@ impl<'a, 'local> Driver<'a, 'local> {
     /// through the Java driver.
     fn run<C, T, E>(&mut self, mut coroutine: C) -> Result<T, BridgeError>
     where
-        C: OfflineCoroutine<Yield = OfflineYield, Return = Result<T, E>>,
+        C: ReplicaCoroutine<Yield = ReplicaYield, Return = Result<T, E>>,
         E: Display,
     {
-        let mut arg: Option<OfflineArg> = None;
+        let mut arg: Option<ReplicaArg> = None;
 
         loop {
             match coroutine.resume(arg.take()) {
-                OfflineCoroutineState::Complete(Ok(value)) => return Ok(value),
-                OfflineCoroutineState::Complete(Err(err)) => return Err(err.to_string().into()),
-                OfflineCoroutineState::Yielded(yielded) => {
+                ReplicaCoroutineState::Complete(Ok(value)) => return Ok(value),
+                ReplicaCoroutineState::Complete(Err(err)) => return Err(err.to_string().into()),
+                ReplicaCoroutineState::Yielded(yielded) => {
                     let reply = self.upcall(&yield_json(&yielded))?;
                     arg = Some(parse_arg(&yielded, &reply)?);
                 }
@@ -130,7 +134,7 @@ impl<'a, 'local> Driver<'a, 'local> {
         }
     }
 
-    /// Upcalls `OfflineDriver.serve` with one yield envelope and
+    /// Upcalls `ReplicaDriver.serve` with one yield envelope and
     /// returns the raw JSON reply.
     fn upcall(&mut self, request: &str) -> Result<String, String> {
         let request = self
@@ -154,39 +158,39 @@ impl<'a, 'local> Driver<'a, 'local> {
 }
 
 /// Serializes one engine yield to its JSON envelope.
-fn yield_json(yielded: &OfflineYield) -> String {
+fn yield_json(yielded: &ReplicaYield) -> String {
     let envelope = match yielded {
-        OfflineYield::WantsLoad(collection) => json!({
+        ReplicaYield::WantsLoad(collection) => json!({
             "op": "load",
             "collection": collection.as_str(),
         }),
-        OfflineYield::WantsLookupObject(links) => json!({
+        ReplicaYield::WantsLookupObject(links) => json!({
             "op": "lookup",
-            "links": links.iter().map(OfflineLinkId::as_str).collect::<Vec<_>>(),
+            "links": links.iter().map(ReplicaLinkId::as_str).collect::<Vec<_>>(),
         }),
-        OfflineYield::WantsWrite(ops) => json!({
+        ReplicaYield::WantsWrite(ops) => json!({
             "op": "write",
             "writes": ops.iter().map(WriteOpJson::from).collect::<Vec<_>>(),
         }),
-        OfflineYield::WantsEnumerate { collection, cursor } => json!({
+        ReplicaYield::WantsEnumerate { collection, cursor } => json!({
             "op": "enumerate",
             "collection": collection.as_str(),
             "cursor": cursor.as_ref().map(checkpoint_str).filter(|c| !c.is_empty()),
         }),
-        OfflineYield::WantsFetch {
+        ReplicaYield::WantsFetch {
             collection,
             handles,
             tier,
         } => json!({
             "op": "fetch",
             "collection": collection.as_str(),
-            "handles": handles.iter().map(OfflineHandle::as_str).collect::<Vec<_>>(),
+            "handles": handles.iter().map(ReplicaHandle::as_str).collect::<Vec<_>>(),
             "tier": match tier {
-                OfflineTier::Meta => "meta",
-                OfflineTier::Full => "full",
+                ReplicaTier::Meta => "meta",
+                ReplicaTier::Full => "full",
             },
         }),
-        OfflineYield::WantsPush {
+        ReplicaYield::WantsPush {
             collection,
             changes,
         } => json!({
@@ -203,7 +207,7 @@ fn yield_json(yielded: &OfflineYield) -> String {
 /// arg fed back on the next resume. A reply carrying an `error` field
 /// aborts the run, keeping the HTTP status the driver reported (a 401
 /// surfacing here is what triggers the token refresh upstairs).
-fn parse_arg(yielded: &OfflineYield, reply: &str) -> Result<OfflineArg, BridgeError> {
+fn parse_arg(yielded: &ReplicaYield, reply: &str) -> Result<ReplicaArg, BridgeError> {
     let probe: ErrorJson =
         from_str(reply).map_err(|err| format!("Unreadable driver reply: {err}"))?;
     if let Some(error) = probe.error {
@@ -214,82 +218,85 @@ fn parse_arg(yielded: &OfflineYield, reply: &str) -> Result<OfflineArg, BridgeEr
     }
 
     let arg = match yielded {
-        OfflineYield::WantsLoad(_) => {
+        ReplicaYield::WantsLoad(_) => {
             let loaded: LoadedJson = parse(reply)?;
-            OfflineArg::Load(OfflineLoaded {
+            ReplicaArg::Load(ReplicaLoaded {
                 placements: loaded
                     .placements
                     .into_iter()
-                    .map(OfflinePlacement::from)
+                    .map(ReplicaPlacement::from)
                     .collect(),
                 checkpoint: loaded
                     .checkpoint
                     .filter(|token| !token.is_empty())
-                    .map(|token| OfflineCheckpoint(token.into_bytes())),
+                    .map(|token| ReplicaCheckpoint(token.into_bytes())),
             })
         }
-        OfflineYield::WantsLookupObject(_) => {
+        ReplicaYield::WantsLookupObject(_) => {
             let lookup: LookupJson = parse(reply)?;
-            let objects: BTreeMap<OfflineLinkId, OfflineHash> = lookup
+            let objects: BTreeMap<ReplicaLinkId, ReplicaHash> = lookup
                 .objects
                 .into_iter()
-                .map(|(link, hash)| (OfflineLinkId(link), OfflineHash(hash)))
+                .map(|(link, hash)| (ReplicaLinkId(link), ReplicaHash(hash)))
                 .collect();
-            OfflineArg::LookupObject(objects)
+            ReplicaArg::LookupObject(objects)
         }
-        OfflineYield::WantsWrite(_) => OfflineArg::Write,
-        OfflineYield::WantsEnumerate { .. } => {
+        ReplicaYield::WantsWrite(_) => ReplicaArg::Write,
+        ReplicaYield::WantsEnumerate { .. } => {
             let snapshot: SnapshotJson = parse(reply)?;
-            OfflineArg::Enumerate(OfflineRemoteSnapshot {
+            ReplicaArg::Enumerate(ReplicaRemoteSnapshot {
                 items: snapshot
                     .items
                     .into_iter()
-                    .map(|item| OfflineRemoteItem {
-                        handle: OfflineHandle(item.handle),
-                        flags: OfflineFlags::from_iter(item.flags),
+                    .map(|item| ReplicaRemoteItem {
+                        handle: ReplicaHandle(item.handle),
+                        flags: ReplicaFlags::from_iter(item.flags),
                         revision: item.revision,
                     })
                     .collect(),
-                vanished: snapshot.vanished.into_iter().map(OfflineHandle).collect(),
+                vanished: snapshot.vanished.into_iter().map(ReplicaHandle).collect(),
                 complete: snapshot.complete,
-                checkpoint: OfflineCheckpoint(snapshot.checkpoint.unwrap_or_default().into_bytes()),
+                checkpoint: ReplicaCheckpoint(snapshot.checkpoint.unwrap_or_default().into_bytes()),
             })
         }
-        OfflineYield::WantsFetch { .. } => {
+        ReplicaYield::WantsFetch { .. } => {
             let fetched: FetchedJson = parse(reply)?;
             let items = fetched
                 .items
                 .into_iter()
-                .map(|item| OfflineFetchedItem {
-                    handle: OfflineHandle(item.handle),
-                    link_id: OfflineLinkId(item.link_id),
-                    meta: OfflineMeta(item.meta),
+                .map(|item| ReplicaFetchedItem {
+                    handle: ReplicaHandle(item.handle),
+                    link_id: ReplicaLinkId(item.link_id),
+                    meta: ReplicaMeta(item.meta),
                     body: match (item.hash, item.body) {
-                        (Some(hash), Some(body)) => Some((OfflineHash(hash), body.into_bytes())),
+                        (Some(hash), Some(body)) => Some(ReplicaFetchedBody::Inline {
+                            hash: ReplicaHash(hash),
+                            bytes: body.into_bytes(),
+                        }),
                         _ => None,
                     },
                     revision: item.revision,
                 })
                 .collect();
-            OfflineArg::Fetch(items)
+            ReplicaArg::Fetch(items)
         }
-        OfflineYield::WantsPush { .. } => {
+        ReplicaYield::WantsPush { .. } => {
             let pushed: PushedJson = parse(reply)?;
             let results = pushed
                 .results
                 .into_iter()
-                .map(|result| OfflinePushResult {
-                    handle: OfflineHandle(result.handle),
+                .map(|result| ReplicaPushResult {
+                    handle: ReplicaHandle(result.handle),
                     outcome: if result.accepted {
-                        OfflinePushOutcome::Accepted
+                        ReplicaPushOutcome::Accepted
                     } else {
-                        OfflinePushOutcome::Rejected
+                        ReplicaPushOutcome::Rejected
                     },
-                    assigned: result.assigned.map(OfflineHandle),
+                    assigned: result.assigned.map(ReplicaHandle),
                     revision: result.revision,
                 })
                 .collect();
-            OfflineArg::Push(results)
+            ReplicaArg::Push(results)
         }
     };
 
@@ -303,7 +310,7 @@ fn parse<'de, T: Deserialize<'de>>(reply: &'de str) -> Result<T, String> {
 /// Checkpoints are opaque bytes to the engine; every token this app
 /// round-trips (WebDAV sync-token, JMAP state) is text, so the wire
 /// carries them as plain strings.
-fn checkpoint_str(checkpoint: &OfflineCheckpoint) -> String {
+fn checkpoint_str(checkpoint: &ReplicaCheckpoint) -> String {
     String::from_utf8_lossy(&checkpoint.0).into_owned()
 }
 
@@ -341,26 +348,26 @@ struct PlacementJson {
     origin: Option<OriginJson>,
 }
 
-impl From<PlacementJson> for OfflinePlacement {
+impl From<PlacementJson> for ReplicaPlacement {
     fn from(wire: PlacementJson) -> Self {
         Self {
             collection: wire.collection.into(),
-            handle: OfflineHandle(wire.handle),
-            link_id: wire.link_id.map(OfflineLinkId),
-            object: wire.object.map(OfflineHash),
+            handle: ReplicaHandle(wire.handle),
+            link_id: wire.link_id.map(ReplicaLinkId),
+            object: wire.object.map(ReplicaHash),
             level: wire.level.into(),
-            meta: wire.meta.map(OfflineMeta),
-            flags: OfflineFlags::from_iter(wire.flags),
+            meta: wire.meta.map(ReplicaMeta),
+            flags: ReplicaFlags::from_iter(wire.flags),
             status: wire.status.into(),
             conflict_revision: wire.conflict_revision,
-            base: wire.base.map(OfflineBase::from),
-            origin: wire.origin.map(OfflineOrigin::from),
+            base: wire.base.map(ReplicaBase::from),
+            origin: wire.origin.map(ReplicaOrigin::from),
         }
     }
 }
 
-impl From<&OfflinePlacement> for PlacementJson {
-    fn from(placement: &OfflinePlacement) -> Self {
+impl From<&ReplicaPlacement> for PlacementJson {
+    fn from(placement: &ReplicaPlacement) -> Self {
         Self {
             collection: placement.collection.as_str().into(),
             handle: placement.handle.as_str().into(),
@@ -391,18 +398,18 @@ struct BaseJson {
     object: Option<String>,
 }
 
-impl From<BaseJson> for OfflineBase {
+impl From<BaseJson> for ReplicaBase {
     fn from(wire: BaseJson) -> Self {
         Self {
-            flags: OfflineFlags::from_iter(wire.flags),
+            flags: ReplicaFlags::from_iter(wire.flags),
             revision: wire.revision,
-            object: wire.object.map(OfflineHash),
+            object: wire.object.map(ReplicaHash),
         }
     }
 }
 
-impl From<&OfflineBase> for BaseJson {
-    fn from(base: &OfflineBase) -> Self {
+impl From<&ReplicaBase> for BaseJson {
+    fn from(base: &ReplicaBase) -> Self {
         Self {
             flags: base.flags.0.iter().cloned().collect(),
             revision: base.revision.clone(),
@@ -419,17 +426,17 @@ struct OriginJson {
     handle: String,
 }
 
-impl From<OriginJson> for OfflineOrigin {
+impl From<OriginJson> for ReplicaOrigin {
     fn from(wire: OriginJson) -> Self {
         Self {
             collection: wire.collection.into(),
-            handle: OfflineHandle(wire.handle),
+            handle: ReplicaHandle(wire.handle),
         }
     }
 }
 
-impl From<&OfflineOrigin> for OriginJson {
-    fn from(origin: &OfflineOrigin) -> Self {
+impl From<&ReplicaOrigin> for OriginJson {
+    fn from(origin: &ReplicaOrigin) -> Self {
         Self {
             collection: origin.collection.as_str().into(),
             handle: origin.handle.as_str().into(),
@@ -446,7 +453,7 @@ enum LevelJson {
     Full,
 }
 
-impl From<LevelJson> for OfflineLevel {
+impl From<LevelJson> for ReplicaLevel {
     fn from(wire: LevelJson) -> Self {
         match wire {
             LevelJson::Probed => Self::Probed,
@@ -456,12 +463,12 @@ impl From<LevelJson> for OfflineLevel {
     }
 }
 
-impl From<OfflineLevel> for LevelJson {
-    fn from(level: OfflineLevel) -> Self {
+impl From<ReplicaLevel> for LevelJson {
+    fn from(level: ReplicaLevel) -> Self {
         match level {
-            OfflineLevel::Probed => Self::Probed,
-            OfflineLevel::Meta => Self::Meta,
-            OfflineLevel::Full => Self::Full,
+            ReplicaLevel::Probed => Self::Probed,
+            ReplicaLevel::Meta => Self::Meta,
+            ReplicaLevel::Full => Self::Full,
         }
     }
 }
@@ -477,7 +484,7 @@ enum StatusJson {
     Created,
 }
 
-impl From<StatusJson> for OfflineStatus {
+impl From<StatusJson> for ReplicaStatus {
     fn from(wire: StatusJson) -> Self {
         match wire {
             StatusJson::Clean => Self::Clean,
@@ -489,14 +496,14 @@ impl From<StatusJson> for OfflineStatus {
     }
 }
 
-impl From<OfflineStatus> for StatusJson {
-    fn from(status: OfflineStatus) -> Self {
+impl From<ReplicaStatus> for StatusJson {
+    fn from(status: ReplicaStatus) -> Self {
         match status {
-            OfflineStatus::Clean => Self::Clean,
-            OfflineStatus::Dirty => Self::Dirty,
-            OfflineStatus::Tombstone => Self::Tombstone,
-            OfflineStatus::Conflict => Self::Conflict,
-            OfflineStatus::Created => Self::Created,
+            ReplicaStatus::Clean => Self::Clean,
+            ReplicaStatus::Dirty => Self::Dirty,
+            ReplicaStatus::Tombstone => Self::Tombstone,
+            ReplicaStatus::Conflict => Self::Conflict,
+            ReplicaStatus::Created => Self::Created,
         }
     }
 }
@@ -526,22 +533,28 @@ enum WriteOpJson {
     },
 }
 
-impl From<&OfflineWriteOp> for WriteOpJson {
-    fn from(op: &OfflineWriteOp) -> Self {
+impl From<&ReplicaWriteOp> for WriteOpJson {
+    fn from(op: &ReplicaWriteOp) -> Self {
         match op {
-            OfflineWriteOp::UpsertPlacement(placement) => Self::Upsert {
+            ReplicaWriteOp::UpsertPlacement(placement) => Self::Upsert {
                 placement: placement.into(),
             },
-            OfflineWriteOp::DropPlacement { collection, handle } => Self::Drop {
+            ReplicaWriteOp::DropPlacement { collection, handle } => Self::Drop {
                 collection: collection.as_str().into(),
                 handle: handle.as_str().into(),
             },
-            OfflineWriteOp::StoreObject { object, body } => Self::StoreObject {
+            ReplicaWriteOp::StoreObject { object, body } => Self::StoreObject {
                 hash: object.hash.as_str().into(),
                 size: object.size,
-                body: String::from_utf8_lossy(body).into_owned(),
+                // A byteless op (an object streamed into the store during fetch)
+                // does not arise for the contacts bridge, whose remote always
+                // returns inline bodies; map it to an empty payload for safety.
+                body: body
+                    .as_deref()
+                    .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+                    .unwrap_or_default(),
             },
-            OfflineWriteOp::SetCheckpoint {
+            ReplicaWriteOp::SetCheckpoint {
                 collection,
                 checkpoint,
             } => Self::SetCheckpoint {
@@ -590,10 +603,10 @@ enum ChangeJson {
     },
 }
 
-impl From<&OfflineChange> for ChangeJson {
-    fn from(change: &OfflineChange) -> Self {
+impl From<&ReplicaChange> for ChangeJson {
+    fn from(change: &ReplicaChange) -> Self {
         match change {
-            OfflineChange::Add {
+            ReplicaChange::Add {
                 handle,
                 link_id,
                 flags,
@@ -606,7 +619,7 @@ impl From<&OfflineChange> for ChangeJson {
                 origin: origin.as_ref().map(OriginJson::from),
                 object: object.as_ref().map(|hash| hash.as_str().into()),
             },
-            OfflineChange::Remove {
+            ReplicaChange::Remove {
                 handle,
                 to,
                 if_match,
@@ -615,11 +628,11 @@ impl From<&OfflineChange> for ChangeJson {
                 to: to.as_ref().map(|to| to.as_str().into()),
                 if_match: if_match.clone(),
             },
-            OfflineChange::SetFlags { handle, flags } => Self::SetFlags {
+            ReplicaChange::SetFlags { handle, flags } => Self::SetFlags {
                 handle: handle.as_str().into(),
                 flags: flags.0.iter().cloned().collect(),
             },
-            OfflineChange::Update {
+            ReplicaChange::Update {
                 handle,
                 object,
                 if_match,
@@ -647,7 +660,7 @@ enum MutationJson {
     },
 }
 
-impl From<MutationJson> for OfflineMutation {
+impl From<MutationJson> for ReplicaMutation {
     fn from(wire: MutationJson) -> Self {
         match wire {
             MutationJson::Edit {
@@ -657,13 +670,13 @@ impl From<MutationJson> for OfflineMutation {
                 body,
                 meta,
             } => Self::Edit {
-                handle: OfflineHandle(handle),
-                object: OfflineObject {
-                    hash: OfflineHash(hash),
+                handle: ReplicaHandle(handle),
+                object: ReplicaObject {
+                    hash: ReplicaHash(hash),
                     size,
                 },
                 body: body.into_bytes(),
-                meta: meta.map(OfflineMeta),
+                meta: meta.map(ReplicaMeta),
             },
         }
     }

@@ -51,7 +51,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="cardamum" />
+                <data android:scheme="pimalaya" />
             </intent-filter>
 
             <!-- Catches the dynamic-registration OAuth redirect: a
@@ -62,11 +62,11 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="org.pimalaya.cardamum" />
+                <data android:scheme="org.pimalaya" />
             </intent-filter>
         </activity>
 
-        <!-- Registers Cardamum's account type (one account per synced
+        <!-- Registers Pimalaya's account type (one account per synced
              addressbook); bound by the system's AccountManager. -->
         <service
             android:name=".AuthenticatorService"

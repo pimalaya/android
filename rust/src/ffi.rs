@@ -1,4 +1,4 @@
-//! JNI entry points called from the Cardamum `:client` module.
+//! JNI entry points called from the Pimalaya `:client` module.
 //!
 //! Every method captures the FFI [`EnvUnowned`], upgrades it to a usable
 //! [`Env`] inside [`EnvUnowned::with_env`] (which also guards against
@@ -12,10 +12,13 @@
 //! keeps only the marshaling helpers shared across more than one of
 //! them.
 
+mod calendar;
 mod card;
 mod discovery;
+mod mail;
 mod oauth;
 mod offline;
+mod pimdir;
 mod project;
 
 use jni::{Env, objects::JString};

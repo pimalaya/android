@@ -1,6 +1,6 @@
 # Merged view pivot
 
-The account > addressbook > contacts hierarchy is too rigid: seeing another addressbook means navigating out and back in, moving a card between accounts has no home, and the app opens on a list of containers instead of the contacts themselves. The pivot turns the app contact-first: one merged list across every subscribed account and addressbook, the containers demoted to a filter and a management screen. The Android Contacts app is the precedent, with the one design decision that matters borrowed from it: **merged is a view, not a storage model**. The native app never merges storage; every raw contact belongs to exactly one account and the merged contact is an aggregation layer on top. Cardamum does the same.
+The account > addressbook > contacts hierarchy is too rigid: seeing another addressbook means navigating out and back in, moving a card between accounts has no home, and the app opens on a list of containers instead of the contacts themselves. The pivot turns the app contact-first: one merged list across every subscribed account and addressbook, the containers demoted to a filter and a management screen. The Android Contacts app is the precedent, with the one design decision that matters borrowed from it: **merged is a view, not a storage model**. The native app never merges storage; every raw contact belongs to exactly one account and the merged contact is an aggregation layer on top. Pimalaya does the same.
 
 ## Model
 

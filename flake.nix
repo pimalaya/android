@@ -1,5 +1,5 @@
 {
-  description = "Cardamum for Android: manage your contacts (Rust + Kotlin)";
+  description = "Pimalaya for Android: manage your contacts (Rust + Kotlin)";
 
   inputs = {
     nixpkgs = {

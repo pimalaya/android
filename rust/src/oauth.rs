@@ -157,7 +157,7 @@ mod tests {
         let url = authorize_url(
             "https://api.fastmail.com/oauth/authorize",
             "07ee41ae",
-            "org.pimalaya.cardamum:/oauth2redirect",
+            "org.pimalaya:/oauth2redirect",
             "urn:ietf:params:oauth:scope:contacts offline_access",
             "stateABCDEF0123456789abcdef012345",
             "verifierABCDEF0123456789abcdef0123456789ABCDEF0123456789abcdef01",
@@ -171,7 +171,7 @@ mod tests {
              ?client_id=07ee41ae\
              &code_challenge=3UabJaVjZLMdt78g6JRyEM8pdmTSqJNYLL3y6RSjDr8\
              &code_challenge_method=S256\
-             &redirect_uri=org.pimalaya.cardamum%3A%2Foauth2redirect\
+             &redirect_uri=org.pimalaya%3A%2Foauth2redirect\
              &response_type=code\
              &scope=offline_access+urn%3Aietf%3Aparams%3Aoauth%3Ascope%3Acontacts\
              &state=stateABCDEF0123456789abcdef012345",
@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn validate_redirect_accepts_the_single_slash_scheme() {
         let code = validate_redirect(
-            "org.pimalaya.cardamum:/oauth2redirect\
+            "org.pimalaya:/oauth2redirect\
              ?code=abc123\
              &state=stateABCDEF0123456789abcdef012345\
              &iss=https%3A%2F%2Fapi.fastmail.com",
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn validate_redirect_surfaces_the_server_error() {
         let err = validate_redirect(
-            "org.pimalaya.cardamum:/oauth2redirect\
+            "org.pimalaya:/oauth2redirect\
              ?error=invalid_request\
              &state=stateABCDEF0123456789abcdef012345",
             "stateABCDEF0123456789abcdef012345",

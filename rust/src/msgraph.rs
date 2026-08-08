@@ -57,7 +57,7 @@ use crate::project::{MAX_STASH_LINE, escape_text, full_date, splice_props, text_
 /// form); it rides inline in create and update bodies and reads back
 /// through a filtered `$expand` (docs/custom-data.md).
 pub const EXTENDED_PROP_ID: &str =
-    "String {c8e5e5cf-3f6c-4f0a-9d4e-52f1e7b2a9d3} Name cardamum-vcard";
+    "String {c8e5e5cf-3f6c-4f0a-9d4e-52f1e7b2a9d3} Name pimalaya-vcard";
 
 /// Property names minted by [`to_vcard`] from the Graph-only contact
 /// fields; [`to_contact`] consumes (drops) them, the server value
@@ -789,7 +789,7 @@ fn set_first(slot: &mut Option<String>, value: impl AsRef<str>) -> bool {
     }
 }
 
-/// The stashed vCard remainder lines behind the contact's cardamum
+/// The stashed vCard remainder lines behind the contact's pimalaya
 /// extended property (matched by name: Graph may normalize the GUID
 /// spelling in responses).
 fn stash_lines(contact: &MsgraphContact) -> Vec<String> {
@@ -799,7 +799,7 @@ fn stash_lines(contact: &MsgraphContact) -> Vec<String> {
         .map(Vec::as_slice)
         .unwrap_or(&[])
         .iter()
-        .filter(|prop| prop.id.to_ascii_lowercase().contains("cardamum-vcard"))
+        .filter(|prop| prop.id.to_ascii_lowercase().contains("pimalaya-vcard"))
         .flat_map(|prop| prop.value.split('\n'))
         .filter(|line| !line.is_empty())
         .map(str::to_string)

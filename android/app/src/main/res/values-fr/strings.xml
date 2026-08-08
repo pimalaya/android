@@ -5,7 +5,7 @@
     <string name="cancel_auth">Annuler</string>
     <string name="welcome_value_1">Tous vos contacts de tous vos comptes</string>
     <string name="welcome_value_2">accessibles hors ligne, dans une vue partagée</string>
-    <string name="welcome_description">Cardamum trouve automatiquement les paramètres de votre serveur ; saisissez simplement ce que vous savez de votre fournisseur</string>
+    <string name="welcome_description">Pimalaya trouve automatiquement les paramètres de votre serveur ; saisissez simplement ce que vous savez de votre fournisseur</string>
     <string name="email_hint">E-mail, serveur ou URI</string>
     <string name="auth_step_email">Bienvenue</string>
     <string name="auth_step_config">Configuration</string>
@@ -14,7 +14,7 @@
     <string name="email_invalid">Saisissez une adresse e-mail valide</string>
     <string name="discover_failed">Impossible de trouver les paramètres de votre serveur de contacts</string>
     <string name="setup_choice_title">Configuration du compte</string>
-    <string name="setup_choice_message">Cardamum peut tout configurer avec les réglages recommandés, ou vous laisser vérifier chaque étape.</string>
+    <string name="setup_choice_message">Pimalaya peut tout configurer avec les réglages recommandés, ou vous laisser vérifier chaque étape.</string>
     <string name="setup_simple">Standard</string>
     <string name="setup_advanced">Avancé</string>
 
@@ -35,9 +35,9 @@
     <string name="oauth_scope">Portée</string>
     <string name="oauth_redirect">URI de redirection</string>
     <string name="oauth_client_id_empty">Saisissez l\'identifiant client</string>
-    <string name="oauth_redirect_invalid">Saisissez une URL de rebouclage http://127.0.0.1, ou org.pimalaya.cardamum:/oauth2redirect</string>
+    <string name="oauth_redirect_invalid">Saisissez une URL de rebouclage http://127.0.0.1, ou org.pimalaya:/oauth2redirect</string>
     <string name="oauth_port_taken">Impossible d\'utiliser le port de rebouclage ; essayez-en un autre</string>
-    <string name="oauth_loopback_done">Connexion réussie. Vous pouvez fermer cet onglet et revenir à Cardamum.</string>
+    <string name="oauth_loopback_done">Connexion réussie. Vous pouvez fermer cet onglet et revenir à Pimalaya.</string>
     <string name="oauth_metadata_incomplete">Il manque un point de terminaison dans les métadonnées OAuth du serveur</string>
 
     <string name="password_title">Connexion</string>

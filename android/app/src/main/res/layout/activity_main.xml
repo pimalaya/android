@@ -55,15 +55,45 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- Contacts: opens the addressbooks management screen. -->
-        <ImageButton
-            android:id="@+id/contacts_menu"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/subscriptions_title"
-            android:src="@drawable/ic_menu"
-            android:tint="?android:attr/textColorPrimary" />
+        <!-- The domain switcher: the app's whole navigation, replacing
+             the drawer. Each icon flips the list to one domain over the
+             same merged view; the current one is at full tint, the other
+             two dimmed (applyDomainSwitcher in MainActivity). Shown on
+             the three list screens only. -->
+        <LinearLayout
+            android:id="@+id/domain_switcher"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/domain_mail"
+                android:layout_width="@dimen/app_bar_button"
+                android:layout_height="@dimen/app_bar_button"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/domain_mail"
+                android:src="@drawable/ic_domain_mail"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <ImageButton
+                android:id="@+id/domain_contacts"
+                android:layout_width="@dimen/app_bar_button"
+                android:layout_height="@dimen/app_bar_button"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/domain_contacts"
+                android:src="@drawable/ic_domain_contacts"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <ImageButton
+                android:id="@+id/domain_calendar"
+                android:layout_width="@dimen/app_bar_button"
+                android:layout_height="@dimen/app_bar_button"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/domain_calendar"
+                android:src="@drawable/ic_domain_calendar"
+                android:tint="?android:attr/textColorPrimary" />
+
+        </LinearLayout>
 
         <!-- Contacts selection mode: cancel the selection. -->
         <ImageButton
@@ -137,6 +167,20 @@
             android:layout_width="0dp"
             android:layout_height="0dp"
             android:layout_weight="1" />
+
+        <!-- The merged view's two-axis filter, shared by the three list
+             screens: the account axis is common to all of them. Tinted
+             with the accent while anything is hidden, so a narrowed list
+             never looks like an empty one. -->
+        <ImageButton
+            android:id="@+id/bar_filter"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/filter_title"
+            android:src="@drawable/ic_filter_list"
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
 
         <!-- Contacts: opens the in-bar search field. -->
         <ImageButton
@@ -276,6 +320,10 @@
         <include layout="@layout/panel_advanced" />
 
         <include layout="@layout/panel_source" />
+
+        <include layout="@layout/panel_mail" />
+
+        <include layout="@layout/panel_calendar" />
 
     </ViewFlipper>
 

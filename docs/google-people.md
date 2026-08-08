@@ -1,6 +1,6 @@
 # Google People API backend
 
-The fourth backend behind CardamumClient: accounts whose base URL carries the `google://<email>` sentinel route every operation through io-people's coroutines, with rust/src/google.rs projecting People person resources to and from the vCard document of record. The account exposes one Contacts addressbook (the People API has no folders; contact groups are m:n labels), and contacts list through `people.connections.list` paging.
+The fourth backend behind PimalayaClient: accounts whose base URL carries the `google://<email>` sentinel route every operation through io-people's coroutines, with rust/src/google.rs projecting People person resources to and from the vCard document of record. The account exposes one Contacts addressbook (the People API has no folders; contact groups are m:n labels), and contacts list through `people.connections.list` paging.
 
 Two People mechanics shape the projection:
 
@@ -61,7 +61,7 @@ Every property of RFC 6350 §6, plus the registered extensions worth a row. **Bo
 
 ## People fields with no vCard slot
 
-The reverse view: person fields the projection leaves unmanaged today, and where each one could land. Everything here already survives Cardamum updates on Google itself (it stays out of the update mask); the destinations below only matter for making the data visible in the vCard document of record, and portable when a card moves to another addressbook.
+The reverse view: person fields the projection leaves unmanaged today, and where each one could land. Everything here already survives Pimalaya updates on Google itself (it stays out of the update mask); the destinations below only matter for making the data visible in the vCard document of record, and portable when a card moves to another addressbook.
 
 | Google People | Destination |
 |---|---|
@@ -80,14 +80,14 @@ The reverse view: person fields the projection leaves unmanaged today, and where
 | `externalIds` | Google-scoped: X-GOOGLE-EXTERNAL-ID (values reference the source system, meaningless elsewhere) |
 | `miscKeywords` | Google-scoped (Outlook-inherited keyword types): X-GOOGLE-MISC-KEYWORD |
 | `userDefined` | an X- property per key (they are the user-visible custom fields of the Google Contacts UI) |
-| `clientData` | reserved: this is where Cardamum would stash vCard X-* properties (below) |
+| `clientData` | reserved: this is where Pimalaya would stash vCard X-* properties (below) |
 | `ageRanges`, `metadata` | output-only, nothing to write back |
 
 ## Round-tripping vCard X-* through Google
 
 Yes, People can carry unknown vCard data. The person resource has two free-form key/value list fields:
 
-- **`clientData`**: arbitrary data "populated by clients", invisible in every Google UI. This is the designed slot for machine round-trip data: Cardamum would store each unmanaged X-* property line (name, parameters, value) under a `clientData` entry and restore it on read, making the Google backend X-*-preserving like CardDAV.
+- **`clientData`**: arbitrary data "populated by clients", invisible in every Google UI. This is the designed slot for machine round-trip data: Pimalaya would store each unmanaged X-* property line (name, parameters, value) under a `clientData` entry and restore it on read, making the Google backend X-*-preserving like CardDAV.
 - **`userDefined`**: same shape, but rendered in the Google Contacts UI as the user's custom fields. Wrong for opaque X-* blobs (they would clutter the UI), right as the destination for X- properties that carry a human-readable label and value.
 
 Both are writable through the normal update mask (`clientData`, `userDefined`), so no extra endpoint is involved. Quota and size limits on these fields are undocumented; the implementation should degrade gracefully (drop with a log, never fail the write) if Google rejects an oversized entry.
@@ -98,8 +98,8 @@ The rule for projecting People-only data into the vCard, so a card moved to anot
 
 1. **Portable semantics get real vCard slots, never X-GOOGLE-*.** Anniversaries, gender, languages, interests, skills, SIP addresses, calendar URLs and file-as all have standard (or registered-extension) vCard forms; minting X-GOOGLE-ANNIVERSARY for data vCard can express would trap portable data in a vendor namespace. These are the *candidate* rows above.
 2. **Google-scoped data gets X-GOOGLE-* properties.** Group membership resource names, external ids, misc keywords and location metadata only mean something to the Google account they came from. Projecting them as X-GOOGLE-* keeps them in the document of record, lets them ride a move to another addressbook as inert baggage, and restores them bit-perfect if the card ever moves back; other backends simply preserve them like any X-* (CardDAV natively, Graph and JMAP through their own unmanaged-data story).
-3. **Namespace care.** Google's own CardDAV historically emits X-GOOGLE-TALK and friends, so Cardamum-minted names must not collide with them; prefixing the property set (or verifying each name against what Google CardDAV emits) is part of the implementation work.
+3. **Namespace care.** Google's own CardDAV historically emits X-GOOGLE-TALK and friends, so Pimalaya-minted names must not collide with them; prefixing the property set (or verifying each name against what Google CardDAV emits) is part of the implementation work.
 
 This is a deliberate exception to the "never mint X-* properties" rule of [contacts-mapping.md](contacts-mapping.md): that rule targets phone-side user data, where competing client spellings breed duplicates. Here the minting side is a backend projection with a fixed, documented vocabulary, and the data has no standard slot by definition. The policy addendum belongs in contacts-mapping.md when this lands.
 
-Both sections above are implemented; the cross-backend behavior (shared with Microsoft Graph) is specified in [custom-data.md](custom-data.md). The stash lands in a `clientData` entry under the key `cardamum.vcard`, stash writes merge foreign `clientData` entries under the etag guard, and external ids, misc keywords and locations ride the vCard as read-only X-GOOGLE-* properties (group memberships are structural addressbook memberships instead, per [merged-view.md](merged-view.md)). The portable graduations (the *candidate* rows of the mapping table) remain future work.
+Both sections above are implemented; the cross-backend behavior (shared with Microsoft Graph) is specified in [custom-data.md](custom-data.md). The stash lands in a `clientData` entry under the key `pimalaya.vcard`, stash writes merge foreign `clientData` entries under the etag guard, and external ids, misc keywords and locations ride the vCard as read-only X-GOOGLE-* properties (group memberships are structural addressbook memberships instead, per [merged-view.md](merged-view.md)). The portable graduations (the *candidate* rows of the mapping table) remain future work.

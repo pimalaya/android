@@ -17,11 +17,11 @@ The base vCard in CardStore is the document of record; the phone is a lossy proj
 
 ## Custom property policy
 
-Custom X-* names are arbitrary; two clients inventing their own spellings for the same data is how duplicates are born. Cardamum therefore syncs the least common denominator and applies Postel's law to the rest:
+Custom X-* names are arbitrary; two clients inventing their own spellings for the same data is how duplicates are born. Pimalaya therefore syncs the least common denominator and applies Postel's law to the rest:
 
 1. **Never mint X-* properties.** New phone-side data is written only to well-defined vCard properties. A phone field with no standard slot does not sync: it stays on the phone contact, unharmed and unpropagated.
 2. **Recognize common X-* conventions on read.** Properties that iOS, DAVx5 and Google CardDAV widely write (grouped item.X-ABLabel labels, X-PHONETIC-*, X-ANNIVERSARY, X-ABDATE, X-ABRELATEDNAMES, legacy X-AIM-style IM handles) are projected onto the phone when present, so data from the user's other devices is visible and never re-created under a second name.
-3. **Edit in place, never rename.** An edit to data that arrived through an X-* property patches that same property; Cardamum only ever edits custom names other clients chose, it never introduces a competing one.
+3. **Edit in place, never rename.** An edit to data that arrived through an X-* property patches that same property; Pimalaya only ever edits custom names other clients chose, it never introduces a competing one.
 
 The practical cost under vCard 3.0: custom labels, phonetic names, anniversaries and year-less birthdays entered on the Android side stay phone-local. vCard 4.0 standardizes most of these (ANNIVERSARY, RELATED, PREF=1, truncated `--MMDD` dates), so when a server advertises 4.0 in its supported-address-data, the synced set grows without any custom property.
 
@@ -57,7 +57,7 @@ One raw contact per vCard, owned by the addressbook's Android account.
 | SipAddress | IMPP:sip:... | IMPP is well-defined (RFC 4770); kind deprecated on Android, mapped for completeness |
 | Note | NOTE | multiple NOTEs concatenate into the single phone note, and stay separate properties in the base document |
 | Photo | PHOTO;ENCODING=b;TYPE=JPEG (3.0), PHOTO:data:... (4.0) | the raw contact's primary photo only; Android recompresses photos on insert, so equality is byte-of-what-we-wrote, see the loop rules |
-| GroupMembership | CATEGORIES | not projected: Cardamum creates no groups (the labels section of contacts apps belongs to the user); the addressbook shows up under the accounts section via the contacts-authority syncable flag instead, and CATEGORIES stay vCard-side, preserved by the patch |
+| GroupMembership | CATEGORIES | not projected: Pimalaya creates no groups (the labels section of contacts apps belongs to the user); the addressbook shows up under the accounts section via the contacts-authority syncable flag instead, and CATEGORIES stay vCard-side, preserved by the patch |
 | Identity | not mapped | platform-internal |
 | third-party kinds (WhatsApp, ...) | not mapped | belong to other apps' accounts anyway |
 

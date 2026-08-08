@@ -89,6 +89,62 @@ pub struct Addressbook {
     pub color: Option<String>,
 }
 
+/// One CalDAV calendar surfaced to the Java client.
+///
+/// The same five fields as [`Addressbook`], and kept a separate type
+/// rather than shared: the two are the same shape today by coincidence
+/// of both being WebDAV collections, and a calendar grows a default
+/// time zone and a component set that an addressbook never will.
+#[derive(Serialize)]
+pub struct Calendar {
+    /// Last non-empty path segment of the collection URL.
+    pub id: String,
+    /// Human-readable name (display name, falling back to the id).
+    pub name: String,
+    /// Absolute collection URL, the target of every event operation.
+    pub url: String,
+    /// Free-form description, when the server exposes one.
+    pub description: Option<String>,
+    /// Display colour (`#RRGGBB`), when the server exposes one.
+    pub color: Option<String>,
+}
+
+/// One calendar item surfaced to the Java client, raw.
+///
+/// The iCalendar text is passed through unparsed: the expansion of a
+/// recurring event depends on the window being rendered, so decoding
+/// happens where that window is known rather than here.
+#[derive(Serialize)]
+pub struct Event {
+    /// Display identifier (resource name with any `.ics` stripped).
+    pub id: String,
+    /// Entity tag guarding concurrent updates, when the server sent one.
+    pub etag: Option<String>,
+    /// Raw iCalendar text, one VCALENDAR.
+    pub ical: String,
+}
+
+/// One message's envelope spine, surfaced to the Java client.
+///
+/// The spine only: no body, no structure, no attachments. A merged mail
+/// list renders exactly these fields, and fetching bodies for every
+/// message of every mailbox to draw a list would be the wrong trade.
+#[derive(Serialize)]
+pub struct Message {
+    /// The mailbox the message was listed from.
+    pub mailbox: String,
+    /// IMAP UID, unique within the mailbox and its UIDVALIDITY epoch.
+    pub uid: u32,
+    /// Decoded `Subject`, empty when the message carries none.
+    pub subject: String,
+    /// The first `From` address, display name preferred over the address.
+    pub from: String,
+    /// The envelope `Date`, still RFC 5322 text.
+    pub date: String,
+    /// Whether the message carries `\Seen`.
+    pub seen: bool,
+}
+
 /// Incremental changes of one collection since a sync cursor: the
 /// changed cards (spine-only or full, per backend), the removed
 /// resource names, the next cursor to checkpoint, and whether the

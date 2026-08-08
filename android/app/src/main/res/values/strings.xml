@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <string name="app_name" translatable="false">Cardamum</string>
+    <string name="app_name" translatable="false">Pimalaya</string>
 
     <string name="new_account">New account</string>
     <string name="cancel_auth">Cancel</string>
-    <string name="welcome" translatable="false">Cardamum</string>
+    <string name="welcome" translatable="false">Pimalaya</string>
     <string name="welcome_value_1">All your contacts from all your accounts</string>
     <string name="welcome_value_2">accessible offline, in a shared view</string>
-    <string name="welcome_description">Cardamum finds your server settings automatically, just enter anything you know about your provider</string>
+    <string name="welcome_description">Pimalaya finds your server settings automatically, just enter anything you know about your provider</string>
     <string name="email_hint">Email, server or URI</string>
     <string name="auth_step_email">Welcome</string>
     <string name="auth_step_config">Configuration</string>
@@ -17,7 +17,7 @@
     <string name="email_invalid">Enter a valid email address</string>
     <string name="discover_failed">Could not find your contacts server settings</string>
     <string name="setup_choice_title">Account setup</string>
-    <string name="setup_choice_message">Cardamum can set everything up automatically with the recommended settings, or let you review each step.</string>
+    <string name="setup_choice_message">Pimalaya can set everything up automatically with the recommended settings, or let you review each step.</string>
     <string name="setup_simple">Recommended</string>
     <string name="setup_advanced">Advanced</string>
 
@@ -43,9 +43,9 @@
     <string name="oauth_scope">Scope</string>
     <string name="oauth_redirect">Redirect URI</string>
     <string name="oauth_client_id_empty">Enter the client ID</string>
-    <string name="oauth_redirect_invalid">Enter an http://127.0.0.1 loopback URL, or org.pimalaya.cardamum:/oauth2redirect</string>
+    <string name="oauth_redirect_invalid">Enter an http://127.0.0.1 loopback URL, or org.pimalaya:/oauth2redirect</string>
     <string name="oauth_port_taken">Could not bind the loopback port; try another</string>
-    <string name="oauth_loopback_done">Signed in. You can close this tab and return to Cardamum.</string>
+    <string name="oauth_loopback_done">Signed in. You can close this tab and return to Pimalaya.</string>
     <string name="oauth_metadata_incomplete">The server\'s OAuth metadata is missing an endpoint</string>
 
     <string name="password_title">Sign in</string>
@@ -69,7 +69,7 @@
     <string name="about_body">Version %1$s\n\nYour contacts, offline-first and multi-account.\n\nMade by Pimalaya.</string>
     <string name="about_website">Website</string>
     <string name="report_bug">Report a bug</string>
-    <string name="local_account">Cardamum</string>
+    <string name="local_account">Pimalaya</string>
     <string name="local_book">Local app contacts</string>
     <string name="delete_account">Delete account</string>
     <string name="account_enable">Enable this account</string>
@@ -151,6 +151,19 @@
     <string name="manage_books_title">Addressbooks of this contact</string>
     <string name="contact_open_failed">Could not open the contact</string>
     <string name="empty_title">No contact found</string>
+    <string name="domain_mail">Mail</string>
+    <string name="domain_contacts">Contacts</string>
+    <string name="domain_calendar">Calendar</string>
+    <string name="mail_empty">No message</string>
+    <string name="calendar_empty">No event</string>
+    <string name="filter_title">Filter</string>
+    <string name="filter_accounts">Accounts</string>
+    <string name="filter_collections">Collections</string>
+    <string name="filter_reset">Show all</string>
+    <string name="event_all_day">All day</string>
+    <string name="message_no_sender">(Unknown sender)</string>
+    <string name="message_no_subject">(No subject)</string>
+    <string name="event_untitled">(No title)</string>
     <string name="no_account">No account found</string>
 
     <string name="back">Back</string>

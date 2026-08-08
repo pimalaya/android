@@ -14,6 +14,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "cardamum"
+rootProject.name = "pimalaya"
 
 include(":app", ":client")

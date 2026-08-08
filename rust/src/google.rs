@@ -95,7 +95,7 @@ pub const READ_FIELDS: &[PeoplePersonField] = &[
 /// clientData key of the entry stashing the vCard remainder: every
 /// property the projection neither manages nor mints, preserved
 /// verbatim through Google (docs/custom-data.md).
-pub const CLIENT_DATA_KEY: &str = "cardamum.vcard";
+pub const CLIENT_DATA_KEY: &str = "pimalaya.vcard";
 
 /// Property names minted by [`to_vcard`] from the Google-scoped person
 /// fields; [`to_person`] consumes (drops) them, the server value being
@@ -289,7 +289,7 @@ pub fn to_vcard(person: &PeoplePerson) -> String {
 /// update), while unmanaged People fields stay out of the body. Every
 /// line that does not project (unknown and X-* properties, standard
 /// properties without a People slot, values past a single-instance
-/// slot, partial birthdays) is stashed verbatim into the cardamum
+/// slot, partial birthdays) is stashed verbatim into the pimalaya
 /// clientData entry, so it survives on Google and restores on read.
 /// The UID is not read back (the resource name addresses the person
 /// through the request path, filled by the caller) and the minted
@@ -841,7 +841,7 @@ fn typed_line(name: &str, r#type: &Option<String>, value: &str) -> String {
     }
 }
 
-/// The stashed vCard remainder lines behind the person's cardamum
+/// The stashed vCard remainder lines behind the person's pimalaya
 /// clientData entry.
 fn stash_lines(person: &PeoplePerson) -> Vec<String> {
     person

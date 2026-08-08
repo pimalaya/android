@@ -20,7 +20,7 @@ use crate::{
 /// with m:n addressbook memberships; pure computation, no transport.
 /// Returns `{"backend": "..", "accountLevel": bool}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_accountInfo<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     base_url: JString<'local>,
@@ -54,7 +54,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_accountInfo<'loc
 /// HTTPS session URL or bare host); pure computation, no transport.
 /// Returns `{"url": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_accountBase<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_accountBase<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     kind: JString<'local>,
@@ -78,7 +78,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_accountBase<'loc
 /// backend dispatched from the base URL. Returns a JSON array of
 /// addressbooks carrying absolute collection URLs.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_listAddressbooks<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_listAddressbooks<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -110,7 +110,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_listAddressbooks
 /// memberships as book ids. Returns a JSON array of
 /// `{id, uri, etag, vcard, books}` objects.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_listAccountCards<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_listAccountCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -141,7 +141,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_listAccountCards
 /// the backend dispatched from the base URL (CardDAV, Graph). Returns
 /// a JSON array of `{id, uri, etag, vcard}` objects.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_listCards<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_listCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -179,7 +179,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_listCards<'local
 /// created `{id, uri, etag, vcard}` (the server-assigned id on the
 /// backends naming the resource themselves).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_createCard<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_createCard<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -222,7 +222,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_createCard<'loca
 /// the server returned it), the backend dispatched from the base URL.
 /// Returns `{id, uri, etag, vcard}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_readCard<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_readCard<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -265,7 +265,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_readCard<'local>
 /// ETag guards the guarding backends' writes (empty means unknown for
 /// both). Returns the updated `{id, uri, etag, vcard}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_updateCard<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_updateCard<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -320,7 +320,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_updateCard<'loca
 /// backend dispatched from the base URL and the ETag guarding the
 /// guarding backends' deletion (empty means unknown). Returns `{}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_deleteCard<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_deleteCard<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -368,7 +368,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_deleteCard<'loca
 /// one backend with a batch create verb). Returns a JSON array of the
 /// created `{id, uri, etag, vcard}` in input order.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_createCards<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_createCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -408,7 +408,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_createCards<'loc
 /// card ids) from the addressbook collection, Google-only (the one
 /// backend with a batch delete verb). Returns `{}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_deleteCards<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_deleteCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -448,7 +448,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_deleteCards<'loc
 /// Graph ($batch) only. Returns a JSON array of `{ref, accepted, id?,
 /// etag?, error?}`, one outcome per change.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_pushCards<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_pushCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -500,7 +500,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_pushCards<'local
 /// etag, vcard?, books?}], "vanished": [uri], "token": "..",
 /// "complete": bool}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_syncCards<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_syncCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -542,7 +542,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_syncCards<'local
 /// collection via REPORT `addressbook-multiget`. Returns a JSON array
 /// of `{id, uri, etag, vcard}` objects.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_multigetCards<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_multigetCards<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -583,7 +583,7 @@ pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_multigetCards<'l
 /// memberships on an account-level backend (JSON string arrays of book
 /// ids), the backend dispatched from the base URL. Returns `{}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_cardamum_client_Native_updateCardBooks<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_updateCardBooks<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,

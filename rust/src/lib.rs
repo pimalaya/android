@@ -1,4 +1,4 @@
-//! JNI bridge for the Cardamum Android :client module.
+//! JNI bridge for the Pimalaya Android :client module.
 //!
 //! TLS and TCP live in Java (SSLSocket); this crate is a pure protocol
 //! state machine running io-pim-discovery's discovery, io-oauth's OAuth 2.0 and
@@ -31,14 +31,15 @@
 //!
 //! ## Offline engine
 //!
-//! The `offline*` entry points run io-offline's replica engine (sync,
-//! upgrade, mutate), upcalling a Java `OfflineDriver` on each yield so
+//! The `offline*` entry points run io-replica's replica engine (sync,
+//! upgrade, mutate), upcalling a Java `ReplicaDriver` on each yield so
 //! storage stays in the Java CardStore and remote operations reuse the
 //! backend clients; `syncCards` and `multigetCards` are the CardDAV
 //! primitives its remote seam builds on (RFC 6578 sync-collection with a
 //! full-enumeration fallback, and addressbook-multiget body fetches).
 
 mod account;
+mod calendar;
 mod client;
 mod ffi;
 mod google;

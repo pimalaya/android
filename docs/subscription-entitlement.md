@@ -35,4 +35,4 @@ Implemented (Google build, src/google):
 - GoogleBilling.enforce gates on the cache: within the grace window it opens the app and re-verifies against Play in the background (PlayVerifier, headless one-shot query); otherwise it shows the paywall.
 - PaywallActivity connects to Play, checks for an active subscription, records every definitive Play answer into the cache (a failed query never marks a subscriber lapsed), lets subscribers through and otherwise offers the subscription.
 - Subscriptions.isActive is the shared purchased-state check for the paywall and the background verifier.
-- Product id wired to the real base plan cardamum (trial offer cardamum-trial).
+- Product id wired to the real base plan pimalaya (trial offer pimalaya-trial).

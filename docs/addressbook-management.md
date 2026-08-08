@@ -9,7 +9,7 @@ The app can list addressbooks and toggle their subscription, but it cannot creat
 - `CardStore.removeAccount`: drop a whole account and every book under it.
 - The home drawer (`MainActivity.reloadHome`) lists books grouped by account, each row a subscription checkbox; long-pressing an account **header** confirms account deletion.
 
-There is no per-addressbook mutation at any layer: not in `CardStore`, not in `CardamumClient` / `Native`, and not in the Rust bridge (rust/src/client.rs exposes `list_addressbooks` plus card CRUD only).
+There is no per-addressbook mutation at any layer: not in `CardStore`, not in `PimalayaClient` / `Native`, and not in the Rust bridge (rust/src/client.rs exposes `list_addressbooks` plus card CRUD only).
 
 ## What a create / rename / delete would take
 
@@ -20,7 +20,7 @@ A full vertical slice per operation, and the semantics differ by backend:
 - Google People: books map to contact groups; arbitrary creation is possible but the "default" group is special and cannot be removed.
 - Microsoft Graph: contact folders; the default folder cannot be renamed or deleted.
 
-Each needs: the protocol coroutine in the relevant io-* crate, a Rust bridge method, a `Native` FFI entry, a `CardamumClient` wrapper, `CardStore` persistence, then the UI (a FAB dropdown offering account vs addressbook creation, and a long-press dialog on a book row to rename or delete, the delete guarded by a confirm dialog).
+Each needs: the protocol coroutine in the relevant io-* crate, a Rust bridge method, a `Native` FFI entry, a `PimalayaClient` wrapper, `CardStore` persistence, then the UI (a FAB dropdown offering account vs addressbook creation, and a long-press dialog on a book row to rename or delete, the delete guarded by a confirm dialog).
 
 ## Desired UI, when the backend lands
 

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Edit schema read by contacts apps (android.provider.CONTACTS_STRUCTURE):
-     declares Cardamum's account type as a contacts source, which is what
+     declares Pimalaya's account type as a contacts source, which is what
      makes contacts apps list its accounts in their drawer and allow
      editing its raw contacts. Kinds mirror what the projector writes
      (docs/contacts-mapping.md). -->

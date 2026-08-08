@@ -16,12 +16,14 @@
 //! and error helpers shared by more than one backend live in
 //! [`convert`].
 
+mod caldav;
 mod carddav;
 mod convert;
 mod discovery;
 mod dispatch;
 mod google;
 mod graph;
+pub(crate) mod imap;
 mod jmap;
 
 use core::error::Error as StdError;
@@ -42,7 +44,7 @@ use crate::{client::convert::coroutine_error, types::BridgeError};
 
 /// Sent as the `User-Agent` on every WebDAV request; shared by the
 /// CardDAV verbs and the discovery walk.
-pub(crate) const USER_AGENT: &str = concat!("cardamum-android/", env!("CARGO_PKG_VERSION"));
+pub(crate) const USER_AGENT: &str = concat!("pimalaya-android/", env!("CARGO_PKG_VERSION"));
 
 /// One native call's CardDAV client: a mutable `Env` and the Java
 /// transport it upcalls for socket I/O.

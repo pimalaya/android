@@ -14,7 +14,7 @@ Independent of typing, fewer and coarser crossings mean less untyped blob to typ
 
 ## Lever A: type the replies (do next)
 
-Promote every `json!` reply in store.rs and project.rs to a named serde struct, mirroring offline.rs, and write the matching :client model class for each. Turn the stringly-typed dispatch keys into serde-renamed enums (the `accountBase` kind, the `cardTypeOrder` and `formEntry` kind, the offline `action`, the `op` fields). Make `syncCards` symmetric: serialize and parse CardDelta through serde on both sides instead of the current hand re-parse. Roughly 141 `json!` sites collapse to perhaps 30 to 40 structs, with about 30 new Java DTOs; the existing `object()` / `array()` error-unwrap helpers and the `BridgeError` to `CardamumException` contract stay as they are. This kills the runtime-key surface and the duplicated literals, at the cost of two hand-maintained copies until lever B.
+Promote every `json!` reply in store.rs and project.rs to a named serde struct, mirroring offline.rs, and write the matching :client model class for each. Turn the stringly-typed dispatch keys into serde-renamed enums (the `accountBase` kind, the `cardTypeOrder` and `formEntry` kind, the offline `action`, the `op` fields). Make `syncCards` symmetric: serialize and parse CardDelta through serde on both sides instead of the current hand re-parse. Roughly 141 `json!` sites collapse to perhaps 30 to 40 structs, with about 30 new Java DTOs; the existing `object()` / `array()` error-unwrap helpers and the `BridgeError` to `PimalayaException` contract stay as they are. This kills the runtime-key surface and the duplicated literals, at the cost of two hand-maintained copies until lever B.
 
 ## Lever B: generate the Java side (optional, later)
 

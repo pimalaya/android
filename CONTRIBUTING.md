@@ -1,6 +1,6 @@
 # Contributing guide
 
-Thank you for investing your time in contributing to Cardamum for Android.
+Thank you for investing your time in contributing to Pimalaya for Android.
 
 Whether you are a human or an AI agent, read these in order before touching the code:
 
@@ -21,9 +21,9 @@ If you do not want to use Nix, provide these yourself: the Android SDK (platform
 
 Three layers, each knowing only the one below:
 
-- `:app` (Java, framework Views): the screens. Talks only to `CardamumClient`; never sees sockets or JNI.
+- `:app` (Java, framework Views): the screens. Talks only to `PimalayaClient`; never sees sockets or JNI.
 - `:client` (Android library, Java): the public API exposed to the app. Owns the JNI boundary, the URL-keyed pool of TLS sockets (platform trust store, zero APK cost) and the parsing of the bridge's replies.
-- `libcardamum.so` (Rust): the Pimalaya I/O-free building blocks (pimconf discovery, io-webdav CardDAV) exposed over JNI, with socket I/O delegated back to Java on each read/write yield.
+- `libpimalaya.so` (Rust): the Pimalaya I/O-free building blocks (pimconf discovery, io-webdav CardDAV) exposed over JNI, with socket I/O delegated back to Java on each read/write yield.
 
 TLS and TCP live in Java on purpose: the `.so` stays a small state machine that cross-compiles trivially, and certificate validation is handled by Android. The app is plain Java and XML framework Views, no Kotlin and no Jetpack, to keep the toolchain small and the APK minimal.
 
@@ -59,4 +59,4 @@ gradle :app:testDebugUnitTest
 
 ## Commit style
 
-Cardamum for Android follows the [conventional commits specification](https://www.conventionalcommits.org/en/v1.0.0/#summary).
+Pimalaya for Android follows the [conventional commits specification](https://www.conventionalcommits.org/en/v1.0.0/#summary).

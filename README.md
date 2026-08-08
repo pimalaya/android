@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./logo.svg" alt="Logo" width="128" height="128" />
-  <h1>📇 Cardamum Android</h1>
-  <p>Android app to manage contacts</p>
+  <h1>🗂️ Pimalaya Android</h1>
+  <p>Android app to manage mail, contacts and calendars</p>
   <p>
     <a href="https://matrix.to/#/#pimalaya:matrix.org"><img alt="Matrix" src="https://img.shields.io/badge/chat-%23pimalaya-blue?style=flat&logo=matrix&logoColor=white"/></a>
     <a href="https://fosstodon.org/@pimalaya"><img alt="Mastodon" src="https://img.shields.io/badge/news-%40pimalaya-blue?style=flat&logo=mastodon&logoColor=white"/></a>
@@ -17,7 +17,7 @@
 </tr></table>
 
 > [!WARNING]
-> Cardamum for Android is early-stage software under active development: it is not yet published on any store, and everything is subject to change. See [docs/design.md](./docs/design.md) for the design and the [docs](./docs) folder for the living documentation.
+> Pimalaya for Android is early-stage software under active development: it is not yet published on any store, and everything is subject to change. See [docs/design.md](./docs/design.md) for the design and the [docs](./docs) folder for the living documentation.
 
 ## Table of contents
 
@@ -32,6 +32,8 @@
 
 ## Features
 
+- **Three domains, one app**: mail, contacts and calendars behind three icons in the top bar, over one store and one account list.
+- **Merged views**: each domain is a single list across every account and every collection, filterable on both axes, rather than a mailbox or an addressbook at a time.
 - **Multiple accounts and backends**: keep CardDAV, JMAP, Microsoft and Google addressbooks side by side in a single app.
 - **Offline first**: every contact is stored locally and rendered instantly, with edits pushed on the next sync.
 - **Incremental sync**: each pass transfers only what changed, on every backend.
@@ -42,6 +44,8 @@
 - **Flexible authentication**: password, API token or OAuth 2.0, with shipped Google and Microsoft sign-in or your own; credentials are encrypted by the Android Keystore.
 - **Full vCard editor**: a friendly form, an advanced per-property editor and a free-hand source editor.
 - **Merged contact view**: one deduplicated list over every account, with search, import, export and a duplicate remover.
+
+Contacts is the mature domain. **Mail and calendar are read-only for now**: a merged message list and a merged agenda, with no message view, no event detail and no write path yet.
 
 ## Coverage
 
@@ -54,7 +58,13 @@
 | [OAuth 2.0][rfc6749] and [dynamic client registration][rfc7591] | Signing in without a provider console, next to the shipped Google and Microsoft clients |
 | [Microsoft Graph][msgraph] | Contact synchronization against Outlook and Microsoft 365 |
 | [Google People API][people] | Contact synchronization against Google accounts |
+| [IMAP4rev1][rfc3501] | Reading mail: the mailbox list and the envelope spine of each, merged across accounts |
+| [iCalendar][rfc5545] | The calendar data model, recurrence rules included: a rule is expanded into the occurrences an agenda window shows |
+| [CalDAV][rfc4791] | Calendar synchronization against any standards-compliant server |
 
+[rfc3501]: https://www.rfc-editor.org/rfc/rfc3501
+[rfc4791]: https://www.rfc-editor.org/rfc/rfc4791
+[rfc5545]: https://www.rfc-editor.org/rfc/rfc5545
 [rfc6350]: https://www.rfc-editor.org/rfc/rfc6350
 [rfc6352]: https://www.rfc-editor.org/rfc/rfc6352
 [rfc6749]: https://www.rfc-editor.org/rfc/rfc6749
@@ -68,7 +78,7 @@
 
 ## Installation
 
-Cardamum for Android is not yet published, therefore the only way to install the app is to check out the [releases](https://github.com/pimalaya/cardamum-android/actions/workflows/releases.yml) GitHub workflow, look for the *Artifacts* section, download the APK and manually install it.
+Pimalaya for Android is not yet published, therefore the only way to install the app is to check out the [releases](https://github.com/pimalaya/android/actions/workflows/releases.yml) GitHub workflow, look for the *Artifacts* section, download the APK and manually install it.
 
 ## AI disclosure
 

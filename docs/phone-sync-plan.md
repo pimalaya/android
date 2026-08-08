@@ -1,6 +1,6 @@
 # Phone sync plan: ContactsContract as a second io-offline spoke
 
-The store is the hub with two spokes: the remote server (CardDAV, Graph, JMAP, People) and the phone's ContactsContract. Today only the server spoke is a real sync (io-offline engine); the phone spoke is a one-way projection, so edits made in the phone's contacts app on Cardamum's raw contacts (which set the provider's DIRTY flag, bump VERSION, and set DELETED on removal) are never read back and get clobbered by the next projection. This plan makes the phone a second io-offline spoke: same engine, same Rust semantics, Java limited to interfacing ContactsContract.
+The store is the hub with two spokes: the remote server (CardDAV, Graph, JMAP, People) and the phone's ContactsContract. Today only the server spoke is a real sync (io-offline engine); the phone spoke is a one-way projection, so edits made in the phone's contacts app on Pimalaya's raw contacts (which set the provider's DIRTY flag, bump VERSION, and set DELETED on removal) are never read back and get clobbered by the next projection. This plan makes the phone a second io-offline spoke: same engine, same Rust semantics, Java limited to interfacing ContactsContract.
 
 ## Design
 
@@ -38,7 +38,7 @@ syncBook becomes three engine passes: phone (pull the contacts app's edits into 
 
 ### Stage 4: shakeout matrix
 
-On-device, per backend family: edit a field in the phone app and see it in Cardamum and on the server; delete and create from the phone app; edit the same card in the phone app and remotely between syncs (engine three-way merge, update beats delete both ways); dirty-but-unchanged raw contacts converge silently; a field only Cardamum knows survives a phone-side edit of another field.
+On-device, per backend family: edit a field in the phone app and see it in Pimalaya and on the server; delete and create from the phone app; edit the same card in the phone app and remotely between syncs (engine three-way merge, update beats delete both ways); dirty-but-unchanged raw contacts converge silently; a field only Pimalaya knows survives a phone-side edit of another field.
 
 ## Landed (2026-07-09)
 
@@ -46,7 +46,7 @@ All stages are in, with these deviations from the plan text above, each forced b
 
 - **The phone axis lives on the membership table, not the card table.** On the account-level backends one card sits in several books, each book is its own Android account with its own raw contact and an independent VERSION, so per-card columns would ping-pong between books. The axis is per (book, card), which is exactly the membership row.
 - **Four columns, not two.** The engine's pull-content path drops the body and expects a per-axis refetch marker, and conflicts persist their observed revision across passes, so the axis mirrors the server one in full: phone_revision, phone_base, phone_stale, phone_conflict_revision (schema v15; the card tables rebuild, the addressbook table survives).
-- **The fetch boundary overlays instead of replacing.** applyCard deletes managed properties absent from the model, so a bare reverse-mapped model would strip everything the phone cannot represent. The body is applyCard(phone_base, Mapping.merge(project(phone_base), Mapping.model(rows))): merge takes a field from the phone only when it differs from what phone_base itself projects onto the phone, so mapping lossiness (the FN-diverged name row, canonicalized TEL types) never reads as an edit and Cardamum-only fields ride along.
+- **The fetch boundary overlays instead of replacing.** applyCard deletes managed properties absent from the model, so a bare reverse-mapped model would strip everything the phone cannot represent. The body is applyCard(phone_base, Mapping.merge(project(phone_base), Mapping.model(rows))): merge takes a field from the phone only when it differs from what phone_base itself projects onto the phone, so mapping lossiness (the FN-diverged name row, canonicalized TEL types) never reads as an edit and Pimalaya-only fields ride along.
 - **The adapter is its own class.** PhoneRemote replaces Projector (deleted) next to OfflineEngine, which routes phone-collection yields to it; Mapping stays the pure JVM-tested half, now in both directions plus merge.
 - **Enumerate heals as it walks.** DELETED raw contacts are purged (absence from the complete round is the vanished signal), contacts without SOURCE_ID get stamped a fresh handle before being listed (a crash never ingests them twice), and a SOURCE_ID the store no longer holds is a stale projection and is purged too; that last rule is what makes the v15 rebuild converge in one run instead of resurrecting pre-spoke projections as creates.
 - **No Rust changes.** The bridge and the engine are collection-agnostic; the whole spoke is Java against the existing serve seam.
@@ -69,6 +69,6 @@ An on-device trace of the surviving cascade (the two fixes above made it silent 
 
 ## Limits, accepted up front
 
-- Only fields the EditSchema exposes round-trip; everything else is Cardamum-only and preserved by the applyCard patch at the fetch boundary.
+- Only fields the EditSchema exposes round-trip; everything else is Pimalaya-only and preserved by the applyCard patch at the fetch boundary.
 - Group membership is out of scope: the projector removes groups today, and per-placement membership moves have their own engine semantics (see the io-offline migration notes).
 - The photo kind is declared in the EditSchema but not projected; photos stay out of scope for this pass.
