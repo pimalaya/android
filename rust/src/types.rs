@@ -133,8 +133,10 @@ pub struct Event {
 pub struct Message {
     /// The mailbox the message was listed from.
     pub mailbox: String,
-    /// IMAP UID, unique within the mailbox and its UIDVALIDITY epoch.
-    pub uid: u32,
+    /// What the backend addresses the message by, within its mailbox:
+    /// the IMAP UID as text, the opaque Email id on JMAP. A string
+    /// rather than a number because only one of the two is one.
+    pub id: String,
     /// Decoded `Subject`, empty when the message carries none.
     pub subject: String,
     /// The first `From` address, display name preferred over the address.

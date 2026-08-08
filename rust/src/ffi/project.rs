@@ -18,9 +18,9 @@ use crate::{
 };
 
 /// `Native.indexCard`: indexes a vCard for the store (display name,
-/// first email and phone, UID, normalized content hash); pure
-/// computation, no transport. Returns
-/// `{"name", "email", "phone", "uid", "hash"}`.
+/// first email and phone, every email, UID, normalized content hash);
+/// pure computation, no transport. Returns
+/// `{"name", "email", "emails", "phone", "info", "uid", "hash"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_indexCard<'local>(
     mut env: EnvUnowned<'local>,

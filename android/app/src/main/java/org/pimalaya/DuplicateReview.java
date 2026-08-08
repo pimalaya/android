@@ -222,14 +222,8 @@ final class DuplicateReview {
                 if (!staged.add(host.pool.replicaRef(entry)) || uid.equals(entry.uid)) {
                     continue;
                 }
-                AccountEntry owner = host.accountFor(entry.accountEmail);
-                if (owner == null) {
-                    continue;
-                }
                 String vcard = Cards.setCardUid(entry.card.vcard, uid);
-                host.base.saveLocal(
-                        entry.accountEmail,
-                        ContactPool.cardKey(owner.account, entry.book.url, entry.card.id),
+                host.contacts.save(
                         entry.book.url,
                         new Card(entry.card.id, entry.card.uri, entry.card.etag, vcard));
             }

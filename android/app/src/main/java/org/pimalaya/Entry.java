@@ -25,7 +25,7 @@ final class Entry {
         return name.isEmpty() ? card.id : name;
     }
 
-    Entry(Addressbook book, String accountEmail, CardStore.Indexed indexed) {
+    Entry(Addressbook book, String accountEmail, PimdirContacts.Indexed indexed) {
         this.book = book;
         this.accountEmail = accountEmail;
         this.card = indexed.card;

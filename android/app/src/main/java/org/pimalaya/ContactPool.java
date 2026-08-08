@@ -21,14 +21,16 @@ import org.pimalaya.client.PimalayaClient;
  */
 final class ContactPool {
     private final CardStore base;
+    private final PimdirContacts contacts;
 
     /** The host's in-memory account cache, read on the main thread
      *  only ({@link #replicaRef}); the io-side grouping receives a
      *  snapshot instead. */
     private final List<AccountEntry> accounts;
 
-    ContactPool(CardStore base, List<AccountEntry> accounts) {
+    ContactPool(CardStore base, PimdirContacts contacts, List<AccountEntry> accounts) {
         this.base = base;
+        this.contacts = contacts;
         this.accounts = accounts;
     }
 
@@ -36,7 +38,7 @@ final class ContactPool {
     List<Entry> loadEntries() {
         List<Entry> entries = new ArrayList<>();
         for (BookEntry entry : base.loadSubscribedAddressbooks()) {
-            for (CardStore.Indexed indexed : base.loadIndexedCards(entry.book.url)) {
+            for (PimdirContacts.Indexed indexed : contacts.list(entry.book.url)) {
                 entries.add(new Entry(entry.book, entry.accountEmail, indexed));
             }
         }
@@ -103,7 +105,7 @@ final class ContactPool {
      * id on account-level backends, the collection-scoped key on
      * per-collection ones.
      */
-    static String cardKey(Account account, String bookUrl, String id) {
+    private static String cardKey(Account account, String bookUrl, String id) {
         return PimalayaClient.isAccountLevel(account) ? id : CardStore.key(bookUrl, id);
     }
 
@@ -117,7 +119,10 @@ final class ContactPool {
         String key =
                 account == null
                         ? CardStore.key(entry.book.url, entry.card.id)
-                        : cardKey(account.account, entry.book.url, entry.card.id);
+                        : cardKey(
+                                account.server(PimDomain.CONTACTS),
+                                entry.book.url,
+                                entry.card.id);
         return CardStore.replicaRef(entry.accountEmail, key);
     }
 }

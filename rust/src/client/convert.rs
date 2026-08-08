@@ -8,9 +8,7 @@ use core::error::Error as StdError;
 use io_jmap::rfc8620::send::JmapSendError;
 use io_msgraph::v1::send::MsgraphSendError;
 use io_people::v1::send::PeopleSendError;
-use io_webdav::rfc4918::{
-    follow_redirects::FollowRedirectsError, send::SendError as WebdavSendError,
-};
+use io_webdav::rfc4918::{follow_redirects::WebdavFollowRedirectsError, send::WebdavSendError};
 
 use crate::types::{BridgeError, PushOutcome};
 
@@ -34,7 +32,7 @@ fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
         if let Some(WebdavSendError::HttpStatus(status, _)) = err.downcast_ref() {
             return Some(*status);
         }
-        if let Some(FollowRedirectsError::HttpStatus(status, _)) = err.downcast_ref() {
+        if let Some(WebdavFollowRedirectsError::HttpStatus(status, _)) = err.downcast_ref() {
             return Some(*status);
         }
         if let Some(JmapSendError::HttpStatus(status)) = err.downcast_ref() {

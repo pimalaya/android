@@ -54,6 +54,21 @@ public final class AuthMethod {
     }
 
     /**
+     * An authorization code grant the caller already knows the endpoints of,
+     * for the providers that publish no discoverable configuration.
+     */
+    public static AuthMethod oauthCodeGrant(
+            String authorizationEndpoint, String tokenEndpoint, String scope) {
+        return new AuthMethod(
+                Type.OAUTH_AUTHORIZATION_CODE_GRANT,
+                authorizationEndpoint,
+                null,
+                tokenEndpoint,
+                scope,
+                null);
+    }
+
+    /**
      * Parses one method from the bridge's JSON shape: {@code "password"}
      * and {@code "bearer"} as plain strings, the OAuth variants as
      * single-key objects.

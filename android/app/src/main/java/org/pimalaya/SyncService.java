@@ -64,9 +64,10 @@ public class SyncService extends Service {
             }
 
             try {
-                CardStore store = new CardStore(context);
+                PimdirDb pimdir = new PimdirDb(context);
+                CardStore store = new CardStore(context, pimdir);
                 OfflineEngine engine =
-                        new OfflineEngine(store, new PimalayaClient(), null, context);
+                        new OfflineEngine(store, pimdir, new PimalayaClient(), null, context);
                 OfflineEngine.Report report = new OfflineEngine.Report();
                 engine.syncPhone(url, report);
                 Log.d(

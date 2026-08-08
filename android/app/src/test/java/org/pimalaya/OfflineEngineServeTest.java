@@ -3,6 +3,8 @@ package org.pimalaya;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import android.content.Context;
+
 import java.util.List;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -30,12 +32,18 @@ public class OfflineEngineServeTest {
 
     @Before
     public void setUp() {
-        store = new CardStore(RuntimeEnvironment.getApplication());
-        store.replaceAddressbooks(
-                EMAIL, List.of(new Addressbook("b1", "Book One", BOOK, null, null)));
+        Context context = RuntimeEnvironment.getApplication();
+        PimdirDb pimdir = new PimdirDb(context);
+        store = new CardStore(context, pimdir);
+
+        List<Addressbook> books = List.of(new Addressbook("b1", "Book One", BOOK, null, null));
+        store.replaceAddressbooks(EMAIL, books);
+        new PimdirCollections(pimdir, context).replace(
+                EMAIL, PimdirMeta.CONTACT, PimdirCollections.of(EMAIL, books));
+
         // No account (storage yields only) and no context (no phone
         // spoke): the shape the mutate driver runs with.
-        engine = new OfflineEngine(store, new PimalayaClient(), null, null);
+        engine = new OfflineEngine(store, pimdir, new PimalayaClient(), null, null);
     }
 
     @Test

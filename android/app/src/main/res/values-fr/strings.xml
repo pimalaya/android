@@ -6,7 +6,7 @@
     <string name="welcome_value_1">Tous vos contacts de tous vos comptes</string>
     <string name="welcome_value_2">accessibles hors ligne, dans une vue partagée</string>
     <string name="welcome_description">Pimalaya trouve automatiquement les paramètres de votre serveur ; saisissez simplement ce que vous savez de votre fournisseur</string>
-    <string name="email_hint">E-mail, serveur ou URI</string>
+    <string name="email_hint">Adresse e-mail</string>
     <string name="auth_step_email">Bienvenue</string>
     <string name="auth_step_config">Configuration</string>
     <string name="auth_step_books">Sélection</string>

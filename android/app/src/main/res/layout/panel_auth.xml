@@ -68,6 +68,8 @@
 
         <include layout="@layout/panel_email" />
 
+        <include layout="@layout/panel_domain" />
+
         <include layout="@layout/panel_config" />
 
         <include layout="@layout/panel_books" />

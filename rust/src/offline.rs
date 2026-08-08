@@ -268,6 +268,7 @@ fn parse_arg(yielded: &ReplicaYield, reply: &str) -> Result<ReplicaArg, BridgeEr
                     handle: ReplicaHandle(item.handle),
                     link_id: ReplicaLinkId(item.link_id),
                     meta: ReplicaMeta(item.meta),
+                    sort_key: item.sort_key.into(),
                     body: match (item.hash, item.body) {
                         (Some(hash), Some(body)) => Some(ReplicaFetchedBody::Inline {
                             hash: ReplicaHash(hash),
@@ -337,6 +338,12 @@ struct PlacementJson {
     level: LevelJson,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     meta: Option<String>,
+    /// The presentation sort key (pimdir SPEC.md 9.3). Round-tripped rather
+    /// than defaulted on the way out: the reference write is a replace-all, so
+    /// a sync that dropped the key would silently reset the ordering of every
+    /// item it touched. Empty means unknown.
+    #[serde(default)]
+    sort_key: String,
     #[serde(default)]
     flags: Vec<String>,
     status: StatusJson,
@@ -357,6 +364,7 @@ impl From<PlacementJson> for ReplicaPlacement {
             object: wire.object.map(ReplicaHash),
             level: wire.level.into(),
             meta: wire.meta.map(ReplicaMeta),
+            sort_key: wire.sort_key.into(),
             flags: ReplicaFlags::from_iter(wire.flags),
             status: wire.status.into(),
             conflict_revision: wire.conflict_revision,
@@ -375,6 +383,7 @@ impl From<&ReplicaPlacement> for PlacementJson {
             object: placement.object.as_ref().map(|hash| hash.as_str().into()),
             level: placement.level.into(),
             meta: placement.meta.as_ref().map(|meta| meta.0.clone()),
+            sort_key: placement.sort_key.0.clone(),
             flags: placement.flags.0.iter().cloned().collect(),
             status: placement.status.into(),
             conflict_revision: placement.conflict_revision.clone(),
@@ -657,6 +666,11 @@ enum MutationJson {
         body: String,
         #[serde(default)]
         meta: Option<String>,
+        /// Absent leaves the stored key alone; the spec makes a write that
+        /// does not restate it preserve it, so an edit that has no new key
+        /// must not send one rather than send an empty one.
+        #[serde(default)]
+        sort_key: Option<String>,
     },
 }
 
@@ -669,6 +683,7 @@ impl From<MutationJson> for ReplicaMutation {
                 size,
                 body,
                 meta,
+                sort_key,
             } => Self::Edit {
                 handle: ReplicaHandle(handle),
                 object: ReplicaObject {
@@ -677,6 +692,7 @@ impl From<MutationJson> for ReplicaMutation {
                 },
                 body: body.into_bytes(),
                 meta: meta.map(ReplicaMeta),
+                sort_key: sort_key.map(Into::into),
             },
         }
     }
@@ -738,6 +754,10 @@ struct FetchedItemJson {
     link_id: String,
     #[serde(default)]
     meta: String,
+    /// The sort key the remote side derived beside the summary; empty when it
+    /// derived none, which is the unknown key rather than one sorting first.
+    #[serde(default)]
+    sort_key: String,
     #[serde(default)]
     hash: Option<String>,
     #[serde(default)]

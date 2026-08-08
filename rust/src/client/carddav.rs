@@ -9,13 +9,14 @@ use io_webdav::{
     coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield},
     rfc4918::{GETETAG, WebdavAuth},
     rfc6352::{
-        addressbook::{Addressbook as DavAddressbook, list::ListAddressbooks},
+        addressbook::{CarddavAddressbook as DavAddressbook, list::CarddavAddressbookList},
         card::{
-            CardEntry, CardRef, create::CreateCard, delete::DeleteCard, enumerate::EnumCards,
-            list::ListCards, multiget::MultigetCards, read::ReadCard, update::UpdateCard,
+            CarddavCardEntry, CarddavCardRef, create::CarddavCardCreate, delete::CarddavCardDelete,
+            enumerate::CarddavCardEnum, list::CarddavCardList, multiget::CarddavCardMultiget,
+            read::CarddavCardRead, update::CarddavCardUpdate,
         },
     },
-    rfc6578::sync_collection::{SyncCollection, SyncCollectionError, SyncDelta},
+    rfc6578::sync_collection::{WebdavSyncCollection, WebdavSyncCollectionError, WebdavSyncDelta},
 };
 use url::Url;
 use vcard::tree::cst::VcardCst;
@@ -64,7 +65,7 @@ impl<'a, 'local> Client<'a, 'local> {
             .addressbook_home_set(&principal, &auth)?
             .ok_or_else(|| "No addressbook home set found".to_string())?;
 
-        let coroutine = ListAddressbooks::new(&home_set, &auth, USER_AGENT, home_set.path());
+        let coroutine = CarddavAddressbookList::new(&home_set, &auth, USER_AGENT, home_set.path());
         let addressbooks: BTreeSet<DavAddressbook> = self.run(&home_set, coroutine)?;
 
         Ok(addressbooks
@@ -80,8 +81,8 @@ impl<'a, 'local> Client<'a, 'local> {
         credentials: &Credentials,
     ) -> Result<Vec<Card>, BridgeError> {
         let auth = auth(credentials);
-        let coroutine = ListCards::new(url, &auth, USER_AGENT, url.path());
-        let cards: BTreeSet<CardEntry> = self.run(url, coroutine)?;
+        let coroutine = CarddavCardList::new(url, &auth, USER_AGENT, url.path());
+        let cards: BTreeSet<CarddavCardEntry> = self.run(url, coroutine)?;
 
         Ok(cards.into_iter().map(into_card).collect())
     }
@@ -96,7 +97,7 @@ impl<'a, 'local> Client<'a, 'local> {
         vcard: &str,
     ) -> Result<Option<String>, BridgeError> {
         let auth = auth(credentials);
-        let coroutine = CreateCard::new(
+        let coroutine = CarddavCardCreate::new(
             url,
             &auth,
             USER_AGENT,
@@ -118,7 +119,7 @@ impl<'a, 'local> Client<'a, 'local> {
         uri: &str,
     ) -> Result<Card, BridgeError> {
         let auth = auth(credentials);
-        let coroutine = ReadCard::new(url, &auth, USER_AGENT, url.path(), uri);
+        let coroutine = CarddavCardRead::new(url, &auth, USER_AGENT, url.path(), uri);
         let body = self.run(url, coroutine)?;
 
         Ok(Card {
@@ -143,7 +144,7 @@ impl<'a, 'local> Client<'a, 'local> {
         if_match: Option<&str>,
     ) -> Result<Option<String>, BridgeError> {
         let auth = auth(credentials);
-        let coroutine = UpdateCard::new(
+        let coroutine = CarddavCardUpdate::new(
             url,
             &auth,
             USER_AGENT,
@@ -167,7 +168,7 @@ impl<'a, 'local> Client<'a, 'local> {
         if_match: Option<&str>,
     ) -> Result<(), BridgeError> {
         let auth = auth(credentials);
-        let coroutine = DeleteCard::new(url, &auth, USER_AGENT, url.path(), uri, if_match);
+        let coroutine = CarddavCardDelete::new(url, &auth, USER_AGENT, url.path(), uri, if_match);
         self.run(url, coroutine)?;
 
         Ok(())
@@ -179,10 +180,10 @@ impl<'a, 'local> Client<'a, 'local> {
         &mut self,
         url: &Url,
         credentials: &Credentials,
-    ) -> Result<Vec<CardRef>, BridgeError> {
+    ) -> Result<Vec<CarddavCardRef>, BridgeError> {
         let auth = auth(credentials);
-        let coroutine = EnumCards::new(url, &auth, USER_AGENT, url.path());
-        let refs: BTreeSet<CardRef> = self.run(url, coroutine)?;
+        let coroutine = CarddavCardEnum::new(url, &auth, USER_AGENT, url.path());
+        let refs: BTreeSet<CarddavCardRef> = self.run(url, coroutine)?;
 
         Ok(refs.into_iter().collect())
     }
@@ -196,13 +197,13 @@ impl<'a, 'local> Client<'a, 'local> {
         url: &Url,
         credentials: &Credentials,
         sync_token: Option<&str>,
-    ) -> Result<Option<SyncDelta>, BridgeError> {
+    ) -> Result<Option<WebdavSyncDelta>, BridgeError> {
         let auth = auth(credentials);
         let mut token = sync_token.map(str::to_string);
-        let mut delta = SyncDelta::default();
+        let mut delta = WebdavSyncDelta::default();
 
         loop {
-            let coroutine = SyncCollection::new(
+            let coroutine = WebdavSyncCollection::new(
                 url,
                 &auth,
                 USER_AGENT,
@@ -236,8 +237,8 @@ impl<'a, 'local> Client<'a, 'local> {
         uris: &[&str],
     ) -> Result<Vec<Card>, BridgeError> {
         let auth = auth(credentials);
-        let coroutine = MultigetCards::new(url, &auth, USER_AGENT, url.path(), uris);
-        let cards: Vec<CardEntry> = self.run(url, coroutine)?;
+        let coroutine = CarddavCardMultiget::new(url, &auth, USER_AGENT, url.path(), uris);
+        let cards: Vec<CarddavCardEntry> = self.run(url, coroutine)?;
 
         Ok(cards.into_iter().map(into_card).collect())
     }
@@ -248,14 +249,16 @@ impl<'a, 'local> Client<'a, 'local> {
     fn run_sync_collection(
         &mut self,
         target: &Url,
-        mut coroutine: SyncCollection,
-    ) -> Result<Option<SyncDelta>, BridgeError> {
+        mut coroutine: WebdavSyncCollection,
+    ) -> Result<Option<WebdavSyncDelta>, BridgeError> {
         let mut arg: Option<Vec<u8>> = None;
 
         loop {
             match coroutine.resume(arg.as_deref()) {
                 WebdavCoroutineState::Complete(Ok(delta)) => return Ok(Some(delta)),
-                WebdavCoroutineState::Complete(Err(SyncCollectionError::InvalidSyncToken)) => {
+                WebdavCoroutineState::Complete(Err(
+                    WebdavSyncCollectionError::InvalidSyncToken,
+                )) => {
                     return Ok(None);
                 }
                 WebdavCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
@@ -323,11 +326,11 @@ fn into_addressbook(home_set: &Url, book: DavAddressbook) -> Addressbook {
 
 /// io-webdav card entry to the JNI-facing shape; vCards are text, so
 /// the raw bytes are decoded lossily.
-fn into_card(entry: CardEntry) -> Card {
+fn into_card(entry: CarddavCardEntry) -> Card {
     Card {
         vcard: String::from_utf8_lossy(&entry.data).into_owned(),
-        id: entry.id,
-        uri: entry.uri,
+        id: entry.id.clone(),
+        uri: entry.id,
         etag: entry.etag,
         books: Vec::new(),
     }

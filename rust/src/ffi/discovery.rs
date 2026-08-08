@@ -104,6 +104,48 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchCarddav<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
+/// `Native.searchCaldav`: resolves the email domain's CalDAV context
+/// root (RFC 6764). Returns a JSON array of service configs.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_searchCaldav<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    email: JString<'local>,
+    resolver: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let json =
+            search_mechanism_json(env, &transport, &email, &resolver, SearchMechanism::Caldav);
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.searchAutoconfig`: fetches the email domain's Mozilla
+/// autoconfig document, which is where a mail domain's IMAP and SMTP
+/// endpoints come from. Returns a JSON array of service configs.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_searchAutoconfig<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    email: JString<'local>,
+    resolver: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let json = search_mechanism_json(
+            env,
+            &transport,
+            &email,
+            &resolver,
+            SearchMechanism::Autoconfig,
+        );
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
 /// `Native.searchJmap`: resolves the email domain's JMAP session URL
 /// (RFC 8620). Returns a JSON array of service configs.
 #[unsafe(no_mangle)]
@@ -124,7 +166,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchJmap<'local>(
 /// `Native.searchMerge`: pure reduction of per-mechanism config lists
 /// (a JSON array of arrays, in mechanism-priority order) into one
 /// deduplicated list, restricted to the services the app drives
-/// (CardDAV, JMAP). Returns a JSON array of service configs.
+/// (IMAP, CalDAV, CardDAV, JMAP). Returns a JSON array of service
+/// configs.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_searchMerge<'local>(
     mut env: EnvUnowned<'local>,
@@ -173,6 +216,8 @@ enum SearchMechanism {
     Provider,
     Pacc,
     Carddav,
+    Caldav,
+    Autoconfig,
     Jmap,
 }
 
@@ -193,6 +238,8 @@ fn search_mechanism_json<'local>(
         SearchMechanism::Provider => client.search_provider(&email, resolver),
         SearchMechanism::Pacc => client.search_pacc(&email, resolver),
         SearchMechanism::Carddav => client.search_carddav(&email, resolver),
+        SearchMechanism::Caldav => client.search_caldav(&email, resolver),
+        SearchMechanism::Autoconfig => client.search_autoconfig(&email, resolver),
         SearchMechanism::Jmap => client.search_jmap(&email, resolver),
     };
 
@@ -209,7 +256,18 @@ fn search_merge(lists: &str) -> Result<String, String> {
     let lists: Vec<Vec<DiscoveryServiceConfig>> =
         from_str(lists).map_err(|err| format!("Invalid config lists: {err}"))?;
 
-    let services = BTreeSet::from([DiscoveryService::Carddav, DiscoveryService::Jmap]);
+    // NOTE: every service the app can actually drive. This list is the last
+    // gate before the connection screen, so a service missing from it is
+    // discovered, merged away and never seen: CalDAV and IMAP were, which is
+    // why a Fastmail address offered JMAP alone for calendars and mail while
+    // contacts, whose CardDAV was listed, offered both. SMTP stays out because
+    // nothing here sends.
+    let services = BTreeSet::from([
+        DiscoveryService::Imap,
+        DiscoveryService::Caldav,
+        DiscoveryService::Carddav,
+        DiscoveryService::Jmap,
+    ]);
     let mut collector = DiscoveryConfigCollector::new(services);
 
     for configs in lists {

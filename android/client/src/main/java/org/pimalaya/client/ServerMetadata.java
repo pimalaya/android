@@ -51,8 +51,17 @@ public final class ServerMetadata {
      * contacts scope plus {@code offline_access}, each kept only when
      * advertised).
      */
-    public String contactsScope() {
+    /**
+     * The scope to request for the domains one grant covers, negotiated
+     * against what this server advertises.
+     *
+     * <p>Space-separated domain ids ({@code mail}, {@code contacts},
+     * {@code calendars}): a grant shared by several asks for all of theirs, and
+     * asking for the wrong one does not fail loudly, it just puts the wrong
+     * thing on the consent screen.
+     */
+    public String domainScope(String domains) {
         return PimalayaClient.string(
-                PimalayaClient.object(Native.oauthContactsScope(scopesSupported)), "scope");
+                PimalayaClient.object(Native.oauthDomainScope(scopesSupported, domains)), "scope");
     }
 }

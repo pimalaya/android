@@ -8,7 +8,9 @@ import android.util.Base64;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -19,11 +21,11 @@ import org.json.JSONObject;
 import org.pimalaya.client.Account;
 
 /**
- * Caches the connected CardDAV accounts locally, encrypted with an
- * AES-GCM key held in the Android Keystore. Passwords and OAuth tokens
- * never touch disk in clear, and no Jetpack Security / Tink dependency
- * is pulled in (smallest APK). The whole account list is one encrypted
- * blob, keyed by the account email.
+ * Caches the connected accounts locally, encrypted with an AES-GCM key held in
+ * the Android Keystore. Passwords and OAuth tokens never touch disk in clear,
+ * and no Jetpack Security / Tink dependency is pulled in (smallest APK). The
+ * whole account list is one encrypted blob, keyed by the address; what each
+ * account is connected for lives inside it, one block per domain.
  */
 public class SecureStore {
     /**
@@ -72,7 +74,7 @@ public class SecureStore {
         }
     }
 
-    /** Adds an account (replacing any with the same email), then persists. */
+    /** Adds or replaces an account, keyed by its address, then persists. */
     public void add(AccountEntry entry) {
         synchronized (LOCK) {
             List<AccountEntry> entries = loadAll();
@@ -82,7 +84,36 @@ public class SecureStore {
         }
     }
 
-    /** Removes the account with the given email, then persists. */
+    /**
+     * Connects one domain of an address, keeping every domain it already
+     * covers, then persists.
+     *
+     * <p>This is what makes "set up calendar for this account" a step rather
+     * than a second account: the entry is merged into the one that is already
+     * there, and only appears as a new account when the address is new.
+     */
+    public AccountEntry connect(String email, PimDomain domain, AccountConnection connection) {
+        synchronized (LOCK) {
+            List<AccountEntry> entries = loadAll();
+            AccountEntry existing = null;
+            for (AccountEntry entry : entries) {
+                if (entry.email.equals(email)) {
+                    existing = entry;
+                }
+            }
+
+            AccountEntry merged =
+                    existing == null
+                            ? AccountEntry.of(email, domain, connection)
+                            : existing.with(domain, connection);
+            entries.removeIf(entry -> entry.email.equals(email));
+            entries.add(merged);
+            save(entries);
+            return merged;
+        }
+    }
+
+    /** Removes an address and every domain it covered, then persists. */
     public void remove(String email) {
         synchronized (LOCK) {
             List<AccountEntry> entries = loadAll();
@@ -133,26 +164,36 @@ public class SecureStore {
         try {
             JSONArray array = new JSONArray();
             for (AccountEntry entry : entries) {
-                JSONObject object =
-                        new JSONObject()
-                                .put("baseUrl", entry.account.baseUrl)
-                                .put("login", entry.account.login)
-                                .put("password", entry.account.password)
-                                .put("email", entry.email);
-                if (entry.refreshToken != null) {
-                    object.put("refreshToken", entry.refreshToken)
-                            .put("tokenEndpoint", entry.tokenEndpoint)
-                            .put("clientId", entry.clientId);
-                    if (entry.clientSecret != null) {
-                        object.put("clientSecret", entry.clientSecret);
-                    }
+                JSONObject connections = new JSONObject();
+                for (PimDomain domain : entry.domains()) {
+                    connections.put(domain.id, encode(entry.connection(domain)));
                 }
-                array.put(object);
+                array.put(
+                        new JSONObject()
+                                .put("email", entry.email)
+                                .put("connections", connections));
             }
             return array.toString();
         } catch (JSONException error) {
             throw new IllegalStateException("Could not encode the accounts", error);
         }
+    }
+
+    private static JSONObject encode(AccountConnection connection) throws JSONException {
+        JSONObject object =
+                new JSONObject()
+                        .put("baseUrl", connection.account.baseUrl)
+                        .put("login", connection.account.login)
+                        .put("password", connection.account.password);
+        if (connection.refreshToken != null) {
+            object.put("refreshToken", connection.refreshToken)
+                    .put("tokenEndpoint", connection.tokenEndpoint)
+                    .put("clientId", connection.clientId);
+            if (connection.clientSecret != null) {
+                object.put("clientSecret", connection.clientSecret);
+            }
+        }
+        return object;
     }
 
     private static List<AccountEntry> decode(String json) {
@@ -161,29 +202,43 @@ public class SecureStore {
             List<AccountEntry> entries = new ArrayList<>(array.length());
             for (int index = 0; index < array.length(); index++) {
                 JSONObject object = array.getJSONObject(index);
-                Account account =
-                        new Account(
-                                object.getString("baseUrl"),
-                                object.getString("login"),
-                                object.getString("password"));
-                entries.add(
-                        new AccountEntry(
-                                account,
-                                object.getString("email"),
-                                object.isNull("refreshToken")
-                                        ? null
-                                        : object.optString("refreshToken"),
-                                object.isNull("tokenEndpoint")
-                                        ? null
-                                        : object.optString("tokenEndpoint"),
-                                object.isNull("clientId") ? null : object.optString("clientId"),
-                                object.isNull("clientSecret")
-                                        ? null
-                                        : object.optString("clientSecret")));
+                String email = object.getString("email");
+
+                JSONObject connections = object.optJSONObject("connections");
+                if (connections == null) {
+                    // NOTE: an account stored before an account could cover
+                    // several domains. Its one connection is a contacts one,
+                    // because contacts is all the app could connect then.
+                    entries.add(
+                            AccountEntry.of(email, PimDomain.CONTACTS, decodeConnection(object)));
+                    continue;
+                }
+
+                Map<PimDomain, AccountConnection> decoded = new EnumMap<>(PimDomain.class);
+                for (java.util.Iterator<String> ids = connections.keys(); ids.hasNext(); ) {
+                    String id = ids.next();
+                    decoded.put(
+                            PimDomain.byId(id), decodeConnection(connections.getJSONObject(id)));
+                }
+                entries.add(new AccountEntry(email, decoded));
             }
             return entries;
         } catch (JSONException error) {
             throw new IllegalStateException("Could not decode the accounts", error);
         }
+    }
+
+    private static AccountConnection decodeConnection(JSONObject object) throws JSONException {
+        Account account =
+                new Account(
+                        object.getString("baseUrl"),
+                        object.getString("login"),
+                        object.getString("password"));
+        return new AccountConnection(
+                account,
+                object.isNull("refreshToken") ? null : object.optString("refreshToken"),
+                object.isNull("tokenEndpoint") ? null : object.optString("tokenEndpoint"),
+                object.isNull("clientId") ? null : object.optString("clientId"),
+                object.isNull("clientSecret") ? null : object.optString("clientSecret"));
     }
 }

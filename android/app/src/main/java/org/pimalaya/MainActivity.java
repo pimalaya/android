@@ -72,8 +72,11 @@ public class MainActivity extends Activity {
     /** The auth flow's steps, inside its own flipper under one bar. */
     static final int STEP_EMAIL = 0;
 
-    static final int STEP_CONFIG = 1;
-    static final int STEP_BOOKS = 2;
+    /** What to connect this address for, once discovery has said what it can. */
+    static final int STEP_DOMAIN = 1;
+
+    static final int STEP_CONFIG = 2;
+    static final int STEP_BOOKS = 3;
 
     static final int REQUEST_CONTACTS = 1;
     private static final int REQUEST_IMPORT = 2;
@@ -89,6 +92,12 @@ public class MainActivity extends Activity {
 
     SecureStore store;
     CardStore base;
+
+    /** The pimdir store every domain and every account shares. */
+    PimdirDb pimdir;
+
+    /** The contacts inside it. */
+    PimdirContacts contacts;
     private SyncRunner runner;
     private ViewFlipper flipper;
     private ViewFlipper authFlipper;
@@ -166,20 +175,22 @@ public class MainActivity extends Activity {
         applyEdgeToEdge();
 
         store = new SecureStore(this);
-        base = new CardStore(this);
-        pool = new ContactPool(base, accounts);
+        pimdir = new PimdirDb(this);
+        base = new CardStore(this, pimdir);
+        contacts = new PimdirContacts(pimdir);
+        pool = new ContactPool(base, contacts, accounts);
         contactsList = new ContactsList(this);
-        events = new EventStore(this);
+        events = new EventStore(this, pimdir);
         calendarList = new CalendarList(this, events);
-        mail = new MailStore(this);
+        mail = new MailStore(this, pimdir);
         mailList = new MailList(this, mail);
-        runner = new SyncRunner(this, base, store, client, syncObserver());
+        runner = new SyncRunner(this, base, pimdir, store, client, syncObserver());
         // NOTE: the two flows reference each other (grants land back in
         // the wizard), so one side binds late.
         oauth = new OauthFlow(this);
         onboarding = new OnboardingFlow(this, oauth);
         oauth.onConnected = onboarding::connect;
-        oauth.onAborted = onboarding::resetConfigContinue;
+        oauth.onAborted = onboarding::abortAuthSteps;
         flipper = findViewById(R.id.flipper);
         authFlipper = findViewById(R.id.auth_flipper);
         form = new ContactForm(this);
@@ -206,8 +217,13 @@ public class MainActivity extends Activity {
         // NOTE: the built-in local book is always present and
         // subscribed, so the app opens usable with no account:
         // onboarding is never forced.
-        base.ensureLocalAddressbook(
-                LocalBook.URL, LocalBook.ACCOUNT, LocalBook.ID, getString(R.string.local_book));
+        base.ensureLocalAddressbook(LocalBook.URL, LocalBook.ACCOUNT, LocalBook.ID);
+        new PimdirCollections(pimdir, this)
+                .ensure(
+                        LocalBook.URL,
+                        LocalBook.ACCOUNT,
+                        PimdirMeta.CONTACT,
+                        getString(R.string.local_book));
         accounts.add(LocalBook.account());
         accounts.addAll(store.loadAll());
 
@@ -217,6 +233,18 @@ public class MainActivity extends Activity {
         BackgroundSync.reconcile(this, base.loadAllAddressbooks());
 
         goHome();
+
+        // NOTE: a summary is written, never derived, so a store filled by a
+        // writer that spelled it differently keeps that spelling until
+        // something rewrites it, and no sync will: the bodies have not
+        // changed. Costs one query over the summaries when there is nothing
+        // to do.
+        io.execute(
+                () -> {
+                    if (contacts.repairSummaries() > 0) {
+                        postAlive(this::reloadContacts);
+                    }
+                });
 
         // NOTE: adb-only hooks, so syncs can be driven headlessly:
         // am start ... --ez syncRemote true / --ez syncLocal true
@@ -300,12 +328,16 @@ public class MainActivity extends Activity {
      */
     private void applyAuthChrome() {
         int step = authFlipper.getDisplayedChild();
-        int title =
-                step == STEP_EMAIL
-                        ? (hasRealAccount() ? R.string.add_account : R.string.auth_step_email)
-                        : step == STEP_CONFIG
-                                ? R.string.auth_step_config
-                                : R.string.auth_step_books;
+        int title;
+        if (step == STEP_EMAIL) {
+            title = hasRealAccount() ? R.string.add_account : R.string.auth_step_email;
+        } else if (step == STEP_DOMAIN) {
+            title = R.string.auth_step_domain;
+        } else if (step == STEP_CONFIG) {
+            title = R.string.auth_step_config;
+        } else {
+            title = R.string.auth_step_books;
+        }
         ((TextView) findViewById(R.id.auth_title)).setText(title);
     }
 
@@ -317,6 +349,8 @@ public class MainActivity extends Activity {
             // the books step steps back like any other.
             showAuthBack(STEP_CONFIG);
         } else if (step == STEP_CONFIG) {
+            showAuthBack(STEP_DOMAIN);
+        } else if (step == STEP_DOMAIN) {
             showAuthBack(STEP_EMAIL);
         } else {
             cancelAuth();
@@ -331,6 +365,20 @@ public class MainActivity extends Activity {
         closeOverlay(PANEL_AUTH);
         screen = PANEL_CONTACTS;
         applyChrome(PANEL_CONTACTS);
+    }
+
+    /**
+     * Closes the auth sheet onto one of the domain screens, for a connection
+     * that finishes somewhere other than the contacts list.
+     */
+    void leaveOnboarding(int panel) {
+        closeOverlay(PANEL_AUTH);
+        screen = panel;
+        applyChrome(panel);
+        if (drawer.isDrawerOpen(android.view.Gravity.START)) {
+            drawer.closeDrawer(android.view.Gravity.START);
+        }
+        reloadHome();
     }
 
     /** The account entry matching an email, or null. */
@@ -914,33 +962,30 @@ public class MainActivity extends Activity {
      * only when something actually projects to the phone.
      */
     /**
-     * Refetches every account's mail: the newest messages of every
+     * Refetches every mail account's mail: the newest messages of every
      * mailbox, into the merged list.
      *
-     * <p>The IMAP endpoint is discovered rather than configured. These
-     * accounts were onboarded for CardDAV and carry no mail server, so
-     * the same io-pim-discovery search the wizard uses is run for the
-     * `imap` service and its endpoint is used. Implicit TLS only: this
-     * client has no STARTTLS step, so a `starttls` config is skipped
-     * with a log rather than attempted in the clear.
+     * <p>The endpoint is the one the account was connected with, which is what
+     * the mail domain of the connection flow exists to establish. It used to be
+     * re-discovered on every refresh from a contacts account's address, because
+     * there was no way to connect a mail account at all; that guessed at both
+     * the server and the credentials, and worked only where the two domains
+     * happened to share them.
      */
     void syncMail() {
         setSyncing(true);
         io.execute(
                 () -> {
                     Exception failure = null;
-                    for (AccountEntry account : store.loadAll()) {
+                    for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
+                        AccountConnection mailbox = account.connection(PimDomain.MAIL);
                         try {
-                            String url = imapUrl(account);
-                            if (url == null) {
-                                continue;
-                            }
                             mail.replaceMessages(
                                     account.email,
                                     client.syncMail(
-                                            url,
-                                            account.account.login,
-                                            account.account.password,
+                                            mailbox.account.baseUrl,
+                                            mailbox.account.login,
+                                            mailbox.account.password,
                                             MAIL_PER_MAILBOX));
                         } catch (Exception error) {
                             Log.w("pimalaya", "mail sync failed: " + account.email, error);
@@ -963,27 +1008,15 @@ public class MainActivity extends Activity {
     /** How many messages are taken from the end of each mailbox. */
     private static final int MAIL_PER_MAILBOX = 50;
 
-    /**
-     * The account's IMAP URL, discovered from its email address; null
-     * when no usable endpoint is found.
-     */
-    private String imapUrl(AccountEntry account) {
-        for (org.pimalaya.client.ServiceConfig config :
-                client.searchProvider(account.email, null)) {
-            if (!"imap".equalsIgnoreCase(config.service) || config.host == null) {
-                continue;
+    /** The stored accounts connected for one domain. */
+    List<AccountEntry> accountsFor(PimDomain domain) {
+        List<AccountEntry> matching = new ArrayList<>();
+        for (AccountEntry entry : store.loadAll()) {
+            if (entry.covers(domain)) {
+                matching.add(entry);
             }
-            if ("tls".equalsIgnoreCase(config.security)) {
-                return "imaps://" + config.host + ":" + config.port;
-            }
-            Log.w(
-                    "pimalaya",
-                    "skip imap endpoint for "
-                            + account.email
-                            + ": unsupported security "
-                            + config.security);
         }
-        return null;
+        return matching;
     }
 
     /**
@@ -999,17 +1032,17 @@ public class MainActivity extends Activity {
         io.execute(
                 () -> {
                     Exception failure = null;
-                    for (AccountEntry account : store.loadAll()) {
-                        // NOTE: CalDAV only. Graph, JMAP and Google are
-                        // contact backends here, and walking them for
-                        // calendars would fail once per refresh.
-                        if (!org.pimalaya.client.PimalayaClient.isCarddav(
-                                account.account.baseUrl)) {
-                            continue;
-                        }
+                    // NOTE: the calendar accounts, rather than the contacts
+                    // accounts that happened to be CalDAV-shaped. That filter
+                    // was the closest thing to a calendar account the app had
+                    // before the connection flow could make one, and it walked
+                    // a CardDAV home looking for calendars.
+                    for (AccountEntry account : accountsFor(PimDomain.CALENDAR)) {
                         try {
                             events.replaceCalendars(
-                                    account.email, client.listCalendars(account.account));
+                                    account.email,
+                                    client.listCalendars(
+                                            account.connection(PimDomain.CALENDAR).account));
                         } catch (Exception error) {
                             Log.w("pimalaya", "calendar list failed: " + account.email, error);
                             failure = error;
@@ -1017,14 +1050,15 @@ public class MainActivity extends Activity {
                         }
 
                         for (EventStore.StoredCalendar calendar : events.loadCalendars()) {
-                            if (!calendar.accountEmail.equals(account.email)
-                                    || !calendar.subscribed) {
+                            if (!calendar.accountEmail.equals(account.email)) {
                                 continue;
                             }
                             try {
                                 events.replaceEvents(
-                                        calendar.url,
-                                        client.listEvents(account.account, calendar.url));
+                                        calendar.id,
+                                        client.listEvents(
+                                                account.connection(PimDomain.CALENDAR).account,
+                                                calendar.url));
                             } catch (Exception error) {
                                 Log.w("pimalaya", "event list failed: " + calendar.url, error);
                                 failure = error;
@@ -1196,7 +1230,7 @@ public class MainActivity extends Activity {
         JSONObject bodies;
         JSONObject resolution;
         try {
-            bodies = new OfflineStore(base).loadConflict(replica.book.url, handle);
+            bodies = new PimdirStorage(pimdir).loadConflict(replica.book.url, handle);
             if (bodies == null) {
                 // NOTE: flagged but its remote is not captured yet (the
                 // capturing sync has not run); edit it plainly.
@@ -1218,7 +1252,7 @@ public class MainActivity extends Activity {
             // conflict. The toast is the tap's only visible outcome, so
             // without it the vanishing flag reads as a bug.
             try {
-                new OfflineEngine(base, client, null, null)
+                new OfflineEngine(base, pimdir, client, null, null)
                         .mutateEdit(replica.book.url, handle, resolution.optString("vcard"));
             } catch (Exception error) {
                 showError(error, R.string.save_failed);
@@ -1385,15 +1419,7 @@ public class MainActivity extends Activity {
 
     /** Stages a copied card into the target addressbook. */
     void createCopy(BookEntry target, AccountEntry account, String id, String vcard) {
-        String key = ContactPool.cardKey(account.account, target.book.url, id);
-
-        // NOTE: Google creates land in myContacts; the group membership
-        // pushes right after the create (confirmPush's key rename carries
-        // it over).
-        if (PimalayaClient.isGoogle(account.account) && !"myContacts".equals(target.book.id)) {
-            base.stageMembership(target.accountEmail, key, target.book.url, true);
-        }
-        base.saveLocal(target.accountEmail, key, target.book.url, new Card(id, null, null, vcard));
+        contacts.save(target.book.url, new Card(id, null, null, vcard));
     }
 
     /** The survivor chooser over any replica list, then the merge. */
@@ -1458,14 +1484,7 @@ public class MainActivity extends Activity {
             if (ref.equals(survivorRef) || !removed.add(ref)) {
                 continue;
             }
-            AccountEntry owner = accountFor(entry.accountEmail);
-            if (owner == null) {
-                continue;
-            }
-            base.markDeleted(
-                    entry.accountEmail,
-                    ContactPool.cardKey(owner.account, entry.book.url, entry.card.id),
-                    entry.card);
+            contacts.stageDelete(entry.book.url, entry.card.id);
         }
 
         toast(getString(R.string.merge_done));
@@ -1711,9 +1730,7 @@ public class MainActivity extends Activity {
                 filter.collectionAxis(getString(R.string.filter_collections));
         if (screen == PANEL_CALENDAR) {
             for (EventStore.StoredCalendar calendar : events.loadCalendars()) {
-                if (calendar.subscribed) {
-                    byCollection.add(calendar.id, calendar.name);
-                }
+                byCollection.add(calendar.id, calendar.name);
             }
         } else if (screen == PANEL_MAIL) {
             for (String mailbox : mail.loadMailboxes()) {

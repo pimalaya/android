@@ -53,7 +53,8 @@ public class SyncWorker extends Worker {
             return Result.failure();
         }
 
-        CardStore base = new CardStore(context);
+        PimdirDb pimdir = new PimdirDb(context);
+        CardStore base = new CardStore(context, pimdir);
 
         // NOTE: when the store no longer wants this book synced, the
         // orphaned periodic work cancels itself.
@@ -71,7 +72,13 @@ public class SyncWorker extends Worker {
 
         try {
             OfflineEngine.Report report =
-                    new SyncRunner(context, base, new SecureStore(context), new PimalayaClient(), null)
+                    new SyncRunner(
+                                    context,
+                                    base,
+                                    pimdir,
+                                    new SecureStore(context),
+                                    new PimalayaClient(),
+                                    null)
                             .syncBook(book);
             Log.d(
                     "pimalaya",

@@ -2,7 +2,7 @@
 //! bridge exposes, each method routing to the CardDAV, Graph, JMAP or
 //! Google implementation behind the account's base URL.
 
-use io_webdav::rfc6578::sync_collection::SyncDelta;
+use io_webdav::rfc6578::sync_collection::WebdavSyncDelta;
 use url::Url;
 
 use crate::{
@@ -133,8 +133,8 @@ impl<'a, 'local> Client<'a, 'local> {
                 let changed = refs
                     .into_iter()
                     .map(|entry| Card {
-                        id: entry.id,
-                        uri: entry.uri,
+                        id: entry.id.clone(),
+                        uri: entry.id,
                         etag: entry.etag,
                         vcard: String::new(),
                         books: Vec::new(),
@@ -420,7 +420,7 @@ fn parse_url(raw: &str) -> Result<Url, BridgeError> {
 /// A sync-collection delta as the unified card delta shape, each
 /// member href mapped to its resource name (the collection's own href,
 /// when a server lists it, yields an empty name and is skipped).
-fn into_card_delta(delta: SyncDelta) -> CardDelta {
+fn into_card_delta(delta: WebdavSyncDelta) -> CardDelta {
     let changed = delta
         .changed
         .into_iter()

@@ -63,11 +63,12 @@ public class PimalayaClient {
     }
 
     /**
-     * Searches every discovery mechanism for CardDAV and JMAP service
-     * configs (PACC, RFC 6764 CardDAV resolve, RFC 8620 JMAP
-     * resolve), each carrying its endpoint and authentication
-     * methods, so the connection screen can list them for the user to
-     * choose. The input is an email address or a bare domain (every
+     * Searches every discovery mechanism for service configs of every
+     * domain the app covers: PACC, RFC 6764 CardDAV and CalDAV
+     * resolve, Mozilla autoconfig (IMAP and SMTP) and RFC 8620 JMAP
+     * resolve, each carrying its endpoint and authentication methods,
+     * so the connection screen can list what the address actually
+     * offers. The input is an email address or a bare domain (every
      * mechanism is domain-driven; a domain just skips the username
      * hints), normally pre-gated by {@link #searchProvider}. The
      * mechanisms run in parallel, each on its own transport; a
@@ -77,7 +78,7 @@ public class PimalayaClient {
      * advertise. Resolver as in {@link #discover}.
      */
     public List<ServiceConfig> searchAll(String email, String resolver) {
-        String[] outputs = new String[3];
+        String[] outputs = new String[5];
         Thread[] mechanisms = new Thread[outputs.length];
         for (int index = 0; index < mechanisms.length; index++) {
             final int mechanism = index;
@@ -143,6 +144,10 @@ public class PimalayaClient {
                 return Native.searchPacc(transport, email, resolver);
             case 1:
                 return Native.searchCarddav(transport, email, resolver);
+            case 2:
+                return Native.searchCaldav(transport, email, resolver);
+            case 3:
+                return Native.searchAutoconfig(transport, email, resolver);
             default:
                 return Native.searchJmap(transport, email, resolver);
         }
@@ -364,7 +369,7 @@ public class PimalayaClient {
                 messages.add(
                         new Message(
                                 string(message, "mailbox"),
-                                message.optLong("uid"),
+                                string(message, "id"),
                                 string(message, "subject"),
                                 string(message, "from"),
                                 string(message, "date"),
@@ -403,9 +408,9 @@ public class PimalayaClient {
     }
 
     /**
-     * Lists a calendar collection's events. One CalDAV report carries
-     * every event's iCalendar body back, so a whole calendar costs a
-     * single round trip.
+     * Lists a calendar collection's events. One CalDAV report, or one
+     * JMAP request, carries every event's body back, so a whole
+     * calendar costs a single round trip either way.
      */
     public List<Event> listEvents(Account account, String calendarUrl) {
         Transport transport = new Transport();
@@ -413,7 +418,11 @@ public class PimalayaClient {
             JSONArray reply =
                     array(
                             Native.listEvents(
-                                    transport, calendarUrl, account.login, account.password));
+                                    transport,
+                                    account.baseUrl,
+                                    calendarUrl,
+                                    account.login,
+                                    account.password));
 
             List<Event> events = new ArrayList<>(reply.length());
             for (int index = 0; index < reply.length(); index++) {

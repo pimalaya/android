@@ -548,14 +548,7 @@ final class ContactsList {
         for (Group group : sortedContacts) {
             if (selectedKeys.contains(group.key)) {
                 for (Entry entry : group.replicas) {
-                    AccountEntry account = host.accountFor(entry.accountEmail);
-                    if (account == null) {
-                        continue;
-                    }
-                    host.base.markDeleted(
-                            entry.accountEmail,
-                            ContactPool.cardKey(account.account, entry.book.url, entry.card.id),
-                            entry.card);
+                    host.contacts.stageDelete(entry.book.url, entry.card.id);
                 }
             }
         }

@@ -100,12 +100,7 @@ final class VcfTransfer {
         for (String vcard : Vcf.split(text)) {
             String uid = host.cardIndex(vcard).optString("uid");
             String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
-            String key =
-                    account != null
-                            ? ContactPool.cardKey(account.account, target.book.url, id)
-                            : CardStore.key(target.book.url, id);
-            host.base.saveLocal(
-                    target.accountEmail, key, target.book.url, new Card(id, null, null, vcard));
+            host.contacts.save(target.book.url, new Card(id, null, null, vcard));
             count++;
         }
         return count;

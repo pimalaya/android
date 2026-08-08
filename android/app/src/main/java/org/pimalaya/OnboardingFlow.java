@@ -43,8 +43,42 @@ final class OnboardingFlow {
 
     private List<ServiceConfig> searchedConfigs = new ArrayList<>();
 
-    /** The action armed by the picked config option; null when none. */
-    private Runnable selectedConfig;
+    /** The domain whose flow is running now. */
+    private PimDomain pendingDomain = PimDomain.CONTACTS;
+
+    /** The setup screen's per-domain sections. */
+    private final java.util.Map<PimDomain, DomainSetup> setups =
+            new java.util.EnumMap<>(PimDomain.class);
+
+    /**
+     * The domains one in-flight browser grant is signing in for, with the
+     * endpoint each of them will use; empty outside a grant.
+     *
+     * <p>Several, because one authorization server covers every domain that
+     * chose it, and the tokens it returns belong to all of them.
+     */
+    private final java.util.Map<PimDomain, String> oauthGroup =
+            new java.util.EnumMap<>(PimDomain.class);
+
+    /** The account being built up, one domain's connection at a time. */
+    private AccountEntry connectedAccount;
+
+    /** The interactions Continue planned; null outside the sign-in sequence. */
+    private List<AuthStep> authSteps;
+
+    /** Which of them is running. */
+    private int authStepIndex;
+
+    /**
+     * The fixed provider rule the address matched ({@code provider:google},
+     * {@code provider:microsoft}), or null.
+     *
+     * <p>Kept beside the discovered configs rather than replacing them: a
+     * provider match tells us how to sign in for contacts, and says nothing
+     * about whether the same address also serves mail or calendars, which only
+     * the protocol sweep can answer.
+     */
+    private String matchedProvider;
 
     /** The setup-mode choice: standard (true), advanced (false), or
      *  still being asked (null). */
@@ -52,9 +86,6 @@ final class OnboardingFlow {
 
     /** A config step waiting on the setup-mode choice. */
     private Runnable pendingConfigStep;
-
-    /** The just-connected account, held until the books step commits. */
-    private AccountEntry pendingAccount;
 
     /** The just-connected account's addressbooks. */
     private List<Addressbook> pendingBooks;
@@ -77,6 +108,11 @@ final class OnboardingFlow {
     void open() {
         pendingEmail = null;
         searchedConfigs = new ArrayList<>();
+        pendingDomain = PimDomain.CONTACTS;
+        matchedProvider = null;
+        setups.clear();
+        oauthGroup.clear();
+        connectedAccount = null;
         ((EditText) host.findViewById(R.id.email_input)).setText("");
         host.showAuth(MainActivity.STEP_EMAIL);
     }
@@ -87,10 +123,8 @@ final class OnboardingFlow {
             case MainActivity.STEP_EMAIL:
                 submitEmail();
                 break;
-            case MainActivity.STEP_CONFIG:
-                if (selectedConfig != null) {
-                    selectedConfig.run();
-                }
+            case MainActivity.STEP_DOMAIN:
+                confirmSetup();
                 break;
             case MainActivity.STEP_BOOKS:
                 confirmBooks();
@@ -105,8 +139,8 @@ final class OnboardingFlow {
         switch (step) {
             case MainActivity.STEP_EMAIL:
                 return emailSubmittable();
-            case MainActivity.STEP_CONFIG:
-                return selectedConfig != null;
+            case MainActivity.STEP_DOMAIN:
+                return setupReady();
             case MainActivity.STEP_BOOKS:
                 return booksAnyChecked();
             default:
@@ -121,22 +155,22 @@ final class OnboardingFlow {
         return !address.isEmpty() && !address.contains(" ");
     }
 
-    /** The email step's continue: discovery for an address, manual for a URI. */
+    /**
+     * The email step's continue: discovery, always.
+     *
+     * <p>One field, one kind of answer. Asking for "an email, a server or a
+     * URI" made the user do the app's job, and the app can do it: discovery
+     * knows how to turn an address into servers, and when it turns up nothing
+     * the manual server entry is offered from the next step, where it reads as
+     * a fallback rather than as a thing to have known in advance.
+     */
     private void submitEmail() {
         host.hideKeyboard();
 
-        // NOTE: one field covers every case: an email or bare domain
-        // goes through discovery, a connection URI (://) is a server to
-        // configure by hand.
-        String address =
+        pendingEmail =
                 ((EditText) host.findViewById(R.id.email_input)).getText().toString().trim();
-        pendingEmail = address;
         askSetupMode();
-        if (address.contains("://")) {
-            deliverConfigs(() -> showManualConfigs(address));
-        } else {
-            search();
-        }
+        search();
     }
 
     /**
@@ -202,8 +236,8 @@ final class OnboardingFlow {
                     // NOTE: a null resolver falls back to the bridge's
                     // DNS-over-HTTPS default, which works on mobile
                     // networks that block outbound DNS over TCP.
+                    String provider = null;
                     if (!emailLogin().isEmpty()) {
-                        String provider = null;
                         try {
                             List<ServiceConfig> hits =
                                     host.client.searchProvider(pendingEmail, null);
@@ -211,18 +245,14 @@ final class OnboardingFlow {
                         } catch (Exception error) {
                             Log.w("pimalaya", "provider probe failed", error);
                         }
-
-                        if (provider != null) {
-                            String matched = provider;
-                            host.main.post(
-                                    () -> {
-                                        host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
-                                        deliverConfigs(() -> showProviderConfigs(matched));
-                                    });
-                            return;
-                        }
                     }
 
+                    // NOTE: the protocol sweep runs even when a provider rule
+                    // matched, which the contacts-only flow used to skip. A
+                    // rule says how to sign in for contacts at Google or
+                    // Microsoft; only the sweep can say whether the same
+                    // address also publishes mail or calendars, and that is
+                    // the whole question the next step asks.
                     List<ServiceConfig> configs = new ArrayList<>();
                     Exception failure = null;
                     try {
@@ -236,11 +266,12 @@ final class OnboardingFlow {
                     }
 
                     List<ServiceConfig> found = configs;
+                    String matched = provider;
                     Exception searchFailure = failure;
                     host.main.post(
                             () -> {
                                 host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
-                                if (searchFailure != null) {
+                                if (searchFailure != null && found.isEmpty() && matched == null) {
                                     deliverConfigs(
                                             () ->
                                                     host.showError(
@@ -248,234 +279,705 @@ final class OnboardingFlow {
                                                             R.string.discover_failed));
                                     return;
                                 }
-                                if (found.isEmpty() && !pendingEmail.contains("@")) {
-                                    deliverConfigs(() -> showManualConfigs(pendingEmail));
-                                    return;
-                                }
                                 searchedConfigs = found;
-                                deliverConfigs(this::showConfigs);
+                                matchedProvider = matched;
+                                deliverConfigs(this::showSetup);
                             });
                 });
     }
 
-    /** The config Continue back to idle: enabled once an option is picked. */
+    /** One offered way to connect one domain: a server and a way in. */
+    private static final class SetupOption {
+        final String label;
+        final String detail;
+
+        /** What the account stores as its server for this domain. */
+        final String baseUrl;
+
+        /**
+         * The RFC 8707 resource an OAuth grant is asked for, or null when the
+         * service has no URI form.
+         *
+         * <p>Deliberately not {@link #baseUrl}. A JMAP account's base is the
+         * internal {@code jmap://} marker the backend dispatches on, and an
+         * authorization server asked to issue a token for that URI has no idea
+         * what it names: Fastmail answers {@code invalid_target}. The resource
+         * is the HTTPS session URL the service was discovered at, which is what
+         * the server actually protects.
+         */
+        final String resource;
+
+        final AuthMethod method;
+        final String login;
+
+        SetupOption(
+                String label,
+                String detail,
+                String baseUrl,
+                String resource,
+                AuthMethod method,
+                String login) {
+            this.label = label;
+            this.detail = detail;
+            this.baseUrl = baseUrl;
+            this.resource = resource;
+            this.method = method;
+            this.login = login;
+        }
+
+        /** Whether this option signs in through a browser grant. */
+        boolean isOauth() {
+            return method != null
+                    && method.type != AuthMethod.Type.PASSWORD
+                    && method.type != AuthMethod.Type.BEARER;
+        }
+    }
+
+    /** One domain's section of the setup screen. */
+    private static final class DomainSetup {
+        final PimDomain domain;
+
+        DomainSetup(PimDomain domain) {
+            this.domain = domain;
+        }
+
+        final List<SetupOption> options = new ArrayList<>();
+        final List<android.widget.RadioButton> buttons = new ArrayList<>();
+
+        /**
+         * Whether this domain is being connected at all.
+         *
+         * <p>Off to begin with: an address that offers three domains is not a
+         * request for three, and starting them all on makes the screen a list
+         * of things to switch off rather than a choice to make.
+         */
+        boolean enabled;
+
+        SetupOption selected;
+
+        /** What signing in produced; null until the sign-in sequence runs. */
+        AccountConnection connected;
+
+        /** Whether this domain is switched on and has something to connect to. */
+        boolean ready() {
+            return enabled && selected != null;
+        }
+    }
+
+    /**
+     * One interaction the sign-in sequence owes the user: a dialog, or a
+     * browser hop.
+     *
+     * <p>Several domains when one browser grant covers them all, which is the
+     * whole reason the sequence is planned rather than run per domain: the
+     * plan is what knows that mail and calendars behind one authorization
+     * server are one step and not two.
+     */
+    private static final class AuthStep {
+        final List<PimDomain> domains = new ArrayList<>();
+        final SetupOption option;
+
+        AuthStep(SetupOption option) {
+            this.option = option;
+        }
+    }
+
+    /**
+     * Fills the setup screen: every domain this address offers, with its
+     * configurations under it and a button that signs in to the one picked.
+     *
+     * <p>One page rather than a domain step and then a configuration step. The
+     * stepper hid what was being configured, because a screen of protocols with
+     * no domain on it could have belonged to any of them; here the domain is
+     * the heading above its own options and there is nothing to remember
+     * between screens.
+     *
+     * <p>Each domain takes one option or none: the radio deselects, so an
+     * address that offers calendars is not obliged to connect them. Continue
+     * waits until everything picked has actually been signed in to, which is
+     * what the per-domain button is for.
+     */
+    private void showSetup() {
+        ((TextView) host.findViewById(R.id.domain_email)).setText(pendingEmail);
+
+        LinearLayout container = host.findViewById(R.id.domain_container);
+        container.removeAllViews();
+        setups.clear();
+
+        AccountEntry existing = host.accountFor(pendingEmail);
+        boolean anything = false;
+
+        for (PimDomain domain : PimDomain.values()) {
+            DomainSetup setup = new DomainSetup(domain);
+            setup.options.addAll(optionsFor(domain));
+            anything |= !setup.options.isEmpty();
+            setups.put(domain, setup);
+            container.addView(sectionOf(setup, existing != null && existing.covers(domain)));
+        }
+
+        TextView message = host.findViewById(R.id.domain_message);
+        message.setText(anything ? R.string.domain_message : R.string.domain_none);
+
+        resetSetupContinue();
+        host.showAuth(MainActivity.STEP_DOMAIN);
+    }
+
+    /**
+     * One domain's section: a switch naming it, and the configurations under
+     * it.
+     *
+     * <p>Switched on by default, because an address that offers a domain
+     * almost always wants it; switching off discards the domain outright,
+     * which is a clearer answer than an empty selection and leaves nothing to
+     * misread on the way out.
+     */
+    private View sectionOf(DomainSetup setup, boolean alreadyConnected) {
+        LinearLayout section = new LinearLayout(host);
+        section.setOrientation(LinearLayout.VERTICAL);
+        section.setPadding(0, host.ui.dp(8), 0, host.ui.dp(16));
+
+        android.widget.Switch toggle = new android.widget.Switch(host);
+        toggle.setText(host.getString(setup.domain.label));
+        toggle.setTextSize(16);
+        toggle.setTypeface(toggle.getTypeface(), android.graphics.Typeface.BOLD);
+        toggle.setChecked(setup.enabled);
+        toggle.setPadding(0, host.ui.dp(8), 0, host.ui.dp(4));
+        toggle.setOnCheckedChangeListener(
+                (view, checked) -> {
+                    setup.enabled = checked;
+                    renderSection(setup);
+                    resetSetupContinue();
+                });
+        section.addView(toggle);
+
+        if (alreadyConnected) {
+            TextView note = new TextView(host);
+            note.setText(R.string.domain_connected);
+            note.setTextSize(13);
+            note.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
+            section.addView(note);
+        }
+
+        for (SetupOption option : setup.options) {
+            android.widget.RadioButton button = new android.widget.RadioButton(host);
+            button.setText(optionLabel(option));
+            button.setTextSize(15);
+            button.setPadding(host.ui.dp(8), host.ui.dp(10), host.ui.dp(8), host.ui.dp(10));
+            // NOTE: not a RadioGroup, so the group can start with nothing
+            // picked; a RadioGroup has no empty state to open in.
+            button.setOnClickListener(
+                    view -> {
+                        setup.selected = option;
+                        renderSection(setup);
+                        resetSetupContinue();
+                    });
+            setup.buttons.add(button);
+            section.addView(button);
+        }
+
+        renderSection(setup);
+        return section;
+    }
+
+    /** Shows or dims one section's options, following its switch. */
+    private void renderSection(DomainSetup setup) {
+        for (int index = 0; index < setup.buttons.size(); index++) {
+            android.widget.RadioButton button = setup.buttons.get(index);
+            button.setChecked(setup.options.get(index) == setup.selected);
+            // NOTE: gone, not dimmed. A switched-off domain has nothing to say
+            // and a greyed list of protocols under it is noise the reader has
+            // to skip past on the way to the domains they do want.
+            button.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    /**
+     * Continue: available once at least one domain is on and every domain
+     * that is on knows what to connect to.
+     *
+     * <p>Nothing is signed in to yet. What the screen collects is the plan,
+     * and the interactions it needs are worked out from the whole plan at
+     * once, which is the only way to know that two domains behind one
+     * authorization server cost one browser hop rather than two.
+     */
+    private void resetSetupContinue() {
+        host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
+        host.setFabEnabled(R.id.fab, setupReady());
+    }
+
+    private boolean setupReady() {
+        boolean any = false;
+        for (DomainSetup setup : setups.values()) {
+            if (!setup.enabled) {
+                continue;
+            }
+            if (setup.selected == null) {
+                return false;
+            }
+            any = true;
+        }
+        return any;
+    }
+
+    /** The config Continue back to idle. */
     void resetConfigContinue() {
         host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
-        host.setFabEnabled(R.id.fab, selectedConfig != null);
+        host.setFabEnabled(R.id.fab, setupReady());
     }
 
     /**
-     * Fills the config screen with the proposals matching the provider,
-     * as a radio list: one option per protocol and authentication
-     * variant. Picking an option reveals the Continue button, which
-     * runs it: OAuth starts the browser grant, password pops the
-     * credentials dialog.
+     * Everything this domain can be connected with: one option per discovered
+     * configuration and authentication method, plus manual entry.
      */
-    private void showConfigs() {
-        TextView email = host.findViewById(R.id.config_email);
-        email.setText(pendingEmail);
+    private List<SetupOption> optionsFor(PimDomain domain) {
+        List<SetupOption> options = new ArrayList<>();
 
-        selectedConfig = null;
-        resetConfigContinue();
-
-        LinearLayout container = host.findViewById(R.id.config_container);
-        container.removeAllViews();
-
-        // NOTE: stable sort, so discovery order breaks preference ties.
+        List<ServiceConfig> configs = new ArrayList<>(PimDomain.configsFor(domain, searchedConfigs));
         java.util.Collections.sort(
-                searchedConfigs,
+                configs,
                 (left, right) ->
                         Integer.compare(serviceRank(left.service), serviceRank(right.service)));
-        for (ServiceConfig config : searchedConfigs) {
-            addConfigItems(container, config);
-        }
-        boolean discovered = container.getChildCount() > 0;
 
-        // NOTE: nothing discovered (or drivable): offer the big-provider
-        // sign-ins as a fallback chooser when an email was entered. No
-        // protocol signal reveals where contacts live (Google publishes
-        // no CardDAV SRV, no well-known), so the sign-in is the real test.
-        if (!discovered) {
-            container.addView(
-                    configItem(host.getString(R.string.discover_failed), null, null, null));
-            if (!emailLogin().isEmpty()) {
-                addGoogleItems(container);
-                addMicrosoftItems(container);
+        for (ServiceConfig config : configs) {
+            String baseUrl = endpointUrl(config);
+            if (baseUrl == null) {
+                continue;
+            }
+            String detail = config.url != null ? hostOf(config.url) : config.host;
+            String login = config.username != null ? config.username : emailLogin();
+
+            List<AuthMethod> methods = new ArrayList<>(config.auth);
+            java.util.Collections.sort(
+                    methods,
+                    (left, right) -> Integer.compare(authRank(left.type), authRank(right.type)));
+            for (AuthMethod method : methods) {
+                options.add(
+                        new SetupOption(
+                                protocolName(config.service),
+                                detail,
+                                baseUrl,
+                                resourceOf(config, method),
+                                method,
+                                login));
             }
         }
 
-        selectFirstConfig();
-        // NOTE: the standard setup runs the armed first proposal without
-        // showing the config screen, but only when discovery found
-        // something: auto-signing into a guessed provider would be wrong.
-        if (simpleSetup() && discovered && selectedConfig != null) {
-            selectedConfig.run();
-            return;
+        // NOTE: the provider sign-ins are contacts sign-ins (CardDAV, the
+        // People API, Graph). No protocol signal reveals where contacts live at
+        // Google or Microsoft, so the sign-in itself is the real test.
+        if (domain == PimDomain.CONTACTS && matchedProvider != null) {
+            addProviderOptions(options);
         }
-        host.showAuth(MainActivity.STEP_CONFIG);
+
+        options.add(
+                new SetupOption(
+                        host.getString(R.string.domain_manual), null, null, null, null, null));
+        return options;
     }
 
     /**
-     * The config options of a provider-probe hit: the dedicated
-     * variants of the matched provider, driven by the shipped OAuth
-     * clients.
+     * The matched provider's contacts sign-ins, as options.
+     *
+     * <p>They are hand-written rather than discovered because neither Google
+     * nor Microsoft publishes a CardDAV SRV record or well-known: the sign-in
+     * itself is the only way to find out, so the endpoints and scopes are the
+     * app's own knowledge of those two.
      */
-    private void showProviderConfigs(String provider) {
-        TextView email = host.findViewById(R.id.config_email);
-        email.setText(pendingEmail);
-
-        selectedConfig = null;
-        resetConfigContinue();
-
-        LinearLayout container = host.findViewById(R.id.config_container);
-        container.removeAllViews();
-
-        if (provider.equals("provider:google")) {
-            addGoogleItems(container);
-        } else {
-            addMicrosoftItems(container);
-        }
-
-        selectFirstConfig();
-        if (simpleSetup() && selectedConfig != null) {
-            selectedConfig.run();
+    private void addProviderOptions(List<SetupOption> options) {
+        if ("provider:google".equals(matchedProvider)) {
+            options.add(
+                    providerOption(
+                            R.string.config_carddav,
+                            PimalayaClient.googleCarddavBase(pendingEmail),
+                            Oauth.GOOGLE_AUTH_ENDPOINT,
+                            Oauth.GOOGLE_TOKEN_ENDPOINT,
+                            Oauth.GOOGLE_SCOPE));
+            options.add(
+                    providerOption(
+                            R.string.config_google_api,
+                            PimalayaClient.googlePeopleBase(pendingEmail),
+                            Oauth.GOOGLE_AUTH_ENDPOINT,
+                            Oauth.GOOGLE_TOKEN_ENDPOINT,
+                            Oauth.GOOGLE_PEOPLE_SCOPE));
             return;
         }
-        host.showAuth(MainActivity.STEP_CONFIG);
+        options.add(
+                providerOption(
+                        R.string.config_msgraph,
+                        PimalayaClient.msgraphBase(pendingEmail),
+                        Oauth.MICROSOFT_AUTH_ENDPOINT,
+                        Oauth.MICROSOFT_TOKEN_ENDPOINT,
+                        Oauth.MICROSOFT_SCOPE));
+    }
+
+    private SetupOption providerOption(
+            int label, String baseUrl, String authEndpoint, String tokenEndpoint, String scope) {
+        return new SetupOption(
+                host.getString(label),
+                hostOf(baseUrl),
+                baseUrl,
+                // NOTE: Google and Microsoft authorize by scope, not by RFC 8707
+                // resource, and sending one earns an invalid_target from them.
+                null,
+                AuthMethod.oauthCodeGrant(authEndpoint, tokenEndpoint, scope),
+                emailLogin());
     }
 
     /**
-     * A config option running an OAuth grant: the standard setup runs
-     * the shipped flow directly (the recommended path needs no
-     * confirm), everything else opens the client prompt.
+     * The RFC 8707 resource an OAuth grant asks for, or null when there is
+     * none to ask for.
+     *
+     * <p>An HTTP service names itself: the URL it was discovered at is the URI
+     * the server protects. A text one does not, and IMAP is the case that
+     * matters, because nothing in PACC, autoconfig or SRV carries a resource
+     * for it and a server that requires one (Fastmail answers
+     * {@code invalid_target} without) leaves no other way in.
+     *
+     * <p>So a text service falls back to the origin of its authorization
+     * endpoint, on the reasoning that a provider issuing tokens at
+     * {@code https://api.example.com/oauth/authorize} protects its resources
+     * under the same origin. That is a derivation, not a discovery: a provider
+     * that separates the two will need its resource from RFC 9728 protected
+     * resource metadata, which nothing fetches yet.
      */
-    private Runnable oauthOption(
-            String baseUrl,
-            String authEndpoint,
-            String tokenEndpoint,
-            String scope,
-            String defaultClientId,
-            String defaultRedirect,
-            Runnable defaultFlow) {
-        return () -> {
-            if (simpleSetup() && defaultFlow != null) {
-                defaultFlow.run();
-                return;
+    private static String resourceOf(ServiceConfig config, AuthMethod method) {
+        if (config.url != null) {
+            return config.url;
+        }
+        if (method == null || method.authorizationEndpoint == null) {
+            return null;
+        }
+        try {
+            java.net.URL endpoint = new java.net.URL(method.authorizationEndpoint);
+            String port = endpoint.getPort() == -1 ? "" : ":" + endpoint.getPort();
+            return endpoint.getProtocol() + "://" + endpoint.getHost() + port + "/";
+        } catch (Exception error) {
+            return null;
+        }
+    }
+
+    /** Protocol preference: JMAP, then the DAVs, then the rest. */
+    private static int serviceRank(String service) {
+        switch (service) {
+            case "jmap":
+                return 0;
+            case "carddav":
+            case "caldav":
+                return 1;
+            default:
+                return 2;
+        }
+    }
+
+    /** Auth precedence: OAuth 2.0 over API token over password. */
+    private static int authRank(AuthMethod.Type type) {
+        switch (type) {
+            case PASSWORD:
+                return 2;
+            case BEARER:
+                return 1;
+            default:
+                return 0;
+        }
+    }
+
+    /** The user-facing name of a searched service kind. */
+    private String protocolName(String service) {
+        switch (service) {
+            case "carddav":
+                return host.getString(R.string.config_carddav);
+            case "caldav":
+                return host.getString(R.string.config_caldav);
+            case "imap":
+                return host.getString(R.string.config_imap);
+            case "jmap":
+                return host.getString(R.string.config_jmap);
+            default:
+                return service;
+        }
+    }
+
+    /** An option's label: the protocol, its server and how it signs in. */
+    private String optionLabel(SetupOption option) {
+        if (option.method == null) {
+            return option.label;
+        }
+        String detail = option.detail == null ? "" : " (" + option.detail + ")";
+        return option.label + detail + " · " + authName(option.method.type);
+    }
+
+    /** The user-facing name of an authentication method. */
+    private String authName(AuthMethod.Type type) {
+        switch (type) {
+            case PASSWORD:
+                return host.getString(R.string.config_password);
+            case BEARER:
+                return host.getString(R.string.config_token);
+            default:
+                return host.getString(R.string.config_oauth2);
+        }
+    }
+
+    /**
+     * Signs in to one domain's picked option.
+     *
+     * <p>A password or a token is asked for per domain, because each is a
+     * separate secret even when the server is the same. A browser grant is not:
+     * every domain that picked OAuth at the same authorization endpoint is
+     * signed in to <strong>once</strong>, with the scopes merged, because that
+     * is what one authorization server means. Selecting OAuth for mail and
+     * calendars and a token for contacts is therefore one browser hop and one
+     * token prompt, not three interactions.
+     */
+    /**
+     * Works out the interactions the whole selection needs, in order.
+     *
+     * <p>A password and a token are one step each, because each is its own
+     * secret however many domains share a server. Browser grants are pooled by
+     * authorization server and resource, so the domains one consent actually
+     * covers cost one hop: this is where "mail and calendars on one JMAP
+     * session" becomes a single step instead of two identical ones.
+     */
+    private List<AuthStep> planAuthSteps() {
+        List<AuthStep> steps = new ArrayList<>();
+
+        for (DomainSetup setup : setups.values()) {
+            if (!setup.ready()) {
+                continue;
             }
-            oauth.promptOauthClient(
+            SetupOption option = setup.selected;
+
+            AuthStep shared = null;
+            if (option.isOauth()) {
+                for (AuthStep candidate : steps) {
+                    if (candidate.option.isOauth()
+                            && sameAuthorizationServer(candidate.option.method, option.method)
+                            && sameResource(candidate.option.resource, option.resource)) {
+                        shared = candidate;
+                        break;
+                    }
+                }
+            }
+
+            if (shared != null) {
+                shared.domains.add(setup.domain);
+            } else {
+                AuthStep step = new AuthStep(option);
+                step.domains.add(setup.domain);
+                steps.add(step);
+            }
+        }
+        return steps;
+    }
+
+    /**
+     * Abandons the sign-in sequence and returns to the selection.
+     *
+     * <p>Everything already signed in to this run is dropped with it. Half a
+     * sequence is not half an account: leaving the completed steps behind
+     * would persist an account covering fewer domains than the screen still
+     * shows selected.
+     */
+    void abortAuthSteps() {
+        authSteps = null;
+        authStepIndex = 0;
+        oauthGroup.clear();
+        for (DomainSetup setup : setups.values()) {
+            setup.connected = null;
+        }
+        resetSetupContinue();
+        host.showAuth(MainActivity.STEP_DOMAIN);
+    }
+
+    /** Runs the next planned interaction, or finishes when there are none. */
+    private void runNextAuthStep() {
+        if (authSteps == null || authStepIndex >= authSteps.size()) {
+            commitConnections();
+            return;
+        }
+
+        AuthStep step = authSteps.get(authStepIndex);
+        SetupOption option = step.option;
+        pendingDomain = step.domains.get(0);
+
+        if (option.method == null) {
+            promptManualEndpoint(pendingEmail);
+            return;
+        }
+        switch (option.method.type) {
+            case PASSWORD:
+                promptCredentials(option.baseUrl, option.detail, option.login);
+                break;
+            case BEARER:
+                promptToken(option.baseUrl, option.detail);
+                break;
+            default:
+                startGroupedOauth(step);
+                break;
+        }
+    }
+
+    /**
+     * The dialog title of the running step: how far along it is, which domain
+     * it is for, and how it signs in.
+     *
+     * <p>A sequence of unlabelled credential prompts is indistinguishable from
+     * one prompt that keeps failing, which is what this exists to prevent.
+     */
+    private String stepTitle() {
+        if (authSteps == null || authStepIndex >= authSteps.size()) {
+            return host.getString(R.string.password_title);
+        }
+        AuthStep step = authSteps.get(authStepIndex);
+
+        List<String> domains = new ArrayList<>();
+        for (PimDomain domain : step.domains) {
+            domains.add(host.getString(domain.label));
+        }
+        String kind =
+                step.option.method == null
+                        ? host.getString(R.string.domain_manual)
+                        : authName(step.option.method.type);
+
+        return host.getString(
+                R.string.setup_step_title,
+                authStepIndex + 1,
+                authSteps.size(),
+                String.join(", ", domains),
+                kind);
+    }
+
+    /**
+     * Runs one browser grant for every domain of the step, with their scopes
+     * merged.
+     */
+    private void startGroupedOauth(AuthStep step) {
+        SetupOption option = step.option;
+        oauthGroup.clear();
+
+        java.util.Set<String> scopes = new java.util.LinkedHashSet<>();
+        for (PimDomain domain : step.domains) {
+            DomainSetup setup = setups.get(domain);
+            oauthGroup.put(domain, setup.selected.baseUrl);
+            addScopes(scopes, setup.selected.method.scope);
+        }
+
+        String scope = scopes.isEmpty() ? null : String.join(" ", scopes);
+        if (option.method.type == AuthMethod.Type.OAUTH_ISSUER) {
+            // NOTE: the resource, never the base URL. A JMAP account's base is
+            // the internal jmap:// marker and a mailbox's is imaps://, and an
+            // authorization server asked to issue a token for either answers
+            // invalid_target: neither is a URI it protects.
+            oauth.startIssuerOauth(
                     pendingEmail,
-                    baseUrl,
-                    authEndpoint,
-                    tokenEndpoint,
-                    scope,
-                    defaultClientId,
-                    defaultRedirect,
-                    defaultFlow);
-        };
-    }
-
-    /**
-     * The dedicated Google variants, one OAuth row per service
-     * (CardDAV, People API); each opens the client prompt prefilled
-     * with the shipped client, whose unchanged submission runs the
-     * dedicated flow. Base URLs embed the entered email.
-     */
-    private void addGoogleItems(LinearLayout container) {
-        container.addView(
-                configItem(
-                        host.getString(R.string.config_carddav),
-                        null,
-                        host.getString(R.string.config_oauth2),
-                        oauthOption(
-                                PimalayaClient.googleCarddavBase(pendingEmail),
-                                Oauth.GOOGLE_AUTH_ENDPOINT,
-                                Oauth.GOOGLE_TOKEN_ENDPOINT,
-                                Oauth.GOOGLE_SCOPE,
-                                Oauth.GOOGLE_CLIENT_ID,
-                                Oauth.GOOGLE_REDIRECT_URI,
-                                () ->
-                                        oauth.startGoogleOauth(
-                                                pendingEmail,
-                                                Oauth.GOOGLE_SCOPE,
-                                                PimalayaClient.googleCarddavBase(pendingEmail)))));
-        container.addView(
-                configItem(
-                        host.getString(R.string.config_google_api),
-                        null,
-                        host.getString(R.string.config_oauth2),
-                        oauthOption(
-                                PimalayaClient.googlePeopleBase(pendingEmail),
-                                Oauth.GOOGLE_AUTH_ENDPOINT,
-                                Oauth.GOOGLE_TOKEN_ENDPOINT,
-                                Oauth.GOOGLE_PEOPLE_SCOPE,
-                                Oauth.GOOGLE_CLIENT_ID,
-                                Oauth.GOOGLE_REDIRECT_URI,
-                                () ->
-                                        oauth.startGoogleOauth(
-                                                pendingEmail,
-                                                Oauth.GOOGLE_PEOPLE_SCOPE,
-                                                PimalayaClient.googlePeopleBase(pendingEmail)))));
-    }
-
-    /**
-     * The dedicated Microsoft Graph variant, one OAuth row opening the
-     * client prompt prefilled with the shipped client, whose unchanged
-     * submission runs the dedicated flow. The base URL embeds the
-     * entered email.
-     */
-    private void addMicrosoftItems(LinearLayout container) {
-        container.addView(
-                configItem(
-                        host.getString(R.string.config_msgraph),
-                        null,
-                        host.getString(R.string.config_oauth2),
-                        oauthOption(
-                                PimalayaClient.msgraphBase(pendingEmail),
-                                Oauth.MICROSOFT_AUTH_ENDPOINT,
-                                Oauth.MICROSOFT_TOKEN_ENDPOINT,
-                                Oauth.MICROSOFT_SCOPE,
-                                Oauth.MICROSOFT_CLIENT_ID,
-                                Oauth.MICROSOFT_REDIRECT_URI,
-                                () -> oauth.startMicrosoftOauth(pendingEmail))));
-    }
-
-    /**
-     * The config options for a server typed directly in the first
-     * field (a host[:port], or a connection URI): no discovery, the
-     * same server offered over CardDAV and JMAP, the credentials asked
-     * next (an empty login sends the secret as a Bearer token).
-     */
-    private void showManualConfigs(String address) {
-        String url = address.contains("://") ? address : "https://" + address;
-        String serverHost = hostOf(url);
-        String jmapUrl = PimalayaClient.jmapBase(url);
-
-        ((TextView) host.findViewById(R.id.config_email)).setText(pendingEmail);
-        selectedConfig = null;
-        resetConfigContinue();
-
-        LinearLayout container = host.findViewById(R.id.config_container);
-        container.removeAllViews();
-        // NOTE: JMAP before CardDAV, per the protocol preference order.
-        container.addView(
-                configItem(
-                        host.getString(R.string.config_jmap),
-                        serverHost,
-                        host.getString(R.string.config_password),
-                        () -> promptCredentials(jmapUrl, serverHost, emailLogin())));
-        container.addView(
-                configItem(
-                        host.getString(R.string.config_carddav),
-                        serverHost,
-                        host.getString(R.string.config_password),
-                        () -> promptCredentials(url, serverHost, emailLogin())));
-
-        selectFirstConfig();
-        if (simpleSetup() && selectedConfig != null) {
-            selectedConfig.run();
+                    option.baseUrl,
+                    option.method.issuer,
+                    option.resource,
+                    grantedDomains());
             return;
         }
-        host.showAuth(MainActivity.STEP_CONFIG);
+        oauth.promptOauthClient(
+                pendingEmail,
+                option.baseUrl,
+                option.method.authorizationEndpoint,
+                option.method.tokenEndpoint,
+                scope,
+                option.resource,
+                null,
+                null,
+                null);
+    }
+
+    /** The domains the in-flight grant covers, for the scopes to ask for. */
+    private String grantedDomains() {
+        List<String> ids = new ArrayList<>();
+        for (PimDomain domain : oauthGroup.keySet()) {
+            ids.add(domain.id);
+        }
+        return String.join(" ", ids);
+    }
+
+    private static void addScopes(java.util.Set<String> scopes, String scope) {
+        if (scope == null || scope.isEmpty()) {
+            return;
+        }
+        for (String part : scope.split("\\s+")) {
+            if (!part.isEmpty()) {
+                scopes.add(part);
+            }
+        }
+    }
+
+    /** Whether two OAuth methods would send the user to the same server. */
+    private static boolean sameAuthorizationServer(AuthMethod left, AuthMethod right) {
+        if (left.type != right.type) {
+            return false;
+        }
+        if (left.issuer != null || right.issuer != null) {
+            return left.issuer != null && left.issuer.equals(right.issuer);
+        }
+        return left.authorizationEndpoint != null
+                && left.authorizationEndpoint.equals(right.authorizationEndpoint);
+    }
+
+    /** Whether two options name the same protected resource, absence included. */
+    private static boolean sameResource(String left, String right) {
+        return left == null ? right == null : left.equals(right);
+    }
+
+    /**
+     * Asks for the one thing discovery would have produced for this domain: a
+     * server. What is asked for follows the domain, since a mailbox is named by
+     * a host and a port and a DAV collection by a URL.
+     */
+    private void promptManualEndpoint(String address) {
+        String suggestion = address.contains("://") ? address : "https://" + address;
+        EditText field =
+                host.ui.field(
+                        pendingDomain == PimDomain.MAIL
+                                ? R.string.manual_mail_server
+                                : R.string.manual_dav_url,
+                        pendingDomain == PimDomain.MAIL ? hostOf(suggestion) : suggestion);
+
+        LinearLayout fields = new LinearLayout(host);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(host.ui.dp(24), host.ui.dp(8), host.ui.dp(24), 0);
+        fields.addView(field);
+
+        new AlertDialog.Builder(host)
+                .setTitle(stepTitle())
+                .setMessage(
+                        host.getString(
+                                R.string.manual_message, host.getString(pendingDomain.label)))
+                .setView(fields)
+                .setPositiveButton(
+                        R.string.password_submit,
+                        (dialog, which) -> {
+                            String entered = field.getText().toString().trim();
+                            if (entered.isEmpty()) {
+                                abortAuthSteps();
+                                return;
+                            }
+                            String url = manualUrl(entered);
+                            promptCredentials(url, hostOf(url), emailLogin());
+                        })
+                .setNegativeButton(
+                        android.R.string.cancel, (dialog, which) -> abortAuthSteps())
+                .show();
+    }
+
+    /**
+     * What was typed, as the URL the domain's client connects to: implicit-TLS
+     * IMAP on its default port for mail, the URL itself for a DAV collection.
+     */
+    private String manualUrl(String entered) {
+        if (pendingDomain != PimDomain.MAIL) {
+            return entered.contains("://") ? entered : "https://" + entered;
+        }
+        if (entered.contains("://")) {
+            return entered;
+        }
+        return entered.contains(":") ? "imaps://" + entered : "imaps://" + entered + ":993";
     }
 
     /**
@@ -508,7 +1010,7 @@ final class OnboardingFlow {
         fields.addView(secret);
 
         new AlertDialog.Builder(host)
-                .setTitle(R.string.password_title)
+                .setTitle(stepTitle())
                 .setMessage(host.getString(R.string.password_server, pendingEmail, serverHost))
                 .setView(fields)
                 .setPositiveButton(
@@ -530,193 +1032,8 @@ final class OnboardingFlow {
                                     null,
                                     null);
                         })
-                .setNegativeButton(android.R.string.cancel, null)
+                .setNegativeButton(android.R.string.cancel, (dialog, which) -> abortAuthSteps())
                 .show();
-    }
-
-    /**
-     * One radio option per usable authentication variant of a searched
-     * config: password variants prompt for the credentials, OAuth code
-     * grants prompt for a custom client (the endpoints prefilled from
-     * the discovery). Variants the app cannot drive (no client to use)
-     * are not offered at all.
-     */
-    private void addConfigItems(LinearLayout container, ServiceConfig config) {
-        String protocol = protocolName(config.service);
-        String serverHost = hostOf(config.url);
-        String baseUrl =
-                "jmap".equals(config.service)
-                        ? PimalayaClient.jmapBase(config.url)
-                        : config.url;
-
-        // NOTE: offer the auth variants in preference order (OAuth 2.0,
-        // then API token, then password).
-        List<AuthMethod> methods = new ArrayList<>(config.auth);
-        java.util.Collections.sort(
-                methods,
-                (left, right) -> Integer.compare(authRank(left.type), authRank(right.type)));
-        for (AuthMethod method : methods) {
-            switch (method.type) {
-                case PASSWORD:
-                    // NOTE: the login is only a default: a provider's
-                    // login is not always the address, so the prompt asks
-                    // the user to confirm it.
-                    String login = config.username != null ? config.username : emailLogin();
-                    container.addView(
-                            configItem(
-                                    protocol,
-                                    serverHost,
-                                    host.getString(R.string.config_password),
-                                    () -> promptCredentials(baseUrl, serverHost, login)));
-                    break;
-                case BEARER:
-                    // NOTE: no login asked: the empty login makes the
-                    // backends send the token as Bearer instead of Basic.
-                    container.addView(
-                            configItem(
-                                    protocol,
-                                    serverHost,
-                                    host.getString(R.string.config_token),
-                                    () -> promptToken(baseUrl, serverHost)));
-                    break;
-                case OAUTH_AUTHORIZATION_CODE_GRANT:
-                    container.addView(
-                            configItem(
-                                    protocol,
-                                    serverHost,
-                                    host.getString(R.string.config_oauth2),
-                                    oauthOption(
-                                            baseUrl,
-                                            method.authorizationEndpoint,
-                                            method.tokenEndpoint,
-                                            method.scope,
-                                            null,
-                                            null,
-                                            null)));
-                    break;
-                case OAUTH_ISSUER:
-                    // NOTE: only an issuer advertised: discover metadata
-                    // and, when it allows dynamic registration (RFC
-                    // 7591), run the grant with no pre-registered client.
-                    // The endpoint URL rides along as the RFC 8707
-                    // resource.
-                    container.addView(
-                            configItem(
-                                    protocol,
-                                    serverHost,
-                                    host.getString(R.string.config_oauth2),
-                                    () ->
-                                            oauth.startIssuerOauth(
-                                                    pendingEmail,
-                                                    baseUrl,
-                                                    method.issuer,
-                                                    config.url)));
-                    break;
-                default:
-                    // NOTE: nothing the app can drive; not offered.
-                    break;
-            }
-        }
-    }
-
-    /** Protocol precedence: JMAP over CardDAV over anything proprietary. */
-    private static int serviceRank(String service) {
-        switch (service) {
-            case "jmap":
-                return 0;
-            case "carddav":
-                return 1;
-            default:
-                return 2;
-        }
-    }
-
-    /** Auth precedence: OAuth 2.0 over API token over password. */
-    private static int authRank(AuthMethod.Type type) {
-        switch (type) {
-            case OAUTH_AUTHORIZATION_CODE_GRANT:
-            case OAUTH_DEVICE_AUTHORIZATION_GRANT:
-            case OAUTH_ISSUER:
-                return 0;
-            case BEARER:
-                return 1;
-            default:
-                return 2;
-        }
-    }
-
-    /**
-     * Arms the first offerable option, so the config screen opens with
-     * a sane default already picked (the highest-ranked protocol and
-     * auth, per the sort applied before rendering).
-     */
-    private void selectFirstConfig() {
-        LinearLayout container = host.findViewById(R.id.config_container);
-        for (int at = 0; at < container.getChildCount(); at++) {
-            View child = container.getChildAt(at);
-            if (child instanceof android.widget.RadioButton && child.isEnabled()) {
-                child.performClick();
-                break;
-            }
-        }
-    }
-
-    /** The user-facing name of a searched service kind. */
-    private String protocolName(String service) {
-        switch (service) {
-            case "carddav":
-                return host.getString(R.string.config_carddav);
-            case "jmap":
-                return host.getString(R.string.config_jmap);
-            default:
-                return service;
-        }
-    }
-
-    /**
-     * A config option as a two-line radio: the protocol with its server
-     * host in parentheses, then the authentication method diminished
-     * below. Picking it arms the Continue button with `action`; a null
-     * action renders the option disabled.
-     */
-    private View configItem(String title, String detail, String subtitle, Runnable action) {
-        android.widget.RadioButton option = new android.widget.RadioButton(host);
-        String main = detail == null ? title : title + " (" + detail + ")";
-
-        if (subtitle == null) {
-            option.setText(main);
-        } else {
-            android.text.SpannableString text =
-                    new android.text.SpannableString(main + "\n" + subtitle);
-            int start = main.length() + 1;
-            text.setSpan(
-                    new android.text.style.RelativeSizeSpan(0.8f),
-                    start,
-                    text.length(),
-                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            text.setSpan(
-                    new android.text.style.ForegroundColorSpan(
-                            host.ui.resolveColor(android.R.attr.textColorSecondary)),
-                    start,
-                    text.length(),
-                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            option.setText(text);
-        }
-
-        option.setTextSize(15);
-        option.setPadding(host.ui.dp(8), host.ui.dp(12), host.ui.dp(8), host.ui.dp(12));
-
-        if (action == null) {
-            option.setEnabled(false);
-        } else {
-            option.setOnClickListener(
-                    view -> {
-                        selectedConfig = action;
-                        host.setFabEnabled(R.id.fab, true);
-                    });
-        }
-
-        return option;
     }
 
     /**
@@ -742,7 +1059,7 @@ final class OnboardingFlow {
                         LinearLayout.LayoutParams.WRAP_CONTENT));
 
         new AlertDialog.Builder(host)
-                .setTitle(R.string.password_title)
+                .setTitle(stepTitle())
                 .setMessage(host.getString(R.string.password_server, pendingEmail, serverHost))
                 .setView(wrapper)
                 .setPositiveButton(
@@ -761,7 +1078,7 @@ final class OnboardingFlow {
                                     null,
                                     null);
                         })
-                .setNegativeButton(android.R.string.cancel, null)
+                .setNegativeButton(android.R.string.cancel, (dialog, which) -> abortAuthSteps())
                 .show();
     }
 
@@ -781,23 +1098,95 @@ final class OnboardingFlow {
             String tokenEndpoint,
             String clientId,
             String clientSecret) {
-        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        connectedEmail = email;
 
+        // NOTE: a browser grant covers every domain that chose the same
+        // authorization server, so its tokens land on all of them, each against
+        // its own endpoint. A password or token prompt covers the one domain
+        // whose button opened it.
+        if (!oauthGroup.isEmpty()) {
+            for (java.util.Map.Entry<PimDomain, String> granted : oauthGroup.entrySet()) {
+                DomainSetup setup = setups.get(granted.getKey());
+                if (setup == null) {
+                    continue;
+                }
+                setup.connected =
+                        new AccountConnection(
+                                new Account(
+                                        granted.getValue(), candidate.login, candidate.password),
+                                refreshToken,
+                                tokenEndpoint,
+                                clientId,
+                                clientSecret);
+            }
+            oauthGroup.clear();
+        } else {
+            DomainSetup setup = setups.get(pendingDomain);
+            if (setup != null) {
+                setup.connected =
+                        new AccountConnection(
+                                candidate, refreshToken, tokenEndpoint, clientId, clientSecret);
+            }
+        }
+
+        // NOTE: one step done, on to the next. The sequence advances here
+        // rather than at each prompt because a browser grant returns through
+        // this same callback after an OS round trip, so this is the one place
+        // every kind of step comes back to.
+        authStepIndex++;
+        runNextAuthStep();
+    }
+
+    /**
+     * Continue from the setup screen: everything signed in to becomes one
+     * account, and the contacts domain adds its address book selection.
+     */
+    private void confirmSetup() {
+        connectedEmail = pendingEmail;
+        for (DomainSetup setup : setups.values()) {
+            setup.connected = null;
+        }
+        authSteps = planAuthSteps();
+        authStepIndex = 0;
+        runNextAuthStep();
+    }
+
+    /**
+     * Turns everything the sequence signed in to into one account, and adds
+     * the contacts domain's address book selection when it is among them.
+     */
+    private void commitConnections() {
+        authSteps = null;
+
+        connectedAccount = null;
+        for (DomainSetup setup : setups.values()) {
+            if (setup.connected == null) {
+                continue;
+            }
+            connectedAccount =
+                    connectedAccount == null
+                            ? AccountEntry.of(connectedEmail, setup.domain, setup.connected)
+                            : connectedAccount.with(setup.domain, setup.connected);
+        }
+        if (connectedAccount == null) {
+            return;
+        }
+
+        Account contacts = connectedAccount.server(PimDomain.CONTACTS);
+        if (contacts == null) {
+            finishOnboarding();
+            return;
+        }
+
+        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        String email = connectedEmail;
         host.io.execute(
                 () -> {
                     try {
-                        List<Addressbook> fetched = host.client.listAddressbooks(candidate);
+                        List<Addressbook> fetched = host.client.listAddressbooks(contacts);
                         host.main.post(
                                 () -> {
                                     resetConfigContinue();
-                                    pendingAccount =
-                                            new AccountEntry(
-                                                    candidate,
-                                                    email,
-                                                    refreshToken,
-                                                    tokenEndpoint,
-                                                    clientId,
-                                                    clientSecret);
                                     pendingBooks = fetched;
                                     if (simpleSetup()) {
                                         confirmAllBooks(email);
@@ -940,11 +1329,12 @@ final class OnboardingFlow {
      * cadence is on), then runs the account's first sync.
      */
     private void commitBooks(java.util.Set<String> subscribed, long minutes) {
-        host.accounts.removeIf(entry -> entry.email.equals(connectedEmail));
-        host.accounts.add(pendingAccount);
-        host.store.add(pendingAccount);
-        pendingAccount = null;
         host.base.replaceAddressbooks(connectedEmail, pendingBooks);
+        new PimdirCollections(host.pimdir, host)
+                .replace(
+                        connectedEmail,
+                        PimdirMeta.CONTACT,
+                        PimdirCollections.of(connectedEmail, pendingBooks));
 
         for (Addressbook book : pendingBooks) {
             boolean on = subscribed.contains(book.url);
@@ -973,8 +1363,80 @@ final class OnboardingFlow {
                     permissions.toArray(new String[0]), MainActivity.REQUEST_CONTACTS);
         }
 
-        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
-        host.syncRemote(true);
+        finishOnboarding();
+    }
+
+    /**
+     * Persists everything the run connected, as one account, and lands on the
+     * screen of a domain it covers.
+     *
+     * <p>One save at the end rather than one per domain: the account is the
+     * unit, and a run that connected mail and contacts should leave one entry
+     * behind holding both, not two entries racing to replace each other.
+     */
+    private void finishOnboarding() {
+        if (connectedAccount == null) {
+            return;
+        }
+
+        AccountEntry connected = connectedAccount;
+        connectedAccount = null;
+
+        // NOTE: merged into whatever the address already had, so connecting a
+        // domain onto an existing account keeps the domains it already covers
+        // instead of replacing the account with a one-domain one.
+        AccountEntry merged = connected;
+        for (PimDomain domain : connected.domains()) {
+            merged = host.store.connect(connected.email, domain, connected.connection(domain));
+        }
+
+        AccountEntry stored = merged;
+        host.accounts.removeIf(entry -> entry.email.equals(stored.email));
+        host.accounts.add(stored);
+
+        if (stored.covers(PimDomain.CONTACTS)) {
+            host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+            host.syncRemote(true);
+            return;
+        }
+
+        boolean mail = stored.covers(PimDomain.MAIL);
+        host.leaveOnboarding(mail ? MainActivity.PANEL_MAIL : MainActivity.PANEL_CALENDAR);
+        if (mail) {
+            host.syncMail();
+        }
+        if (stored.covers(PimDomain.CALENDAR)) {
+            host.syncCalendars();
+        }
+    }
+
+    /**
+     * The URL an account connects to for one discovered config, or null when
+     * this app cannot drive it.
+     *
+     * <p>An HTTP endpoint arrives ready to use. A TCP one does not: discovery
+     * reports a host, a port and a security mode, and the scheme is the client's
+     * to choose. Only implicit TLS is offered, because the IMAP client has no
+     * STARTTLS step, and a {@code starttls} endpoint driven as if it were
+     * implicit would connect in the clear rather than fail.
+     */
+    private static String endpointUrl(ServiceConfig config) {
+        if (config.url != null) {
+            return "jmap".equals(config.service)
+                    ? PimalayaClient.jmapBase(config.url)
+                    : config.url;
+        }
+        if (config.host == null || !"imap".equals(config.service)) {
+            return null;
+        }
+        if (!"tls".equalsIgnoreCase(config.security)) {
+            Log.w(
+                    "pimalaya",
+                    "skip " + config.service + " at " + config.host
+                            + ": unsupported security " + config.security);
+            return null;
+        }
+        return "imaps://" + config.host + ":" + config.port;
     }
 
     private static String hostOf(String url) {

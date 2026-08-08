@@ -9,7 +9,7 @@ use vcard::{
     tree::{
         cst::VcardCst,
         merge::merge,
-        prop::{VcardPropLens, rev::REV, uid::UID},
+        prop::{lens::VcardPropLens, rev::REV, uid::UID},
     },
 };
 

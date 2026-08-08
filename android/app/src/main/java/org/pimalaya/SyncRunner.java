@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.OauthTokens;
@@ -72,6 +73,7 @@ final class SyncRunner {
 
     private final Context context;
     private final CardStore base;
+    private final PimdirDb pimdir;
     private final SecureStore store;
     private final PimalayaClient client;
 
@@ -81,11 +83,13 @@ final class SyncRunner {
     SyncRunner(
             Context context,
             CardStore base,
+            PimdirDb pimdir,
             SecureStore store,
             PimalayaClient client,
             Observer observer) {
         this.context = context;
         this.base = base;
+        this.pimdir = pimdir;
         this.store = store;
         this.client = client;
         this.observer = observer;
@@ -114,10 +118,11 @@ final class SyncRunner {
             return new OfflineEngine.Report();
         }
 
+        AccountConnection contacts = entry.connection(PimDomain.CONTACTS);
         try {
-            return engine(entry.account).syncBook(url, book.remoteSynced);
+            return engine(contacts.account).syncBook(url, book.remoteSynced);
         } catch (Exception error) {
-            if (!expiredToken(error) || entry.refreshToken == null) {
+            if (!expiredToken(error) || contacts.refreshToken == null) {
                 throw error;
             }
             return engine(refresh(entry)).syncBook(url, book.remoteSynced);
@@ -144,12 +149,23 @@ final class SyncRunner {
         for (BookEntry entry : base.loadAllAddressbooks()) {
             known.add(entry.accountEmail);
         }
+        // NOTE: only the accounts that cover contacts. An account connected
+        // for mail alone has no address books to re-fetch, and asking its
+        // server for some would fail once per sync.
         for (AccountEntry account : store.loadAll()) {
-            if (known.contains(account.email)) {
+            if (!account.covers(PimDomain.CONTACTS) || known.contains(account.email)) {
                 continue;
             }
             try {
-                base.replaceAddressbooks(account.email, client.listAddressbooks(account.account));
+                List<Addressbook> books =
+                        client.listAddressbooks(
+                                account.connection(PimDomain.CONTACTS).account);
+                base.replaceAddressbooks(account.email, books);
+                new PimdirCollections(pimdir, context)
+                        .replace(
+                                account.email,
+                                PimdirMeta.CONTACT,
+                                PimdirCollections.of(account.email, books));
             } catch (Exception error) {
                 Log.w("pimalaya", "addressbook recovery failed", error);
             }
@@ -171,10 +187,11 @@ final class SyncRunner {
                 continue;
             }
 
+            AccountConnection contacts = entry.connection(PimDomain.CONTACTS);
             try {
-                syncAccount(entry.account, group.getValue(), outcome);
+                syncAccount(contacts.account, group.getValue(), outcome);
             } catch (Exception error) {
-                if (expiredToken(error) && entry.refreshToken != null) {
+                if (expiredToken(error) && contacts.refreshToken != null) {
                     try {
                         syncAccount(refresh(entry), group.getValue(), outcome);
                         continue;
@@ -252,7 +269,7 @@ final class SyncRunner {
 
     /** An engine wired to the observer's progress display. */
     private OfflineEngine engine(Account account) {
-        OfflineEngine engine = new OfflineEngine(base, client, account, context);
+        OfflineEngine engine = new OfflineEngine(base, pimdir, client, account, context);
         if (observer != null) {
             engine.progress = observer::step;
         }
@@ -265,37 +282,42 @@ final class SyncRunner {
      * the refresh token, so a reissued one replaces the stored one.
      */
     private Account refresh(AccountEntry entry) {
+        AccountConnection contacts = entry.connection(PimDomain.CONTACTS);
         OauthTokens tokens =
                 client.oauthRefresh(
-                        entry.tokenEndpoint,
-                        entry.clientId,
-                        entry.clientSecret,
-                        entry.refreshToken,
+                        contacts.tokenEndpoint,
+                        contacts.clientId,
+                        contacts.clientSecret,
+                        contacts.refreshToken,
                         null);
 
+        // NOTE: the refreshed token replaces this domain's connection alone.
+        // Another domain of the same account may well hold a different token,
+        // from a different consent, and refreshing one must not overwrite it.
         String refreshToken =
-                tokens.refreshToken != null ? tokens.refreshToken : entry.refreshToken;
-        Account fresh = new Account(entry.account.baseUrl, "", tokens.accessToken);
+                tokens.refreshToken != null ? tokens.refreshToken : contacts.refreshToken;
         AccountEntry updated =
-                new AccountEntry(
-                        fresh,
-                        entry.email,
-                        refreshToken,
-                        entry.tokenEndpoint,
-                        entry.clientId,
-                        entry.clientSecret);
+                entry.with(
+                        PimDomain.CONTACTS,
+                        contacts.withAccessToken(tokens.accessToken, refreshToken));
 
         store.add(updated);
         if (observer != null) {
             observer.accountRefreshed(updated);
         }
-        return fresh;
+        return updated.connection(PimDomain.CONTACTS).account;
     }
 
-    /** The stored account entry matching an email, or null. */
+    /**
+     * The stored contacts account for an address, or null.
+     *
+     * <p>Scoped to the domain because one address can be connected for several,
+     * and this runner syncs address books: matching on the address alone could
+     * hand back a mail account and sync a mailbox as a book.
+     */
     private AccountEntry entryFor(String email) {
         for (AccountEntry entry : store.loadAll()) {
-            if (entry.email.equals(email)) {
+            if (entry.covers(PimDomain.CONTACTS) && entry.email.equals(email)) {
                 return entry;
             }
         }

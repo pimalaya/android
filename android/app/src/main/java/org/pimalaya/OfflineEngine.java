@@ -27,11 +27,11 @@ import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.OfflineDriver;
 
 /**
- * One account's io-offline driver: the Rust bridge runs the engine's
+ * One account's io-replica driver: the Rust bridge runs the engine's
  * coroutines and this class services their yields, storage against the
- * {@link CardStore} and remote against the backend clients or, for a
- * book's phone collection, against its raw contacts through the
- * {@link PhoneRemote} adapter. Every server backend enumerates
+ * pimdir store ({@link PimdirStorage}) and remote against the backend
+ * clients or, for a book's phone collection, against its raw contacts
+ * through the {@link PhoneRemote} adapter. Every server backend enumerates
  * incrementally from its stored cursor (CardDAV sync-collection, Graph
  * delta, JMAP /changes, People sync tokens), falling back to a
  * complete round when the cursor expired; the account-wide deltas of
@@ -57,11 +57,8 @@ final class OfflineEngine implements OfflineDriver {
 
     private final CardStore base;
 
-    /** The store's io-offline seam (placements, writes, conflicts). */
-    private final OfflineStore offline;
-
-    /** The store's phone-spoke seam (quiet-path guard counts). */
-    private final OfflinePhoneStore offlinePhone;
+    /** The pimdir store's io-replica seam (placements, writes, conflicts). */
+    private final PimdirStorage offline;
 
     private final PimalayaClient client;
     private final Account account;
@@ -179,13 +176,17 @@ final class OfflineEngine implements OfflineDriver {
      * yields only (local mutations never touch the remote), a null
      * context disables the phone spoke.
      */
-    OfflineEngine(CardStore base, PimalayaClient client, Account account, Context context) {
+    OfflineEngine(
+            CardStore base,
+            PimdirDb pimdir,
+            PimalayaClient client,
+            Account account,
+            Context context) {
         this.base = base;
-        this.offline = new OfflineStore(base);
-        this.offlinePhone = new OfflinePhoneStore(base);
+        this.offline = new PimdirStorage(pimdir);
         this.client = client;
         this.account = account;
-        this.phone = context == null ? null : new PhoneRemote(context, base);
+        this.phone = context == null ? null : new PhoneRemote(context, pimdir);
     }
 
     /**
@@ -267,14 +268,14 @@ final class OfflineEngine implements OfflineDriver {
             // matching member counts means the engine pass would reconcile
             // nothing. ContactsContract has no per-account changes token,
             // so three cheap counts stand in for one.
+            String collection = PimdirStorage.phoneCollection(url);
             if (!phone.changed(url)
-                    && !offlinePhone.pending(url)
-                    && phone.count(url) == offlinePhone.memberCount(url)) {
+                    && !offline.pending(collection)
+                    && phone.count(url) == offline.memberCount(collection)) {
                 return;
             }
 
             tally = report;
-            String collection = CardStore.phoneCollection(url);
             step(Progress.STAGE_PHONE, 0);
 
             Log.d(
@@ -379,13 +380,19 @@ final class OfflineEngine implements OfflineDriver {
      * next sync pushes it); editing a conflicted placement resolves it.
      */
     void mutateEdit(String url, String handle, String vcard) throws JSONException {
+        JSONObject index = Cards.indexCard(vcard);
+
         JSONObject mutation = new JSONObject();
         mutation.put("op", "edit");
         mutation.put("handle", handle);
         mutation.put("hash", CardStore.byteHash(vcard));
         mutation.put("size", vcard.getBytes(StandardCharsets.UTF_8).length);
         mutation.put("body", vcard);
-        mutation.put("meta", Cards.indexCard(vcard).toString());
+        mutation.put("meta", PimdirMeta.contact(index, vcard.length()));
+        // NOTE: an edit that changes what the key is derived from has to say
+        // so, or the card keeps the position its old name gave it; renaming
+        // someone is exactly that edit.
+        mutation.put("sortKey", PimdirMeta.contactSortKey(index.optString("name")));
         client.offlineMutate(this, url, mutation);
     }
 
@@ -608,7 +615,13 @@ final class OfflineEngine implements OfflineDriver {
         JSONObject item = new JSONObject();
         item.put("handle", handle);
         item.put("linkId", uid.isEmpty() ? handle : uid);
-        item.put("meta", index.toString());
+        // NOTE: the store's summary convention, not the raw card index: the
+        // index is this app's projection and the summary is what any reader of
+        // the store understands, so the fetch path and the edit path have to
+        // write the same shape or a synced card renders differently from an
+        // edited one.
+        item.put("meta", PimdirMeta.contact(index, card.vcard.length()));
+        item.put("sortKey", PimdirMeta.contactSortKey(index.optString("name")));
         item.put("hash", CardStore.byteHash(card.vcard));
         item.put("body", card.vcard);
         if (revision != null) {
@@ -995,8 +1008,12 @@ final class OfflineEngine implements OfflineDriver {
             return result(handle, true, handle, null);
         }
 
-        Card created =
-                client.createCard(account, url, row.getString("id"), row.getString("vcard"));
+        // NOTE: the handle, not the bare id: io-webdav names the resource
+        // verbatim now instead of appending .vcf itself, so the name sent has
+        // to be the one this side already calls the card by. Sending the id
+        // would create `uuid` on the server while the store waits for
+        // `uuid.vcf`, and the next sync would see a stranger.
+        Card created = client.createCard(account, url, handle, row.getString("vcard"));
 
         JSONArray postCreate = plan.optJSONArray("postCreateBooks");
         for (int index = 0; postCreate != null && index < postCreate.length(); index++) {

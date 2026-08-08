@@ -92,25 +92,45 @@ pub fn session_params() -> (String, String) {
     (random_string(32), random_string(64))
 }
 
-/// The scope a contacts client requests of an authorization server:
-/// the standard contacts scope (draft-ietf-mailmaint-oauth-public)
-/// plus `offline_access` for the refresh token, each kept only when
-/// the space-separated advertised set contains it. Requesting the
-/// whole advertised set instead is what an "invalid scope"
-/// authorization error comes from: that set is what the server
-/// supports, not what a contacts client needs. A server advertising
-/// no scopes at all gets the standard pair as-is.
-pub fn contacts_scope(scopes_supported: &str) -> String {
-    const WANTED: [&str; 2] = ["urn:ietf:params:oauth:scope:contacts", "offline_access"];
+/// The scope a client requests of an authorization server for one
+/// domain: that domain's standard scope
+/// (draft-ietf-mailmaint-oauth-public) plus `offline_access` for the
+/// refresh token, each kept only when the space-separated advertised
+/// set contains it.
+///
+/// Requesting the whole advertised set instead is what an "invalid
+/// scope" authorization error comes from: that set is what the server
+/// supports, not what this client needs. A server advertising no
+/// scopes at all gets the standard pair as-is.
+///
+/// `domains` is a space-separated list of the domains one grant covers
+/// (`mail`, `contacts`, `calendars`), because a grant shared by
+/// several of them has to ask for all of theirs at once. Asking for
+/// the wrong one is not a failure the user sees as an error: the
+/// consent screen simply offers to manage the wrong thing, which is
+/// what a calendar grant requesting the contacts scope did.
+pub fn domain_scope(scopes_supported: &str, domains: &str) -> String {
+    let mut wanted: Vec<&str> = Vec::new();
+    for domain in domains.split_whitespace() {
+        match domain {
+            "mail" => wanted.push("urn:ietf:params:oauth:scope:mail"),
+            "contacts" => wanted.push("urn:ietf:params:oauth:scope:contacts"),
+            // NOTE: both spellings, because the app names the domain
+            // `calendar` and the scope registry `calendars`.
+            "calendar" | "calendars" => wanted.push("urn:ietf:params:oauth:scope:calendars"),
+            _ => (),
+        }
+    }
+    wanted.push("offline_access");
 
     let advertised: Vec<&str> = scopes_supported.split_whitespace().collect();
     if advertised.is_empty() {
-        return WANTED.join(" ");
+        return wanted.join(" ");
     }
 
-    WANTED
+    wanted
         .into_iter()
-        .filter(|wanted| advertised.contains(wanted))
+        .filter(|scope| advertised.contains(scope))
         .collect::<Vec<&str>>()
         .join(" ")
 }
@@ -212,20 +232,30 @@ mod tests {
     /// with the advertised set; no advertised set requests the pair
     /// as-is.
     #[test]
-    fn contacts_scope_negotiates_against_the_advertised_set() {
+    fn domain_scope_asks_for_the_domains_the_grant_covers() {
         assert_eq!(
-            contacts_scope(""),
+            domain_scope("", "contacts"),
             "urn:ietf:params:oauth:scope:contacts offline_access",
         );
+        // A calendar grant must not ask to manage contacts: the consent
+        // screen would offer the wrong thing and the token would be useless.
         assert_eq!(
-            contacts_scope("mail urn:ietf:params:oauth:scope:contacts calendars"),
+            domain_scope("", "calendars"),
+            "urn:ietf:params:oauth:scope:calendars offline_access",
+        );
+        // One grant shared by several domains asks for all of theirs.
+        assert_eq!(
+            domain_scope("", "mail calendars"),
+            "urn:ietf:params:oauth:scope:mail urn:ietf:params:oauth:scope:calendars offline_access",
+        );
+        assert_eq!(
+            domain_scope(
+                "mail urn:ietf:params:oauth:scope:contacts calendars",
+                "contacts"
+            ),
             "urn:ietf:params:oauth:scope:contacts",
         );
-        assert_eq!(
-            contacts_scope("urn:ietf:params:oauth:scope:contacts offline_access extras"),
-            "urn:ietf:params:oauth:scope:contacts offline_access",
-        );
-        assert_eq!(contacts_scope("mail calendars"), "");
+        assert_eq!(domain_scope("mail calendars", "contacts"), "");
     }
 
     /// An error redirect surfaces the server's error code.

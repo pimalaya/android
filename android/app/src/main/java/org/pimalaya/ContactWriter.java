@@ -62,11 +62,7 @@ final class ContactWriter {
                 String vcard = Cards.applyCard(source, model);
                 String uid = host.cardIndex(vcard).optString("uid");
                 String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
-                host.base.saveLocal(
-                        host.edit.accountEmail,
-                        ContactPool.cardKey(account.account, host.edit.book.url, id),
-                        host.edit.book.url,
-                        new Card(id, null, null, vcard));
+                host.contacts.save(host.edit.book.url, new Card(id, null, null, vcard));
             } else if (host.edit.resolvingConflict) {
                 saveConflictResolution(model);
             } else if (host.edit.mergeSurvivor != null) {
@@ -94,7 +90,7 @@ final class ContactWriter {
      * replica resolves it).
      */
     private void saveFanOut(JSONObject model) throws JSONException {
-        OfflineEngine engine = new OfflineEngine(host.base, host.client, null, null);
+        OfflineEngine engine = new OfflineEngine(host.base, host.pimdir, host.client, null, null);
         java.util.Set<String> staged = new java.util.HashSet<>();
 
         for (Entry entry : host.edit.replicas) {
@@ -129,7 +125,7 @@ final class ContactWriter {
     private void saveConflictResolution(JSONObject model) throws JSONException {
         Entry replica = host.edit.replicas.get(0);
         String resolved = Cards.applyCard(host.edit.vcard, model);
-        new OfflineEngine(host.base, host.client, null, null)
+        new OfflineEngine(host.base, host.pimdir, host.client, null, null)
                 .mutateEdit(
                         replica.book.url,
                         CardStore.rowHandle(replica.book.url, replica.card.uri, replica.card.id),
@@ -146,7 +142,7 @@ final class ContactWriter {
 
         String vcard = Cards.applyCard(survivor.card.vcard, model);
         if (!host.cardIndex(vcard).optString("hash").equals(survivor.hash)) {
-            new OfflineEngine(host.base, host.client, null, null)
+            new OfflineEngine(host.base, host.pimdir, host.client, null, null)
                     .mutateEdit(
                             survivor.book.url,
                             CardStore.rowHandle(
@@ -165,10 +161,7 @@ final class ContactWriter {
             if (owner == null) {
                 continue;
             }
-            host.base.markDeleted(
-                    entry.accountEmail,
-                    ContactPool.cardKey(owner.account, entry.book.url, entry.card.id),
-                    entry.card);
+            host.contacts.stageDelete(entry.book.url, entry.card.id);
         }
 
         host.toast(host.getString(R.string.merge_done));
@@ -214,14 +207,11 @@ final class ContactWriter {
      * copied card sharing the vCard UID anywhere else.
      */
     private void addToBook(BookEntry target, AccountEntry account, String vcard) {
-        if (PimalayaClient.isAccountLevel(account.account)) {
+        if (PimalayaClient.isAccountLevel(account.server(PimDomain.CONTACTS))) {
             for (Entry entry : host.edit.replicas) {
                 if (entry.accountEmail.equals(target.accountEmail)) {
-                    host.base.stageMembership(
-                            entry.accountEmail,
-                            ContactPool.cardKey(account.account, entry.book.url, entry.card.id),
-                            target.book.url,
-                            true);
+                    host.contacts.stageMembership(
+                            entry.book.url, target.book.url, entry.card.id, true);
                     return;
                 }
             }
@@ -246,14 +236,18 @@ final class ContactWriter {
         if (owner == null) {
             return;
         }
-        String replicaKey = ContactPool.cardKey(owner.account, replica.book.url, replica.card.id);
 
-        if (PimalayaClient.isAccountLevel(owner.account)
-                && host.base.loadMemberships(replica.accountEmail, replicaKey).size() > 1) {
-            host.base.stageMembership(replica.accountEmail, replicaKey, target.book.url, false);
+        // NOTE: on an account-level backend the card outlives the book it is
+        // being taken out of, as long as another book still holds it; anywhere
+        // else the book is the only place it exists, so the card goes with it.
+        // Both are the same staged delete, on the placement rather than on the
+        // card: what differs is only whether another placement survives it.
+        if (PimalayaClient.isAccountLevel(owner.server(PimDomain.CONTACTS))
+                && host.contacts.collectionsOf(replica.card.id).size() > 1) {
+            host.contacts.stageMembership(
+                    replica.book.url, target.book.url, replica.card.id, false);
         } else {
-            // Last place of this card, so the card itself goes.
-            host.base.markDeleted(replica.accountEmail, replicaKey, replica.card);
+            host.contacts.stageDelete(replica.book.url, replica.card.id);
         }
     }
 }

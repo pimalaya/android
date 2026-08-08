@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The calendar screen: one agenda merging every subscribed calendar of
+ * The calendar screen: one agenda merging every calendar of
  * every account, the same merged view the contacts list gives contacts.
  *
  * <p>Rows are <em>occurrences</em>, not stored events: a weekly meeting
@@ -91,15 +91,15 @@ final class CalendarList {
         String from = today();
         String until = plusDays(from, WINDOW_DAYS);
 
-        Map<String, EventStore.StoredCalendar> byUrl = new HashMap<>();
+        Map<String, EventStore.StoredCalendar> byCollection = new HashMap<>();
         for (EventStore.StoredCalendar calendar : store.loadCalendars()) {
-            byUrl.put(calendar.url, calendar);
+            byCollection.put(calendar.id, calendar);
         }
 
         List<Row> occurrences = new ArrayList<>();
         for (EventStore.StoredEvent event : store.loadEvents()) {
-            EventStore.StoredCalendar calendar = byUrl.get(event.calendarUrl);
-            if (calendar == null || !calendar.subscribed) {
+            EventStore.StoredCalendar calendar = byCollection.get(event.collectionId);
+            if (calendar == null) {
                 continue;
             }
             if (!host.filter.accepts(calendar.accountEmail, calendar.id)) {

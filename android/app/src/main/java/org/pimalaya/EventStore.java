@@ -1,10 +1,7 @@
 package org.pimalaya;
 
-import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteOpenHelper;
 
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.Event;
@@ -13,165 +10,130 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The calendar side of the local store: subscribed calendars and their
- * raw calendar objects, one row per server resource.
+ * The calendar side of the pimdir store: calendars as collections of kind
+ * {@code text/calendar}, their objects as items.
  *
- * <p>Deliberately its own database rather than a {@code kind} column on
- * {@link CardStore}. The plan's step 4 called for that discriminator, but
- * the contacts schema carries a merge model (base bodies, conflict
- * revisions, dirty and deleted flags, a write-time index) that read-only
- * events have no use for, and both schemas are due to be replaced by
- * pimdir (P1-3). Widening the one that is about to go, to hold rows that
- * need none of its machinery, would have bought nothing.
+ * <p>It had its own database until the contacts moved: the argument then was
+ * that read-only events had no use for the contacts schema's merge model, which
+ * was true and is now moot, because pimdir's model is not the contacts one. A
+ * calendar is a collection like any other and an event is an item like any
+ * other; what mail and contacts add on top (bindings, staged edits, conflicts)
+ * is simply unused here, at the cost of nothing.
  *
- * <p>Events are stored as the iCalendar text the server sent, unparsed:
- * what an event renders as depends on the window being shown, so the
- * expansion happens at render time through the bridge.
+ * <p>Events are stored as the iCalendar text the server sent, unparsed: what an
+ * event renders as depends on the window being shown, so the expansion happens
+ * at render time through the bridge. The summary beside it ({@link PimdirMeta})
+ * is what an agenda row reads, so listing a month never parses a body.
+ *
+ * <p>There is no subscription switch. The old schema carried one, defaulted to
+ * true and never written by anything, so it decided nothing; when a calendar
+ * picker exists it belongs beside the address books' switches, in the app's own
+ * state rather than in the store.
  */
-final class EventStore extends SQLiteOpenHelper {
-    private static final String DATABASE = "events.db";
-    private static final int VERSION = 1;
+final class EventStore {
+    private final PimdirItems items;
+    private final PimdirCollections collections;
+    private final PimdirAccount accounts;
 
-    EventStore(Context context) {
-        super(context, DATABASE, null, VERSION);
-    }
-
-    @Override
-    public void onCreate(SQLiteDatabase db) {
-        db.execSQL(
-                "CREATE TABLE IF NOT EXISTS calendar ("
-                        + "url TEXT PRIMARY KEY, "
-                        + "account_email TEXT NOT NULL, "
-                        + "id TEXT NOT NULL, "
-                        + "name TEXT NOT NULL, "
-                        + "color TEXT, "
-                        + "subscribed INTEGER NOT NULL DEFAULT 1)");
-        db.execSQL(
-                "CREATE TABLE IF NOT EXISTS event ("
-                        + "calendar_url TEXT NOT NULL, "
-                        + "id TEXT NOT NULL, "
-                        + "etag TEXT, "
-                        + "ical TEXT NOT NULL, "
-                        + "PRIMARY KEY (calendar_url, id))");
-    }
-
-    @Override
-    public void onUpgrade(SQLiteDatabase db, int from, int to) {
-        // NOTE: the store is a cache of a read-only sync, so an upgrade
-        // just refetches rather than migrating.
-        db.execSQL("DROP TABLE IF EXISTS event");
-        db.execSQL("DROP TABLE IF EXISTS calendar");
-        onCreate(db);
+    EventStore(Context context, PimdirDb store) {
+        this.items = new PimdirItems(store);
+        this.collections = new PimdirCollections(store, context);
+        this.accounts = new PimdirAccount(context);
     }
 
     /**
-     * Replaces an account's calendars with what the server just listed,
-     * keeping the subscribed flag of the ones already known so a
-     * refresh never silently re-enables a calendar the user turned off.
+     * Replaces an account's calendars with what the server just listed.
+     *
+     * <p>The collection id is the calendar's address namespaced by the account
+     * ({@link PimdirAccount}), the way a mailbox id is. A CalDAV URL is unique
+     * on its own and would not need it, but a JMAP calendar id is unique only
+     * within its JMAP account: two accounts on one provider both holding a
+     * calendar {@code c1} would otherwise be one row that each sync round
+     * re-points at the other account.
      */
     void replaceCalendars(String accountEmail, List<Calendar> calendars) {
-        SQLiteDatabase db = getWritableDatabase();
-        db.beginTransaction();
-        try {
-            for (Calendar calendar : calendars) {
-                ContentValues values = new ContentValues();
-                values.put("url", calendar.url);
-                values.put("account_email", accountEmail);
-                values.put("id", calendar.id);
-                values.put("name", calendar.name);
-                values.put("color", calendar.color);
-                if (!known(db, calendar.url)) {
-                    values.put("subscribed", 1);
-                }
-                db.insertWithOnConflict(
-                        "calendar", null, values, SQLiteDatabase.CONFLICT_REPLACE);
-            }
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
+        String account = accounts.idOf(accountEmail);
+
+        List<PimdirCollections.Stored> listed = new ArrayList<>(calendars.size());
+        for (Calendar calendar : calendars) {
+            listed.add(
+                    new PimdirCollections.Stored(
+                            PimdirAccount.collectionId(account, calendar.url),
+                            accountEmail,
+                            calendar.name,
+                            calendar.description,
+                            calendar.color));
         }
+        collections.replace(accountEmail, PimdirMeta.CALENDAR, listed);
     }
 
-    private static boolean known(SQLiteDatabase db, String url) {
-        try (Cursor cursor =
-                db.query("calendar", new String[] {"url"}, "url = ?", new String[] {url},
-                        null, null, null)) {
-            return cursor.moveToFirst();
+    /** Replaces one calendar collection's objects with the listed set. */
+    void replaceEvents(String collectionId, List<Event> events) {
+        List<PimdirItems.Row> rows = new ArrayList<>(events.size());
+        for (Event event : events) {
+            rows.add(
+                    new PimdirItems.Row(
+                            event.id,
+                            event.ical,
+                            // NOTE: the summary an agenda row renders is not
+                            // derived here: it needs the expansion, which is the
+                            // bridge's, so the item carries the body and the
+                            // agenda projects it. What is written is the key
+                            // that orders it, empty until the first expansion
+                            // teaches the store where the event starts.
+                            null,
+                            ""));
         }
-    }
-
-    /** Replaces one calendar's events with the listed set. */
-    void replaceEvents(String calendarUrl, List<Event> events) {
-        SQLiteDatabase db = getWritableDatabase();
-        db.beginTransaction();
-        try {
-            db.delete("event", "calendar_url = ?", new String[] {calendarUrl});
-            for (Event event : events) {
-                ContentValues values = new ContentValues();
-                values.put("calendar_url", calendarUrl);
-                values.put("id", event.id);
-                values.put("etag", event.etag);
-                values.put("ical", event.ical);
-                db.insertWithOnConflict("event", null, values, SQLiteDatabase.CONFLICT_REPLACE);
-            }
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
-        }
+        items.replace(collectionId, rows);
     }
 
     /** One stored calendar, with the account it belongs to. */
     static final class StoredCalendar {
+        /** The backend's own address, what a listing round asks for. */
         final String url;
+
         final String accountEmail;
+
+        /** The namespaced collection id, what the store keys items by. */
         final String id;
+
         final String name;
         final String color;
-        final boolean subscribed;
 
-        StoredCalendar(
-                String url,
-                String accountEmail,
-                String id,
-                String name,
-                String color,
-                boolean subscribed) {
+        StoredCalendar(String url, String accountEmail, String id, String name, String color) {
             this.url = url;
             this.accountEmail = accountEmail;
             this.id = id;
             this.name = name;
             this.color = color;
-            this.subscribed = subscribed;
         }
     }
 
     List<StoredCalendar> loadCalendars() {
         List<StoredCalendar> calendars = new ArrayList<>();
-        try (Cursor cursor =
-                getReadableDatabase()
-                        .query("calendar", null, null, null, null, null, "name COLLATE NOCASE")) {
-            while (cursor.moveToNext()) {
-                calendars.add(
-                        new StoredCalendar(
-                                text(cursor, "url"),
-                                text(cursor, "account_email"),
-                                text(cursor, "id"),
-                                text(cursor, "name"),
-                                text(cursor, "color"),
-                                cursor.getInt(cursor.getColumnIndexOrThrow("subscribed")) != 0));
-            }
+        for (PimdirCollections.Stored stored : collections.list(PimdirMeta.CALENDAR)) {
+            String account = accounts.idOf(stored.accountEmail);
+            calendars.add(
+                    new StoredCalendar(
+                            PimdirAccount.nameOf(account, stored.id),
+                            stored.accountEmail,
+                            stored.id,
+                            stored.name,
+                            stored.color));
         }
         return calendars;
     }
 
     /** One stored calendar object, still iCalendar text. */
     static final class StoredEvent {
-        final String calendarUrl;
+        /** The collection id of the calendar holding it. */
+        final String collectionId;
+
         final String id;
         final String ical;
 
-        StoredEvent(String calendarUrl, String id, String ical) {
-            this.calendarUrl = calendarUrl;
+        StoredEvent(String collectionId, String id, String ical) {
+            this.collectionId = collectionId;
             this.id = id;
             this.ical = ical;
         }
@@ -179,21 +141,23 @@ final class EventStore extends SQLiteOpenHelper {
 
     List<StoredEvent> loadEvents() {
         List<StoredEvent> events = new ArrayList<>();
-        try (Cursor cursor = getReadableDatabase().query("event", null, null, null, null, null,
-                null)) {
+        try (Cursor cursor =
+                items.readable()
+                        .rawQuery(
+                                "SELECT i.collection, i.link_id, i.object_hash FROM items i"
+                                        + " JOIN collections c ON c.id = i.collection"
+                                        + " WHERE c.kind = ? AND i.deleted = 0"
+                                        + " AND i.retained_at IS NULL"
+                                        + " AND i.object_hash IS NOT NULL",
+                                new String[] {PimdirMeta.CALENDAR})) {
             while (cursor.moveToNext()) {
                 events.add(
                         new StoredEvent(
-                                text(cursor, "calendar_url"),
-                                text(cursor, "id"),
-                                text(cursor, "ical")));
+                                cursor.getString(0),
+                                cursor.getString(1),
+                                items.body(cursor.getString(2))));
             }
         }
         return events;
-    }
-
-    private static String text(Cursor cursor, String column) {
-        int index = cursor.getColumnIndexOrThrow(column);
-        return cursor.isNull(index) ? null : cursor.getString(index);
     }
 }

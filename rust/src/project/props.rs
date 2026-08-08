@@ -9,7 +9,7 @@ use vcard::{
     tree::{
         cst::VcardCst,
         line::VcardLine,
-        prop::{VcardPropLens, adr::ADR, gender::GENDER, n::N},
+        prop::{adr::ADR, gender::GENDER, lens::VcardPropLens, n::N},
     },
     version::VcardVersion,
 };

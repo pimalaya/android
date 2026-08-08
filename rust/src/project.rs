@@ -22,8 +22,8 @@ use vcard::{
         cst::VcardCst,
         line::VcardLine,
         prop::{
-            VcardPropLens, adr::ADR, anniversary::ANNIVERSARY, bday::BDAY, categories::CATEGORIES,
-            email::EMAIL, r#fn::FN, gender::GENDER, impp::IMPP, lang::LANG, n::N,
+            adr::ADR, anniversary::ANNIVERSARY, bday::BDAY, categories::CATEGORIES, email::EMAIL,
+            r#fn::FN, gender::GENDER, impp::IMPP, lang::LANG, lens::VcardPropLens, n::N,
             nickname::NICKNAME, note::NOTE, org::ORG, related::RELATED, role::ROLE, tel::TEL,
             title::TITLE, uid::UID, url::URL,
         },
@@ -641,6 +641,7 @@ pub fn index(vcard: &str) -> Result<Value, String> {
     let name = display_name(&model);
     let uid = single_field(&model, "uid").to_string();
     let email = first_entry(&model, "emails", "address");
+    let emails = every_entry(&model, "emails", "address");
     let phone = first_entry(&model, "phones", "number");
     let info = fallback_info(&model);
 
@@ -655,6 +656,11 @@ pub fn index(vcard: &str) -> Result<Value, String> {
     Ok(json!({
         "name": name,
         "email": email,
+        // NOTE: every address, not just the first: this is what the
+        // store's `text/vcard` summary publishes (pimdir SPEC.md §13),
+        // and a partial list there would read as a complete one to any
+        // other reader of the same store.
+        "emails": emails,
         "phone": phone,
         "info": info,
         "uid": uid,
@@ -722,6 +728,20 @@ fn first_entry(model: &Value, array: &str, field: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string()
+}
+
+/// Every value of one field across an array of the model, in document
+/// order and without the empties.
+fn every_entry(model: &Value, array: &str, field: &str) -> Vec<String> {
+    let Some(entries) = model.get(array).and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|entry| entry.get(field).and_then(Value::as_str))
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Sorts every array of the model by the items' serialized form, so

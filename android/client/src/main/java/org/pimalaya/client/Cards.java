@@ -39,42 +39,6 @@ public final class Cards {
     }
 
     /**
-     * Maps one card-plus-membership row to its engine placement on the
-     * server axis, null when the row surfaces nowhere.
-     */
-    public static JSONObject offlinePlacement(JSONObject facts) {
-        return PimalayaClient.object(Native.offlinePlacement(facts.toString()))
-                .optJSONObject("placement");
-    }
-
-    /**
-     * Maps one card-plus-membership row to its phone-axis placement,
-     * null when the row surfaces nowhere.
-     */
-    public static JSONObject offlinePhonePlacement(JSONObject facts) {
-        return PimalayaClient.object(Native.offlinePhonePlacement(facts.toString()))
-                .optJSONObject("placement");
-    }
-
-    /**
-     * Plans one engine upsert onto the card and membership rows
-     * ({@code {action, row?, memberState?}}).
-     */
-    public static JSONObject offlineUpsertPlan(JSONObject facts) {
-        return PimalayaClient.object(Native.offlineUpsertPlan(facts.toString()));
-    }
-
-    /** Plans one phone-axis upsert ({@code {action, row?, axis}}). */
-    public static JSONObject offlinePhoneUpsertPlan(JSONObject facts) {
-        return PimalayaClient.object(Native.offlinePhoneUpsertPlan(facts.toString()));
-    }
-
-    /** Plans a phone-collection drop ({@code {action}}). */
-    public static JSONObject offlinePhoneDropPlan(JSONObject facts) {
-        return PimalayaClient.object(Native.offlinePhoneDropPlan(facts.toString()));
-    }
-
-    /**
      * Projects the card's vCard onto the neutral field model the app
      * maps to ContactsContract rows (docs/contacts-mapping.md).
      */

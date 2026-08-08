@@ -224,6 +224,7 @@ final class OauthFlow {
             String authEndpoint,
             String tokenEndpoint,
             String scope,
+            String resource,
             String defaultClientId,
             String defaultRedirect,
             Runnable defaultFlow) {
@@ -308,7 +309,15 @@ final class OauthFlow {
 
                             if (redirect.startsWith("http://")) {
                                 startLoopbackOauth(
-                                        email, id, secret, auth, token, scopes, baseUrl, redirect);
+                                        email,
+                                        id,
+                                        secret,
+                                        auth,
+                                        token,
+                                        scopes,
+                                        baseUrl,
+                                        redirect,
+                                        resource);
                             } else if (redirect.startsWith("org.pimalaya:")) {
                                 launchSchemeGrant(
                                         email,
@@ -318,7 +327,7 @@ final class OauthFlow {
                                         auth,
                                         token,
                                         scopes,
-                                        null);
+                                        resource);
                             } else {
                                 host.toast(host.getString(R.string.oauth_redirect_invalid));
                             }
@@ -339,7 +348,8 @@ final class OauthFlow {
      * with the endpoints prefilled, so the user can paste a
      * self-registered client id instead.
      */
-    void startIssuerOauth(String email, String baseUrl, String issuer, String resource) {
+    void startIssuerOauth(
+            String email, String baseUrl, String issuer, String resource, String domains) {
         host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
 
         host.io.execute(
@@ -365,6 +375,7 @@ final class OauthFlow {
                                                 metadata.authorizationEndpoint,
                                                 metadata.tokenEndpoint,
                                                 metadata.scopesSupported,
+                                                resource,
                                                 null,
                                                 null,
                                                 null);
@@ -372,11 +383,13 @@ final class OauthFlow {
                             return;
                         }
 
-                        // NOTE: request only the contacts scope (plus
-                        // offline_access), not the server's whole set:
-                        // asking for mail/calendar extras earns an
-                        // invalid_scope authorization error.
-                        String scope = metadata.contactsScope();
+                        // NOTE: request only the scopes of the domains this
+                        // grant covers (plus offline_access), not the
+                        // server's whole set: asking for its extras earns an
+                        // invalid_scope authorization error, and asking for
+                        // the wrong domain's puts the wrong thing on the
+                        // consent screen.
+                        String scope = metadata.domainScope(domains);
                         String clientId =
                                 host.client.oauthRegisterClient(
                                         metadata.registrationEndpoint,
@@ -496,7 +509,8 @@ final class OauthFlow {
             String tokenEndpoint,
             String scope,
             String baseUrl,
-            String redirectUri) {
+            String redirectUri,
+            String resource) {
         String secret = clientSecret.isEmpty() ? null : clientSecret;
 
         Uri redirect = Uri.parse(redirectUri);

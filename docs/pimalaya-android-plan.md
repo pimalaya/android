@@ -409,7 +409,6 @@ The rule and the expander ship; `RDATE`/`EXDATE`/`RECURRENCE-ID` composition (sc
 3) does not, and stays P0-9's remainder. What exists in ical-rs today:
 
 ```
-[features] recur = []      default-off, dependency-free, independent of `parser`
 src/recur.rs               IcalRecurRule, its part enums, IcalRecurDateTime, the parser
 src/recur/civil.rs         proleptic Gregorian arithmetic (Hinnant), private
 src/recur/expand.rs        IcalRecurExpand, the lazy Iterator
@@ -420,6 +419,13 @@ All seven frequencies, every `BY` part with its expand-or-limit behaviour per fr
 (including the two notes governing `BYDAY` ordinal scope), `BYSETPOS`, `WKST`, and the
 RFC 7529 `RSCALE`/`SKIP` parts decoded (a non-Gregorian scale is refused by expansion
 rather than mis-expanded). 92 tests green, clippy and rustfmt clean.
+
+**It shipped unconditional, not behind a feature.** The plan budgeted `recur` as a
+default-off feature so it could never cost the default build anything. It is dependency
+free, so released ical-rs 0.1.0 declares no such feature and exports `recur` like any
+other module: the app enables nothing and the risk the gate protected against (a
+`recur` that starts wanting chrono or a bundled tzdb) has to be watched at review
+instead.
 
 Three things worth knowing when the Android side consumes it:
 
@@ -444,6 +450,11 @@ applicationId `org.pimalaya.android`. Free to do cleanly since nothing is publis
 path and git patches where possible, mirroring the CLI alignment work
 (io-pim-discovery instead of pimconf, io-http 0.3, pimalaya-stream 0.1). Verify in the
 nix devshell and via `:app:runDebug` on device.
+
+*Done, 2026-08-08.* Everything is a released crate except io-pimdir and io-replica,
+which stay pinned to git: this app needs `sql::ALL` from the first and the placement
+sort key from the second, and neither is in a published version yet. vcard-rs moved to
+0.2 with the crate, whose renames the tree had already absorbed.
 
 **P1-3. CardStore to pimdir.** Replace the bespoke SQLite store with io-pimdir. The
 replica/membership concepts map directly: a replica is an item keyed `(collection,
@@ -593,7 +604,8 @@ Each is releasable and has an acceptance test.
   public RRULE corpus including DST-crossing cases, terminates on an infinite rule under
   `take_while`, and adds nothing to the default-feature build.
 - **M1 refactor.** P1-1 to P1-3. Acceptance: current contacts functionality unchanged on
-  device, on current libs, on pimdir, with no bespoke store left.
+  device, on current libs, on pimdir, with no bespoke store left. *Built (§13); the
+  device half of the acceptance has not run.*
 - **M2 two-axis view.** P2-1 to P2-4. Acceptance: contacts across two accounts show as
   separate rows with affinity; both filters work; manual merge and conflict resolution
   behave as before.
@@ -617,12 +629,310 @@ Each is releasable and has an acceptance test.
 - **The `recur` feature** is new code with subtle semantics (BY\* interaction order, DST
   transitions, short-month clamping). Time-box it and use a public test corpus rather
   than tests written from the RFC.
-- **Feature creep into ical-rs.** `recur` must stay default-off, dependency-free and
-  tzdata-free. If it starts wanting chrono or a bundled tzdb, that is the signal it
-  should have been a crate after all; check this at review, not at release.
+- **Feature creep into ical-rs.** `recur` must stay dependency-free and tzdata-free. If
+  it starts wanting chrono or a bundled tzdb, that is the signal it should have been a
+  crate after all; check this at review, not at release. It shipped unconditional rather
+  than behind a default-off feature, so review is the only gate there is.
 - **Affinity false positives.** Grouping on phone and name equality will occasionally
   propose merging two different people. Ignore already persists; keep merge always
   confirmed and reversible before push.
 - **Binary size.** The stated goal is smallest and fastest. Every new dependency
   (temporal crate, tzdata, HTML rendering for mail bodies) needs a size budget check, not
   just a correctness check.
+
+## 11. P1-3 progress, 2026-08-08 (evening)
+
+The pimdir migration, in the shape that turned out to be right rather than the
+one §4 assumed.
+
+**The architecture does not change.** io-replica already runs in Rust while
+storage is serviced from Java over a JNI upcall, and that stays. What changes is
+the schema underneath, so the migration is narrower than P1-3 reads: the remote
+half (`enumerate` / `fetch` / `push`) is untouched entirely.
+
+**io-pimdir is taken without its `client` feature.** Android ships SQLite;
+compiling rusqlite in would put a second engine in every ABI of a binary whose
+first fixed decision is to be small. The crate contributes `sql` (the canonical
+schema and every statement) and `codec`; execution stays on
+`android.database.sqlite`. Dependency tree for it: io-replica and serde_json,
+nothing else.
+
+**The SQL crosses JNI rather than being transcribed.** `Native.pimdirSql()`
+hands over all sixty statements as JSON; `PimdirSql` caches and serves them by
+name. Transcribing them would work once and drift silently afterwards, and the
+whole reason to depend on the crate is that it is the canonical copy. This
+required `sql::ALL` upstream (io-pimdir, landed with its own Cairn change).
+
+Landed:
+
+```
+android/client/.../PimdirSql.java   canonical SQL by name, plus schema() splitting
+android/app/.../PimdirDb.java       the store: schema, FKs, WAL, objects/ beside it
+android/app/.../PimdirBlobs.java    content-addressed bodies, temp -> fsync -> rename
+android/app/.../PimdirAccount.java  the stable account id and collection namespacing
+android/app/.../PimdirMeta.java     per-kind meta and sort keys (the consumer's half)
+android/app/.../PimdirStorage.java  the three storage ops over items/bindings/objects
+```
+
+36 tests over the six, all Robolectric so they run the real platform driver.
+
+Four things worth carrying forward:
+
+- **The blob layer computes no hash.** The engine hashes a body on fetch and
+  hands the value down; the store files bytes under the name it is given. An
+  earlier draft of `PimdirBlobs` implemented FNV-1a-128 in Java, which would
+  have written blobs no other reader could find and failed silently rather than
+  loudly. (§12 revisits which algorithm that name is under.)
+- **The account id is a UUID, not the email.** SPEC.md §9.2 rules out an id the
+  user can rename, since it becomes part of every collection id it namespaces,
+  and rules out an id containing the namespace separator, since `a` + `b/c` and
+  `a/b` + `c` would be indistinguishable. A UUID satisfies both by construction.
+- **A write that does not restate the sort key preserves it.** The reference
+  write is a replace-all, so blanking the key on every upsert would reset the
+  ordering of every item a sync touched. The upsert carries `sort_key` through
+  and the `UPDATE` keeps the stored one when the write sends none.
+- **`sources.checkpoint` is BLOB and the tables are STRICT**, so a TEXT bind is
+  refused rather than coerced. Checkpoints are opaque bytes on both sides.
+
+Not done at that point: the cutover. `OfflineEngine` still routed to
+`OfflineStore` over `CardStore`, and `PimdirStorage` was not wired in. §12 and
+§13 are that cutover.
+
+## 12. The engine cutover, 2026-08-08 (late)
+
+The sync engine now runs entirely on the pimdir store. `OfflineEngine` holds a
+`PimdirStorage` instead of an `OfflineStore`, and `PhoneRemote` reads its patch
+base through the same seam. Nothing in the sync path touches the `card` and
+`membership` tables any more.
+
+Three findings shaped it, each a defect in what §11 had landed:
+
+- **The store declared a hash it did not use.** `store_meta.hash_algo` said
+  `blake3` while every object name in it was SHA-256 hex, from
+  `rust/src/store.rs`. SPEC.md §4.3 admits `blake3` or `sha256-128`, and §5
+  requires lowercase base32 (RFC 4648, no padding) because the name is also a
+  blob path component. Both halves were wrong, and both fail silently: another
+  pimdir reader would verify every blob against the wrong algorithm and find
+  nothing. The name is now `sha256-128` in base32, computed identically in
+  `PimdirHash` and `store.rs::byte_hash`, with the same vectors pinned on both
+  sides so a drift fails loudly.
+- **Refcounts ignored the merge bases.** `bindings.base_object` is a reference
+  like `items.object_hash` (SPEC.md §5, and io-pimdir's own `object_refs`
+  counts all three), but the Java seam counted only the current object. A body
+  that a base still named was therefore collected the moment the item moved past
+  it. The foreign key catches that as a constraint failure, so the symptom is a
+  crashing sync rather than a lost base, but only because the schema is strict
+  enough to notice; a store without the key would have silently dropped what the
+  next three-way merge diffs against.
+- **The phone spoke is a source, not a collection.** §11 left `SOURCE` hardcoded
+  to `server`, which would have made the phone twin a second collection holding
+  a second copy of every card. It is now the `phone` source on the *same* item:
+  the engine still names two collections (`phone:<url>` and `<url>`) and the
+  storage maps that prefix onto `(collection, source)`. This is what `bindings`
+  is for, and it makes cross-spoke propagation free rather than a second write,
+  since a phone-won edit leaves the item diverging from the server's base by
+  construction.
+
+Also landed:
+
+```
+android/app/.../PimdirHash.java         sha256-128 in base32, the object name
+android/app/.../PimdirCollections.java  the roster: collections rows per account and kind
+```
+
+`PimdirCollections` exists because a collection row has to be there before an
+item can reference it, and nothing was creating one. It is fed from the three
+places the app already learns an address book roster (onboarding, the sync
+self-heal, and the built-in on-device book), and it is what the mail and
+calendar rosters will reuse in P4.
+
+`PimdirStorage` grew the driver's own reads beside the three storage yields:
+`loadRow`, `loadConflict`, `loadConflicts`, `handlesBelowFull`,
+`setConflictRevision`, `setConflictRemote`, plus the two quiet-path guards
+(`pending`, `memberCount`) that let a phone pass with nothing to do cost
+nothing. The captured remote body of a conflict lands in `items.conflict_object`
+as an ordinary refcounted object, released when no source is conflicted over the
+item any more.
+
+19 storage tests plus 3 hash tests, all Robolectric.
+
+## 13. P1-3 complete, and P4's store with it, 2026-08-08 (night)
+
+The reads and the writes moved together, because they had to: the engine had
+already stopped writing `card` and `membership`, so anything short of the whole
+contacts path would have left the screens reading a table nothing filled. Mail
+and calendar folded in the same pass, since the shape was proven by then and
+their stores were the smaller half of the work.
+
+**There is one store now.** `pimdir.db` plus its `objects/` directory holds
+every account and all three domains, discriminated by `collections.kind`;
+`events.db` and `mail.db` are deleted on first run and `cards.db` survives with
+its card tables dropped, holding only what pimdir has no column for.
+
+```
+android/app/.../PimdirItems.java     item writes outside a sync: put, remove, replace
+android/app/.../PimdirContacts.java  the contacts semantics on top of them
+android/app/.../PimdirCollections.java  the roster, now shared by all three kinds
+```
+
+The translation, in the order it caused trouble:
+
+- **Membership is placement.** A card in three books is three `items` rows
+  sharing one `link_id` and therefore one `seq`, which is what the
+  `membership` table encoded by hand. `stageMembership` is an insert and a
+  staged delete, and the round trip that used to need explicit cancelling
+  (`added` then `removed`) now cancels by construction.
+- **Dirty is derived.** An item whose `object_hash` has moved past its server
+  binding's `base_object` *is* a pending push, so the flag and the fact cannot
+  disagree. A staged create is an item with no binding at all; a staged delete
+  is `deleted = 1` on an item that still has one.
+- **A pending create needs an origin.** io-replica sets `ReplicaOrigin` from a
+  `Copy` mutation, and a placement written directly carries none, so the push
+  adapter would have read "add this contact to a second address book" as a
+  second upload on the account-level backends. The storage seam now derives it:
+  a placement with no base whose `link_id` is bound in another collection of the
+  same source names that collection as its origin. This is the old
+  `originUrl` rule, computed from the schema rather than passed in.
+- **The summary carries the list row.** `PimdirMeta`'s `text/vcard` blob is the
+  SPEC.md §13 convention (`v`, `uid`, `fn`, `emails`, `size`) plus `phone`,
+  `info` and `hash`, because the alternative is parsing a vCard per row at
+  render time, which is the cost a summary exists to remove. `index` in
+  `rust/src/project.rs` gained `emails` so the spec fields can be complete
+  rather than truncated to the first address.
+- **The calendar subscription switch is gone.** It defaulted to true and nothing
+  ever wrote it, so it decided nothing; when a calendar picker exists it belongs
+  beside the address books' switches, in the app's own state.
+
+`CardStore` keeps its name and is now what its documentation says: the app's own
+state about its books (the three switches, the account and backend id) plus the
+merged view's link exceptions. It reads the display fields from `collections`
+rather than holding a second copy, and a collection with no switch row takes the
+defaults instead of vanishing from a listing.
+
+Deleted: `OfflineStore`, `OfflinePhoneStore`, and the placement-codec half of
+`rust/src/store.rs` (`placement`, `phone_placement`, `upsert_plan`,
+`phone_upsert_plan`, `phone_drop_plan`) with its five JNI entries and its Java
+wrappers. What they encoded, the membership-versus-card decision, is what the
+pimdir schema expresses natively. `store.rs` keeps only what no table can be
+read for: `push_plan`, `account_snapshot`, `retry_unguarded`. `byte_hash` went
+with them, since every hash the app computes is now Java's `PimdirHash`.
+
+105 Robolectric tests and 81 Rust tests green; `:app:assembleDebug` builds.
+
+**Not verified on a device.** Nothing here has run against a real server or a
+real Contacts provider, and the acceptance test for M1 is precisely that
+contacts behave unchanged on a device. The three-way merge, the phone spoke's
+projection and the CardDAV If-Match quirk retry are the places where a green
+build proves least.
+
+### The first device run, and what it caught
+
+Every contact rendered as its id. **There are three writers of a contact
+summary, and only one of them had been moved to the new convention**: the app's
+own `PimdirContacts.save`, but not `OfflineEngine.fetchedItem` (the sync path)
+nor `mutateEdit` (the staged edit), both of which still wrote the raw
+`Cards.indexCard` output, whose display name is `name` where the convention says
+`fn`. Every synced card therefore had an empty `fn`, an empty `uid` and an empty
+`hash`, so the list fell back to the id, the A-to-Z ordering was absent, and
+UID-based grouping across accounts silently stopped matching. All three now go
+through `PimdirMeta.contact`, and the two that write a body also write the sort
+key beside it.
+
+The lesson is the one SPEC.md §13 states and this missed anyway: a summary's
+shape is a contract between *every* writer of a collection and its readers, so
+adding a field to it is not a change to one method. The unit tests did not catch
+it because they exercised the writer that was correct.
+
+**A summary is written, never derived**, which makes this worse than a normal
+regression: nothing re-fetches a card whose body has not changed, so the bad
+summaries would have persisted for the life of the store. `repairSummaries`
+rewrites them from the bodies on launch, once, and is a single query over the
+summaries when there is nothing to do. This is the case io-pimdir's
+`set_sort_key` is documented for, "a store written before its kind had a
+convention".
+
+Mail and calendar showing nothing is unrelated and unchanged: neither has a sync
+entry point beyond pull-to-refresh on its own tab (`MailList.setUp`,
+`CalendarList.setUp`). The calendar round also skips any account that is not
+CardDAV, and the mail round needs a password, since the IMAP client
+authenticates with PLAIN only, so an OAuth account fetches nothing.
+
+## 14. Connecting an account, per domain, 2026-08-09
+
+The first device run of the folded store made the real gap obvious: mail and
+calendar were empty because **there was no way to connect a mail or a calendar
+account**. Every stored account was a contacts account, so `syncMail` re-ran
+discovery on a contacts address and guessed at both the endpoint and the
+credentials, and `syncCalendars` filtered contacts accounts for CardDAV-shaped
+URLs and walked an address-book home looking for calendars. Both were the
+placeholders §1b's demo slice admitted to; neither could work for an account
+whose mail lives somewhere else, or behind a different token.
+
+**One account is one identity; a domain is an axis of it.** An address covers
+some of mail, contacts and calendars, each with its own server and credentials,
+and the flow runs once per domain inside the one account.
+
+The first cut of this got it backwards, as `1 account = 1 auth = 1 domain`, and
+the reasoning was wrong in a way worth keeping: it cited JMAP as the case
+*requiring* the split. RFC 8620 is one session resource behind one
+authentication, with capability URNs saying which domains each account serves,
+so three accounts there are three sessions to the same URL with the same token.
+It is the clearest argument against. Splitting also fragments one identity at
+the front door: every cross-domain question afterwards has to reassemble it, an
+expired token becomes three repairs, and connecting calendars next month means a
+second account rather than a step. The split even produced a live bug before it
+was reverted, `accountFor(email)` returning whichever domain happened to be
+first.
+
+Multi-select is right here, because ticking two domains queues two flows rather
+than creating two accounts.
+
+The flow is now: **email, then domain, then the existing config and auth steps**.
+
+- The first step asks for an email and nothing else. "Email, server or URI" made
+  the user do the app's job; discovery does it, and manual server entry moved to
+  where it belongs, as an option on the next step when nothing was found.
+- The second step lists what the address actually offers, one option per domain,
+  each naming the protocols behind it. Everything after it is scoped to the
+  chosen domain, so the config step proposes only what can serve it.
+- The address-book selection stays the contacts domain's step. A mailbox roster
+  and a calendar roster are discovered by their own first sync, so those flows
+  end at the credentials and land on their own screen.
+
+What had to change underneath:
+
+- **Discovery only ever searched CardDAV and JMAP**, so no mail or calendar
+  service could be found however the flow asked. `search_caldav` (RFC 6764) and
+  `search_autoconfig` (the ISP URLs, the ISPDB and the mailconf TXT redirect,
+  which is where IMAP and SMTP come from) join the parallel sweep, now five
+  mechanisms.
+- **The provider fast-path no longer skips the sweep.** A Google or Microsoft MX
+  match says how to sign in for contacts; only the sweep can say whether the
+  same address publishes mail or calendars, which is the whole question the
+  domain step asks.
+- **An account holds one connection per domain** (`AccountConnection`), and the
+  roster stays keyed by the address. Refreshing one domain's token rewrites that
+  domain's connection alone, since another may hold a different token from a
+  different consent. An account stored before this decodes as a contacts
+  connection, which is all the app could connect then, so nothing has to be
+  re-onboarded.
+- **A credential already entered in the run is offered rather than asked for
+  again**, when the next domain is on the same origin and the first was not an
+  OAuth grant. Fastmail is then one app password typed once, three ticks and two
+  offers accepted; Gmail is still three consents, because Google genuinely wants
+  three scopes. The offer is scoped to the run: reusing what the user just typed
+  is an offer, reaching into an account connected weeks ago would not be.
+- **Manual entry is the domain's discovery result, hand-filled**, feeding the
+  same auth step: a host and port for mail, a URL for CardDAV or CalDAV. A second
+  wizard would drift out of step with the discovered path within two changes.
+- **A TCP endpoint needed a scheme.** IMAP arrives as a host, a port and a
+  security mode, and `ServiceConfig.url` is null for it, so the config item
+  built a null base URL. Only implicit TLS is offered, because the IMAP client
+  has no STARTTLS step and driving a `starttls` endpoint as implicit would
+  connect in the clear rather than fail. SMTP is discovered and deliberately not
+  offered: this app only reads mail, so the option would connect to nothing.
+
+117 Robolectric tests and 81 Rust tests green; `:app:assembleDebug` builds.
+Existing accounts keep working, as accounts covering contacts; connecting mail
+or calendars onto one of them is the same flow with those domains ticked, and
+merges into the account rather than making a second.

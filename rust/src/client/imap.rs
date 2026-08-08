@@ -110,16 +110,10 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         // NOTE: LIST yields (mailbox, delimiter, attributes) triples.
         Ok(listed
             .into_iter()
-            .filter(|(_, _, attributes)| {
-                !attributes
-                    .iter()
-                    .any(|attribute| *attribute == FlagNameAttribute::Noselect)
-            })
+            .filter(|(_, _, attributes)| !attributes.contains(&FlagNameAttribute::Noselect))
             .map(|(mailbox, _, _)| match mailbox {
                 Mailbox::Inbox => String::from("INBOX"),
-                Mailbox::Other(other) => {
-                    String::from_utf8_lossy(other.as_ref().as_ref()).into_owned()
-                }
+                Mailbox::Other(other) => String::from_utf8_lossy(other.as_ref()).into_owned(),
             })
             .collect())
     }
@@ -195,9 +189,7 @@ fn message(mailbox: &str, items: Vec<MessageDataItem<'static>>) -> Message {
         match item {
             MessageDataItem::Uid(value) => uid = value.get(),
             MessageDataItem::Flags(flags) => {
-                seen = flags
-                    .iter()
-                    .any(|flag| *flag == FlagFetch::Flag(Flag::Seen));
+                seen = flags.contains(&FlagFetch::Flag(Flag::Seen));
             }
             MessageDataItem::Envelope(envelope) => {
                 if let Some(value) = envelope.subject.into_option() {
@@ -214,7 +206,7 @@ fn message(mailbox: &str, items: Vec<MessageDataItem<'static>>) -> Message {
 
     Message {
         mailbox: mailbox.to_string(),
-        uid,
+        id: uid.to_string(),
         subject,
         from,
         date,

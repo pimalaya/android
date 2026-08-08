@@ -2,7 +2,7 @@
 name = "pimalaya"
 description = "JNI bridge driving Pimalaya I/O-free coroutines for the Pimalaya Android client"
 version = "0.1.0"
-authors = ["soywod <pimalaya.org@posteo.net>"]
+authors = ["Clément DOUIN (soywod) <pimalaya.org@posteo.net>"]
 rust-version = "1.88"
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -12,16 +12,16 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-ical-rs = { path = "../../ical-rs", default-features = false, features = ["parser"] }
+ical-rs = { version = "0.1", default-features = false, features = ["jscalendar", "parser"] }
 io-http = { version = "0.3", default-features = false }
-io-imap = { path = "../../io-imap", default-features = false }
+io-imap = { version = "0.4", default-features = false }
 io-jmap = { version = "0.2", default-features = false }
 io-msgraph = { version = "0.2", default-features = false }
 io-oauth = { version = "0.2", default-features = false }
 io-people = { version = "0.2", default-features = false }
-io-pim-discovery = { version = "0.3", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
-io-pimdir = { path = "../../io-pimdir", default-features = false }
-io-replica = { path = "../../io-replica", default-features = false }
+io-pim-discovery = { version = "0.5", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
+io-pimdir = { version = "0.2", default-features = false }
+io-replica = { version = "0.3", default-features = false }
 io-webdav = { version = "0.1", default-features = false }
 jni = "0.22"
 log = { version = "0.4", default-features = false }
@@ -31,4 +31,10 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.11", default-features = false }
 url = { version = "2", default-features = false }
-vcard-rs = { version = "0.1", default-features = false, features = ["parser", "jscontact"] }
+vcard-rs = { version = "0.2", default-features = false, features = ["parser", "jscontact"] }
+
+[patch.crates-io]
+io-jmap.git = "https://github.com/pimalaya/io-jmap.git"
+io-pimdir.git = "https://github.com/pimalaya/io-pimdir.git"
+io-replica.git = "https://github.com/pimalaya/io-replica.git"
+io-webdav.git = "https://github.com/pimalaya/io-webdav.git"

@@ -13,8 +13,11 @@ use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
 use io_pim_discovery::rfc6764::{service::DiscoveryDavService, well_known::DiscoveryWellKnown};
 use io_webdav::{
     rfc4791::{
-        calendar::{Calendar as DavCalendar, home_set::CalendarHomeSet, list::ListCalendars},
-        item::list::{ItemEntry, ListItems},
+        calendar::{
+            CaldavCalendar as DavCalendar, home_set::CaldavCalendarHomeSet,
+            list::CaldavCalendarList,
+        },
+        item::{CaldavItemEntry, list::CaldavItemList},
     },
     rfc4918::WebdavAuth,
 };
@@ -66,7 +69,7 @@ impl<'a, 'local> Client<'a, 'local> {
             .calendar_home_set(&principal, &auth)?
             .ok_or_else(|| "No calendar home set found".to_string())?;
 
-        let coroutine = ListCalendars::new(&home_set, &auth, USER_AGENT, home_set.path());
+        let coroutine = CaldavCalendarList::new(&home_set, &auth, USER_AGENT, home_set.path());
         let calendars: BTreeSet<DavCalendar> = self.run(&home_set, coroutine)?;
 
         Ok(calendars
@@ -86,8 +89,8 @@ impl<'a, 'local> Client<'a, 'local> {
         credentials: &crate::types::Credentials,
     ) -> Result<Vec<Event>, BridgeError> {
         let auth = auth(credentials);
-        let coroutine = ListItems::new(url, &auth, USER_AGENT, url.path(), VEVENT_FILTER);
-        let items: BTreeSet<ItemEntry> = self.run(url, coroutine)?;
+        let coroutine = CaldavItemList::new(url, &auth, USER_AGENT, url.path(), VEVENT_FILTER);
+        let items: BTreeSet<CaldavItemEntry> = self.run(url, coroutine)?;
 
         Ok(items.into_iter().map(into_event).collect())
     }
@@ -99,7 +102,7 @@ impl<'a, 'local> Client<'a, 'local> {
         auth: &WebdavAuth,
     ) -> Result<Option<Url>, BridgeError> {
         self.run_redirect(principal, |url| {
-            CalendarHomeSet::new(url, auth, USER_AGENT, url.path())
+            CaldavCalendarHomeSet::new(url, auth, USER_AGENT, url.path())
         })
     }
 }
@@ -131,7 +134,7 @@ fn into_calendar(home_set: &Url, calendar: DavCalendar) -> Calendar {
 
 /// io-webdav item entry to the JNI-facing shape; iCalendar is text, so
 /// the raw bytes are decoded lossily.
-fn into_event(entry: ItemEntry) -> Event {
+fn into_event(entry: CaldavItemEntry) -> Event {
     Event {
         id: entry.id,
         etag: entry.etag,

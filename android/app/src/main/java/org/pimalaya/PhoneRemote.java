@@ -40,22 +40,16 @@ import org.pimalaya.client.Cards;
  */
 final class PhoneRemote {
     private final Context context;
-    private final CardStore base;
 
-    /** The store's io-offline seam (the row reads behind the fetch). */
-    private final OfflineStore offline;
-
-    /** The store's phone-spoke seam (the phone base behind the fetch). */
-    private final OfflinePhoneStore offlinePhone;
+    /** The store's io-replica seam (the row reads behind the fetch). */
+    private final PimdirStorage offline;
 
     /** Raw contact row ids by handle, primed by the pass's enumerate. */
     private final Map<String, Long> rawIds = new HashMap<>();
 
-    PhoneRemote(Context context, CardStore base) {
+    PhoneRemote(Context context, PimdirDb pimdir) {
         this.context = context;
-        this.base = base;
-        this.offline = new OfflineStore(base);
-        this.offlinePhone = new OfflinePhoneStore(base);
+        this.offline = new PimdirStorage(pimdir);
     }
 
     /**
@@ -171,7 +165,7 @@ final class PhoneRemote {
                     ContentValues values = new ContentValues();
                     values.put(RawContacts.SOURCE_ID, handle);
                     resolver.update(rawContactUri(account, rawId), values, null, null);
-                } else if (offline.loadRow(url, sourceId) == null) {
+                } else if (offline.loadRow(collection, sourceId) == null) {
                     // NOTE: stale projection of a card the store dropped
                     // (interrupted delete, store rebuild); purge it.
                     resolver.delete(rawContactUri(account, rawId), null, null);
@@ -260,7 +254,7 @@ final class PhoneRemote {
             version = cursor.getInt(2);
         }
 
-        String baseVcard = phoneBase(url, handle);
+        String baseVcard = phoneBase(collection, handle);
         JSONObject baseModel = Cards.projectCard(baseVcard);
         JSONObject phoneModel = Mapping.model(dataRows(resolver, account, rawId));
         JSONObject merged = Mapping.merge(baseModel, phoneModel);
@@ -540,12 +534,13 @@ final class PhoneRemote {
      * read-back; a phone-created contact starts from a fresh skeleton
      * carrying its handle as UID.
      */
-    private String phoneBase(String url, String handle) throws JSONException {
-        JSONObject row = offline.loadRow(url, handle);
+    private String phoneBase(String collection, String handle) throws JSONException {
+        JSONObject row = offline.loadRow(PimdirStorage.phoneCollection(
+                PimdirStorage.collectionOf(collection)), handle);
         String held = null;
         if (row != null) {
-            held = offlinePhone.loadBase(url, handle);
-            if (held == null) {
+            held = row.isNull("baseVcard") ? null : row.getString("baseVcard");
+            if (held == null || held.isEmpty()) {
                 // NOTE: never converged but the hub holds it; its own vCard
                 // is the closest base, healing a lost axis without dropping
                 // unmapped properties.

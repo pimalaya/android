@@ -26,9 +26,9 @@ use io_oauth::{
     },
 };
 use io_pim_discovery::{
-    autoconfig::mx::DiscoveryDnsMx,
+    autoconfig::{isp::DiscoveryIsp, mailconf::DiscoveryMailconf, mx::DiscoveryDnsMx},
     compose::{
-        config::{DiscoveryService, DiscoveryServiceConfig},
+        config::{DiscoveryConfigSource, DiscoveryService, DiscoveryServiceConfig},
         providers::DiscoveryKnownProvider,
     },
     coroutine::{DiscoveryCoroutine, DiscoveryCoroutineState, DiscoveryYield},
@@ -41,8 +41,8 @@ use io_pim_discovery::{
     rfc9110::DiscoveryProbeAuth,
 };
 use io_webdav::{
-    rfc4918::WebdavAuth, rfc5397::current_user_principal::CurrentUserPrincipal,
-    rfc6352::addressbook::home_set::AddressbookHomeSet,
+    rfc4918::WebdavAuth, rfc5397::current_user_principal::WebdavCurrentUserPrincipal,
+    rfc6352::addressbook::home_set::CarddavAddressbookHomeSet,
 };
 use secrecy::SecretString;
 use url::Url;
@@ -172,6 +172,77 @@ impl<'a, 'local> Client<'a, 'local> {
             DiscoveryService::Carddav,
             url,
         )])
+    }
+
+    /// Resolves the email domain's CalDAV context root (RFC 6764) into
+    /// a service config.
+    pub fn search_caldav(
+        &mut self,
+        email: &str,
+        resolver: Option<&str>,
+    ) -> Result<Vec<DiscoveryServiceConfig>, BridgeError> {
+        let (_, domain) = search_domain(email)?;
+
+        let resolve = DiscoveryDavResolve::new(
+            &domain,
+            DiscoveryDavService::Caldav,
+            self.search_resolver(resolver)?,
+        );
+        let url = self.run_mechanism(resolve)?;
+
+        Ok(vec![DiscoveryServiceConfig::from_dav(
+            DiscoveryService::Caldav,
+            url,
+        )])
+    }
+
+    /// Fetches the email domain's Mozilla autoconfig document into
+    /// service configs, which is where a mail domain's IMAP and SMTP
+    /// endpoints come from.
+    ///
+    /// Four locations, best-effort and in the order the specification
+    /// ranks them: the ISP's own URL, its unauthenticated fallback, the
+    /// Thunderbird ISPDB, then the mailconf well-known probe. The first
+    /// that answers wins, and a location that fails is skipped rather
+    /// than fatal: this runs for every onboarding, and most domains
+    /// publish at exactly one of them.
+    pub fn search_autoconfig(
+        &mut self,
+        email: &str,
+        resolver: Option<&str>,
+    ) -> Result<Vec<DiscoveryServiceConfig>, BridgeError> {
+        let (local, domain) = search_domain(email)?;
+
+        let mut located = Vec::new();
+        if let Ok(url) = DiscoveryIsp::main_url(&local, &domain, true) {
+            located.push((url, DiscoveryConfigSource::IspMain));
+        }
+        if let Ok(url) = DiscoveryIsp::fallback_url(&domain, true) {
+            located.push((url, DiscoveryConfigSource::IspFallback));
+        }
+        if let Ok(url) = DiscoveryIsp::db_url(&domain, true) {
+            located.push((url, DiscoveryConfigSource::Ispdb));
+        }
+
+        // NOTE: the mailconf TXT record names where the document lives
+        // rather than carrying it, so it is one lookup and then the same
+        // fetch as the three fixed locations.
+        let mailconf = DiscoveryMailconf::new(&domain, self.search_resolver(resolver)?);
+        if let Ok(url) = self.run_mechanism(mailconf) {
+            located.push((url, DiscoveryConfigSource::Mailconf));
+        }
+
+        for (url, source) in located {
+            let Ok(config) = self.run_mechanism(DiscoveryIsp::new(url)) else {
+                continue;
+            };
+            let configs = DiscoveryServiceConfig::from_autoconfig(&config, email, source);
+            if !configs.is_empty() {
+                return Ok(configs);
+            }
+        }
+
+        Ok(Vec::new())
     }
 
     /// Resolves the email domain's JMAP session URL (RFC 8620) into a
@@ -374,7 +445,7 @@ impl<'a, 'local> Client<'a, 'local> {
         auth: &WebdavAuth,
     ) -> Result<Option<Url>, BridgeError> {
         self.run_redirect(base_url, |url| {
-            CurrentUserPrincipal::new(url, auth, USER_AGENT)
+            WebdavCurrentUserPrincipal::new(url, auth, USER_AGENT)
         })
     }
 
@@ -385,7 +456,7 @@ impl<'a, 'local> Client<'a, 'local> {
         auth: &WebdavAuth,
     ) -> Result<Option<Url>, BridgeError> {
         self.run_redirect(principal, |url| {
-            AddressbookHomeSet::new(url, auth, USER_AGENT, url.path())
+            CarddavAddressbookHomeSet::new(url, auth, USER_AGENT, url.path())
         })
     }
 }

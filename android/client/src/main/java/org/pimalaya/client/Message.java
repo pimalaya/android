@@ -11,8 +11,12 @@ public final class Message {
     /** The mailbox the message was listed from. */
     public final String mailbox;
 
-    /** IMAP UID, unique within the mailbox and its UIDVALIDITY epoch. */
-    public final long uid;
+    /**
+     * What the backend addresses the message by, within its mailbox: the
+     * IMAP UID as text, the opaque {@code Email} id on JMAP. A string
+     * rather than a number because only one of the two is one.
+     */
+    public final String id;
 
     public final String subject;
 
@@ -26,9 +30,9 @@ public final class Message {
     public final boolean seen;
 
     public Message(
-            String mailbox, long uid, String subject, String from, String date, boolean seen) {
+            String mailbox, String id, String subject, String from, String date, boolean seen) {
         this.mailbox = mailbox;
-        this.uid = uid;
+        this.id = id;
         this.subject = subject;
         this.from = from;
         this.date = date;

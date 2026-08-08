@@ -1,16 +1,31 @@
 //! JMAP operations: the RFC 9610 AddressBook and ContactCard verbs, the
-//! ContactCard/set push and the ContactCard/changes sync round.
+//! ContactCard/set push and the ContactCard/changes sync round, the RFC
+//! 8621 Mailbox and Email reads behind the account-wide mail walk, and
+//! the draft-ietf-jmap-calendars Calendar and CalendarEvent reads.
+//!
+//! One JMAP session serves all three domains, which is why they share a
+//! file: the session fetch, the auth header and the resume loops are the
+//! same code whichever capability a verb declares.
 
 use core::error::Error as StdError;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ical::ical::Ical;
 use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
 use io_jmap::{
+    calendars::{
+        calendar::{JmapCalendar, get::*},
+        calendar_event::{JmapCalendarEvent, query::*},
+    },
     coroutine::{JmapCoroutine, JmapCoroutineState, JmapYield},
     rfc8620::{
-        changes::*, coroutine::JmapRedirectYield, error::JmapMethodError, session::JmapSession,
-        session_get::*,
+        changes::*, coroutine::JmapRedirectYield, error::JmapMethodError, filter::JmapFilter,
+        session::JmapSession, session_get::*,
+    },
+    rfc8621::{
+        email::{JMAP_KEYWORD_SEEN, JmapEmail, JmapEmailAddress, JmapEmailProperty, query::*},
+        mailbox::{JmapMailbox, get::*},
     },
     rfc9610::{
         address_book::{JmapAddressBook, get::*},
@@ -27,7 +42,10 @@ use crate::{
         convert::{coroutine_error, rejected, required},
     },
     jmap,
-    types::{Addressbook, BridgeError, Card, CardDelta, Credentials, PushChange, PushOutcome},
+    types::{
+        Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, Message,
+        PushChange, PushOutcome,
+    },
 };
 
 /// How many changes one JMAP ContactCard/set call carries: well under
@@ -476,6 +494,172 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 }
 
+/// JMAP mail operations: the RFC 8621 Mailbox roster and the per-mailbox
+/// envelope spine, the JMAP half of what `syncMail` does over IMAP.
+impl<'a, 'local> Client<'a, 'local> {
+    /// Walks a whole account: one session fetch, the mailbox roster,
+    /// then the newest `limit` messages of each mailbox.
+    ///
+    /// Mirrors the IMAP walk, and for the same reason: the session is
+    /// what authenticates, so fetching it once and reusing it for every
+    /// mailbox is the difference between one round trip and one per
+    /// collection. An unreadable mailbox is skipped rather than failing
+    /// the account, exactly as a mailbox the IMAP session cannot
+    /// EXAMINE is.
+    pub fn sync_jmap_account(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        limit: u32,
+    ) -> Result<Vec<Message>, BridgeError> {
+        let auth = jmap_auth(credentials);
+        let session = self.jmap_session(session_url, &auth)?;
+        let api_url = session.api_url.clone();
+
+        let mailboxes = self.list_jmap_mailboxes(&session, &auth, &api_url)?;
+
+        let mut messages = Vec::new();
+        for (id, path) in mailboxes {
+            match self.list_jmap_messages(&session, &auth, &api_url, &id, &path, limit) {
+                Ok(found) => messages.extend(found),
+                Err(err) => log::warn!("skip mailbox {path}: {err}"),
+            }
+        }
+
+        Ok(messages)
+    }
+
+    /// The account's mailboxes as `(id, path)` pairs, the path being the
+    /// names of the mailbox and its ancestors joined by `/`.
+    ///
+    /// The path rather than the bare name, because the name is what the
+    /// store keys a collection by and JMAP lets two mailboxes under
+    /// different parents share one: an Archive inside two accounts of a
+    /// unified mailbox would otherwise collapse into a single
+    /// collection. IMAP hands the app hierarchical names already, so
+    /// this is what keeps the two backends storing the same shape.
+    fn list_jmap_mailboxes(
+        &mut self,
+        session: &JmapSession,
+        auth: &SecretString,
+        api_url: &Url,
+    ) -> Result<Vec<(String, String)>, BridgeError> {
+        let opts = JmapMailboxGetOptions::default();
+        let coroutine = JmapMailboxGet::new(session, auth, opts).map_err(|err| err.to_string())?;
+        let out = self.run_jmap(api_url, coroutine)?;
+
+        let named: BTreeMap<String, JmapMailbox> = out
+            .mailboxes
+            .into_iter()
+            .filter_map(|mailbox| mailbox.id.clone().map(|id| (id, mailbox)))
+            .collect();
+
+        Ok(named
+            .iter()
+            .map(|(id, mailbox)| (id.clone(), mailbox_path(&named, mailbox)))
+            .collect())
+    }
+
+    /// The newest `limit` messages of one mailbox: an `Email/query`
+    /// bounded to it, batched with the `Email/get` that fetches the
+    /// envelope spine of what it matched.
+    fn list_jmap_messages(
+        &mut self,
+        session: &JmapSession,
+        auth: &SecretString,
+        api_url: &Url,
+        mailbox_id: &str,
+        mailbox_path: &str,
+        limit: u32,
+    ) -> Result<Vec<Message>, BridgeError> {
+        let filter = JmapEmailFilter {
+            in_mailbox: Some(mailbox_id.to_string()),
+            ..Default::default()
+        };
+        let opts = JmapEmailQueryOptions {
+            filter: Some(JmapFilter::Condition(filter)),
+            sort: Some(vec![JmapEmailComparator::received_at_desc()]),
+            limit: Some(limit.into()),
+            properties: Some(vec![
+                JmapEmailProperty::Id,
+                JmapEmailProperty::Subject,
+                JmapEmailProperty::From,
+                JmapEmailProperty::ReceivedAt,
+                JmapEmailProperty::Keywords,
+            ]),
+            ..Default::default()
+        };
+
+        let coroutine = JmapEmailQuery::new(session, auth, opts).map_err(|err| err.to_string())?;
+        let out = self.run_jmap(api_url, coroutine)?;
+
+        Ok(out
+            .emails
+            .into_iter()
+            .map(|email| message(mailbox_path, email))
+            .collect())
+    }
+}
+
+/// JMAP calendar operations: the draft-ietf-jmap-calendars Calendar and
+/// CalendarEvent reads, each event converted to the iCalendar text the
+/// rest of the app renders.
+impl<'a, 'local> Client<'a, 'local> {
+    /// Lists the account's JMAP Calendars. Collection URLs are left
+    /// empty: the caller composes them, since only it knows the account
+    /// they belong to. Doubles as the connection check during
+    /// onboarding.
+    pub fn list_jmap_calendars(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+    ) -> Result<Vec<Calendar>, BridgeError> {
+        let auth = jmap_auth(credentials);
+        let session = self.jmap_session(session_url, &auth)?;
+        let api_url = session.api_url.clone();
+
+        let opts = JmapCalendarGetOptions::default();
+        let coroutine =
+            JmapCalendarGet::new(&session, &auth, opts).map_err(|err| err.to_string())?;
+        let out = self.run_jmap(&api_url, coroutine)?;
+
+        Ok(out.calendars.into_iter().map(jmap_calendar).collect())
+    }
+
+    /// Lists a JMAP Calendar's events, each converted to iCalendar.
+    ///
+    /// Recurrence is left folded: the server could expand it here (that
+    /// is the whole point of `CalendarEvent/query`), but the agenda
+    /// already expands iCalendar for the CalDAV path, and one expansion
+    /// path that both backends feed is worth more than a round trip
+    /// saved. The server-side expansion is the optimisation to add
+    /// later, with this as its oracle.
+    pub fn list_jmap_events(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        calendar_id: &str,
+    ) -> Result<Vec<Event>, BridgeError> {
+        let auth = jmap_auth(credentials);
+        let session = self.jmap_session(session_url, &auth)?;
+        let api_url = session.api_url.clone();
+
+        let opts = JmapCalendarEventQueryOptions {
+            filter: Some(JmapCalendarEventFilter {
+                in_calendar: Some(calendar_id.to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let coroutine =
+            JmapCalendarEventQuery::new(&session, &auth, opts).map_err(|err| err.to_string())?;
+        let out = self.run_jmap(&api_url, coroutine)?;
+
+        let events: Result<Vec<Event>, String> = out.events.into_iter().map(jmap_event).collect();
+        Ok(events?)
+    }
+}
+
 /// JMAP coroutine runners: the JMAP session fetch and the resume loops
 /// that pump a JMAP method coroutine, routing every yield to the
 /// transport stream opened on the session's API URL.
@@ -580,6 +764,119 @@ fn jmap_auth(credentials: &Credentials) -> SecretString {
     };
 
     SecretString::from(value)
+}
+
+/// The path of a mailbox: the names of its ancestors and its own,
+/// joined by `/`, the way IMAP hands the app a hierarchical name.
+///
+/// A parent the roster does not carry (unreadable, or removed between
+/// the two) ends the walk: a partial path still names the mailbox, and
+/// a mailbox dropped for a missing ancestor would hide its mail.
+fn mailbox_path(named: &BTreeMap<String, JmapMailbox>, mailbox: &JmapMailbox) -> String {
+    let mut segments = vec![mailbox.name.clone().unwrap_or_default()];
+    let mut parent = mailbox.parent_id.clone();
+
+    // NOTE: bounded by the roster size, so a server answering with a
+    // parent cycle cannot spin here.
+    while let Some(id) = parent.take() {
+        let Some(ancestor) = named.get(&id) else {
+            break;
+        };
+        if segments.len() > named.len() {
+            break;
+        }
+        segments.push(ancestor.name.clone().unwrap_or_default());
+        parent = ancestor.parent_id.clone();
+    }
+
+    segments.reverse();
+    segments.join("/")
+}
+
+/// One JMAP Email to the JNI-facing shape.
+///
+/// Seen is a keyword rather than a flag on this backend, and it is
+/// mapped here so the rest of the app keeps one notion of seen. The
+/// date crosses as the RFC 3339 `receivedAt` the server sent, which the
+/// store's sort key normalises alongside the RFC 5322 dates IMAP
+/// returns.
+fn message(mailbox: &str, email: JmapEmail) -> Message {
+    let seen = email
+        .keywords
+        .as_ref()
+        .and_then(|keywords| keywords.get(JMAP_KEYWORD_SEEN).copied())
+        .unwrap_or(false);
+
+    Message {
+        mailbox: mailbox.to_string(),
+        id: email.id.unwrap_or_default(),
+        subject: email.subject.unwrap_or_default(),
+        from: email
+            .from
+            .as_deref()
+            .and_then(<[JmapEmailAddress]>::first)
+            .map(address_label)
+            .unwrap_or_default(),
+        date: email.received_at.unwrap_or_default(),
+        seen,
+    }
+}
+
+/// An email address as a person reads it: the display name when the
+/// server sent one, the address otherwise.
+fn address_label(address: &JmapEmailAddress) -> String {
+    match address.name.as_deref() {
+        Some(name) if !name.trim().is_empty() => name.to_string(),
+        _ => address.email.clone(),
+    }
+}
+
+/// io-jmap Calendar to the JNI-facing shape, the twin of
+/// [`jmap_addressbook`]: the display name defaults to the id, and the
+/// collection URL is left empty for the caller to compose.
+fn jmap_calendar(calendar: JmapCalendar) -> Calendar {
+    let id = calendar.id.unwrap_or_default();
+
+    Calendar {
+        name: calendar.name.unwrap_or_else(|| id.clone()),
+        id,
+        url: String::new(),
+        description: calendar.description,
+        color: calendar.color,
+    }
+}
+
+/// io-jmap CalendarEvent to the JNI-facing shape, its JSCalendar
+/// payload converted to iCalendar.
+///
+/// The conversion happens here rather than downstream because the
+/// store's collection kind is a media type: `text/calendar` promises
+/// one shape, and a second payload format under it would fork every
+/// reader of the agenda. The fidelity of the conversion is ical-rs's
+/// problem, which is where it belongs.
+///
+/// There is no ETag: JMAP has no per-object one, and the store does not
+/// read the field for calendar items.
+fn jmap_event(event: JmapCalendarEvent) -> Result<Event, String> {
+    let id = event.id.unwrap_or_default();
+    let mut payload = event.event;
+
+    // NOTE: a JSCalendar object with no `@type` reads as a Group, which
+    // one CalendarEvent is not. The draft has the server send it; a
+    // server that did not would otherwise convert to an empty calendar.
+    payload
+        .entry("@type")
+        .or_insert_with(|| Value::from("Event"));
+
+    let payload = Value::Object(payload);
+    let ical = Ical::from_jscalendar(&payload)
+        .map_err(|err| format!("Invalid JSCalendar event `{id}`: {err}"))?;
+
+    Ok(Event {
+        id,
+        etag: None,
+        ical: ical.to_string(),
+    })
 }
 
 /// io-jmap AddressBook to the JNI-facing shape: the display name

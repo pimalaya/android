@@ -50,6 +50,20 @@ final class Native {
     static native String searchCarddav(Transport transport, String email, String resolver);
 
     /**
+     * RFC 6764 resolve: the email domain's CalDAV context root as a
+     * service config. Returns a JSON array. Resolver as in
+     * {@link #discover}.
+     */
+    static native String searchCaldav(Transport transport, String email, String resolver);
+
+    /**
+     * Mozilla autoconfig: the email domain's IMAP and SMTP endpoints as
+     * service configs, from the ISP URLs, the ISPDB or the mailconf TXT
+     * redirect. Returns a JSON array. Resolver as in {@link #discover}.
+     */
+    static native String searchAutoconfig(Transport transport, String email, String resolver);
+
+    /**
      * RFC 8620 resolve: the email domain's JMAP session URL as a
      * service config. Returns a JSON array. Resolver as in
      * {@link #discover}.
@@ -85,7 +99,7 @@ final class Native {
      * (empty for none); pure computation, no transport. Returns
      * {@code {"scope": ".."}}.
      */
-    static native String oauthContactsScope(String scopesSupported);
+    static native String oauthDomainScope(String scopesSupported, String domains);
 
     /**
      * Builds the OAuth 2.0 authorization URL with PKCE (S256) and CSRF
@@ -204,24 +218,29 @@ final class Native {
      * returns the newest {@code limit} messages of each. One call per
      * account, not per mailbox: IMAP is a session, so the whole walk
      * happens inside one login. Returns a JSON array of
-     * {@code {mailbox, uid, subject, from, date, seen}}.
+     * {@code {mailbox, id, subject, from, date, seen}}.
      */
     static native String syncMail(
             Transport transport, String url, String login, String password, int limit);
 
     /**
-     * Lists the account's calendars off its CalDAV base URL. Returns a
-     * JSON array of calendars carrying absolute collection URLs.
+     * Lists the account's calendars off its base URL, CalDAV or JMAP.
+     * Returns a JSON array of calendars carrying the collection URL
+     * every event listing addresses.
      */
     static native String listCalendars(
             Transport transport, String baseUrl, String login, String password);
 
     /**
-     * Lists a calendar collection's events, each carrying its raw
-     * iCalendar text. Returns a JSON array of {@code {id, etag, ical}}.
+     * Lists a calendar collection's events, each carrying its iCalendar
+     * text. Returns a JSON array of {@code {id, etag, ical}}.
+     *
+     * <p>Takes the account's base URL beside the collection's: it is
+     * what names the backend, and a JMAP calendar's URL is an id behind
+     * the account marker rather than something addressable on its own.
      */
     static native String listEvents(
-            Transport transport, String url, String login, String password);
+            Transport transport, String baseUrl, String url, String login, String password);
 
     /**
      * The occurrences one calendar object denotes inside a civil
@@ -440,44 +459,10 @@ final class Native {
     static native String offlinePushPlan(String facts);
 
     /**
-     * Maps one card-plus-membership row to its engine placement on the
-     * server axis; pure computation, no transport. Returns
-     * {@code {"placement": {..} | null}}.
-     */
-    static native String offlinePlacement(String facts);
-
-    /**
-     * Maps one card-plus-membership row to its phone-axis placement;
-     * pure computation, no transport. Returns
-     * {@code {"placement": {..} | null}}.
-     */
-    static native String offlinePhonePlacement(String facts);
-
-    /**
-     * Plans one engine upsert onto the card and membership rows; pure
-     * computation, no transport. Returns {@code {action, row?,
-     * memberState?}}.
-     */
-    static native String offlineUpsertPlan(String facts);
-
-    /**
-     * Plans one phone-axis upsert; pure computation, no transport.
-     * Returns {@code {action, row?, axis}}.
-     */
-    static native String offlinePhoneUpsertPlan(String facts);
-
-    /**
-     * Plans a phone-collection drop (membership removal vs card
-     * deletion); pure computation, no transport. Takes
-     * {@code {collection, deleted, otherMemberships}}, returns
-     * {@code {action}}.
-     */
-    static native String offlinePhoneDropPlan(String facts);
-
-    /**
      * Indexes a vCard for the store (display name, first email and
-     * phone, UID, normalized content hash); pure computation, no
-     * transport. Returns {@code {name, email, phone, uid, hash}}.
+     * phone, every email, UID, normalized content hash); pure
+     * computation, no transport. Returns
+     * {@code {name, email, emails, phone, info, uid, hash}}.
      */
     static native String indexCard(String vcard);
 

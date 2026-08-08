@@ -33,8 +33,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirSql<'local>(
             statements.insert((*name).to_string(), Value::String((*sql).to_string()));
         }
 
-        let json = to_string(&Value::Object(statements))
-            .unwrap_or_else(|err| error_json(err.to_string()));
+        let json =
+            to_string(&Value::Object(statements)).unwrap_or_else(|err| error_json(err.to_string()));
 
         Ok(env.new_string(json)?.into())
     })

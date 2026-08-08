@@ -6,16 +6,30 @@
     <string name="new_account">New account</string>
     <string name="cancel_auth">Cancel</string>
     <string name="welcome" translatable="false">Pimalaya</string>
-    <string name="welcome_value_1">All your contacts from all your accounts</string>
+    <string name="welcome_value_1">All your mail, contacts and calendars</string>
     <string name="welcome_value_2">accessible offline, in a shared view</string>
-    <string name="welcome_description">Pimalaya finds your server settings automatically, just enter anything you know about your provider</string>
-    <string name="email_hint">Email, server or URI</string>
+    <string name="welcome_description">Pimalaya finds your server settings automatically, just enter your email address</string>
+    <string name="email_hint">Email address</string>
     <string name="auth_step_email">Welcome</string>
+    <string name="auth_step_domain">What to connect</string>
     <string name="auth_step_config">Configuration</string>
     <string name="auth_step_books">Selection</string>
     <string name="email_submit">Continue</string>
     <string name="email_invalid">Enter a valid email address</string>
-    <string name="discover_failed">Could not find your contacts server settings</string>
+    <string name="discover_failed">Could not find your server settings</string>
+
+    <string name="domain_title">What would you like to connect?</string>
+    <string name="domain_message">Pick how to connect each one. Switch off anything you do not want on this device; you can add it later.</string>
+    <string name="domain_none">Nothing was found for this address. You can enter the server settings yourself.</string>
+    <string name="domain_manual">Enter settings manually</string>
+    <string name="domain_connected">Already connected</string>
+    <string name="setup_step_title">Step %1$d/%2$d · %3$s · %4$s</string>
+
+    <string name="manual_title">Server settings</string>
+    <string name="manual_message">Nothing was discovered for %1$s. Enter the server yourself and Pimalaya will carry on as usual.</string>
+    <string name="manual_mail_server">Mail server (host or host:port)</string>
+    <string name="manual_dav_url">Server URL</string>
+
     <string name="setup_choice_title">Account setup</string>
     <string name="setup_choice_message">Pimalaya can set everything up automatically with the recommended settings, or let you review each step.</string>
     <string name="setup_simple">Recommended</string>
@@ -23,6 +37,8 @@
 
     <string name="config_title">Choose a configuration</string>
     <string name="config_carddav" translatable="false">CardDAV</string>
+    <string name="config_caldav" translatable="false">CalDAV</string>
+    <string name="config_imap" translatable="false">IMAP</string>
     <string name="config_jmap" translatable="false">JMAP</string>
     <string name="config_google_api" translatable="false">Google People API</string>
     <string name="config_msgraph" translatable="false">Microsoft Graph</string>

@@ -11,7 +11,7 @@ use serde_json::{json, to_string};
 use crate::{
     client::Client,
     ffi::{error_json, parse_url, read_string},
-    oauth::{authorize_url, contacts_scope, session_params, validate_redirect},
+    oauth::{authorize_url, domain_scope, session_params, validate_redirect},
 };
 
 /// `Native.oauthAuthorizeUrl`: builds the RFC 6749 authorization URL
@@ -99,19 +99,22 @@ pub extern "system" fn Java_org_pimalaya_client_Native_oauthSessionParams<'local
     .resolve::<LogErrorAndDefault>()
 }
 
-/// `Native.oauthContactsScope`: the scope a contacts client requests
-/// of an authorization server, negotiated against its space-separated
-/// advertised scopes (empty for none); pure computation, no transport.
-/// Returns `{"scope": ".."}`.
+/// `Native.oauthDomainScope`: the scope a client requests of an
+/// authorization server for the domains one grant covers, negotiated
+/// against its space-separated advertised scopes (empty for none);
+/// pure computation, no transport. `domains` is space-separated
+/// (`mail`, `contacts`, `calendars`). Returns `{"scope": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_oauthContactsScope<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_oauthDomainScope<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     scopes_supported: JString<'local>,
+    domains: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let scopes_supported = read_string(env, &scopes_supported);
-        let scope = contacts_scope(&scopes_supported);
+        let domains = read_string(env, &domains);
+        let scope = domain_scope(&scopes_supported, &domains);
         let json = json!({ "scope": scope }).to_string();
 
         Ok(env.new_string(json)?.into())

@@ -30,8 +30,9 @@ use vcard::{
         cst::VcardCst,
         line::VcardLine,
         prop::{
-            VcardPropLens, adr::ADR, email::EMAIL, r#fn::FN, impp::IMPP, n::N, nickname::NICKNAME,
-            note::NOTE, org::ORG, related::RELATED, role::ROLE, tel::TEL, title::TITLE, url::URL,
+            adr::ADR, email::EMAIL, r#fn::FN, impp::IMPP, lens::VcardPropLens, n::N,
+            nickname::NICKNAME, note::NOTE, org::ORG, related::RELATED, role::ROLE, tel::TEL,
+            title::TITLE, url::URL,
         },
     },
     value::{

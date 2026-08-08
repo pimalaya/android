@@ -375,8 +375,17 @@ final class AccountSettings {
         }
         BackgroundSync.reconcile(host, host.base.loadAllAddressbooks());
 
+        // NOTE: the account and every domain it covered. The screen shows the
+        // contacts side, but the user is deleting the account they see, and
+        // leaving a mail or calendar connection behind under the same address
+        // would be an invisible leftover.
         host.store.remove(email);
-        host.base.detachAccountToLocal(email);
+        // NOTE: the contacts outlive the account: they move into the on-device
+        // book, cleared of every sync marker, and the account's collections go
+        // with their bindings. The switches and the link exceptions are the
+        // app's own state and are dropped separately.
+        host.contacts.detachToLocal(urls, LocalBook.URL);
+        host.base.forgetAccount(email);
         host.accounts.removeIf(entry -> entry.email.equals(email));
         host.reloadHome();
 

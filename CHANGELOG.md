@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - Added multi-account contact management over CardDAV, JMAP for Contacts, Microsoft Graph and the Google People API, unified behind one client and a contact-first view that merges every account's addressbooks.
+- Added mail and calendars beside the contacts, read-only and merged across accounts the same way: mailboxes over IMAP or JMAP in one message list, calendars over CalDAV or JMAP in one agenda. A JMAP account serves all three domains from its single session.
 - Added offline-first storage: a full local vCard store rendered instantly, with edits staged and pushed on the next sync.
 - Added incremental synchronization on every backend through the io-offline replica engine, with three-way-merge conflicts that auto-resolve clean divergences and surface only genuine same-field collisions for manual resolution.
 - Added two-way phone synchronization: each addressbook mirrors into its own Android account (the DAVx5 pattern), so edits from any contacts app converge into the store and ride upstream.
