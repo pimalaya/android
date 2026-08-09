@@ -554,6 +554,64 @@ public class PimalayaClient {
     }
 
     /**
+     * Applies one edit to a calendar object, returning the new
+     * iCalendar text. A patch through the object's concrete syntax
+     * tree, so everything the edit does not name survives untouched.
+     *
+     * <p>{@code edit} is a JSON object of the properties to set; an
+     * absent key is left alone and a present empty one removes its
+     * property. Pure computation, no transport.
+     */
+    public String writeEvent(String ical, String edit) {
+        String written = Native.writeEvent(ical, edit).trim();
+
+        // NOTE: the reply is the object itself, so an error has to be
+        // told apart from a body. It is: no calendar object opens with
+        // a brace, so a brace is the bridge's error shape.
+        if (written.startsWith("{")) {
+            object(written);
+            throw new PimalayaException("Unreadable bridge reply: expected an object");
+        }
+        return written;
+    }
+
+    /**
+     * Pushes an edited object back to the calendar it came from,
+     * guarded by the ETag it was read with, and returns the new one.
+     *
+     * <p>Guarded on purpose: a calendar is shared, and an unguarded PUT
+     * is how one client silently overwrites another's edit.
+     */
+    public String updateEvent(
+            Account account, String calendarUrl, String id, String ical, String etag) {
+        Transport transport = new Transport();
+        try {
+            String reply =
+                    Native.updateEvent(
+                            transport,
+                            account.baseUrl,
+                            calendarUrl,
+                            account.login,
+                            account.password,
+                            id,
+                            ical,
+                            etag == null ? "" : etag);
+
+            String trimmed = reply.trim();
+            if (trimmed.startsWith("{")) {
+                // An object here is the bridge's error shape; a success
+                // is the new ETag as a bare JSON string, or null.
+                object(trimmed);
+            }
+            return trimmed.startsWith("\"")
+                    ? trimmed.substring(1, trimmed.length() - 1)
+                    : null;
+        } finally {
+            transport.close();
+        }
+    }
+
+    /**
      * Lists every card of an account-level backend (JMAP, Google) in
      * one pass, each carrying its addressbook memberships as book ids
      * ({@link Card#books}).

@@ -55,19 +55,17 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- The logo, in the slot a burger would take: the accounts
-             drawer is what it opens, and the mark is the app's identity
-             beside the domain's name. Deliberately untinted, unlike
-             every other bar button. -->
+        <!-- The accounts drawer, behind the burger that says so. The
+             app's mark stood here for a while; a logo is identity and
+             not an action, and the drawer it opened had to be guessed. -->
         <ImageButton
-            android:id="@+id/bar_logo"
+            android:id="@+id/bar_menu"
             android:layout_width="@dimen/app_bar_button"
             android:layout_height="@dimen/app_bar_button"
             android:background="@drawable/ripple_circle"
             android:contentDescription="@string/accounts_open"
-            android:padding="@dimen/app_bar_logo_padding"
-            android:scaleType="fitCenter"
-            android:src="@drawable/ic_logo"
+            android:src="@drawable/ic_menu"
+            android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
         <!-- Contacts selection mode: cancel the selection. -->
@@ -81,24 +79,52 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- The list screens' title, and the app's whole top-level
-             navigation: it names the domain being shown and drops onto
-             the three (DomainMenu). The caret is what says so. Every
-             list row's avatar starts where this text does. -->
-        <TextView
-            android:id="@+id/bar_domain"
+        <!-- The app's whole top-level navigation: one button per domain,
+             the one being shown drawn in the accent. Three buttons and
+             no name, because the glyphs are the same three the empty
+             states and the agenda rows use, and a title beside them
+             said the same thing twice while taking the width the
+             domain's own actions need.
+
+             The first of them begins at item_start (4 + 48 + 4), which
+             is where every list row's avatar begins: the rows hang off
+             the navigation. -->
+        <ImageButton
+            android:id="@+id/bar_domain_mail"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:layout_marginStart="@dimen/app_bar_title_padding"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/mail_title"
+            android:src="@drawable/ic_domain_mail"
+            android:visibility="gone" />
+
+        <ImageButton
+            android:id="@+id/bar_domain_contacts"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/contacts_title"
+            android:src="@drawable/ic_domain_contacts"
+            android:visibility="gone" />
+
+        <ImageButton
+            android:id="@+id/bar_domain_calendar"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/calendar_title"
+            android:src="@drawable/ic_domain_calendar"
+            android:visibility="gone" />
+
+        <!-- The gap between the navigation and the domain's actions.
+             Only the list screens raise it: every other screen's title
+             is weighted and is its own spacer. -->
+        <View
+            android:id="@+id/bar_spacer"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="1dp"
             android:layout_weight="1"
-            android:background="?android:attr/selectableItemBackground"
-            android:drawableEnd="@drawable/ic_arrow_drop_down"
-            android:drawableTint="?android:attr/textColorPrimary"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:paddingStart="@dimen/app_bar_title_padding"
-            android:paddingEnd="@dimen/app_bar_title_padding"
-            android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
-            android:textColor="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
         <!-- Every other screen's title: the contact's name on the

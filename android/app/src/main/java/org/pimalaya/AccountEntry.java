@@ -2,45 +2,67 @@ package org.pimalaya;
 
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+
 import org.pimalaya.client.Account;
 
 /**
- * One connected identity: an address, and what it is connected for.
+ * One address, and everything the app holds for it: where each domain
+ * it covers lives ({@link AccountConnection}), and the credentials
+ * those domains sign in with ({@link AccountCredential}).
  *
- * <p>The address is the account. Which domains it covers, where each of them
- * lives and how each of them signs in are properties of it
- * ({@link AccountConnection}), not three accounts wearing the same address.
+ * <p>One entry per address and not one per domain, because the person
+ * has one account: an expired token is one repair, and a contact card
+ * has to be relatable to the sender of a message without reassembling
+ * an identity that onboarding took apart.
  *
- * <p>That distinction is the whole model. Auth and domain are different axes:
- * one provider wants one app password for everything, another wants a separate
- * consent per scope, and both are the same person with the same account. Split
- * at the front door instead, and every cross-domain question afterwards has to
- * put the identity back together, an expired token becomes three repairs, and
- * connecting calendars next month means a second account rather than a step.
- *
- * <p>An OAuth connection carries an empty login, so the address cannot be
- * recovered from the credentials and is kept here alongside them.
+ * <p>The two maps are the important part. Endpoints are per domain,
+ * credentials are per consent, and one consent routinely covers several
+ * domains, so a credential is stored once and named by each connection
+ * that uses it. Renewing it is one write, and no two domains can end up
+ * holding different halves of the same sign-in.
  */
 final class AccountEntry {
     final String email;
 
     private final Map<PimDomain, AccountConnection> connections;
+    private final Map<String, AccountCredential> credentials;
 
-    AccountEntry(String email, Map<PimDomain, AccountConnection> connections) {
+    AccountEntry(
+            String email,
+            Map<PimDomain, AccountConnection> connections,
+            Map<String, AccountCredential> credentials) {
         this.email = email;
-        this.connections = new EnumMap<>(connections);
+        // NOTE: built and filled, not copy-constructed: EnumMap cannot
+        // take its key type from an empty plain map, and an account with
+        // no domain yet is exactly how one is built up.
+        this.connections = new EnumMap<>(PimDomain.class);
+        this.connections.putAll(connections);
+        this.credentials = new HashMap<>(credentials);
     }
 
     /** One connected identity covering a single domain. */
-    static AccountEntry of(String email, PimDomain domain, AccountConnection connection) {
-        return new AccountEntry(email, Map.of(domain, connection));
+    static AccountEntry of(
+            String email, PimDomain domain, String baseUrl, AccountCredential credential) {
+        return new AccountEntry(email, Map.of(), Map.of()).with(domain, baseUrl, credential);
     }
 
-    /** What this account holds for a domain, or null when it covers none. */
+    /** Where a domain lives, or null when the account covers none. */
     AccountConnection connection(PimDomain domain) {
         return connections.get(domain);
+    }
+
+    /** What a domain signs in with, or null when it covers none. */
+    AccountCredential credential(PimDomain domain) {
+        AccountConnection connection = connections.get(domain);
+        return connection == null ? null : credentials.get(connection.credentialId);
+    }
+
+    /** Every credential this account holds, by id. */
+    Map<String, AccountCredential> credentials() {
+        return Collections.unmodifiableMap(credentials);
     }
 
     /** Whether this account is connected for a domain. */
@@ -49,13 +71,17 @@ final class AccountEntry {
     }
 
     /**
-     * The server one domain talks to, or null when the account does not cover
-     * it: the shorthand for the many callers that want the endpoint and not the
-     * credentials around it.
+     * The server one domain talks to, credential included, or null when
+     * the account does not cover it: the shorthand for the many callers
+     * that want somewhere to send a request.
      */
     Account server(PimDomain domain) {
         AccountConnection connection = connections.get(domain);
-        return connection == null ? null : connection.account;
+        AccountCredential credential = credential(domain);
+        if (connection == null || credential == null) {
+            return null;
+        }
+        return new Account(connection.baseUrl, credential.login, credential.secret);
     }
 
     /** The domains this account covers, in the enum's order. */
@@ -64,23 +90,68 @@ final class AccountEntry {
     }
 
     /**
-     * The same account with one domain connected or reconnected.
+     * The same account with one domain connected or reconnected, on the
+     * given endpoint and credential. Naming a credential another domain
+     * already uses is how one grant comes to cover several.
      *
-     * <p>Returns a new entry rather than mutating: the roster is read on the
-     * main thread and written from sync threads, and an account that gains a
-     * domain half-way through a read would be worse than one that gains it
-     * late.
+     * <p>Returns a new entry rather than mutating: the roster is read on
+     * the main thread and written from sync threads, and an account that
+     * gains a domain half-way through a read would be worse than one
+     * that gains it late.
      */
-    AccountEntry with(PimDomain domain, AccountConnection connection) {
+    AccountEntry with(PimDomain domain, String baseUrl, AccountCredential credential) {
         Map<PimDomain, AccountConnection> merged = new EnumMap<>(connections);
-        merged.put(domain, connection);
-        return new AccountEntry(email, merged);
+        merged.put(domain, new AccountConnection(baseUrl, credential.id));
+
+        Map<String, AccountCredential> held = new HashMap<>(credentials);
+        held.put(credential.id, credential);
+
+        return new AccountEntry(email, merged, held);
     }
 
-    /** The same account with one domain disconnected. */
+    /**
+     * The same account with one domain's credential renewed.
+     *
+     * <p>One write, and every domain that named that credential is
+     * renewed with it. That is the property the split exists for: there
+     * is no second copy to update, and therefore none to forget.
+     */
+    AccountEntry refreshed(PimDomain domain, String accessToken, String refreshToken) {
+        AccountCredential credential = credential(domain);
+        if (credential == null) {
+            return this;
+        }
+
+        Map<String, AccountCredential> held = new HashMap<>(credentials);
+        held.put(credential.id, credential.withTokens(accessToken, refreshToken));
+
+        return new AccountEntry(email, connections, held);
+    }
+
+    /**
+     * The same account with one domain disconnected, and its credential
+     * dropped when that domain was the last to use it: a secret nothing
+     * can present is one the app has no business keeping.
+     */
     AccountEntry without(PimDomain domain) {
         Map<PimDomain, AccountConnection> remaining = new EnumMap<>(connections);
-        remaining.remove(domain);
-        return new AccountEntry(email, remaining);
+        AccountConnection removed = remaining.remove(domain);
+
+        Map<String, AccountCredential> held = new HashMap<>(credentials);
+        if (removed != null && !usedBy(remaining, removed.credentialId)) {
+            held.remove(removed.credentialId);
+        }
+
+        return new AccountEntry(email, remaining, held);
+    }
+
+    private static boolean usedBy(
+            Map<PimDomain, AccountConnection> connections, String credentialId) {
+        for (AccountConnection connection : connections.values()) {
+            if (credentialId.equals(connection.credentialId)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

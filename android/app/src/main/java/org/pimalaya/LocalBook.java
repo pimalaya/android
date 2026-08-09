@@ -36,6 +36,6 @@ final class LocalBook {
     /** The synthesized account, its login and password unused (no transport). */
     static AccountEntry account() {
         return AccountEntry.of(
-                ACCOUNT, PimDomain.CONTACTS, new AccountConnection(new Account(ACCOUNT, "", "")));
+                ACCOUNT, PimDomain.CONTACTS, ACCOUNT, AccountCredential.password("", ""));
     }
 }

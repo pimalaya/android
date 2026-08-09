@@ -5,7 +5,7 @@
 
 use core::error::Error as StdError;
 
-use io_jmap::rfc8620::send::JmapSendError;
+use io_jmap::rfc8620::{send::JmapSendError, session_get::JmapSessionGetError};
 use io_msgraph::v1::send::MsgraphSendError;
 use io_people::v1::send::PeopleSendError;
 use io_webdav::rfc4918::{follow_redirects::WebdavFollowRedirectsError, send::WebdavSendError};
@@ -25,6 +25,15 @@ pub(crate) fn coroutine_error(err: &(impl StdError + 'static)) -> BridgeError {
 /// knows the HTTP status of the failed round, if the failure was one:
 /// io-webdav and io-jmap carry it on their send errors, io-msgraph
 /// and io-people expose it as an accessor.
+///
+/// **Not every status is on a send error.** A few coroutines check the
+/// status themselves and fail with a variant of their own that formats
+/// it into the message and sources nothing, so the walk below runs
+/// straight past it: the status has to be read off those variants by
+/// name. JMAP's session fetch is one, and missing it cost every JMAP
+/// account its token refresh, since a session get is the first call of
+/// every JMAP round and a 401 that reports no status is a 401 nothing
+/// can retry.
 fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
     let mut cause = Some(err);
 
@@ -36,6 +45,9 @@ fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
             return Some(*status);
         }
         if let Some(JmapSendError::HttpStatus(status)) = err.downcast_ref() {
+            return Some(*status);
+        }
+        if let Some(JmapSessionGetError::HttpStatus(status)) = err.downcast_ref() {
             return Some(*status);
         }
         if let Some(send) = err.downcast_ref::<MsgraphSendError>() {
@@ -68,5 +80,36 @@ pub(crate) fn rejected(reference: String, error: String) -> PushOutcome {
         accepted: false,
         error: Some(error),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use io_jmap::rfc8620::{send::JmapSendError, session_get::JmapSessionGetError};
+
+    use super::coroutine_error;
+
+    #[test]
+    fn a_status_the_failure_carries_itself_still_crosses() {
+        // The regression this exists for: JmapSessionGetError formats
+        // the status into its message and sources nothing, so a walk of
+        // the source chain finds no status and Java sees a bare error.
+        // A JMAP session get is the first call of every JMAP round, so
+        // a 401 that reports no status is one no token refresh can be
+        // triggered by, and the account simply stops syncing.
+        let session = coroutine_error(&JmapSessionGetError::HttpStatus(401));
+        assert_eq!(session.status, Some(401));
+        assert!(session.message.contains("401"));
+
+        // The ordinary path, where the status is on the send error.
+        assert_eq!(
+            coroutine_error(&JmapSendError::HttpStatus(412)).status,
+            Some(412)
+        );
+
+        // A failure that was never an HTTP round carries no status, so
+        // nothing downstream mistakes it for one.
+        let parsed = coroutine_error(&JmapSessionGetError::NoPrimaryMailAccount);
+        assert_eq!(parsed.status, None);
     }
 }

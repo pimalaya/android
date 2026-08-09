@@ -13,10 +13,25 @@ use ical::{
     param::IcalParam,
     prop::{IcalProp, IcalPropKind, IcalPropName},
     recur::{IcalRecurDateTime, IcalRecurRule, expand::IcalRecurExpand},
-    tree::cst::IcalCst,
-    value::IcalValue,
+    tree::{
+        component::{vevent::VEVENT, vjournal::VJOURNAL, vtodo::VTODO},
+        cst::IcalCst,
+        prop::{
+            IcalPropLens, IcalPropSpec, categories::CATEGORIES, completed::COMPLETED,
+            description::DESCRIPTION, dtend::DTEND, dtstamp::DTSTAMP, dtstart::DTSTART, due::DUE,
+            last_modified::LAST_MODIFIED, location::LOCATION, percent_complete::PERCENT_COMPLETE,
+            priority::PRIORITY, status::STATUS, summary::SUMMARY, url::URL,
+        },
+    },
+    value::{
+        IcalValue,
+        datetime::{IcalDate, IcalDateTime},
+        integer::IcalInteger,
+        text::{IcalText, IcalTextList},
+        uri::IcalUri,
+    },
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::types::BridgeError;
 
@@ -168,6 +183,212 @@ pub fn read(ical: &str) -> Result<EventDetail, BridgeError> {
         created: text_of(component, IcalPropKind::Created).unwrap_or_default(),
         last_modified: text_of(component, IcalPropKind::LastModified).unwrap_or_default(),
     })
+}
+
+/// What one edit changes on a component.
+///
+/// Every field is optional, and an absent one is left alone: the form
+/// sends what its component actually has, so a to-do's edit never
+/// mentions an end and a journal entry's never mentions a due date. A
+/// present field that is empty <em>removes</em> the property, which is
+/// how a form clears a value.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EventEdit {
+    pub summary: Option<String>,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub url: Option<String>,
+    pub status: Option<String>,
+    pub categories: Option<String>,
+    pub priority: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub due: Option<String>,
+    pub completed: Option<String>,
+    pub percent_complete: Option<String>,
+    /// Whether the dates carried are DATE rather than DATE-TIME.
+    pub all_day: bool,
+    /// Now, as a UTC `YYYYMMDDTHHMMSSZ` stamp, for the two properties
+    /// that record when the object was last touched. Passed in rather
+    /// than read here, so this stays a pure function of its inputs.
+    pub stamp: Option<String>,
+}
+
+/// Applies one edit to a calendar object, returning the new iCalendar.
+///
+/// A patch and not a rebuild: the object is walked as a concrete syntax
+/// tree and only the edited properties are replaced, so everything the
+/// form does not manage (VALARMs, X- properties, the ATTENDEE list, the
+/// parameters on the lines it leaves alone) survives byte for byte.
+/// That is the same rule the vCard side follows, and for the same
+/// reason: a client that rewrites what it does not understand loses
+/// other clients' data.
+pub fn write(ical: &str, edit: &str) -> Result<String, BridgeError> {
+    let edit: EventEdit = serde_json::from_str(edit).map_err(|err| err.to_string())?;
+
+    let cst = IcalCst::parse(ical).map_err(|err| err.to_string())?;
+    let mut cst = cst.into_static();
+
+    if let Some(component) = cst.component_mut::<VEVENT>() {
+        patch(component, &edit);
+    } else if let Some(component) = cst.component_mut::<VTODO>() {
+        patch(component, &edit);
+    } else if let Some(component) = cst.component_mut::<VJOURNAL>() {
+        patch(component, &edit);
+    } else {
+        return Err("The object holds nothing to edit".into());
+    }
+
+    String::from_utf8(cst.to_bytes()).map_err(|err| err.to_string().into())
+}
+
+/// Replaces every edited property of one component, in place.
+fn patch(component: &mut IcalCst<'static>, edit: &EventEdit) {
+    text::<SUMMARY>(component, IcalPropKind::Summary, &edit.summary);
+    text::<DESCRIPTION>(component, IcalPropKind::Description, &edit.description);
+    text::<LOCATION>(component, IcalPropKind::Location, &edit.location);
+    text::<STATUS>(component, IcalPropKind::Status, &edit.status);
+
+    if let Some(value) = &edit.url {
+        component.remove::<URL>();
+        if !value.is_empty() {
+            component.push(prop(
+                IcalPropKind::Url,
+                Vec::new(),
+                IcalValue::Uri(IcalUri(value.clone().into())),
+            ));
+        }
+    }
+
+    if let Some(value) = &edit.categories {
+        component.remove::<CATEGORIES>();
+        let items: Vec<_> = value
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(|item| item.to_string().into())
+            .collect();
+        if !items.is_empty() {
+            component.push(prop(
+                IcalPropKind::Categories,
+                Vec::new(),
+                IcalValue::TextList(IcalTextList(items)),
+            ));
+        }
+    }
+
+    number::<PRIORITY>(component, IcalPropKind::Priority, &edit.priority);
+    number::<PERCENT_COMPLETE>(
+        component,
+        IcalPropKind::PercentComplete,
+        &edit.percent_complete,
+    );
+
+    if let Some(value) = &edit.start {
+        component.remove::<DTSTART>();
+        push_date(component, IcalPropKind::DtStart, value, edit.all_day);
+    }
+    if let Some(value) = &edit.end {
+        component.remove::<DTEND>();
+        push_date(component, IcalPropKind::DtEnd, value, edit.all_day);
+    }
+    if let Some(value) = &edit.due {
+        component.remove::<DUE>();
+        push_date(component, IcalPropKind::Due, value, edit.all_day);
+    }
+    if let Some(value) = &edit.completed {
+        component.remove::<COMPLETED>();
+        // NOTE: COMPLETED is a UTC DATE-TIME by RFC 5545 3.8.2.1, never
+        // a date, whatever the rest of the component is.
+        push_date(component, IcalPropKind::Completed, value, false);
+    }
+
+    // RFC 5545 3.8.7.2 and 3.8.7.3: an edit is when the object was last
+    // built, and when it last changed. Both, because a server and
+    // another client read different ones.
+    if let Some(stamp) = &edit.stamp {
+        component.remove::<DTSTAMP>();
+        push_date(component, IcalPropKind::DtStamp, stamp, false);
+        component.remove::<LAST_MODIFIED>();
+        push_date(component, IcalPropKind::LastModified, stamp, false);
+    }
+}
+
+/// Replaces a text property, removing it when the edit clears it.
+fn text<L: IcalPropLens + IcalPropSpec>(
+    component: &mut IcalCst<'static>,
+    kind: IcalPropKind,
+    value: &Option<String>,
+) {
+    let Some(value) = value else {
+        return;
+    };
+
+    component.remove::<L>();
+    if !value.is_empty() {
+        component.push(prop(
+            kind,
+            Vec::new(),
+            IcalValue::Text(IcalText(value.clone().into())),
+        ));
+    }
+}
+
+/// The same for an integer property, ignoring anything unreadable
+/// rather than writing a number the property cannot hold.
+fn number<L: IcalPropLens + IcalPropSpec>(
+    component: &mut IcalCst<'static>,
+    kind: IcalPropKind,
+    value: &Option<String>,
+) {
+    let Some(value) = value else {
+        return;
+    };
+
+    component.remove::<L>();
+    if value.parse::<i64>().is_ok() {
+        component.push(prop(
+            kind,
+            Vec::new(),
+            IcalValue::Integer(IcalInteger(value.clone().into())),
+        ));
+    }
+}
+
+/// Pushes a date or date-time property, carrying `VALUE=DATE` when the
+/// component is an all-day one: without it a bare `YYYYMMDD` is not a
+/// legal DATE-TIME and servers reject the object.
+fn push_date(component: &mut IcalCst<'static>, kind: IcalPropKind, value: &str, all_day: bool) {
+    if value.is_empty() {
+        return;
+    }
+
+    if all_day {
+        component.push(prop(
+            kind,
+            vec![IcalParam::Value("DATE".into())],
+            IcalValue::Date(IcalDate(value.to_string().into())),
+        ));
+    } else {
+        component.push(prop(
+            kind,
+            Vec::new(),
+            IcalValue::DateTime(IcalDateTime(value.to_string().into())),
+        ));
+    }
+}
+
+fn prop(
+    kind: IcalPropKind,
+    params: Vec<IcalParam<'static>>,
+    value: IcalValue<'static>,
+) -> IcalProp<'static> {
+    IcalProp {
+        name: IcalPropName::Kind(kind),
+        params,
+        value,
+    }
 }
 
 /// Every scheduled component of a tree, outermost first.
@@ -656,6 +877,66 @@ mod tests {
         // date-only DUE makes the page an all-day one.
         assert_eq!(detail.start, "20260115");
         assert!(detail.all_day);
+    }
+
+    #[test]
+    fn an_edit_patches_and_leaves_everything_else_alone() {
+        let ical = object(
+            "BEGIN:VEVENT\r\nUID:42\r\nDTSTART:20260105T090000\r\nDTEND:20260105T100000\r\n\
+             SUMMARY:Standup\r\nLOCATION:Room 3\r\nX-VENDOR-FLAG:keep me\r\n\
+             BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\n\
+             END:VEVENT\r\n",
+        );
+
+        let written = write(
+            &ical,
+            r#"{"summary":"Daily standup","location":"","stamp":"20260809T150000Z"}"#,
+        )
+        .unwrap();
+
+        assert!(written.contains("SUMMARY:Daily standup"));
+        assert!(!written.contains("Standup\r\n"));
+        // Cleared, so the property goes rather than being written empty.
+        assert!(!written.contains("LOCATION"));
+        // A client that rewrites what it does not understand loses other
+        // clients' data, so none of this may move.
+        assert!(written.contains("X-VENDOR-FLAG:keep me"));
+        assert!(written.contains("BEGIN:VALARM"));
+        assert!(written.contains("TRIGGER:-PT10M"));
+        assert!(written.contains("UID:42"));
+        assert!(written.contains("DTSTART:20260105T090000"));
+        assert!(written.contains("LAST-MODIFIED:20260809T150000Z"));
+
+        // The result is a calendar object the reader can read back.
+        let detail = read(&written).unwrap();
+        assert_eq!(detail.summary, "Daily standup");
+        assert_eq!(detail.location, "");
+    }
+
+    #[test]
+    fn an_all_day_edit_marks_its_dates_as_dates() {
+        let ical = object("BEGIN:VEVENT\r\nUID:9\r\nDTSTART:20260105T090000\r\nEND:VEVENT\r\n");
+
+        let written = write(&ical, r#"{"start":"20260105","allDay":true}"#).unwrap();
+
+        // Without VALUE=DATE a bare YYYYMMDD is not a legal DATE-TIME
+        // and servers reject the object.
+        assert!(written.contains("DTSTART;VALUE=DATE:20260105"));
+        assert!(read(&written).unwrap().all_day);
+    }
+
+    #[test]
+    fn an_edit_reaches_a_todo_and_a_journal_entry_too() {
+        let todo = object("BEGIN:VTODO\r\nUID:7\r\nDUE:20260115T170000\r\nEND:VTODO\r\n");
+        let written = write(&todo, r#"{"summary":"File taxes","percentComplete":"40"}"#).unwrap();
+        assert!(written.contains("SUMMARY:File taxes"));
+        assert!(written.contains("PERCENT-COMPLETE:40"));
+
+        let journal = object("BEGIN:VJOURNAL\r\nUID:3\r\nDTSTART:20260105\r\nEND:VJOURNAL\r\n");
+        let written = write(&journal, r#"{"description":"Notes, and more"}"#).unwrap();
+        // The comma is data, not a separator, so it escapes on the wire.
+        assert!(written.contains("DESCRIPTION:Notes\\, and more"));
+        assert_eq!(read(&written).unwrap().description, "Notes, and more");
     }
 
     #[test]

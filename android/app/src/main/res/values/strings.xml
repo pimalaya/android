@@ -225,7 +225,6 @@
     <string name="message_attachment">Has an attachment</string>
 
     <!-- The message reader. -->
-    <string name="message_loading">Loading the message…</string>
     <string name="message_failed">Could not read the message</string>
     <string name="message_no_content">This message has no readable body</string>
     <string name="message_no_account">The account this message came from is gone</string>
@@ -267,6 +266,21 @@
     <string name="event_field_account">Account</string>
     <string name="event_field_kind">Kind</string>
     <string name="event_percent">%s%%</string>
+
+    <!-- The entry editor. -->
+    <string name="event_edit">Edit</string>
+    <string name="event_save">Save</string>
+    <string name="event_field_summary">Title</string>
+    <string name="event_field_all_day">All day</string>
+    <string name="event_unset">Not set</string>
+    <string name="event_percent_hint">0 to 100</string>
+    <string name="event_priority_hint">1 (highest) to 9</string>
+    <string name="event_save_failed">Could not save the entry</string>
+    <string name="event_unreadable">This entry could not be read</string>
+    <string name="event_nothing_to_add">Nothing left to add</string>
+    <string name="event_field_this_one">This occurrence</string>
+    <string name="yes">Yes</string>
+    <string name="no">No</string>
 
     <string name="event_untitled">(No title)</string>
     <string name="compose_new">New message</string>

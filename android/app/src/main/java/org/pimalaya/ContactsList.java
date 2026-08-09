@@ -443,8 +443,8 @@ final class ContactsList {
         // the field two buttons' worth of bar to grow into and the query
         // no room. The birthday and duplicate icons do stay, so the pill
         // shrinks to end at them.
-        host.findViewById(R.id.bar_domain).setVisibility(View.GONE);
-        host.findViewById(R.id.bar_logo).setVisibility(View.GONE);
+        host.showDomainButtons(false);
+        host.findViewById(R.id.bar_menu).setVisibility(View.GONE);
         host.findViewById(R.id.contacts_search).setVisibility(View.GONE);
         host.findViewById(R.id.contacts_search_pill).setVisibility(View.VISIBLE);
         host.findViewById(R.id.contacts_search_close).setVisibility(View.VISIBLE);
@@ -475,9 +475,8 @@ final class ContactsList {
         }
         host.findViewById(R.id.contacts_search_pill).setVisibility(View.GONE);
         host.findViewById(R.id.contacts_search_close).setVisibility(View.GONE);
-        host.findViewById(R.id.bar_logo).setVisibility(selectionMode ? View.GONE : View.VISIBLE);
-        host.findViewById(R.id.bar_domain)
-                .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        host.findViewById(R.id.bar_menu).setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        host.showDomainButtons(!selectionMode);
         host.findViewById(R.id.bar_title).setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         host.findViewById(R.id.contacts_search)
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
@@ -516,8 +515,8 @@ final class ContactsList {
         // The logo and the domain dropdown are what a list screen's bar
         // is; both yield to the two modes that take the bar over.
         boolean navigating = !selectionMode && !searchOpen;
-        host.findViewById(R.id.bar_logo).setVisibility(navigating ? View.VISIBLE : View.GONE);
-        host.findViewById(R.id.bar_domain).setVisibility(navigating ? View.VISIBLE : View.GONE);
+        host.findViewById(R.id.bar_menu).setVisibility(navigating ? View.VISIBLE : View.GONE);
+        host.showDomainButtons(navigating);
         host.findViewById(R.id.bar_filter)
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.contacts_search)

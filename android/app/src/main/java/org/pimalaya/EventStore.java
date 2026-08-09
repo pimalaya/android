@@ -78,10 +78,11 @@ final class EventStore {
                             // NOTE: the summary an agenda row renders is not
                             // derived here: it needs the expansion, which is the
                             // bridge's, so the item carries the body and the
-                            // agenda projects it. What is written is the key
-                            // that orders it, empty until the first expansion
-                            // teaches the store where the event starts.
-                            null,
+                            // agenda projects it. What the meta does carry is
+                            // the validator the server handed over, which is
+                            // what lets an edit be pushed guarded instead of
+                            // overwriting whatever arrived since.
+                            PimdirMeta.calendarValidator(event.etag),
                             ""));
         }
         items.replace(collectionId, rows);
@@ -132,10 +133,14 @@ final class EventStore {
         final String id;
         final String ical;
 
-        StoredEvent(String collectionId, String id, String ical) {
+        /** The server's validator, empty when it sent none. */
+        final String etag;
+
+        StoredEvent(String collectionId, String id, String ical, String etag) {
             this.collectionId = collectionId;
             this.id = id;
             this.ical = ical;
+            this.etag = etag;
         }
     }
 
@@ -144,7 +149,7 @@ final class EventStore {
         try (Cursor cursor =
                 items.readable()
                         .rawQuery(
-                                "SELECT i.collection, i.link_id, i.object_hash FROM items i"
+                                "SELECT i.collection, i.link_id, i.object_hash, i.meta FROM items i"
                                         + " JOIN collections c ON c.id = i.collection"
                                         + " WHERE c.kind = ? AND i.deleted = 0"
                                         + " AND i.retained_at IS NULL"
@@ -155,9 +160,29 @@ final class EventStore {
                         new StoredEvent(
                                 cursor.getString(0),
                                 cursor.getString(1),
-                                items.body(cursor.getString(2))));
+                                items.body(cursor.getString(2)),
+                                PimdirMeta.validatorOf(cursor.getString(3))));
             }
         }
         return events;
+    }
+
+    /**
+     * Replaces one stored object's body after an edit, so the agenda
+     * re-renders from what was just pushed rather than waiting for the
+     * next sync to fetch it back.
+     */
+    void replaceEvent(String collectionId, String id, String ical, String etag) {
+        android.database.sqlite.SQLiteDatabase db = items.writable();
+        db.beginTransaction();
+        try {
+            items.put(
+                    db,
+                    collectionId,
+                    new PimdirItems.Row(id, ical, PimdirMeta.calendarValidator(etag), ""));
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
     }
 }

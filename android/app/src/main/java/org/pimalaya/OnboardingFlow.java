@@ -355,8 +355,17 @@ final class OnboardingFlow {
 
         SetupOption selected;
 
-        /** What signing in produced; null until the sign-in sequence runs. */
-        AccountConnection connected;
+        /** Where this domain lives; null until the sequence runs. */
+        String baseUrl;
+
+        /**
+         * What signing in produced; null until the sequence runs.
+         *
+         * <p>Shared with the other domains of the same step when a
+         * browser grant covered several: one consent is one credential,
+         * and this is where that begins.
+         */
+        AccountCredential credential;
 
         /** Whether this domain is switched on and has something to connect to. */
         boolean ready() {
@@ -783,7 +792,7 @@ final class OnboardingFlow {
         authStepIndex = 0;
         oauthGroup.clear();
         for (DomainSetup setup : setups.values()) {
-            setup.connected = null;
+            setup.credential = null;
         }
         resetSetupContinue();
         host.showAuth(MainActivity.STEP_DOMAIN);
@@ -1101,31 +1110,36 @@ final class OnboardingFlow {
         connectedEmail = email;
 
         // NOTE: a browser grant covers every domain that chose the same
-        // authorization server, so its tokens land on all of them, each against
-        // its own endpoint. A password or token prompt covers the one domain
-        // whose button opened it.
+        // authorization server, so one credential lands on all of them, each
+        // against its own endpoint. That sharing is the point: the grant is
+        // one consent, and a provider that rotates its refresh token retires
+        // every copy but the one it just issued. A password or token prompt
+        // covers the one domain whose button opened it.
+        AccountCredential credential =
+                refreshToken == null
+                        ? AccountCredential.password(candidate.login, candidate.password)
+                        : AccountCredential.oauth(
+                                candidate.password,
+                                refreshToken,
+                                tokenEndpoint,
+                                clientId,
+                                clientSecret);
+
         if (!oauthGroup.isEmpty()) {
             for (java.util.Map.Entry<PimDomain, String> granted : oauthGroup.entrySet()) {
                 DomainSetup setup = setups.get(granted.getKey());
                 if (setup == null) {
                     continue;
                 }
-                setup.connected =
-                        new AccountConnection(
-                                new Account(
-                                        granted.getValue(), candidate.login, candidate.password),
-                                refreshToken,
-                                tokenEndpoint,
-                                clientId,
-                                clientSecret);
+                setup.baseUrl = granted.getValue();
+                setup.credential = credential;
             }
             oauthGroup.clear();
         } else {
             DomainSetup setup = setups.get(pendingDomain);
             if (setup != null) {
-                setup.connected =
-                        new AccountConnection(
-                                candidate, refreshToken, tokenEndpoint, clientId, clientSecret);
+                setup.baseUrl = candidate.baseUrl;
+                setup.credential = credential;
             }
         }
 
@@ -1144,7 +1158,7 @@ final class OnboardingFlow {
     private void confirmSetup() {
         connectedEmail = pendingEmail;
         for (DomainSetup setup : setups.values()) {
-            setup.connected = null;
+            setup.credential = null;
         }
         authSteps = planAuthSteps();
         authStepIndex = 0;
@@ -1160,13 +1174,14 @@ final class OnboardingFlow {
 
         connectedAccount = null;
         for (DomainSetup setup : setups.values()) {
-            if (setup.connected == null) {
+            if (setup.credential == null) {
                 continue;
             }
             connectedAccount =
                     connectedAccount == null
-                            ? AccountEntry.of(connectedEmail, setup.domain, setup.connected)
-                            : connectedAccount.with(setup.domain, setup.connected);
+                            ? AccountEntry.of(
+                                    connectedEmail, setup.domain, setup.baseUrl, setup.credential)
+                            : connectedAccount.with(setup.domain, setup.baseUrl, setup.credential);
         }
         if (connectedAccount == null) {
             return;
@@ -1387,7 +1402,12 @@ final class OnboardingFlow {
         // instead of replacing the account with a one-domain one.
         AccountEntry merged = connected;
         for (PimDomain domain : connected.domains()) {
-            merged = host.store.connect(connected.email, domain, connected.connection(domain));
+            merged =
+                    host.store.connect(
+                            connected.email,
+                            domain,
+                            connected.connection(domain).baseUrl,
+                            connected.credential(domain));
         }
 
         AccountEntry stored = merged;

@@ -5,10 +5,12 @@ import android.content.SharedPreferences;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
+import android.util.Log;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.crypto.Cipher;
@@ -18,7 +20,6 @@ import javax.crypto.spec.GCMParameterSpec;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.client.Account;
 
 /**
  * Caches the connected accounts locally, encrypted with an AES-GCM key held in
@@ -92,7 +93,8 @@ public class SecureStore {
      * than a second account: the entry is merged into the one that is already
      * there, and only appears as a new account when the address is new.
      */
-    public AccountEntry connect(String email, PimDomain domain, AccountConnection connection) {
+    public AccountEntry connect(
+            String email, PimDomain domain, String baseUrl, AccountCredential credential) {
         synchronized (LOCK) {
             List<AccountEntry> entries = loadAll();
             AccountEntry existing = null;
@@ -104,8 +106,8 @@ public class SecureStore {
 
             AccountEntry merged =
                     existing == null
-                            ? AccountEntry.of(email, domain, connection)
-                            : existing.with(domain, connection);
+                            ? AccountEntry.of(email, domain, baseUrl, credential)
+                            : existing.with(domain, baseUrl, credential);
             entries.removeIf(entry -> entry.email.equals(email));
             entries.add(merged);
             save(entries);
@@ -160,18 +162,37 @@ public class SecureStore {
         return generator.generateKey();
     }
 
+    /**
+     * The stored shape: per address, where each domain lives and which
+     * credential signs in to it, then the credentials themselves once
+     * each. Credentials sit beside the connections rather than inside
+     * them because one of them routinely covers several domains, and a
+     * file that stored copies is a file whose copies drift apart.
+     */
     private static String encode(List<AccountEntry> entries) {
         try {
             JSONArray array = new JSONArray();
             for (AccountEntry entry : entries) {
                 JSONObject connections = new JSONObject();
                 for (PimDomain domain : entry.domains()) {
-                    connections.put(domain.id, encode(entry.connection(domain)));
+                    AccountConnection connection = entry.connection(domain);
+                    connections.put(
+                            domain.id,
+                            new JSONObject()
+                                    .put("baseUrl", connection.baseUrl)
+                                    .put("credential", connection.credentialId));
                 }
+
+                JSONObject credentials = new JSONObject();
+                for (AccountCredential credential : entry.credentials().values()) {
+                    credentials.put(credential.id, encode(credential));
+                }
+
                 array.put(
                         new JSONObject()
                                 .put("email", entry.email)
-                                .put("connections", connections));
+                                .put("connections", connections)
+                                .put("credentials", credentials));
             }
             return array.toString();
         } catch (JSONException error) {
@@ -179,18 +200,17 @@ public class SecureStore {
         }
     }
 
-    private static JSONObject encode(AccountConnection connection) throws JSONException {
+    private static JSONObject encode(AccountCredential credential) throws JSONException {
         JSONObject object =
                 new JSONObject()
-                        .put("baseUrl", connection.account.baseUrl)
-                        .put("login", connection.account.login)
-                        .put("password", connection.account.password);
-        if (connection.refreshToken != null) {
-            object.put("refreshToken", connection.refreshToken)
-                    .put("tokenEndpoint", connection.tokenEndpoint)
-                    .put("clientId", connection.clientId);
-            if (connection.clientSecret != null) {
-                object.put("clientSecret", connection.clientSecret);
+                        .put("login", credential.login)
+                        .put("secret", credential.secret);
+        if (credential.refreshToken != null) {
+            object.put("refreshToken", credential.refreshToken)
+                    .put("tokenEndpoint", credential.tokenEndpoint)
+                    .put("clientId", credential.clientId);
+            if (credential.clientSecret != null) {
+                object.put("clientSecret", credential.clientSecret);
             }
         }
         return object;
@@ -201,26 +221,10 @@ public class SecureStore {
             JSONArray array = new JSONArray(json);
             List<AccountEntry> entries = new ArrayList<>(array.length());
             for (int index = 0; index < array.length(); index++) {
-                JSONObject object = array.getJSONObject(index);
-                String email = object.getString("email");
-
-                JSONObject connections = object.optJSONObject("connections");
-                if (connections == null) {
-                    // NOTE: an account stored before an account could cover
-                    // several domains. Its one connection is a contacts one,
-                    // because contacts is all the app could connect then.
-                    entries.add(
-                            AccountEntry.of(email, PimDomain.CONTACTS, decodeConnection(object)));
-                    continue;
+                AccountEntry entry = decodeEntry(array.getJSONObject(index));
+                if (entry != null) {
+                    entries.add(entry);
                 }
-
-                Map<PimDomain, AccountConnection> decoded = new EnumMap<>(PimDomain.class);
-                for (java.util.Iterator<String> ids = connections.keys(); ids.hasNext(); ) {
-                    String id = ids.next();
-                    decoded.put(
-                            PimDomain.byId(id), decodeConnection(connections.getJSONObject(id)));
-                }
-                entries.add(new AccountEntry(email, decoded));
             }
             return entries;
         } catch (JSONException error) {
@@ -228,14 +232,50 @@ public class SecureStore {
         }
     }
 
-    private static AccountConnection decodeConnection(JSONObject object) throws JSONException {
-        Account account =
-                new Account(
-                        object.getString("baseUrl"),
-                        object.getString("login"),
-                        object.getString("password"));
-        return new AccountConnection(
-                account,
+    /**
+     * One stored account, or null when it cannot be read.
+     *
+     * <p>Null rather than a throw, because what cannot be read here is
+     * an account written by a version that stored credentials per
+     * domain: dropping it costs one re-sign-in, while failing the whole
+     * decode would take the readable accounts down with it and leave
+     * the app with nothing to open.
+     */
+    private static AccountEntry decodeEntry(JSONObject object) throws JSONException {
+        String email = object.getString("email");
+        JSONObject connections = object.optJSONObject("connections");
+        JSONObject credentials = object.optJSONObject("credentials");
+
+        if (connections == null || credentials == null) {
+            Log.w("pimalaya", "dropping an account stored in an older shape: " + email);
+            return null;
+        }
+
+        Map<String, AccountCredential> decoded = new HashMap<>();
+        for (java.util.Iterator<String> ids = credentials.keys(); ids.hasNext(); ) {
+            String id = ids.next();
+            decoded.put(id, decodeCredential(id, credentials.getJSONObject(id)));
+        }
+
+        Map<PimDomain, AccountConnection> located = new EnumMap<>(PimDomain.class);
+        for (java.util.Iterator<String> ids = connections.keys(); ids.hasNext(); ) {
+            String id = ids.next();
+            JSONObject connection = connections.getJSONObject(id);
+            located.put(
+                    PimDomain.byId(id),
+                    new AccountConnection(
+                            connection.getString("baseUrl"), connection.getString("credential")));
+        }
+
+        return new AccountEntry(email, located, decoded);
+    }
+
+    private static AccountCredential decodeCredential(String id, JSONObject object)
+            throws JSONException {
+        return new AccountCredential(
+                id,
+                object.getString("login"),
+                object.getString("secret"),
                 object.isNull("refreshToken") ? null : object.optString("refreshToken"),
                 object.isNull("tokenEndpoint") ? null : object.optString("tokenEndpoint"),
                 object.isNull("clientId") ? null : object.optString("clientId"),

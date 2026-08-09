@@ -17,7 +17,7 @@ use io_webdav::{
             CaldavCalendar as DavCalendar, home_set::CaldavCalendarHomeSet,
             list::CaldavCalendarList,
         },
-        item::{CaldavItemEntry, list::CaldavItemList},
+        item::{CaldavItemEntry, list::CaldavItemList, update::CaldavItemUpdate},
     },
     rfc4918::WebdavAuth,
 };
@@ -93,6 +93,35 @@ impl<'a, 'local> Client<'a, 'local> {
         let items: BTreeSet<CaldavItemEntry> = self.run(url, coroutine)?;
 
         Ok(items.into_iter().map(into_event).collect())
+    }
+
+    /// Replaces the object at resource id `id` inside the calendar
+    /// collection at `url`, guarded by `if_match` when an ETag is
+    /// known, returning the new ETag when the server sends one.
+    ///
+    /// Guarded on purpose: a calendar is a shared thing, and a blind
+    /// PUT is how one client silently overwrites another's edit. A
+    /// rejected precondition surfaces as the error it is.
+    pub fn update_caldav_event(
+        &mut self,
+        url: &Url,
+        credentials: &crate::types::Credentials,
+        id: &str,
+        ical: &str,
+        if_match: Option<&str>,
+    ) -> Result<Option<String>, BridgeError> {
+        let auth = auth(credentials);
+        let coroutine = CaldavItemUpdate::new(
+            url,
+            &auth,
+            USER_AGENT,
+            url.path(),
+            id,
+            ical.as_bytes().to_vec(),
+            if_match,
+        );
+
+        Ok(self.run(url, coroutine)?.etag)
     }
 
     /// PROPFIND the principal for `CALDAV:calendar-home-set`.

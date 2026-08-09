@@ -277,6 +277,29 @@ final class Native {
     static native String readEvent(String ical);
 
     /**
+     * Applies one edit to a calendar object and returns the new
+     * iCalendar text, patched through its concrete syntax tree so
+     * everything the edit does not name survives. Pure computation, no
+     * transport. Returns the object itself, or a JSON error object.
+     */
+    static native String writeEvent(String ical, String edit);
+
+    /**
+     * Pushes an edited object back to its calendar, guarded by
+     * {@code etag} when one is known. Returns the new ETag as a JSON
+     * string (or null), or a JSON error object.
+     */
+    static native String updateEvent(
+            Transport transport,
+            String baseUrl,
+            String calendarUrl,
+            String login,
+            String password,
+            String id,
+            String ical,
+            String etag);
+
+    /**
      * Lists every card of an account-level backend (JMAP, Google) in
      * one pass, each carrying its addressbook memberships as book ids.
      * Returns a JSON array of {@code {id, uri, etag, vcard, books}}.

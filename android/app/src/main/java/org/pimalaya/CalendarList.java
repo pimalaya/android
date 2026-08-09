@@ -1,7 +1,6 @@
 package org.pimalaya;
 
 import android.content.Context;
-import android.text.format.DateUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -225,27 +224,6 @@ final class CalendarList {
     }
 
     /**
-     * When an occurrence starts: the time alone when it falls today, the
-     * day and the time otherwise, the day alone when it is all-day.
-     *
-     * <p>The year shows only when it is not this one, which is the
-     * platform's own rule for a date a reader is scanning rather than
-     * filing.
-     */
-    static String startLabel(Context context, Occurrence occurrence) {
-        long stamp = stampOf(occurrence.start);
-        int flags = DateUtils.FORMAT_SHOW_DATE | DateUtils.FORMAT_ABBREV_MONTH;
-
-        if (occurrence.allDay) {
-            return DateUtils.formatDateTime(context, stamp, flags);
-        }
-        if (DateUtils.isToday(stamp)) {
-            return DateUtils.formatDateTime(context, stamp, DateUtils.FORMAT_SHOW_TIME);
-        }
-        return DateUtils.formatDateTime(context, stamp, flags | DateUtils.FORMAT_SHOW_TIME);
-    }
-
-    /**
      * How far off an occurrence is, in the app's shared date vocabulary:
      * in 20 minutes, in 3 days, 2 hours ago.
      *
@@ -327,8 +305,6 @@ final class CalendarList {
 
             ((TextView) view.findViewById(R.id.event_countdown))
                     .setText(countdownLabel(host, occurrence));
-            ((TextView) view.findViewById(R.id.event_start))
-                    .setText(startLabel(host, occurrence));
 
             // The disc stands for the calendar, initial and colour both,
             // the way the mail row's disc stands for its sender; the

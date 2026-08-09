@@ -118,11 +118,11 @@ final class SyncRunner {
             return new OfflineEngine.Report();
         }
 
-        AccountConnection contacts = entry.connection(PimDomain.CONTACTS);
+        AccountCredential contacts = entry.credential(PimDomain.CONTACTS);
         try {
-            return engine(contacts.account).syncBook(url, book.remoteSynced);
+            return engine(entry.server(PimDomain.CONTACTS)).syncBook(url, book.remoteSynced);
         } catch (Exception error) {
-            if (!expiredToken(error) || contacts.refreshToken == null) {
+            if (!expiredToken(error) || !contacts.renewable()) {
                 throw error;
             }
             return engine(refresh(entry)).syncBook(url, book.remoteSynced);
@@ -158,8 +158,7 @@ final class SyncRunner {
             }
             try {
                 List<Addressbook> books =
-                        client.listAddressbooks(
-                                account.connection(PimDomain.CONTACTS).account);
+                        client.listAddressbooks(account.server(PimDomain.CONTACTS));
                 base.replaceAddressbooks(account.email, books);
                 new PimdirCollections(pimdir, context)
                         .replace(
@@ -187,11 +186,11 @@ final class SyncRunner {
                 continue;
             }
 
-            AccountConnection contacts = entry.connection(PimDomain.CONTACTS);
+            AccountCredential contacts = entry.credential(PimDomain.CONTACTS);
             try {
-                syncAccount(contacts.account, group.getValue(), outcome);
+                syncAccount(entry.server(PimDomain.CONTACTS), group.getValue(), outcome);
             } catch (Exception error) {
-                if (expiredToken(error) && contacts.refreshToken != null) {
+                if (expiredToken(error) && contacts.renewable()) {
                     try {
                         syncAccount(refresh(entry), group.getValue(), outcome);
                         continue;
@@ -278,31 +277,39 @@ final class SyncRunner {
 
     /** Refreshes the contacts token and returns the fresh credentials. */
     private Account refresh(AccountEntry entry) {
-        return refreshed(entry, PimDomain.CONTACTS).connection(PimDomain.CONTACTS).account;
+        return refreshed(entry, PimDomain.CONTACTS).server(PimDomain.CONTACTS);
     }
 
     /**
-     * Refreshes one domain's OAuth access token and re-persists the
-     * account, returning the updated entry. Providers may rotate the
-     * refresh token, so a reissued one replaces the stored one.
+     * Renews one domain's credential and re-persists the account,
+     * returning the updated entry.
+     *
+     * <p>Whichever domain asks, the credential is renewed once and
+     * every domain that signs in with it follows, because a credential
+     * is stored once per consent rather than copied per domain
+     * ({@link AccountCredential}). A provider that issues a fresh
+     * refresh token on every use retires the old one immediately, so
+     * copies were exactly what could not be kept in step.
      */
     AccountEntry refreshed(AccountEntry entry, PimDomain domain) {
-        AccountConnection connection = entry.connection(domain);
+        AccountCredential credential = entry.credential(domain);
         OauthTokens tokens =
                 client.oauthRefresh(
-                        connection.tokenEndpoint,
-                        connection.clientId,
-                        connection.clientSecret,
-                        connection.refreshToken,
+                        credential.tokenEndpoint,
+                        credential.clientId,
+                        credential.clientSecret,
+                        credential.refreshToken,
                         null);
 
-        // NOTE: the refreshed token replaces this domain's connection alone.
-        // Another domain of the same account may well hold a different token,
-        // from a different consent, and refreshing one must not overwrite it.
-        String refreshToken =
-                tokens.refreshToken != null ? tokens.refreshToken : connection.refreshToken;
+        // One write. Every domain signing in with this credential is
+        // renewed by it, because there is only ever the one copy.
         AccountEntry updated =
-                entry.with(domain, connection.withAccessToken(tokens.accessToken, refreshToken));
+                entry.refreshed(
+                        domain,
+                        tokens.accessToken,
+                        tokens.refreshToken != null
+                                ? tokens.refreshToken
+                                : credential.refreshToken);
 
         store.add(updated);
         if (observer != null) {
@@ -333,15 +340,15 @@ final class SyncRunner {
         }
 
         <T> T call(Call<T> call) throws Exception {
-            AccountConnection connection = account.connection(domain);
+            AccountCredential credential = account.credential(domain);
             try {
-                return call.on(connection.account);
+                return call.on(account.server(domain));
             } catch (Exception error) {
-                if (!expiredToken(error) || connection.refreshToken == null) {
+                if (!expiredToken(error) || !credential.renewable()) {
                     throw error;
                 }
                 account = refreshed(account, domain);
-                return call.on(account.connection(domain).account);
+                return call.on(account.server(domain));
             }
         }
     }

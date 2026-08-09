@@ -68,34 +68,20 @@
 
     </LinearLayout>
 
-    <!-- Top-aligned, exactly as the mail row's is. How far off the
-         occurrence is comes first, because the rows are one scrolling
-         scale of time and that is the only thing saying where on it you
-         are; the moment itself hangs under it. -->
-    <LinearLayout
+    <!-- Top-aligned, where the mail row puts its date, and answering
+         the same question: how far off the occurrence is. The rows are
+         one scrolling scale of time, so the distance is what says where
+         on it a row sits; the exact moment is one tap away, on the
+         entry's own page. -->
+    <TextView
+        android:id="@+id/event_countdown"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
         android:layout_marginStart="8dp"
         android:gravity="end"
-        android:orientation="vertical">
-
-        <TextView
-            android:id="@+id/event_countdown"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:lineHeight="24dp"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="12sp" />
-
-        <TextView
-            android:id="@+id/event_start"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:lineHeight="16dp"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="12sp" />
-
-    </LinearLayout>
+        android:lineHeight="24dp"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="12sp" />
 
 </LinearLayout>

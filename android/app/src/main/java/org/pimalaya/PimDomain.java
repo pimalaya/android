@@ -12,8 +12,9 @@ import java.util.Set;
  * serve them.
  *
  * <p>A domain is an axis of an account, not an account. One address is one
- * identity that covers some of these, each with its own server and its own
- * credentials ({@link AccountConnection}); the connection flow runs once per
+ * identity that covers some of these, each with its own server
+ * ({@link AccountConnection}) and signing in with one of the account's
+ * credentials ({@link AccountCredential}); the connection flow runs once per
  * domain, and all of them land in the one account. Splitting instead would
  * fragment an identity at the front door: every cross-domain question
  * afterwards has to put it back together, an expired token becomes three

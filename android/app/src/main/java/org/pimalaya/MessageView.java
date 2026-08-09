@@ -57,7 +57,7 @@ final class MessageView {
 
         header(message);
         badges(new ArrayList<>());
-        state(host.getString(R.string.message_loading));
+        loading();
         host.show(MainActivity.PANEL_MESSAGE);
 
         load(message);
@@ -203,15 +203,24 @@ final class MessageView {
         frame.addView(view);
         frame.setVisibility(View.VISIBLE);
         host.findViewById(R.id.message_view_state).setVisibility(View.GONE);
+        host.findViewById(R.id.message_view_loading).setVisibility(View.GONE);
     }
 
-    /** Shows a word in the body's place: loading, empty, or a failure. */
+    /** A spinner in the body's place, while the body is on its way. */
+    private void loading() {
+        clearBody().setVisibility(View.GONE);
+        host.findViewById(R.id.message_view_state).setVisibility(View.GONE);
+        host.findViewById(R.id.message_view_loading).setVisibility(View.VISIBLE);
+    }
+
+    /** A word in the body's place: nothing to show, or a failure. */
     private void state(String message) {
         TextView state = host.findViewById(R.id.message_view_state);
         state.setText(message);
         state.setVisibility(View.VISIBLE);
 
         clearBody().setVisibility(View.GONE);
+        host.findViewById(R.id.message_view_loading).setVisibility(View.GONE);
     }
 
     /**

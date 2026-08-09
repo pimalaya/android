@@ -194,6 +194,42 @@ final class PimdirMeta {
     }
 
     /**
+     * The summary of a calendar object the app stores whole: the server's
+     * validator and nothing else.
+     *
+     * <p>What an agenda row renders is not here, deliberately: it needs the
+     * recurrence expansion, which is the bridge's, so the item carries its
+     * body and the agenda projects it. The ETag is, because an edit has to be
+     * pushed guarded, and a validator kept nowhere is a validator that cannot
+     * guard anything.
+     */
+    static String calendarValidator(String etag) {
+        try {
+            JSONObject meta = new JSONObject();
+            meta.put("v", V);
+            putIfSet(meta, "etag", etag);
+            return meta.toString();
+        } catch (JSONException error) {
+            Log.w("pimalaya", "calendar meta failed", error);
+            return "";
+        }
+    }
+
+    /** The validator a stored summary carries, empty when it holds none. */
+    static String validatorOf(String meta) {
+        if (meta == null || meta.isEmpty()) {
+            return "";
+        }
+        try {
+            return new JSONObject(meta).optString("etag");
+        } catch (JSONException error) {
+            // An unreadable summary is one that guards nothing: the push
+            // goes unguarded rather than not going.
+            return "";
+        }
+    }
+
+    /**
      * The sort key of a calendar entry: its {@code DTSTART}, normalised like
      * mail's date, which is what lets a date-range read page a calendar through
      * the same statements as a mailbox.

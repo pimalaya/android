@@ -14,8 +14,10 @@ import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
+import android.content.res.ColorStateList;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.Spinner;
@@ -229,8 +231,11 @@ public class MainActivity extends Activity {
         setUpFab(R.id.fab);
         findViewById(R.id.fab).setOnClickListener(view -> onFabClick());
         findViewById(R.id.bar_back).setOnClickListener(view -> onBarBack());
-        findViewById(R.id.bar_logo).setOnClickListener(view -> openAccountsDrawer());
-        findViewById(R.id.bar_domain).setOnClickListener(this::openDomainMenu);
+        findViewById(R.id.bar_menu).setOnClickListener(view -> openAccountsDrawer());
+        for (int panel : Domains.PANELS) {
+            findViewById(Domains.buttonOf(panel))
+                    .setOnClickListener(view -> switchDomain(panel));
+        }
         findViewById(R.id.bar_filter).setOnClickListener(view -> openFilter());
 
         // The modal dialog binds once here and covers every sync entry
@@ -1616,7 +1621,19 @@ public class MainActivity extends Activity {
 
     private void setUpContactPanel() {
         findViewById(R.id.contact_books).setOnClickListener(view -> manageBooks());
-        findViewById(R.id.contact_add_field).setOnClickListener(view -> form.addField());
+        // NOTE: the add-field button is the bar's, not the contact
+        // editor's: the calendar entry page raises the same one, since
+        // both are the same page with the same gesture. Which one it
+        // adds to follows the screen showing it.
+        findViewById(R.id.contact_add_field)
+                .setOnClickListener(
+                        view -> {
+                            if (screen == PANEL_EVENT_VIEW) {
+                                eventView.addField();
+                            } else {
+                                form.addField();
+                            }
+                        });
     }
 
     /**
@@ -1733,22 +1750,44 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * The list chrome for one domain: the logo, the domain's name as the
-     * dropdown that navigates to the other two, and the filter every
-     * list shares. The domain's own actions come after, from its screen.
-     *
-     * <p>The name replaced three switcher icons. Icons and a title said
-     * the same thing twice, and between them they took the bar width the
-     * actions needed; a dropdown says it once and gives that width back.
+     * The list chrome for one domain: the burger onto the accounts
+     * drawer, the three domain buttons with this one accented, and the
+     * filter every list shares. The domain's own actions come after,
+     * from its screen.
      */
     private void showDomainBar(int panel) {
-        TextView domain = findViewById(R.id.bar_domain);
-        domain.setText(DomainMenu.titleOf(panel));
-        domain.setVisibility(View.VISIBLE);
-        findViewById(R.id.bar_title).setVisibility(View.GONE);
+        showDomainButtons(true);
+        for (int target : Domains.PANELS) {
+            ((ImageButton) findViewById(Domains.buttonOf(target)))
+                    .setImageTintList(
+                            ColorStateList.valueOf(
+                                    ui.resolveColor(
+                                            target == panel
+                                                    ? android.R.attr.colorAccent
+                                                    : android.R.attr.textColorPrimary)));
+        }
 
-        findViewById(R.id.bar_logo).setVisibility(View.VISIBLE);
+        findViewById(R.id.bar_title).setVisibility(View.GONE);
+        findViewById(R.id.bar_menu).setVisibility(View.VISIBLE);
         showFilterButton();
+    }
+
+    /** Retitles the bar, for a page whose own edits change its title. */
+    void updateBarTitle(String title) {
+        ((TextView) findViewById(R.id.bar_title)).setText(title);
+    }
+
+    /**
+     * Raises or hides the three domain buttons together with the gap
+     * that follows them: they are sized to themselves, so without the
+     * gap the bar would pull the domain's actions up against them.
+     */
+    void showDomainButtons(boolean shown) {
+        int visibility = shown ? View.VISIBLE : View.GONE;
+        for (int panel : Domains.PANELS) {
+            findViewById(Domains.buttonOf(panel)).setVisibility(visibility);
+        }
+        findViewById(R.id.bar_spacer).setVisibility(visibility);
     }
 
     /** The merged view's filter, on every list screen, accented while it bites. */
@@ -1763,23 +1802,19 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Drops the domain list under the bar title. Flipping domains is a
-     * lateral move, not a descent, so it animates like a back navigation
-     * going left and a forward one going right, matching the order the
-     * dropdown lists them in.
+     * Switches to another domain. A lateral move and not a descent, so
+     * it animates like a back navigation going left and a forward one
+     * going right, matching the order the buttons sit in.
      */
-    private void openDomainMenu(View anchor) {
-        DomainMenu.show(
-                this,
-                anchor,
-                screen,
-                target -> {
-                    if (DomainMenu.indexOf(target) < DomainMenu.indexOf(screen)) {
-                        showBack(target);
-                    } else {
-                        show(target);
-                    }
-                });
+    private void switchDomain(int target) {
+        if (target == screen) {
+            return;
+        }
+        if (Domains.indexOf(target) < Domains.indexOf(screen)) {
+            showBack(target);
+        } else {
+            show(target);
+        }
     }
 
     /** Opens the two-axis filter over the subscribed books and accounts. */
@@ -2030,7 +2065,26 @@ public class MainActivity extends Activity {
         // what is open rather than by the domain, since the domain is
         // where the back arrow goes.
         screens.put(PANEL_MESSAGE, reader(() -> messageView.title(), PANEL_MAIL));
-        screens.put(PANEL_EVENT_VIEW, reader(() -> eventView.title(), PANEL_CALENDAR));
+
+        // A calendar entry's page is its form, the way a contact's is:
+        // the same rows read and edited, the add-field button beside the
+        // title, and the FAB to save.
+        Screen entry = new Screen();
+        entry.chrome =
+                () -> {
+                    ((TextView) findViewById(R.id.bar_title)).setText(eventView.title());
+                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
+                    if (eventView.readable()) {
+                        findViewById(R.id.contact_add_field).setVisibility(View.VISIBLE);
+                        addFab(R.drawable.ic_save, R.string.event_save);
+                    } else {
+                        findViewById(R.id.fab).setVisibility(View.GONE);
+                    }
+                };
+        entry.fab = () -> eventView.save();
+        entry.barBack = () -> showBack(PANEL_CALENDAR);
+        entry.systemBack = () -> showBack(PANEL_CALENDAR);
+        screens.put(PANEL_EVENT_VIEW, entry);
 
         Screen contact = new Screen();
         contact.chrome =
@@ -2139,8 +2193,11 @@ public class MainActivity extends Activity {
             for (int id :
                     new int[] {
                         R.id.bar_back,
-                        R.id.bar_logo,
-                        R.id.bar_domain,
+                        R.id.bar_menu,
+                        R.id.bar_domain_mail,
+                        R.id.bar_domain_contacts,
+                        R.id.bar_domain_calendar,
+                        R.id.bar_spacer,
                         R.id.bar_filter,
                         R.id.contacts_close,
                         R.id.contacts_search_pill,
