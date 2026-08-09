@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The calendar entry reader's content: the same settings-style page
+     the contact editor is drawn on (accent section headers over
+     full-bleed rows), read-only, with the sections the component
+     carrying it actually has. Its bar elements live in the persistent
+     chrome (activity_main.xml). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <LinearLayout
+            android:id="@+id/event_view_page"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="24dp" />
+
+    </ScrollView>
+
+</FrameLayout>

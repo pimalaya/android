@@ -25,6 +25,7 @@ io-replica = { version = "0.3", default-features = false }
 io-webdav = { version = "0.1", default-features = false }
 jni = "0.22"
 log = { version = "0.4", default-features = false }
+mail-parser = { version = "0.11", default-features = false, features = ["full_encoding"] }
 rand = "0.10"
 secrecy = { version = "0.10", default-features = false }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }

@@ -218,10 +218,28 @@ final class Native {
      * returns the newest {@code limit} messages of each. One call per
      * account, not per mailbox: IMAP is a session, so the whole walk
      * happens inside one login. Returns a JSON array of
-     * {@code {mailbox, id, subject, from, date, seen}}.
+     * {@code {mailbox, id, subject, from, fromAddress, date, seen,
+     * answered, flagged, hasAttachment}}.
      */
     static native String syncMail(
             Transport transport, String url, String login, String password, int limit);
+
+    /**
+     * Reads one message whole: its headers and the one body a reader
+     * sees, the MIME tree resolved on the bridge side. Returns a JSON
+     * object of {@code {subject, from, fromAddress, to, cc, date, kind,
+     * body, attachments}}.
+     *
+     * <p>The mailbox is only IMAP's concern: a JMAP {@code Email} id
+     * addresses the message across the whole account.
+     */
+    static native String fetchMessage(
+            Transport transport,
+            String url,
+            String login,
+            String password,
+            String mailbox,
+            String id);
 
     /**
      * Lists the account's calendars off its base URL, CalDAV or JMAP.
@@ -246,9 +264,17 @@ final class Native {
      * The occurrences one calendar object denotes inside a civil
      * window, recurrence expanded. Pure computation, no transport, so
      * no {@link Transport} argument. Returns a JSON array of
-     * {@code {start, end, summary, location, allDay}}.
+     * {@code {component, start, end, summary, location, allDay}}.
      */
     static native String expandEvent(String ical, String windowStart, String windowEnd);
+
+    /**
+     * One calendar object's first scheduled component read whole, for
+     * the page that shows it. Pure computation, no transport, like the
+     * expansion beside it. Returns a JSON object of the component's
+     * properties.
+     */
+    static native String readEvent(String ical);
 
     /**
      * Lists every card of an account-level backend (JMAP, Google) in

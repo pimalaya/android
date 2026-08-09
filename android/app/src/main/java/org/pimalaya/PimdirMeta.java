@@ -42,21 +42,42 @@ final class PimdirMeta {
     // ---- message/rfc822 ---------------------------------------------------
 
     /**
-     * The summary of one message, per SPEC.md §13. Flags are deliberately absent:
-     * they are the item's own mutable state, not part of its summary.
+     * The summary of one message, per SPEC.md §13, widened by the two fields
+     * this app's list rows need. Flags are deliberately absent: they are the
+     * item's own mutable state, not part of its summary.
+     *
+     * <p>{@code from} is the sender's address, as the spec defines it, and
+     * {@code from_name} their display name; the two are separate because a row
+     * shows the name while the avatar beside it is derived from the address,
+     * which is the half that survives a rename. {@code attachment} is here
+     * rather than in the flags because no protocol treats it as one: IMAP
+     * derives it from BODYSTRUCTURE and JMAP reports it as a property. Both
+     * are app additions, and an unknown field is ignorable by construction, so
+     * a reader that has never heard of them loses nothing.
      */
     static String mail(
-            String messageId, String subject, String from, String to, String date, long size) {
+            String messageId,
+            String subject,
+            String fromName,
+            String fromAddress,
+            String to,
+            String date,
+            long size,
+            boolean attachment) {
         try {
             JSONObject meta = new JSONObject();
             meta.put("v", V);
             putIfSet(meta, "message_id", bare(messageId));
             meta.put("subject", subject == null ? "" : subject);
-            putIfSet(meta, "from", from);
+            putIfSet(meta, "from", fromAddress);
+            putIfSet(meta, "from_name", fromName);
             putIfSet(meta, "to", to);
             putIfSet(meta, "date", rfc3339(date));
             if (size > 0) {
                 meta.put("size", size);
+            }
+            if (attachment) {
+                meta.put("attachment", true);
             }
             return meta.toString();
         } catch (JSONException error) {

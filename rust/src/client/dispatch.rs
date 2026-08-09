@@ -42,7 +42,9 @@ impl<'a, 'local> Client<'a, 'local> {
                 let session_url = account::jmap_session_url(base_url)?;
                 let mut books = self.list_jmap_addressbooks(&session_url, credentials)?;
                 for book in &mut books {
-                    book.url = format!("{base_url}/{}", book.id);
+                    // NOTE: the listing already put the account-scoped
+                    // path there; only the base is missing.
+                    book.url = format!("{base_url}/{}", book.url);
                 }
                 Ok(books)
             }
@@ -227,7 +229,7 @@ impl<'a, 'local> Client<'a, 'local> {
             ),
             Backend::Jmap => {
                 let session_url = account::jmap_session_url(base_url)?;
-                let book_id = account::book_segment(base_url, addressbook_url);
+                let book_id = account::jmap_collection_id(addressbook_url);
                 self.create_jmap_card(&session_url, credentials, book_id, vcard)
             }
             Backend::Google => self.create_google_card(credentials.password, vcard),
@@ -374,7 +376,7 @@ impl<'a, 'local> Client<'a, 'local> {
         match Backend::of(base_url) {
             Backend::Jmap => {
                 let session_url = account::jmap_session_url(base_url)?;
-                let book_id = account::book_segment(base_url, addressbook_url);
+                let book_id = account::jmap_collection_id(addressbook_url);
                 self.push_jmap_cards(&session_url, credentials, book_id, changes)
             }
             Backend::Graph => self.push_graph_cards(

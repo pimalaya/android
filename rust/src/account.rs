@@ -129,6 +129,20 @@ pub fn book_segment<'a>(base_url: &str, addressbook_url: &'a str) -> &'a str {
     }
 }
 
+/// The collection id addressed by a JMAP collection URL: its last path
+/// segment.
+///
+/// An AddressBook or Calendar id is unique inside its JMAP account and
+/// nowhere else, so two accounts on one provider routinely name a
+/// collection the same. The URL the app addresses one by therefore
+/// carries both, `<base URL>/<JMAP account id>/<collection id>`, and
+/// only the tail is the id the protocol takes back. A session that
+/// named no account for the capability composed the bare id, which the
+/// same last-segment read returns unchanged.
+pub fn jmap_collection_id(collection_url: &str) -> &str {
+    collection_url.rsplit('/').next().unwrap_or(collection_url)
+}
+
 /// The Graph folder id addressed by an addressbook URL, empty for the
 /// default Contacts folder.
 pub fn graph_folder<'a>(base_url: &str, addressbook_url: &'a str) -> &'a str {
@@ -216,6 +230,26 @@ mod tests {
             "https://api.fastmail.com/jmap/session",
         );
         assert!(jmap_session_url("https://api.fastmail.com").is_err());
+    }
+
+    /// A JMAP collection URL carries the JMAP account id in front of
+    /// the collection's own id, and only the tail addresses it.
+    #[test]
+    fn jmap_collection_id_takes_the_last_segment() {
+        assert_eq!(
+            jmap_collection_id("jmap://api.example.com/session/u33dcb42b/book1"),
+            "book1",
+        );
+
+        // Two accounts on one provider name the same book; the URLs
+        // they are stored under differ, and both read back as `book1`.
+        assert_eq!(
+            jmap_collection_id("jmap://api.example.com/session/u9f1e2c04/book1"),
+            "book1",
+        );
+
+        // A session naming no account composed the bare id.
+        assert_eq!(jmap_collection_id("jmap://api.example.com/book1"), "book1");
     }
 
     /// The book segment is the part after the base URL; a URL outside

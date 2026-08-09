@@ -274,27 +274,44 @@ public class CardStore extends SQLiteOpenHelper {
      * <p>Only the switches: the books themselves are collections in the store
      * and {@link PimdirCollections} is what writes them, so a book that
      * vanished server-side loses its contents there rather than here.
+     *
+     * <p>A book is recognised by its URL, and failing that by its id within the
+     * account. The fallback is what carries the switches across a change in how
+     * a backend's URLs are composed: the JMAP ones gained their JMAP account id
+     * so two accounts on one provider stop colliding, and without this a user
+     * would find every JMAP book back to the defaults, re-subscribed and
+     * un-mirrored from the phone. An id that two books of one account share is
+     * left out of the fallback rather than guessed at.
      */
     public void replaceAddressbooks(String accountEmail, List<Addressbook> books) {
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
         try {
-            Map<String, int[]> wasSwitched = new HashMap<>();
+            Map<String, int[]> byUrl = new HashMap<>();
+            Map<String, int[]> byId = new HashMap<>();
+            Set<String> ambiguous = new java.util.HashSet<>();
             try (Cursor cursor =
                     db.query(
                             "addressbook",
-                            new String[] {"url", "subscribed", "remote_synced", "phone_synced"},
+                            new String[] {
+                                "url", "id", "subscribed", "remote_synced", "phone_synced"
+                            },
                             "account_email = ?",
                             new String[] {accountEmail},
                             null,
                             null,
                             null)) {
                 while (cursor.moveToNext()) {
-                    wasSwitched.put(
-                            cursor.getString(0),
-                            new int[] {cursor.getInt(1), cursor.getInt(2), cursor.getInt(3)});
+                    int[] switches =
+                            new int[] {cursor.getInt(2), cursor.getInt(3), cursor.getInt(4)};
+                    byUrl.put(cursor.getString(0), switches);
+                    String id = cursor.getString(1);
+                    if (byId.put(id, switches) != null) {
+                        ambiguous.add(id);
+                    }
                 }
             }
+            byId.keySet().removeAll(ambiguous);
 
             db.delete("addressbook", "account_email = ?", new String[] {accountEmail});
 
@@ -303,7 +320,10 @@ public class CardStore extends SQLiteOpenHelper {
                 values.put("url", book.url);
                 values.put("account_email", accountEmail);
                 values.put("id", book.id);
-                int[] switches = wasSwitched.get(book.url);
+                int[] switches = byUrl.get(book.url);
+                if (switches == null) {
+                    switches = byId.get(book.id);
+                }
                 values.put("subscribed", switches == null ? 1 : switches[0]);
                 values.put("remote_synced", switches == null ? 1 : switches[1]);
                 values.put("phone_synced", switches == null ? 0 : switches[2]);

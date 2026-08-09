@@ -126,10 +126,12 @@ pub struct Event {
 
 /// One message's envelope spine, surfaced to the Java client.
 ///
-/// The spine only: no body, no structure, no attachments. A merged mail
-/// list renders exactly these fields, and fetching bodies for every
-/// message of every mailbox to draw a list would be the wrong trade.
+/// The spine only: no body and no MIME structure, just the one bit of it
+/// a row renders ([`Message::has_attachment`]). A merged mail list draws
+/// exactly these fields, and fetching bodies for every message of every
+/// mailbox to draw a list would be the wrong trade.
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Message {
     /// The mailbox the message was listed from.
     pub mailbox: String,
@@ -139,12 +141,74 @@ pub struct Message {
     pub id: String,
     /// Decoded `Subject`, empty when the message carries none.
     pub subject: String,
-    /// The first `From` address, display name preferred over the address.
+    /// The first `From` display name, empty when the sender sent none.
+    /// Kept apart from the address rather than folded into one label,
+    /// because a row shows the name while the avatar beside it is
+    /// derived from the address, which is the half that never changes.
     pub from: String,
+    /// The first `From` address itself, empty when the envelope carries
+    /// no sender at all.
+    pub from_address: String,
     /// The envelope `Date`, still RFC 5322 text.
     pub date: String,
-    /// Whether the message carries `\Seen`.
+    /// Whether the message carries `\Seen` (JMAP `$seen`).
     pub seen: bool,
+    /// Whether the message carries `\Answered` (JMAP `$answered`).
+    pub answered: bool,
+    /// Whether the message carries `\Flagged` (JMAP `$flagged`).
+    pub flagged: bool,
+    /// Whether any MIME part is dispositioned as an attachment.
+    pub has_attachment: bool,
+}
+
+/// One message read whole: the headers a reader sees and the one body
+/// part they read, surfaced to the Java client.
+///
+/// The MIME tree is resolved here rather than crossing the bridge,
+/// because picking the part to show is a decision about the message
+/// (the richest alternative wins, HTML over text) and not about the
+/// screen showing it. What crosses is one body and the list of what
+/// hangs off it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageBody {
+    /// Decoded `Subject`, empty when the message carries none.
+    pub subject: String,
+    /// The first `From` display name, empty when there is none.
+    pub from: String,
+    /// The first `From` address itself.
+    pub from_address: String,
+    /// Every `To` address, comma separated, as a header reads.
+    pub to: String,
+    /// Every `Cc` address, comma separated.
+    pub cc: String,
+    /// When the message was sent, RFC 3339, empty when it carries no
+    /// readable date. Normalised rather than raw, since one of the two
+    /// backends never had an RFC 5322 header to hand over; the Java
+    /// side reads both spellings through the one parser it already has.
+    pub date: String,
+    /// What `body` holds: `html`, `plain`, or empty for neither.
+    pub kind: String,
+    /// The body itself, decoded to text.
+    pub body: String,
+    /// What the message carries beside its body.
+    pub attachments: Vec<MessageAttachment>,
+}
+
+/// One attachment of a message, named and measured but not carried.
+///
+/// The bytes stay on the server: the reader shows attachments as badges
+/// saying what is there, and downloading one is a separate act that has
+/// somewhere to put it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageAttachment {
+    /// The file name, or an empty string when the part names none.
+    pub name: String,
+    /// The media type, lowercased.
+    pub mime: String,
+    /// The size in octets, zero when the source does not report one.
+    pub size: u64,
 }
 
 /// Incremental changes of one collection since a sync cursor: the

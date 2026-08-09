@@ -1,60 +1,138 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Mail row, aligned with item_contact and item_event so the three
-     merged lists share one left edge. Three lines: sender and date,
-     subject, then the mailbox and account the message came from, which
-     is what a merged inbox has to say and a per-mailbox one does not. -->
+<!-- Mail row, built on item_contact's frame so the three merged lists
+     share one left edge and one rhythm: the avatar is the app bar
+     button's circle, starting where the bar title's first letter does,
+     and the row stays full-bleed so its ripple spans the whole line.
+
+     Three lines, subject first: in a merged inbox the subject is what
+     distinguishes two rows, and the sender is the supporting line that
+     says who it came from, above the mailbox and account that say where
+     from. The trailing column pairs the date with the message's flags,
+     the way the avatar pairs with the body. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?android:attr/selectableItemBackground"
-    android:orientation="vertical"
-    android:paddingStart="56dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="@dimen/app_bar_padding"
     android:paddingTop="10dp"
-    android:paddingEnd="@dimen/app_bar_padding"
+    android:paddingEnd="@dimen/item_padding"
     android:paddingBottom="10dp">
 
+    <!-- The leading column: a paperclip when the message carries an
+         attachment, nothing otherwise. It is the one mark worth seeing
+         before the subject, since it is what makes a message something
+         to open on a bigger screen. -->
+    <ImageView
+        android:id="@+id/message_attachment"
+        android:layout_width="@dimen/item_lead"
+        android:layout_height="@dimen/item_lead"
+        android:layout_marginEnd="@dimen/app_bar_title_padding"
+        android:contentDescription="@string/message_attachment"
+        android:padding="12dp"
+        android:src="@drawable/ic_attach_file"
+        android:tint="?android:attr/textColorSecondary"
+        android:visibility="invisible" />
+
+    <TextView
+        android:id="@+id/message_avatar"
+        android:layout_width="@dimen/item_avatar"
+        android:layout_height="@dimen/item_avatar"
+        android:layout_marginEnd="@dimen/item_gap"
+        android:gravity="center"
+        android:textColor="#ffffff"
+        android:textSize="18sp" />
+
     <LinearLayout
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:layout_weight="1"
+        android:orientation="vertical">
 
         <TextView
-            android:id="@+id/message_from"
-            android:layout_width="0dp"
+            android:id="@+id/message_subject"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
             android:ellipsize="end"
+            android:lineHeight="24dp"
             android:maxLines="1"
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="16sp" />
 
         <TextView
-            android:id="@+id/message_date"
-            android:layout_width="wrap_content"
+            android:id="@+id/message_from"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
+            android:ellipsize="end"
+            android:lineHeight="16dp"
+            android:maxLines="1"
             android:textColor="?android:attr/textColorSecondary"
-            android:textSize="12sp" />
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/message_origin"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:lineHeight="16dp"
+            android:maxLines="1"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="13sp" />
 
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/message_subject"
-        android:layout_width="match_parent"
+    <!-- Top-aligned rather than centred, so the date sits level with the
+         subject and the flags hang under it in the room the two
+         supporting lines leave, instead of the pair floating in the
+         middle of the row. -->
+    <LinearLayout
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:textColor="?android:attr/textColorPrimary"
-        android:textSize="14sp" />
+        android:layout_gravity="top"
+        android:layout_marginStart="8dp"
+        android:gravity="end"
+        android:orientation="vertical">
 
-    <TextView
-        android:id="@+id/message_origin"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:textColor="?android:attr/textColorSecondary"
-        android:textSize="12sp" />
+        <TextView
+            android:id="@+id/message_date"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:lineHeight="24dp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="12sp" />
+
+        <!-- The state flags, in a fixed order so a row's icons stay
+             where the eye last found them: replied, then important. The
+             attachment is not here: it leads the row instead, in the
+             column the bar title leaves clear. -->
+        <LinearLayout
+            android:id="@+id/message_flags"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/message_answered"
+                android:layout_width="@dimen/message_flag"
+                android:layout_height="@dimen/message_flag"
+                android:layout_marginStart="4dp"
+                android:contentDescription="@string/message_answered"
+                android:src="@drawable/ic_reply"
+                android:tint="?android:attr/textColorSecondary" />
+
+            <ImageView
+                android:id="@+id/message_flagged"
+                android:layout_width="@dimen/message_flag"
+                android:layout_height="@dimen/message_flag"
+                android:layout_marginStart="4dp"
+                android:contentDescription="@string/message_flagged"
+                android:src="@drawable/ic_star"
+                android:tint="?android:attr/colorAccent" />
+
+        </LinearLayout>
+
+    </LinearLayout>
 
 </LinearLayout>

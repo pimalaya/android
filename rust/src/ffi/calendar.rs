@@ -105,7 +105,9 @@ fn list_calendars(
             let session_url = account::jmap_session_url(base_url)?;
             let mut calendars = client.list_jmap_calendars(&session_url, credentials)?;
             for calendar in &mut calendars {
-                calendar.url = format!("{base_url}/{}", calendar.id);
+                // NOTE: the listing already put the account-scoped path
+                // there; only the base is missing.
+                calendar.url = format!("{base_url}/{}", calendar.url);
             }
             Ok(calendars)
         }
@@ -125,7 +127,7 @@ fn list_events(
     match Backend::of(base_url) {
         Backend::Jmap => {
             let session_url = account::jmap_session_url(base_url)?;
-            let calendar_id = account::book_segment(base_url, calendar_url);
+            let calendar_id = account::jmap_collection_id(calendar_url);
             client.list_jmap_events(&session_url, credentials, calendar_id)
         }
         _ => client.list_caldav_events(&parse_url(calendar_url)?, credentials),
@@ -156,6 +158,28 @@ pub extern "system" fn Java_org_pimalaya_client_Native_expandEvent<'local>(
             Ok(occurrences) => {
                 to_string(&occurrences).unwrap_or_else(|err| error_json(err.to_string()))
             }
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.readEvent`: one calendar object's first scheduled component
+/// read whole, for the page that shows it. Pure computation, no
+/// transport, like the expansion beside it.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_readEvent<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    ical: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let ical = read_string(env, &ical);
+
+        let json = match crate::calendar::read(&ical) {
+            Ok(detail) => to_string(&detail).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 

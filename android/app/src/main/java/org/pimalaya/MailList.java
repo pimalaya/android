@@ -1,5 +1,6 @@
 package org.pimalaya;
 
+import android.graphics.Typeface;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -38,6 +39,8 @@ final class MailList {
     void setUp() {
         ListView list = host.findViewById(R.id.mail_list);
         list.setAdapter(adapter);
+        list.setOnItemClickListener(
+                (parent, view, position, id) -> host.messageView.open(rows.get(position)));
 
         androidx.swiperefreshlayout.widget.SwipeRefreshLayout refresh =
                 host.findViewById(R.id.mail_refresh);
@@ -61,26 +64,6 @@ final class MailList {
         adapter.notifyDataSetChanged();
         host.findViewById(R.id.mail_empty)
                 .setVisibility(rows.isEmpty() ? View.VISIBLE : View.GONE);
-    }
-
-    private String dateLabel(long stamp) {
-        if (stamp <= 0) {
-            return "";
-        }
-        java.util.Date date = new java.util.Date(stamp);
-        java.util.Calendar today = java.util.Calendar.getInstance();
-        java.util.Calendar then = java.util.Calendar.getInstance();
-        then.setTime(date);
-
-        // Same day shows a time, anything older a date: the usual mail
-        // client convention, and it keeps the column narrow.
-        boolean sameDay =
-                today.get(java.util.Calendar.YEAR) == then.get(java.util.Calendar.YEAR)
-                        && today.get(java.util.Calendar.DAY_OF_YEAR)
-                                == then.get(java.util.Calendar.DAY_OF_YEAR);
-        return sameDay
-                ? android.text.format.DateFormat.getTimeFormat(host).format(date)
-                : android.text.format.DateFormat.getMediumDateFormat(host).format(date);
     }
 
     private final class Adapter extends BaseAdapter {
@@ -107,31 +90,61 @@ final class MailList {
             }
 
             MailStore.StoredMessage message = rows.get(position);
-            TextView from = view.findViewById(R.id.message_from);
             TextView subject = view.findViewById(R.id.message_subject);
+            TextView from = view.findViewById(R.id.message_from);
+            TextView date = view.findViewById(R.id.message_date);
 
-            from.setText(
-                    message.from.isEmpty()
-                            ? host.getString(R.string.message_no_sender)
-                            : message.from);
             subject.setText(
                     message.subject.isEmpty()
                             ? host.getString(R.string.message_no_subject)
                             : message.subject);
-
-            // Unread is carried by weight alone: a merged list is busy
-            // enough without a second colour competing with the accent.
-            int weight = message.seen ? android.graphics.Typeface.NORMAL
-                    : android.graphics.Typeface.BOLD;
-            from.setTypeface(null, weight);
-            subject.setTypeface(null, weight);
-
-            ((TextView) view.findViewById(R.id.message_date))
-                    .setText(dateLabel(message.stamp));
+            from.setText(
+                    message.sender().isEmpty()
+                            ? host.getString(R.string.message_no_sender)
+                            : message.sender());
+            // Which day rather than which date: scrolling an inbox is
+            // asking how old a message is, and "Yesterday" answers that
+            // where "8 Aug 2026" leaves the reader to work it out. The
+            // exact date is one tap away, in the message's own header.
+            date.setText(Dates.day(host, message.stamp));
             ((TextView) view.findViewById(R.id.message_origin))
                     .setText(message.mailbox + " · " + message.accountEmail);
 
+            // The disc stands for the sender rather than the message, so
+            // it is keyed by the address alone: a sender who changes how
+            // their name is spelled keeps the colour the eye learned.
+            TextView avatar = view.findViewById(R.id.message_avatar);
+            avatar.setText(Avatar.letter(message.fromAddress));
+            avatar.setBackground(Avatar.circle(message.fromAddress));
+
+            // Unread is carried by weight alone, across every line of the
+            // row including the date (as the Compose client does): a
+            // merged list is busy enough without a second colour
+            // competing with the accent the flags already use.
+            int weight = message.seen ? Typeface.NORMAL : Typeface.BOLD;
+            subject.setTypeface(null, weight);
+            from.setTypeface(null, weight);
+            date.setTypeface(null, weight);
+
+            bindFlags(view, message);
+
             return view;
         }
+    }
+
+    /** Shows the flags the message carries, and hides the strip with none. */
+    private void bindFlags(View view, MailStore.StoredMessage message) {
+        view.findViewById(R.id.message_answered)
+                .setVisibility(message.answered ? View.VISIBLE : View.GONE);
+        view.findViewById(R.id.message_flagged)
+                .setVisibility(message.flagged ? View.VISIBLE : View.GONE);
+        view.findViewById(R.id.message_flags)
+                .setVisibility(message.answered || message.flagged ? View.VISIBLE : View.GONE);
+
+        // NOTE: invisible rather than gone, since the leading column is
+        // what puts every row's avatar under the bar title; a row that
+        // gave it up would sit 48dp to the left of its neighbours.
+        view.findViewById(R.id.message_attachment)
+                .setVisibility(message.hasAttachment ? View.VISIBLE : View.INVISIBLE);
     }
 }

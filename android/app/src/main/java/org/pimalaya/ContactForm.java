@@ -80,10 +80,11 @@ final class ContactForm {
 
     final Activity activity;
     final int accentColor;
-    private final int labelColor;
-    private final int surfaceColor;
     private final ScrollView scroll;
     private final LinearLayout container;
+
+    /** The page this form is drawn on, shared with the reader screens. */
+    private final Sections sections;
 
     /** The working field model the dialogs edit in place. */
     JSONObject model = new JSONObject();
@@ -128,10 +129,9 @@ final class ContactForm {
         this.ui = new Ui(activity);
         this.dialogs = new ContactFieldDialogs(this);
         this.accentColor = resolveColor(android.R.attr.colorAccent);
-        this.labelColor = resolveColor(android.R.attr.textColorSecondary);
-        this.surfaceColor = activity.getColor(R.color.surface);
         this.scroll = activity.findViewById(R.id.contact_scroll);
         this.container = activity.findViewById(R.id.contact_form);
+        this.sections = new Sections(activity, container);
     }
 
     /**
@@ -408,7 +408,8 @@ final class ContactForm {
     private View chooserRow(Field field, AlertDialog dialog) {
         ImageView iconView = new ImageView(activity);
         iconView.setImageResource(field.icon);
-        iconView.setImageTintList(ColorStateList.valueOf(labelColor));
+        iconView.setImageTintList(
+                ColorStateList.valueOf(resolveColor(android.R.attr.textColorSecondary)));
 
         TextView labelView = new TextView(activity);
         labelView.setText(field.label);
@@ -739,50 +740,12 @@ final class ContactForm {
     }
 
     private void section(int title, int icon, List<View> items, boolean keepEmpty) {
-        if (items.isEmpty() && !keepEmpty) {
-            return;
-        }
-
-        // NOTE: the line sits flush; the previous section's last item (or
-        // an item-less header, below) already pads 12dp, so a margin here
-        // would double the gap.
-        if (container.getChildCount() > 0) {
-            View line = new View(activity);
-            line.setBackgroundColor(surfaceColor);
-            container.addView(
-                    line,
-                    new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
-        }
-
-        ImageView iconView = new ImageView(activity);
-        iconView.setImageResource(icon);
-        iconView.setImageTintList(ColorStateList.valueOf(accentColor));
-
-        TextView label = new TextView(activity);
-        label.setText(title);
-        label.setTextColor(accentColor);
-        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        LinearLayout.LayoutParams labelParams =
-                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        labelParams.setMarginStart(dp(8));
-
-        LinearLayout header = new LinearLayout(activity);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(
-                dp(16),
-                container.getChildCount() <= 1 ? dp(16) : dp(10),
-                dp(10),
-                items.isEmpty() ? dp(12) : dp(0));
-        header.addView(iconView, new LinearLayout.LayoutParams(dp(18), dp(18)));
-        header.addView(label, labelParams);
-        header.addView(addIcon(R.string.contact_add_field, () -> addToSection(title)));
-        container.addView(header);
-
-        for (View item : items) {
-            container.addView(item);
-        }
+        sections.section(
+                title,
+                icon,
+                items,
+                addIcon(R.string.contact_add_field, () -> addToSection(title)),
+                keepEmpty);
     }
 
     /** The right-aligned add action of a section header. */
@@ -810,53 +773,26 @@ final class ContactForm {
             CharSequence title, CharSequence subtitle, String diverged, Runnable onClick) {
         String key = diverged;
 
-        TextView titleView = new TextView(activity);
-        titleView.setText(title);
-        titleView.setTextColor(resolveColor(android.R.attr.textColorPrimary));
-        titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-
-        LinearLayout text = new LinearLayout(activity);
-        text.setOrientation(LinearLayout.VERTICAL);
-        text.addView(titleView);
-
-        if (subtitle != null && subtitle.length() > 0) {
-            TextView subtitleView = new TextView(activity);
-            subtitleView.setText(subtitle);
-            subtitleView.setTextColor(labelColor);
-            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-            text.addView(subtitleView);
-        }
-
-        LinearLayout row = new LinearLayout(activity);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(16), dp(12), dp(16), dp(12));
-        row.setBackgroundResource(resolveAttr(android.R.attr.selectableItemBackground));
-        row.setOnClickListener(
-                view -> {
-                    pendingResolveKey = key;
-                    onClick.run();
-                });
-        row.addView(
-                text,
-                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
+        ImageView warn = null;
         if (key != null && !resolved.contains(key)) {
             pending.add(key);
-            ImageView warn = new ImageView(activity);
+            warn = new ImageView(activity);
             warn.setImageResource(R.drawable.ic_diverged);
             // NOTE: 24dp (not the list's 32dp) so the glyph centres on the
             // section headers' add-icon column instead of reading off-axis.
             warn.setImageTintList(
                     android.content.res.ColorStateList.valueOf(
                             resolveColor(android.R.attr.colorError)));
-            LinearLayout.LayoutParams warnParams =
-                    new LinearLayout.LayoutParams(dp(24), dp(24));
-            warnParams.setMarginStart(dp(12));
-            row.addView(warn, warnParams);
         }
 
-        return row;
+        return sections.row(
+                title,
+                subtitle,
+                warn,
+                () -> {
+                    pendingResolveKey = key;
+                    onClick.run();
+                });
     }
 
     /** A field's display value, or empty for an unset field: an empty

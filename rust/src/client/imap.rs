@@ -19,17 +19,20 @@ use io_imap::{
     },
     sasl::auth_plain::{ImapAuthPlain, ImapAuthPlainOptions},
     types::{
+        body::{Body, BodyStructure, Disposition},
+        core::IString,
         fetch::{MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName},
         flag::{Flag, FlagFetch, FlagNameAttribute},
         mailbox::{ListMailbox, Mailbox},
         sequence::SequenceSet,
     },
 };
+use mail_parser::{Address, MessageParser, MimeHeaders, PartType};
 use url::Url;
 
 use crate::{
     client::Client,
-    types::{BridgeError, Credentials, Message},
+    types::{BridgeError, Credentials, Message, MessageAttachment, MessageBody},
 };
 
 /// io-imap's own fragmentizer ceiling, 100 MiB per message.
@@ -153,10 +156,16 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
             .try_into()
             .map_err(|_| format!("Invalid sequence set `{range}`"))?;
 
+        // NOTE: BODYSTRUCTURE is the one structural item a listing asks
+        // for, and only because there is no other way to know a message
+        // carries an attachment: IMAP has no flag for it, unlike JMAP's
+        // hasAttachment. It costs a MIME tree per message rather than a
+        // body, which is what keeps this a spine fetch.
         let items = MacroOrMessageDataItemNames::MessageDataItemNames(vec![
             MessageDataItemName::Uid,
             MessageDataItemName::Envelope,
             MessageDataItemName::Flags,
+            MessageDataItemName::BodyStructure,
         ]);
 
         let fetched = self.run(ImapMessageFetch::new(
@@ -177,19 +186,168 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
     }
 }
 
+/// EXAMINE a mailbox and FETCH one message whole, by UID.
+///
+/// `BODY.PEEK[]` rather than `BODY[]`, so opening a message from the
+/// merged list does not mark it read behind the reader's back: what
+/// marks a message read is a decision the app has not made yet, and a
+/// fetch is the wrong place to make it silently.
+impl ImapSession<'_, '_, '_> {
+    pub fn fetch_raw(&mut self, mailbox: &str, uid: &str) -> Result<Vec<u8>, BridgeError> {
+        let name: Mailbox<'static> = mailbox
+            .to_string()
+            .try_into()
+            .map_err(|_| format!("Invalid mailbox name `{mailbox}`"))?;
+
+        self.run(ImapMailboxExamine::new(
+            name,
+            ImapMailboxExamineOptions::default(),
+        ))?;
+
+        let sequence_set: SequenceSet = uid
+            .try_into()
+            .map_err(|_| format!("Invalid message id `{uid}`"))?;
+
+        let items =
+            MacroOrMessageDataItemNames::MessageDataItemNames(vec![MessageDataItemName::BodyExt {
+                section: None,
+                partial: None,
+                peek: true,
+            }]);
+
+        let fetched = self.run(ImapMessageFetch::new(
+            sequence_set,
+            items,
+            ImapMessageFetchOptions {
+                uid: true,
+                ..Default::default()
+            },
+        ))?;
+
+        fetched
+            .into_values()
+            .flat_map(|items| items.into_inner())
+            .find_map(|item| match item {
+                MessageDataItem::BodyExt { data, .. } => {
+                    data.0.map(|body| body.into_inner().into_owned())
+                }
+                _ => None,
+            })
+            .ok_or_else(|| BridgeError::from(format!("No message `{uid}` in `{mailbox}`")))
+    }
+}
+
+/// One raw RFC 5322 message as the reader shows it.
+///
+/// HTML wins over text when the message carries both, because that is
+/// the alternative the sender laid out; the reader sandboxes it, which
+/// is what makes preferring it safe.
+fn parse_message(raw: &[u8]) -> Result<MessageBody, BridgeError> {
+    let parsed = MessageParser::default()
+        .parse(raw)
+        .ok_or_else(|| BridgeError::from("Could not read the message"))?;
+
+    let sender = parsed.from().and_then(|address| address.first());
+
+    // NOTE: the part itself rather than `body_html`, which renders a
+    // text-only message into HTML rather than saying it has none: a
+    // message with nothing but text would otherwise reach the reader as
+    // markup and be sandboxed in a web view for no reason.
+    let html = parsed.html_part(0).and_then(|part| match &part.body {
+        PartType::Html(html) => Some(html.to_string()),
+        _ => None,
+    });
+    let (kind, body) = match html {
+        Some(html) => ("html", html),
+        None => match parsed.body_text(0) {
+            Some(text) => ("plain", text.into_owned()),
+            None => ("", String::new()),
+        },
+    };
+
+    Ok(MessageBody {
+        subject: parsed.subject().unwrap_or_default().to_string(),
+        from: sender
+            .and_then(|address| address.name.as_deref())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or_default()
+            .to_string(),
+        from_address: sender
+            .and_then(|address| address.address.as_deref())
+            .unwrap_or_default()
+            .to_string(),
+        to: addresses(parsed.to()),
+        cc: addresses(parsed.cc()),
+        date: parsed
+            .date()
+            .map(|date| date.to_rfc3339())
+            .unwrap_or_default(),
+        kind: kind.to_string(),
+        body,
+        attachments: parsed
+            .attachments()
+            .map(|part| MessageAttachment {
+                name: part.attachment_name().unwrap_or_default().to_string(),
+                mime: part
+                    .content_type()
+                    .map(|content| match content.subtype() {
+                        Some(subtype) => format!("{}/{subtype}", content.ctype()),
+                        None => content.ctype().to_string(),
+                    })
+                    .unwrap_or_else(|| String::from("application/octet-stream"))
+                    .to_lowercase(),
+                size: part.contents().len() as u64,
+            })
+            .collect(),
+    })
+}
+
+/// A header's addresses as one line, the way a header reads them.
+fn addresses(header: Option<&Address>) -> String {
+    let Some(header) = header else {
+        return String::new();
+    };
+
+    header
+        .clone()
+        .into_list()
+        .iter()
+        .map(|address| match address.name.as_deref().map(str::trim) {
+            Some(name) if !name.is_empty() => {
+                format!(
+                    "{name} <{}>",
+                    address.address.as_deref().unwrap_or_default()
+                )
+            }
+            _ => address.address.as_deref().unwrap_or_default().to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// One FETCH response's data items to the JNI-facing shape.
 fn message(mailbox: &str, items: Vec<MessageDataItem<'static>>) -> Message {
     let mut uid: u32 = 0;
     let mut subject = String::new();
     let mut from = String::new();
+    let mut from_address = String::new();
     let mut date = String::new();
     let mut seen = false;
+    let mut answered = false;
+    let mut flagged = false;
+    let mut has_attachment = false;
 
     for item in items {
         match item {
             MessageDataItem::Uid(value) => uid = value.get(),
             MessageDataItem::Flags(flags) => {
                 seen = flags.contains(&FlagFetch::Flag(Flag::Seen));
+                answered = flags.contains(&FlagFetch::Flag(Flag::Answered));
+                flagged = flags.contains(&FlagFetch::Flag(Flag::Flagged));
+            }
+            MessageDataItem::BodyStructure(structure) => {
+                has_attachment = attaches(&structure);
             }
             MessageDataItem::Envelope(envelope) => {
                 if let Some(value) = envelope.subject.into_option() {
@@ -198,7 +356,10 @@ fn message(mailbox: &str, items: Vec<MessageDataItem<'static>>) -> Message {
                 if let Some(value) = envelope.date.into_option() {
                     date = String::from_utf8_lossy(value.as_ref()).into_owned();
                 }
-                from = envelope.from.first().map(address_label).unwrap_or_default();
+                if let Some(address) = envelope.from.first() {
+                    from = display_name(address);
+                    from_address = mailbox_address(address);
+                }
             }
             _ => {}
         }
@@ -209,21 +370,30 @@ fn message(mailbox: &str, items: Vec<MessageDataItem<'static>>) -> Message {
         id: uid.to_string(),
         subject,
         from,
+        from_address,
         date,
         seen,
+        answered,
+        flagged,
+        has_attachment,
     }
 }
 
-/// An envelope address as a person reads it: the display name when the
-/// server sent one, the mailbox address otherwise.
-fn address_label(address: &io_imap::types::envelope::Address) -> String {
-    if let Some(name) = address.name.clone().into_option() {
-        let name = String::from_utf8_lossy(name.as_ref()).into_owned();
-        if !name.trim().is_empty() {
-            return name;
-        }
-    }
+/// An envelope address's display name, empty when it carries none.
+fn display_name(address: &io_imap::types::envelope::Address) -> String {
+    let Some(name) = address.name.clone().into_option() else {
+        return String::new();
+    };
 
+    let name = String::from_utf8_lossy(name.as_ref()).into_owned();
+    match name.trim().is_empty() {
+        true => String::new(),
+        false => name,
+    }
+}
+
+/// An envelope address's `local@host`, empty when it carries neither.
+fn mailbox_address(address: &io_imap::types::envelope::Address) -> String {
     let local = address
         .mailbox
         .clone()
@@ -241,6 +411,85 @@ fn address_label(address: &io_imap::types::envelope::Address) -> String {
         true => local,
         false => format!("{local}@{host}"),
     }
+}
+
+/// Whether any part of a MIME tree is something to detach.
+///
+/// The disposition (RFC 2183) decides when the sender stated one: an
+/// inline image is a part a listing must not flag, because what the
+/// paperclip promises is something to detach and not something to
+/// render. **When no disposition was stated at all**, a part that names
+/// a file counts, which is the case this used to miss: `Content-Type:
+/// application/pdf; name="invoice.pdf"` with no `Content-Disposition`
+/// is a perfectly ordinary attachment, and mail in the wild is full of
+/// them.
+fn attaches(structure: &BodyStructure) -> bool {
+    match structure {
+        BodyStructure::Single {
+            body,
+            extension_data,
+        } => {
+            let disposition = extension_data
+                .as_ref()
+                .and_then(|data| data.tail.as_ref())
+                .and_then(kind_of);
+
+            match disposition {
+                Some(kind) => kind.eq_ignore_ascii_case("attachment"),
+                None => names_a_file(body),
+            }
+        }
+        BodyStructure::Multi {
+            bodies,
+            extension_data,
+            ..
+        } => {
+            let own = extension_data
+                .as_ref()
+                .and_then(|data| data.tail.as_ref())
+                .and_then(kind_of)
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("attachment"));
+            own || bodies.as_ref().iter().any(attaches)
+        }
+    }
+}
+
+/// A `Content-Disposition`'s type, when the part carries one.
+fn kind_of(disposition: &Disposition) -> Option<String> {
+    disposition
+        .disposition
+        .as_ref()
+        .map(|(kind, _)| text_of(kind))
+}
+
+/// Whether a part's `Content-Type` carries a non-empty `name`, the
+/// pre-RFC-2183 way of saying a part is a file.
+fn names_a_file(body: &Body) -> bool {
+    body.basic
+        .parameter_list
+        .iter()
+        .any(|(key, value)| text_of(key).eq_ignore_ascii_case("name") && !text_of(value).is_empty())
+}
+
+/// An `IString`'s bytes as text, however the server encoded them.
+fn text_of(value: &IString) -> String {
+    String::from_utf8_lossy(&value.clone().into_inner()).into_owned()
+}
+
+/// Reads one message whole: connect, EXAMINE its mailbox, fetch it and
+/// resolve its MIME tree into the one body a reader sees.
+pub fn fetch_message(
+    client: &mut Client<'_, '_>,
+    url: &Url,
+    credentials: &Credentials,
+    mailbox: &str,
+    id: &str,
+) -> Result<MessageBody, BridgeError> {
+    let mut session = ImapSession::new(client, url);
+    session.connect(credentials)?;
+
+    let raw = session.fetch_raw(mailbox, id)?;
+    parse_message(&raw)
 }
 
 /// Walks a whole account: connect once, list the mailboxes, then take
@@ -266,4 +515,125 @@ pub fn sync_account(
     }
 
     Ok(messages)
+}
+
+#[cfg(test)]
+mod tests {
+    use io_imap::types::{
+        body::{BasicFields, Body, BodyStructure, Disposition, SinglePartExtensionData},
+        core::{IString, NString},
+    };
+
+    use super::{attaches, parse_message};
+
+    fn text(value: &str) -> IString<'static> {
+        value.to_string().try_into().expect("printable ASCII")
+    }
+
+    /// One leaf part: what it names itself, and what it says it is for.
+    fn part(name: Option<&str>, disposition: Option<&str>) -> BodyStructure<'static> {
+        BodyStructure::Single {
+            body: Body {
+                basic: BasicFields {
+                    parameter_list: name
+                        .map(|name| vec![(text("name"), text(name))])
+                        .unwrap_or_default(),
+                    id: NString(None),
+                    description: NString(None),
+                    content_transfer_encoding: text("base64"),
+                    size: 42,
+                },
+                specific: io_imap::types::body::SpecificFields::Basic {
+                    r#type: text("application"),
+                    subtype: text("pdf"),
+                },
+            },
+            extension_data: Some(SinglePartExtensionData {
+                md5: NString(None),
+                tail: disposition.map(|kind| Disposition {
+                    disposition: Some((text(kind), Vec::new())),
+                    tail: None,
+                }),
+            }),
+        }
+    }
+
+    #[test]
+    fn a_named_part_with_no_disposition_is_an_attachment() {
+        // The case the paperclip used to miss: plenty of senders write
+        // `Content-Type: application/pdf; name="invoice.pdf"` and no
+        // `Content-Disposition` at all.
+        assert!(attaches(&part(Some("invoice.pdf"), None)));
+        assert!(!attaches(&part(None, None)));
+    }
+
+    #[test]
+    fn a_stated_disposition_decides_on_its_own() {
+        // An inline image names a file too, and flagging it would
+        // promise something to detach where there is only something to
+        // render.
+        assert!(!attaches(&part(Some("logo.png"), Some("inline"))));
+        assert!(attaches(&part(None, Some("attachment"))));
+        assert!(attaches(&part(Some("invoice.pdf"), Some("ATTACHMENT"))));
+    }
+
+    #[test]
+    fn html_wins_over_text_and_attachments_are_listed() {
+        let raw = b"From: Alice <alice@example.org>\r\n\
+                    To: Bob <bob@example.org>\r\n\
+                    Subject: Hello\r\n\
+                    Date: Sun, 9 Aug 2026 12:14:00 +0200\r\n\
+                    MIME-Version: 1.0\r\n\
+                    Content-Type: multipart/mixed; boundary=\"sep\"\r\n\
+                    \r\n\
+                    --sep\r\n\
+                    Content-Type: multipart/alternative; boundary=\"alt\"\r\n\
+                    \r\n\
+                    --alt\r\n\
+                    Content-Type: text/plain\r\n\
+                    \r\n\
+                    plain body\r\n\
+                    --alt\r\n\
+                    Content-Type: text/html\r\n\
+                    \r\n\
+                    <p>rich body</p>\r\n\
+                    --alt--\r\n\
+                    --sep\r\n\
+                    Content-Type: application/pdf; name=\"invoice.pdf\"\r\n\
+                    Content-Disposition: attachment; filename=\"invoice.pdf\"\r\n\
+                    \r\n\
+                    %PDF\r\n\
+                    --sep--\r\n";
+
+        let message = parse_message(raw).unwrap();
+
+        assert_eq!(message.subject, "Hello");
+        assert_eq!(message.from, "Alice");
+        assert_eq!(message.from_address, "alice@example.org");
+        assert_eq!(message.to, "Bob <bob@example.org>");
+        assert_eq!(message.kind, "html");
+        assert!(message.body.contains("rich body"));
+        assert!(message.date.starts_with("2026-08-09T12:14:00"));
+
+        assert_eq!(message.attachments.len(), 1);
+        assert_eq!(message.attachments[0].name, "invoice.pdf");
+        assert_eq!(message.attachments[0].mime, "application/pdf");
+    }
+
+    #[test]
+    fn a_message_with_no_html_falls_back_to_its_text() {
+        let raw = b"From: alice@example.org\r\n\
+                    Subject: Plain\r\n\
+                    \r\n\
+                    just text\r\n";
+
+        let message = parse_message(raw).unwrap();
+
+        assert_eq!(message.kind, "plain");
+        assert_eq!(message.body.trim(), "just text");
+        // No display name in the header, so the row falls back to the
+        // address rather than showing an empty sender.
+        assert_eq!(message.from, "");
+        assert_eq!(message.from_address, "alice@example.org");
+    }
 }

@@ -40,7 +40,9 @@ public class MailStoreTest {
     }
 
     private static Message message(String mailbox, String id, String subject, String date) {
-        return new Message(mailbox, id, subject, "sender@example.org", date, false);
+        return new Message(
+                mailbox, id, subject, "Sender", "sender@example.org", date, false, false, false,
+                false);
     }
 
     private long scalar(String sql, String... args) {
@@ -123,22 +125,59 @@ public class MailStoreTest {
 
     @Test
     public void aSpineCarriesItsFlagsAndNoBody() {
-        store.replaceMessages(
-                ONE,
-                List.of(
-                        new Message("INBOX", "7", "Read", "a@b.c",
-                                "Mon, 5 Jan 2026 09:00:00 +0000", true)));
+        store.replaceMessages(ONE, List.of(flagged(true)));
 
         // A spine is an item with a summary and no object: hydrating it later
         // is a body write on the same row rather than a second table.
         assertEquals(0, scalar("SELECT count(*) FROM items WHERE object_hash IS NOT NULL"));
         assertTrue(store.loadMerged(10).get(0).seen);
 
+        store.replaceMessages(ONE, List.of(flagged(false)));
+        assertFalse("a flag change lands on the same row", store.loadMerged(10).get(0).seen);
+    }
+
+    /** The same message, read or unread, with every other flag set. */
+    private static Message flagged(boolean seen) {
+        return new Message(
+                "INBOX", "7", "Read", "Ada", "a@b.c", "Mon, 5 Jan 2026 09:00:00 +0000", seen,
+                true, true, true);
+    }
+
+    @Test
+    public void aRowKeepsEveryFlagItsRendersOn() {
+        store.replaceMessages(ONE, List.of(flagged(true)));
+
+        // Three of the four are what the row's trailing icons read, and
+        // they travel by two different routes: answered and flagged are
+        // IMAP flags in the item's own flag set, the attachment is a
+        // summary field, because no protocol treats it as a flag.
+        MailStore.StoredMessage stored = store.loadMerged(10).get(0);
+        assertTrue(stored.answered);
+        assertTrue(stored.flagged);
+        assertTrue(stored.hasAttachment);
+    }
+
+    @Test
+    public void aSenderIsStoredByNameAndByAddress() {
         store.replaceMessages(
                 ONE,
                 List.of(
-                        new Message("INBOX", "7", "Read", "a@b.c",
-                                "Mon, 5 Jan 2026 09:00:00 +0000", false)));
-        assertFalse("a flag change lands on the same row", store.loadMerged(10).get(0).seen);
+                        new Message(
+                                "INBOX", "1", "Named", "Ada Lovelace", "ada@example.org",
+                                "Mon, 5 Jan 2026 09:00:00 +0000", true, false, false, false),
+                        new Message(
+                                "INBOX", "2", "Nameless", "", "anon@example.org",
+                                "Mon, 5 Jan 2026 10:00:00 +0000", true, false, false, false)));
+
+        // The row shows the name and the avatar beside it is keyed by the
+        // address, so losing either half would cost one of the two.
+        MailStore.StoredMessage nameless = store.loadMerged(10).get(0);
+        MailStore.StoredMessage named = store.loadMerged(10).get(1);
+
+        assertEquals("Ada Lovelace", named.fromName);
+        assertEquals("ada@example.org", named.fromAddress);
+        assertEquals("Ada Lovelace", named.sender());
+        assertEquals("a sender with no name falls back to their address",
+                "anon@example.org", nameless.sender());
     }
 }

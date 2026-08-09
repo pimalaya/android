@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The message reader: a header card that says everything about the
+     message, then the message itself filling what is left.
+
+     The card comes from the list row, which already knew the subject,
+     the sender and the date, so it is drawn at once and the body slots
+     in under it when the fetch returns. The two are stacked rather than
+     scrolled together because the body is a web view when the message
+     is HTML, and a web view inside a scroll view scrolls twice. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/card_background"
+        android:layout_margin="@dimen/item_padding"
+        android:orientation="vertical"
+        android:padding="@dimen/item_padding">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <!-- The same disc the row carried, keyed by the same
+                 address, so opening a message keeps the mark the eye
+                 was following. -->
+            <TextView
+                android:id="@+id/message_view_avatar"
+                android:layout_width="@dimen/item_avatar"
+                android:layout_height="@dimen/item_avatar"
+                android:layout_marginEnd="@dimen/item_gap"
+                android:gravity="center"
+                android:textColor="#ffffff"
+                android:textSize="18sp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/message_view_subject"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="18sp" />
+
+                <TextView
+                    android:id="@+id/message_view_from"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/message_view_recipients"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13sp" />
+
+                <!-- The exact date and how long ago, together: the
+                     exact one answers "when", the relative one answers
+                     "how long have I been sitting on this", and a
+                     reader opening a message usually wants both. -->
+                <TextView
+                    android:id="@+id/message_view_date"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13sp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- One badge per attachment, wrapping onto as many lines as it
+             takes: what a message carries is part of what it is, and a
+             count would send the reader looking for a list. -->
+        <LinearLayout
+            android:id="@+id/message_view_attachments"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/message_view_body"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <TextView
+        android:id="@+id/message_view_state"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:alpha="0.5"
+        android:gravity="center"
+        android:padding="48dp"
+        android:textColor="?android:attr/textColorSecondary"
+        android:textSize="16sp" />
+
+</LinearLayout>

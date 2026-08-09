@@ -26,8 +26,8 @@ public class PimdirMetaTest {
     public void aMailSummaryCarriesTheEnvelopeAndNoFlags() throws Exception {
         String meta =
                 PimdirMeta.mail(
-                        "<abc@host>", "Hello", "alice@example.org", "bob@example.org",
-                        "Mon, 5 Jan 2026 09:00:00 +0000", 1234);
+                        "<abc@host>", "Hello", "Alice", "alice@example.org", "bob@example.org",
+                        "Mon, 5 Jan 2026 09:00:00 +0000", 1234, true);
         JSONObject parsed = new JSONObject(meta);
 
         assertEquals(1, parsed.getInt("v"));
@@ -36,6 +36,29 @@ public class PimdirMetaTest {
         assertEquals("2026-01-05T09:00:00Z", parsed.getString("date"));
         assertEquals(1234, parsed.getInt("size"));
         assertFalse("flags are the item's state, not its summary", parsed.has("flags"));
+
+        // The spec's `from` is the address; the display name rides beside
+        // it, so a reader that knows only the convention still gets the
+        // field it expects rather than a name where an address goes.
+        assertEquals("alice@example.org", parsed.getString("from"));
+        assertEquals("Alice", parsed.getString("from_name"));
+        assertTrue(parsed.getBoolean("attachment"));
+    }
+
+    @Test
+    public void aMailSummaryLeavesOutWhatTheMessageDoesNotHave() throws Exception {
+        // An absent field is absent, not empty or false: the summary is
+        // read with optString and optBoolean, so writing the negatives
+        // would only grow every row of a spine mirror.
+        JSONObject parsed =
+                new JSONObject(
+                        PimdirMeta.mail(
+                                null, "Hello", "", "alice@example.org", null,
+                                "Mon, 5 Jan 2026 09:00:00 +0000", 0, false));
+
+        assertFalse(parsed.has("from_name"));
+        assertFalse(parsed.has("attachment"));
+        assertFalse(parsed.has("size"));
     }
 
     @Test

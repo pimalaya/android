@@ -55,45 +55,20 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- The domain switcher: the app's whole navigation, replacing
-             the drawer. Each icon flips the list to one domain over the
-             same merged view; the current one is at full tint, the other
-             two dimmed (applyDomainSwitcher in MainActivity). Shown on
-             the three list screens only. -->
-        <LinearLayout
-            android:id="@+id/domain_switcher"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <ImageButton
-                android:id="@+id/domain_mail"
-                android:layout_width="@dimen/app_bar_button"
-                android:layout_height="@dimen/app_bar_button"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/domain_mail"
-                android:src="@drawable/ic_domain_mail"
-                android:tint="?android:attr/textColorPrimary" />
-
-            <ImageButton
-                android:id="@+id/domain_contacts"
-                android:layout_width="@dimen/app_bar_button"
-                android:layout_height="@dimen/app_bar_button"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/domain_contacts"
-                android:src="@drawable/ic_domain_contacts"
-                android:tint="?android:attr/textColorPrimary" />
-
-            <ImageButton
-                android:id="@+id/domain_calendar"
-                android:layout_width="@dimen/app_bar_button"
-                android:layout_height="@dimen/app_bar_button"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/domain_calendar"
-                android:src="@drawable/ic_domain_calendar"
-                android:tint="?android:attr/textColorPrimary" />
-
-        </LinearLayout>
+        <!-- The logo, in the slot a burger would take: the accounts
+             drawer is what it opens, and the mark is the app's identity
+             beside the domain's name. Deliberately untinted, unlike
+             every other bar button. -->
+        <ImageButton
+            android:id="@+id/bar_logo"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/accounts_open"
+            android:padding="@dimen/app_bar_logo_padding"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_logo"
+            android:visibility="gone" />
 
         <!-- Contacts selection mode: cancel the selection. -->
         <ImageButton
@@ -106,11 +81,37 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- The screen's title (or the selected count). -->
+        <!-- The list screens' title, and the app's whole top-level
+             navigation: it names the domain being shown and drops onto
+             the three (DomainMenu). The caret is what says so. Every
+             list row's avatar starts where this text does. -->
+        <TextView
+            android:id="@+id/bar_domain"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackground"
+            android:drawableEnd="@drawable/ic_arrow_drop_down"
+            android:drawableTint="?android:attr/textColorPrimary"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:paddingStart="@dimen/app_bar_title_padding"
+            android:paddingEnd="@dimen/app_bar_title_padding"
+            android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
+            android:textColor="?android:attr/textColorPrimary"
+            android:visibility="gone" />
+
+        <!-- Every other screen's title: the contact's name on the
+             editor, the selected count during a selection. It
+             ellipsizes rather than pushing the trailing buttons off a
+             narrow bar. -->
         <TextView
             android:id="@+id/bar_title"
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
             android:paddingStart="@dimen/app_bar_title_padding"
             android:paddingEnd="@dimen/app_bar_title_padding"
             android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
@@ -161,17 +162,10 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- Pushes the action icons to the right edge. -->
-        <View
-            android:id="@+id/contacts_bar_spacer"
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-        <!-- The merged view's two-axis filter, shared by the three list
-             screens: the account axis is common to all of them. Tinted
-             with the accent while anything is hidden, so a narrowed list
-             never looks like an empty one. -->
+        <!-- The merged view's two-axis filter, on every list screen: the
+             account axis is common to all of them. Tinted with the
+             accent while anything is hidden, so a narrowed list never
+             looks like an empty one. -->
         <ImageButton
             android:id="@+id/bar_filter"
             android:layout_width="@dimen/app_bar_button"
@@ -190,7 +184,8 @@
             android:background="@drawable/ripple_circle"
             android:contentDescription="@string/contacts_search"
             android:src="@drawable/ic_search"
-            android:tint="?android:attr/textColorPrimary" />
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
 
         <!-- Contacts: the next-birthday dialog. -->
         <ImageButton
@@ -200,7 +195,8 @@
             android:background="@drawable/ripple_circle"
             android:contentDescription="@string/birthdays_title"
             android:src="@drawable/ic_birthday"
-            android:tint="?android:attr/textColorPrimary" />
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
 
         <!-- Contacts: the duplicate remover. -->
         <ImageButton
@@ -210,7 +206,8 @@
             android:background="@drawable/ripple_circle"
             android:contentDescription="@string/dup_find"
             android:src="@drawable/ic_duplicates"
-            android:tint="?android:attr/textColorPrimary" />
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
 
         <!-- Contacts selection mode: merge the selected cards. -->
         <ImageButton
@@ -252,20 +249,22 @@
 
         </FrameLayout>
 
-        <!-- Contacts: the overflow menu (Import, Export), hence the
-             up-down arrows. The slot id gates its whole visibility. -->
+        <!-- Contacts: what is management rather than action, behind one
+             overflow (addressbooks, import, export). The slot id gates
+             its whole visibility. -->
         <FrameLayout
             android:id="@+id/contacts_more_slot"
             android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button">
+            android:layout_height="@dimen/app_bar_button"
+            android:visibility="gone">
 
             <ImageButton
                 android:id="@+id/contacts_more"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/contacts_more"
-                android:src="@drawable/ic_import_export"
+                android:contentDescription="@string/more"
+                android:src="@drawable/ic_more_vert"
                 android:tint="?android:attr/textColorPrimary" />
 
         </FrameLayout>
@@ -324,6 +323,14 @@
         <include layout="@layout/panel_mail" />
 
         <include layout="@layout/panel_calendar" />
+
+        <include layout="@layout/panel_compose" />
+
+        <include layout="@layout/panel_event" />
+
+        <include layout="@layout/panel_message" />
+
+        <include layout="@layout/panel_event_view" />
 
     </ViewFlipper>
 

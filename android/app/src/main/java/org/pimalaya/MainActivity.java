@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Supplier;
 import org.json.JSONObject;
 import org.pimalaya.client.Cards;
 import org.pimalaya.client.Account;
@@ -44,30 +45,43 @@ import org.pimalaya.client.PimalayaException;
  * <p>First launch is the connection flow: email, provider detection and
  * discovery, proposed configurations, the credentials and a connection
  * check, then the addressbook selection. Every subsequent launch lands
- * on the app's root: the merged contacts list across every subscribed
- * addressbook of every account, contact-first per docs/merged-view.md
- * (replicas sharing a vCard UID collapse into one row; storage and sync
- * stay strictly per-replica). A merged row opens one edit form for the
- * whole contact and saving fans the form out onto every replica.
- * Addressbooks live behind a management screen; syncs are manual, from
- * the drawer or the pull-down.
+ * on the app's root, the merged mail list, with the switcher in the bar
+ * flipping to the two other domains over the same merged view.
+ *
+ * <p>The contacts list behind that switcher is contact-first per
+ * docs/merged-view.md (replicas sharing a vCard UID collapse into one
+ * row; storage and sync stay strictly per-replica). A merged row opens
+ * one edit form for the whole contact and saving fans the form out onto
+ * every replica. Accounts live behind the drawer the bar's logo opens;
+ * syncs are manual, from there or from the pull-down.
  */
 public class MainActivity extends Activity {
-    // NOTE: contacts, contact, advanced, source, mail and calendar are
-    // the content flipper's child indexes; home and auth are whole-frame
-    // overlays sliding over it, bar included (only the FAB stays above
-    // them), so their ids only have to miss the flipper's range.
+    // NOTE: everything from contacts to event is the content flipper's
+    // child indexes, in the order activity_main.xml includes them; auth
+    // and account are whole-frame overlays sliding over it, bar included
+    // (only the FAB stays above them), so their ids only have to miss
+    // the flipper's range.
     static final int PANEL_CONTACTS = 0;
     static final int PANEL_CONTACT = 1;
     static final int PANEL_ADVANCED = 2;
     static final int PANEL_SOURCE = 3;
     static final int PANEL_MAIL = 4;
     static final int PANEL_CALENDAR = 5;
-    private static final int PANEL_AUTH = 7;
-    static final int PANEL_ACCOUNT = 8;
+    static final int PANEL_COMPOSE = 6;
+    static final int PANEL_EVENT = 7;
+    static final int PANEL_MESSAGE = 8;
+    static final int PANEL_EVENT_VIEW = 9;
+    private static final int PANEL_AUTH = 20;
+    static final int PANEL_ACCOUNT = 21;
 
-    /** The list screens the domain switcher flips between, in bar order. */
-    private static final int[] DOMAINS = {PANEL_MAIL, PANEL_CONTACTS, PANEL_CALENDAR};
+    /**
+     * The domain the app opens on, and the one every flow that finishes
+     * without a domain of its own lands back on. Mail, because it is the
+     * one people check rather than consult: an agenda and an address
+     * book are looked up when something is wanted from them, while an
+     * inbox is the reason the app was opened at all.
+     */
+    private static final int PANEL_ROOT = PANEL_MAIL;
 
     /** The auth flow's steps, inside its own flipper under one bar. */
     static final int STEP_EMAIL = 0;
@@ -98,7 +112,7 @@ public class MainActivity extends Activity {
 
     /** The contacts inside it. */
     PimdirContacts contacts;
-    private SyncRunner runner;
+    SyncRunner runner;
     private ViewFlipper flipper;
     private ViewFlipper authFlipper;
     ContactForm form;
@@ -114,10 +128,16 @@ public class MainActivity extends Activity {
 
     CalendarList calendarList;
 
+    /** The reader one agenda row opens onto. */
+    EventView eventView;
+
     /** The mail side of the store, and the merged list over it. */
     MailStore mail;
 
     MailList mailList;
+
+    /** The reader one message row opens onto. */
+    MessageView messageView;
 
     /** The connection wizard and its OAuth grants (see onCreate wiring). */
     private OnboardingFlow onboarding;
@@ -165,7 +185,7 @@ public class MainActivity extends Activity {
     EditSession edit = new EditSession();
 
     /** The screen currently shown: a flipper panel, or an overlay. */
-    int screen = PANEL_CONTACTS;
+    int screen = PANEL_ROOT;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -184,6 +204,8 @@ public class MainActivity extends Activity {
         calendarList = new CalendarList(this, events);
         mail = new MailStore(this, pimdir);
         mailList = new MailList(this, mail);
+        eventView = new EventView(this);
+        messageView = new MessageView(this);
         runner = new SyncRunner(this, base, pimdir, store, client, syncObserver());
         // NOTE: the two flows reference each other (grants land back in
         // the wizard), so one side binds late.
@@ -197,7 +219,6 @@ public class MainActivity extends Activity {
         form.setOnRender(this::updateSaveEnabled);
 
         setUpScreens();
-        setUpDomainSwitcher();
         setUpEmailPanel();
         contactsList.setUp();
         calendarList.setUp();
@@ -208,6 +229,8 @@ public class MainActivity extends Activity {
         setUpFab(R.id.fab);
         findViewById(R.id.fab).setOnClickListener(view -> onFabClick());
         findViewById(R.id.bar_back).setOnClickListener(view -> onBarBack());
+        findViewById(R.id.bar_logo).setOnClickListener(view -> openAccountsDrawer());
+        findViewById(R.id.bar_domain).setOnClickListener(this::openDomainMenu);
         findViewById(R.id.bar_filter).setOnClickListener(view -> openFilter());
 
         // The modal dialog binds once here and covers every sync entry
@@ -359,17 +382,17 @@ public class MainActivity extends Activity {
 
     /**
      * Leaves the auth flow without finishing: the sheet slides out onto
-     * the contacts root (the drawer stays closed).
+     * the root (the drawer stays closed).
      */
     private void cancelAuth() {
         closeOverlay(PANEL_AUTH);
-        screen = PANEL_CONTACTS;
-        applyChrome(PANEL_CONTACTS);
+        screen = PANEL_ROOT;
+        applyChrome(PANEL_ROOT);
     }
 
     /**
      * Closes the auth sheet onto one of the domain screens, for a connection
-     * that finishes somewhere other than the contacts list.
+     * that finishes somewhere other than the root.
      */
     void leaveOnboarding(int panel) {
         closeOverlay(PANEL_AUTH);
@@ -480,21 +503,30 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** The app's root: the merged contacts list across every account. */
+    /** The app's root: the merged mail list across every account. */
     private void goHome() {
+        goDomain(PANEL_ROOT);
+    }
+
+    /**
+     * Lands on one domain's list with everything behind it settled: any
+     * contacts search or selection dropped, the contacts rebuilt (they
+     * back the merged view whichever list shows), the drawer shut.
+     */
+    private void goDomain(int panel) {
         contactsList.closeSearch();
         contactsList.exitSelection();
 
         reloadContacts();
 
-        // Landing on the root is always a return: the auth sheet slides
-        // back out onto the root left underneath.
+        // Landing on a list is always a return: the auth sheet slides
+        // back out onto the list left underneath.
         if (screen == PANEL_AUTH) {
             closeOverlay(PANEL_AUTH);
-            screen = PANEL_CONTACTS;
-            applyChrome(PANEL_CONTACTS);
+            screen = panel;
+            applyChrome(panel);
         } else {
-            showBack(PANEL_CONTACTS);
+            showBack(panel);
         }
 
         if (drawer.isDrawerOpen(android.view.Gravity.START)) {
@@ -504,10 +536,12 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Refreshes the addressbooks management screen and slides it over
-     * the contacts list like a drawer (the list stays put).
+     * Refreshes the accounts drawer and slides it over the list (which
+     * stays put). Reached from the bar's logo, which is the leading slot
+     * a burger would take, and from the contacts overflow, where the
+     * per-book switches behind each account are what is wanted.
      */
-    void openBooksManager() {
+    void openAccountsDrawer() {
         reloadHome();
         drawer.openDrawer(android.view.Gravity.START);
     }
@@ -895,12 +929,12 @@ public class MainActivity extends Activity {
      * Store-to-remote spoke: per addressbook, fetches the remote into
      * the store, pushes the staged local changes, and re-fetches the
      * pushed state. The phone is not touched; that is the local sync.
-     * When `toHome`, this is the onboarding's first sync, landing on
-     * the contacts list; either way the shared syncing state drives
-     * the modal loader over whatever is on screen (the auth sheet
-     * included, the loader sits above it).
+     * When `onboarding`, this is the first sync of a freshly connected
+     * contacts account and lands on the contacts list; either way the
+     * shared syncing state drives the modal loader over whatever is on
+     * screen (the auth sheet included, the loader sits above it).
      */
-    void syncRemote(boolean toHome) {
+    void syncRemote(boolean onboarding) {
         setSyncing(true);
 
         io.execute(
@@ -909,7 +943,7 @@ public class MainActivity extends Activity {
                     postAlive(
                             () -> {
                                 setSyncing(false);
-                                finishSync(toHome);
+                                finishSync(onboarding);
                                 reportSync(outcome);
                             });
                 });
@@ -978,15 +1012,17 @@ public class MainActivity extends Activity {
                 () -> {
                     Exception failure = null;
                     for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
-                        AccountConnection mailbox = account.connection(PimDomain.MAIL);
+                        SyncRunner.Session session = runner.session(account, PimDomain.MAIL);
                         try {
                             mail.replaceMessages(
                                     account.email,
-                                    client.syncMail(
-                                            mailbox.account.baseUrl,
-                                            mailbox.account.login,
-                                            mailbox.account.password,
-                                            MAIL_PER_MAILBOX));
+                                    session.call(
+                                            server ->
+                                                    client.syncMail(
+                                                            server.baseUrl,
+                                                            server.login,
+                                                            server.password,
+                                                            MAIL_PER_MAILBOX)));
                         } catch (Exception error) {
                             Log.w("pimalaya", "mail sync failed: " + account.email, error);
                             failure = error;
@@ -999,7 +1035,7 @@ public class MainActivity extends Activity {
                                 setSyncing(false);
                                 mailList.reload();
                                 if (outcome != null) {
-                                    toast(getString(R.string.sync_failed));
+                                    showError(outcome, R.string.sync_failed);
                                 }
                             });
                 });
@@ -1038,11 +1074,14 @@ public class MainActivity extends Activity {
                     // before the connection flow could make one, and it walked
                     // a CardDAV home looking for calendars.
                     for (AccountEntry account : accountsFor(PimDomain.CALENDAR)) {
+                        // NOTE: one session for the whole account, so the
+                        // listing and every event round after it share the
+                        // token a refresh may have replaced part-way.
+                        SyncRunner.Session session = runner.session(account, PimDomain.CALENDAR);
                         try {
                             events.replaceCalendars(
                                     account.email,
-                                    client.listCalendars(
-                                            account.connection(PimDomain.CALENDAR).account));
+                                    session.call(server -> client.listCalendars(server)));
                         } catch (Exception error) {
                             Log.w("pimalaya", "calendar list failed: " + account.email, error);
                             failure = error;
@@ -1056,9 +1095,9 @@ public class MainActivity extends Activity {
                             try {
                                 events.replaceEvents(
                                         calendar.id,
-                                        client.listEvents(
-                                                account.connection(PimDomain.CALENDAR).account,
-                                                calendar.url));
+                                        session.call(
+                                                server ->
+                                                        client.listEvents(server, calendar.url)));
                             } catch (Exception error) {
                                 Log.w("pimalaya", "event list failed: " + calendar.url, error);
                                 failure = error;
@@ -1072,7 +1111,7 @@ public class MainActivity extends Activity {
                                 setSyncing(false);
                                 calendarList.reload();
                                 if (outcome != null) {
-                                    toast(getString(R.string.sync_failed));
+                                    showError(outcome, R.string.sync_failed);
                                 }
                             });
                 });
@@ -1105,10 +1144,15 @@ public class MainActivity extends Activity {
                 });
     }
 
-    /** After a sync, lands on the merged root or refreshes the open list. */
-    private void finishSync(boolean toHome) {
-        if (toHome) {
-            goHome();
+    /**
+     * After a sync, refreshes the open list, or lands on the contacts
+     * when the sync was the one the onboarding runs on a fresh contacts
+     * account: what was just connected is what should show, which is why
+     * this lands there rather than on the root.
+     */
+    private void finishSync(boolean onboarding) {
+        if (onboarding) {
+            goDomain(PANEL_CONTACTS);
         } else {
             reloadContacts();
         }
@@ -1689,19 +1733,21 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Raises the domain switcher over the title and marks {@code panel}
-     * as the one showing: it is the app's whole top-level navigation, so
-     * the current domain has to be readable at a glance. The other two
-     * are dimmed rather than hidden, since a switcher that only shows
-     * where you are cannot show where you can go.
+     * The list chrome for one domain: the logo, the domain's name as the
+     * dropdown that navigates to the other two, and the filter every
+     * list shares. The domain's own actions come after, from its screen.
+     *
+     * <p>The name replaced three switcher icons. Icons and a title said
+     * the same thing twice, and between them they took the bar width the
+     * actions needed; a dropdown says it once and gives that width back.
      */
-    private void showDomainSwitcher(int panel) {
+    private void showDomainBar(int panel) {
+        TextView domain = findViewById(R.id.bar_domain);
+        domain.setText(DomainMenu.titleOf(panel));
+        domain.setVisibility(View.VISIBLE);
         findViewById(R.id.bar_title).setVisibility(View.GONE);
-        findViewById(R.id.domain_switcher).setVisibility(View.VISIBLE);
-        for (int index = 0; index < DOMAINS.length; index++) {
-            android.widget.ImageButton icon = findViewById(domainButton(DOMAINS[index]));
-            icon.setImageAlpha(DOMAINS[index] == panel ? 255 : 90);
-        }
+
+        findViewById(R.id.bar_logo).setVisibility(View.VISIBLE);
         showFilterButton();
     }
 
@@ -1714,6 +1760,26 @@ public class MainActivity extends Activity {
                         filter.isActive()
                                 ? ui.resolveColor(android.R.attr.colorAccent)
                                 : ui.resolveColor(android.R.attr.textColorPrimary)));
+    }
+
+    /**
+     * Drops the domain list under the bar title. Flipping domains is a
+     * lateral move, not a descent, so it animates like a back navigation
+     * going left and a forward one going right, matching the order the
+     * dropdown lists them in.
+     */
+    private void openDomainMenu(View anchor) {
+        DomainMenu.show(
+                this,
+                anchor,
+                screen,
+                target -> {
+                    if (DomainMenu.indexOf(target) < DomainMenu.indexOf(screen)) {
+                        showBack(target);
+                    } else {
+                        show(target);
+                    }
+                });
     }
 
     /** Opens the two-axis filter over the subscribed books and accounts. */
@@ -1753,48 +1819,6 @@ public class MainActivity extends Activity {
                     calendarList.reload();
                     mailList.reload();
                 });
-    }
-
-    /** The switcher button that flips to a domain's list screen. */
-    private static int domainButton(int panel) {
-        if (panel == PANEL_MAIL) {
-            return R.id.domain_mail;
-        }
-        return panel == PANEL_CALENDAR ? R.id.domain_calendar : R.id.domain_contacts;
-    }
-
-    /**
-     * Binds the three switcher icons. Flipping between domains is a
-     * lateral move, not a descent, so it animates like a back
-     * navigation when going left and a forward one when going right,
-     * matching the icons' order in the bar.
-     */
-    private void setUpDomainSwitcher() {
-        for (int index = 0; index < DOMAINS.length; index++) {
-            int target = DOMAINS[index];
-            findViewById(domainButton(target))
-                    .setOnClickListener(
-                            view -> {
-                                if (screen == target) {
-                                    return;
-                                }
-                                if (indexOfDomain(target) < indexOfDomain(screen)) {
-                                    showBack(target);
-                                } else {
-                                    show(target);
-                                }
-                            });
-        }
-    }
-
-    /** A domain's position in the bar, or -1 when the screen is not one. */
-    private static int indexOfDomain(int panel) {
-        for (int index = 0; index < DOMAINS.length; index++) {
-            if (DOMAINS[index] == panel) {
-                return index;
-            }
-        }
-        return -1;
     }
 
     /** Navigates forward: the panels slide in from the right. */
@@ -1897,6 +1921,54 @@ public class MainActivity extends Activity {
      *  matching the include order in activity_main.xml). */
     private final Map<Integer, Screen> screens = new HashMap<>();
 
+    /** Raises the shared FAB as a list screen's add button. */
+    private void addFab(int icon, int description) {
+        android.widget.ImageButton fab = findViewById(R.id.fab);
+        fab.setImageResource(icon);
+        fab.setContentDescription(getString(description));
+        fab.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * An editor that is still a frame: a titled screen with a back arrow
+     * and no FAB, leaving onto the list that opened it. It is a screen
+     * rather than nothing so the navigation around it can be built and
+     * used before what goes inside it exists.
+     */
+    private Screen frame(int title, int list) {
+        Screen frame = new Screen();
+        frame.chrome =
+                () -> {
+                    ((TextView) findViewById(R.id.bar_title)).setText(title);
+                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
+                    findViewById(R.id.fab).setVisibility(View.GONE);
+                };
+        frame.barBack = () -> showBack(list);
+        frame.systemBack = () -> showBack(list);
+        return frame;
+    }
+
+    /**
+     * A reader: one item shown whole, with a back arrow onto the list it
+     * was opened from and a bar titled by the item itself.
+     *
+     * <p>The title is a supplier rather than a string, because what is
+     * open changes with every row and the chrome is applied after the
+     * reader has been handed its item.
+     */
+    private Screen reader(Supplier<String> title, int list) {
+        Screen reader = new Screen();
+        reader.chrome =
+                () -> {
+                    ((TextView) findViewById(R.id.bar_title)).setText(title.get());
+                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
+                    findViewById(R.id.fab).setVisibility(View.GONE);
+                };
+        reader.barBack = () -> showBack(list);
+        reader.systemBack = () -> showBack(list);
+        return reader;
+    }
+
     /** Fills the screen table; every entry reads like one screen's card. */
     private void setUpScreens() {
         Screen contacts = new Screen();
@@ -1910,7 +1982,7 @@ public class MainActivity extends Activity {
                     // switcher when a selection is running.
                     contactsList.updateSelectionUi();
                     if (!contactsList.isSelectionMode() && !contactsList.isSearchOpen()) {
-                        showDomainSwitcher(PANEL_CONTACTS);
+                        showDomainBar(PANEL_CONTACTS);
                     }
                 };
         contacts.fab = this::addContact;
@@ -1925,27 +1997,40 @@ public class MainActivity extends Activity {
         screens.put(PANEL_CONTACTS, contacts);
 
         // Mail and calendar share the contacts list's chrome shape: the
-        // domain switcher instead of a title, no per-domain actions yet
-        // (read-only), and the FAB hidden until a write path exists.
+        // domain switcher instead of a title, and an add FAB opening the
+        // domain's editor. Their lists are read-only, so the editors are
+        // frames for now; the FAB is there because where a domain's new
+        // item is created should not move once they are filled in.
         Screen mailScreen = new Screen();
         mailScreen.chrome =
                 () -> {
-                    findViewById(R.id.fab).setVisibility(View.GONE);
-                    showDomainSwitcher(PANEL_MAIL);
+                    addFab(R.drawable.ic_add, R.string.compose_new);
+                    showDomainBar(PANEL_MAIL);
                     mailList.reload();
                 };
+        mailScreen.fab = () -> show(PANEL_COMPOSE);
         screens.put(PANEL_MAIL, mailScreen);
 
         Screen calendar = new Screen();
         calendar.chrome =
                 () -> {
-                    findViewById(R.id.fab).setVisibility(View.GONE);
-                    showDomainSwitcher(PANEL_CALENDAR);
+                    addFab(R.drawable.ic_add, R.string.event_new);
+                    showDomainBar(PANEL_CALENDAR);
                     // The window the agenda covers starts at today, so it
                     // is rebuilt on arrival rather than cached across days.
                     calendarList.reload();
                 };
+        calendar.fab = () -> show(PANEL_EVENT);
         screens.put(PANEL_CALENDAR, calendar);
+
+        screens.put(PANEL_COMPOSE, frame(R.string.compose_new, PANEL_MAIL));
+        screens.put(PANEL_EVENT, frame(R.string.event_new, PANEL_CALENDAR));
+
+        // The two readers: a back arrow, no FAB, and a bar titled by
+        // what is open rather than by the domain, since the domain is
+        // where the back arrow goes.
+        screens.put(PANEL_MESSAGE, reader(() -> messageView.title(), PANEL_MAIL));
+        screens.put(PANEL_EVENT_VIEW, reader(() -> eventView.title(), PANEL_CALENDAR));
 
         Screen contact = new Screen();
         contact.chrome =
@@ -2054,7 +2139,8 @@ public class MainActivity extends Activity {
             for (int id :
                     new int[] {
                         R.id.bar_back,
-                        R.id.domain_switcher,
+                        R.id.bar_logo,
+                        R.id.bar_domain,
                         R.id.bar_filter,
                         R.id.contacts_close,
                         R.id.contacts_search_pill,
@@ -2073,7 +2159,6 @@ public class MainActivity extends Activity {
                 findViewById(id).setVisibility(View.GONE);
             }
             findViewById(R.id.bar_title).setVisibility(View.VISIBLE);
-            findViewById(R.id.contacts_bar_spacer).setVisibility(View.VISIBLE);
         }
 
         entry.chrome.run();
@@ -2128,7 +2213,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String message(Exception error, int fallback) {
+    String message(Exception error, int fallback) {
         String message = error.getMessage();
         return message == null || message.isEmpty() ? getString(fallback) : message;
     }

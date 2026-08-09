@@ -276,36 +276,84 @@ final class SyncRunner {
         return engine;
     }
 
-    /**
-     * Refreshes an OAuth account's access token and re-persists the
-     * account, returning the fresh credentials. Providers may rotate
-     * the refresh token, so a reissued one replaces the stored one.
-     */
+    /** Refreshes the contacts token and returns the fresh credentials. */
     private Account refresh(AccountEntry entry) {
-        AccountConnection contacts = entry.connection(PimDomain.CONTACTS);
+        return refreshed(entry, PimDomain.CONTACTS).connection(PimDomain.CONTACTS).account;
+    }
+
+    /**
+     * Refreshes one domain's OAuth access token and re-persists the
+     * account, returning the updated entry. Providers may rotate the
+     * refresh token, so a reissued one replaces the stored one.
+     */
+    AccountEntry refreshed(AccountEntry entry, PimDomain domain) {
+        AccountConnection connection = entry.connection(domain);
         OauthTokens tokens =
                 client.oauthRefresh(
-                        contacts.tokenEndpoint,
-                        contacts.clientId,
-                        contacts.clientSecret,
-                        contacts.refreshToken,
+                        connection.tokenEndpoint,
+                        connection.clientId,
+                        connection.clientSecret,
+                        connection.refreshToken,
                         null);
 
         // NOTE: the refreshed token replaces this domain's connection alone.
         // Another domain of the same account may well hold a different token,
         // from a different consent, and refreshing one must not overwrite it.
         String refreshToken =
-                tokens.refreshToken != null ? tokens.refreshToken : contacts.refreshToken;
+                tokens.refreshToken != null ? tokens.refreshToken : connection.refreshToken;
         AccountEntry updated =
-                entry.with(
-                        PimDomain.CONTACTS,
-                        contacts.withAccessToken(tokens.accessToken, refreshToken));
+                entry.with(domain, connection.withAccessToken(tokens.accessToken, refreshToken));
 
         store.add(updated);
         if (observer != null) {
             observer.accountRefreshed(updated);
         }
-        return updated.connection(PimDomain.CONTACTS).account;
+        return updated;
+    }
+
+    /**
+     * One account's calls in one domain, with its access token kept
+     * fresh: a call answered 401 refreshes the token once and runs
+     * again, and every later call in the scope uses the refreshed
+     * connection.
+     *
+     * <p>The read-only domains need this exactly as much as contacts
+     * does. An access token lives about an hour, so without it the
+     * second sync of any OAuth mail or calendar account of a session
+     * fails and keeps failing, with a stored refresh token sitting
+     * unused beside it.
+     */
+    final class Session {
+        private AccountEntry account;
+        private final PimDomain domain;
+
+        private Session(AccountEntry account, PimDomain domain) {
+            this.account = account;
+            this.domain = domain;
+        }
+
+        <T> T call(Call<T> call) throws Exception {
+            AccountConnection connection = account.connection(domain);
+            try {
+                return call.on(connection.account);
+            } catch (Exception error) {
+                if (!expiredToken(error) || connection.refreshToken == null) {
+                    throw error;
+                }
+                account = refreshed(account, domain);
+                return call.on(account.connection(domain).account);
+            }
+        }
+    }
+
+    /** One call against a domain's endpoint, retryable after a refresh. */
+    interface Call<T> {
+        T on(Account server) throws Exception;
+    }
+
+    /** A token-refreshing scope for one account's domain. */
+    Session session(AccountEntry account, PimDomain domain) {
+        return new Session(account, domain);
     }
 
     /**
@@ -331,7 +379,7 @@ final class SyncRunner {
     }
 
     /** True for an HTTP 401 from any backend (expired or revoked token). */
-    private static boolean expiredToken(Exception error) {
+    static boolean expiredToken(Exception error) {
         return error instanceof PimalayaException
                 && Integer.valueOf(401).equals(((PimalayaException) error).status);
     }

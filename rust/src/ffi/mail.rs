@@ -22,7 +22,7 @@ use crate::{
     account::{self, Backend},
     client::{self, Client},
     ffi::{error_json, parse_url, read_string},
-    types::{BridgeError, Credentials, Message},
+    types::{BridgeError, Credentials, Message, MessageBody},
 };
 
 /// `Native.syncMail`: connects to the account's mail server, lists its
@@ -57,6 +57,66 @@ pub extern "system" fn Java_org_pimalaya_client_Native_syncMail<'local>(
         Ok(env.new_string(json)?.into())
     })
     .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.fetchMessage`: reads one message whole, headers and the one
+/// body a reader sees. Returns a JSON object of
+/// `{subject, from, fromAddress, to, cc, date, kind, body, attachments}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessage<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    url: JString<'local>,
+    login: JString<'local>,
+    password: JString<'local>,
+    mailbox: JString<'local>,
+    id: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let url = read_string(env, &url);
+        let login = read_string(env, &login);
+        let password = read_string(env, &password);
+        let mailbox = read_string(env, &mailbox);
+        let id = read_string(env, &id);
+        let credentials = Credentials {
+            login: &login,
+            password: &password,
+        };
+
+        let mut client = Client::new(env, &transport);
+        let json = match read_message(&mut client, &url, &credentials, &mailbox, &id) {
+            Ok(message) => to_string(&message).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// Reads one message with whichever backend its base URL names.
+///
+/// The mailbox is only IMAP's concern: a JMAP `Email` id addresses the
+/// message across the whole account, and the same message filed in two
+/// mailboxes is one object with one id.
+fn read_message(
+    client: &mut Client<'_, '_>,
+    base_url: &str,
+    credentials: &Credentials,
+    mailbox: &str,
+    id: &str,
+) -> Result<MessageBody, BridgeError> {
+    match Backend::of(base_url) {
+        Backend::Jmap => {
+            let session_url = account::jmap_session_url(base_url)?;
+            client.fetch_jmap_message(&session_url, credentials, id)
+        }
+        _ => {
+            let url = parse_url(base_url)?;
+            client::imap::fetch_message(client, &url, credentials, mailbox, id)
+        }
+    }
 }
 
 /// Walks the account's mail with whichever backend its base URL names.

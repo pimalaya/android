@@ -45,11 +45,11 @@ final class EventStore {
      * Replaces an account's calendars with what the server just listed.
      *
      * <p>The collection id is the calendar's address namespaced by the account
-     * ({@link PimdirAccount}), the way a mailbox id is. A CalDAV URL is unique
-     * on its own and would not need it, but a JMAP calendar id is unique only
-     * within its JMAP account: two accounts on one provider both holding a
-     * calendar {@code c1} would otherwise be one row that each sync round
-     * re-points at the other account.
+     * ({@link PimdirAccount}), the way a mailbox id is. Neither backend needs
+     * it today: a CalDAV URL is unique on its own, and a JMAP calendar URL
+     * carries its JMAP account id since the address itself was fixed. It stays
+     * because mailboxes do need it, a mailbox name being unique only within
+     * its account, and one rule across the three domains beats an exception.
      */
     void replaceCalendars(String accountEmail, List<Calendar> calendars) {
         String account = accounts.idOf(accountEmail);

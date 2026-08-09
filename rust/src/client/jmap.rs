@@ -15,6 +15,7 @@ use ical::ical::Ical;
 use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
 use io_jmap::{
     calendars::{
+        JMAP_CALENDARS_CAPABILITY,
         calendar::{JmapCalendar, get::*},
         calendar_event::{JmapCalendarEvent, query::*},
     },
@@ -24,10 +25,15 @@ use io_jmap::{
         session::JmapSession, session_get::*,
     },
     rfc8621::{
-        email::{JMAP_KEYWORD_SEEN, JmapEmail, JmapEmailAddress, JmapEmailProperty, query::*},
+        email::{
+            JMAP_KEYWORD_ANSWERED, JMAP_KEYWORD_FLAGGED, JMAP_KEYWORD_SEEN, JmapEmail,
+            JmapEmailAddress, JmapEmailBodyPart, JmapEmailBodyValue, JmapEmailProperty, get::*,
+            query::*,
+        },
         mailbox::{JmapMailbox, get::*},
     },
     rfc9610::{
+        JMAP_CONTACTS_CAPABILITY,
         address_book::{JmapAddressBook, get::*},
         contact_card::{JmapContactCard, changes::*, get::*, query::*, set::*},
     },
@@ -44,7 +50,7 @@ use crate::{
     jmap,
     types::{
         Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, Message,
-        PushChange, PushOutcome,
+        MessageAttachment, MessageBody, PushChange, PushOutcome,
     },
 };
 
@@ -52,12 +58,17 @@ use crate::{
 /// every server's advertised maxObjectsInSet, so no session lookup.
 const JMAP_SET_CHUNK: usize = 50;
 
+/// How much of one body value a reader is handed, in octets. Generous
+/// for anything meant to be read, and a ceiling on the mailing-list
+/// digest that would otherwise arrive whole over a phone connection.
+const MAX_BODY_BYTES: u64 = 512 * 1024;
+
 /// JMAP operations: the RFC 9610 AddressBook and ContactCard verbs, the
 /// ContactCard/set push and the ContactCard/changes sync round.
 impl<'a, 'local> Client<'a, 'local> {
     /// Lists the account's JMAP AddressBooks (RFC 9610 §2.1).
     /// Collection URLs are left empty: the caller composes them, since
-    /// only it knows the account they belong to. Doubles as the
+    /// only it knows the account base they hang off. Doubles as the
     /// connection check during onboarding.
     pub fn list_jmap_addressbooks(
         &mut self,
@@ -76,7 +87,7 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(out
             .address_books
             .into_iter()
-            .map(jmap_addressbook)
+            .map(|book| jmap_addressbook(&session, book))
             .collect())
     }
 
@@ -560,6 +571,52 @@ impl<'a, 'local> Client<'a, 'local> {
             .collect())
     }
 
+    /// Reads one message whole, headers and body together.
+    ///
+    /// Body values are asked for by the same call that asks for the
+    /// headers, capped: a reader shows what fits on a phone, and a
+    /// message carrying a megabyte of quoted history should not be
+    /// pulled whole to render its first screen.
+    pub fn fetch_jmap_message(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        id: &str,
+    ) -> Result<MessageBody, BridgeError> {
+        let auth = jmap_auth(credentials);
+        let session = self.jmap_session(session_url, &auth)?;
+        let api_url = session.api_url.clone();
+
+        let opts = JmapEmailGetOptions {
+            properties: Some(vec![
+                JmapEmailProperty::Id,
+                JmapEmailProperty::Subject,
+                JmapEmailProperty::From,
+                JmapEmailProperty::To,
+                JmapEmailProperty::Cc,
+                JmapEmailProperty::SentAt,
+                JmapEmailProperty::ReceivedAt,
+                JmapEmailProperty::TextBody,
+                JmapEmailProperty::HtmlBody,
+                JmapEmailProperty::BodyValues,
+                JmapEmailProperty::Attachments,
+            ]),
+            fetch_text_body_values: true,
+            fetch_html_body_values: true,
+            max_body_value_bytes: MAX_BODY_BYTES,
+        };
+
+        let coroutine = JmapEmailGet::new(&session, &auth, vec![id.to_string()], opts)
+            .map_err(|err| err.to_string())?;
+        let out = self.run_jmap(&api_url, coroutine)?;
+
+        out.emails
+            .into_iter()
+            .next()
+            .map(message_body)
+            .ok_or_else(|| BridgeError::from(format!("No message `{id}`")))
+    }
+
     /// The newest `limit` messages of one mailbox: an `Email/query`
     /// bounded to it, batched with the `Email/get` that fetches the
     /// envelope spine of what it matched.
@@ -586,6 +643,7 @@ impl<'a, 'local> Client<'a, 'local> {
                 JmapEmailProperty::From,
                 JmapEmailProperty::ReceivedAt,
                 JmapEmailProperty::Keywords,
+                JmapEmailProperty::HasAttachment,
             ]),
             ..Default::default()
         };
@@ -605,10 +663,10 @@ impl<'a, 'local> Client<'a, 'local> {
 /// CalendarEvent reads, each event converted to the iCalendar text the
 /// rest of the app renders.
 impl<'a, 'local> Client<'a, 'local> {
-    /// Lists the account's JMAP Calendars. Collection URLs are left
-    /// empty: the caller composes them, since only it knows the account
-    /// they belong to. Doubles as the connection check during
-    /// onboarding.
+    /// Lists the account's JMAP Calendars. Collection URLs come out as
+    /// the account-scoped path the caller prefixes with the account
+    /// base URL, since only it knows that base. Doubles as the
+    /// connection check during onboarding.
     pub fn list_jmap_calendars(
         &mut self,
         session_url: &Url,
@@ -623,7 +681,11 @@ impl<'a, 'local> Client<'a, 'local> {
             JmapCalendarGet::new(&session, &auth, opts).map_err(|err| err.to_string())?;
         let out = self.run_jmap(&api_url, coroutine)?;
 
-        Ok(out.calendars.into_iter().map(jmap_calendar).collect())
+        Ok(out
+            .calendars
+            .into_iter()
+            .map(|calendar| jmap_calendar(&session, calendar))
+            .collect())
     }
 
     /// Lists a JMAP Calendar's events, each converted to iCalendar.
@@ -793,6 +855,82 @@ fn mailbox_path(named: &BTreeMap<String, JmapMailbox>, mailbox: &JmapMailbox) ->
     segments.join("/")
 }
 
+/// One JMAP Email read whole to the reader's shape.
+///
+/// The body comes back inside the same `Email/get` that returns the
+/// headers, because JMAP hands over decoded body values: there is no
+/// second download and no MIME tree to walk, which is the whole
+/// difference from the IMAP path.
+fn message_body(email: JmapEmail) -> MessageBody {
+    let sender = email.from.as_deref().and_then(<[JmapEmailAddress]>::first);
+    let values = email.body_values.unwrap_or_default();
+
+    // HTML first, the alternative the sender laid out, and the reader
+    // sandboxes it; text is what a message with no HTML part leaves.
+    let html = part_value(&values, email.html_body.as_deref());
+    let text = part_value(&values, email.text_body.as_deref());
+    let (kind, body) = match html {
+        Some(html) => ("html", html),
+        None => match text {
+            Some(text) => ("plain", text),
+            None => ("", String::new()),
+        },
+    };
+
+    MessageBody {
+        subject: email.subject.unwrap_or_default(),
+        from: sender.map(display_name).unwrap_or_default(),
+        from_address: sender
+            .map(|address| address.email.clone())
+            .unwrap_or_default(),
+        to: addresses(email.to.as_deref()),
+        cc: addresses(email.cc.as_deref()),
+        // The `Date` the sender wrote when the server kept it, else
+        // when it arrived: a reader asks when a message was sent.
+        date: email.sent_at.or(email.received_at).unwrap_or_default(),
+        kind: kind.to_string(),
+        body,
+        attachments: email
+            .attachments
+            .unwrap_or_default()
+            .into_iter()
+            .map(|part| MessageAttachment {
+                name: part.name.unwrap_or_default(),
+                mime: part
+                    .r#type
+                    .unwrap_or_else(|| String::from("application/octet-stream"))
+                    .to_lowercase(),
+                size: part.size.unwrap_or(0),
+            })
+            .collect(),
+    }
+}
+
+/// The text of the first body part that has one, fetched by part id.
+fn part_value(
+    values: &BTreeMap<String, JmapEmailBodyValue>,
+    parts: Option<&[JmapEmailBodyPart]>,
+) -> Option<String> {
+    parts?
+        .iter()
+        .filter_map(|part| part.part_id.as_deref())
+        .find_map(|id| values.get(id))
+        .map(|value| value.value.clone())
+}
+
+/// A header's addresses as one line, the way a header reads them.
+fn addresses(addresses: Option<&[JmapEmailAddress]>) -> String {
+    addresses
+        .unwrap_or_default()
+        .iter()
+        .map(|address| match address.name.as_deref().map(str::trim) {
+            Some(name) if !name.is_empty() => format!("{name} <{}>", address.email),
+            _ => address.email.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// One JMAP Email to the JNI-facing shape.
 ///
 /// Seen is a keyword rather than a flag on this backend, and it is
@@ -801,46 +939,56 @@ fn mailbox_path(named: &BTreeMap<String, JmapMailbox>, mailbox: &JmapMailbox) ->
 /// store's sort key normalises alongside the RFC 5322 dates IMAP
 /// returns.
 fn message(mailbox: &str, email: JmapEmail) -> Message {
-    let seen = email
-        .keywords
-        .as_ref()
-        .and_then(|keywords| keywords.get(JMAP_KEYWORD_SEEN).copied())
-        .unwrap_or(false);
+    let sender = email.from.as_deref().and_then(<[JmapEmailAddress]>::first);
+    let from = sender.map(display_name).unwrap_or_default();
+    let from_address = sender
+        .map(|address| address.email.clone())
+        .unwrap_or_default();
+
+    let seen = keyword(&email, JMAP_KEYWORD_SEEN);
+    let answered = keyword(&email, JMAP_KEYWORD_ANSWERED);
+    let flagged = keyword(&email, JMAP_KEYWORD_FLAGGED);
 
     Message {
         mailbox: mailbox.to_string(),
         id: email.id.unwrap_or_default(),
         subject: email.subject.unwrap_or_default(),
-        from: email
-            .from
-            .as_deref()
-            .and_then(<[JmapEmailAddress]>::first)
-            .map(address_label)
-            .unwrap_or_default(),
+        from,
+        from_address,
         date: email.received_at.unwrap_or_default(),
         seen,
+        answered,
+        flagged,
+        has_attachment: email.has_attachment.unwrap_or(false),
     }
 }
 
-/// An email address as a person reads it: the display name when the
-/// server sent one, the address otherwise.
-fn address_label(address: &JmapEmailAddress) -> String {
+/// Whether one keyword is set on an email.
+fn keyword(email: &JmapEmail, keyword: &str) -> bool {
+    email
+        .keywords
+        .as_ref()
+        .and_then(|keywords| keywords.get(keyword).copied())
+        .unwrap_or(false)
+}
+
+/// An email address's display name, empty when it carries none.
+fn display_name(address: &JmapEmailAddress) -> String {
     match address.name.as_deref() {
         Some(name) if !name.trim().is_empty() => name.to_string(),
-        _ => address.email.clone(),
+        _ => String::new(),
     }
 }
 
 /// io-jmap Calendar to the JNI-facing shape, the twin of
-/// [`jmap_addressbook`]: the display name defaults to the id, and the
-/// collection URL is left empty for the caller to compose.
-fn jmap_calendar(calendar: JmapCalendar) -> Calendar {
+/// [`jmap_addressbook`] down to the account-scoped URL.
+fn jmap_calendar(session: &JmapSession, calendar: JmapCalendar) -> Calendar {
     let id = calendar.id.unwrap_or_default();
 
     Calendar {
-        name: calendar.name.unwrap_or_else(|| id.clone()),
+        name: calendar.name.clone().unwrap_or_else(|| id.clone()),
+        url: jmap_collection_path(session, JMAP_CALENDARS_CAPABILITY, &id),
         id,
-        url: String::new(),
         description: calendar.description,
         color: calendar.color,
     }
@@ -880,16 +1028,37 @@ fn jmap_event(event: JmapCalendarEvent) -> Result<Event, String> {
 }
 
 /// io-jmap AddressBook to the JNI-facing shape: the display name
-/// defaults to the id when the server returned none, and the absolute
-/// collection URL is left empty, composed by the caller.
-fn jmap_addressbook(book: JmapAddressBook) -> Addressbook {
+/// defaults to the id when the server returned none, and the URL is the
+/// account-scoped path of [`jmap_collection_path`], which the caller
+/// prefixes with the account base URL.
+fn jmap_addressbook(session: &JmapSession, book: JmapAddressBook) -> Addressbook {
     let id = book.id.unwrap_or_default();
 
     Addressbook {
-        name: book.name.unwrap_or_else(|| id.clone()),
+        name: book.name.clone().unwrap_or_else(|| id.clone()),
+        url: jmap_collection_path(session, JMAP_CONTACTS_CAPABILITY, &id),
         id,
-        url: String::new(),
         description: book.description,
         color: None,
+    }
+}
+
+/// The account-scoped path of one JMAP collection: the JMAP account id
+/// serving the capability, then the collection's own id.
+///
+/// A collection id is unique inside its JMAP account and nowhere else,
+/// so two accounts on one provider routinely name a book or a calendar
+/// the same. The app keys a stored collection by its URL, so without
+/// the account id in front the two would be one row that each sync
+/// round re-points at the other account, merging two people's data.
+/// [`account::jmap_collection_id`] takes the prefix back off wherever
+/// the protocol wants the bare id.
+///
+/// A session naming no account for the capability yields the bare id,
+/// which is what the app addressed before and is no worse.
+fn jmap_collection_path(session: &JmapSession, capability: &str, id: &str) -> String {
+    match session.primary_accounts.get(capability) {
+        Some(account) if !account.is_empty() => format!("{account}/{id}"),
+        _ => id.to_string(),
     }
 }

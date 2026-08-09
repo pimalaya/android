@@ -35,6 +35,12 @@ final class MailStore {
     /** The IMAP {@code \Seen} flag, as the store's JSON array spells it. */
     private static final String SEEN = "\\Seen";
 
+    /** The IMAP {@code \Answered} flag: the message was replied to. */
+    private static final String ANSWERED = "\\Answered";
+
+    /** The IMAP {@code \Flagged} flag: the message was marked important. */
+    private static final String FLAGGED = "\\Flagged";
+
     private final PimdirItems items;
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
@@ -97,10 +103,24 @@ final class MailStore {
         if (message.seen) {
             flags.put(SEEN);
         }
+        if (message.answered) {
+            flags.put(ANSWERED);
+        }
+        if (message.flagged) {
+            flags.put(FLAGGED);
+        }
         return new PimdirItems.Row(
                 message.id,
                 null,
-                PimdirMeta.mail(null, message.subject, message.from, null, message.date, 0),
+                PimdirMeta.mail(
+                        null,
+                        message.subject,
+                        message.from,
+                        message.fromAddress,
+                        null,
+                        message.date,
+                        0,
+                        message.hasAttachment),
                 PimdirMeta.mailSortKey(message.date),
                 flags.toString());
     }
@@ -111,25 +131,47 @@ final class MailStore {
         final String mailbox;
         final String id;
         final String subject;
-        final String from;
+
+        /** The sender's display name, empty when they sent none. */
+        final String fromName;
+
+        /** The sender's address, what the row's avatar is derived from. */
+        final String fromAddress;
+
         final long stamp;
         final boolean seen;
+        final boolean answered;
+        final boolean flagged;
+        final boolean hasAttachment;
 
         StoredMessage(
                 String accountEmail,
                 String mailbox,
                 String id,
                 String subject,
-                String from,
+                String fromName,
+                String fromAddress,
                 long stamp,
-                boolean seen) {
+                boolean seen,
+                boolean answered,
+                boolean flagged,
+                boolean hasAttachment) {
             this.accountEmail = accountEmail;
             this.mailbox = mailbox;
             this.id = id;
             this.subject = subject;
-            this.from = from;
+            this.fromName = fromName;
+            this.fromAddress = fromAddress;
             this.stamp = stamp;
             this.seen = seen;
+            this.answered = answered;
+            this.flagged = flagged;
+            this.hasAttachment = hasAttachment;
+        }
+
+        /** The sender as a row shows them: the name, else the address. */
+        String sender() {
+            return fromName.isEmpty() ? fromAddress : fromName;
         }
     }
 
@@ -157,19 +199,24 @@ final class MailStore {
                     continue;
                 }
                 JSONObject meta = metaOf(cursor.getString(2));
+                String flags = cursor.isNull(3) ? null : cursor.getString(3);
                 messages.add(
                         new StoredMessage(
                                 mailbox.accountEmail,
                                 mailbox.name,
                                 cursor.getString(1),
                                 meta.optString("subject"),
+                                meta.optString("from_name"),
                                 meta.optString("from"),
                                 // NOTE: from the key rather than the summary's
                                 // date, since the key is what the row was
                                 // ordered by: a label disagreeing with the
                                 // order it appears in reads as a bug.
                                 PimdirMeta.stampOf(cursor.getString(4)),
-                                seen(cursor.isNull(3) ? null : cursor.getString(3))));
+                                has(flags, SEEN),
+                                has(flags, ANSWERED),
+                                has(flags, FLAGGED),
+                                meta.optBoolean("attachment")));
             }
         }
         return messages;
@@ -186,22 +233,22 @@ final class MailStore {
         return mailboxes;
     }
 
-    /** Whether the stored flag set carries {@code \Seen}. */
-    private static boolean seen(String flags) {
+    /** Whether the stored flag set carries one flag. */
+    private static boolean has(String flags, String flag) {
         if (flags == null || flags.isEmpty()) {
             return false;
         }
         try {
             JSONArray parsed = new JSONArray(flags);
             for (int index = 0; index < parsed.length(); index++) {
-                if (SEEN.equals(parsed.optString(index))) {
+                if (flag.equals(parsed.optString(index))) {
                     return true;
                 }
             }
         } catch (JSONException error) {
             // An unreadable flag set is an unknown one, and unknown reads as
-            // unread, which is the state that shows the message rather than
-            // hiding it.
+            // unset: an unread message shows rather than hides, and no icon
+            // claims a state the store cannot back up.
         }
         return false;
     }

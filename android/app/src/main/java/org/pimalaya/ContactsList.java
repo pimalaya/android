@@ -127,9 +127,6 @@ final class ContactsList {
                 });
 
         TextView sticky = host.findViewById(R.id.contacts_sticky_letter);
-        // NOTE: clickable only in selection mode, else it passes touches
-        // through to the list; tapping it selects or clears that letter.
-        sticky.setClickable(false);
         sticky.setOnClickListener(view -> toggleLetter(sticky.getText().toString()));
         list.setOnScrollListener(
                 new android.widget.AbsListView.OnScrollListener() {
@@ -141,7 +138,7 @@ final class ContactsList {
                             android.widget.AbsListView v, int first, int count, int total) {
                         if (first < sortedContacts.size()) {
                             sticky.setText(
-                                    letter(sortedContacts.get(first).primary().displayName()));
+                                    Avatar.letter(sortedContacts.get(first).primary().displayName()));
                         }
                     }
                 });
@@ -231,17 +228,22 @@ final class ContactsList {
         // addressbook, or no account.
         boolean empty = sortedContacts.isEmpty();
         host.findViewById(R.id.contacts_empty).setVisibility(empty ? View.VISIBLE : View.GONE);
-        sticky.setText(empty ? "" : letter(sortedContacts.get(0).primary().displayName()));
+        sticky.setText(empty ? "" : Avatar.letter(sortedContacts.get(0).primary().displayName()));
 
-        // NOTE: rows are uniform, so sizing the sticky letter box to one
-        // row height aligns both letters' centres.
+        // A letterless button is a button that does nothing, so the whole
+        // slot goes with the rows it labels.
+        View slot = host.findViewById(R.id.contacts_sticky_slot);
+        slot.setVisibility(empty ? View.GONE : View.VISIBLE);
+
+        // NOTE: rows are uniform, so sizing the slot to one row height
+        // centres its button on the row whose letter it shows.
         ListView list = host.findViewById(R.id.contacts_list);
         list.post(
                 () -> {
                     View first = list.getChildAt(0);
-                    if (first != null && sticky.getLayoutParams().height != first.getHeight()) {
-                        sticky.getLayoutParams().height = first.getHeight();
-                        sticky.requestLayout();
+                    if (first != null && slot.getLayoutParams().height != first.getHeight()) {
+                        slot.getLayoutParams().height = first.getHeight();
+                        slot.requestLayout();
                     }
                 });
     }
@@ -275,8 +277,8 @@ final class ContactsList {
             String name = entry.displayName();
 
             TextView avatar = row.findViewById(R.id.contact_avatar);
-            avatar.setText(letter(name));
-            avatar.setBackground(avatarCircle(entry.card != null ? entry.card.vcard : name));
+            avatar.setText(Avatar.letter(name));
+            avatar.setBackground(Avatar.circle(entry.card != null ? entry.card.vcard : name));
 
             ((TextView) row.findViewById(R.id.contact_name)).setText(name);
 
@@ -399,17 +401,25 @@ final class ContactsList {
 
     /**
      * Selects every contact under a letter, or clears them when they are
-     * all already selected (the sticky letter's tap target in selection
-     * mode).
+     * all already selected: the sticky letter's tap.
+     *
+     * <p>Outside a selection it starts one, so the button does something
+     * wherever it is pressed. A long press on a row starts a selection
+     * from one contact; this starts one from a whole section, which is
+     * the only other unit the list has.
      */
     private void toggleLetter(String letter) {
         List<String> keys = new ArrayList<>();
         for (Group group : sortedContacts) {
-            if (letter.equals(letter(group.primary().displayName()))) {
+            if (letter.equals(Avatar.letter(group.primary().displayName()))) {
                 keys.add(group.key);
             }
         }
-        boolean all = !keys.isEmpty();
+        if (keys.isEmpty()) {
+            return;
+        }
+
+        boolean all = true;
         for (String key : keys) {
             all &= selectedKeys.contains(key);
         }
@@ -420,6 +430,8 @@ final class ContactsList {
                 selectedKeys.add(key);
             }
         }
+
+        selectionMode = !selectedKeys.isEmpty();
         updateSelectionUi();
         adapter.notifyDataSetChanged();
     }
@@ -427,8 +439,12 @@ final class ContactsList {
     /** Swaps the title for the search pill and opens the keyboard. */
     private void openSearch() {
         searchOpen = true;
-        host.findViewById(R.id.bar_title).setVisibility(View.GONE);
-        host.findViewById(R.id.contacts_bar_spacer).setVisibility(View.GONE);
+        // NOTE: the navigation goes with the title. Leaving it up gave
+        // the field two buttons' worth of bar to grow into and the query
+        // no room. The birthday and duplicate icons do stay, so the pill
+        // shrinks to end at them.
+        host.findViewById(R.id.bar_domain).setVisibility(View.GONE);
+        host.findViewById(R.id.bar_logo).setVisibility(View.GONE);
         host.findViewById(R.id.contacts_search).setVisibility(View.GONE);
         host.findViewById(R.id.contacts_search_pill).setVisibility(View.VISIBLE);
         host.findViewById(R.id.contacts_search_close).setVisibility(View.VISIBLE);
@@ -441,7 +457,7 @@ final class ContactsList {
         imm.showSoftInput(input, 0);
     }
 
-    /** Clears the query and gives the title its place back. */
+    /** Clears the query and gives the bar its buttons back. */
     void closeSearch() {
         ((EditText) host.findViewById(R.id.contacts_search_input)).setText("");
         // NOTE: the watcher clears the query only after its debounce, so
@@ -459,8 +475,10 @@ final class ContactsList {
         }
         host.findViewById(R.id.contacts_search_pill).setVisibility(View.GONE);
         host.findViewById(R.id.contacts_search_close).setVisibility(View.GONE);
-        host.findViewById(R.id.bar_title).setVisibility(View.VISIBLE);
-        host.findViewById(R.id.contacts_bar_spacer).setVisibility(View.VISIBLE);
+        host.findViewById(R.id.bar_logo).setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        host.findViewById(R.id.bar_domain)
+                .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        host.findViewById(R.id.bar_title).setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         host.findViewById(R.id.contacts_search)
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.contacts_more_slot)
@@ -484,31 +502,31 @@ final class ContactsList {
             closeSearch();
         }
 
+        // A selection takes the domain dropdown's place with its count,
+        // since navigating away mid-selection is not what the bar is
+        // for; a search takes the whole title slot with its pill.
         TextView title = host.findViewById(R.id.bar_title);
-        if (selectionMode) {
-            title.setText(host.getString(R.string.selected_count, selectedKeys.size()));
-        } else {
-            title.setText(R.string.contacts_title);
-        }
-        title.setVisibility(searchOpen ? View.GONE : View.VISIBLE);
-        host.findViewById(R.id.contacts_bar_spacer)
-                .setVisibility(searchOpen ? View.GONE : View.VISIBLE);
+        title.setText(host.getString(R.string.selected_count, selectedKeys.size()));
+        title.setVisibility(selectionMode && !searchOpen ? View.VISIBLE : View.GONE);
         host.findViewById(R.id.contacts_search_pill)
                 .setVisibility(searchOpen ? View.VISIBLE : View.GONE);
         host.findViewById(R.id.contacts_search_close)
                 .setVisibility(searchOpen ? View.VISIBLE : View.GONE);
 
+        // The logo and the domain dropdown are what a list screen's bar
+        // is; both yield to the two modes that take the bar over.
+        boolean navigating = !selectionMode && !searchOpen;
+        host.findViewById(R.id.bar_logo).setVisibility(navigating ? View.VISIBLE : View.GONE);
+        host.findViewById(R.id.bar_domain).setVisibility(navigating ? View.VISIBLE : View.GONE);
+        host.findViewById(R.id.bar_filter)
+                .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.contacts_search)
                 .setVisibility(selectionMode || searchOpen ? View.GONE : View.VISIBLE);
-        // The birthday and duplicates icons stay through search, so the
-        // pill shrinks to end at them.
         host.findViewById(R.id.contacts_birthdays)
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.contacts_duplicates)
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
-        // The switcher is top-level navigation, so it yields to the two
-        // modes that take the bar over: a selection and an open search.
-        host.findViewById(R.id.domain_switcher)
+        host.findViewById(R.id.contacts_more_slot)
                 .setVisibility(selectionMode || searchOpen ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.contacts_close)
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
@@ -525,11 +543,6 @@ final class ContactsList {
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         ((CheckBox) host.findViewById(R.id.contacts_select_all))
                 .setChecked(selectionMode && allSelected());
-        host.findViewById(R.id.contacts_sticky_letter).setClickable(selectionMode);
-        // NOTE: the whole overflow slot goes in selection mode, not just
-        // its button, else an empty 48dp frame pushes the icons off edge.
-        host.findViewById(R.id.contacts_more_slot)
-                .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.fab).setVisibility(selectionMode ? View.GONE : View.VISIBLE);
     }
 
@@ -557,39 +570,6 @@ final class ContactsList {
         reload();
     }
 
-    /**
-     * A muted round avatar background, its hue mapped from the card's
-     * raw vCard rather than the display name: distinct contacts (their
-     * UID and address fields differ) spread across the wheel, while a
-     * card lightly edited keeps almost the same colour.
-     */
-    private android.graphics.drawable.GradientDrawable avatarCircle(String vcard) {
-        int color = android.graphics.Color.HSVToColor(new float[] {hueOf(vcard), 0.4f, 0.55f});
-        android.graphics.drawable.GradientDrawable circle =
-                new android.graphics.drawable.GradientDrawable();
-        circle.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-        circle.setColor(color);
-        return circle;
-    }
-
-    /**
-     * Maps a vCard to a hue in [0, 360) by summing its code points. The
-     * sum is locality preserving, so a one-character edit shifts the hue
-     * by one degree, yet the differing name, email and UID keep distinct
-     * cards far apart (unlike hashing the display name, where near
-     * identical names collapse onto near identical hues).
-     */
-    private static float hueOf(String vcard) {
-        if (vcard == null) {
-            return 0f;
-        }
-        long sum = 0;
-        for (int index = 0; index < vcard.length(); index++) {
-            sum += vcard.charAt(index);
-        }
-        return sum % 360;
-    }
-
     /** Sets a diminished sub-line, hiding it when the value is empty. */
     private void bindLine(TextView view, String value) {
         if (value == null || value.isEmpty()) {
@@ -611,43 +591,30 @@ final class ContactsList {
         return false;
     }
 
-    /** The contacts overflow menu: Import, Export (sync lives in the
-     *  drawer and the pull-down, duplicates and birthdays on their own
-     *  bar buttons). Text-only: the framework popup renders forced
-     *  icons flush against their labels on some Android releases. */
+    /**
+     * The contacts overflow: what is management rather than action.
+     * Searching, the birthday peek and the duplicate finder are bar
+     * buttons; syncing is the drawer's and the pull-down's.
+     *
+     * <p>Text-only: the framework popup renders forced icons flush
+     * against their labels on some Android releases.
+     */
     private void showMoreMenu(View anchor) {
         android.widget.PopupMenu menu = new android.widget.PopupMenu(host, anchor);
-        // Addressbooks moved here when the domain switcher took the
-        // bar's leading slot: it is management, not navigation, so the
-        // overflow is where it belongs.
-        menu.getMenu().add(0, 1, 0, R.string.subscriptions_title);
-        menu.getMenu().add(0, 2, 1, R.string.import_contacts);
-        menu.getMenu().add(0, 3, 2, R.string.export_contacts);
-        menu.setOnMenuItemClickListener(
-                item -> {
-                    switch (item.getItemId()) {
-                        case 1:
-                            host.openBooksManager();
-                            return true;
-                        case 2:
-                            host.importContacts();
-                            return true;
-                        case 3:
-                            host.exportContacts();
-                            return true;
-                        default:
-                            return false;
-                    }
-                });
+        item(menu, R.string.subscriptions_title, host::openAccountsDrawer);
+        item(menu, R.string.import_contacts, host::importContacts);
+        item(menu, R.string.export_contacts, host::exportContacts);
         menu.show();
     }
 
-    static String letter(String name) {
-        String trimmed = name.trim();
-        if (trimmed.isEmpty()) {
-            return "#";
-        }
-        char first = Character.toUpperCase(trimmed.charAt(0));
-        return Character.isLetter(first) ? String.valueOf(first) : "#";
+    /** One menu entry carrying its own action. */
+    private static void item(android.widget.PopupMenu menu, int label, Runnable action) {
+        menu.getMenu()
+                .add(label)
+                .setOnMenuItemClickListener(
+                        entry -> {
+                            action.run();
+                            return true;
+                        });
     }
 }

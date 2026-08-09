@@ -1,41 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Agenda row, aligned with item_contact: the time column stands where
-     the contact avatar does, so the two lists share one left edge. A
-     day header replaces the time column with a single wide label. -->
+<!-- Agenda row, on the same frame as item_contact and item_message: an
+     initial disc where the contact's initial is, a body of a title over
+     a supporting line, and a top-aligned trailing column.
+
+     The disc stands for the calendar rather than the entry, initial and
+     colour both, the way the mail row's disc stands for the sender: one
+     calendar's rows read as one calendar's. What kind of entry it is
+     leads the row instead, in the column the bar title leaves clear,
+     since that is one glyph and not a thing to name. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:background="?android:attr/selectableItemBackground"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingStart="40dp"
+    android:paddingStart="@dimen/app_bar_padding"
     android:paddingTop="10dp"
-    android:paddingEnd="@dimen/app_bar_padding"
+    android:paddingEnd="@dimen/item_padding"
     android:paddingBottom="10dp">
 
-    <!-- The day header, shown instead of the two columns below. -->
-    <TextView
-        android:id="@+id/event_day"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:fontFamily="sans-serif-medium"
-        android:textColor="?android:attr/colorAccent"
-        android:textSize="13sp"
-        android:visibility="gone" />
+    <ImageView
+        android:id="@+id/event_component"
+        android:layout_width="@dimen/item_lead"
+        android:layout_height="@dimen/item_lead"
+        android:layout_marginEnd="@dimen/app_bar_title_padding"
+        android:contentDescription="@string/event_component_event"
+        android:padding="12dp"
+        android:src="@drawable/ic_component_event"
+        android:tint="?android:attr/textColorSecondary" />
 
     <TextView
-        android:id="@+id/event_time"
-        android:layout_width="44dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
+        android:id="@+id/event_avatar"
+        android:layout_width="@dimen/item_avatar"
+        android:layout_height="@dimen/item_avatar"
+        android:layout_marginEnd="@dimen/item_gap"
         android:gravity="center"
-        android:textColor="?android:attr/textColorSecondary"
-        android:textSize="13sp" />
+        android:textColor="#ffffff"
+        android:textSize="18sp" />
 
     <LinearLayout
-        android:id="@+id/event_body"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
@@ -45,23 +48,53 @@
             android:id="@+id/event_summary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:fontFamily="sans-serif-medium"
+            android:ellipsize="end"
             android:lineHeight="24dp"
             android:maxLines="1"
-            android:ellipsize="end"
             android:textColor="?android:attr/textColorPrimary"
             android:textSize="16sp" />
 
+        <!-- How long it runs and which calendar it is in, the way a mail
+             row says its mailbox and account. -->
         <TextView
-            android:id="@+id/event_subtitle"
+            android:id="@+id/event_origin"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:ellipsize="end"
             android:lineHeight="16dp"
             android:maxLines="1"
-            android:ellipsize="end"
             android:textColor="?android:attr/textColorSecondary"
-            android:textSize="13sp"
-            android:visibility="gone" />
+            android:textSize="13sp" />
+
+    </LinearLayout>
+
+    <!-- Top-aligned, exactly as the mail row's is. How far off the
+         occurrence is comes first, because the rows are one scrolling
+         scale of time and that is the only thing saying where on it you
+         are; the moment itself hangs under it. -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginStart="8dp"
+        android:gravity="end"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/event_countdown"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:lineHeight="24dp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/event_start"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:lineHeight="16dp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="12sp" />
 
     </LinearLayout>
 

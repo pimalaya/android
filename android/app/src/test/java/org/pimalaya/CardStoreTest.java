@@ -89,6 +89,22 @@ public class CardStoreTest {
     }
 
     @Test
+    public void aBookWhoseUrlWasRecomposedKeepsItsSwitches() {
+        // JMAP collection URLs gained the JMAP account id, so the same book
+        // comes back under a new URL exactly once. Matching on the id within
+        // the account is what stops that reshaping from silently
+        // re-subscribing every book and dropping the phone spoke.
+        store.setBookState(BOOK, true, false, true);
+
+        roster(new Addressbook("b1", "Book One", BOOK + "?recomposed", null, null));
+
+        BookEntry entry = only();
+        assertEquals(BOOK + "?recomposed", entry.book.url);
+        assertFalse("the user turned remote sync off", entry.remoteSynced);
+        assertTrue("and left the phone spoke on", entry.phoneSynced);
+    }
+
+    @Test
     public void unsubscribingForcesBothSpokesOff() {
         // Neither spoke means anything without the subscription, so leaving one
         // on would schedule syncs for a book that is not displayed.

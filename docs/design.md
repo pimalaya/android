@@ -1,6 +1,6 @@
 # Pimalaya for Android: design
 
-The core idea and the target structure of the app. The current code implements the connection flow, the contacts screen and the hub-and-spoke sync engine on io-offline, both spokes included (docs/io-offline-migration.md for the server spoke, docs/phone-sync-plan.md for the phone one).
+The core idea and the target structure of the app. The current code implements the connection flow, the three list screens (contacts read-write, mail and calendars read-only) and the hub-and-spoke sync engine on io-offline, both spokes included (docs/io-offline-migration.md for the server spoke, docs/phone-sync-plan.md for the phone one).
 
 ## Screens
 
@@ -24,6 +24,32 @@ One activity, one ViewFlipper, one panel per screen:
    Launch is offline first: the contacts screen renders instantly from the store. By default the app never syncs by itself; each addressbook can opt into scheduled background sync (the "Synchronize in background" cadence, set at the end of the connection flow or from the account's settings screen, account-wide or per book behind its Advanced fold), which runs the same three-pass book sync through one WorkManager periodic worker per book, the DAVx5 pattern; a book whose remote switch is off keeps its phone pass and skips the server exchange. A pass that did something posts a notification shaped like the in-app sync toast (pulled, pushed, merged, titled by the book); a pass with nothing to report posts nothing. Contacts in a pending both-sides-edited conflict sit each pass out (the engine parks them untouched, per item, while everything else keeps syncing) and ride the notification as a warning subtitle on every pass until the user resolves them in the app; enabling a cadence also turns on the Android account's content-triggered sync, so contacts-app edits upload into the hub as they happen.
 
 3. **Contacts** (list + editor panels). Lists the cards of every synced addressbook by FN. The editor is a tabbed form (name, contact, address, other, plus a read-only source tab showing the raw vCard) over the same neutral field model the phone projection uses: the form collects the model and the Rust bridge patches it onto the stored vCard through the vcard-rs CST, so every property the form does not manage (PHOTO, CATEGORIES, IMPP, X-*) survives untouched. Saving and deleting are offline first: they only stage the change in the base; the next sync pushes it.
+
+4. **Mail** and **Calendar** (list panels). The same merged view over the two other domains, read-only: every mailbox of every account in one message list, every calendar of every account in one agenda.
+
+### The bar the three lists share
+
+One app bar serves all three: the logo, which opens the accounts drawer the way a burger would; the domain's name (Emails, Contacts, Calendars), which is also the app's whole top-level navigation, dropping onto the three domains with their glyphs ([DomainMenu](../android/app/src/main/java/org/pimalaya/DomainMenu.java)); then that domain's actions, ending in an overflow for whatever is management rather than action. The navigation was three switcher icons before the bar took a title, which said the same thing twice and took the width the actions needed; a dropdown says it once. The merged view's filter is the one action every domain shares, and it wears the accent while it is hiding something, so a narrowed list cannot be mistaken for an empty one. The app opens on the mail list.
+
+The three rows are one row, and the row is built on the bar. Each leads with a disc the size of a bar button's ripple, starting where the title's first letter does, so the rows hang off the domain's name; a title line and its supporting lines follow, and a top-aligned right column closes: a contact's initial over its name and phone, a sender's initial over the subject, the sender and the mailbox with the date and the message's marks trailing, a calendar's initial over the summary and the length with how far off the occurrence is and when it starts trailing. Only the weight of an unread message is bold; every title line is otherwise the same size and weight in all three domains, so that bold means one thing.
+
+Starting the rows under the title leaves one bar button's width clear on their leading edge, on the logo's own axis, and each domain puts there what it wants read before anything else: the contacts list its sticky section letter, the mail list a paperclip when the message carries an attachment, the agenda the glyph of the component the row came out of. What is in that column is a mark and never a phrase, which is what sent the agenda's countdown to the other side of the row: "in 3 days" does not fit under a bar button, and it belongs where a mail row puts its date anyway, since in both cases the trailing column answers *when*.
+
+Dates are told the way a reader would tell them. A mail row says Today, Yesterday, 3 days ago; an agenda row says in 20 minutes, in 3 days, 2 hours ago; an open message says the exact date with how long ago beside it. One unit and never two, and calendar days rather than elapsed hours, so a message from 23:00 last night reads Yesterday and not nine hours ago. The vocabulary lives in one place (Dates) because the three domains show the same column, and two wordings for one idea would read as two apps.
+
+What each disc is keyed by is what identifies the row rather than what is written on it (a contact's whole vCard, a sender's address, a calendar's id), so renaming any of them keeps its colour.
+
+The contacts row's trailing end is the bar's too: its selection checkbox sits in a button-wide slot flush with the bar's select-all. The section letter in its leading column is a round button with the same ripple as any other, and pressing it selects its whole section, starting a selection when none is running.
+
+Each domain's FAB adds to that domain. Contacts opens its editor; mail and calendars open frames, screens that exist and are navigable so that what goes in them is built against wiring that already works.
+
+### What a row opens onto
+
+Tapping a row opens the thing itself, on a screen titled by it with a back arrow onto the list.
+
+A **message** opens on a header card and its body. The card is drawn from the row before anything is fetched (the store already holds the subject, the sender and the date), and the fetch fills in the recipients, the exact date and the attachments, each a badge naming a file and its size. The body is fetched every time, since the merged list stores spines and has nowhere to keep one; IMAP fetches the raw message and the bridge resolves its MIME tree, JMAP asks for the body values in the same call as the headers. HTML wins over the text alternative when both are there, and renders in a web view with scripting off, network loads blocked and images not loaded at all: that sandbox is what makes preferring HTML safe, since a remote image is a read receipt nobody asked permission for.
+
+A **calendar entry** opens on the settings-style page the contact editor is drawn on, read-only. The two share their builder (Sections) rather than looking alike by coincidence: a contact and an event are the same page with different sections. Which sections show follows the component, because that is the honest difference between the three: an event is placed between two moments, a to-do is due and partly done, a journal entry is written on a day and has neither. What the page shows is the occurrence that was tapped and not the stored object, so the fifteenth Monday of a weekly meeting reads on its own day, with the rule itself listed as one more property.
 
 ## Sync engine
 

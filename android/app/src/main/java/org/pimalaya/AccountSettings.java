@@ -39,6 +39,14 @@ final class AccountSettings {
     /** Whether the settings screen's advanced sections are unfolded. */
     private boolean settingsAdvancedOpen;
 
+    /**
+     * The list screen the drawer was raised over, restored on the way
+     * out. The overlay covers the drawer, which covers a list, and that
+     * list is still there underneath: landing the chrome on a different
+     * one would leave the bar describing a screen nobody navigated to.
+     */
+    private int cameFrom = MainActivity.PANEL_MAIL;
+
     AccountSettings(MainActivity host) {
         this.host = host;
     }
@@ -60,6 +68,7 @@ final class AccountSettings {
      */
     void open(String email) {
         settingsEmail = email;
+        cameFrom = host.screen;
         settingsBooks = new ArrayList<>();
         bookSettings.clear();
         for (BookEntry entry : host.base.loadAllAddressbooks()) {
@@ -297,8 +306,8 @@ final class AccountSettings {
     void leave() {
         settingsEmail = null;
         host.closeOverlay(MainActivity.PANEL_ACCOUNT);
-        host.screen = MainActivity.PANEL_CONTACTS;
-        host.applyChrome(MainActivity.PANEL_CONTACTS);
+        host.screen = cameFrom;
+        host.applyChrome(cameFrom);
         // NOTE: the drawer never closed under the overlay, so its rows
         // refresh in place.
         host.reloadHome();

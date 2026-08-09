@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A card: the app's neutral surface tone, rounded like the search
+     pill's family but at a corner a block of text can sit inside. Used
+     for the header a reader meets above a message's body. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/surface" />
+    <corners android:radius="16dp" />
+</shape>

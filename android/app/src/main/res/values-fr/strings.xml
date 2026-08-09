@@ -103,9 +103,7 @@
     <string name="notif_channel_sync">Synchronisation en arrière-plan</string>
     <string name="notif_conflicts_sub">Conflits détectés ; ouvrez l\'application pour les résoudre</string>
 
-    <string name="contacts_title">Contacts</string>
     <string name="contacts_sync">Synchroniser</string>
-    <string name="contacts_more">Plus</string>
     <string name="birthdays_title">Prochain anniversaire</string>
     <string name="birthdays_none">Aucune date de naissance renseignée sur vos contacts.</string>
     <string name="birthdays_and">" et "</string>

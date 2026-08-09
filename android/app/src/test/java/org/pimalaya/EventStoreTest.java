@@ -73,11 +73,11 @@ public class EventStoreTest {
 
     @Test
     public void twoAccountsSharingACalendarIdDoNotCollide() {
-        // A JMAP calendar id is unique inside its JMAP account, not across
-        // them, so two accounts on one provider routinely name a calendar the
-        // same. Without the account namespace they would be one collection
-        // that each sync round re-points at the other account, merging two
-        // people's agendas.
+        // The JMAP address carries its account id now, so two accounts on one
+        // provider no longer hand identical URLs down. This pins the store's
+        // own guard against it anyway: a backend that did would be one
+        // collection that each sync round re-points at the other account,
+        // merging two people's agendas.
         String jmapUrl = "jmap://api.example.com/c1";
         store.replaceCalendars(
                 EMAIL, List.of(new Calendar("c1", "Mine", jmapUrl, null, null)));

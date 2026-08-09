@@ -6,6 +6,11 @@
     <dimen name="app_bar_icon">24dp</dimen>
     <dimen name="app_bar_title_padding">4dp</dimen>
 
+    <!-- Inset of the logo inside its bar button. Larger than the 12dp a
+         24dp glyph takes, because the mark is a filled shape rather
+         than a stroked outline and reads heavier at the same size. -->
+    <dimen name="app_bar_logo_padding">13dp</dimen>
+
     <dimen name="fab">56dp</dimen>
     <dimen name="fab_margin">16dp</dimen>
     <dimen name="fab_elevation">6dp</dimen>
@@ -18,4 +23,29 @@
     <dimen name="item_icon">24dp</dimen>
     <dimen name="item_gap">16dp</dimen>
     <dimen name="item_text">16sp</dimen>
+
+    <!-- A mail row's flag glyph: sized off the line it sits on (13sp)
+         rather than the 24dp icon grid, so three of them fit under a
+         date without widening the trailing column. -->
+    <dimen name="message_flag">16dp</dimen>
+
+    <!-- A list row's leading disc: the app bar button's diameter, so the
+         discs and the bar's buttons are one size across the app. -->
+    <dimen name="item_avatar">@dimen/app_bar_button</dimen>
+
+    <!-- Where a list row's avatar starts: under the first letter of the
+         bar title, which is the bar padding plus its leading button plus
+         the title's own padding (4 + 48 + 4). Flush with the bar's logo
+         instead read as clamped against the screen edge.
+
+         The mail and agenda rows reach it by padding 4dp and leading
+         with an item_lead column; the contacts row pads the whole 56dp,
+         since what fills its column is an overlay above the list rather
+         than anything the row itself draws. -->
+    <dimen name="item_start">56dp</dimen>
+
+    <!-- The leading column every list row keeps clear, inside
+         item_start: the contacts list puts its sticky section letter
+         there, the agenda a countdown, the mail list a paperclip. -->
+    <dimen name="item_lead">@dimen/app_bar_button</dimen>
 </resources>

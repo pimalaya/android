@@ -127,9 +127,7 @@
     <string name="notif_channel_sync">Background sync</string>
     <string name="notif_conflicts_sub">Conflicts found; open the app to resolve them</string>
 
-    <string name="contacts_title">Contacts</string>
     <string name="contacts_sync">Sync</string>
-    <string name="contacts_more">More</string>
     <string name="birthdays_title">Next birthday</string>
     <string name="birthdays_none">No birthday recorded on your contacts</string>
     <string name="birthdays_and">" and "</string>
@@ -167,6 +165,10 @@
     <string name="manage_books_title">Addressbooks of this contact</string>
     <string name="contact_open_failed">Could not open the contact</string>
     <string name="empty_title">No contact found</string>
+    <string name="accounts_open">Accounts</string>
+    <string name="mail_title">Emails</string>
+    <string name="contacts_title">Contacts</string>
+    <string name="calendar_title">Calendars</string>
     <string name="domain_mail">Mail</string>
     <string name="domain_contacts">Contacts</string>
     <string name="domain_calendar">Calendar</string>
@@ -176,10 +178,104 @@
     <string name="filter_accounts">Accounts</string>
     <string name="filter_collections">Collections</string>
     <string name="filter_reset">Show all</string>
+    <!-- The date vocabulary the three lists and the two readers share.
+         A span is worded once and then placed by date_in or date_ago,
+         so a unit is spelled in one place whichever direction it runs
+         in. -->
+    <string name="date_now">now</string>
+    <string name="date_today">Today</string>
+    <string name="date_yesterday">Yesterday</string>
+    <string name="date_later">Later</string>
+    <string name="date_in">in %s</string>
+    <string name="date_ago">%s ago</string>
+    <plurals name="date_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <plurals name="date_hours">
+        <item quantity="one">%d hour</item>
+        <item quantity="other">%d hours</item>
+    </plurals>
+    <plurals name="date_days">
+        <item quantity="one">%d day</item>
+        <item quantity="other">%d days</item>
+    </plurals>
+    <plurals name="date_weeks">
+        <item quantity="one">%d week</item>
+        <item quantity="other">%d weeks</item>
+    </plurals>
+    <plurals name="date_months">
+        <item quantity="one">%d month</item>
+        <item quantity="other">%d months</item>
+    </plurals>
+    <plurals name="date_years">
+        <item quantity="one">%d year</item>
+        <item quantity="other">%d years</item>
+    </plurals>
+
     <string name="event_all_day">All day</string>
+    <string name="event_duration_hours">%1$dh</string>
+    <string name="event_duration_hours_minutes">%1$dh%2$02d</string>
+    <string name="event_duration_minutes">%1$d min</string>
+    <string name="event_duration_days">%1$d days</string>
     <string name="message_no_sender">(Unknown sender)</string>
     <string name="message_no_subject">(No subject)</string>
+    <string name="message_answered">Replied</string>
+    <string name="message_flagged">Important</string>
+    <string name="message_attachment">Has an attachment</string>
+
+    <!-- The message reader. -->
+    <string name="message_loading">Loading the message…</string>
+    <string name="message_failed">Could not read the message</string>
+    <string name="message_no_content">This message has no readable body</string>
+    <string name="message_no_account">The account this message came from is gone</string>
+    <string name="message_to">To: %s</string>
+    <string name="message_cc">Cc: %s</string>
+    <string name="message_attachment_unnamed">(Unnamed)</string>
+    <string name="size_bytes">%d B</string>
+    <string name="size_kilobytes">%d kB</string>
+    <string name="size_megabytes">%d MB</string>
+
+    <!-- The calendar entry reader: one section per thing a component
+         has, so a to-do never shows an end and an event never shows a
+         completion. -->
+    <string name="event_section_when">When</string>
+    <string name="event_section_progress">Progress</string>
+    <string name="event_section_where">Where</string>
+    <string name="event_section_details">Details</string>
+    <string name="event_section_people">People</string>
+    <string name="event_section_calendar">Calendar</string>
+    <string name="event_field_start">Starts</string>
+    <string name="event_field_scheduled">Scheduled</string>
+    <string name="event_field_written">Written</string>
+    <string name="event_field_end">Ends</string>
+    <string name="event_field_duration">Lasts</string>
+    <string name="event_field_countdown">From now</string>
+    <string name="event_field_repeats">Repeats</string>
+    <string name="event_field_due">Due</string>
+    <string name="event_field_completed">Completed</string>
+    <string name="event_field_progress">Done</string>
+    <string name="event_field_priority">Priority</string>
+    <string name="event_field_location">Location</string>
+    <string name="event_field_description">Description</string>
+    <string name="event_field_categories">Categories</string>
+    <string name="event_field_status">Status</string>
+    <string name="event_field_url">Link</string>
+    <string name="event_field_organizer">Organizer</string>
+    <string name="event_field_attendee">Attendee</string>
+    <string name="event_field_calendar">Calendar</string>
+    <string name="event_field_account">Account</string>
+    <string name="event_field_kind">Kind</string>
+    <string name="event_percent">%s%%</string>
+
     <string name="event_untitled">(No title)</string>
+    <string name="compose_new">New message</string>
+    <string name="compose_placeholder">Writing messages is not wired yet</string>
+    <string name="event_new">New event</string>
+    <string name="event_new_placeholder">Creating events is not wired yet</string>
+    <string name="event_component_event">Event</string>
+    <string name="event_component_todo">To-do</string>
+    <string name="event_component_journal">Journal entry</string>
     <string name="no_account">No account found</string>
 
     <string name="back">Back</string>

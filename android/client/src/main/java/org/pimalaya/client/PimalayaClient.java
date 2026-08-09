@@ -372,10 +372,58 @@ public class PimalayaClient {
                                 string(message, "id"),
                                 string(message, "subject"),
                                 string(message, "from"),
+                                string(message, "fromAddress"),
                                 string(message, "date"),
-                                message.optBoolean("seen")));
+                                message.optBoolean("seen"),
+                                message.optBoolean("answered"),
+                                message.optBoolean("flagged"),
+                                message.optBoolean("hasAttachment")));
             }
             return messages;
+        } finally {
+            transport.close();
+        }
+    }
+
+    /**
+     * Reads one message whole, headers and body together.
+     *
+     * <p>One round trip on either backend: IMAP fetches the raw message
+     * and the bridge resolves its MIME tree, JMAP asks for the body
+     * values in the same call as the headers.
+     */
+    public MessageBody fetchMessage(
+            String url, String login, String password, String mailbox, String id) {
+        Transport transport = new Transport();
+        try {
+            JSONObject reply =
+                    object(Native.fetchMessage(transport, url, login, password, mailbox, id));
+
+            JSONArray listed = reply.optJSONArray("attachments");
+            List<MessageBody.Attachment> attachments =
+                    new ArrayList<>(listed == null ? 0 : listed.length());
+            for (int index = 0; listed != null && index < listed.length(); index++) {
+                JSONObject attachment = object(listed, index);
+                attachments.add(
+                        new MessageBody.Attachment(
+                                attachment.optString("name"),
+                                attachment.optString("mime"),
+                                attachment.optLong("size")));
+            }
+
+            // NOTE: optString and not the null-returning helper beside
+            // it: every one of these fields is always serialised, and a
+            // reader must never be handed a null to render.
+            return new MessageBody(
+                    reply.optString("subject"),
+                    reply.optString("from"),
+                    reply.optString("fromAddress"),
+                    reply.optString("to"),
+                    reply.optString("cc"),
+                    reply.optString("date"),
+                    reply.optString("kind"),
+                    reply.optString("body"),
+                    attachments);
         } finally {
             transport.close();
         }
@@ -453,6 +501,7 @@ public class PimalayaClient {
             JSONObject occurrence = object(reply, index);
             occurrences.add(
                     new Occurrence(
+                            string(occurrence, "component"),
                             string(occurrence, "start"),
                             string(occurrence, "end"),
                             string(occurrence, "summary"),
@@ -460,6 +509,48 @@ public class PimalayaClient {
                             occurrence.optBoolean("allDay")));
         }
         return occurrences;
+    }
+
+    /**
+     * Reads one calendar object's first scheduled component whole, for
+     * the page that shows it. Pure computation, like the expansion
+     * beside it: no transport, no account.
+     */
+    public EventDetail readEvent(String ical) {
+        JSONObject reply = object(Native.readEvent(ical));
+
+        JSONArray listed = reply.optJSONArray("attendees");
+        List<EventDetail.Attendee> attendees = new ArrayList<>(listed == null ? 0 : listed.length());
+        for (int index = 0; listed != null && index < listed.length(); index++) {
+            JSONObject attendee = object(listed, index);
+            attendees.add(
+                    new EventDetail.Attendee(
+                            attendee.optString("name"),
+                            attendee.optString("address"),
+                            attendee.optString("status")));
+        }
+
+        return new EventDetail(
+                reply.optString("component"),
+                reply.optString("uid"),
+                reply.optString("summary"),
+                reply.optString("description"),
+                reply.optString("location"),
+                reply.optString("url"),
+                reply.optString("status"),
+                reply.optString("categories"),
+                reply.optString("start"),
+                reply.optString("end"),
+                reply.optString("due"),
+                reply.optString("completed"),
+                reply.optBoolean("allDay"),
+                reply.optString("recurrence"),
+                reply.optString("priority"),
+                reply.optString("percentComplete"),
+                reply.optString("organizer"),
+                attendees,
+                reply.optString("created"),
+                reply.optString("lastModified"));
     }
 
     /**
