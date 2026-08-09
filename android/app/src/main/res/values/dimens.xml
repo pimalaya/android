@@ -24,12 +24,18 @@
          date without widening the trailing column. -->
     <dimen name="message_flag">16dp</dimen>
 
-    <!-- A list row's leading disc: inside the 48dp column it starts in
-         rather than filling it. Matching a bar button exactly made the
-         disc read as another button, and the two are a scroll apart
-         rather than side by side, so the likeness bought less than the
-         extra weight cost. -->
-    <dimen name="item_avatar">44dp</dimen>
+    <!-- The column a list row's disc sits in: the app bar button's
+         diameter, so the disc centres on the axis of the bar's first
+         domain button however big the disc itself is. -->
+    <dimen name="item_avatar">@dimen/app_bar_button</dimen>
+
+    <!-- How far the disc sits inside that column, drawn rather than
+         laid out (Avatar insets it). Smaller than the column because a
+         disc the exact size of a bar button reads as another button;
+         inset rather than shrunk, because shrinking the view would
+         take the disc off the button's axis and drag the text after it.
+         This is the one number to change to resize every avatar. -->
+    <dimen name="item_avatar_inset">2dp</dimen>
 
     <!-- Where a list row's avatar starts: under the bar's first domain
          button, which is the bar padding plus the burger plus the gap

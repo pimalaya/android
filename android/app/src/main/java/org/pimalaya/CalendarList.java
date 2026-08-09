@@ -313,7 +313,7 @@ final class CalendarList {
             // leads the row instead, in its own column.
             TextView avatar = view.findViewById(R.id.event_avatar);
             avatar.setText(Avatar.letter(row.calendar.name));
-            avatar.setBackground(Avatar.disc(Avatar.colorOf(row.calendar.color, row.calendar.id)));
+            avatar.setBackground(Avatar.disc(host, Avatar.colorOf(row.calendar.color, row.calendar.id)));
 
             ImageView component = view.findViewById(R.id.event_component);
             component.setImageResource(glyphOf(occurrence.component));

@@ -115,7 +115,7 @@ final class MailList {
             // their name is spelled keeps the colour the eye learned.
             TextView avatar = view.findViewById(R.id.message_avatar);
             avatar.setText(Avatar.letter(message.fromAddress));
-            avatar.setBackground(Avatar.circle(message.fromAddress));
+            avatar.setBackground(Avatar.circle(host, message.fromAddress));
 
             // Unread is carried by weight alone, across every line of the
             // row including the date (as the Compose client does): a

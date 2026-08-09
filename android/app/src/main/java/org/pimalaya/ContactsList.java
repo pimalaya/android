@@ -278,7 +278,7 @@ final class ContactsList {
 
             TextView avatar = row.findViewById(R.id.contact_avatar);
             avatar.setText(Avatar.letter(name));
-            avatar.setBackground(Avatar.circle(entry.card != null ? entry.card.vcard : name));
+            avatar.setBackground(Avatar.circle(host, entry.card != null ? entry.card.vcard : name));
 
             ((TextView) row.findViewById(R.id.contact_name)).setText(name);
 

@@ -1,7 +1,10 @@
 package org.pimalaya;
 
+import android.content.Context;
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.InsetDrawable;
 
 /**
  * The coloured disc a list row leads with, shared by the three domains.
@@ -24,8 +27,8 @@ final class Avatar {
      * <p>Saturation and value are fixed, so every disc in the app sits at
      * one weight and the hue is the only thing that varies.
      */
-    static GradientDrawable circle(String seed) {
-        return disc(Color.HSVToColor(new float[] {hueOf(seed), 0.4f, 0.55f}));
+    static Drawable circle(Context context, String seed) {
+        return disc(context, Color.HSVToColor(new float[] {hueOf(seed), 0.4f, 0.55f}));
     }
 
     /**
@@ -33,12 +36,20 @@ final class Avatar {
      * already has one of its own: a calendar's server-set colour beats
      * anything derived, since it is the colour that calendar has
      * everywhere else the user sees it.
+     *
+     * <p>Inset inside the view rather than sized to it, so the disc can
+     * be smaller than the column without leaving the axis the column
+     * puts it on: the bar's first domain button. Shrinking the view
+     * instead moved every disc two pixels off that axis and pulled the
+     * text after it.
      */
-    static GradientDrawable disc(int color) {
+    static Drawable disc(Context context, int color) {
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
         circle.setColor(color);
-        return circle;
+
+        int inset = context.getResources().getDimensionPixelSize(R.dimen.item_avatar_inset);
+        return new InsetDrawable(circle, inset);
     }
 
     /**
