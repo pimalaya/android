@@ -35,12 +35,12 @@ use io_imap::{
         sequence::SequenceSet,
     },
 };
-use mail_parser::{Address, MessageParser, MimeHeaders, PartType};
 use url::Url;
 
 use crate::{
     client::Client,
-    types::{BridgeError, Credentials, Message, MessageAttachment, MessageBody},
+    mail,
+    types::{BridgeError, Credentials, MailWalk, Mailbox as MailboxEntry, Message},
 };
 
 /// io-imap's own fragmentizer ceiling, 100 MiB per message.
@@ -120,11 +120,6 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         ))?;
 
         Ok(())
-    }
-
-    /// LIST, keeping the mailboxes that can actually hold messages.
-    pub fn list_mailboxes(&mut self) -> Result<Vec<String>, BridgeError> {
-        Ok(self.list()?.into_iter().map(|(name, _)| name).collect())
     }
 
     /// LIST, as `(name, attributes)` pairs, the unselectable ones out.
@@ -434,95 +429,6 @@ fn uids(uid: &str) -> Result<SequenceSet, BridgeError> {
         .map_err(|_| BridgeError::from(format!("Invalid message id `{uid}`")))
 }
 
-/// One raw RFC 5322 message as the reader shows it.
-///
-/// HTML wins over text when the message carries both, because that is
-/// the alternative the sender laid out; the reader sandboxes it, which
-/// is what makes preferring it safe.
-fn parse_message(raw: &[u8]) -> Result<MessageBody, BridgeError> {
-    let parsed = MessageParser::default()
-        .parse(raw)
-        .ok_or_else(|| BridgeError::from("Could not read the message"))?;
-
-    let sender = parsed.from().and_then(|address| address.first());
-
-    // NOTE: the part itself rather than `body_html`, which renders a
-    // text-only message into HTML rather than saying it has none: a
-    // message with nothing but text would otherwise reach the reader as
-    // markup and be sandboxed in a web view for no reason.
-    let html = parsed.html_part(0).and_then(|part| match &part.body {
-        PartType::Html(html) => Some(html.to_string()),
-        _ => None,
-    });
-    let (kind, body) = match html {
-        Some(html) => ("html", html),
-        None => match parsed.body_text(0) {
-            Some(text) => ("plain", text.into_owned()),
-            None => ("", String::new()),
-        },
-    };
-
-    Ok(MessageBody {
-        subject: parsed.subject().unwrap_or_default().to_string(),
-        from: sender
-            .and_then(|address| address.name.as_deref())
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .unwrap_or_default()
-            .to_string(),
-        from_address: sender
-            .and_then(|address| address.address.as_deref())
-            .unwrap_or_default()
-            .to_string(),
-        to: addresses(parsed.to()),
-        cc: addresses(parsed.cc()),
-        date: parsed
-            .date()
-            .map(|date| date.to_rfc3339())
-            .unwrap_or_default(),
-        kind: kind.to_string(),
-        body,
-        attachments: parsed
-            .attachments()
-            .map(|part| MessageAttachment {
-                name: part.attachment_name().unwrap_or_default().to_string(),
-                mime: part
-                    .content_type()
-                    .map(|content| match content.subtype() {
-                        Some(subtype) => format!("{}/{subtype}", content.ctype()),
-                        None => content.ctype().to_string(),
-                    })
-                    .unwrap_or_else(|| String::from("application/octet-stream"))
-                    .to_lowercase(),
-                size: part.contents().len() as u64,
-            })
-            .collect(),
-    })
-}
-
-/// A header's addresses as one line, the way a header reads them.
-fn addresses(header: Option<&Address>) -> String {
-    let Some(header) = header else {
-        return String::new();
-    };
-
-    header
-        .clone()
-        .into_list()
-        .iter()
-        .map(|address| match address.name.as_deref().map(str::trim) {
-            Some(name) if !name.is_empty() => {
-                format!(
-                    "{name} <{}>",
-                    address.address.as_deref().unwrap_or_default()
-                )
-            }
-            _ => address.address.as_deref().unwrap_or_default().to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
 /// One FETCH response's data items to the JNI-facing shape.
 fn message(mailbox: &str, items: Vec<MessageDataItem<'static>>) -> Message {
     let mut uid: u32 = 0;
@@ -548,7 +454,11 @@ fn message(mailbox: &str, items: Vec<MessageDataItem<'static>>) -> Message {
             }
             MessageDataItem::Envelope(envelope) => {
                 if let Some(value) = envelope.subject.into_option() {
-                    subject = String::from_utf8_lossy(value.as_ref()).into_owned();
+                    // NOTE: the ENVELOPE is the header text itself, so what
+                    // arrives here is what was written on the wire. A list
+                    // drawing it raw shows the encoded words a reader
+                    // expects to have been decoded for it.
+                    subject = mail::decode_header(&String::from_utf8_lossy(value.as_ref()));
                 }
                 if let Some(value) = envelope.date.into_option() {
                     date = String::from_utf8_lossy(value.as_ref()).into_owned();
@@ -582,7 +492,10 @@ fn display_name(address: &io_imap::types::envelope::Address) -> String {
         return String::new();
     };
 
-    let name = String::from_utf8_lossy(name.as_ref()).into_owned();
+    // Decoded on the same terms as the subject: a sender writing their
+    // own name in their own script reaches the envelope as encoded words,
+    // and a row is where that name is read.
+    let name = mail::decode_header(&String::from_utf8_lossy(name.as_ref()));
     match name.trim().is_empty() {
         true => String::new(),
         false => name,
@@ -673,45 +586,73 @@ fn text_of(value: &IString) -> String {
     String::from_utf8_lossy(&value.clone().into_inner()).into_owned()
 }
 
-/// Reads one message whole: connect, EXAMINE its mailbox, fetch it and
-/// resolve its MIME tree into the one body a reader sees.
-pub fn fetch_message(
+/// Reads one message whole: connect, EXAMINE its mailbox and fetch it,
+/// as the bytes the server holds.
+///
+/// The MIME tree is nobody's business here. What a reader draws is
+/// derived from these bytes by [`crate::mail::parse`], and derived again
+/// from the same bytes once the store holds them, which is what makes
+/// opening a message a second time cost nothing.
+pub fn fetch_source(
     client: &mut Client<'_, '_>,
     url: &Url,
     credentials: &Credentials,
     mailbox: &str,
     id: &str,
-) -> Result<MessageBody, BridgeError> {
+) -> Result<Vec<u8>, BridgeError> {
     let mut session = ImapSession::new(client, url);
     session.connect(credentials)?;
 
-    let raw = session.fetch_raw(mailbox, id)?;
-    parse_message(&raw)
+    session.fetch_raw(mailbox, id)
 }
 
-/// Walks a whole account: connect once, list the mailboxes, then take
-/// the newest `limit` messages of each.
+/// Walks a whole account: connect once, list the mailboxes with the
+/// roles their attributes mark, then take the newest `limit` messages of
+/// each.
 pub fn sync_account(
     client: &mut Client<'_, '_>,
     url: &Url,
     credentials: &Credentials,
     limit: u32,
-) -> Result<Vec<Message>, BridgeError> {
+) -> Result<MailWalk, BridgeError> {
     let mut session = ImapSession::new(client, url);
     session.connect(credentials)?;
 
-    let mailboxes = session.list_mailboxes()?;
+    let listed = session.list()?;
+    let mut mailboxes = Vec::with_capacity(listed.len());
     let mut messages = Vec::new();
-    for mailbox in mailboxes {
+
+    for (name, attributes) in listed {
         // NOTE: one unreadable mailbox (a shared folder the account
         // cannot EXAMINE) must not fail the whole account.
-        match session.fetch_envelopes(&mailbox, limit) {
+        match session.fetch_envelopes(&name, limit) {
             Ok(found) => messages.extend(found),
-            Err(err) => log::warn!("skip mailbox {mailbox}: {err}"),
+            Err(err) => log::warn!("skip mailbox {name}: {err}"),
         }
+        mailboxes.push(MailboxEntry {
+            role: role_of(&attributes),
+            name,
+        });
     }
 
-    Ok(messages)
+    Ok(MailWalk {
+        mailboxes,
+        messages,
+    })
+}
+
+/// The role a mailbox's RFC 6154 attributes give it, of the one a write
+/// needs, empty where they give it another.
+fn role_of(attributes: &[FlagNameAttribute<'static>]) -> String {
+    let trash = attributes
+        .iter()
+        .any(|held| held.to_string().eq_ignore_ascii_case("\\Trash"));
+
+    if trash {
+        String::from("trash")
+    } else {
+        String::new()
+    }
 }
 
 #[cfg(test)]
@@ -721,7 +662,7 @@ mod tests {
         core::{IString, NString},
     };
 
-    use super::{attaches, parse_message};
+    use super::attaches;
 
     fn text(value: &str) -> IString<'static> {
         value.to_string().try_into().expect("printable ASCII")
@@ -772,65 +713,5 @@ mod tests {
         assert!(!attaches(&part(Some("logo.png"), Some("inline"))));
         assert!(attaches(&part(None, Some("attachment"))));
         assert!(attaches(&part(Some("invoice.pdf"), Some("ATTACHMENT"))));
-    }
-
-    #[test]
-    fn html_wins_over_text_and_attachments_are_listed() {
-        let raw = b"From: Alice <alice@example.org>\r\n\
-                    To: Bob <bob@example.org>\r\n\
-                    Subject: Hello\r\n\
-                    Date: Sun, 9 Aug 2026 12:14:00 +0200\r\n\
-                    MIME-Version: 1.0\r\n\
-                    Content-Type: multipart/mixed; boundary=\"sep\"\r\n\
-                    \r\n\
-                    --sep\r\n\
-                    Content-Type: multipart/alternative; boundary=\"alt\"\r\n\
-                    \r\n\
-                    --alt\r\n\
-                    Content-Type: text/plain\r\n\
-                    \r\n\
-                    plain body\r\n\
-                    --alt\r\n\
-                    Content-Type: text/html\r\n\
-                    \r\n\
-                    <p>rich body</p>\r\n\
-                    --alt--\r\n\
-                    --sep\r\n\
-                    Content-Type: application/pdf; name=\"invoice.pdf\"\r\n\
-                    Content-Disposition: attachment; filename=\"invoice.pdf\"\r\n\
-                    \r\n\
-                    %PDF\r\n\
-                    --sep--\r\n";
-
-        let message = parse_message(raw).unwrap();
-
-        assert_eq!(message.subject, "Hello");
-        assert_eq!(message.from, "Alice");
-        assert_eq!(message.from_address, "alice@example.org");
-        assert_eq!(message.to, "Bob <bob@example.org>");
-        assert_eq!(message.kind, "html");
-        assert!(message.body.contains("rich body"));
-        assert!(message.date.starts_with("2026-08-09T12:14:00"));
-
-        assert_eq!(message.attachments.len(), 1);
-        assert_eq!(message.attachments[0].name, "invoice.pdf");
-        assert_eq!(message.attachments[0].mime, "application/pdf");
-    }
-
-    #[test]
-    fn a_message_with_no_html_falls_back_to_its_text() {
-        let raw = b"From: alice@example.org\r\n\
-                    Subject: Plain\r\n\
-                    \r\n\
-                    just text\r\n";
-
-        let message = parse_message(raw).unwrap();
-
-        assert_eq!(message.kind, "plain");
-        assert_eq!(message.body.trim(), "just text");
-        // No display name in the header, so the row falls back to the
-        // address rather than showing an empty sender.
-        assert_eq!(message.from, "");
-        assert_eq!(message.from_address, "alice@example.org");
     }
 }

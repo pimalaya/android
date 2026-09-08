@@ -14,6 +14,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.EventDetail;
@@ -255,7 +256,13 @@ final class EventView {
             return;
         }
 
-        open(null, new EventStore.StoredEvent(calendar.id, uid + ".ics", ical, ""), calendar, true);
+        String id = uid + ".ics";
+        open(
+                null,
+                new EventStore.StoredEvent(
+                        calendar.id, id, CardStore.rowHandle(null, id), ical, ""),
+                calendar,
+                true);
     }
 
     /** Opens the page on one agenda row. */
@@ -794,12 +801,14 @@ final class EventView {
     // ---- saving -----------------------------------------------------------
 
     /**
-     * Patches the object, pushes it, and stores what was pushed.
+     * Patches the object and stages it; the next sync pushes it.
      *
-     * <p>The store is written from the same text the server was handed,
-     * so the agenda shows the edit without waiting for a sync to fetch
-     * it back; a push that fails writes nothing, since a local copy the
-     * server never took is a lie the next sync would silently undo.
+     * <p>The store and nothing else, so an entry can be written and saved
+     * with the radio off. A create is staged as one, guarded by
+     * {@code If-None-Match} when it goes out, and an edit is staged
+     * against the ETag the entry was read at, so the push that follows is
+     * conditioned on the state the edit was made against rather than on
+     * whatever arrived since.
      */
     void save() {
         if (detail == null) {
@@ -807,52 +816,35 @@ final class EventView {
             return;
         }
 
-        AccountEntry account = accountOf(calendar.accountEmail);
-        if (account == null) {
-            host.toast(host.getString(R.string.message_no_account));
-            return;
-        }
-
         put("stamp", now());
         String edited = model.toString();
         EventStore.StoredEvent target = event;
         EventStore.StoredCalendar collection = calendar;
+        boolean isNew = creating;
 
         host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
         host.io.execute(
                 () -> {
                     Exception failure = null;
-                    String written = null;
-                    String etag = null;
                     try {
-                        written = host.client.writeEvent(target.ical, edited);
-                        String pushed = written;
-                        boolean isNew = creating;
-                        etag =
-                                host.runner
-                                        .session(account, PimDomain.CALENDAR)
-                                        .call(
-                                                server ->
-                                                        isNew
-                                                                ? host.client.createEvent(
-                                                                        server,
-                                                                        collection.url,
-                                                                        target.id,
-                                                                        pushed)
-                                                                : host.client.updateEvent(
-                                                                        server,
-                                                                        collection.url,
-                                                                        target.id,
-                                                                        pushed,
-                                                                        target.etag));
+                        String written = host.client.writeEvent(target.ical, edited);
+                        CalendarEngine engine = host.calendarEngine(collection.accountEmail);
+                        if (isNew) {
+                            // NOTE: no summary and no key. What an agenda row
+                            // shows needs the recurrence expansion, which
+                            // happens at render time against the window being
+                            // shown, so there is nothing to write here.
+                            engine.mutateAdd(
+                                    collection.id, target.id, written, new JSONArray(), null, "");
+                        } else {
+                            engine.mutateEdit(collection.id, target.handle, written, null, "");
+                        }
                     } catch (Exception error) {
                         Log.w("pimalaya", "event save failed: " + target.id, error);
                         failure = error;
                     }
 
                     Exception outcome = failure;
-                    String body = written;
-                    String validator = etag;
                     host.postAlive(
                             () -> {
                                 host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
@@ -860,11 +852,6 @@ final class EventView {
                                     host.showError(outcome, R.string.event_save_failed);
                                     return;
                                 }
-                                host.events.replaceEvent(
-                                        collection.id,
-                                        target.id,
-                                        body,
-                                        validator == null ? "" : validator);
                                 creating = false;
                                 host.calendarList.reload();
                                 host.showBack(MainActivity.PANEL_CALENDAR);
@@ -882,21 +869,16 @@ final class EventView {
     }
 
     /**
-     * Removes the entry from its calendar, then from the store.
+     * Stages the entry's removal and leaves the page; the next sync
+     * deletes it, guarded by the ETag it was read at.
      *
-     * <p>An entry the server has never seen is only ever local, so its
-     * delete is the page closing: there is nothing to remove and no
-     * precondition to guard it with.
+     * <p>An entry that was never saved is only ever on this screen, so its
+     * delete is the page closing: there is nothing staged to withdraw and
+     * nothing anywhere to tell about it.
      */
     private void delete() {
         if (creating) {
             host.showBack(MainActivity.PANEL_CALENDAR);
-            return;
-        }
-
-        AccountEntry account = accountOf(calendar.accountEmail);
-        if (account == null) {
-            host.toast(host.getString(R.string.message_no_account));
             return;
         }
 
@@ -908,17 +890,8 @@ final class EventView {
                 () -> {
                     Exception failure = null;
                     try {
-                        host.runner
-                                .session(account, PimDomain.CALENDAR)
-                                .call(
-                                        server -> {
-                                            host.client.deleteEvent(
-                                                    server,
-                                                    collection.url,
-                                                    target.id,
-                                                    target.etag);
-                                            return null;
-                                        });
+                        host.calendarEngine(collection.accountEmail)
+                                .mutateRemove(collection.id, target.handle);
                     } catch (Exception error) {
                         Log.w("pimalaya", "event delete failed: " + target.id, error);
                         failure = error;
@@ -932,19 +905,10 @@ final class EventView {
                                     host.showError(outcome, R.string.event_delete_failed);
                                     return;
                                 }
-                                host.events.removeEvent(collection.id, target.id);
                                 host.calendarList.reload();
                                 host.showBack(MainActivity.PANEL_CALENDAR);
                             });
                 });
     }
 
-    private AccountEntry accountOf(String email) {
-        for (AccountEntry account : host.accountsFor(PimDomain.CALENDAR)) {
-            if (account.email.equals(email)) {
-                return account;
-            }
-        }
-        return null;
-    }
 }

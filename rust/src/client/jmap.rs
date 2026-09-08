@@ -21,14 +21,14 @@ use io_jmap::{
     },
     coroutine::{JmapCoroutine, JmapCoroutineState, JmapYield},
     rfc8620::{
-        changes::*, coroutine::JmapRedirectYield, error::JmapMethodError, filter::JmapFilter,
-        session::JmapSession, session_get::*,
+        blob_download::JmapBlobDownload, changes::*, coroutine::JmapRedirectYield,
+        error::JmapMethodError, filter::JmapFilter, session::JmapSession, session_get::*,
     },
     rfc8621::{
+        JMAP_MAIL_CAPABILITY,
         email::{
             JMAP_KEYWORD_ANSWERED, JMAP_KEYWORD_FLAGGED, JMAP_KEYWORD_SEEN, JmapEmail,
-            JmapEmailAddress, JmapEmailBodyPart, JmapEmailBodyValue, JmapEmailProperty, get::*,
-            query::*, set::*,
+            JmapEmailAddress, JmapEmailProperty, get::*, query::*, set::*,
         },
         mailbox::{JmapMailbox, JmapMailboxRole, get::*},
     },
@@ -49,19 +49,14 @@ use crate::{
     },
     jmap,
     types::{
-        Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, Message,
-        MessageAttachment, MessageBody, PushChange, PushOutcome,
+        Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, MailWalk, Mailbox,
+        Message, PushChange, PushOutcome,
     },
 };
 
 /// How many changes one JMAP ContactCard/set call carries: well under
 /// every server's advertised maxObjectsInSet, so no session lookup.
 const JMAP_SET_CHUNK: usize = 50;
-
-/// How much of one body value a reader is handed, in octets. Generous
-/// for anything meant to be read, and a ceiling on the mailing-list
-/// digest that would otherwise arrive whole over a phone connection.
-const MAX_BODY_BYTES: u64 = 512 * 1024;
 
 /// JMAP operations: the RFC 9610 AddressBook and ContactCard verbs, the
 /// ContactCard/set push and the ContactCard/changes sync round.
@@ -522,26 +517,31 @@ impl<'a, 'local> Client<'a, 'local> {
         session_url: &Url,
         credentials: &Credentials,
         limit: u32,
-    ) -> Result<Vec<Message>, BridgeError> {
+    ) -> Result<MailWalk, BridgeError> {
         let auth = jmap_auth(credentials);
         let session = self.jmap_session(session_url, &auth)?;
         let api_url = session.api_url.clone();
 
-        let mailboxes = self.list_jmap_mailboxes(&session, &auth, &api_url)?;
+        let listed = self.list_jmap_mailboxes(&session, &auth, &api_url)?;
 
+        let mut mailboxes = Vec::with_capacity(listed.len());
         let mut messages = Vec::new();
-        for (id, path) in mailboxes {
+        for (id, path, role) in listed {
             match self.list_jmap_messages(&session, &auth, &api_url, &id, &path, limit) {
                 Ok(found) => messages.extend(found),
                 Err(err) => log::warn!("skip mailbox {path}: {err}"),
             }
+            mailboxes.push(Mailbox { name: path, role });
         }
 
-        Ok(messages)
+        Ok(MailWalk {
+            mailboxes,
+            messages,
+        })
     }
 
-    /// The account's mailboxes as `(id, path)` pairs, the path being the
-    /// names of the mailbox and its ancestors joined by `/`.
+    /// The account's mailboxes as `(id, path, role)` triples, the path
+    /// being the names of the mailbox and its ancestors joined by `/`.
     ///
     /// The path rather than the bare name, because the name is what the
     /// store keys a collection by and JMAP lets two mailboxes under
@@ -549,12 +549,15 @@ impl<'a, 'local> Client<'a, 'local> {
     /// unified mailbox would otherwise collapse into a single
     /// collection. IMAP hands the app hierarchical names already, so
     /// this is what keeps the two backends storing the same shape.
+    ///
+    /// The role is the RFC 8621 counterpart of RFC 6154's attributes, of
+    /// the one a write needs: which mailbox a delete moves into.
     fn list_jmap_mailboxes(
         &mut self,
         session: &JmapSession,
         auth: &SecretString,
         api_url: &Url,
-    ) -> Result<Vec<(String, String)>, BridgeError> {
+    ) -> Result<Vec<(String, String, String)>, BridgeError> {
         let opts = JmapMailboxGetOptions::default();
         let coroutine = JmapMailboxGet::new(session, auth, opts).map_err(|err| err.to_string())?;
         let out = self.run_jmap(api_url, coroutine)?;
@@ -567,54 +570,88 @@ impl<'a, 'local> Client<'a, 'local> {
 
         Ok(named
             .iter()
-            .map(|(id, mailbox)| (id.clone(), mailbox_path(&named, mailbox)))
+            .map(|(id, mailbox)| {
+                let role = match mailbox.role {
+                    Some(JmapMailboxRole::Trash) => "trash",
+                    _ => "",
+                };
+                (id.clone(), mailbox_path(&named, mailbox), role.into())
+            })
             .collect())
     }
 
-    /// Reads one message whole, headers and body together.
+    /// Reads one message whole, as the RFC 5322 bytes behind it.
     ///
-    /// Body values are asked for by the same call that asks for the
-    /// headers, capped: a reader shows what fits on a phone, and a
-    /// message carrying a megabyte of quoted history should not be
-    /// pulled whole to render its first screen.
-    pub fn fetch_jmap_message(
+    /// Two round trips where the body values would have been one: an
+    /// `Email/get` for the `blobId`, then the RFC 8620 section 6.2
+    /// download of that blob. It buys the one thing the body values
+    /// cannot, which is a message the store can hold: what comes back
+    /// is the message rather than a server's rendering of it, so it is
+    /// filed once and read from the store every time after, offline
+    /// included, through the same parser the IMAP side uses.
+    pub fn fetch_jmap_source(
         &mut self,
         session_url: &Url,
         credentials: &Credentials,
         id: &str,
-    ) -> Result<MessageBody, BridgeError> {
+    ) -> Result<Vec<u8>, BridgeError> {
         let auth = jmap_auth(credentials);
         let session = self.jmap_session(session_url, &auth)?;
         let api_url = session.api_url.clone();
 
         let opts = JmapEmailGetOptions {
-            properties: Some(vec![
-                JmapEmailProperty::Id,
-                JmapEmailProperty::Subject,
-                JmapEmailProperty::From,
-                JmapEmailProperty::To,
-                JmapEmailProperty::Cc,
-                JmapEmailProperty::SentAt,
-                JmapEmailProperty::ReceivedAt,
-                JmapEmailProperty::TextBody,
-                JmapEmailProperty::HtmlBody,
-                JmapEmailProperty::BodyValues,
-                JmapEmailProperty::Attachments,
-            ]),
-            fetch_text_body_values: true,
-            fetch_html_body_values: true,
-            max_body_value_bytes: MAX_BODY_BYTES,
+            properties: Some(vec![JmapEmailProperty::Id, JmapEmailProperty::BlobId]),
+            ..Default::default()
         };
 
         let coroutine = JmapEmailGet::new(&session, &auth, vec![id.to_string()], opts)
             .map_err(|err| err.to_string())?;
         let out = self.run_jmap(&api_url, coroutine)?;
 
-        out.emails
+        let blob = out
+            .emails
             .into_iter()
             .next()
-            .map(message_body)
-            .ok_or_else(|| BridgeError::from(format!("No message `{id}`")))
+            .and_then(|email| email.blob_id)
+            .ok_or_else(|| BridgeError::from(format!("No message `{id}`")))?;
+
+        let url = download_url(&session, &blob)?;
+        self.run_jmap_download(&auth, &url)
+    }
+
+    /// Downloads one blob, following the redirects the download URL may
+    /// answer with, and returns its bytes.
+    fn run_jmap_download(
+        &mut self,
+        auth: &SecretString,
+        download_url: &Url,
+    ) -> Result<Vec<u8>, BridgeError> {
+        let mut target = download_url.clone();
+
+        loop {
+            let mut coroutine = JmapBlobDownload::new(auth, &target);
+            let mut arg: Option<Vec<u8>> = None;
+
+            loop {
+                match coroutine.resume(arg.as_deref()) {
+                    JmapCoroutineState::Complete(Ok(out)) => return Ok(out.data),
+                    JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
+                    JmapCoroutineState::Yielded(JmapRedirectYield::WantsWrite(bytes)) => {
+                        self.write(target.as_str(), &bytes)?;
+                        arg = None;
+                    }
+                    JmapCoroutineState::Yielded(JmapRedirectYield::WantsRead) => {
+                        arg = Some(self.read(target.as_str())?);
+                    }
+                    JmapCoroutineState::Yielded(JmapRedirectYield::WantsRedirect {
+                        url, ..
+                    }) => {
+                        target = url;
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     /// The newest `limit` messages of one mailbox: an `Email/query`
@@ -956,80 +993,39 @@ fn mailbox_path(named: &BTreeMap<String, JmapMailbox>, mailbox: &JmapMailbox) ->
     segments.join("/")
 }
 
-/// One JMAP Email read whole to the reader's shape.
+/// Where one blob is downloaded from: the session's RFC 6570 template
+/// (RFC 8620 section 6.2) with its four variables filled in.
 ///
-/// The body comes back inside the same `Email/get` that returns the
-/// headers, because JMAP hands over decoded body values: there is no
-/// second download and no MIME tree to walk, which is the whole
-/// difference from the IMAP path.
-fn message_body(email: JmapEmail) -> MessageBody {
-    let sender = email.from.as_deref().and_then(<[JmapEmailAddress]>::first);
-    let values = email.body_values.unwrap_or_default();
+/// Filled by substitution rather than by a template engine, because the
+/// template is specified variable by variable and there are four of
+/// them: the account the blob belongs to, the blob, a name the download
+/// is offered under, and the media type it is asked for.
+fn download_url(session: &JmapSession, blob: &str) -> Result<Url, BridgeError> {
+    let account = session.primary_account_id_for(JMAP_MAIL_CAPABILITY);
+    let filled = session
+        .download_url
+        .replace("{accountId}", &encode(&account))
+        .replace("{blobId}", &encode(blob))
+        .replace("{name}", &encode("message.eml"))
+        .replace("{type}", &encode("message/rfc822"));
 
-    // HTML first, the alternative the sender laid out, and the reader
-    // sandboxes it; text is what a message with no HTML part leaves.
-    let html = part_value(&values, email.html_body.as_deref());
-    let text = part_value(&values, email.text_body.as_deref());
-    let (kind, body) = match html {
-        Some(html) => ("html", html),
-        None => match text {
-            Some(text) => ("plain", text),
-            None => ("", String::new()),
-        },
-    };
+    Url::parse(&filled).map_err(|err| BridgeError::from(format!("Invalid download URL: {err}")))
+}
 
-    MessageBody {
-        subject: email.subject.unwrap_or_default(),
-        from: sender.map(display_name).unwrap_or_default(),
-        from_address: sender
-            .map(|address| address.email.clone())
-            .unwrap_or_default(),
-        to: addresses(email.to.as_deref()),
-        cc: addresses(email.cc.as_deref()),
-        // The `Date` the sender wrote when the server kept it, else
-        // when it arrived: a reader asks when a message was sent.
-        date: email.sent_at.or(email.received_at).unwrap_or_default(),
-        kind: kind.to_string(),
-        body,
-        attachments: email
-            .attachments
-            .unwrap_or_default()
-            .into_iter()
-            .map(|part| MessageAttachment {
-                name: part.name.unwrap_or_default(),
-                mime: part
-                    .r#type
-                    .unwrap_or_else(|| String::from("application/octet-stream"))
-                    .to_lowercase(),
-                size: part.size.unwrap_or(0),
-            })
-            .collect(),
+/// One template variable as a URL path or query component: everything
+/// outside the RFC 3986 unreserved set percent-encoded, a blob id being
+/// opaque and free to carry anything.
+fn encode(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(char::from(byte))
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
     }
-}
-
-/// The text of the first body part that has one, fetched by part id.
-fn part_value(
-    values: &BTreeMap<String, JmapEmailBodyValue>,
-    parts: Option<&[JmapEmailBodyPart]>,
-) -> Option<String> {
-    parts?
-        .iter()
-        .filter_map(|part| part.part_id.as_deref())
-        .find_map(|id| values.get(id))
-        .map(|value| value.value.clone())
-}
-
-/// A header's addresses as one line, the way a header reads them.
-fn addresses(addresses: Option<&[JmapEmailAddress]>) -> String {
-    addresses
-        .unwrap_or_default()
-        .iter()
-        .map(|address| match address.name.as_deref().map(str::trim) {
-            Some(name) if !name.is_empty() => format!("{name} <{}>", address.email),
-            _ => address.email.clone(),
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
+    encoded
 }
 
 /// One JMAP Email to the JNI-facing shape.
@@ -1161,5 +1157,58 @@ fn jmap_collection_path(session: &JmapSession, capability: &str, id: &str) -> St
     match session.primary_accounts.get(capability) {
         Some(account) if !account.is_empty() => format!("{account}/{id}"),
         _ => id.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use io_jmap::{rfc8620::session::JmapSession, rfc8621::JMAP_MAIL_CAPABILITY};
+    use std::collections::BTreeMap;
+    use url::Url;
+
+    use super::download_url;
+
+    fn session(template: &str) -> JmapSession {
+        JmapSession {
+            username: String::new(),
+            accounts: BTreeMap::new(),
+            primary_accounts: BTreeMap::from([(
+                JMAP_MAIL_CAPABILITY.to_string(),
+                "u42".to_string(),
+            )]),
+            capabilities: BTreeMap::new(),
+            api_url: Url::parse("https://api.example.com/jmap/").unwrap(),
+            download_url: template.to_string(),
+            upload_url: String::new(),
+            event_source_url: String::new(),
+            state: String::new(),
+        }
+    }
+
+    /// Every variable, or the download reaches a path with a brace in it
+    /// and the server answers 404 rather than the message.
+    #[test]
+    fn a_download_url_leaves_no_variable_behind() {
+        let session = session(
+            "https://api.example.com/jmap/download/{accountId}/{blobId}/{name}?accept={type}",
+        );
+
+        let url = download_url(&session, "G12ab").unwrap();
+
+        assert_eq!(
+            url.as_str(),
+            "https://api.example.com/jmap/download/u42/G12ab/message.eml?accept=message%2Frfc822"
+        );
+    }
+
+    /// A blob id is opaque, so it routinely carries what a path separates
+    /// segments with.
+    #[test]
+    fn a_blob_id_is_encoded_rather_than_pasted() {
+        let session = session("https://api.example.com/d/{accountId}/{blobId}");
+
+        let url = download_url(&session, "a/b c").unwrap();
+
+        assert_eq!(url.as_str(), "https://api.example.com/d/u42/a%2Fb%20c");
     }
 }

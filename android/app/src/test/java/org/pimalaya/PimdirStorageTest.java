@@ -54,8 +54,33 @@ public class PimdirStorageTest {
         return op;
     }
 
-    /** An upsert of one placement. */
+    /** An upsert of one placement, with no base: a pending create. */
     private JSONObject upsert(String handle, String linkId, String hash, String sortKey)
+            throws Exception {
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", placement(handle, linkId, hash, sortKey));
+        return op;
+    }
+
+    /** The same, with the base a fetch writes beside the body it read. */
+    private JSONObject synced(String handle, String linkId, String hash, String sortKey)
+            throws Exception {
+        JSONObject placement = placement(handle, linkId, hash, sortKey);
+        JSONObject base = new JSONObject();
+        base.put("revision", "rev-" + linkId);
+        if (hash != null) {
+            base.put("object", hash);
+        }
+        placement.put("base", base);
+
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", placement);
+        return op;
+    }
+
+    private JSONObject placement(String handle, String linkId, String hash, String sortKey)
             throws Exception {
         JSONObject placement = new JSONObject();
         placement.put("collection", "acct/Contacts");
@@ -71,11 +96,7 @@ public class PimdirStorageTest {
         placement.put("level", "full");
         placement.put("flags", new JSONArray());
         placement.put("status", "clean");
-
-        JSONObject op = new JSONObject();
-        op.put("op", "upsert");
-        op.put("placement", placement);
-        return op;
+        return placement;
     }
 
     /** The typed contact summary an engine write carries, as the wire spells it. */
@@ -117,7 +138,7 @@ public class PimdirStorageTest {
     @Test
     public void aWrittenPlacementLoadsBackAsItself() throws Exception {
         storage.applyWrites(
-                batch(storeObject("aa11", "BEGIN:VCARD"), upsert("a.vcf", "uid-a", "aa11", "alice")));
+                batch(storeObject("aa11", "BEGIN:VCARD"), synced("a.vcf", "uid-a", "aa11", "alice")));
 
         JSONObject loaded = storage.loadCollection("acct/Contacts", null);
         JSONArray placements = loaded.getJSONArray("placements");
@@ -130,6 +151,78 @@ public class PimdirStorageTest {
         assertEquals("alice", placement.getString("sortKey"));
         assertEquals("full", placement.getString("level"));
         assertEquals("clean", placement.getString("status"));
+    }
+
+    /**
+     * The status is derived from the row and never stored (SYNC §3), and the
+     * two that carry a push are the two that matter: without `dirty` a
+     * staged edit loads back as agreed and the merge finds nothing to send,
+     * and without `created` an item no source binds reads as a member the
+     * remote no longer has, which a complete round retires.
+     */
+    @Test
+    public void theStatusIsDerivedFromWhatTheRowOwes() throws Exception {
+        storage.applyWrites(
+                batch(storeObject("ab12", "one"), synced("s.vcf", "uid-s", "ab12", "sam")));
+        assertEquals("clean", statusOf("s.vcf"));
+
+        // A staged edit: the body moved and the base kept what was agreed,
+        // which is exactly what an `Edit` mutation writes.
+        JSONObject edited = synced("s.vcf", "uid-s", "ac13", "sam").getJSONObject("placement");
+        edited.getJSONObject("base").put("object", "ab12");
+        JSONObject edit = new JSONObject();
+        edit.put("op", "upsert");
+        edit.put("placement", edited);
+        storage.applyWrites(batch(storeObject("ac13", "two"), edit));
+        assertEquals("dirty", statusOf("s.vcf"));
+
+        // A create nobody has agreed on: bound with no base.
+        storage.applyWrites(batch(storeObject("ad14", "three"), upsert("n.vcf", "uid-n", "ad14", "nan")));
+        assertEquals("created", statusOf("n.vcf"));
+    }
+
+    @Test
+    public void aMarkerSetThatOnlyReorderedOwesNoPush() throws Exception {
+        JSONObject placement =
+                synced("f.vcf", "uid-f", null, "fay").getJSONObject("placement");
+        placement.put("flags", new JSONArray().put("\\Seen").put("\\Flagged"));
+        placement.getJSONObject("base")
+                .put("flags", new JSONArray().put("\\Flagged").put("\\Seen"));
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", placement);
+        storage.applyWrites(batch(op));
+
+        // The markers are what differ, not the order they were written in:
+        // comparing the stored text would derive a push on every sync for a
+        // set nobody moved.
+        assertEquals("clean", statusOf("f.vcf"));
+    }
+
+    @Test
+    public void aBodilessRowNeverProjectsAsFull() throws Exception {
+        // Whatever the stored level claims: an item whose body a remote
+        // change dropped has to project below full, or nothing refetches it.
+        storage.applyWrites(batch(synced("m.vcf", "uid-m", null, "mo")));
+        db.execSQL("UPDATE items SET level = 2 WHERE link_id = 'uid-m'");
+
+        JSONObject placement =
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("placements")
+                        .getJSONObject(0);
+        assertEquals("meta", placement.getString("level"));
+    }
+
+    /** The status the projection gives one handle. */
+    private String statusOf(String handle) throws Exception {
+        JSONArray placements =
+                storage.loadCollection("acct/Contacts", null).getJSONArray("placements");
+        for (int index = 0; index < placements.length(); index++) {
+            if (handle.equals(placements.getJSONObject(index).getString("handle"))) {
+                return placements.getJSONObject(index).getString("status");
+            }
+        }
+        return null;
     }
 
     @Test
@@ -785,5 +878,33 @@ public class PimdirStorageTest {
                         .getJSONObject(0);
         assertTrue(loaded.has("base"));
         assertEquals(0, loaded.getJSONObject("base").length());
+    }
+
+    @Test
+    public void aStagedRemovalIsLoadedBackAsTheTombstoneItIs() throws Exception {
+        storage.applyWrites(batch(storeObject("dd16", "body"), upsert("t.vcf", "uid-t", "dd16", "t")));
+
+        JSONObject placement =
+                upsert("t.vcf", "uid-t", "dd16", "t").getJSONObject("placement");
+        placement.put("status", "tombstone");
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", placement);
+        storage.applyWrites(batch(op));
+
+        assertEquals(1, scalar("SELECT deleted FROM items WHERE link_id = ?", "uid-t"));
+
+        // The merge derives the remove push from the placement, so a load that
+        // hid it would leave the delete local forever and let the next
+        // enumerate read the member the server still holds as one to add back.
+        JSONArray placements =
+                storage.loadCollection("acct/Contacts", null).getJSONArray("placements");
+        assertEquals(1, placements.length());
+        assertEquals("tombstone", placements.getJSONObject(0).getString("status"));
+
+        // And an edit after it revives the row, which is what makes an edit
+        // beat a delete rather than the order of two taps deciding.
+        storage.applyWrites(batch(upsert("t.vcf", "uid-t", "dd16", "t")));
+        assertEquals(0, scalar("SELECT deleted FROM items WHERE link_id = ?", "uid-t"));
     }
 }

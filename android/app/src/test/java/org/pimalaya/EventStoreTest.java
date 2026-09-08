@@ -6,12 +6,12 @@ import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Calendar;
-import org.pimalaya.client.Event;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -37,6 +37,7 @@ public class EventStoreTest {
                     + "END:VCALENDAR\r\n";
 
     private PimdirDb pimdir;
+    private PimdirItems items;
     private EventStore store;
 
     /** The stored collection id of {@link #CALENDAR}, namespaced by account. */
@@ -46,6 +47,7 @@ public class EventStoreTest {
     public void setUp() {
         Context context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
+        items = new PimdirItems(pimdir);
         store = new EventStore(context, pimdir);
         store.replaceCalendars(
                 EMAIL, List.of(new Calendar("work", "Work", CALENDAR, "Team calendar", "#ff0000")));
@@ -94,9 +96,21 @@ public class EventStoreTest {
         }
     }
 
+    /** Files one object the way a reconcile files it: the text and its ETag. */
+    private void event(String id, String etag) {
+        SQLiteDatabase db = items.writable();
+        db.beginTransaction();
+        try {
+            items.put(db, collection, new PimdirItems.Row(id, ICAL, null, "", "[]", etag));
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
     @Test
     public void anEventRoundTripsAsTheTextTheServerSent() {
-        store.replaceEvents(collection, List.of(new Event("ev-1", "etag-1", ICAL)));
+        event("ev-1", "etag-1");
 
         List<EventStore.StoredEvent> events = store.loadEvents();
         assertEquals(1, events.size());
@@ -104,26 +118,33 @@ public class EventStoreTest {
         assertEquals("ev-1", events.get(0).id);
         assertEquals("byte for byte, so the expansion sees what the server sent",
                 ICAL, events.get(0).ical);
+        assertEquals("the validator the next write is guarded by", "etag-1", events.get(0).etag);
+        assertEquals("bound, so the handle is the resource name", "ev-1", events.get(0).handle);
     }
 
     @Test
-    public void aRefreshDropsWhatTheServerNoLongerHas() {
-        store.replaceEvents(
-                collection,
-                List.of(new Event("ev-1", "etag-1", ICAL), new Event("ev-2", "etag-2", ICAL)));
-        assertEquals(2, store.loadEvents().size());
+    public void anEntryTheServerHasNeverSeenCarriesItsProvisionalHandle() {
+        // A staged create has no binding, so nothing has named it yet: the
+        // engine addresses it by the handle its identity derives (SYNC §2),
+        // and a page opened on it has to hand back that same handle or the
+        // edit would name a resource nobody knows.
+        SQLiteDatabase db = items.writable();
+        db.beginTransaction();
+        try {
+            items.put(db, collection, new PimdirItems.Row("new.ics", ICAL, null, ""));
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
 
-        store.replaceEvents(collection, List.of(new Event("ev-1", "etag-1", ICAL)));
-
-        assertEquals(1, store.loadEvents().size());
-        // The dropped event's body had no other reader, so it is collected
-        // rather than left pinned in the object directory forever.
-        assertEquals(1, scalar("SELECT count(*) FROM objects"));
+        EventStore.StoredEvent staged = store.loadEvents().get(0);
+        assertEquals(PimdirStorage.provisionalOf("new.ics"), staged.handle);
+        assertEquals("", staged.etag);
     }
 
     @Test
     public void aVanishedCalendarTakesItsEventsWithIt() {
-        store.replaceEvents(collection, List.of(new Event("ev-1", "etag-1", ICAL)));
+        event("ev-1", "etag-1");
 
         store.replaceCalendars(EMAIL, List.of());
 

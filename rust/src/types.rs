@@ -161,6 +161,34 @@ pub struct Message {
     pub has_attachment: bool,
 }
 
+/// One mailbox the account holds, and what the server says it is for.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Mailbox {
+    /// The name a collection is keyed by, hierarchical where the backend
+    /// nests.
+    pub name: String,
+    /// `trash` where the server marks the mailbox with the RFC 6154
+    /// attribute of that name, empty where it marks it another or none.
+    ///
+    /// The one role a write needs: which mailbox a delete moves into. It
+    /// is read once per sync and stored, because a delete has to decide
+    /// between a move and a marker with no network to ask.
+    pub role: String,
+}
+
+/// One walk of an account's mail: the mailboxes it holds and the newest
+/// messages of each.
+///
+/// One authentication answers both, which is why they cross together:
+/// the roster alone would be a second connection for two attributes.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailWalk {
+    pub mailboxes: Vec<Mailbox>,
+    pub messages: Vec<Message>,
+}
+
 /// One message read whole: the headers a reader sees and the one body
 /// part they read, surfaced to the Java client.
 ///

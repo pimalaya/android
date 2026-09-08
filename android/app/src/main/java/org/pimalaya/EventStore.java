@@ -26,6 +26,11 @@ import java.util.List;
  * agenda row shows needs that same expansion, so the row carries the body and
  * the validator its next write is guarded by, and nothing else.
  *
+ * <p>The objects themselves are written by {@link CalendarEngine} and never
+ * here: a calendar is reconciled rather than replaced, which is what lets a
+ * staged create, edit or delete survive a refresh. What is left here is the
+ * calendar roster and the two reads the agenda does.
+ *
  * <p>There is no subscription switch. The old schema carried one, defaulted to
  * true and never written by anything, so it decided nothing; when a calendar
  * picker exists it belongs beside the address books' switches, in the app's own
@@ -66,21 +71,6 @@ final class EventStore {
                             calendar.color));
         }
         collections.replace(accountEmail, PimdirSummary.CALENDAR, listed);
-    }
-
-    /** Replaces one calendar collection's objects with the listed set. */
-    void replaceEvents(String collectionId, List<Event> events) {
-        List<PimdirItems.Row> rows = new ArrayList<>(events.size());
-        for (Event event : events) {
-            // NOTE: the summary an agenda row renders is not derived here: it
-            // needs the expansion, which is the bridge's, so the item carries
-            // the body and the agenda projects it. What the row does carry is
-            // the validator the server handed over, as the base revision of
-            // its source binding, which is what lets an edit be pushed guarded
-            // instead of overwriting whatever arrived since.
-            rows.add(new PimdirItems.Row(event.id, event.ical, null, "", "[]", event.etag));
-        }
-        items.replace(collectionId, rows);
     }
 
     /** One stored calendar, with the account it belongs to. */
@@ -126,14 +116,23 @@ final class EventStore {
         final String collectionId;
 
         final String id;
+
+        /**
+         * How the engine addresses the entry: the resource name the server
+         * bound it under, or the provisional handle a create waits under
+         * until a push assigns one (SYNC §2).
+         */
+        final String handle;
+
         final String ical;
 
         /** The server's validator, empty when it sent none. */
         final String etag;
 
-        StoredEvent(String collectionId, String id, String ical, String etag) {
+        StoredEvent(String collectionId, String id, String handle, String ical, String etag) {
             this.collectionId = collectionId;
             this.id = id;
+            this.handle = handle;
             this.ical = ical;
             this.etag = etag;
         }
@@ -144,7 +143,8 @@ final class EventStore {
         try (Cursor cursor =
                 items.readable()
                         .rawQuery(
-                                "SELECT i.collection, i.link_id, i.object_hash, b.base_revision"
+                                "SELECT i.collection, i.link_id, i.object_hash, b.base_revision,"
+                                        + " b.handle"
                                         + " FROM items i"
                                         + " JOIN collections c ON c.id = i.collection"
                                         + " LEFT JOIN bindings b ON b.collection = i.collection"
@@ -154,45 +154,16 @@ final class EventStore {
                                         + " AND i.object_hash IS NOT NULL",
                                 new String[] {PimdirStorage.SERVER, PimdirSummary.CALENDAR})) {
             while (cursor.moveToNext()) {
+                String id = cursor.getString(1);
                 events.add(
                         new StoredEvent(
                                 cursor.getString(0),
-                                cursor.getString(1),
+                                id,
+                                CardStore.rowHandle(cursor.isNull(4) ? null : cursor.getString(4), id),
                                 items.body(cursor.getString(2)),
                                 cursor.isNull(3) ? "" : cursor.getString(3)));
             }
         }
         return events;
-    }
-
-    /**
-     * Replaces one stored object's body after an edit, so the agenda
-     * re-renders from what was just pushed rather than waiting for the
-     * next sync to fetch it back.
-     */
-    void replaceEvent(String collectionId, String id, String ical, String etag) {
-        android.database.sqlite.SQLiteDatabase db = items.writable();
-        db.beginTransaction();
-        try {
-            items.put(
-                    db,
-                    collectionId,
-                    new PimdirItems.Row(id, ical, null, "", "[]", etag));
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
-        }
-    }
-
-    /** Retires one stored object, for an entry the server no longer holds. */
-    void removeEvent(String collectionId, String id) {
-        android.database.sqlite.SQLiteDatabase db = items.writable();
-        db.beginTransaction();
-        try {
-            items.remove(db, collectionId, id);
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
-        }
     }
 }

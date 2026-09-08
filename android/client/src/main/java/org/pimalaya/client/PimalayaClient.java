@@ -1,6 +1,7 @@
 package org.pimalaya.client;
 
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -314,6 +315,11 @@ public class PimalayaClient {
         return account != null && "google".equals(info(account.baseUrl).optString("backend"));
     }
 
+    /** True when the account's backend speaks JMAP (RFC 8620). */
+    public static boolean isJmap(Account account) {
+        return account != null && "jmap".equals(info(account.baseUrl).optString("backend"));
+    }
+
     /** Parsed backend info by URL, cached (pure computation). */
     private static final Map<String, JSONObject> infos = new ConcurrentHashMap<>();
 
@@ -354,18 +360,28 @@ public class PimalayaClient {
     }
 
     /**
-     * Walks an IMAP account: connect, list the mailboxes, take the
-     * newest {@code limit} messages of each. One login for the whole
-     * account.
+     * Walks an IMAP account: connect, list the mailboxes with the roles
+     * their RFC 6154 attributes mark, take the newest {@code limit}
+     * messages of each. One login for the whole account.
      */
-    public List<Message> syncMail(String url, String login, String password, int limit) {
+    public MailWalk syncMail(String url, String login, String password, int limit) {
         Transport transport = new Transport();
         try {
-            JSONArray reply = array(Native.syncMail(transport, url, login, password, limit));
+            JSONObject reply = object(Native.syncMail(transport, url, login, password, limit));
 
-            List<Message> messages = new ArrayList<>(reply.length());
-            for (int index = 0; index < reply.length(); index++) {
-                JSONObject message = object(reply, index);
+            JSONArray listed = reply.optJSONArray("mailboxes");
+            List<Mailbox> mailboxes = new ArrayList<>(listed == null ? 0 : listed.length());
+            for (int index = 0; listed != null && index < listed.length(); index++) {
+                JSONObject mailbox = object(listed, index);
+                mailboxes.add(
+                        new Mailbox(string(mailbox, "name"), mailbox.optString("role")));
+            }
+
+            JSONArray listedMessages = reply.optJSONArray("messages");
+            List<Message> messages =
+                    new ArrayList<>(listedMessages == null ? 0 : listedMessages.length());
+            for (int index = 0; listedMessages != null && index < listedMessages.length(); index++) {
+                JSONObject message = object(listedMessages, index);
                 messages.add(
                         new Message(
                                 string(message, "mailbox"),
@@ -379,54 +395,71 @@ public class PimalayaClient {
                                 message.optBoolean("flagged"),
                                 message.optBoolean("hasAttachment")));
             }
-            return messages;
+            return new MailWalk(mailboxes, messages);
         } finally {
             transport.close();
         }
     }
 
     /**
-     * Reads one message whole, headers and body together.
+     * Reads one message whole, as the bytes the server holds.
      *
-     * <p>One round trip on either backend: IMAP fetches the raw message
-     * and the bridge resolves its MIME tree, JMAP asks for the body
-     * values in the same call as the headers.
+     * <p>IMAP fetches it with {@code BODY.PEEK[]}; JMAP reads the
+     * message's {@code blobId} and downloads that blob, which is one
+     * round trip more than its body values would have been and the only
+     * way to come back with the message rather than a rendering of it.
+     * The caller stores what it gets and renders it through
+     * {@link #parseMessage}, so a second open costs nothing.
      */
-    public MessageBody fetchMessage(
+    public byte[] fetchMessageSource(
             String url, String login, String password, String mailbox, String id) {
         Transport transport = new Transport();
         try {
             JSONObject reply =
-                    object(Native.fetchMessage(transport, url, login, password, mailbox, id));
-
-            JSONArray listed = reply.optJSONArray("attachments");
-            List<MessageBody.Attachment> attachments =
-                    new ArrayList<>(listed == null ? 0 : listed.length());
-            for (int index = 0; listed != null && index < listed.length(); index++) {
-                JSONObject attachment = object(listed, index);
-                attachments.add(
-                        new MessageBody.Attachment(
-                                attachment.optString("name"),
-                                attachment.optString("mime"),
-                                attachment.optLong("size")));
-            }
-
-            // NOTE: optString and not the null-returning helper beside
-            // it: every one of these fields is always serialised, and a
-            // reader must never be handed a null to render.
-            return new MessageBody(
-                    reply.optString("subject"),
-                    reply.optString("from"),
-                    reply.optString("fromAddress"),
-                    reply.optString("to"),
-                    reply.optString("cc"),
-                    reply.optString("date"),
-                    reply.optString("kind"),
-                    reply.optString("body"),
-                    attachments);
+                    object(
+                            Native.fetchMessageSource(
+                                    transport, url, login, password, mailbox, id));
+            return Base64.getDecoder().decode(reply.optString("source"));
         } finally {
             transport.close();
         }
+    }
+
+    /**
+     * Resolves one message's MIME tree into what a reader draws: the
+     * headers, the one body it shows, and what it carries beside it.
+     *
+     * <p>No network, whatever the message: this is the whole read path
+     * of a message the store already holds.
+     */
+    public MessageBody parseMessage(byte[] source) {
+        JSONObject reply = object(Native.parseMessage(source));
+
+        JSONArray listed = reply.optJSONArray("attachments");
+        List<MessageBody.Attachment> attachments =
+                new ArrayList<>(listed == null ? 0 : listed.length());
+        for (int index = 0; listed != null && index < listed.length(); index++) {
+            JSONObject attachment = object(listed, index);
+            attachments.add(
+                    new MessageBody.Attachment(
+                            attachment.optString("name"),
+                            attachment.optString("mime"),
+                            attachment.optLong("size")));
+        }
+
+        // NOTE: optString and not the null-returning helper beside it:
+        // every one of these fields is always serialised, and a reader
+        // must never be handed a null to render.
+        return new MessageBody(
+                reply.optString("subject"),
+                reply.optString("from"),
+                reply.optString("fromAddress"),
+                reply.optString("to"),
+                reply.optString("cc"),
+                reply.optString("date"),
+                reply.optString("kind"),
+                reply.optString("body"),
+                attachments);
     }
 
     /**
@@ -453,28 +486,41 @@ public class PimalayaClient {
     }
 
     /**
-     * Composes one draft and hands it over, then files the copy the
-     * sender keeps, answering the mailbox it landed in or null when the
-     * account named no sent mailbox.
+     * Composes one draft into the RFC 5322 message an outbox holds.
      *
      * <p>{@code draft} is a JSON object of {@code from}, {@code fromName},
      * {@code to}, {@code cc}, {@code bcc}, {@code subject}, {@code body},
      * {@code date} and {@code messageId}: the composer's fields plus the
      * two stamps, which are the caller's so the bridge stays a pure
      * function of what it is handed.
+     *
+     * <p>No network, which is the point: a message is written and queued
+     * with the radio off, and {@link #submitMessage} is what needs one.
+     * The bytes carry a {@code Bcc} header, as RFC 5322 §3.6.3 provides
+     * for a message prepared for sending; the submission takes it out.
      */
-    public String sendMessage(Account account, String draft) {
+    public byte[] composeMessage(String draft) {
+        JSONObject reply = object(Native.composeMessage(draft));
+        return Base64.getDecoder().decode(reply.optString("source"));
+    }
+
+    /**
+     * Hands one stored message over, then files the copy the sender
+     * keeps, answering the mailbox it landed in or null when the account
+     * named no sent mailbox.
+     */
+    public String submitMessage(Account account, byte[] source) {
         Transport transport = new Transport();
         try {
             JSONObject reply =
                     object(
-                            Native.sendMessage(
+                            Native.submitMessage(
                                     transport,
                                     account.baseUrl,
                                     account.submitUrl == null ? "" : account.submitUrl,
                                     account.login,
                                     account.password,
-                                    draft));
+                                    source));
             return optString(reply, "mailbox");
         } finally {
             transport.close();

@@ -15,7 +15,7 @@
 use jni::{
     EnvUnowned,
     errors::{Error, LogErrorAndDefault},
-    objects::{JClass, JObject, JString},
+    objects::{JByteArray, JClass, JObject, JString},
 };
 use serde_json::{from_str, json, to_string};
 
@@ -24,12 +24,13 @@ use crate::{
     client::{self, Client},
     ffi::{error_json, parse_url, read_string},
     mail::{self, Draft},
-    types::{BridgeError, Credentials, Message, MessageBody},
+    types::{BridgeError, Credentials, MailWalk},
 };
 
 /// `Native.syncMail`: connects to the account's mail server, lists its
 /// mailboxes and returns the newest `limit` messages of each. Returns a
-/// JSON array of `{mailbox, id, subject, from, date, seen}` objects.
+/// JSON object of `{mailboxes, messages}`, the roster carrying the RFC
+/// 6154 role of each mailbox and the messages their envelope spine.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_syncMail<'local>(
     mut env: EnvUnowned<'local>,
@@ -52,7 +53,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_syncMail<'local>(
 
         let mut client = Client::new(env, &transport);
         let json = match sync_account(&mut client, &url, &credentials, limit) {
-            Ok(messages) => to_string(&messages).unwrap_or_else(|err| error_json(err.to_string())),
+            Ok(walk) => to_string(&walk).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -61,11 +62,13 @@ pub extern "system" fn Java_org_pimalaya_client_Native_syncMail<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// `Native.fetchMessage`: reads one message whole, headers and the one
-/// body a reader sees. Returns a JSON object of
-/// `{subject, from, fromAddress, to, cc, date, kind, body, attachments}`.
+/// `Native.fetchMessageSource`: reads one message whole, as the RFC 5322
+/// bytes the server holds. Returns a JSON object of `{source}`, the
+/// message base64-encoded, since a Java string is UTF-8 and a message is
+/// not: what the caller decodes back is what the server sent, which is
+/// what makes it storable.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessage<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessageSource<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -87,7 +90,31 @@ pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessage<'local>(
         };
 
         let mut client = Client::new(env, &transport);
-        let json = match read_message(&mut client, &url, &credentials, &mailbox, &id) {
+        let json = match read_source(&mut client, &url, &credentials, &mailbox, &id) {
+            Ok(source) => json!({ "source": mail::base64(&source) }).to_string(),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.parseMessage`: one stored message to what the reader draws.
+/// Returns a JSON object of
+/// `{subject, from, fromAddress, to, cc, date, kind, body, attachments}`.
+///
+/// No transport, because there is nothing to reach for: the bytes are
+/// the argument. This is what a message opened a second time costs.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_parseMessage<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    source: JByteArray<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let raw = env.convert_byte_array(&source).unwrap_or_default();
+        let json = match mail::parse(&raw) {
             Ok(message) => to_string(&message).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
@@ -97,26 +124,26 @@ pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessage<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// Reads one message with whichever backend its base URL names.
+/// Reads one message's source with whichever backend its base URL names.
 ///
 /// The mailbox is only IMAP's concern: a JMAP `Email` id addresses the
 /// message across the whole account, and the same message filed in two
 /// mailboxes is one object with one id.
-fn read_message(
+fn read_source(
     client: &mut Client<'_, '_>,
     base_url: &str,
     credentials: &Credentials,
     mailbox: &str,
     id: &str,
-) -> Result<MessageBody, BridgeError> {
+) -> Result<Vec<u8>, BridgeError> {
     match Backend::of(base_url) {
         Backend::Jmap => {
             let session_url = account::jmap_session_url(base_url)?;
-            client.fetch_jmap_message(&session_url, credentials, id)
+            client.fetch_jmap_source(&session_url, credentials, id)
         }
         _ => {
             let url = parse_url(base_url)?;
-            client::imap::fetch_message(client, &url, credentials, mailbox, id)
+            client::imap::fetch_source(client, &url, credentials, mailbox, id)
         }
     }
 }
@@ -127,7 +154,7 @@ fn sync_account(
     base_url: &str,
     credentials: &Credentials,
     limit: u32,
-) -> Result<Vec<Message>, BridgeError> {
+) -> Result<MailWalk, BridgeError> {
     match Backend::of(base_url) {
         Backend::Jmap => {
             let session_url = account::jmap_session_url(base_url)?;
@@ -266,12 +293,37 @@ fn delete_message(
     }
 }
 
-/// `Native.sendMessage`: composes one draft and hands it over, then
-/// files a copy in the account's sent mailbox. Returns
-/// `{"mailbox": ".."}` naming where the copy landed, `{"mailbox": null}`
-/// when the account named no sent mailbox, or `{"error": ".."}`.
+/// `Native.composeMessage`: one draft to the RFC 5322 message an outbox
+/// holds. Returns a JSON object of `{source}`, the message
+/// base64-encoded, or `{"error": ".."}`.
+///
+/// No transport, because composing reaches for nothing: it is what lets
+/// a message be written and queued with the radio off, which is the
+/// whole of the outbox.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_sendMessage<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_composeMessage<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    draft: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let draft = read_string(env, &draft);
+        let json = match compose_message(&draft) {
+            Ok(source) => json!({ "source": mail::base64(&source) }).to_string(),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.submitMessage`: hands one stored message over, then files a
+/// copy in the account's sent mailbox. Returns `{"mailbox": ".."}` naming
+/// where the copy landed, `{"mailbox": null}` when the account named no
+/// sent mailbox, or `{"error": ".."}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -279,21 +331,21 @@ pub extern "system" fn Java_org_pimalaya_client_Native_sendMessage<'local>(
     submit_url: JString<'local>,
     login: JString<'local>,
     password: JString<'local>,
-    draft: JString<'local>,
+    source: JByteArray<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let url = read_string(env, &url);
         let submit_url = read_string(env, &submit_url);
         let login = read_string(env, &login);
         let password = read_string(env, &password);
-        let draft = read_string(env, &draft);
+        let raw = env.convert_byte_array(&source).unwrap_or_default();
         let credentials = Credentials {
             login: &login,
             password: &password,
         };
 
         let mut client = Client::new(env, &transport);
-        let json = match send_message(&mut client, &url, &submit_url, &credentials, &draft) {
+        let json = match submit_message(&mut client, &url, &submit_url, &credentials, &raw) {
             Ok(sent) => json!({ "mailbox": sent }).to_string(),
             Err(err) => error_json(err),
         };
@@ -303,20 +355,26 @@ pub extern "system" fn Java_org_pimalaya_client_Native_sendMessage<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// Submits one draft with whichever backend the base URL names, and
-/// files the copy the sender keeps.
+/// Composes one draft, refusing what no backend here could ever send.
 ///
-/// SMTP only for now. A JMAP account submits through
-/// `EmailSubmission/set` (RFC 8621 section 7), which is a different
-/// shape entirely: the message is created as an `Email` first and the
-/// submission names it. Refusing beats composing a message that goes
-/// nowhere.
-fn send_message(
+/// The refusal is here rather than at the submission because the outbox
+/// is where the sender is still looking: a JMAP account submits through
+/// `EmailSubmission/set` (RFC 8621 section 7), which is a different shape
+/// entirely, and queueing a message nothing could hand over would only
+/// fail later, out of sight.
+fn compose_message(draft: &str) -> Result<Vec<u8>, BridgeError> {
+    let draft: Draft = from_str(draft).map_err(|err| format!("Invalid draft: {err}"))?;
+    mail::compose(&draft)
+}
+
+/// Submits one stored message over SMTP and files the copy the sender
+/// keeps.
+fn submit_message(
     client: &mut Client<'_, '_>,
     base_url: &str,
     submit_url: &str,
     credentials: &Credentials,
-    draft: &str,
+    raw: &[u8],
 ) -> Result<Option<String>, BridgeError> {
     if Backend::of(base_url) == Backend::Jmap {
         return Err("Sending from a JMAP account is not supported yet".into());
@@ -325,8 +383,7 @@ fn send_message(
         return Err("This account has no server to send through".into());
     }
 
-    let draft: Draft = from_str(draft).map_err(|err| format!("Invalid draft: {err}"))?;
-    let composed = mail::compose(&draft)?;
+    let composed = mail::envelope(raw)?;
 
     client::smtp::send(client, &parse_url(submit_url)?, credentials, &composed)?;
 

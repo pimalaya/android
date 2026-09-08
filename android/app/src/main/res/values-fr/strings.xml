@@ -3,27 +3,52 @@
 
     <string name="new_account">Nouveau compte</string>
     <string name="cancel_auth">Annuler</string>
-    <string name="welcome_value_1">Tous vos contacts de tous vos comptes</string>
+    <string name="welcome_value_1">Tous vos e-mails, contacts et agendas</string>
     <string name="welcome_value_2">accessibles hors ligne, dans une vue partagée</string>
-    <string name="welcome_description">Pimalaya trouve automatiquement les paramètres de votre serveur ; saisissez simplement ce que vous savez de votre fournisseur</string>
+    <string name="welcome_description">Pimalaya trouve automatiquement les paramètres de votre serveur ; saisissez simplement votre adresse e-mail</string>
     <string name="email_hint">Adresse e-mail</string>
     <string name="auth_step_email">Bienvenue</string>
+    <string name="auth_step_domain">Que connecter</string>
     <string name="auth_step_config">Configuration</string>
     <string name="auth_step_books">Sélection</string>
     <string name="email_submit">Continuer</string>
     <string name="email_invalid">Saisissez une adresse e-mail valide</string>
-    <string name="discover_failed">Impossible de trouver les paramètres de votre serveur de contacts</string>
+    <string name="discover_failed">Impossible de trouver les paramètres de votre serveur</string>
+
+    <string name="domain_title">Que souhaitez-vous connecter ?</string>
+    <string name="domain_message">Choisissez comment connecter chaque domaine. Désactivez ce que vous ne voulez pas sur cet appareil ; vous pourrez l\'ajouter plus tard.</string>
+    <string name="domain_message_simple">Activez ce que vous voulez sur cet appareil. Pimalaya choisit les réglages et vous demande votre mot de passe ; vous pourrez ajouter le reste plus tard.</string>
+    <string name="domain_none">Rien n\'a été trouvé pour cette adresse. Vous pouvez saisir les paramètres du serveur vous-même.</string>
+    <string name="domain_manual">Saisir les paramètres manuellement</string>
+    <string name="domain_connected">Déjà connecté</string>
+    <string name="domain_advanced_only">Nécessite la configuration avancée</string>
+    <string name="domain_mail">E-mails</string>
+    <string name="domain_contacts">Contacts</string>
+    <string name="domain_calendar">Agenda</string>
+    <string name="mail_title">E-mails</string>
+    <string name="contacts_title">Contacts</string>
+    <string name="calendar_title">Agendas</string>
+    <string name="setup_step_title">Étape %1$d/%2$d · %3$s · %4$s</string>
+    <string name="setup_step_one">%1$s · Connexion</string>
+    <string name="setup_step_domain">%1$s · Étape %2$d/%3$d</string>
+
+    <string name="manual_title">Paramètres du serveur</string>
+    <string name="manual_message">Rien n\'a été découvert pour %1$s. Saisissez le serveur vous-même et Pimalaya continuera normalement.</string>
+    <string name="manual_mail_server">Serveur de messagerie (hôte ou hôte:port)</string>
+    <string name="manual_dav_url">URL du serveur</string>
+
     <string name="setup_choice_title">Configuration du compte</string>
-    <string name="setup_choice_message">Pimalaya peut tout configurer avec les réglages recommandés, ou vous laisser vérifier chaque étape.</string>
+    <string name="setup_choice_message">Pimalaya peut tout configurer avec votre mot de passe, ou vous laisser choisir les serveurs, la connexion et ce qui est synchronisé.</string>
     <string name="setup_simple">Standard</string>
     <string name="setup_advanced">Avancé</string>
+    <string name="setup_simple_unavailable">Cette adresse se connecte d\'une manière que la configuration standard ne couvre pas. La configuration avancée peut la connecter.</string>
 
     <string name="config_title">Choisissez une configuration</string>
     <string name="config_soon">Bientôt disponible</string>
     <string name="config_password">Mot de passe</string>
     <string name="config_token">Jeton d\'API</string>
     <string name="config_oauth">Se connecter avec le navigateur</string>
-    <string name="custom_login">Identifiant (vide pour un jeton d\'API)</string>
+    <string name="custom_login">Identifiant</string>
 
     <string name="oauth_custom_title">Client OAuth 2.0</string>
     <string name="oauth_shipped_hint">Connexion via le client intégré de l\'application. N\'activez la configuration avancée que pour utiliser votre propre client OAuth.</string>
@@ -58,7 +83,7 @@
     <string name="sync_accounts">Synchroniser les comptes</string>
     <string name="about">À propos</string>
     <string name="drawer_close">Fermer</string>
-    <string name="about_body">Version %1$s\n\nVos contacts, hors-ligne et multi-comptes.\n\nRéalisé par Pimalaya.</string>
+    <string name="about_body">Version %1$s\n\nVos e-mails, contacts et agendas, hors-ligne et multi-comptes.\n\nRéalisé par Pimalaya.</string>
     <string name="about_website">Site web</string>
     <string name="report_bug">Signaler un bug</string>
     <string name="local_account">Cette application</string>
@@ -79,7 +104,7 @@
         <item>Synchroniser toutes les 12 heures</item>
         <item>Synchroniser tous les jours</item>
     </string-array>
-    <string name="home_empty">Aucun carnet d\'adresses pour l\'instant. Ajoutez un compte pour commencer.</string>
+    <string name="home_empty">Aucun compte pour l\'instant. Ajoutez-en un pour commencer.</string>
     <string name="delete_account_confirm">Voulez-vous vraiment retirer ce compte ? Ses contacts resteront sur cet appareil.</string>
 
     <string name="sync_title">Synchronisation</string>

@@ -20,8 +20,9 @@
 //! `createCard` / `updateCard` / `deleteCard` are the vCard CRUD the
 //! contact screens build on.
 //!
-//! Mail: `syncMail` walks an account's mailboxes, `fetchMessage` reads
-//! one whole, `setMessageFlag` and `deleteMessage` are what a reader
+//! Mail: `syncMail` walks an account's mailboxes, `fetchMessageSource`
+//! reads one whole and `parseMessage` turns those bytes into what a
+//! reader draws, `setMessageFlag` and `deleteMessage` are what a reader
 //! writes back, and `sendMessage` composes a draft to RFC 5322 and
 //! hands it to the account's submission server.
 //!

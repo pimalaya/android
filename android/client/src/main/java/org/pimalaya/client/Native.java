@@ -223,29 +223,46 @@ final class Native {
      * Connects to the account's IMAP server, lists its mailboxes and
      * returns the newest {@code limit} messages of each. One call per
      * account, not per mailbox: IMAP is a session, so the whole walk
-     * happens inside one login. Returns a JSON array of
+     * happens inside one login. Returns a JSON object of
+     * {@code {mailboxes, messages}}, each mailbox
+     * {@code {name, role}} and each message
      * {@code {mailbox, id, subject, from, fromAddress, date, seen,
      * answered, flagged, hasAttachment}}.
+     *
+     * <p>The role is {@code trash} where the server marks the mailbox with
+     * the RFC 6154 attribute of that name, and empty where it marks it
+     * another or none. It rides along because a delete has to decide
+     * between a move and a marker with no network to ask.
      */
     static native String syncMail(
             Transport transport, String url, String login, String password, int limit);
 
     /**
-     * Reads one message whole: its headers and the one body a reader
-     * sees, the MIME tree resolved on the bridge side. Returns a JSON
-     * object of {@code {subject, from, fromAddress, to, cc, date, kind,
-     * body, attachments}}.
+     * Reads one message whole, as the RFC 5322 bytes the server holds.
+     * Returns a JSON object of {@code {source}}, the message
+     * base64-encoded: a Java string is UTF-8 and a message is not, so
+     * the bytes travel encoded and are stored decoded.
      *
      * <p>The mailbox is only IMAP's concern: a JMAP {@code Email} id
      * addresses the message across the whole account.
      */
-    static native String fetchMessage(
+    static native String fetchMessageSource(
             Transport transport,
             String url,
             String login,
             String password,
             String mailbox,
             String id);
+
+    /**
+     * Resolves one message's MIME tree into what a reader draws. Returns
+     * a JSON object of {@code {subject, from, fromAddress, to, cc, date,
+     * kind, body, attachments}}.
+     *
+     * <p>No transport: the bytes are the argument, so a message the
+     * store already holds is read with no network at all.
+     */
+    static native String parseMessage(byte[] source);
 
     /**
      * Adds or removes one marker on one message, named the IMAP way
@@ -264,21 +281,36 @@ final class Native {
             boolean add);
 
     /**
-     * Composes one draft and hands it over, then files the copy the
-     * sender keeps. Returns {@code {mailbox}} naming where the copy
-     * landed, or a null mailbox when the account named no sent mailbox.
+     * Composes one draft into the RFC 5322 message an outbox holds.
+     * Returns a JSON object of {@code {source}}, the message
+     * base64-encoded.
+     *
+     * <p>No transport: composing reaches for nothing, which is what lets
+     * a message be written and queued with the radio off. The bytes
+     * carry a {@code Bcc} header, which RFC 5322 §3.6.3 provides for a
+     * message prepared for sending; {@link #submitMessage} takes it back
+     * out.
+     */
+    static native String composeMessage(String draft);
+
+    /**
+     * Hands one stored message over, then files the copy the sender
+     * keeps. Returns {@code {mailbox}} naming where the copy landed, or
+     * a null mailbox when the account named no sent mailbox.
      *
      * <p>Two endpoints: the base URL is where mail is read, which is
      * where the copy is filed, and the submit URL is where the message
-     * is handed over.
+     * is handed over. The envelope comes off the message's own address
+     * headers, the {@code Bcc} among them, and that header leaves the
+     * bytes on the way out.
      */
-    static native String sendMessage(
+    static native String submitMessage(
             Transport transport,
             String url,
             String submitUrl,
             String login,
             String password,
-            String draft);
+            byte[] source);
 
     /**
      * Deletes one message into the account's trash: the mailbox the

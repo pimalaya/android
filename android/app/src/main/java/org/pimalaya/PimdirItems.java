@@ -42,6 +42,9 @@ final class PimdirItems {
     /** The detail ladder as the schema stores it: 0 probed, 1 meta, 2 full. */
     static final int FULL = 2;
 
+    /** The rung below it: the item is known and its body is not stored. */
+    static final int META = 1;
+
     private final PimdirDb store;
     private final PimdirBlobs blobs;
 
@@ -114,6 +117,65 @@ final class PimdirItems {
     }
 
     /**
+     * The bytes one item's body holds, or null when it holds none.
+     *
+     * <p>Bytes rather than text, for the one kind that is not text: a
+     * message is what its sender encoded, and handing it back decoded as
+     * UTF-8 would mangle a body in a legacy charset before the parser that
+     * reads the header naming that charset ever saw it.
+     */
+    byte[] objectBytes(String collection, String linkId) {
+        String hash = objectOf(readable(), collection, linkId);
+        if (hash == null) {
+            return null;
+        }
+        try {
+            byte[] body = blobs.get(hash);
+            if (body == null) {
+                Log.w("pimalaya", "missing blob for " + hash);
+            }
+            return body;
+        } catch (IOException error) {
+            Log.w("pimalaya", "could not read the body " + hash, error);
+            return null;
+        }
+    }
+
+    /**
+     * Files a body against an item the collection already holds, raising it
+     * to full and leaving the rest of its row alone.
+     *
+     * <p>For the mirrors, whose rows arrive as a spine and gain their bodies
+     * one open at a time: everything else writes the body with the row,
+     * having had both in hand from the start. An item the collection does
+     * not hold is not created, because a body with no row is a body no
+     * listing can reach.
+     */
+    void putObject(String collection, String linkId, byte[] body) {
+        String hash = PimdirHash.of(body);
+        SQLiteDatabase db = writable();
+        db.beginTransaction();
+        try {
+            if (!knows(db, collection, linkId)) {
+                Log.w("pimalaya", "no item " + linkId + " in " + collection);
+                return;
+            }
+
+            String previous = objectOf(db, collection, linkId);
+            storeObject(db, hash, body);
+            db.execSQL(
+                    "UPDATE items SET object_hash = ?, level = ?"
+                            + " WHERE collection = ? AND link_id = ?",
+                    new Object[] {hash, FULL, collection, linkId});
+            adjustRefcount(db, previous, hash);
+            collectGarbage(db);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /**
      * Writes one item's content, returning the hash it now carries.
      *
      * <p>Everything the store owns and the caller does not is left alone: the
@@ -130,19 +192,30 @@ final class PimdirItems {
         String previous = objectOf(db, collection, row.linkId);
         boolean exists = previous != null || knows(db, collection, row.linkId);
 
+        // NOTE: a row carrying no body keeps the stored one, on the same
+        // terms as the summary it does not restate. A mail refresh restates
+        // the spine of every mailbox and knows nothing about bodies, so
+        // taking the absence as a removal would discard the message a reader
+        // stored by opening it, once a round, for as long as they keep the
+        // account.
+        if (hash == null) {
+            hash = previous;
+        }
+        int level = hash == null ? META : FULL;
+
         if (exists) {
             db.execSQL(
                     "UPDATE items SET object_hash = ?, sort_key = ?, flags = ?,"
                             + " level = ?, deleted = 0, retained_at = NULL, retained_by = NULL"
                             + " WHERE collection = ? AND link_id = ?",
-                    new Object[] {hash, row.sortKey, row.flags, FULL, collection, row.linkId});
+                    new Object[] {hash, row.sortKey, row.flags, level, collection, row.linkId});
         } else {
             db.execSQL(
                     "INSERT INTO items(collection, link_id, seq, flags, object_hash,"
                             + " sort_key, level) VALUES(?, ?, ?, ?, ?, ?, ?)",
                     new Object[] {
                         collection, row.linkId, seqFor(db, row.linkId), row.flags, hash,
-                        row.sortKey, FULL
+                        row.sortKey, level
                     });
         }
 
@@ -195,37 +268,6 @@ final class PimdirItems {
         adjustRefcount(db, conflict, null);
         for (String pin : pinned) {
             adjustRefcount(db, pin, null);
-        }
-    }
-
-    /**
-     * Replaces a collection's contents with the listed rows, for the read-only
-     * mirrors: what the listing no longer carries is gone from the store too.
-     *
-     * <p>These collections have no engine and no local edits, so there is
-     * nothing to reconcile and nothing to stage. A whole-collection replace is
-     * therefore both correct and the cheapest thing that is: the alternative,
-     * diffing to spare a few writes, would buy nothing and could leave a row the
-     * server no longer has.
-     */
-    void replace(String collection, List<Row> rows) {
-        SQLiteDatabase db = writable();
-        db.beginTransaction();
-        try {
-            Set<String> listed = new HashSet<>();
-            for (Row row : rows) {
-                listed.add(row.linkId);
-                put(db, collection, row);
-            }
-            for (String stale : linkIdsOf(db, collection)) {
-                if (!listed.contains(stale)) {
-                    remove(db, collection, stale);
-                }
-            }
-            collectGarbage(db);
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
         }
     }
 
@@ -285,9 +327,13 @@ final class PimdirItems {
         }
     }
 
-    /** Files a body and indexes it, leaving the refcount to the caller. */
+    /** Files a text body and indexes it, leaving the refcount to the caller. */
     void storeObject(SQLiteDatabase db, String hash, String body) {
-        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        storeObject(db, hash, body.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Files a body and indexes it, leaving the refcount to the caller. */
+    void storeObject(SQLiteDatabase db, String hash, byte[] bytes) {
         try {
             blobs.put(hash, bytes);
         } catch (IOException error) {

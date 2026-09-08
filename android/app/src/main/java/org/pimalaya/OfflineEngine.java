@@ -2,7 +2,6 @@ package org.pimalaya;
 
 import android.content.Context;
 import android.util.Log;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -23,8 +22,6 @@ import org.pimalaya.client.Account;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardDelta;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.client.PimalayaException;
-import org.pimalaya.client.OfflineDriver;
 
 /**
  * One account's offline driver: the Rust bridge runs the engine's
@@ -43,7 +40,7 @@ import org.pimalaya.client.OfflineDriver;
  * conflicts by three-way merge and pushes the resolutions. Everything
  * blocks; callers run it off the main thread.
  */
-final class OfflineEngine implements OfflineDriver {
+final class OfflineEngine extends PimdirEngine {
     /**
      * One lock per book URL, process-wide: the in-app sync, the
      * background worker and the OS-scheduled sync service can each
@@ -57,10 +54,6 @@ final class OfflineEngine implements OfflineDriver {
 
     private final CardStore base;
 
-    /** The pimdir store's engine seam (placements, writes, conflicts). */
-    private final PimdirStorage offline;
-
-    private final PimalayaClient client;
     private final Account account;
 
     /** The phone spoke's adapter; null on context-less (mutate) drivers. */
@@ -141,37 +134,6 @@ final class OfflineEngine implements OfflineDriver {
     }
 
     /**
-     * Observes the sync's coarse steps for a progress display; steps
-     * fire on the sync thread. Null when the sync runs headless (the
-     * background worker, the OS-scheduled adapter).
-     */
-    interface Progress {
-        /** Exchanging the spine with the server. */
-        int STAGE_SERVER = 0;
-        /** Downloading `count` bodies from the server. */
-        int STAGE_DOWNLOAD = 1;
-        /** Sending `count` changes to the server. */
-        int STAGE_UPLOAD = 2;
-        /** Reconciling with the phone's contacts. */
-        int STAGE_PHONE = 3;
-        /** Writing `count` contacts to the phone. */
-        int STAGE_PROJECT = 4;
-        /** Resolving `count` conflicts. */
-        int STAGE_RESOLVE = 5;
-
-        void step(int stage, int count);
-    }
-
-    /** The foreground sync's progress observer; null when headless. */
-    Progress progress;
-
-    private void step(int stage, int count) {
-        if (progress != null) {
-            progress.step(stage, count);
-        }
-    }
-
-    /**
      * Builds a driver for one account; a null account services storage
      * yields only (local mutations never touch the remote), a null
      * context disables the phone spoke.
@@ -182,9 +144,8 @@ final class OfflineEngine implements OfflineDriver {
             PimalayaClient client,
             Account account,
             Context context) {
+        super(pimdir, client);
         this.base = base;
-        this.offline = new PimdirStorage(pimdir);
-        this.client = client;
         this.account = account;
         this.phone = context == null ? null : new PhoneRemote(context, pimdir);
     }
@@ -303,17 +264,15 @@ final class OfflineEngine implements OfflineDriver {
         return SYNC_LOCKS.computeIfAbsent(url, key -> new ReentrantLock());
     }
 
-    /** Raises every bodiless or stale placement to its full body. */
-    private void hydrate(String url) {
-        List<String> pending = offline.handlesBelowFull(url);
-        if (!pending.isEmpty()) {
-            if (!CardStore.isPhoneCollection(url)) {
-                step(Progress.STAGE_DOWNLOAD, pending.size());
-            }
-            Log.d(
-                    "pimalaya",
-                    "hydrate " + url + " (" + pending.size() + " below full): "
-                            + client.offlineUpgrade(this, url, pending));
+    /**
+     * Announces a hydrate, unless it is the phone spoke's: projecting a
+     * book onto the device downloads nothing, so a "downloading" line
+     * over it would name the wrong thing.
+     */
+    @Override
+    protected void hydrating(String collection, int count) {
+        if (!CardStore.isPhoneCollection(collection)) {
+            step(Progress.STAGE_DOWNLOAD, count);
         }
     }
 
@@ -381,60 +340,31 @@ final class OfflineEngine implements OfflineDriver {
     }
 
     /**
-     * Stages a content edit on one placement through the engine (the
-     * next sync pushes it); editing a conflicted placement resolves it.
+     * Stages a content edit on one card through the engine (the next sync
+     * pushes it); editing a conflicted placement resolves it.
+     *
+     * <p>The summary and the key come off the document itself, so a
+     * rename moves the card in the list rather than leaving it where the
+     * old name put it.
      */
     void mutateEdit(String url, String handle, String vcard) throws JSONException {
         JSONObject index = Cards.indexCard(vcard);
-
-        JSONObject mutation = new JSONObject();
-        mutation.put("op", "edit");
-        mutation.put("handle", handle);
-        mutation.put("hash", CardStore.byteHash(vcard));
-        mutation.put("size", vcard.getBytes(StandardCharsets.UTF_8).length);
-        mutation.put("body", vcard);
-        mutation.put("summary", index.optJSONObject("summary"));
-        // NOTE: an edit that changes what the key is derived from has to say
-        // so, or the card keeps the position its old name gave it; renaming
-        // someone is exactly that edit.
-        mutation.put("sortKey", index.optString("sortKey"));
-        client.offlineMutate(this, url, mutation);
+        mutateEdit(
+                url,
+                handle,
+                vcard,
+                index.optJSONObject("summary"),
+                index.optString("sortKey"));
     }
 
     @Override
-    public String serve(String yieldJson) {
-        try {
-            JSONObject yielded = new JSONObject(yieldJson);
-            switch (yielded.getString("op")) {
-                case "load":
-                    return offline.loadCollection(
-                                    yielded.getString("collection"),
-                                    yielded.optJSONObject("scope"))
-                            .toString();
-                case "lookup":
-                    return offline.lookupObjects(yielded.getJSONArray("links")).toString();
-                case "write":
-                    JSONArray effects = offline.applyWrites(yielded.getJSONArray("writes"));
-                    for (int index = 0; tally != null && index < effects.length(); index++) {
-                        JSONObject effect = effects.getJSONObject(index);
-                        tally.tally(
-                                effect.getString("collection"),
-                                effect.getString("handle"),
-                                effect.getString("kind"));
-                    }
-                    return "{}";
-                case "enumerate":
-                    return enumerate(yielded).toString();
-                case "fetch":
-                    return fetch(yielded).toString();
-                case "push":
-                    return push(yielded).toString();
-                default:
-                    return error("Unsupported engine yield " + yielded.getString("op"));
-            }
-        } catch (Exception failure) {
-            Log.w("pimalaya", "offline driver failed", failure);
-            return error(failure);
+    protected void applied(JSONArray effects) throws JSONException {
+        for (int index = 0; tally != null && index < effects.length(); index++) {
+            JSONObject effect = effects.getJSONObject(index);
+            tally.tally(
+                    effect.getString("collection"),
+                    effect.getString("handle"),
+                    effect.getString("kind"));
         }
     }
 
@@ -447,7 +377,8 @@ final class OfflineEngine implements OfflineDriver {
      * delta from next time; a cursor the server no longer accepts
      * falls back to an initial round.
      */
-    private JSONObject enumerate(JSONObject yielded) throws JSONException {
+    @Override
+    protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String url = yielded.getString("collection");
         if (CardStore.isPhoneCollection(url)) {
             return phone.enumerate(url);
@@ -551,7 +482,8 @@ final class OfflineEngine implements OfflineDriver {
      * with its link id (the vCard UID), the summary STORAGE Annex A
      * derives from it, and its content hash.
      */
-    private JSONObject fetch(JSONObject yielded) throws JSONException {
+    @Override
+    protected JSONObject fetch(JSONObject yielded) throws JSONException {
         String url = yielded.getString("collection");
         JSONArray handles = yielded.getJSONArray("handles");
         if (CardStore.isPhoneCollection(url)) {
@@ -647,7 +579,8 @@ final class OfflineEngine implements OfflineDriver {
      * sync reconciles it; any other failure aborts the pass (offline
      * fallback).
      */
-    private JSONObject push(JSONObject yielded) throws JSONException {
+    @Override
+    protected JSONObject push(JSONObject yielded) throws JSONException {
         String url = yielded.getString("collection");
         JSONArray changes = yielded.getJSONArray("changes");
         if (CardStore.isPhoneCollection(url)) {
@@ -1119,22 +1052,6 @@ final class OfflineEngine implements OfflineDriver {
         return result(handle, true, null, null);
     }
 
-    /** One push result on the engine wire. */
-    private static JSONObject result(
-            String handle, boolean accepted, String assigned, String revision)
-            throws JSONException {
-        JSONObject result = new JSONObject();
-        result.put("handle", handle);
-        result.put("accepted", accepted);
-        if (assigned != null) {
-            result.put("assigned", assigned);
-        }
-        if (revision != null) {
-            result.put("revision", revision);
-        }
-        return result;
-    }
-
     /** How many resource names one addressbook-multiget carries. */
     private static final int MULTIGET_CHUNK = 50;
 
@@ -1191,21 +1108,6 @@ final class OfflineEngine implements OfflineDriver {
         }
     }
 
-    /** The HTTP status a bridge failure carries, null on any other failure. */
-    private static Integer status(Exception failure) {
-        return failure instanceof PimalayaException
-                ? ((PimalayaException) failure).status
-                : null;
-    }
-
-    private static boolean isPreconditionFailure(Exception failure) {
-        return Integer.valueOf(412).equals(status(failure));
-    }
-
-    private static boolean isGone(Exception failure) {
-        return Integer.valueOf(404).equals(status(failure));
-    }
-
     private boolean isGraph() {
         return account != null && PimalayaClient.isGraph(account);
     }
@@ -1220,34 +1122,4 @@ final class OfflineEngine implements OfflineDriver {
                 && !PimalayaClient.isGoogle(account);
     }
 
-    private static String error(String message) {
-        JSONObject reply = new JSONObject();
-        try {
-            reply.put("error", message);
-        } catch (JSONException ignored) {
-            return "{\"error\": \"driver failure\"}";
-        }
-        return reply.toString();
-    }
-
-    /**
-     * A failure as the driver error reply, keeping the HTTP status a
-     * bridge failure carries so it survives the round trip through
-     * the engine (the sync entry points branch on it for the token
-     * refresh).
-     */
-    private static String error(Exception failure) {
-        String message = failure.getMessage();
-        JSONObject reply = new JSONObject();
-        try {
-            reply.put("error", message == null ? failure.toString() : message);
-            Integer status = status(failure);
-            if (status != null) {
-                reply.put("status", status);
-            }
-        } catch (JSONException ignored) {
-            return "{\"error\": \"driver failure\"}";
-        }
-        return reply.toString();
-    }
 }

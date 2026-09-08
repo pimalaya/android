@@ -763,11 +763,19 @@ impl From<&PimdirChange> for ChangeJson {
     }
 }
 
-/// A local mutation on the JSON wire (Java to engine only); the app
-/// only stages content edits through the engine.
+/// A local mutation on the JSON wire (Java to engine only): the staged
+/// write every offline action of every domain is, reconciled by the sync
+/// that follows.
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
 enum MutationJson {
+    SetFlags {
+        handle: String,
+        flags: Vec<String>,
+    },
+    Remove {
+        handle: String,
+    },
     Edit {
         handle: String,
         hash: String,
@@ -781,11 +789,30 @@ enum MutationJson {
         #[serde(default)]
         sort_key: Option<String>,
     },
+    Add {
+        link_id: String,
+        #[serde(default)]
+        flags: Vec<String>,
+        hash: String,
+        size: usize,
+        body: String,
+        #[serde(default)]
+        summary: Option<SummaryJson>,
+        /// Stated rather than optional: a create has no stored key to keep,
+        /// so the empty string is the key nobody derived.
+        #[serde(default)]
+        sort_key: String,
+    },
 }
 
 impl From<MutationJson> for PimdirMutation {
     fn from(wire: MutationJson) -> Self {
         match wire {
+            MutationJson::SetFlags { handle, flags } => Self::SetFlags {
+                handle: PimdirHandle(handle),
+                flags: PimdirFlags::from_iter(flags),
+            },
+            MutationJson::Remove { handle } => Self::Remove(PimdirHandle(handle)),
             MutationJson::Edit {
                 handle,
                 hash,
@@ -802,6 +829,25 @@ impl From<MutationJson> for PimdirMutation {
                 body: body.into_bytes(),
                 summary: summary.map(Into::into),
                 sort_key: sort_key.map(Into::into),
+            },
+            MutationJson::Add {
+                link_id,
+                flags,
+                hash,
+                size,
+                body,
+                summary,
+                sort_key,
+            } => Self::Add {
+                link_id: PimdirLinkId(link_id),
+                flags: PimdirFlags::from_iter(flags),
+                object: PimdirObject {
+                    hash: PimdirHash(hash),
+                    size,
+                },
+                body: body.into_bytes(),
+                summary: summary.map(Into::into),
+                sort_key: sort_key.into(),
             },
         }
     }

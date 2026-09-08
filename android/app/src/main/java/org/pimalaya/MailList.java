@@ -107,8 +107,17 @@ final class MailList {
             // where "8 Aug 2026" leaves the reader to work it out. The
             // exact date is one tap away, in the message's own header.
             date.setText(Dates.day(host, message.stamp));
+            // A message waiting in the outbox says so where a message that
+            // has been somewhere says which mailbox: naming the outbox
+            // would answer where it is, and what the reader is asking is
+            // whether it has gone.
             ((TextView) view.findViewById(R.id.message_origin))
-                    .setText(message.mailbox + " · " + message.accountEmail);
+                    .setText(
+                            (message.pending
+                                            ? host.getString(R.string.message_pending)
+                                            : message.mailbox)
+                                    + " · "
+                                    + message.accountEmail);
 
             // The disc stands for the sender rather than the message, so
             // it is keyed by the address alone: a sender who changes how

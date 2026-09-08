@@ -1,21 +1,29 @@
-//! Message composition: the composer's fields to the RFC 5322 bytes a
-//! submission hands over.
+//! Message composition and reading: the composer's fields to the RFC
+//! 5322 bytes a submission hands over, and a stored message back to what
+//! a reader draws.
 //!
 //! Built here rather than in Java for the reason every other document in
 //! this app is: the wire format is the library layer's business, and a
 //! second implementation of header encoding on the other side of the JNI
 //! boundary would be a second place for it to be wrong.
 //!
-//! Plain text only, and deliberately: a composer that offers no
-//! formatting has nothing to express in HTML, and a `multipart/alternative`
-//! carrying the same text twice is a larger message saying the same
-//! thing. Attachments are the reason that will change.
+//! Neither half speaks a protocol, which is why they share a module the
+//! backends have no part in: reading resolves the MIME tree of bytes
+//! whichever server sent them, so a message the store already holds is
+//! read exactly as one just fetched is.
+//!
+//! Composition is plain text only, and deliberately: a composer that
+//! offers no formatting has nothing to express in HTML, and a
+//! `multipart/alternative` carrying the same text twice is a larger
+//! message saying the same thing. Attachments are the reason that will
+//! change.
 
 use std::fmt::Write as _;
 
+use mail_parser::{Address, MessageParser, MimeHeaders, PartType};
 use serde::Deserialize;
 
-use crate::types::BridgeError;
+use crate::types::{BridgeError, MessageAttachment, MessageBody};
 
 /// How long a header line may run before it folds (RFC 5322 section
 /// 2.1.1 recommends 78, and requires no more than 998).
@@ -57,13 +65,12 @@ pub struct Draft {
     pub message_id: String,
 }
 
-/// One composed message: its bytes, and the envelope they are handed
-/// over with.
+/// One message about to be handed over: the bytes a server receives, and
+/// the envelope it is handed over with.
 ///
-/// The envelope is not derived from the headers by the reader of this
-/// struct, because it must not be: a blind copy is a recipient the
-/// headers deliberately do not name, and deriving would either lose it
-/// or disclose it.
+/// The bytes carry no `Bcc`, because the recipients that header names are
+/// the ones nobody else may learn about; the envelope carries them, which
+/// is the only way a blind copy is neither lost nor disclosed.
 pub struct Composed {
     /// The complete RFC 5322 message, headers and body.
     pub message: Vec<u8>,
@@ -73,8 +80,15 @@ pub struct Composed {
     pub recipients: Vec<String>,
 }
 
-/// Composes one draft into the message and the envelope it is sent with.
-pub fn compose(draft: &Draft) -> Result<Composed, BridgeError> {
+/// Composes one draft into the RFC 5322 message an outbox holds.
+///
+/// The message a submission hands over is [`envelope`]'s job, not this
+/// one's: what comes out here carries a `Bcc` header, which section 3.6.3
+/// provides for a message prepared for sending precisely so that the
+/// blind recipients survive until whoever sends it strips them. It is
+/// what lets the outbox hold one self-contained document rather than a
+/// message and a list beside it.
+pub fn compose(draft: &Draft) -> Result<Vec<u8>, BridgeError> {
     let sender = addresses(&draft.from)
         .into_iter()
         .next()
@@ -97,6 +111,9 @@ pub fn compose(draft: &Draft) -> Result<Composed, BridgeError> {
     if !cc.is_empty() {
         headers.push_str(&header("Cc", &cc.join(", ")));
     }
+    if !bcc.is_empty() {
+        headers.push_str(&header("Bcc", &bcc.join(", ")));
+    }
     headers.push_str(&header("Subject", &draft.subject));
     headers.push_str("MIME-Version: 1.0\r\n");
     headers.push_str("Content-Type: text/plain; charset=utf-8\r\n");
@@ -106,15 +123,224 @@ pub fn compose(draft: &Draft) -> Result<Composed, BridgeError> {
     message.extend_from_slice(b"\r\n");
     message.extend_from_slice(quoted_printable(&draft.body).as_bytes());
 
-    let mut recipients = to;
-    recipients.extend(cc);
-    recipients.extend(bcc);
+    Ok(message)
+}
+
+/// One stored message as it is handed over: the envelope its address
+/// headers name, and the bytes with the `Bcc` header taken back out.
+///
+/// The reverse of [`compose`], and the step RFC 5322 section 3.6.3 asks
+/// of whoever sends the message: the blind recipients become `RCPT TO`
+/// commands and leave the document, so no copy any recipient receives
+/// names them.
+pub fn envelope(raw: &[u8]) -> Result<Composed, BridgeError> {
+    let parsed = MessageParser::default()
+        .parse(raw)
+        .ok_or_else(|| BridgeError::from("Could not read the message"))?;
+
+    let sender = parsed
+        .from()
+        .and_then(|address| address.first())
+        .and_then(|address| address.address.as_deref())
+        .ok_or_else(|| BridgeError::from("The message has no sender"))?
+        .to_string();
+
+    let mut recipients = Vec::new();
+    for header in [parsed.to(), parsed.cc(), parsed.bcc()] {
+        recipients.extend(envelope_addresses(header));
+    }
+    if recipients.is_empty() {
+        return Err("The message has no recipient".into());
+    }
 
     Ok(Composed {
-        message,
+        message: without_bcc(raw),
         sender,
         recipients,
     })
+}
+
+/// The bare addresses of one address header, for the envelope.
+fn envelope_addresses(header: Option<&Address>) -> Vec<String> {
+    let Some(header) = header else {
+        return Vec::new();
+    };
+
+    header
+        .clone()
+        .into_list()
+        .into_iter()
+        .filter_map(|address| address.address.map(|address| address.into_owned()))
+        .filter(|address| !address.is_empty())
+        .collect()
+}
+
+/// The message with its `Bcc` header and that header's folded
+/// continuation lines removed, the body untouched.
+///
+/// Done on the bytes rather than by recomposing, because what goes out
+/// has to be what was stored: re-encoding a message to drop one header
+/// would re-encode the other headers with it, and the copy the sender
+/// keeps would stop matching the copy the recipients got.
+fn without_bcc(raw: &[u8]) -> Vec<u8> {
+    let mut kept = Vec::with_capacity(raw.len());
+    let mut read = 0;
+    let mut dropping = false;
+
+    for line in raw.split_inclusive(|byte| *byte == b'\n') {
+        read += line.len();
+
+        let text = line.strip_suffix(b"\n").unwrap_or(line);
+        let text = text.strip_suffix(b"\r").unwrap_or(text);
+
+        // The blank line ends the header block; everything after it is
+        // body, where a line starting with `Bcc:` is just text.
+        if text.is_empty() {
+            kept.extend_from_slice(&raw[read - line.len()..]);
+            return kept;
+        }
+
+        let folded = matches!(text.first(), Some(b' ' | b'\t'));
+        if !folded {
+            dropping = text.len() >= 4 && text[..4].eq_ignore_ascii_case(b"bcc:");
+        }
+        if !dropping {
+            kept.extend_from_slice(line);
+        }
+    }
+
+    kept
+}
+
+/// One header value as a reader sees it: RFC 2047 encoded words decoded,
+/// everything else left as it came.
+///
+/// The counterpart of [`header`], and the half an envelope needs. A
+/// message read whole is decoded by the parser on the way through, but an
+/// IMAP `ENVELOPE` is the header text itself: the subject and the sender's
+/// name arrive exactly as they were written on the wire, encoded words
+/// and all, and a list drawing them raw shows `=?UTF-8?B?...?=` where the
+/// reader below it shows a name.
+///
+/// Decoded by parsing a synthetic header rather than by hand, so the
+/// charsets, the base64 and quoted-printable spellings, and the
+/// whitespace rule of section 6.2 are the ones the reader already uses,
+/// rather than a second implementation of the same RFC that agrees with
+/// it until it does not.
+pub fn decode_header(raw: &str) -> String {
+    // A value carrying no encoded word is returned untouched, which is
+    // most of them: it spares the parse, and it guarantees that a header
+    // needing nothing done to it comes back byte for byte.
+    if !raw.contains("=?") {
+        return raw.into();
+    }
+
+    // NOTE: a line break would end the synthetic header and let whatever
+    // follows read as one of its own. An ENVELOPE value is unfolded
+    // already, so this never fires; it is here because the cost of being
+    // wrong about that is a header injected from a message.
+    let value: String = raw
+        .chars()
+        .map(|char| match char {
+            '\r' | '\n' => ' ',
+            other => other,
+        })
+        .collect();
+
+    let synthetic = format!("Subject: {value}\r\n\r\n");
+    MessageParser::default()
+        .parse(synthetic.as_bytes())
+        .and_then(|parsed| parsed.subject().map(str::to_string))
+        .unwrap_or_else(|| raw.into())
+}
+
+/// One raw RFC 5322 message as the reader shows it.
+///
+/// HTML wins over text when the message carries both, because that is
+/// the alternative the sender laid out; the reader sandboxes it, which
+/// is what makes preferring it safe.
+pub fn parse(raw: &[u8]) -> Result<MessageBody, BridgeError> {
+    let parsed = MessageParser::default()
+        .parse(raw)
+        .ok_or_else(|| BridgeError::from("Could not read the message"))?;
+
+    let sender = parsed.from().and_then(|address| address.first());
+
+    // NOTE: the part itself rather than `body_html`, which renders a
+    // text-only message into HTML rather than saying it has none: a
+    // message with nothing but text would otherwise reach the reader as
+    // markup and be sandboxed in a web view for no reason.
+    let html = parsed.html_part(0).and_then(|part| match &part.body {
+        PartType::Html(html) => Some(html.to_string()),
+        _ => None,
+    });
+    let (kind, body) = match html {
+        Some(html) => ("html", html),
+        None => match parsed.body_text(0) {
+            Some(text) => ("plain", text.into_owned()),
+            None => ("", String::new()),
+        },
+    };
+
+    Ok(MessageBody {
+        subject: parsed.subject().unwrap_or_default().to_string(),
+        from: sender
+            .and_then(|address| address.name.as_deref())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or_default()
+            .to_string(),
+        from_address: sender
+            .and_then(|address| address.address.as_deref())
+            .unwrap_or_default()
+            .to_string(),
+        to: header_addresses(parsed.to()),
+        cc: header_addresses(parsed.cc()),
+        date: parsed
+            .date()
+            .map(|date| date.to_rfc3339())
+            .unwrap_or_default(),
+        kind: kind.to_string(),
+        body,
+        attachments: parsed
+            .attachments()
+            .map(|part| MessageAttachment {
+                name: part.attachment_name().unwrap_or_default().to_string(),
+                mime: part
+                    .content_type()
+                    .map(|content| match content.subtype() {
+                        Some(subtype) => format!("{}/{subtype}", content.ctype()),
+                        None => content.ctype().to_string(),
+                    })
+                    .unwrap_or_else(|| String::from("application/octet-stream"))
+                    .to_lowercase(),
+                size: part.contents().len() as u64,
+            })
+            .collect(),
+    })
+}
+
+/// A header's addresses as one line, the way a header reads them.
+fn header_addresses(header: Option<&Address>) -> String {
+    let Some(header) = header else {
+        return String::new();
+    };
+
+    header
+        .clone()
+        .into_list()
+        .iter()
+        .map(|address| match address.name.as_deref().map(str::trim) {
+            Some(name) if !name.is_empty() => {
+                format!(
+                    "{name} <{}>",
+                    address.address.as_deref().unwrap_or_default()
+                )
+            }
+            _ => address.address.as_deref().unwrap_or_default().to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// One header line: the name, the value encoded where it has to be, and
@@ -209,7 +435,11 @@ fn base64_len(bytes: usize) -> usize {
 }
 
 /// The standard base64 alphabet (RFC 4648 section 4), padded.
-fn base64(bytes: &[u8]) -> String {
+///
+/// Also how a fetched message crosses the JNI boundary: a Java string is
+/// UTF-8 and a message is bytes, so the reply carries the encoding and
+/// the Java side decodes it back before storing it.
+pub(crate) fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
     let mut encoded = String::with_capacity(base64_len(bytes.len()));
@@ -311,7 +541,7 @@ mod tests {
     }
 
     fn text(draft: &Draft) -> String {
-        String::from_utf8(compose(draft).unwrap().message).unwrap()
+        String::from_utf8(compose(draft).unwrap()).unwrap()
     }
 
     /// The value of one header, unfolded back into one line.
@@ -338,8 +568,7 @@ mod tests {
 
     #[test]
     fn a_plain_draft_composes_the_headers_a_reader_needs() {
-        let composed = compose(&draft()).unwrap();
-        let message = String::from_utf8(composed.message).unwrap();
+        let message = text(&draft());
 
         assert!(message.contains("Date: Mon, 5 Jan 2026 09:00:00 +0000\r\n"));
         assert!(message.contains("Message-ID: <abc@pimalaya>\r\n"));
@@ -348,24 +577,31 @@ mod tests {
         assert!(message.contains("Subject: Hello\r\n"));
         assert!(message.ends_with("\r\n\r\nHi there\r\n"));
 
+        let composed = envelope(message.as_bytes()).unwrap();
         assert_eq!(composed.sender, "ada@example.org");
         assert_eq!(composed.recipients, ["bob@example.com"]);
     }
 
     #[test]
-    fn a_blind_copy_reaches_the_envelope_and_no_header() {
+    fn a_blind_copy_waits_in_the_message_and_leaves_it_at_the_submission() {
         let mut draft = draft();
         draft.cc = "cc@example.com".into();
         draft.bcc = "hidden@example.com, second@example.com".into();
 
-        let composed = compose(&draft).unwrap();
-        let message = String::from_utf8(composed.message).unwrap();
+        // The outbox holds the blind recipients, per RFC 5322 §3.6.3:
+        // nothing else remembers them until the message goes out.
+        let queued = text(&draft);
+        assert!(queued.contains("Bcc: hidden@example.com, second@example.com\r\n"));
 
-        assert!(message.contains("Cc: cc@example.com\r\n"));
+        let composed = envelope(queued.as_bytes()).unwrap();
+        let sent = String::from_utf8(composed.message).unwrap();
+
+        assert!(sent.contains("Cc: cc@example.com\r\n"));
         assert!(
-            !message.contains("hidden@example.com"),
-            "a blind copy must not be named in the headers"
+            !sent.contains("hidden@example.com"),
+            "a blind copy must not be named in what the recipients receive"
         );
+        assert!(sent.ends_with("\r\n\r\nHi there\r\n"), "the body survived");
         assert_eq!(
             composed.recipients,
             [
@@ -375,6 +611,96 @@ mod tests {
                 "second@example.com"
             ]
         );
+    }
+
+    #[test]
+    fn a_folded_blind_copy_leaves_with_its_continuation_lines() {
+        let mut draft = draft();
+        draft.bcc = (0..12)
+            .map(|index| format!("blind{index}@example.org"))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let queued = text(&draft);
+        assert!(queued.contains("Bcc: "), "expected the header");
+        assert!(queued.contains("\r\n "), "expected a fold to strip past");
+
+        let composed = envelope(queued.as_bytes()).unwrap();
+        let sent = String::from_utf8(composed.message).unwrap();
+
+        assert!(
+            !sent.contains("blind"),
+            "a folded blind copy must not leave half a header behind"
+        );
+        assert!(sent.contains("To: bob@example.com\r\n"), "kept the rest");
+        assert_eq!(composed.recipients.len(), 13);
+    }
+
+    /// The envelope path's whole point: what `header` writes, `decode_header`
+    /// reads back. An IMAP `ENVELOPE` hands the wire text over verbatim, so
+    /// this is the only thing standing between a sender's name and a row
+    /// showing `=?UTF-8?B?...?=`.
+    #[test]
+    fn an_encoded_header_decodes_back_to_what_was_written() {
+        for original in [
+            "Réunion générale",
+            "Re: déjeuner tomorrow",
+            "déjeuner à côté données réunion générale prévue",
+            "Ada Lovelace",
+            "Ada Løvelace",
+        ] {
+            // `header` writes "Name: value\r\n", folded; the envelope carries
+            // the value alone, unfolded.
+            let written = header("Subject", original);
+            let value = written
+                .trim_start_matches("Subject:")
+                .replace("\r\n ", " ")
+                .trim()
+                .to_string();
+
+            assert_eq!(
+                decode_header(&value),
+                original,
+                "round trip of {original:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_header_with_nothing_encoded_comes_back_byte_for_byte() {
+        // The fast path, and what it guarantees: a value needing nothing
+        // done to it must not be normalised on its way through a parser.
+        for original in ["Standup at 9", "  spaced  out  ", "", "a ? b = c"] {
+            assert_eq!(decode_header(original), original);
+        }
+    }
+
+    #[test]
+    fn a_header_that_only_looks_encoded_is_left_alone() {
+        // `=?` with nothing decodable behind it is text, and text is what
+        // it has to stay: the alternative is a subject that disappears.
+        assert_eq!(decode_header("=?not really?="), "=?not really?=");
+    }
+
+    #[test]
+    fn a_line_break_in_a_header_cannot_smuggle_another_one() {
+        // An ENVELOPE value is unfolded, so this never arises in practice.
+        // What it pins is that being wrong about that costs nothing: the
+        // break folds into a space rather than ending the header.
+        let decoded = decode_header("=?UTF-8?B?w6k=?=\r\nBcc: someone@example.org");
+        assert!(decoded.starts_with('é'), "decoded: {decoded:?}");
+        assert!(decoded.contains("Bcc: someone@example.org"), "kept as text");
+    }
+
+    #[test]
+    fn a_body_line_that_reads_like_a_header_is_left_alone() {
+        let mut draft = draft();
+        draft.body = "Bcc: not a header, just text".into();
+
+        let composed = envelope(text(&draft).as_bytes()).unwrap();
+        let sent = String::from_utf8(composed.message).unwrap();
+
+        assert!(sent.ends_with("\r\n\r\nBcc: not a header, just text\r\n"));
     }
 
     #[test]
@@ -479,5 +805,65 @@ mod tests {
             }
         }
         bytes
+    }
+
+    #[test]
+    fn html_wins_over_text_and_attachments_are_listed() {
+        let raw = b"From: Alice <alice@example.org>\r\n\
+                    To: Bob <bob@example.org>\r\n\
+                    Subject: Hello\r\n\
+                    Date: Sun, 9 Aug 2026 12:14:00 +0200\r\n\
+                    MIME-Version: 1.0\r\n\
+                    Content-Type: multipart/mixed; boundary=\"sep\"\r\n\
+                    \r\n\
+                    --sep\r\n\
+                    Content-Type: multipart/alternative; boundary=\"alt\"\r\n\
+                    \r\n\
+                    --alt\r\n\
+                    Content-Type: text/plain\r\n\
+                    \r\n\
+                    plain body\r\n\
+                    --alt\r\n\
+                    Content-Type: text/html\r\n\
+                    \r\n\
+                    <p>rich body</p>\r\n\
+                    --alt--\r\n\
+                    --sep\r\n\
+                    Content-Type: application/pdf; name=\"invoice.pdf\"\r\n\
+                    Content-Disposition: attachment; filename=\"invoice.pdf\"\r\n\
+                    \r\n\
+                    %PDF\r\n\
+                    --sep--\r\n";
+
+        let message = parse(raw).unwrap();
+
+        assert_eq!(message.subject, "Hello");
+        assert_eq!(message.from, "Alice");
+        assert_eq!(message.from_address, "alice@example.org");
+        assert_eq!(message.to, "Bob <bob@example.org>");
+        assert_eq!(message.kind, "html");
+        assert!(message.body.contains("rich body"));
+        assert!(message.date.starts_with("2026-08-09T12:14:00"));
+
+        assert_eq!(message.attachments.len(), 1);
+        assert_eq!(message.attachments[0].name, "invoice.pdf");
+        assert_eq!(message.attachments[0].mime, "application/pdf");
+    }
+
+    #[test]
+    fn a_message_with_no_html_falls_back_to_its_text() {
+        let raw = b"From: alice@example.org\r\n\
+                    Subject: Plain\r\n\
+                    \r\n\
+                    just text\r\n";
+
+        let message = parse(raw).unwrap();
+
+        assert_eq!(message.kind, "plain");
+        assert_eq!(message.body.trim(), "just text");
+        // No display name in the header, so the row falls back to the
+        // address rather than showing an empty sender.
+        assert_eq!(message.from, "");
+        assert_eq!(message.from_address, "alice@example.org");
     }
 }

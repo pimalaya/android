@@ -28,9 +28,9 @@ import java.util.Set;
  * ticked domains decide what the one account syncs.
  */
 enum PimDomain {
-    MAIL("mail", R.string.domain_mail),
-    CONTACTS("contacts", R.string.domain_contacts),
-    CALENDAR("calendar", R.string.domain_calendar);
+    MAIL("mail", R.string.domain_mail, R.drawable.ic_domain_mail),
+    CONTACTS("contacts", R.string.domain_contacts, R.drawable.ic_domain_contacts),
+    CALENDAR("calendar", R.string.domain_calendar, R.drawable.ic_domain_calendar);
 
     /** The stored spelling; the enum name is not persisted. */
     final String id;
@@ -38,9 +38,13 @@ enum PimDomain {
     /** The label a picker shows. */
     final int label;
 
-    PimDomain(String id, int label) {
+    /** The glyph beside that label, the one the domain bar draws. */
+    final int icon;
+
+    PimDomain(String id, int label, int icon) {
         this.id = id;
         this.label = label;
+        this.icon = icon;
     }
 
     /** The domain a stored id names, contacts when it names none. */

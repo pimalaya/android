@@ -6,10 +6,12 @@ import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Account;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -21,8 +23,14 @@ import java.util.UUID;
  *
  * <p>Plain text, one recipient field per kind, and the copies hidden
  * until they are asked for. What it is not is a draft editor: nothing is
- * stored until the message is handed over, so leaving the screen loses
- * what was typed and the screen says so before it does.
+ * stored until the message is sent, so leaving the screen loses what was
+ * typed and the screen says so before it does.
+ *
+ * <p>Sending stores rather than submits. The message is composed here,
+ * which needs nothing but the fields, and lands in the account's outbox;
+ * the sync that follows hands it over. So a message can be written and
+ * sent with the radio off, and what the composer reports is that it is
+ * queued, not that it arrived.
  *
  * <p>The account is the one the composer opened on, and it is fixed for
  * the message: the sender is what a server checks a submission against,
@@ -138,7 +146,12 @@ final class MessageCompose {
     }
 
     /**
-     * Composes what is on screen and hands it over.
+     * Composes what is on screen and puts it in the outbox.
+     *
+     * <p>Nothing is handed over here, and that is the point: composing
+     * reaches for nothing, so a message can be written and sent with the
+     * radio off, and the sync that follows is what carries it out. What
+     * the composer waits for is a disk write.
      *
      * <p>The two stamps are minted here rather than in the bridge, which
      * keeps the composition a pure function of what it is handed: the
@@ -157,18 +170,26 @@ final class MessageCompose {
             return;
         }
 
+        // NOTE: everything the fields say, read before the work moves off
+        // this thread. A view is the main thread's, and the composition
+        // that follows is not.
+        String messageId = messageId(account.email);
+        String date = now();
+        String to = value(R.id.compose_to);
+        String subject = value(R.id.compose_subject);
+
         String draft;
         try {
             draft =
                     new JSONObject()
                             .put("from", account.email)
-                            .put("to", value(R.id.compose_to))
+                            .put("to", to)
                             .put("cc", value(R.id.compose_cc))
                             .put("bcc", value(R.id.compose_bcc))
-                            .put("subject", value(R.id.compose_subject))
+                            .put("subject", subject)
                             .put("body", value(R.id.compose_body))
-                            .put("date", now())
-                            .put("messageId", messageId(account.email))
+                            .put("date", date)
+                            .put("messageId", messageId)
                             .toString();
         } catch (JSONException error) {
             host.showError(error, R.string.compose_failed);
@@ -179,21 +200,36 @@ final class MessageCompose {
         host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
         host.io.execute(
                 () -> {
-                    String copy = null;
                     Exception failure = null;
                     try {
-                        copy =
-                                host.runner
-                                        .session(sender, PimDomain.MAIL)
-                                        .call(
-                                                server ->
-                                                        host.client.sendMessage(server, draft));
+                        byte[] source = host.client.composeMessage(draft);
+                        host.mail.ensureOutbox(sender.email);
+                        host.mailEngine(sender.email)
+                                .mutateAdd(
+                                        host.mail.outboxOf(sender.email),
+                                        // The `Message-ID` is the identity, which
+                                        // is what a link id is: it is minted here
+                                        // and stamped on the message, so the copy
+                                        // the sync files in the sent mailbox comes
+                                        // back under the same name.
+                                        PimdirSummary.bare(messageId),
+                                        new String(source, StandardCharsets.UTF_8),
+                                        new JSONArray().put(MailEngine.SEEN),
+                                        PimdirSummary.mail(
+                                                messageId,
+                                                subject,
+                                                "",
+                                                sender.email,
+                                                to,
+                                                date,
+                                                source.length,
+                                                false),
+                                        PimdirSummary.mailSortKey(date));
                     } catch (Exception error) {
-                        Log.w("pimalaya", "send failed: " + sender.email, error);
+                        Log.w("pimalaya", "compose failed: " + sender.email, error);
                         failure = error;
                     }
 
-                    String mailbox = copy;
                     Exception outcome = failure;
                     host.postAlive(
                             () -> {
@@ -202,10 +238,8 @@ final class MessageCompose {
                                     host.showError(outcome, R.string.compose_failed);
                                     return;
                                 }
-                                host.toast(
-                                        mailbox == null
-                                                ? host.getString(R.string.compose_sent_no_copy)
-                                                : host.getString(R.string.compose_sent, mailbox));
+                                host.toast(host.getString(R.string.compose_queued));
+                                host.mailList.reload();
                                 host.showBack(MainActivity.PANEL_MAIL);
                             });
                 });

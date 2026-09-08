@@ -10,7 +10,7 @@ The app keeps one pimdir store for every account and every domain: `collections.
 
 The schema is io-pimdir's, handed to Java over JNI rather than transcribed, and executed against Android's own SQLite. The crate is taken without its `client` feature: the platform ships SQLite, and compiling a second engine into every ABI would work against the app's first design goal.
 
-A contacts collection is reconciled by io-pimdir's sync engine against two sources, the server and the phone, which the store holds as one item with one `bindings` row per source. Mail and calendar collections are read-only mirrors: they carry no binding beyond the one a calendar's ETag lives in, no staged edit and no conflict, and a refresh replaces their contents.
+Every collection is reconciled by io-pimdir's sync engine, so every collection carries bindings, staged writes and conflicts. A contacts collection is reconciled against two sources, the server and the phone, which the store holds as one item with one `bindings` row per source; mail and calendar have the one source each and are otherwise the same. Nothing replaces a collection's contents: a refresh reconciles it, which is what lets a write staged before it survive it.
 
 ### Requirement: The engine is io-pimdir's
 The bridge SHALL run io-pimdir's sync, upgrade and mutate coroutines, and the app SHALL NOT depend on io-replica.
@@ -117,3 +117,88 @@ The store SHALL read a `rekeyed` drop as this row going and the item staying, on
 - GIVEN a collection whose handle space the remote renumbered
 - WHEN the engine drops every old handle as `rekeyed` and upserts the new ones
 - THEN no item is retired and no delete propagates to another source
+
+### Requirement: A refresh keeps the bodies it does not restate
+A write carrying no body SHALL keep the object the item already holds, and an item's level SHALL follow what it holds: meta with no body, full with one.
+
+#### Scenario: A sync after a read
+- GIVEN a message whose body was stored by opening it
+- WHEN the mailbox is refreshed
+- THEN the stored body survives the refresh
+
+#### Scenario: An envelope with no body
+- GIVEN a message the sync has just stored
+- WHEN its row is read
+- THEN it stands at meta
+
+### Requirement: An action is a local write
+Every action the reader takes in any domain SHALL be applied to the store alone and SHALL succeed with no network. Only a sync pass and the fetch of a message body SHALL reach a server.
+
+#### Scenario: A marker written with the radio off
+- GIVEN no network
+- WHEN the reader marks a message read
+- THEN the store records it, the list reflects it, and nothing is reported as failed
+
+#### Scenario: An entry edited with the radio off
+- GIVEN no network
+- WHEN a calendar entry is saved
+- THEN the agenda shows the edit and the push waits for the next sync
+
+#### Scenario: The push is refused later
+- GIVEN a staged write the server rejects
+- WHEN the sync pushes it
+- THEN the sync reports the refusal, the write staying staged
+
+### Requirement: A sync says what it is working on, in every domain
+The modal sync dialog SHALL name what the pass is on and what it is doing: the collection being reconciled as its title, and the step it stands at as its detail line. The three domains SHALL report both, so a wait reads the same whichever one is being synced.
+
+#### Scenario: A mail pass
+- GIVEN more than one mailbox
+- WHEN the mail list is refreshed
+- THEN the dialog names each mailbox as it starts, over a line saying whether it is exchanging with the server or sending changes
+
+#### Scenario: A calendar pass
+- GIVEN more than one calendar
+- WHEN the agenda is refreshed
+- THEN the dialog names each calendar as it starts, over the same lines
+
+### Requirement: A placement's status is derived from the row
+The store SHALL derive what a placement owes rather than store it, by the first rule that applies (pimdir SYNC §3): conflict when either the binding or the item is conflicted, tombstone when the item is deleted and the source binds it, created when the source binds it with no base or does not bind it at all, dirty when the flags differ from the base's, both known, or a mutable kind's body differs from the base's, clean otherwise. An item no source binds and the store holds no body for SHALL be projected for nobody. A placement holding no body SHALL project below full, whatever the stored level claims.
+
+#### Scenario: A staged edit
+- GIVEN an item whose body moved past the one its base holds
+- WHEN the collection is loaded
+- THEN the placement comes back dirty, which is what the merge derives its push from
+
+#### Scenario: A message the reader opened
+- GIVEN a stored message, an immutable kind, whose body a read filed
+- WHEN the collection is loaded
+- THEN the placement comes back clean, the bytes owing no upload
+
+#### Scenario: A marker set that only reordered
+- GIVEN a stored flag set naming what the base names, in another order
+- WHEN the collection is loaded
+- THEN the placement comes back clean
+
+#### Scenario: A body a remote change dropped
+- GIVEN an item whose object a refresh released
+- WHEN the collection is loaded
+- THEN the placement projects at most meta, so an upgrade refetches it
+
+### Requirement: A staged removal is a tombstone the load hands back
+An item staged for removal SHALL be kept, marked, and SHALL be loaded back to the engine as a tombstone until a push has carried it. It SHALL leave every listing at once, and an edit after it SHALL revive it.
+
+#### Scenario: The delete is derived
+- GIVEN a bound item the reader deleted
+- WHEN the collection is loaded
+- THEN the placement comes back as a tombstone, which is what the merge derives its remove push from
+
+#### Scenario: The row is not resurrected
+- GIVEN a staged removal the sync has not carried yet
+- WHEN the remote enumerate still lists the member
+- THEN it is not read as one to add back
+
+#### Scenario: An edit beats a delete
+- GIVEN a staged removal
+- WHEN the item is written again
+- THEN the row is revived rather than left marked

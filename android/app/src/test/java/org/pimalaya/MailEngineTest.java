@@ -1,0 +1,198 @@
+package org.pimalaya;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+import android.content.Context;
+import android.database.Cursor;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.PimalayaClient;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
+
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+/**
+ * The staged writes every mail action is, run through the real bridge
+ * and the real store.
+ *
+ * <p>What they pin is the half of offline-first that is easy to get
+ * wrong: a staged change moves the item and leaves the base alone. The
+ * base is what the source last agreed on, so it is what the next sync
+ * diffs the push out of; moving it with the edit would push nothing and
+ * silently drop the change.
+ */
+@RunWith(RobolectricTestRunner.class)
+public class MailEngineTest {
+    private static final String EMAIL = "jane@example.com";
+
+    private PimdirDb pimdir;
+    private MailStore store;
+    private MailEngine engine;
+    private String collection;
+
+    @Before
+    public void setUp() throws Exception {
+        Context context = RuntimeEnvironment.getApplication();
+        pimdir = new PimdirDb(context);
+        store = new MailStore(context, pimdir);
+        store.replaceMailboxes(EMAIL, List.of(new Mailbox("INBOX", "")));
+        collection = store.collectionOf(EMAIL, "INBOX");
+
+        // No account: the shape a driver that only stages runs with, which
+        // is every action in the reader and the composer.
+        engine =
+                new MailEngine(
+                        pimdir,
+                        new PimalayaClient(),
+                        null,
+                        new PimdirAccount(context).idOf(EMAIL));
+
+        // One message the sync has already reconciled: bound, and agreed at
+        // a flag set the server also holds.
+        JSONObject write = new JSONObject();
+        write.put("op", "write");
+        write.put(
+                "writes",
+                new JSONArray()
+                        .put(
+                                new JSONObject()
+                                        .put("op", "upsert")
+                                        .put(
+                                                "placement",
+                                                new JSONObject()
+                                                        .put("collection", collection)
+                                                        .put("handle", "42")
+                                                        .put("linkId", "42")
+                                                        .put("level", "meta")
+                                                        .put("status", "clean")
+                                                        .put(
+                                                                "flags",
+                                                                new JSONArray().put("$junk"))
+                                                        .put(
+                                                                "base",
+                                                                new JSONObject()
+                                                                        .put(
+                                                                                "flags",
+                                                                                new JSONArray()
+                                                                                        .put(
+                                                                                                "$junk"))))));
+        assertEquals("{}", engine.serve(write.toString()));
+    }
+
+    private String scalar(String sql, String... args) {
+        try (Cursor cursor = pimdir.getReadableDatabase().rawQuery(sql, args)) {
+            return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : null;
+        }
+    }
+
+    @Test
+    public void aStagedMarkerMovesTheItemAndLeavesTheBaseAlone() throws Exception {
+        JSONArray staged =
+                MailEngine.withFlag(store.flagsOf(collection, "42"), MailEngine.SEEN, true);
+        engine.mutateFlags(collection, "42", staged);
+
+        JSONArray held = store.flagsOf(collection, "42");
+        assertTrue("the marker the reader moved", MailEngine.has(held, MailEngine.SEEN));
+        assertTrue("and the keyword this app never models", MailEngine.has(held, "$junk"));
+
+        // The base is what the source last agreed on. If the stage moved it
+        // too, the next sync would diff nothing out and the marker would
+        // never reach the server.
+        JSONArray base = engine.offline.baseFlags(collection, "42");
+        assertFalse(MailEngine.has(base, MailEngine.SEEN));
+        assertTrue(MailEngine.has(base, "$junk"));
+    }
+
+    /**
+     * The staged marker has to come back to the engine as a pending push,
+     * or the sync finds nothing to send: what the merge acts on is the
+     * placement's status, and the store derives it rather than storing it.
+     */
+    @Test
+    public void aStagedMarkerIsProjectedAsAPendingPush() throws Exception {
+        engine.mutateFlags(
+                collection,
+                "42",
+                MailEngine.withFlag(store.flagsOf(collection, "42"), MailEngine.SEEN, true));
+
+        JSONObject load = new JSONObject();
+        load.put("op", "load");
+        load.put("collection", collection);
+        JSONArray placements =
+                new JSONObject(engine.serve(load.toString())).getJSONArray("placements");
+
+        assertEquals(1, placements.length());
+        assertEquals("dirty", placements.getJSONObject(0).getString("status"));
+    }
+
+    /**
+     * And a message the reader opened is not one: a message is immutable,
+     * so the bytes stored by opening it owe no upload, and reading them as
+     * one would derive an update per opened message that no mail backend
+     * would take.
+     */
+    @Test
+    public void aStoredBodyIsNotAPendingPush() throws Exception {
+        store.saveSource(collection, "42", "From: a@b.c\r\n\r\nbody\r\n".getBytes(StandardCharsets.UTF_8));
+
+        JSONObject load = new JSONObject();
+        load.put("op", "load");
+        load.put("collection", collection);
+        JSONArray placements =
+                new JSONObject(engine.serve(load.toString())).getJSONArray("placements");
+
+        assertEquals("clean", placements.getJSONObject(0).getString("status"));
+    }
+
+    @Test
+    public void aStagedDeleteIsATombstoneUntilItIsPushed() throws Exception {
+        engine.mutateRemove(collection, "42");
+
+        // Marked rather than dropped: the row has to survive until a sync
+        // has told the server, or the delete would happen only here.
+        assertEquals("1", scalar("SELECT deleted FROM items WHERE link_id = ?", "42"));
+        assertTrue("and it leaves the list at once", store.loadMerged(10).isEmpty());
+    }
+
+    @Test
+    public void anOutgoingMessageIsStagedAsACreate() throws Exception {
+        String source = "From: jane@example.com\r\nSubject: Hi\r\n\r\nthe body\r\n";
+        String outbox = store.outboxOf(EMAIL);
+        store.ensureOutbox(EMAIL);
+
+        engine.mutateAdd(
+                outbox,
+                "queued@example.com",
+                source,
+                new JSONArray().put(MailEngine.SEEN),
+                PimdirSummary.mail(
+                        "<queued@example.com>",
+                        "Hi",
+                        "",
+                        EMAIL,
+                        null,
+                        "Mon, 5 Jan 2026 09:00:00 +0000",
+                        source.length(),
+                        false),
+                PimdirSummary.mailSortKey("Mon, 5 Jan 2026 09:00:00 +0000"));
+
+        List<MailStore.Outgoing> waiting = store.outgoing(EMAIL);
+        assertEquals(1, waiting.size());
+        assertEquals("queued@example.com", waiting.get(0).id);
+        assertEquals(source, new String(waiting.get(0).source, StandardCharsets.UTF_8));
+
+        MailStore.StoredMessage row = store.loadMerged(10).get(0);
+        assertTrue("it says of itself that it has not gone yet", row.pending);
+        assertEquals("Hi", row.subject);
+        assertEquals(outbox, row.collection);
+    }
+}

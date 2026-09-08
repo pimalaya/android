@@ -147,6 +147,10 @@ final class PimdirStorage {
      * <p>Retained rows are excluded: a retained item is the store's memory of a
      * removal that has finished propagating (SPEC.md §11), and the merge
      * reconciles only what load returns, so returning one would re-derive it.
+     * A staged removal is not one of those and <strong>is</strong> returned, as
+     * the tombstone it is: the merge derives its remove push from the placement,
+     * so hiding it would leave the delete local forever and let the next
+     * enumerate read the member the server still holds as one to add back.
      *
      * <p>{@code scope} narrows the read to the rows the engine is about to
      * touch, so a flag change on one message costs one row rather than the size
@@ -175,14 +179,24 @@ final class PimdirStorage {
                         "SELECT i.link_id, i.flags, i.object_hash, i.sort_key, i.level,"
                                 + " b.handle, b.base_flags, b.base_object, b.base_revision,"
                                 + " b.base_present, b.conflicted, b.conflict_revision,"
-                                + " b.conflict_object"
+                                + " b.conflict_object, i.deleted, i.conflicted, c.kind"
                                 + " FROM items i"
+                                + " JOIN collections c ON c.id = i.collection"
                                 + " LEFT JOIN bindings b ON b.collection = i.collection"
                                 + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.collection = ? AND i.deleted = 0"
+                                + " WHERE i.collection = ?"
                                 + " AND i.retained_at IS NULL" + narrowed,
                         args.toArray(new String[0]))) {
             while (cursor.moveToNext()) {
+                // NOTE: one placement per item the source binds, and one
+                // create per item it does not bind but the store holds a body
+                // for (SYNC §3). An item that is neither is projected for
+                // nobody: handing it over under a provisional handle would
+                // have a complete round read it as a member the remote lost
+                // and retire it, taking the body a reader had stored.
+                if (cursor.isNull(5) && cursor.isNull(2)) {
+                    continue;
+                }
                 placements.put(placementOf(collection, cursor));
             }
         }
@@ -326,7 +340,11 @@ final class PimdirStorage {
             placement.put("object", cursor.getString(2));
         }
         placement.put("sortKey", cursor.isNull(3) ? "" : cursor.getString(3));
-        placement.put("level", levelName(cursor.getInt(4)));
+        // NOTE: full only when a body is actually there, whatever the stored
+        // level claims (SYNC §3). An item whose body a remote change dropped
+        // projects at most meta, which is what has the upgrade refetch it.
+        placement.put(
+                "level", cursor.isNull(2) ? cappedLevel(cursor.getInt(4)) : levelName(cursor.getInt(4)));
         // NOTE: a NULL column is a set nobody has read, which the wire says by
         // leaving the field out. Sending an empty array instead would push that
         // absence onto whichever side did know the markers.
@@ -334,10 +352,7 @@ final class PimdirStorage {
             placement.put("flags", arrayOf(cursor.getString(1)));
         }
 
-        // A binding's conflict is this source diverging from its own remote; the
-        // item's is the cross-source one. The engine wants the per-source view.
-        boolean conflicted = !cursor.isNull(10) && cursor.getInt(10) == 1;
-        placement.put("status", conflicted ? "conflict" : "clean");
+        placement.put("status", statusOf(cursor));
         if (!cursor.isNull(11)) {
             placement.put("conflictRevision", cursor.getString(11));
         }
@@ -370,6 +385,97 @@ final class PimdirStorage {
             }
         }
         return placement;
+    }
+
+    /**
+     * What a placement owes, derived from the row (SYNC §3), first rule that
+     * applies.
+     *
+     * <p>Derived and never stored, which is the standard's rule and not this
+     * app's convenience: a status column would be a second copy of what the
+     * bindings already say, and the two would part company the first time a
+     * crash landed between them.
+     *
+     * <p>The two the store used to leave out were the two that carry a push.
+     * Without {@code dirty} a staged edit is loaded back as agreed and the
+     * merge finds nothing to send; without {@code created} an item no source
+     * binds reads as a member the remote no longer has, and a complete round
+     * retires it. Both are silent: the write lands, the sync reports success,
+     * and the change is gone.
+     */
+    private static String statusOf(Cursor cursor) {
+        // 1. A divergence, per source or across them, and neither is
+        // downgraded by anything below.
+        boolean conflicted =
+                (!cursor.isNull(10) && cursor.getInt(10) == 1)
+                        || (!cursor.isNull(14) && cursor.getInt(14) == 1);
+        if (conflicted) {
+            return "conflict";
+        }
+
+        // 2. A staged removal, while the source still binds the item: the
+        // content is kept, so an edit after it still beats the delete.
+        boolean bound = !cursor.isNull(5);
+        if (cursor.getInt(13) == 1 && bound) {
+            return "tombstone";
+        }
+
+        // 3. A create: nothing has agreed on this item here yet, either
+        // because the source binds it with no base or because it does not
+        // bind it at all, the load projecting one only where the store holds
+        // a body to offer.
+        if (!bound || !hasBase(cursor)) {
+            return "created";
+        }
+
+        // 4. A pending push: markers both sides know and disagree on, or a
+        // body that has moved past the one the base holds. A placement
+        // holding no body owes no body, whatever its base names.
+        boolean flagsMoved =
+                !cursor.isNull(1)
+                        && !cursor.isNull(6)
+                        && !sameFlags(cursor.getString(1), cursor.getString(6));
+        // NOTE: the body axis only where a kind has one to push. A message is
+        // immutable, so the bytes a reader stored by opening it are not an
+        // edit owing an upload; reading them as one would derive an update
+        // per opened message, once a sync, that no mail backend would take.
+        boolean bodyMoved =
+                mutable(cursor.getString(15))
+                        && !cursor.isNull(2)
+                        && (cursor.isNull(7) || !cursor.getString(2).equals(cursor.getString(7)));
+        return flagsMoved || bodyMoved ? "dirty" : "clean";
+    }
+
+    /** Whether a kind's items can be edited in place, so a body owes a push. */
+    private static boolean mutable(String kind) {
+        return !PimdirSummary.MAIL.equals(kind);
+    }
+
+    /** Whether two stored marker sets name the same markers, order aside. */
+    private static boolean sameFlags(String one, String other) {
+        try {
+            Set<String> left = new HashSet<>(stringsOf(arrayOf(one)));
+            Set<String> right = new HashSet<>(stringsOf(arrayOf(other)));
+            return left.equals(right);
+        } catch (JSONException error) {
+            // An unreadable set says nothing, so it cannot disagree with
+            // anything: the alternative is a push nobody asked for.
+            return true;
+        }
+    }
+
+    /** The strings of a JSON array, in order. */
+    private static List<String> stringsOf(JSONArray values) throws JSONException {
+        List<String> strings = new ArrayList<>(values.length());
+        for (int index = 0; index < values.length(); index++) {
+            strings.add(values.getString(index));
+        }
+        return strings;
+    }
+
+    /** The level a bodiless row projects at: never full (SYNC §3). */
+    private static String cappedLevel(int stored) {
+        return levelName(Math.min(stored, 1));
     }
 
     /**
@@ -584,6 +690,10 @@ final class PimdirStorage {
         String flags = placement.optJSONArray("flags") == null
                 ? null
                 : placement.getJSONArray("flags").toString();
+        // A staged removal, which is a write like any other until a push has
+        // carried it: the row stays, marked, so the merge keeps deriving the
+        // remove and an edit after it still beats the delete.
+        boolean tombstone = "tombstone".equals(placement.optString("status", "clean"));
 
         if (linkId == null) {
             upsertProbe(db, collection, source, handle, flags);
@@ -614,9 +724,16 @@ final class PimdirStorage {
         if (!exists) {
             db.execSQL(
                     "INSERT INTO items(collection, link_id, seq, flags, object_hash,"
-                            + " sort_key, level) VALUES(?, ?, ?, ?, ?, ?, ?)",
+                            + " sort_key, level, deleted) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
                     new Object[] {
-                        collection, linkId, nextSeq(db, linkId), flags, object, sortKey, level
+                        collection,
+                        linkId,
+                        nextSeq(db, linkId),
+                        flags,
+                        object,
+                        sortKey,
+                        level,
+                        tombstone ? 1 : 0
                     });
         } else {
             // A write that does not restate the key must preserve it (SPEC.md
@@ -625,9 +742,18 @@ final class PimdirStorage {
             db.execSQL(
                     "UPDATE items SET flags = ?, object_hash = ?, level = ?,"
                             + " sort_key = CASE WHEN ? = '' THEN sort_key ELSE ? END,"
-                            + " deleted = 0, retained_at = NULL, retained_by = NULL"
+                            + " deleted = ?, retained_at = NULL, retained_by = NULL"
                             + " WHERE collection = ? AND link_id = ?",
-                    new Object[] {flags, object, level, sortKey, sortKey, collection, linkId});
+                    new Object[] {
+                        flags,
+                        object,
+                        level,
+                        sortKey,
+                        sortKey,
+                        tombstone ? 1 : 0,
+                        collection,
+                        linkId
+                    });
         }
 
         // On the same terms as the sort key: a write carrying no summary keeps
@@ -783,6 +909,37 @@ final class PimdirStorage {
     }
 
     // ---- the driver's own reads -------------------------------------------
+
+    /**
+     * The flag set this source last agreed on, or null when it agreed on
+     * none (a placement it has never reconciled, or a backend that reports
+     * no flags at all).
+     *
+     * <p>What a marker push diffs against. A backend whose write verb adds
+     * and removes one marker at a time must never be handed a whole set:
+     * replacing it would strip every keyword this app does not model, and
+     * the base is what says which of them the user actually moved.
+     */
+    JSONArray baseFlags(String engineCollection, String handle) throws JSONException {
+        SQLiteDatabase db = store.getReadableDatabase();
+        String collection = collectionOf(engineCollection);
+        String source = sourceOf(engineCollection);
+        String linkId = linkFor(db, collection, source, handle);
+        if (linkId == null) {
+            return null;
+        }
+
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT base_flags FROM bindings WHERE collection = ?"
+                                + " AND link_id = ? AND source = ?",
+                        new String[] {collection, linkId, source})) {
+            if (!cursor.moveToFirst() || cursor.isNull(0)) {
+                return null;
+            }
+            return arrayOf(cursor.getString(0));
+        }
+    }
 
     /**
      * The item behind an engine handle, for the push adapter: what a change

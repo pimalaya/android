@@ -20,10 +20,14 @@
 
     <string name="domain_title">What would you like to connect?</string>
     <string name="domain_message">Pick how to connect each one. Switch off anything you do not want on this device; you can add it later.</string>
+    <string name="domain_message_simple">Switch on what you want on this device. Pimalaya picks the settings and asks for your password; you can add the rest later.</string>
     <string name="domain_none">Nothing was found for this address. You can enter the server settings yourself.</string>
     <string name="domain_manual">Enter settings manually</string>
     <string name="domain_connected">Already connected</string>
+    <string name="domain_advanced_only">Needs the advanced setup</string>
     <string name="setup_step_title">Step %1$d/%2$d · %3$s · %4$s</string>
+    <string name="setup_step_one">%1$s · Sign in</string>
+    <string name="setup_step_domain">%1$s · Step %2$d/%3$d</string>
 
     <string name="manual_title">Server settings</string>
     <string name="manual_message">Nothing was discovered for %1$s. Enter the server yourself and Pimalaya will carry on as usual.</string>
@@ -31,9 +35,10 @@
     <string name="manual_dav_url">Server URL</string>
 
     <string name="setup_choice_title">Account setup</string>
-    <string name="setup_choice_message">Pimalaya can set everything up automatically with the recommended settings, or let you review each step.</string>
+    <string name="setup_choice_message">Pimalaya can set everything up with your password, or let you choose the servers, the sign-in and what to synchronize.</string>
     <string name="setup_simple">Recommended</string>
     <string name="setup_advanced">Advanced</string>
+    <string name="setup_simple_unavailable">This address signs in a way the recommended setup does not cover. The advanced setup can connect it.</string>
 
     <string name="config_title">Choose a configuration</string>
     <string name="config_carddav" translatable="false">CardDAV</string>
@@ -82,7 +87,7 @@
     <string name="sync_accounts">Synchronize accounts</string>
     <string name="about">About</string>
     <string name="drawer_close">Close</string>
-    <string name="about_body">Version %1$s\n\nYour contacts, offline-first and multi-account.\n\nMade by Pimalaya.</string>
+    <string name="about_body">Version %1$s\n\nYour mail, contacts and calendars, offline-first and multi-account.\n\nMade by Pimalaya.</string>
     <string name="about_website">Website</string>
     <string name="report_bug">Report a bug</string>
     <string name="local_account">Pimalaya</string>
@@ -103,7 +108,7 @@
         <item>Sync every 12 hours</item>
         <item>Sync every day</item>
     </string-array>
-    <string name="home_empty">No addressbook yet. Add an account to get started.</string>
+    <string name="home_empty">No account yet. Add one to get started.</string>
     <string name="delete_account_confirm">Are you sure you want to remove this account? Its contacts will stay on this device.</string>
 
     <string name="sync_title">Synchronizing</string>
@@ -112,6 +117,7 @@
     <string name="sync_cards">Fetching contacts of %1$s</string>
     <string name="sync_no_addressbook">No addressbook found</string>
     <string name="sync_failed">Could not synchronize</string>
+    <string name="mail_outbox">Outbox</string>
     <string name="sync_conflicts">%1$d change(s) conflict with the server and stay local</string>
     <string name="sync_conflicts_pending">%1$d contact(s) diverged; resolve them to sync</string>
     <string name="conflict_auto_resolved">Conflict resolved automatically; changes push on the next sync</string>
@@ -242,6 +248,8 @@
     <string name="message_deleted">Moved to %s</string>
     <string name="message_deleted_in_place">Marked deleted; it stays where it is</string>
     <string name="message_write_failed">Could not write the change</string>
+    <string name="message_pending">Waiting to be sent</string>
+    <string name="message_delete_no_trash">This account names no trash mailbox, and JMAP has no marker to delete a message in place with</string>
 
     <string name="size_bytes">%d B</string>
     <string name="size_kilobytes">%d kB</string>
@@ -309,9 +317,13 @@
     <string name="compose_body">Write your message</string>
     <string name="compose_from">From %s</string>
     <string name="compose_send">Send</string>
-    <string name="compose_sent">Sent, copy in %s</string>
-    <string name="compose_sent_no_copy">Sent; this account has no sent mailbox to file a copy in</string>
-    <string name="compose_failed">Could not send the message</string>
+    <string name="compose_queued">In the outbox; it goes out on the next sync</string>
+    <plurals name="outbox_sent">
+        <item quantity="one">Sent one message from the outbox</item>
+        <item quantity="other">Sent %d messages from the outbox</item>
+    </plurals>
+    <string name="compose_failed">Could not write the message</string>
+    <string name="outbox_failed">Could not send from the outbox; the message is still there</string>
     <string name="compose_no_account">No account this app can send from: sending needs an SMTP server, which is discovered when the account is connected</string>
     <string name="compose_no_recipient">Enter at least one recipient</string>
     <string name="compose_discard_confirm">Discard this message?</string>

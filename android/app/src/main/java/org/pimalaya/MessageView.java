@@ -20,6 +20,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.pimalaya.client.MessageBody;
+import org.pimalaya.client.PimalayaClient;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,9 +31,9 @@ import java.util.List;
  * <p>The card is drawn from the list row the reader tapped, so the
  * screen is never blank: the subject, the sender and the date are
  * already in the store, and only the body and the recipients have to be
- * fetched. Nothing is cached: a message body is fetched each time it is
- * opened, which the merged list's spine-only store makes the honest
- * default until bodies have somewhere to live.
+ * read. They are read from the store too wherever it holds the message,
+ * which it does from the first time the message was opened; a message it
+ * does not hold is fetched once and filed as it renders.
  *
  * <p>An HTML body renders in a web view with scripting off, network
  * loads blocked and images not loaded at all. That is the whole point
@@ -126,7 +127,16 @@ final class MessageView {
         date.setText(Dates.full(host, stamp) + " (" + Dates.relative(host, stamp) + ")");
     }
 
-    /** Fetches the message, then fills in what the row could not say. */
+    /**
+     * Renders the message, from the store when it holds it and from the
+     * server otherwise, filing what it fetched on the way through.
+     *
+     * <p>The store first, always. A message is immutable once sent, so the
+     * copy filed by the last open is the message, and asking the server for
+     * it again would be a round trip whose only possible answer is what is
+     * already on disk. It is also what makes the reader work with no network
+     * at all.
+     */
     private void load(MailStore.StoredMessage message) {
         AccountEntry account = accountOf(message.accountEmail);
         if (account == null) {
@@ -139,17 +149,22 @@ final class MessageView {
                     MessageBody loaded = null;
                     Exception failure = null;
                     try {
-                        loaded =
-                                host.runner
-                                        .session(account, PimDomain.MAIL)
-                                        .call(
-                                                server ->
-                                                        host.client.fetchMessage(
-                                                                server.baseUrl,
-                                                                server.login,
-                                                                server.password,
-                                                                message.mailbox,
-                                                                message.id));
+                        byte[] source = host.mail.source(message.collection, message.id);
+                        if (source == null) {
+                            source =
+                                    host.runner
+                                            .session(account, PimDomain.MAIL)
+                                            .call(
+                                                    server ->
+                                                            host.client.fetchMessageSource(
+                                                                    server.baseUrl,
+                                                                    server.login,
+                                                                    server.password,
+                                                                    message.mailbox,
+                                                                    message.id));
+                            host.mail.saveSource(message.collection, message.id, source);
+                        }
+                        loaded = host.client.parseMessage(source);
                     } catch (Exception error) {
                         Log.w("pimalaya", "message fetch failed: " + message.id, error);
                         failure = error;
@@ -175,7 +190,7 @@ final class MessageView {
                                 // failed leaves the message unread, which is
                                 // the honest answer: nothing was read.
                                 if (!seen) {
-                                    write(MailStore.SEEN, true);
+                                    write(MailEngine.SEEN, true);
                                 }
                             });
                 });
@@ -186,13 +201,20 @@ final class MessageView {
      * at, and the delete button.
      */
     private void actions() {
+        // NOTE: a message still in the outbox has no markers to move. It
+        // has never been anywhere that keeps any, and offering the toggles
+        // would promise a state nothing would remember.
+        boolean pending = current != null && current.pending;
+
         ImageButton unread = host.findViewById(R.id.message_view_unread);
+        unread.setVisibility(pending ? View.GONE : View.VISIBLE);
         unread.setContentDescription(
                 host.getString(seen ? R.string.message_mark_unread : R.string.message_mark_read));
         unread.setImageResource(seen ? R.drawable.ic_visibility_off : R.drawable.ic_check);
-        unread.setOnClickListener(view -> write(MailStore.SEEN, !seen));
+        unread.setOnClickListener(view -> write(MailEngine.SEEN, !seen));
 
         ImageButton flag = host.findViewById(R.id.message_view_flag);
+        flag.setVisibility(pending ? View.GONE : View.VISIBLE);
         flag.setContentDescription(
                 host.getString(flagged ? R.string.message_unflag : R.string.message_flag));
         flag.setColorFilter(
@@ -200,45 +222,34 @@ final class MessageView {
                         flagged
                                 ? android.R.attr.colorAccent
                                 : android.R.attr.textColorSecondary));
-        flag.setOnClickListener(view -> write(MailStore.FLAGGED, !flagged));
+        flag.setOnClickListener(view -> write(MailEngine.FLAGGED, !flagged));
 
         host.findViewById(R.id.message_view_delete).setOnClickListener(view -> confirmDelete());
     }
 
     /**
-     * Writes one marker on the server, then on the store, then on the
-     * buttons.
+     * Stages one marker, then redraws the buttons.
      *
-     * <p>In that order and never another: the store mirrors the server,
-     * so a marker the server refused must not survive in it, and the
-     * refusal is what the reader is told about.
+     * <p>The store and nothing else. The next sync pushes the difference
+     * between what is staged and what the server last agreed on, so a
+     * marker written with the radio off is a marker written, and the only
+     * thing the reader waits for is a disk write.
      */
     private void write(String flag, boolean add) {
         MailStore.StoredMessage message = current;
-        AccountEntry account = accountOf(message.accountEmail);
-        if (account == null) {
-            host.toast(host.getString(R.string.message_no_account));
-            return;
-        }
 
         host.io.execute(
                 () -> {
                     Exception failure = null;
                     try {
-                        host.runner
-                                .session(account, PimDomain.MAIL)
-                                .call(
-                                        server -> {
-                                            host.client.setMessageFlag(
-                                                    server,
-                                                    message.mailbox,
-                                                    message.id,
-                                                    flag,
-                                                    add);
-                                            return null;
-                                        });
-                        host.mail.setFlag(
-                                message.accountEmail, message.mailbox, message.id, flag, add);
+                        host.mailEngine(message.accountEmail)
+                                .mutateFlags(
+                                        message.collection,
+                                        message.id,
+                                        MailEngine.withFlag(
+                                                host.mail.flagsOf(message.collection, message.id),
+                                                flag,
+                                                add));
                     } catch (Exception error) {
                         Log.w("pimalaya", "message flag failed: " + message.id, error);
                         failure = error;
@@ -254,9 +265,9 @@ final class MessageView {
                                     host.showError(error, R.string.message_write_failed);
                                     return;
                                 }
-                                if (MailStore.SEEN.equals(flag)) {
+                                if (MailEngine.SEEN.equals(flag)) {
                                     seen = add;
-                                } else if (MailStore.FLAGGED.equals(flag)) {
+                                } else if (MailEngine.FLAGGED.equals(flag)) {
                                     flagged = add;
                                 }
                                 actions();
@@ -275,52 +286,62 @@ final class MessageView {
     }
 
     /**
-     * Deletes the open message, then leaves: what the reader is looking
-     * at is no longer where they are looking, so staying on it would
-     * show a message the account has filed elsewhere.
+     * Stages the open message's deletion, then leaves.
+     *
+     * <p>What is staged depends on where the message would go, which the
+     * account remembers from its last walk: an account with a trash gets a
+     * removal, and the row leaves the list at once because that is where
+     * the message is headed. An account with none, or a message already in
+     * the trash, gets a `\Deleted` marker instead, and the row stays in the
+     * list saying so, because that is all a server with nowhere to put it
+     * can do.
+     *
+     * <p>Unless that server is a JMAP one, which RFC 8621 gives no keyword
+     * to mark it with (section 4.1.1 names three and this is not one of
+     * them). Refused here rather than staged, because a change nothing
+     * could ever carry out would sit in the store failing once per sync.
      */
     private void delete() {
         MailStore.StoredMessage message = current;
+        String trash = host.mail.trashOf(message.accountEmail);
+        boolean moves = !trash.isEmpty() && !trash.equals(message.mailbox);
+
         AccountEntry account = accountOf(message.accountEmail);
-        if (account == null) {
-            host.toast(host.getString(R.string.message_no_account));
+        if (!moves
+                && !message.pending
+                && account != null
+                && PimalayaClient.isJmap(account.server(PimDomain.MAIL))) {
+            host.toast(host.getString(R.string.message_delete_no_trash));
             return;
         }
 
         host.io.execute(
                 () -> {
-                    String trash = null;
                     Exception failure = null;
                     try {
-                        trash =
-                                host.runner
-                                        .session(account, PimDomain.MAIL)
-                                        .call(
-                                                server ->
-                                                        host.client.deleteMessage(
-                                                                server,
-                                                                message.mailbox,
-                                                                message.id));
-                        // NOTE: only a move takes the message out of the
-                        // mailbox the list shows it in. A marker leaves it
-                        // where it is, so the row stays and says so.
-                        if (trash != null) {
-                            host.mail.removeMessage(
-                                    message.accountEmail, message.mailbox, message.id);
+                        if (message.pending) {
+                            // Never sent, so there is nothing to move and
+                            // nowhere to tell: discarding it is the delete.
+                            host.mail.dropOutgoing(message.accountEmail, message.id);
+                        } else if (moves) {
+                            host.mailEngine(message.accountEmail)
+                                    .mutateRemove(message.collection, message.id);
                         } else {
-                            host.mail.setFlag(
-                                    message.accountEmail,
-                                    message.mailbox,
-                                    message.id,
-                                    MailStore.DELETED,
-                                    true);
+                            host.mailEngine(message.accountEmail)
+                                    .mutateFlags(
+                                            message.collection,
+                                            message.id,
+                                            MailEngine.withFlag(
+                                                    host.mail.flagsOf(
+                                                            message.collection, message.id),
+                                                    MailEngine.DELETED,
+                                                    true));
                         }
                     } catch (Exception error) {
                         Log.w("pimalaya", "message delete failed: " + message.id, error);
                         failure = error;
                     }
 
-                    String target = trash;
                     Exception error = failure;
                     host.postAlive(
                             () -> {
@@ -328,12 +349,14 @@ final class MessageView {
                                     host.showError(error, R.string.message_write_failed);
                                     return;
                                 }
-                                host.toast(
-                                        target == null
-                                                ? host.getString(
-                                                        R.string.message_deleted_in_place)
-                                                : host.getString(
-                                                        R.string.message_deleted, target));
+                                if (!message.pending) {
+                                    host.toast(
+                                            moves
+                                                    ? host.getString(
+                                                            R.string.message_deleted, trash)
+                                                    : host.getString(
+                                                            R.string.message_deleted_in_place));
+                                }
                                 host.mailList.reload();
                                 if (current == message) {
                                     host.showBack(MainActivity.PANEL_MAIL);

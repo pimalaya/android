@@ -174,11 +174,12 @@ final class OnboardingFlow {
     }
 
     /**
-     * Asks whether to set the account up the standard way (the first
-     * proposal, every addressbook, phone mirroring, background sync
-     * every 15 minutes) or step by step, while the discovery already
-     * runs behind; the flow proceeds once both the choice and the
-     * discovery are in.
+     * Asks whether to set the account up the standard way (a switch per
+     * domain, the password sign-in of the best configuration found for
+     * it, every addressbook, phone mirroring, background sync every 15
+     * minutes) or step by step, while the discovery already runs
+     * behind; the flow proceeds once both the choice and the discovery
+     * are in.
      */
     private void askSetupMode() {
         setupMode = null;
@@ -415,8 +416,9 @@ final class OnboardingFlow {
     }
 
     /**
-     * Fills the setup screen: every domain this address offers, with its
-     * configurations under it and a button that signs in to the one picked.
+     * Fills the setup screen: every domain this address offers, as a switch
+     * carrying the domain's name and glyph, and under it, in the advanced
+     * setup, its configurations and a button that picks one.
      *
      * <p>One page rather than a domain step and then a configuration step. The
      * stepper hid what was being configured, because a screen of protocols with
@@ -424,10 +426,16 @@ final class OnboardingFlow {
      * the heading above its own options and there is nothing to remember
      * between screens.
      *
-     * <p>Each domain takes one option or none: the radio deselects, so an
-     * address that offers calendars is not obliged to connect them. Continue
-     * waits until everything picked has actually been signed in to, which is
-     * what the per-domain button is for.
+     * <p>The standard setup shows the headings alone. It answers the
+     * configuration question itself, with the password sign-in of the best
+     * configuration found ({@link #passwordOption}), so a screen listing
+     * protocols under each switch would be asking again the question the setup
+     * choice just declined. What is left is what the user actually decides:
+     * which of the three to keep on this device.
+     *
+     * <p>The advanced setup keeps the options: each domain takes one or none,
+     * the radio deselects, so an address that offers calendars is not obliged
+     * to connect them.
      */
     private void showSetup() {
         ((TextView) host.findViewById(R.id.domain_email)).setText(pendingEmail);
@@ -437,43 +445,120 @@ final class OnboardingFlow {
         setups.clear();
 
         AccountEntry existing = host.accountFor(pendingEmail);
-        boolean anything = false;
+        boolean discovered = false;
+        boolean connectable = false;
 
         for (PimDomain domain : PimDomain.values()) {
             DomainSetup setup = new DomainSetup(domain);
             setup.options.addAll(optionsFor(domain));
-            anything |= !setup.options.isEmpty();
+            discovered |= !setup.options.isEmpty();
+            if (simpleSetup()) {
+                setup.selected = passwordOption(setup);
+            } else {
+                setup.options.add(manualOption());
+            }
+            connectable |= connectable(setup);
             setups.put(domain, setup);
             container.addView(sectionOf(setup, existing != null && existing.covers(domain)));
         }
 
-        TextView message = host.findViewById(R.id.domain_message);
-        message.setText(anything ? R.string.domain_message : R.string.domain_none);
+        if (simpleSetup() && !connectable) {
+            offerAdvanced();
+            return;
+        }
+
+        int message = R.string.domain_none;
+        if (discovered) {
+            message = simpleSetup() ? R.string.domain_message_simple : R.string.domain_message;
+        }
+        ((TextView) host.findViewById(R.id.domain_message)).setText(message);
 
         resetSetupContinue();
         host.showAuth(MainActivity.STEP_DOMAIN);
     }
 
     /**
-     * One domain's section: a switch naming it, and the configurations under
-     * it.
+     * The standard setup's way into one domain: the best-ranked
+     * configuration found for it that signs in with a login and a password,
+     * or null when it offers none.
      *
-     * <p>Switched on by default, because an address that offers a domain
-     * almost always wants it; switching off discards the domain outright,
-     * which is a clearer answer than an empty selection and leaves nothing to
-     * misread on the way out.
+     * <p>A password and nothing else. It is the credential every provider
+     * documents on its own help page, so it is the one a setup that asks no
+     * questions can be sure of; a browser grant, an API token or a
+     * hand-entered server is a decision, and a decision is what the advanced
+     * setup is for.
+     */
+    private static SetupOption passwordOption(DomainSetup setup) {
+        for (SetupOption option : setup.options) {
+            if (option.method != null && option.method.type == AuthMethod.Type.PASSWORD) {
+                return option;
+            }
+        }
+        return null;
+    }
+
+    /** Whether this domain can be switched on at all, in the running mode. */
+    private boolean connectable(DomainSetup setup) {
+        return simpleSetup() ? setup.selected != null : !setup.options.isEmpty();
+    }
+
+    /**
+     * Sends a standard setup that has nothing to offer to the advanced one.
+     *
+     * <p>An address whose every service wants a browser grant or a token
+     * leaves the standard screen with three switches that cannot be turned on,
+     * which reads as an app that cannot connect this provider rather than as a
+     * setup that asked the wrong way in.
+     */
+    private void offerAdvanced() {
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.setup_choice_title)
+                .setMessage(R.string.setup_simple_unavailable)
+                .setCancelable(false)
+                .setPositiveButton(
+                        R.string.setup_advanced,
+                        (dialog, which) -> {
+                            setupMode = Boolean.FALSE;
+                            showSetup();
+                        })
+                // NOTE: the flow is still on the address step, which is where
+                // dismissing leaves it: another address is the other answer.
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * One domain's section: a switch carrying its glyph and its name, and the
+     * configurations under it.
+     *
+     * <p>Switched off to begin with, because an address that offers three
+     * domains is not a request for three, and starting them all on makes the
+     * screen a list of things to switch off rather than a choice to make. A
+     * domain the running setup cannot connect is switched off for good, and
+     * says which setup can.
      */
     private View sectionOf(DomainSetup setup, boolean alreadyConnected) {
         LinearLayout section = new LinearLayout(host);
         section.setOrientation(LinearLayout.VERTICAL);
         section.setPadding(0, host.ui.dp(8), 0, host.ui.dp(16));
 
+        boolean connectable = connectable(setup);
+
         android.widget.Switch toggle = new android.widget.Switch(host);
         toggle.setText(host.getString(setup.domain.label));
         toggle.setTextSize(16);
         toggle.setTypeface(toggle.getTypeface(), android.graphics.Typeface.BOLD);
         toggle.setChecked(setup.enabled);
+        toggle.setEnabled(connectable);
         toggle.setPadding(0, host.ui.dp(8), 0, host.ui.dp(4));
+        toggle.setCompoundDrawablesRelativeWithIntrinsicBounds(setup.domain.icon, 0, 0, 0);
+        toggle.setCompoundDrawablePadding(host.ui.dp(12));
+        toggle.setCompoundDrawableTintList(
+                android.content.res.ColorStateList.valueOf(
+                        host.ui.resolveColor(
+                                connectable
+                                        ? android.R.attr.textColorPrimary
+                                        : android.R.attr.textColorSecondary)));
         toggle.setOnCheckedChangeListener(
                 (view, checked) -> {
                     setup.enabled = checked;
@@ -483,32 +568,45 @@ final class OnboardingFlow {
         section.addView(toggle);
 
         if (alreadyConnected) {
-            TextView note = new TextView(host);
-            note.setText(R.string.domain_connected);
-            note.setTextSize(13);
-            note.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
-            section.addView(note);
+            section.addView(note(R.string.domain_connected));
+        }
+        if (!connectable) {
+            section.addView(note(R.string.domain_advanced_only));
         }
 
-        for (SetupOption option : setup.options) {
-            android.widget.RadioButton button = new android.widget.RadioButton(host);
-            button.setText(optionLabel(option));
-            button.setTextSize(15);
-            button.setPadding(host.ui.dp(8), host.ui.dp(10), host.ui.dp(8), host.ui.dp(10));
-            // NOTE: not a RadioGroup, so the group can start with nothing
-            // picked; a RadioGroup has no empty state to open in.
-            button.setOnClickListener(
-                    view -> {
-                        setup.selected = option;
-                        renderSection(setup);
-                        resetSetupContinue();
-                    });
-            setup.buttons.add(button);
-            section.addView(button);
+        // NOTE: the options are the advanced setup's alone. The standard setup
+        // holds the same list, since that is where its password sign-in comes
+        // from, and puts none of it on the screen.
+        if (!simpleSetup()) {
+            for (SetupOption option : setup.options) {
+                android.widget.RadioButton button = new android.widget.RadioButton(host);
+                button.setText(optionLabel(option));
+                button.setTextSize(15);
+                button.setPadding(host.ui.dp(8), host.ui.dp(10), host.ui.dp(8), host.ui.dp(10));
+                // NOTE: not a RadioGroup, so the group can start with nothing
+                // picked; a RadioGroup has no empty state to open in.
+                button.setOnClickListener(
+                        view -> {
+                            setup.selected = option;
+                            renderSection(setup);
+                            resetSetupContinue();
+                        });
+                setup.buttons.add(button);
+                section.addView(button);
+            }
         }
 
         renderSection(setup);
         return section;
+    }
+
+    /** A secondary line under a section's switch. */
+    private TextView note(int text) {
+        TextView note = new TextView(host);
+        note.setText(text);
+        note.setTextSize(13);
+        note.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
+        return note;
     }
 
     /** Shows or dims one section's options, following its switch. */
@@ -558,8 +656,10 @@ final class OnboardingFlow {
     }
 
     /**
-     * Everything this domain can be connected with: one option per discovered
-     * configuration and authentication method, plus manual entry.
+     * Everything this domain was discovered to be connectable with: one option
+     * per configuration and authentication method. Manual entry is not among
+     * them, being an answer the discovery did not give: the advanced setup adds
+     * it, so an empty list here is the address offering this domain nothing.
      */
     private List<SetupOption> optionsFor(PimDomain domain) {
         List<SetupOption> options = new ArrayList<>();
@@ -603,10 +703,13 @@ final class OnboardingFlow {
             addProviderOptions(options);
         }
 
-        options.add(
-                new SetupOption(
-                        host.getString(R.string.domain_manual), null, null, null, null, null));
         return options;
+    }
+
+    /** The option that asks for a server instead of proposing one. */
+    private SetupOption manualOption() {
+        return new SetupOption(
+                host.getString(R.string.domain_manual), null, null, null, null, null);
     }
 
     /**
@@ -857,6 +960,11 @@ final class OnboardingFlow {
      *
      * <p>A sequence of unlabelled credential prompts is indistinguishable from
      * one prompt that keeps failing, which is what this exists to prevent.
+     *
+     * <p>The standard setup keeps the domain and the count and drops the
+     * protocol, which is a thing it deliberately never showed. It cannot drop
+     * more than that: three password prompts in a row, each titled the same,
+     * read as one prompt failing twice.
      */
     private String stepTitle() {
         if (authSteps == null || authStepIndex >= authSteps.size()) {
@@ -868,17 +976,25 @@ final class OnboardingFlow {
         for (PimDomain domain : step.domains) {
             domains.add(host.getString(domain.label));
         }
+        String named = String.join(", ", domains);
+
+        if (simpleSetup()) {
+            return authSteps.size() == 1
+                    ? host.getString(R.string.setup_step_one, named)
+                    : host.getString(
+                            R.string.setup_step_domain,
+                            named,
+                            authStepIndex + 1,
+                            authSteps.size());
+        }
+
         String kind =
                 step.option.method == null
                         ? host.getString(R.string.domain_manual)
                         : authName(step.option.method.type);
 
         return host.getString(
-                R.string.setup_step_title,
-                authStepIndex + 1,
-                authSteps.size(),
-                String.join(", ", domains),
-                kind);
+                R.string.setup_step_title, authStepIndex + 1, authSteps.size(), named, kind);
     }
 
     /**
@@ -1412,8 +1528,9 @@ final class OnboardingFlow {
     }
 
     /**
-     * Persists everything the run connected, as one account, and lands on the
-     * screen of a domain it covers.
+     * Persists everything the run connected, as one account, and hands it to
+     * the first sync, which fills every domain it covers before the app shows
+     * any of them.
      *
      * <p>One save at the end rather than one per domain: the account is the
      * unit, and a run that connected mail and contacts should leave one entry
@@ -1444,20 +1561,8 @@ final class OnboardingFlow {
         host.accounts.removeIf(entry -> entry.email.equals(stored.email));
         host.accounts.add(stored);
 
-        if (stored.covers(PimDomain.CONTACTS)) {
-            host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
-            host.syncRemote(true);
-            return;
-        }
-
-        boolean mail = stored.covers(PimDomain.MAIL);
-        host.leaveOnboarding(mail ? MainActivity.PANEL_MAIL : MainActivity.PANEL_CALENDAR);
-        if (mail) {
-            host.syncMail();
-        }
-        if (stored.covers(PimDomain.CALENDAR)) {
-            host.syncCalendars();
-        }
+        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        host.syncConnected(stored);
     }
 
     /**
