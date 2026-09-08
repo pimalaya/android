@@ -36,14 +36,20 @@
           };
         };
 
-        # Stable Rust via fenix, reading the channel, components and the
-        # four Android ABI targets straight from rust-toolchain.toml so the
-        # toolchain is defined once (shared with rustup/rust-analyzer).
-        fx = fenix.packages.${system};
-        rust = fx.fromToolchainFile {
-          file = ./rust-toolchain.toml;
-          sha256 = "sha256-P30Tm3O7vQAE725YtDCDHGjNrSsfZO4us11UwJGZSJo=";
-        };
+        rust = fenix.packages.${system}.combine [
+          (fenix.packages.${system}.stable.withComponents [
+            "cargo"
+            "clippy"
+            "rust-analyzer"
+            "rust-src"
+            "rustc"
+            "rustfmt"
+          ])
+          fenix.packages.${system}.targets.aarch64-linux-android.stable.rust-std
+          fenix.packages.${system}.targets.armv7-linux-androideabi.stable.rust-std
+          fenix.packages.${system}.targets.x86_64-linux-android.stable.rust-std
+          fenix.packages.${system}.targets.i686-linux-android.stable.rust-std
+        ];
 
         # Bump these together; the NDK version must exist in the pinned
         # nixpkgs androidenv. NDK r27+ aligns native libraries to 16 KB
