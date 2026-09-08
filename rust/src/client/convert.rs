@@ -38,10 +38,10 @@ fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
     let mut cause = Some(err);
 
     while let Some(err) = cause {
-        if let Some(WebdavSendError::HttpStatus(status, _)) = err.downcast_ref() {
+        if let Some(WebdavSendError::HttpStatus { status, .. }) = err.downcast_ref() {
             return Some(*status);
         }
-        if let Some(WebdavFollowRedirectsError::HttpStatus(status, _)) = err.downcast_ref() {
+        if let Some(WebdavFollowRedirectsError::HttpStatus { status, .. }) = err.downcast_ref() {
             return Some(*status);
         }
         if let Some(JmapSendError::HttpStatus(status)) = err.downcast_ref() {

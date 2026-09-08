@@ -14,8 +14,8 @@ use crate::{
 };
 
 /// `Native.offlineSync`: reconciles the collection with its remote
-/// through the io-replica engine, servicing every engine yield via the
-/// given `ReplicaDriver`. With `full` the checkpoint is ignored and the
+/// through the io-pimdir engine, servicing every engine yield via the
+/// given `OfflineDriver`. With `full` the checkpoint is ignored and the
 /// whole remote is enumerated. Returns the sync report
 /// `{"pulled", "pushed", "conflicts", "rejected", "refreshed"}`.
 #[unsafe(no_mangle)]
@@ -40,8 +40,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
 }
 
 /// `Native.offlineUpgrade`: raises the given handles (a JSON string
-/// array) to the full detail tier through the io-replica engine,
-/// servicing every engine yield via the given `ReplicaDriver`. Returns
+/// array) to the full detail tier through the io-pimdir engine,
+/// servicing every engine yield via the given `OfflineDriver`. Returns
 /// the upgrade report `{"upgraded", "fetched", "deduped"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
@@ -69,9 +69,9 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
 }
 
 /// `Native.offlineMutate`: stages a local mutation (a JSON object,
-/// e.g. `{"op": "edit", "handle", "hash", "size", "body", "meta"}`)
-/// through the io-replica engine, servicing the storage yields via the
-/// given `ReplicaDriver`; the remote is never touched. Returns `{}`.
+/// e.g. `{"op": "edit", "handle", "hash", "size", "body", "summary"}`)
+/// through the io-pimdir engine, servicing the storage yields via the
+/// given `OfflineDriver`; the remote is never touched. Returns `{}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_offlineMutate<'local>(
     mut env: EnvUnowned<'local>,

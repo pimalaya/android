@@ -1,40 +1,90 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The message composer, still a frame: the screen exists and is
-     navigable (the mail FAB opens it, the bar's back arrow leaves it),
-     so what goes in it can be built against a place that is already
-     wired. Its bar elements live in the persistent chrome
-     (activity_main.xml). -->
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- The message composer: the envelope on top, the text under it.
+
+     One column of plain fields rather than chips: an address is typed
+     or pasted, and a chip editor is a lot of machinery to say the same
+     thing with. The copy fields open only when they are asked for, so
+     the ordinary message is three fields and a body. Its bar elements
+     live in the persistent chrome (activity_main.xml). -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:alpha="0.25"
-        android:gravity="center_horizontal"
+        android:layout_height="match_parent"
         android:orientation="vertical"
-        android:paddingStart="48dp"
-        android:paddingEnd="48dp">
-
-        <ImageView
-            android:layout_width="96dp"
-            android:layout_height="96dp"
-            android:contentDescription="@null"
-            android:src="@drawable/ic_domain_mail"
-            android:tint="?android:attr/textColorSecondary" />
+        android:padding="@dimen/item_padding">
 
         <TextView
+            android:id="@+id/compose_from"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="4dp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/compose_to"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/compose_to"
+            android:imeOptions="actionNext"
+            android:inputType="textEmailAddress"
+            android:singleLine="true" />
+
+        <EditText
+            android:id="@+id/compose_cc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/compose_cc"
+            android:imeOptions="actionNext"
+            android:inputType="textEmailAddress"
+            android:singleLine="true"
+            android:visibility="gone" />
+
+        <EditText
+            android:id="@+id/compose_bcc"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/compose_bcc"
+            android:imeOptions="actionNext"
+            android:inputType="textEmailAddress"
+            android:singleLine="true"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/compose_copies"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:background="@drawable/ripple_circle"
+            android:padding="8dp"
+            android:text="@string/compose_add_copies"
+            android:textColor="?android:attr/colorAccent"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/compose_subject"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/compose_subject"
+            android:imeOptions="actionNext"
+            android:inputType="textCapSentences"
+            android:singleLine="true" />
+
+        <EditText
+            android:id="@+id/compose_body"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
             android:layout_marginTop="8dp"
-            android:gravity="center"
-            android:text="@string/compose_placeholder"
-            android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="18sp" />
+            android:layout_weight="1"
+            android:gravity="top"
+            android:hint="@string/compose_body"
+            android:inputType="textMultiLine|textCapSentences"
+            android:minLines="8" />
 
     </LinearLayout>
 
-</FrameLayout>
+</ScrollView>

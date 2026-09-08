@@ -28,9 +28,9 @@ use io_jmap::{
         email::{
             JMAP_KEYWORD_ANSWERED, JMAP_KEYWORD_FLAGGED, JMAP_KEYWORD_SEEN, JmapEmail,
             JmapEmailAddress, JmapEmailBodyPart, JmapEmailBodyValue, JmapEmailProperty, get::*,
-            query::*,
+            query::*, set::*,
         },
-        mailbox::{JmapMailbox, get::*},
+        mailbox::{JmapMailbox, JmapMailboxRole, get::*},
     },
     rfc9610::{
         JMAP_CONTACTS_CAPABILITY,
@@ -656,6 +656,107 @@ impl<'a, 'local> Client<'a, 'local> {
             .into_iter()
             .map(|email| message(mailbox_path, email))
             .collect())
+    }
+
+    /// Adds or removes one keyword on one message.
+    ///
+    /// The IMAP marker crosses as the keyword RFC 8621 section 4.1.1
+    /// maps it to, so the caller says `\Seen` whichever backend answers.
+    pub fn set_jmap_keyword(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        id: &str,
+        flag: &str,
+        add: bool,
+    ) -> Result<(), BridgeError> {
+        let keyword = keyword_of(flag)?;
+        let auth = jmap_auth(credentials);
+        let session = self.jmap_session(session_url, &auth)?;
+        let api_url = session.api_url.clone();
+
+        let mut args = JmapEmailSetArgs::default();
+        if add {
+            args.set_keyword(id, keyword);
+        } else {
+            args.unset_keyword(id, keyword);
+        }
+
+        self.run_email_set(&session, &auth, &api_url, args, id)
+    }
+
+    /// Moves one message into the account's trash, naming the mailbox it
+    /// landed in.
+    ///
+    /// A replace rather than an add: RFC 8621 lets a message sit in
+    /// several mailboxes at once, so adding the trash to whatever it is
+    /// already in would file it as deleted and keep it in the inbox.
+    ///
+    /// An account naming no trash is an error rather than a fallback,
+    /// unlike the IMAP side's: RFC 8621 section 4.1.1 has no counterpart
+    /// to `\Deleted`, deletion there being a move or a destroy, so there
+    /// is nothing to mark the message with and leave it where it is.
+    pub fn delete_jmap_message(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        id: &str,
+    ) -> Result<String, BridgeError> {
+        let auth = jmap_auth(credentials);
+        let session = self.jmap_session(session_url, &auth)?;
+        let api_url = session.api_url.clone();
+
+        let opts = JmapMailboxGetOptions::default();
+        let coroutine =
+            JmapMailboxGet::new(&session, &auth, opts).map_err(|err| err.to_string())?;
+        let mailboxes = self.run_jmap(&api_url, coroutine)?.mailboxes;
+
+        let (trash_id, trash_name) = mailboxes
+            .iter()
+            .find(|mailbox| mailbox.role == Some(JmapMailboxRole::Trash))
+            .and_then(|mailbox| mailbox.id.clone().map(|id| (id, mailbox.name.clone())))
+            .ok_or_else(|| BridgeError::from("The account names no trash mailbox"))?;
+
+        let mut args = JmapEmailSetArgs::default();
+        args.replace_mailbox_ids(id, BTreeMap::from([(trash_id, true)]));
+        self.run_email_set(&session, &auth, &api_url, args, id)?;
+
+        Ok(trash_name.unwrap_or_default())
+    }
+
+    /// Runs one `Email/set` and reports the per-object refusal as the
+    /// error it is: the method itself succeeds while refusing the one
+    /// change it was given, so a bare `Ok` would claim a write nobody
+    /// made.
+    fn run_email_set(
+        &mut self,
+        session: &JmapSession,
+        auth: &SecretString,
+        api_url: &Url,
+        args: JmapEmailSetArgs,
+        id: &str,
+    ) -> Result<(), BridgeError> {
+        let coroutine = JmapEmailSet::new(session, auth, args).map_err(|err| err.to_string())?;
+        let out = self.run_jmap(api_url, coroutine)?;
+
+        match out.not_updated.get(id) {
+            Some(refused) => Err(format!("The server refused the change: {refused:?}").into()),
+            None => Ok(()),
+        }
+    }
+}
+
+/// The JMAP keyword an IMAP marker maps to (RFC 8621 section 4.1.1).
+///
+/// The three the section names, and no more: `\Deleted` and `\Recent`
+/// have no counterpart, JMAP expressing the first as a move and the
+/// second not at all.
+fn keyword_of(flag: &str) -> Result<&'static str, BridgeError> {
+    match flag {
+        "\\Seen" => Ok(JMAP_KEYWORD_SEEN),
+        "\\Answered" => Ok(JMAP_KEYWORD_ANSWERED),
+        "\\Flagged" => Ok(JMAP_KEYWORD_FLAGGED),
+        other => Err(format!("No JMAP keyword for the marker `{other}`").into()),
     }
 }
 

@@ -330,6 +330,19 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
+        <!-- Editor: remove what is open. In the bar rather than on the
+             page, because it acts on the whole of what the page shows
+             and not on any one row of it. -->
+        <ImageButton
+            android:id="@+id/bar_delete"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/event_delete"
+            android:src="@drawable/ic_delete_bar"
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
+
     </LinearLayout>
 
     <ViewFlipper
@@ -351,8 +364,6 @@
         <include layout="@layout/panel_calendar" />
 
         <include layout="@layout/panel_compose" />
-
-        <include layout="@layout/panel_event" />
 
         <include layout="@layout/panel_message" />
 

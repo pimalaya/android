@@ -9,20 +9,19 @@
 //! which an agenda never needs.
 
 use ical::{
-    component::{IcalComponent, IcalComponentKind, IcalComponentName},
-    param::IcalParam,
-    prop::{IcalProp, IcalPropKind, IcalPropName},
-    recur::{IcalRecurDateTime, IcalRecurRule, expand::IcalRecurExpand},
-    tree::{
-        component::{vevent::VEVENT, vjournal::VJOURNAL, vtodo::VTODO},
-        cst::IcalCst,
-        prop::{
-            IcalPropLens, IcalPropSpec, categories::CATEGORIES, completed::COMPLETED,
-            description::DESCRIPTION, dtend::DTEND, dtstamp::DTSTAMP, dtstart::DTSTART, due::DUE,
-            last_modified::LAST_MODIFIED, location::LOCATION, percent_complete::PERCENT_COMPLETE,
-            priority::PRIORITY, status::STATUS, summary::SUMMARY, url::URL,
-        },
+    component::{
+        IcalComponent, IcalComponentKind, IcalComponentName, vevent::VEVENT, vjournal::VJOURNAL,
+        vtodo::VTODO,
     },
+    param::IcalParam,
+    prop::{
+        IcalProp, IcalPropKind, IcalPropName, categories::CATEGORIES, completed::COMPLETED,
+        description::DESCRIPTION, dtend::DTEND, dtstamp::DTSTAMP, dtstart::DTSTART, due::DUE,
+        last_modified::LAST_MODIFIED, location::LOCATION, percent_complete::PERCENT_COMPLETE,
+        priority::PRIORITY, status::STATUS, summary::SUMMARY, url::URL,
+    },
+    recur::{IcalRecurDateTime, IcalRecurRule, expand::IcalRecurExpand},
+    tree::{cst::IcalCst, prop::lens::IcalPropLens},
     value::{
         IcalValue,
         datetime::{IcalDate, IcalDateTime},
@@ -215,6 +214,44 @@ pub struct EventEdit {
     pub stamp: Option<String>,
 }
 
+/// The object a new entry starts from: one component carrying the three
+/// properties RFC 5545 requires of it and nothing else.
+///
+/// `UID` identifies it (section 3.8.4.7), `DTSTAMP` says when it was
+/// composed (section 3.8.7.2), and `DTSTART` places it, which every one
+/// of the three components an agenda shows needs to appear on a day. A
+/// to-do could be placed by `DUE` instead, but a page that opens with
+/// neither has nowhere to put the entry, so the start is what a new one
+/// carries and the page moves it.
+///
+/// Both stamps are the caller's, like the edit's, so this stays a pure
+/// function of its inputs: nothing here reads a clock or mints an id.
+pub fn create(component: &str, uid: &str, stamp: &str, start: &str) -> Result<String, BridgeError> {
+    let kind = match component {
+        "VEVENT" | "VTODO" | "VJOURNAL" => component,
+        other => return Err(format!("Cannot create a `{other}`").into()),
+    };
+
+    let object = format!(
+        "BEGIN:VCALENDAR\r\n\
+         VERSION:2.0\r\n\
+         PRODID:-//Pimalaya//Pimalaya for Android//EN\r\n\
+         BEGIN:{kind}\r\n\
+         UID:{uid}\r\n\
+         DTSTAMP:{stamp}\r\n\
+         DTSTART:{start}\r\n\
+         END:{kind}\r\n\
+         END:VCALENDAR\r\n"
+    );
+
+    // NOTE: parsed back rather than returned as built. The three values
+    // come from the caller, and an object this refused to read would be
+    // one the page then opens on nothing.
+    IcalCst::parse(object.as_str()).map_err(|err| err.to_string())?;
+
+    Ok(object)
+}
+
 /// Applies one edit to a calendar object, returning the new iCalendar.
 ///
 /// A patch and not a rebuild: the object is walked as a concrete syntax
@@ -316,7 +353,7 @@ fn patch(component: &mut IcalCst<'static>, edit: &EventEdit) {
 }
 
 /// Replaces a text property, removing it when the edit clears it.
-fn text<L: IcalPropLens + IcalPropSpec>(
+fn text<L: IcalPropLens>(
     component: &mut IcalCst<'static>,
     kind: IcalPropKind,
     value: &Option<String>,
@@ -337,7 +374,7 @@ fn text<L: IcalPropLens + IcalPropSpec>(
 
 /// The same for an integer property, ignoring anything unreadable
 /// rather than writing a number the property cannot hold.
-fn number<L: IcalPropLens + IcalPropSpec>(
+fn number<L: IcalPropLens>(
     component: &mut IcalCst<'static>,
     kind: IcalPropKind,
     value: &Option<String>,
@@ -944,5 +981,36 @@ mod tests {
         let ical = object("BEGIN:VTIMEZONE\r\nTZID:Europe/Paris\r\nEND:VTIMEZONE\r\n");
 
         assert!(read(&ical).is_err());
+    }
+
+    #[test]
+    fn a_new_object_is_one_the_page_can_open_and_edit() {
+        let created = create("VEVENT", "abc-123", "20260105T080000Z", "20260105T090000").unwrap();
+
+        // What a new entry has to be is readable by the page that opens
+        // it and placed on a day by the agenda that lists it, which is
+        // the whole reason it carries a DTSTART it did not have to.
+        let detail = read(&created).unwrap();
+        assert_eq!(detail.component, "VEVENT");
+        assert_eq!(detail.uid, "abc-123");
+        assert_eq!(detail.start, "20260105T090000");
+        assert!(detail.summary.is_empty());
+        assert_eq!(
+            1,
+            expand(&created, "20260101T000000", "20260201T000000")
+                .unwrap()
+                .len()
+        );
+
+        // And an edit patches it like any other object.
+        let written = write(&created, r#"{"summary":"Dentist"}"#).unwrap();
+        assert_eq!(read(&written).unwrap().summary, "Dentist");
+    }
+
+    #[test]
+    fn only_the_three_scheduled_components_can_be_created() {
+        assert!(create("VTODO", "1", "20260105T080000Z", "20260105T090000").is_ok());
+        assert!(create("VJOURNAL", "1", "20260105T080000Z", "20260105").is_ok());
+        assert!(create("VTIMEZONE", "1", "20260105T080000Z", "20260105T090000").is_err());
     }
 }

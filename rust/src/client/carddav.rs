@@ -11,12 +11,15 @@ use io_webdav::{
     rfc6352::{
         addressbook::{CarddavAddressbook as DavAddressbook, list::CarddavAddressbookList},
         card::{
-            CarddavCardEntry, CarddavCardRef, create::CarddavCardCreate, delete::CarddavCardDelete,
-            enumerate::CarddavCardEnum, list::CarddavCardList, multiget::CarddavCardMultiget,
-            read::CarddavCardRead, update::CarddavCardUpdate,
+            CarddavCardEntry, create::CarddavCardCreate, delete::CarddavCardDelete,
+            list::CarddavCardList, multiget::CarddavCardMultiget, read::CarddavCardRead,
+            update::CarddavCardUpdate,
         },
     },
-    rfc6578::sync_collection::{WebdavSyncCollection, WebdavSyncCollectionError, WebdavSyncDelta},
+    rfc6578::sync_collection::{
+        WebdavSyncCollection, WebdavSyncCollectionError, WebdavSyncCollectionOptions,
+        WebdavSyncDelta,
+    },
 };
 use url::Url;
 use vcard::tree::cst::VcardCst;
@@ -174,24 +177,14 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(())
     }
 
-    /// Enumerates the card spine (resource name plus ETag, no body) of
-    /// the addressbook collection at `url`.
-    pub fn enum_cards(
-        &mut self,
-        url: &Url,
-        credentials: &Credentials,
-    ) -> Result<Vec<CarddavCardRef>, BridgeError> {
-        let auth = auth(credentials);
-        let coroutine = CarddavCardEnum::new(url, &auth, USER_AGENT, url.path());
-        let refs: BTreeSet<CarddavCardRef> = self.run(url, coroutine)?;
-
-        Ok(refs.into_iter().collect())
-    }
-
     /// Runs a `sync-collection` REPORT (RFC 6578) against the
     /// addressbook collection at `url`, draining truncated result sets.
-    /// Returns [`None`] when the server rejected the sync token, so the
-    /// caller falls back to a full enumeration.
+    ///
+    /// A server implementing no `sync-collection` is enumerated with the
+    /// `PROPFIND` fallback instead, which lists every member and returns
+    /// no token: that answers an initial round, and turns a round
+    /// carrying a cursor into [`None`] so the caller re-runs it as one.
+    /// [`None`] is also what a rejected sync token answers.
     pub fn sync_carddav_cards(
         &mut self,
         url: &Url,
@@ -199,6 +192,7 @@ impl<'a, 'local> Client<'a, 'local> {
         sync_token: Option<&str>,
     ) -> Result<Option<WebdavSyncDelta>, BridgeError> {
         let auth = auth(credentials);
+        let mut opts = WebdavSyncCollectionOptions::default();
         let mut token = sync_token.map(str::to_string);
         let mut delta = WebdavSyncDelta::default();
 
@@ -210,10 +204,21 @@ impl<'a, 'local> Client<'a, 'local> {
                 url.path(),
                 token.as_deref(),
                 &[GETETAG],
+                opts,
             );
             let page = match self.run_sync_collection(url, coroutine)? {
-                Some(page) => page,
-                None => return Ok(None),
+                SyncRound::Page(page) => page,
+                SyncRound::InvalidToken => return Ok(None),
+                SyncRound::UnsupportedReport if opts.fallback => {
+                    return Err(format!("Cannot enumerate the addressbook at {url}").into());
+                }
+                SyncRound::UnsupportedReport if sync_token.is_some() => return Ok(None),
+                SyncRound::UnsupportedReport => {
+                    opts.fallback = true;
+                    token = None;
+                    delta = WebdavSyncDelta::default();
+                    continue;
+                }
             };
 
             delta.changed.extend(page.changed);
@@ -243,23 +248,28 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(cards.into_iter().map(into_card).collect())
     }
 
-    /// Drives one `sync-collection` REPORT, surfacing a rejected sync
-    /// token as [`None`] instead of an error (the generic [`Self::run`]
-    /// erases the error variant the fallback needs).
+    /// Drives one `sync-collection` round, surfacing the two refusals
+    /// the caller acts on instead of erasing them (the generic
+    /// [`Self::run`] erases the error variants they ride in).
     fn run_sync_collection(
         &mut self,
         target: &Url,
         mut coroutine: WebdavSyncCollection,
-    ) -> Result<Option<WebdavSyncDelta>, BridgeError> {
+    ) -> Result<SyncRound, BridgeError> {
         let mut arg: Option<Vec<u8>> = None;
 
         loop {
             match coroutine.resume(arg.as_deref()) {
-                WebdavCoroutineState::Complete(Ok(delta)) => return Ok(Some(delta)),
+                WebdavCoroutineState::Complete(Ok(delta)) => return Ok(SyncRound::Page(delta)),
                 WebdavCoroutineState::Complete(Err(
                     WebdavSyncCollectionError::InvalidSyncToken,
                 )) => {
-                    return Ok(None);
+                    return Ok(SyncRound::InvalidToken);
+                }
+                WebdavCoroutineState::Complete(Err(
+                    WebdavSyncCollectionError::UnsupportedReport,
+                )) => {
+                    return Ok(SyncRound::UnsupportedReport);
                 }
                 WebdavCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                 WebdavCoroutineState::Yielded(WebdavYield::WantsWrite(bytes)) => {
@@ -272,6 +282,18 @@ impl<'a, 'local> Client<'a, 'local> {
             }
         }
     }
+}
+
+/// What one `sync-collection` round answered.
+enum SyncRound {
+    /// The round ran and returned this page of the delta.
+    Page(WebdavSyncDelta),
+    /// The server rejected the sync token, so the collection has to be
+    /// enumerated from scratch.
+    InvalidToken,
+    /// The server implements no `sync-collection` REPORT, so the
+    /// `PROPFIND` fallback has to enumerate the collection instead.
+    UnsupportedReport,
 }
 
 /// Auth scheme from the credentials: an empty login means the

@@ -14,20 +14,19 @@ use core::str::FromStr;
 
 use std::borrow::Cow;
 
-use serde_json::{Map, Value, json};
+use io_pimdir::summary::contact::derive;
+use serde_json::{Map, Value, json, to_value};
+
+use crate::summary::SummaryJson;
 use vcard::{
     param::VcardParam,
-    prop::{VcardProp, VcardPropKind, VcardPropName},
-    tree::{
-        cst::VcardCst,
-        line::VcardLine,
-        prop::{
-            adr::ADR, anniversary::ANNIVERSARY, bday::BDAY, categories::CATEGORIES, email::EMAIL,
-            r#fn::FN, gender::GENDER, impp::IMPP, lang::LANG, lens::VcardPropLens, n::N,
-            nickname::NICKNAME, note::NOTE, org::ORG, related::RELATED, role::ROLE, tel::TEL,
-            title::TITLE, uid::UID, url::URL,
-        },
+    prop::{
+        VcardProp, VcardPropKind, VcardPropName, adr::ADR, anniversary::ANNIVERSARY, bday::BDAY,
+        categories::CATEGORIES, email::EMAIL, r#fn::FN, gender::GENDER, impp::IMPP, lang::LANG,
+        n::N, nickname::NICKNAME, note::NOTE, org::ORG, related::RELATED, role::ROLE, tel::TEL,
+        title::TITLE, uid::UID, url::URL,
     },
+    tree::{cst::VcardCst, line::VcardLine, prop::lens::VcardPropLens},
     value::{
         VcardValue,
         adr::VcardAdr,
@@ -637,6 +636,11 @@ pub(crate) fn full_date(raw: &str) -> Option<String> {
 /// never read as divergence.
 pub fn index(vcard: &str) -> Result<Value, String> {
     let model = project(vcard)?;
+    // The summary and the key it sorts under are the standard's, derived
+    // from the bytes by io-pimdir rather than from the model here: two
+    // writers of one store have to agree on them property for property
+    // (STORAGE Annex A), and the model is this app's projection.
+    let derived = derive(vcard.as_bytes());
 
     let name = display_name(&model);
     let uid = single_field(&model, "uid").to_string();
@@ -657,7 +661,7 @@ pub fn index(vcard: &str) -> Result<Value, String> {
         "name": name,
         "email": email,
         // NOTE: every address, not just the first: this is what the
-        // store's `text/vcard` summary publishes (pimdir SPEC.md §13),
+        // store's `text/vcard` summary publishes (pimdir SPEC.md Annex A),
         // and a partial list there would read as a complete one to any
         // other reader of the same store.
         "emails": emails,
@@ -665,6 +669,9 @@ pub fn index(vcard: &str) -> Result<Value, String> {
         "info": info,
         "uid": uid,
         "hash": format!("{hash:016x}"),
+        "summary": derived.summary.as_ref().map(SummaryJson::from).map(to_value).transpose()
+            .map_err(|err| format!("Unserializable card summary: {err}"))?,
+        "sortKey": derived.sort_key.as_str(),
     }))
 }
 

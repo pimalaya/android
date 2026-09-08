@@ -41,7 +41,7 @@ import org.pimalaya.client.Cards;
 final class PhoneRemote {
     private final Context context;
 
-    /** The store's io-replica seam (the row reads behind the fetch). */
+    /** The store's engine seam (the row reads behind the fetch). */
     private final PimdirStorage offline;
 
     /** Raw contact row ids by handle, primed by the pass's enumerate. */
@@ -362,17 +362,22 @@ final class PhoneRemote {
         String vcard = row.getString("vcard");
         JSONObject model = Cards.projectCard(vcard);
 
-        Long existing = rawId(resolver, account, handle);
+        // The phone's handle namespace is this app's own: it writes the
+        // sourceid. So a staged create lands under the name behind its
+        // provisional handle (SYNC §2) rather than under the handle itself,
+        // which would file a raw contact under a control character.
+        String name = PimdirStorage.nameOf(handle);
+        Long existing = rawId(resolver, account, name);
         long rawId;
         if (existing != null) {
             rawId = existing;
             rewrite(resolver, account, rawId, model);
         } else {
-            rawId = insert(resolver, account, handle, model);
-            rawIds.put(handle, rawId);
+            rawId = insert(resolver, account, name, model);
+            rawIds.put(name, rawId);
         }
 
-        return result(handle, true, handle, stampRevision(resolver, account, rawId, vcard));
+        return result(handle, true, name, stampRevision(resolver, account, rawId, vcard));
     }
 
     /** Pushes a staged content change onto the existing raw contact. */

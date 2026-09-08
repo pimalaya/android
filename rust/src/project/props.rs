@@ -5,12 +5,8 @@ use core::str::FromStr;
 
 use serde_json::{Value, json};
 use vcard::{
-    prop::VcardPropKind,
-    tree::{
-        cst::VcardCst,
-        line::VcardLine,
-        prop::{adr::ADR, gender::GENDER, lens::VcardPropLens, n::N},
-    },
+    prop::{VcardPropKind, adr::ADR, gender::GENDER, n::N},
+    tree::{cst::VcardCst, line::VcardLine, prop::lens::VcardPropLens},
     version::VcardVersion,
 };
 

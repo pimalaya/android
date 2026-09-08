@@ -1,0 +1,235 @@
+package org.pimalaya;
+
+import android.app.AlertDialog;
+import android.util.Log;
+import android.view.View;
+import android.widget.EditText;
+import android.widget.TextView;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.pimalaya.client.Account;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.TimeZone;
+import java.util.UUID;
+
+/**
+ * The composer: who it is from, who it goes to, and what it says.
+ *
+ * <p>Plain text, one recipient field per kind, and the copies hidden
+ * until they are asked for. What it is not is a draft editor: nothing is
+ * stored until the message is handed over, so leaving the screen loses
+ * what was typed and the screen says so before it does.
+ *
+ * <p>The account is the one the composer opened on, and it is fixed for
+ * the message: the sender is what a server checks a submission against,
+ * so choosing it after the fact would mean re-authenticating somewhere
+ * else. With more than one mail account, the picker comes first.
+ */
+final class MessageCompose {
+    /** The pattern an RFC 5322 date is written in (section 3.3). */
+    private static final String DATE_FORMAT = "EEE, d MMM yyyy HH:mm:ss Z";
+
+    private final MainActivity host;
+
+    /** Which account the message is sent from; null while none is open. */
+    private AccountEntry account;
+
+    MessageCompose(MainActivity host) {
+        this.host = host;
+    }
+
+    /**
+     * Opens the composer, asking which account to send from when there
+     * is more than one and taking it silently when there is one.
+     */
+    void open() {
+        List<AccountEntry> accounts = new ArrayList<>();
+        for (AccountEntry candidate : host.accountsFor(PimDomain.MAIL)) {
+            // NOTE: an account with nowhere to submit is not offered
+            // rather than offered and refused at the send: that is a JMAP
+            // account, whose EmailSubmission is not wired, or one
+            // connected before submission was discovered at all.
+            Account server = candidate.server(PimDomain.MAIL);
+            if (server != null && server.submitUrl != null && !server.submitUrl.isEmpty()) {
+                accounts.add(candidate);
+            }
+        }
+
+        if (accounts.isEmpty()) {
+            host.toast(host.getString(R.string.compose_no_account));
+            return;
+        }
+        if (accounts.size() == 1) {
+            open(accounts.get(0));
+            return;
+        }
+
+        CharSequence[] labels = new CharSequence[accounts.size()];
+        for (int index = 0; index < accounts.size(); index++) {
+            labels[index] = accounts.get(index).email;
+        }
+
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.compose_from_title)
+                .setItems(labels, (dialog, which) -> open(accounts.get(which)))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** Opens the composer on one account, blank. */
+    private void open(AccountEntry account) {
+        this.account = account;
+
+        ((TextView) host.findViewById(R.id.compose_from))
+                .setText(host.getString(R.string.compose_from, account.email));
+        for (int id : new int[] {R.id.compose_to, R.id.compose_cc, R.id.compose_bcc,
+                    R.id.compose_subject, R.id.compose_body}) {
+            ((EditText) host.findViewById(id)).setText("");
+        }
+
+        copies(false);
+        host.findViewById(R.id.compose_copies).setOnClickListener(view -> copies(true));
+        host.show(MainActivity.PANEL_COMPOSE);
+    }
+
+    /** Whether the two copy fields are showing, and their reveal with them. */
+    private void copies(boolean shown) {
+        int visibility = shown ? View.VISIBLE : View.GONE;
+        host.findViewById(R.id.compose_cc).setVisibility(visibility);
+        host.findViewById(R.id.compose_bcc).setVisibility(visibility);
+        host.findViewById(R.id.compose_copies).setVisibility(shown ? View.GONE : View.VISIBLE);
+    }
+
+    /**
+     * Leaves the composer, asking first when there is anything to lose.
+     *
+     * <p>Asked rather than saved: a draft nobody can come back to is
+     * worse than no draft, and coming back to one means storing it,
+     * which is the mailbox the composer does not have yet.
+     */
+    void close() {
+        if (empty()) {
+            host.showBack(MainActivity.PANEL_MAIL);
+            return;
+        }
+
+        new AlertDialog.Builder(host)
+                .setMessage(R.string.compose_discard_confirm)
+                .setPositiveButton(
+                        R.string.compose_discard,
+                        (dialog, which) -> host.showBack(MainActivity.PANEL_MAIL))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** Whether every field of the composer is still blank. */
+    private boolean empty() {
+        for (int id : new int[] {R.id.compose_to, R.id.compose_cc, R.id.compose_bcc,
+                    R.id.compose_subject, R.id.compose_body}) {
+            if (!value(id).isEmpty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Composes what is on screen and hands it over.
+     *
+     * <p>The two stamps are minted here rather than in the bridge, which
+     * keeps the composition a pure function of what it is handed: the
+     * date is this device's clock and the identifier is a fresh one under
+     * the sender's own domain, which is what RFC 5322 section 3.6.4 asks
+     * of whoever mints it.
+     */
+    void send() {
+        if (account == null) {
+            return;
+        }
+        if (value(R.id.compose_to).isEmpty()
+                && value(R.id.compose_cc).isEmpty()
+                && value(R.id.compose_bcc).isEmpty()) {
+            host.toast(host.getString(R.string.compose_no_recipient));
+            return;
+        }
+
+        String draft;
+        try {
+            draft =
+                    new JSONObject()
+                            .put("from", account.email)
+                            .put("to", value(R.id.compose_to))
+                            .put("cc", value(R.id.compose_cc))
+                            .put("bcc", value(R.id.compose_bcc))
+                            .put("subject", value(R.id.compose_subject))
+                            .put("body", value(R.id.compose_body))
+                            .put("date", now())
+                            .put("messageId", messageId(account.email))
+                            .toString();
+        } catch (JSONException error) {
+            host.showError(error, R.string.compose_failed);
+            return;
+        }
+
+        AccountEntry sender = account;
+        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        host.io.execute(
+                () -> {
+                    String copy = null;
+                    Exception failure = null;
+                    try {
+                        copy =
+                                host.runner
+                                        .session(sender, PimDomain.MAIL)
+                                        .call(
+                                                server ->
+                                                        host.client.sendMessage(server, draft));
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "send failed: " + sender.email, error);
+                        failure = error;
+                    }
+
+                    String mailbox = copy;
+                    Exception outcome = failure;
+                    host.postAlive(
+                            () -> {
+                                host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
+                                if (outcome != null) {
+                                    host.showError(outcome, R.string.compose_failed);
+                                    return;
+                                }
+                                host.toast(
+                                        mailbox == null
+                                                ? host.getString(R.string.compose_sent_no_copy)
+                                                : host.getString(R.string.compose_sent, mailbox));
+                                host.showBack(MainActivity.PANEL_MAIL);
+                            });
+                });
+    }
+
+    private String value(int id) {
+        return ((EditText) host.findViewById(id)).getText().toString().trim();
+    }
+
+    /** Now, as the date RFC 5322 section 3.3 writes. */
+    private static String now() {
+        java.text.SimpleDateFormat format =
+                new java.text.SimpleDateFormat(DATE_FORMAT, Locale.US);
+        format.setTimeZone(TimeZone.getDefault());
+        return format.format(new java.util.Date());
+    }
+
+    /**
+     * A fresh `Message-ID` under the sender's own domain, which is the
+     * one RFC 5322 section 3.6.4 says whoever mints it should use.
+     */
+    private static String messageId(String email) {
+        int at = email.lastIndexOf('@');
+        String domain = at < 0 ? "pimalaya.android" : email.substring(at + 1);
+        return "<" + UUID.randomUUID() + "@" + domain + ">";
+    }
+}

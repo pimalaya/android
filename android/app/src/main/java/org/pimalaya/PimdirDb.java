@@ -1,12 +1,21 @@
 package org.pimalaya;
 
 import android.content.Context;
+import android.database.Cursor;
+import android.database.SQLException;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.util.Log;
 
 import org.pimalaya.client.PimdirSql;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * The pimdir store's database, on Android's own SQLite.
@@ -71,18 +80,20 @@ final class PimdirDb extends SQLiteOpenHelper {
     @Override
     public void onCreate(SQLiteDatabase db) {
         // NOTE: execSQL compiles one statement per call, and the canonical
-        // schema is one script whose comments contain semicolons, so the split
-        // has to strip comments first (PimdirSql.schema).
+        // schema is one script whose comments contain semicolons and whose
+        // triggers contain statements, so the split has to strip comments and
+        // read a trigger body whole (PimdirSql.schema).
         for (String statement : PimdirSql.schema()) {
             db.execSQL(statement);
         }
         // NOTE: the recorded algorithm has to be the one the app actually
         // computes (PimdirHash), or every blob in the store is filed under a
         // name no other pimdir reader can verify.
-        db.execSQL(
-                "INSERT INTO store_meta(id, version, hash_algo, created_at)"
-                        + " VALUES(1, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
-                new Object[] {PimdirSql.version(), PimdirHash.ALGORITHM});
+        Map<String, Object> meta = new LinkedHashMap<>();
+        meta.put("version", PimdirSql.version());
+        meta.put("hash_algo", PimdirHash.ALGORITHM);
+        PimdirSql.Bound init = PimdirSql.bind("INIT_STORE_META", meta);
+        db.execSQL(init.sql, init.args);
     }
 
     @Override
@@ -94,14 +105,250 @@ final class PimdirDb extends SQLiteOpenHelper {
     }
 
     @Override
+    public void onOpen(SQLiteDatabase db) {
+        reconcileDraftShape(db);
+    }
+
+    /**
+     * Reconciles the store's shape with the canonical schema's, for a store
+     * already created at version 1 (SPEC.md §6, the draft allowance).
+     *
+     * <p>While the spec is a draft, version 1 is not frozen: a schema change may
+     * be folded into the initial migration rather than added as version 2. Such
+     * a store is not detectably out of date, its {@code user_version} already
+     * matching, so {@link #onUpgrade} never fires and the drift would surface
+     * later as a query error. §6 asks an implementation to reconcile the shape
+     * on open or refuse the store; this reconciles, which is what io-pimdir's
+     * own client does.
+     *
+     * <p>Read from the canonical DDL rather than from a transcribed list of
+     * folded columns, which is the whole reason the schema crosses the JNI
+     * boundary ({@link PimdirSql}): the crate's list lives behind its
+     * {@code client} feature, and a copy of it here goes stale the first time
+     * a draft folds a column in or back out, with nothing to notice.
+     */
+    private static void reconcileDraftShape(SQLiteDatabase db) {
+        Map<String, String> existing = heldObjects(db);
+
+        // The tables first, columns and all: an index and a trigger name the
+        // columns they read, so creating one over a table that has not been
+        // widened yet fails on a column the schema declares and the store does
+        // not hold yet.
+        for (String statement : PimdirSql.schema()) {
+            if (statement.trim().toUpperCase().startsWith("CREATE TABLE")
+                    && !existing.containsKey(declaredName(statement))) {
+                db.execSQL(statement);
+            }
+        }
+
+        for (Map.Entry<String, Map<String, String>> table : canonicalColumns().entrySet()) {
+            Set<String> held = columnsOf(db, table.getKey());
+            // NOTE: an empty side means the question cannot be asked rather
+            // than that the answer is "everything": no such table yet, or a
+            // parse that read no column out of the DDL. Dropping against an
+            // empty canonical set would empty the table's shape instead.
+            if (held.isEmpty() || table.getValue().isEmpty()) {
+                continue;
+            }
+
+            for (Map.Entry<String, String> column : table.getValue().entrySet()) {
+                if (!held.contains(column.getKey()) && addable(column.getValue())) {
+                    db.execSQL("ALTER TABLE " + table.getKey() + " ADD COLUMN "
+                            + column.getKey() + " " + column.getValue());
+                }
+            }
+
+            for (String column : held) {
+                if (!table.getValue().containsKey(column)) {
+                    dropColumn(db, table.getKey(), column);
+                }
+            }
+        }
+
+        // Then what reads them. An index and a trigger hold no rows, so one
+        // whose text has moved is rebuilt rather than patched: CREATE ... IF
+        // NOT EXISTS keys on the name and would leave the old plan, or the old
+        // trigger body, in place.
+        for (String statement : PimdirSql.schema()) {
+            String name = declaredName(statement);
+            if (name == null || statement.trim().toUpperCase().startsWith("CREATE TABLE")) {
+                continue;
+            }
+
+            String stored = existing.get(name);
+            if (stored == null || !normalized(stored).equals(normalized(statement))) {
+                db.execSQL("DROP " + kindOf(statement) + " IF EXISTS " + name);
+                db.execSQL(statement);
+            }
+        }
+    }
+
+    /**
+     * Every table, index and trigger the store holds, mapping its name to the
+     * text it was created with, which is what {@code sqlite_master} keeps.
+     *
+     * <p>Comparing that text against the canonical statement is what tells an
+     * index or a trigger whose shape has moved from one that has not, without
+     * a transcribed list of either.
+     */
+    private static Map<String, String> heldObjects(SQLiteDatabase db) {
+        Map<String, String> objects = new LinkedHashMap<>();
+        try (Cursor cursor =
+                db.rawQuery("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL", null)) {
+            while (cursor.moveToNext()) {
+                objects.put(cursor.getString(0), cursor.getString(1));
+            }
+        }
+        return objects;
+    }
+
+    /** The name a {@code CREATE} statement declares, or null for anything else. */
+    private static String declaredName(String statement) {
+        String[] tokens = statement.trim().split("\\s+|\\(");
+        if (tokens.length < 3 || !tokens[0].equalsIgnoreCase("CREATE")) {
+            return null;
+        }
+
+        // A UNIQUE index names itself one token later than the others do.
+        int kind = tokens[1].equalsIgnoreCase("UNIQUE") ? 2 : 1;
+        if (tokens.length <= kind + 1) {
+            return null;
+        }
+
+        switch (tokens[kind].toUpperCase()) {
+            case "TABLE":
+            case "INDEX":
+            case "TRIGGER":
+                return tokens[kind + 1];
+            default:
+                return null;
+        }
+    }
+
+    /** What a {@code CREATE} statement declares, as {@code DROP} spells it. */
+    private static String kindOf(String statement) {
+        return statement.trim().toUpperCase().startsWith("CREATE TRIGGER") ? "TRIGGER" : "INDEX";
+    }
+
+    /** A statement with its whitespace collapsed, for comparing two spellings. */
+    private static String normalized(String statement) {
+        return statement.replaceAll("\\s+", " ").trim();
+    }
+
+    /**
+     * Every table the canonical schema declares, each mapping its column names
+     * to their declarations, in declaration order.
+     *
+     * <p>The parse is deliberately shallow: split the {@code CREATE TABLE}
+     * body on its top-level commas, take the first token of each part as the
+     * name and the rest as the declaration, and skip a part opening on a table
+     * constraint keyword. That is enough for a comparison against
+     * {@code PRAGMA table_info}, and stops well short of understanding SQL.
+     */
+    private static Map<String, Map<String, String>> canonicalColumns() {
+        Map<String, Map<String, String>> tables = new LinkedHashMap<>();
+
+        for (String statement : PimdirSql.schema()) {
+            String[] head = statement.split("\\(", 2);
+            if (head.length < 2 || !head[0].trim().toUpperCase().startsWith("CREATE TABLE")) {
+                continue;
+            }
+
+            String name = head[0].trim().split("\\s+")[2];
+            Map<String, String> columns = new LinkedHashMap<>();
+            for (String part : splitTopLevel(head[1].substring(0, head[1].lastIndexOf(')')))) {
+                String[] tokens = part.trim().split("\\s+", 2);
+                if (tokens.length < 2 || CONSTRAINTS.contains(tokens[0].toUpperCase())) {
+                    continue;
+                }
+                columns.put(tokens[0], tokens[1].trim());
+            }
+            tables.put(name, columns);
+        }
+        return tables;
+    }
+
+    /** The keywords a {@code CREATE TABLE} part opens on when it names no column. */
+    private static final Set<String> CONSTRAINTS =
+            Set.of("PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "CONSTRAINT");
+
+    /** A comma-separated list split outside its parentheses. */
+    private static List<String> splitTopLevel(String body) {
+        List<String> parts = new ArrayList<>();
+        int depth = 0;
+        int start = 0;
+
+        for (int index = 0; index < body.length(); index++) {
+            char current = body.charAt(index);
+            if (current == '(') {
+                depth++;
+            } else if (current == ')') {
+                depth--;
+            } else if (current == ',' && depth == 0) {
+                parts.add(body.substring(start, index));
+                start = index + 1;
+            }
+        }
+        parts.add(body.substring(start));
+        return parts;
+    }
+
+    /**
+     * Whether a column carrying this declaration can be added to a populated
+     * table: SQLite refuses one that is {@code NOT NULL} with no default,
+     * having no value to write into the rows already there.
+     */
+    private static boolean addable(String declaration) {
+        String upper = declaration.toUpperCase();
+        return !upper.contains("NOT NULL") || upper.contains("DEFAULT");
+    }
+
+    /**
+     * Drops a column the canonical schema no longer declares, best-effort.
+     *
+     * <p>{@code ALTER TABLE … DROP COLUMN} landed in SQLite 3.35, which
+     * Android ships from API 34 on, so a store on an older device keeps the
+     * column. That is why it is a log and not a failure: a column nothing
+     * reads and nothing writes decides nothing, and refusing to open a store
+     * over one would be a worse answer than carrying it.
+     */
+    private static void dropColumn(SQLiteDatabase db, String table, String column) {
+        try {
+            db.execSQL("ALTER TABLE " + table + " DROP COLUMN " + column);
+        } catch (SQLException error) {
+            Log.i("pimalaya", "keeping retired column " + table + "." + column, error);
+        }
+    }
+
+    /** The column names the store's table actually holds; empty when there is none. */
+    private static Set<String> columnsOf(SQLiteDatabase db, String table) {
+        Set<String> columns = new LinkedHashSet<>();
+        try (Cursor cursor = db.rawQuery("PRAGMA table_info(" + table + ")", null)) {
+            while (cursor.moveToNext()) {
+                columns.add(cursor.getString(1));
+            }
+        }
+        return columns;
+    }
+
+    @Override
     public void onUpgrade(SQLiteDatabase db, int from, int to) {
         // NOTE: while the pimdir spec is draft, version 1 is edited in place
         // and a store written by an earlier draft is recreated rather than
-        // migrated (SPEC.md Status). The store is a cache of a sync, so the
-        // cost is one refetch.
-        for (String table : new String[] {
-            "queue", "bindings", "items", "objects", "sources", "collections", "store_meta"
-        }) {
+        // migrated (STORAGE.md Status). The store is a cache of a sync, so the
+        // cost is one refetch. Every table goes, read from the store rather
+        // than listed here: the list is what would go stale.
+        List<String> tables = new ArrayList<>();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                                + " AND name NOT LIKE 'sqlite_%'",
+                        null)) {
+            while (cursor.moveToNext()) {
+                tables.add(cursor.getString(0));
+            }
+        }
+        for (String table : tables) {
             db.execSQL("DROP TABLE IF EXISTS " + table);
         }
         onCreate(db);

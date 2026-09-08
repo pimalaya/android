@@ -183,30 +183,42 @@ public class PimdirContactsTest {
     }
 
     @Test
-    public void savingAConflictedCardResolvesItAgainstTheObservedRevision() {
+    public void savingAConflictedCardResolvesItAgainstTheWholeObservedState() {
         contacts.save(BOOK, new Card("u7", null, null, vcard("u7", "Gil")));
         bind(BOOK, "u7", "c7.vcf", "etag-old");
+        String base = objectOf(BOOK, "u7");
+        String diverging = storeBody("REMOTE");
         db.execSQL(
-                "UPDATE bindings SET conflicted = 1, conflict_revision = 'etag-remote'"
-                        + " WHERE link_id = 'u7'");
-        PimdirStorage storage = new PimdirStorage(pimdir);
-        try {
-            storage.setConflictRemote(BOOK, "c7.vcf", "REMOTE");
-        } catch (Exception error) {
-            throw new AssertionError(error);
-        }
+                "UPDATE bindings SET conflicted = 1, conflict_revision = 'etag-remote',"
+                        + " conflict_object = ? WHERE link_id = 'u7'",
+                new Object[] {diverging});
         assertTrue(contacts.list(BOOK).get(0).conflicted);
 
         contacts.save(BOOK, new Card("u7", null, null, vcard("u7", "Gil resolved")));
 
         // The push has to be conditioned on the state the resolution merged
-        // against, not on the one the conflict was first noticed at.
+        // against, revision and body together, not on the one the conflict was
+        // first noticed at.
         assertEquals("etag-remote",
                 stringOf("SELECT base_revision FROM bindings WHERE link_id = 'u7'"));
+        assertEquals(diverging,
+                stringOf("SELECT base_object FROM bindings WHERE link_id = 'u7'"));
         assertEquals(0, scalar("SELECT conflicted FROM bindings WHERE link_id = 'u7'"));
         assertFalse(contacts.list(BOOK).get(0).conflicted);
-        assertEquals("the captured remote body is released", 0,
-                scalar("SELECT count(*) FROM objects WHERE hash = ?", PimdirHash.of("REMOTE")));
+        assertEquals("the body it displaced is released", 0,
+                scalar("SELECT count(*) FROM objects WHERE hash = ?", base));
+        assertEquals("the adopted one keeps the one pin it always had", 1,
+                scalar("SELECT refcount FROM objects WHERE hash = ?", diverging));
+    }
+
+    /** Files a body as an object of the store, unreferenced, and answers its hash. */
+    private String storeBody(String body) {
+        String hash = PimdirHash.of(body);
+        db.execSQL(
+                "INSERT INTO objects(hash, size, refcount) VALUES(?, ?, 1)"
+                        + " ON CONFLICT(hash) DO NOTHING",
+                new Object[] {hash, body.length()});
+        return hash;
     }
 
     @Test
@@ -245,14 +257,17 @@ public class PimdirContactsTest {
     }
 
     @Test
-    public void theSummaryIsWrittenSoAListNeverParsesAVcard() throws Exception {
+    public void theSummaryIsWrittenSoAnotherReaderSeesTheCard() {
         contacts.save(BOOK, new Card("u11", null, null, vcard("u11", "Kim")));
 
-        JSONObject meta =
-                new JSONObject(stringOf("SELECT meta FROM items WHERE link_id = 'u11'"));
-        assertEquals(1, meta.getInt("v"));
-        assertEquals("Kim", meta.getString("fn"));
-        assertEquals("u11@example.org", meta.getJSONArray("emails").getString(0));
+        // The standard's typed row (STORAGE Annex A.2), not a convention of
+        // this app's: anything else reading the store lists the card from it.
+        assertEquals("Kim", stringOf("SELECT fn FROM contact_summary WHERE link_id = 'u11'"));
+        assertEquals("u11", stringOf("SELECT uid FROM contact_summary WHERE link_id = 'u11'"));
+        assertEquals(
+                "u11@example.org",
+                stringOf("SELECT address FROM item_address WHERE link_id = 'u11'"
+                        + " AND role = 'email' AND position = 0"));
 
         // And the key it is ordered by is the casefolded name, so two writers
         // cannot interleave the same book differently.
@@ -260,25 +275,24 @@ public class PimdirContactsTest {
     }
 
     @Test
-    public void aSummaryFromAnOlderConventionIsRepairedRatherThanRenderedNameless() {
+    public void aRowWithNoSummaryIsRepairedRatherThanLeftInvisible() {
         contacts.save(BOOK, new Card("u12", null, null, vcard("u12", "Lena")));
 
-        // What the previous writer stored: this app's raw card index, whose
-        // display name is `name`, where the store's convention says `fn`. The
-        // rows render nameless and unsorted, and no sync repairs them because
-        // the bodies have not changed.
-        db.execSQL(
-                "UPDATE items SET meta = '{\"name\":\"Lena\",\"uid\":\"u12\"}', sort_key = ''"
-                        + " WHERE link_id = 'u12'");
-        assertEquals("", contacts.list(BOOK).get(0).name);
+        // What a store written before the kind had a summary table holds: the
+        // item and its body, and nothing another reader could list it from. No
+        // sync repairs that, the bodies not having changed.
+        db.execSQL("DELETE FROM contact_summary WHERE link_id = 'u12'");
+        db.execSQL("UPDATE items SET sort_key = '' WHERE link_id = 'u12'");
 
         assertEquals(1, contacts.repairSummaries());
+
+        assertEquals("Lena", stringOf("SELECT fn FROM contact_summary WHERE link_id = 'u12'"));
+        assertEquals("lena", stringOf("SELECT sort_key FROM items WHERE link_id = 'u12'"));
 
         PimdirContacts.Indexed repaired = contacts.list(BOOK).get(0);
         assertEquals("Lena", repaired.name);
         assertEquals("u12", repaired.uid);
         assertEquals("u12@example.org", repaired.email);
-        assertEquals("lena", stringOf("SELECT sort_key FROM items WHERE link_id = 'u12'"));
 
         assertEquals("and it is a no-op once done", 0, contacts.repairSummaries());
     }

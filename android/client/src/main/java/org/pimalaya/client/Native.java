@@ -204,14 +204,20 @@ final class Native {
 
     /**
      * The canonical pimdir SQL: every statement keyed by its constant name, as
-     * a JSON object, {@code MIGRATION_0001} included. Pure computation over
-     * compiled-in constants, so no transport argument. See {@link PimdirSql}
-     * for why the statements come from the crate rather than from Java.
+     * a JSON object. Pure computation over compiled-in constants, so no
+     * transport argument. See {@link PimdirSql} for why the statements come
+     * from the crate rather than from Java.
      */
     static native String pimdirSql();
 
     /** The schema version the compiled-in pimdir SQL is. */
     static native int pimdirVersion();
+
+    /**
+     * Every canonical migration in order, as a JSON array of scripts, applied
+     * above the store's {@code user_version} (STORAGE §6).
+     */
+    static native String pimdirMigrations();
 
     /**
      * Connects to the account's IMAP server, lists its mailboxes and
@@ -234,6 +240,54 @@ final class Native {
      * addresses the message across the whole account.
      */
     static native String fetchMessage(
+            Transport transport,
+            String url,
+            String login,
+            String password,
+            String mailbox,
+            String id);
+
+    /**
+     * Adds or removes one marker on one message, named the IMAP way
+     * ({@code \Seen}, {@code \Answered}, {@code \Flagged}) whichever
+     * backend answers: JMAP's keywords map onto the same three (RFC 8621
+     * §4.1.1). Returns an empty JSON object.
+     */
+    static native String setMessageFlag(
+            Transport transport,
+            String url,
+            String login,
+            String password,
+            String mailbox,
+            String id,
+            String flag,
+            boolean add);
+
+    /**
+     * Composes one draft and hands it over, then files the copy the
+     * sender keeps. Returns {@code {mailbox}} naming where the copy
+     * landed, or a null mailbox when the account named no sent mailbox.
+     *
+     * <p>Two endpoints: the base URL is where mail is read, which is
+     * where the copy is filed, and the submit URL is where the message
+     * is handed over.
+     */
+    static native String sendMessage(
+            Transport transport,
+            String url,
+            String submitUrl,
+            String login,
+            String password,
+            String draft);
+
+    /**
+     * Deletes one message into the account's trash: the mailbox the
+     * server marks {@code \Trash} (RFC 6154) or whose JMAP role is
+     * {@code trash}. Returns {@code {mailbox}} naming where it landed, or
+     * a null mailbox when the account named none and the message was
+     * marked deleted where it is instead.
+     */
+    static native String deleteMessage(
             Transport transport,
             String url,
             String login,
@@ -297,6 +351,41 @@ final class Native {
             String password,
             String id,
             String ical,
+            String etag);
+
+    /**
+     * The object a new calendar entry starts from, carrying the three
+     * properties RFC 5545 requires of its component and nothing else.
+     * Pure computation, no transport. Returns the object itself, or a
+     * JSON error object.
+     */
+    static native String newEvent(String component, String uid, String stamp, String start);
+
+    /**
+     * Files a new object in a calendar, guarded on the resource not
+     * existing. Returns the new ETag as a JSON string (or null), or a
+     * JSON error object.
+     */
+    static native String createEvent(
+            Transport transport,
+            String baseUrl,
+            String calendarUrl,
+            String login,
+            String password,
+            String id,
+            String ical);
+
+    /**
+     * Removes one object from its calendar, guarded by {@code etag} when
+     * one is known. Returns an empty JSON object, or a JSON error one.
+     */
+    static native String deleteEvent(
+            Transport transport,
+            String baseUrl,
+            String calendarUrl,
+            String login,
+            String password,
+            String id,
             String etag);
 
     /**

@@ -2,10 +2,10 @@ package org.pimalaya;
 
 import android.content.Context;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 
 import org.json.JSONArray;
 import org.json.JSONException;
-import org.json.JSONObject;
 import org.pimalaya.client.Message;
 
 import java.util.ArrayList;
@@ -33,13 +33,20 @@ import java.util.Map;
  */
 final class MailStore {
     /** The IMAP {@code \Seen} flag, as the store's JSON array spells it. */
-    private static final String SEEN = "\\Seen";
+    static final String SEEN = "\\Seen";
 
     /** The IMAP {@code \Answered} flag: the message was replied to. */
-    private static final String ANSWERED = "\\Answered";
+    static final String ANSWERED = "\\Answered";
 
     /** The IMAP {@code \Flagged} flag: the message was marked important. */
-    private static final String FLAGGED = "\\Flagged";
+    static final String FLAGGED = "\\Flagged";
+
+    /**
+     * The IMAP {@code \Deleted} flag: the message is marked for removal by a
+     * later expunge, which is what deleting means on a server naming no trash
+     * to move it into.
+     */
+    static final String DELETED = "\\Deleted";
 
     private final PimdirItems items;
     private final PimdirCollections collections;
@@ -80,7 +87,7 @@ final class MailStore {
                             null,
                             null));
         }
-        collections.replace(accountEmail, PimdirMeta.MAIL, listed);
+        collections.replace(accountEmail, PimdirSummary.MAIL, listed);
 
         for (Map.Entry<String, List<PimdirItems.Row>> entry : byMailbox.entrySet()) {
             items.replace(
@@ -112,7 +119,7 @@ final class MailStore {
         return new PimdirItems.Row(
                 message.id,
                 null,
-                PimdirMeta.mail(
+                PimdirSummary.mail(
                         null,
                         message.subject,
                         message.from,
@@ -121,8 +128,9 @@ final class MailStore {
                         message.date,
                         0,
                         message.hasAttachment),
-                PimdirMeta.mailSortKey(message.date),
-                flags.toString());
+                PimdirSummary.mailSortKey(message.date),
+                flags.toString(),
+                null);
     }
 
     /** One stored envelope, with the account it came from. */
@@ -178,7 +186,7 @@ final class MailStore {
     /** Every account's messages, newest first: the merged list itself. */
     List<StoredMessage> loadMerged(int limit) {
         Map<String, PimdirCollections.Stored> mailboxes = new LinkedHashMap<>();
-        for (PimdirCollections.Stored stored : collections.list(PimdirMeta.MAIL)) {
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
             mailboxes.put(stored.id, stored);
         }
 
@@ -186,46 +194,114 @@ final class MailStore {
         try (Cursor cursor =
                 items.readable()
                         .rawQuery(
-                                "SELECT i.collection, i.link_id, i.meta, i.flags, i.sort_key"
+                                "SELECT i.collection, i.link_id, i.flags, i.sort_key,"
+                                        + " s.subject, s.sender_name, s.sender, s.attachment"
                                         + " FROM items i"
                                         + " JOIN collections c ON c.id = i.collection"
+                                        + " LEFT JOIN mail_summary s ON s.collection = i.collection"
+                                        + " AND s.link_id = i.link_id"
                                         + " WHERE c.kind = ? AND i.deleted = 0"
                                         + " AND i.retained_at IS NULL"
                                         + " ORDER BY i.sort_key DESC LIMIT ?",
-                                new String[] {PimdirMeta.MAIL, String.valueOf(limit)})) {
+                                new String[] {PimdirSummary.MAIL, String.valueOf(limit)})) {
             while (cursor.moveToNext()) {
                 PimdirCollections.Stored mailbox = mailboxes.get(cursor.getString(0));
                 if (mailbox == null) {
                     continue;
                 }
-                JSONObject meta = metaOf(cursor.getString(2));
-                String flags = cursor.isNull(3) ? null : cursor.getString(3);
+                String flags = cursor.isNull(2) ? null : cursor.getString(2);
                 messages.add(
                         new StoredMessage(
                                 mailbox.accountEmail,
                                 mailbox.name,
                                 cursor.getString(1),
-                                meta.optString("subject"),
-                                meta.optString("from_name"),
-                                meta.optString("from"),
+                                cursor.isNull(4) ? "" : cursor.getString(4),
+                                cursor.isNull(5) ? "" : cursor.getString(5),
+                                cursor.isNull(6) ? "" : cursor.getString(6),
                                 // NOTE: from the key rather than the summary's
                                 // date, since the key is what the row was
                                 // ordered by: a label disagreeing with the
                                 // order it appears in reads as a bug.
-                                PimdirMeta.stampOf(cursor.getString(4)),
+                                PimdirSummary.stampOf(cursor.getString(3)),
                                 has(flags, SEEN),
                                 has(flags, ANSWERED),
                                 has(flags, FLAGGED),
-                                meta.optBoolean("attachment")));
+                                !cursor.isNull(7) && cursor.getInt(7) == 1));
             }
         }
         return messages;
     }
 
+    /**
+     * Adds or removes one marker on one stored envelope, so the list
+     * reflects a write the server has just accepted without waiting for the
+     * next sync.
+     *
+     * <p>Called after the server, never instead of it: the mirror holds what
+     * the server holds, and a marker written here that the server refused
+     * would be a lie the next sync silently corrects.
+     */
+    void setFlag(String accountEmail, String mailbox, String id, String flag, boolean add) {
+        String collection =
+                PimdirAccount.collectionId(accounts.idOf(accountEmail), mailbox);
+
+        SQLiteDatabase db = items.writable();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT flags FROM items WHERE collection = ? AND link_id = ?",
+                        new String[] {collection, id})) {
+            if (!cursor.moveToFirst()) {
+                return;
+            }
+
+            JSONArray updated = withFlag(cursor.isNull(0) ? null : cursor.getString(0), flag, add);
+            db.execSQL(
+                    "UPDATE items SET flags = ? WHERE collection = ? AND link_id = ?",
+                    new Object[] {updated.toString(), collection, id});
+        }
+    }
+
+    /** Retires one stored envelope, for a message the server no longer files here. */
+    void removeMessage(String accountEmail, String mailbox, String id) {
+        String collection =
+                PimdirAccount.collectionId(accounts.idOf(accountEmail), mailbox);
+
+        SQLiteDatabase db = items.writable();
+        db.beginTransaction();
+        try {
+            items.remove(db, collection, id);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /** The stored marker set with one marker added or removed. */
+    private static JSONArray withFlag(String flags, String flag, boolean add) {
+        JSONArray kept = new JSONArray();
+        try {
+            JSONArray parsed = flags == null || flags.isEmpty()
+                    ? new JSONArray()
+                    : new JSONArray(flags);
+            for (int index = 0; index < parsed.length(); index++) {
+                if (!flag.equals(parsed.optString(index))) {
+                    kept.put(parsed.optString(index));
+                }
+            }
+        } catch (JSONException error) {
+            // An unreadable marker set is rewritten rather than patched: it
+            // says nothing, so there is nothing in it to keep.
+        }
+        if (add) {
+            kept.put(flag);
+        }
+        return kept;
+    }
+
     /** The distinct mailbox names seen, for the filter's collection axis. */
     List<String> loadMailboxes() {
         List<String> mailboxes = new ArrayList<>();
-        for (PimdirCollections.Stored stored : collections.list(PimdirMeta.MAIL)) {
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
             if (!mailboxes.contains(stored.name)) {
                 mailboxes.add(stored.name);
             }
@@ -251,16 +327,5 @@ final class MailStore {
             // claims a state the store cannot back up.
         }
         return false;
-    }
-
-    private static JSONObject metaOf(String meta) {
-        if (meta == null || meta.isEmpty()) {
-            return new JSONObject();
-        }
-        try {
-            return new JSONObject(meta);
-        } catch (JSONException error) {
-            return new JSONObject();
-        }
     }
 }

@@ -58,7 +58,7 @@ public class MailStoreTest {
 
         // Same mailbox name, same UID, different accounts: the id is namespaced
         // so these are two collections rather than one overwritten row.
-        assertEquals(2, scalar("SELECT count(*) FROM collections WHERE kind = ?", PimdirMeta.MAIL));
+        assertEquals(2, scalar("SELECT count(*) FROM collections WHERE kind = ?", PimdirSummary.MAIL));
         assertEquals(2, scalar("SELECT count(*) FROM items"));
 
         List<MailStore.StoredMessage> merged = store.loadMerged(10);
@@ -179,5 +179,37 @@ public class MailStoreTest {
         assertEquals("Ada Lovelace", named.sender());
         assertEquals("a sender with no name falls back to their address",
                 "anon@example.org", nameless.sender());
+    }
+
+    @Test
+    public void aMarkerWrittenOnTheServerIsMirroredWithoutTouchingTheOthers() {
+        store.replaceMessages(ONE, List.of(flagged(false)));
+
+        store.setFlag(ONE, "INBOX", "7", MailStore.SEEN, true);
+        MailStore.StoredMessage stored = store.loadMerged(10).get(0);
+        assertTrue(stored.seen);
+        assertTrue("the markers it already carried are kept", stored.flagged);
+        assertTrue(stored.answered);
+
+        store.setFlag(ONE, "INBOX", "7", MailStore.FLAGGED, false);
+        stored = store.loadMerged(10).get(0);
+        assertFalse(stored.flagged);
+        assertTrue(stored.seen);
+        assertTrue(stored.answered);
+    }
+
+    @Test
+    public void aDeletedMessageLeavesTheList() {
+        store.replaceMessages(
+                ONE,
+                List.of(
+                        message("INBOX", "1", "Going", "Mon, 5 Jan 2026 09:00:00 +0000"),
+                        message("INBOX", "2", "Staying", "Mon, 5 Jan 2026 10:00:00 +0000")));
+
+        store.removeMessage(ONE, "INBOX", "1");
+
+        List<MailStore.StoredMessage> merged = store.loadMerged(10);
+        assertEquals(1, merged.size());
+        assertEquals("Staying", merged.get(0).subject);
     }
 }

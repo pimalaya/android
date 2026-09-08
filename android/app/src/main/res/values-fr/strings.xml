@@ -296,4 +296,39 @@
         <item>Inconnu</item>
     </string-array>
 
+    <!-- Ce que le lecteur fait du message qu'il a ouvert. -->
+    <string name="message_mark_unread">Marquer comme non lu</string>
+    <string name="message_mark_read">Marquer comme lu</string>
+    <string name="message_flag">Marquer comme important</string>
+    <string name="message_unflag">Ne plus marquer comme important</string>
+    <string name="message_delete">Supprimer</string>
+    <string name="message_delete_confirm">Supprimer ce message ?</string>
+    <string name="message_deleted">Déplacé vers %s</string>
+    <string name="message_deleted_in_place">Marqué supprimé ; il reste où il est</string>
+    <string name="message_write_failed">Impossible d\'enregistrer la modification</string>
+
+    <!-- Le compositeur. -->
+    <string name="compose_from_title">Envoyer depuis</string>
+    <string name="compose_to">À</string>
+    <string name="compose_cc">Cc</string>
+    <string name="compose_bcc">Cci</string>
+    <string name="compose_add_copies">Ajouter Cc et Cci</string>
+    <string name="compose_subject">Objet</string>
+    <string name="compose_body">Écrivez votre message</string>
+    <string name="compose_from">De %s</string>
+    <string name="compose_send">Envoyer</string>
+    <string name="compose_sent">Envoyé, copie dans %s</string>
+    <string name="compose_sent_no_copy">Envoyé ; ce compte n\'a pas de dossier d\'envoi où classer la copie</string>
+    <string name="compose_failed">Impossible d\'envoyer le message</string>
+    <string name="compose_no_account">Aucun compte depuis lequel envoyer : l\'envoi demande un serveur SMTP, découvert à la connexion du compte</string>
+    <string name="compose_no_recipient">Indiquez au moins un destinataire</string>
+    <string name="compose_discard_confirm">Abandonner ce message ?</string>
+    <string name="compose_discard">Abandonner</string>
+
+    <!-- Les deux verbes autour de l'édition d'une entrée. -->
+    <string name="event_delete">Supprimer</string>
+    <string name="event_delete_confirm">Supprimer cette entrée ?</string>
+    <string name="event_delete_failed">Impossible de supprimer l\'entrée</string>
+    <string name="event_no_calendar">Aucun calendrier où la placer</string>
+
 </resources>

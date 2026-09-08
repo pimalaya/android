@@ -16,9 +16,8 @@ use serde_json::{Map, Value, to_string};
 
 use crate::ffi::error_json;
 
-/// `Native.pimdirSql`: every canonical statement, keyed by its constant name,
-/// as a JSON object. `MIGRATION_0001` is one of the entries, since creating the
-/// database is as much the caller's job as querying it.
+/// `Native.pimdirSql`: every statement, canonical then the crate's own, keyed
+/// by its constant name, as a JSON object.
 ///
 /// Pure computation over compiled-in constants: no transport, no store, no
 /// failure mode beyond serialization.
@@ -28,13 +27,37 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirSql<'local>(
     _class: JClass<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let mut statements = Map::with_capacity(io_pimdir::sql::ALL.len());
-        for (name, sql) in io_pimdir::sql::ALL {
-            statements.insert((*name).to_string(), Value::String((*sql).to_string()));
+        let mut statements = Map::new();
+        for (name, sql) in io_pimdir::sql::all() {
+            statements.insert(name.to_string(), Value::String(sql.to_string()));
         }
 
         let json =
             to_string(&Value::Object(statements)).unwrap_or_else(|err| error_json(err.to_string()));
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.pimdirMigrations`: every canonical migration in order, as a JSON
+/// array, the runner of STORAGE §6 applying each one above `user_version`.
+///
+/// Creating the database is as much the caller's job as querying it, and the
+/// migrations are indexed apart from the statements the profiles run.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirMigrations<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let migrations: Vec<Value> = io_pimdir::sql::MIGRATIONS
+            .iter()
+            .map(|sql| Value::String((*sql).to_string()))
+            .collect();
+
+        let json =
+            to_string(&Value::Array(migrations)).unwrap_or_else(|err| error_json(err.to_string()));
 
         Ok(env.new_string(json)?.into())
     })

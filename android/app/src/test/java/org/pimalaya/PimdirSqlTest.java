@@ -46,9 +46,12 @@ public class PimdirSqlTest {
         // The crate indexes sixty; an exact count would break on every spec
         // addition, so assert the shape and the ones this app relies on.
         assertTrue("expected the full statement set, got " + all.size(), all.size() >= 50);
-        assertNotNull(all.get("MIGRATION_0001"));
         assertNotNull(all.get("LIST_COLLECTIONS_BY_ACCOUNT"));
         assertNotNull(all.get("LIST_LINK_PLACEMENTS"));
+        assertNotNull(all.get("UPSERT_CONTACT_SUMMARY"));
+        // The migrations are indexed apart from the statements the profiles
+        // run: one is the schema, the others are what a store is queried with.
+        assertTrue(PimdirSql.migrations().length >= 1);
         assertEquals(1, PimdirSql.version());
     }
 

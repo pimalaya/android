@@ -27,7 +27,7 @@ import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.OfflineDriver;
 
 /**
- * One account's io-replica driver: the Rust bridge runs the engine's
+ * One account's offline driver: the Rust bridge runs the engine's
  * coroutines and this class services their yields, storage against the
  * pimdir store ({@link PimdirStorage}) and remote against the backend
  * clients or, for a book's phone collection, against its raw contacts
@@ -57,7 +57,7 @@ final class OfflineEngine implements OfflineDriver {
 
     private final CardStore base;
 
-    /** The pimdir store's io-replica seam (placements, writes, conflicts). */
+    /** The pimdir store's engine seam (placements, writes, conflicts). */
     private final PimdirStorage offline;
 
     private final PimalayaClient client;
@@ -318,40 +318,45 @@ final class OfflineEngine implements OfflineDriver {
     }
 
     /**
-     * Captures one conflicted row's remote side and resolves it on the
-     * spot when the three-way merge needs no user choice: lists merge
-     * as sets and one-sided scalar changes flow in, so only a field
-     * both sides edited, differently, is the user's to settle. A clean
-     * merge stages as the resolution (the caller's second reconcile
-     * pushes it) and reports true; a genuine collision leaves the row
-     * conflicted, its remote body persisted for the resolution form.
+     * Resolves one conflicted row on the spot when the three-way merge
+     * needs no user choice: lists merge as sets and one-sided scalar
+     * changes flow in, so only a field both sides edited, differently,
+     * is the user's to settle. A clean merge stages as the resolution
+     * (the caller's second reconcile pushes it) and reports true; a
+     * genuine collision leaves the row conflicted for the resolution
+     * form.
+     *
+     * <p>The three documents all come from the store: the engine records
+     * the diverging remote body beside the revision it names, and the
+     * hydrate pass before this one is what fetched it. So a conflict is
+     * settled with no credentials, no backend and no network, here and
+     * in the form.
      */
     private boolean resolveCleanConflict(String url, JSONObject conflict) throws JSONException {
-        String handle = conflict.getString("handle");
-        Card remote = client.readCard(account, url, handle);
-
-        // NOTE: persist only the body, not the etag; the push must keep
-        // guarding on the enumerate's revision, since a read etag can
-        // differ from the list etag (Google People API) and get rejected.
-        offline.setConflictRemote(url, handle, remote.vcard);
-
         // NOTE: on a create collision (no captured base) the local body is
         // the base, so it reads unchanged and remote changes flow in clean.
         String local = conflict.getString("vcard");
         String baseVcard =
                 conflict.isNull("baseVcard") ? local : conflict.getString("baseVcard");
-        JSONObject resolution = Cards.mergeConflictForm(baseVcard, local, remote.vcard);
+        JSONObject resolution =
+                Cards.mergeConflictForm(baseVcard, local, conflict.getString("remoteVcard"));
         if (!resolution.optBoolean("resolved")) {
             return false;
         }
 
-        mutateEdit(url, handle, resolution.optString("vcard"));
+        mutateEdit(url, conflict.getString("handle"), resolution.optString("vcard"));
         return true;
     }
 
     /**
-     * Resolves one phone-conflicted row the same way, the remote side
-     * being the raw contact read back through the fetch boundary.
+     * Resolves one phone-conflicted row the same way, and always: the
+     * phone side carries no field the user could be asked about that the
+     * merge cannot settle, so the three-way result stands.
+     *
+     * <p>The revision is refreshed from the raw contact rather than from
+     * the stored one, so the resolving push is conditioned on the state
+     * the merge reconciled with rather than the one the conflict was
+     * first noticed at.
      */
     private void resolvePhoneConflict(String collection, JSONObject conflict)
             throws JSONException {
@@ -388,11 +393,11 @@ final class OfflineEngine implements OfflineDriver {
         mutation.put("hash", CardStore.byteHash(vcard));
         mutation.put("size", vcard.getBytes(StandardCharsets.UTF_8).length);
         mutation.put("body", vcard);
-        mutation.put("meta", PimdirMeta.contact(index, vcard.length()));
+        mutation.put("summary", index.optJSONObject("summary"));
         // NOTE: an edit that changes what the key is derived from has to say
         // so, or the card keeps the position its old name gave it; renaming
         // someone is exactly that edit.
-        mutation.put("sortKey", PimdirMeta.contactSortKey(index.optString("name")));
+        mutation.put("sortKey", index.optString("sortKey"));
         client.offlineMutate(this, url, mutation);
     }
 
@@ -402,7 +407,10 @@ final class OfflineEngine implements OfflineDriver {
             JSONObject yielded = new JSONObject(yieldJson);
             switch (yielded.getString("op")) {
                 case "load":
-                    return offline.loadCollection(yielded.getString("collection")).toString();
+                    return offline.loadCollection(
+                                    yielded.getString("collection"),
+                                    yielded.optJSONObject("scope"))
+                            .toString();
                 case "lookup":
                     return offline.lookupObjects(yielded.getJSONArray("links")).toString();
                 case "write":
@@ -539,9 +547,9 @@ final class OfflineEngine implements OfflineDriver {
     }
 
     /**
-     * Services a fetch yield: the full bodies of the given handles,
-     * each with its link id (the vCard UID), cached summary (the
-     * write-time index) and content hash.
+     * Services a fetch yield: the full bodies of the given handles, each
+     * with its link id (the vCard UID), the summary STORAGE Annex A
+     * derives from it, and its content hash.
      */
     private JSONObject fetch(JSONObject yielded) throws JSONException {
         String url = yielded.getString("collection");
@@ -615,13 +623,12 @@ final class OfflineEngine implements OfflineDriver {
         JSONObject item = new JSONObject();
         item.put("handle", handle);
         item.put("linkId", uid.isEmpty() ? handle : uid);
-        // NOTE: the store's summary convention, not the raw card index: the
+        // NOTE: the standard's summary, not the raw card index beside it: the
         // index is this app's projection and the summary is what any reader of
-        // the store understands, so the fetch path and the edit path have to
-        // write the same shape or a synced card renders differently from an
-        // edited one.
-        item.put("meta", PimdirMeta.contact(index, card.vcard.length()));
-        item.put("sortKey", PimdirMeta.contactSortKey(index.optString("name")));
+        // the store understands. Both come back from one derivation, so the
+        // fetch path and the edit path cannot write different shapes.
+        item.put("summary", index.optJSONObject("summary"));
+        item.put("sortKey", index.optString("sortKey"));
         item.put("hash", CardStore.byteHash(card.vcard));
         item.put("body", card.vcard);
         if (revision != null) {
@@ -1005,15 +1012,22 @@ final class OfflineEngine implements OfflineDriver {
         JSONObject plan = pushPlan("add", url, !change.isNull("origin"), false);
         if ("membership".equals(plan.getString("action"))) {
             client.updateCardBooks(account, row.getString("id"), List.of(bookId(url)), List.of());
-            return result(handle, true, handle, null);
+            // The body is already on the account, so the member this book now
+            // holds is the one the origin names: assigning the provisional
+            // handle instead would bind the book to a name the server never
+            // heard of, and the next enumerate would read it as vanished.
+            JSONObject origin = change.optJSONObject("origin");
+            String assigned = origin == null ? row.getString("id") : origin.getString("handle");
+            return result(handle, true, assigned, null);
         }
 
-        // NOTE: the handle, not the bare id: io-webdav names the resource
-        // verbatim now instead of appending .vcf itself, so the name sent has
-        // to be the one this side already calls the card by. Sending the id
-        // would create `uuid` on the server while the store waits for
-        // `uuid.vcf`, and the next sync would see a stranger.
-        Card created = client.createCard(account, url, handle, row.getString("vcard"));
+        // NOTE: the resource name, not the handle: a staged create sits under
+        // the provisional handle until this push assigns a real one (SYNC §2),
+        // and io-webdav names the resource verbatim now instead of appending
+        // .vcf itself, so what goes out is the name this side calls the card
+        // by. Sending the handle would file it under a control character.
+        String name = CardStore.resourceName(url, PimdirStorage.nameOf(handle));
+        Card created = client.createCard(account, url, name, row.getString("vcard"));
 
         JSONArray postCreate = plan.optJSONArray("postCreateBooks");
         for (int index = 0; postCreate != null && index < postCreate.length(); index++) {

@@ -1,5 +1,6 @@
 package org.pimalaya;
 
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
@@ -12,6 +13,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -47,6 +49,19 @@ final class MessageView {
     /** The row the reader opened, and what the header is drawn from. */
     private MailStore.StoredMessage current;
 
+    /**
+     * What the open message's two toggles stand at.
+     *
+     * <p>Held beside the row rather than read back off it: the row is the
+     * store's answer as of the listing, and the reader moves both of them
+     * while it is open (opening marks read, the toggles are toggles). The
+     * store is written in the same pass, so the two agree; this is what
+     * the buttons draw from without a re-read per tap.
+     */
+    private boolean seen;
+
+    private boolean flagged;
+
     MessageView(MainActivity host) {
         this.host = host;
     }
@@ -54,9 +69,12 @@ final class MessageView {
     /** Opens the reader on one row, then fetches what it does not hold. */
     void open(MailStore.StoredMessage message) {
         current = message;
+        seen = message.seen;
+        flagged = message.flagged;
 
         header(message);
         badges(new ArrayList<>());
+        actions();
         loading();
         host.show(MainActivity.PANEL_MESSAGE);
 
@@ -149,8 +167,176 @@ final class MessageView {
                                 }
                                 if (outcome == null) {
                                     state(host.message(error, R.string.message_failed));
-                                } else {
-                                    render(outcome);
+                                    return;
+                                }
+                                render(outcome);
+                                // NOTE: after the body, not before it. The
+                                // fetch asks for BODY.PEEK[], so a read that
+                                // failed leaves the message unread, which is
+                                // the honest answer: nothing was read.
+                                if (!seen) {
+                                    write(MailStore.SEEN, true);
+                                }
+                            });
+                });
+    }
+
+    /**
+     * The action row: the two toggles drawn at what the message stands
+     * at, and the delete button.
+     */
+    private void actions() {
+        ImageButton unread = host.findViewById(R.id.message_view_unread);
+        unread.setContentDescription(
+                host.getString(seen ? R.string.message_mark_unread : R.string.message_mark_read));
+        unread.setImageResource(seen ? R.drawable.ic_visibility_off : R.drawable.ic_check);
+        unread.setOnClickListener(view -> write(MailStore.SEEN, !seen));
+
+        ImageButton flag = host.findViewById(R.id.message_view_flag);
+        flag.setContentDescription(
+                host.getString(flagged ? R.string.message_unflag : R.string.message_flag));
+        flag.setColorFilter(
+                host.ui.resolveColor(
+                        flagged
+                                ? android.R.attr.colorAccent
+                                : android.R.attr.textColorSecondary));
+        flag.setOnClickListener(view -> write(MailStore.FLAGGED, !flagged));
+
+        host.findViewById(R.id.message_view_delete).setOnClickListener(view -> confirmDelete());
+    }
+
+    /**
+     * Writes one marker on the server, then on the store, then on the
+     * buttons.
+     *
+     * <p>In that order and never another: the store mirrors the server,
+     * so a marker the server refused must not survive in it, and the
+     * refusal is what the reader is told about.
+     */
+    private void write(String flag, boolean add) {
+        MailStore.StoredMessage message = current;
+        AccountEntry account = accountOf(message.accountEmail);
+        if (account == null) {
+            host.toast(host.getString(R.string.message_no_account));
+            return;
+        }
+
+        host.io.execute(
+                () -> {
+                    Exception failure = null;
+                    try {
+                        host.runner
+                                .session(account, PimDomain.MAIL)
+                                .call(
+                                        server -> {
+                                            host.client.setMessageFlag(
+                                                    server,
+                                                    message.mailbox,
+                                                    message.id,
+                                                    flag,
+                                                    add);
+                                            return null;
+                                        });
+                        host.mail.setFlag(
+                                message.accountEmail, message.mailbox, message.id, flag, add);
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "message flag failed: " + message.id, error);
+                        failure = error;
+                    }
+
+                    Exception error = failure;
+                    host.postAlive(
+                            () -> {
+                                if (current != message) {
+                                    return;
+                                }
+                                if (error != null) {
+                                    host.showError(error, R.string.message_write_failed);
+                                    return;
+                                }
+                                if (MailStore.SEEN.equals(flag)) {
+                                    seen = add;
+                                } else if (MailStore.FLAGGED.equals(flag)) {
+                                    flagged = add;
+                                }
+                                actions();
+                                host.mailList.reload();
+                            });
+                });
+    }
+
+    /** Asks before deleting: the reader is one tap from losing a message. */
+    private void confirmDelete() {
+        new AlertDialog.Builder(host)
+                .setMessage(R.string.message_delete_confirm)
+                .setPositiveButton(R.string.message_delete, (dialog, which) -> delete())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * Deletes the open message, then leaves: what the reader is looking
+     * at is no longer where they are looking, so staying on it would
+     * show a message the account has filed elsewhere.
+     */
+    private void delete() {
+        MailStore.StoredMessage message = current;
+        AccountEntry account = accountOf(message.accountEmail);
+        if (account == null) {
+            host.toast(host.getString(R.string.message_no_account));
+            return;
+        }
+
+        host.io.execute(
+                () -> {
+                    String trash = null;
+                    Exception failure = null;
+                    try {
+                        trash =
+                                host.runner
+                                        .session(account, PimDomain.MAIL)
+                                        .call(
+                                                server ->
+                                                        host.client.deleteMessage(
+                                                                server,
+                                                                message.mailbox,
+                                                                message.id));
+                        // NOTE: only a move takes the message out of the
+                        // mailbox the list shows it in. A marker leaves it
+                        // where it is, so the row stays and says so.
+                        if (trash != null) {
+                            host.mail.removeMessage(
+                                    message.accountEmail, message.mailbox, message.id);
+                        } else {
+                            host.mail.setFlag(
+                                    message.accountEmail,
+                                    message.mailbox,
+                                    message.id,
+                                    MailStore.DELETED,
+                                    true);
+                        }
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "message delete failed: " + message.id, error);
+                        failure = error;
+                    }
+
+                    String target = trash;
+                    Exception error = failure;
+                    host.postAlive(
+                            () -> {
+                                if (error != null) {
+                                    host.showError(error, R.string.message_write_failed);
+                                    return;
+                                }
+                                host.toast(
+                                        target == null
+                                                ? host.getString(
+                                                        R.string.message_deleted_in_place)
+                                                : host.getString(
+                                                        R.string.message_deleted, target));
+                                host.mailList.reload();
+                                if (current == message) {
+                                    host.showBack(MainActivity.PANEL_MAIL);
                                 }
                             });
                 });

@@ -1,11 +1,16 @@
 package org.pimalaya.client;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -24,6 +29,7 @@ import java.util.Map;
  */
 public final class PimdirSql {
     private static Map<String, String> statements;
+    private static String[] migrations;
 
     /** The schema version the compiled-in SQL is. */
     public static int version() {
@@ -58,67 +64,187 @@ public final class PimdirSql {
     }
 
     /**
-     * The schema split into the individual statements {@code execSQL} takes,
-     * comments removed.
-     *
-     * <p>Android's {@code execSQL} compiles one statement per call, so the
-     * migration has to be split, and splitting it on {@code ';'} alone is
-     * wrong: the canonical schema documents itself, and its comments contain
-     * semicolons (<em>"handing out the next item `seq`; only ever
-     * increases"</em>). Cutting there truncates a {@code CREATE TABLE} and
-     * SQLite rejects it as incomplete input. So comments go first, tracking
-     * string literals on the way so a {@code --} inside one would survive.
+     * Every migration split into the individual statements {@code execSQL}
+     * takes, in order: Android compiles one statement per call, so a schema
+     * that is one script has to be cut into them ({@link #split}).
      */
     public static String[] schema() {
-        String sql = of("MIGRATION_0001");
-        StringBuilder stripped = new StringBuilder(sql.length());
+        List<String> statements = new ArrayList<>();
+        for (String migration : migrations()) {
+            statements.addAll(Arrays.asList(split(migration)));
+        }
+        return statements.toArray(new String[0]);
+    }
+
+    /** Every canonical migration in order, as its own script (STORAGE §6). */
+    public static synchronized String[] migrations() {
+        if (migrations == null) {
+            migrations = loadMigrations();
+        }
+        return migrations.clone();
+    }
+
+    /**
+     * A canonical statement with its {@code :name} parameters rewritten to the
+     * positional ones Android takes, and the values bound in the order they
+     * occur, drawn from {@code values} by name.
+     *
+     * <p>Android's SQLite binding has no named parameters, so a caller either
+     * rewrites the statement or writes its own. Rewriting is what keeps the
+     * column lists in the crate: the caller names the values it has and never
+     * repeats the statement's own column order. A name the map does not carry
+     * binds NULL, and one it carries more than once in the statement binds the
+     * same value each time.
+     *
+     * <p>The statement is taken comment-free, since the canonical files
+     * document themselves and a parameter is spelled the way prose spells a
+     * colon.
+     */
+    public static Bound bind(String name, Map<String, Object> values) {
+        String[] statements = split(of(name));
+        String sql = statements.length == 0 ? "" : statements[0];
+        StringBuilder rewritten = new StringBuilder(sql.length());
+        List<Object> args = new ArrayList<>();
         boolean inString = false;
-        boolean inComment = false;
 
         for (int index = 0; index < sql.length(); index++) {
             char current = sql.charAt(index);
 
+            if (current == '\'') {
+                inString = !inString;
+            } else if (!inString && current == ':' && index + 1 < sql.length()
+                    && isNameChar(sql.charAt(index + 1))) {
+                int end = index + 1;
+                while (end < sql.length() && isNameChar(sql.charAt(end))) {
+                    end++;
+                }
+                args.add(values.get(sql.substring(index + 1, end)));
+                rewritten.append('?');
+                index = end - 1;
+                continue;
+            }
+
+            rewritten.append(current);
+        }
+
+        return new Bound(rewritten.toString(), args.toArray());
+    }
+
+    /** A statement with its arguments, as {@code execSQL} and friends take them. */
+    public static final class Bound {
+        /** The statement, its parameters positional. */
+        public final String sql;
+
+        /** The values, in the order the statement's parameters occur. */
+        public final Object[] args;
+
+        Bound(String sql, Object[] args) {
+            this.sql = sql;
+            this.args = args;
+        }
+    }
+
+    private static boolean isNameChar(char current) {
+        return Character.isLetterOrDigit(current) || current == '_';
+    }
+
+    /**
+     * A multi-statement script split into the individual statements
+     * {@code execSQL} takes, comments removed.
+     *
+     * <p>Splitting on {@code ';'} alone is wrong twice over. The canonical
+     * schema documents itself and its comments contain semicolons
+     * (<em>"handing out the next item `seq`; only ever increases"</em>), so
+     * comments go first, tracking string literals on the way. And a trigger
+     * body is statements: its own semicolons end nothing, so one ends at the
+     * {@code END} that closes it and nowhere earlier.
+     */
+    public static String[] split(String sql) {
+        List<String> statements = new ArrayList<>();
+        StringBuilder current = new StringBuilder(sql.length());
+        boolean inString = false;
+        boolean inComment = false;
+
+        for (int index = 0; index < sql.length(); index++) {
+            char character = sql.charAt(index);
+
             if (inComment) {
-                if (current == '\n') {
+                if (character == '\n') {
                     inComment = false;
-                    stripped.append(current);
+                    current.append(character);
                 }
                 continue;
             }
 
             if (inString) {
-                stripped.append(current);
-                if (current == '\'') {
+                current.append(character);
+                if (character == '\'') {
                     inString = false;
                 }
                 continue;
             }
 
-            if (current == '\'') {
+            if (character == '\'') {
                 inString = true;
-                stripped.append(current);
+                current.append(character);
                 continue;
             }
 
-            if (current == '-' && index + 1 < sql.length() && sql.charAt(index + 1) == '-') {
+            if (character == '-' && index + 1 < sql.length() && sql.charAt(index + 1) == '-') {
                 inComment = true;
                 index++;
                 continue;
             }
 
-            stripped.append(current);
+            if (character == ';' && closed(current)) {
+                String statement = current.toString().trim();
+                if (!statement.isEmpty()) {
+                    statements.add(statement);
+                }
+                current.setLength(0);
+                continue;
+            }
+
+            current.append(character);
         }
 
-        String[] parts = stripped.toString().split(";");
-        int kept = 0;
-        for (String part : parts) {
-            if (!part.trim().isEmpty()) {
-                parts[kept++] = part.trim();
-            }
+        String last = current.toString().trim();
+        if (!last.isEmpty()) {
+            statements.add(last);
         }
-        String[] result = new String[kept];
-        System.arraycopy(parts, 0, result, 0, kept);
-        return result;
+        return statements.toArray(new String[0]);
+    }
+
+    /**
+     * Whether a semicolon ends what has been read: everything but a trigger
+     * that has not reached its closing {@code END} yet.
+     */
+    private static boolean closed(StringBuilder statement) {
+        String read = statement.toString().trim();
+        return !read.toUpperCase(Locale.ROOT).startsWith("CREATE TRIGGER")
+                || read.toUpperCase(Locale.ROOT).endsWith("END");
+    }
+
+    private static String[] loadMigrations() {
+        String json = Native.pimdirMigrations();
+        try {
+            // NOTE: the bridge reports its own failures as {"error": ...},
+            // which is an object where the migrations are an array.
+            if (json.trim().startsWith("{")) {
+                throw new PimalayaException(
+                        "Could not load the pimdir migrations: "
+                                + new JSONObject(json).optString("error"));
+            }
+
+            JSONArray array = new JSONArray(json);
+            String[] loaded = new String[array.length()];
+            for (int index = 0; index < loaded.length; index++) {
+                loaded[index] = array.getString(index);
+            }
+            return loaded;
+        } catch (JSONException error) {
+            throw new PimalayaException("Unreadable pimdir migrations: " + error.getMessage());
+        }
     }
 
     private static Map<String, String> load() {

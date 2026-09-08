@@ -17,7 +17,10 @@ use io_webdav::{
             CaldavCalendar as DavCalendar, home_set::CaldavCalendarHomeSet,
             list::CaldavCalendarList,
         },
-        item::{CaldavItemEntry, list::CaldavItemList, update::CaldavItemUpdate},
+        item::{
+            CaldavItemEntry, create::CaldavItemCreate, delete::CaldavItemDelete,
+            list::CaldavItemList, update::CaldavItemUpdate,
+        },
     },
     rfc4918::WebdavAuth,
 };
@@ -122,6 +125,51 @@ impl<'a, 'local> Client<'a, 'local> {
         );
 
         Ok(self.run(url, coroutine)?.etag)
+    }
+
+    /// Creates the object at resource id `id` inside the calendar
+    /// collection at `url`, returning the new ETag when the server
+    /// sends one.
+    ///
+    /// The create is guarded on the resource not existing, which
+    /// io-webdav puts on the request as `If-None-Match: *`: a `UID`
+    /// collision is then refused by the server rather than silently
+    /// overwriting whatever holds that name.
+    pub fn create_caldav_event(
+        &mut self,
+        url: &Url,
+        credentials: &crate::types::Credentials,
+        id: &str,
+        ical: &str,
+    ) -> Result<Option<String>, BridgeError> {
+        let auth = auth(credentials);
+        let coroutine = CaldavItemCreate::new(
+            url,
+            &auth,
+            USER_AGENT,
+            url.path(),
+            id,
+            ical.as_bytes().to_vec(),
+        );
+
+        Ok(self.run(url, coroutine)?.etag)
+    }
+
+    /// Deletes the object at resource id `id` inside the calendar
+    /// collection at `url`, guarded by `if_match` when an ETag is
+    /// known, for the same reason the update is.
+    pub fn delete_caldav_event(
+        &mut self,
+        url: &Url,
+        credentials: &crate::types::Credentials,
+        id: &str,
+        if_match: Option<&str>,
+    ) -> Result<(), BridgeError> {
+        let auth = auth(credentials);
+        let coroutine = CaldavItemDelete::new(url, &auth, USER_AGENT, url.path(), id, if_match);
+        self.run(url, coroutine)?;
+
+        Ok(())
     }
 
     /// PROPFIND the principal for `CALDAV:calendar-home-set`.

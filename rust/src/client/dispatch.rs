@@ -111,10 +111,9 @@ impl<'a, 'local> Client<'a, 'local> {
     /// contacts delta round, a JMAP ContactCard/changes round or a
     /// People connections sync. No cursor runs the initial round: the
     /// complete member set plus the cursor to delta from next time. A
-    /// cursor the server no longer accepts re-runs an initial round,
-    /// and an initial CardDAV sync a server rejects outright falls
-    /// back to the plain enumeration; the returned delta says whether
-    /// it was a complete round.
+    /// cursor the server no longer accepts, and a CardDAV server
+    /// implementing no `sync-collection` REPORT, both re-run an initial
+    /// round; the returned delta says whether it was a complete one.
     pub fn sync_cards(
         &mut self,
         base_url: &str,
@@ -122,35 +121,7 @@ impl<'a, 'local> Client<'a, 'local> {
         credentials: &Credentials,
         cursor: Option<&str>,
     ) -> Result<CardDelta, BridgeError> {
-        let round = self.sync_cards_round(base_url, addressbook_url, credentials, cursor);
-
-        let delta = match round {
-            Ok(delta) => delta,
-            Err(_) if cursor.is_none() && Backend::of(base_url) == Backend::Carddav => {
-                // NOTE: no sync-collection support: fall back to the
-                // plain enumeration (a genuine outage fails there too).
-                let url = parse_url(addressbook_url)?;
-                let refs = self.enum_cards(&url, credentials)?;
-
-                let changed = refs
-                    .into_iter()
-                    .map(|entry| Card {
-                        id: entry.id.clone(),
-                        uri: entry.id,
-                        etag: entry.etag,
-                        vcard: String::new(),
-                        books: Vec::new(),
-                    })
-                    .collect();
-                return Ok(CardDelta {
-                    changed,
-                    vanished: Vec::new(),
-                    token: None,
-                    complete: true,
-                });
-            }
-            Err(err) => return Err(err),
-        };
+        let delta = self.sync_cards_round(base_url, addressbook_url, credentials, cursor)?;
 
         if let Some(mut delta) = delta {
             delta.complete = cursor.is_none();

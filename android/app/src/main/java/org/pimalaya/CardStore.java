@@ -425,7 +425,7 @@ public class CardStore extends SQLiteOpenHelper {
         }
 
         List<BookEntry> books = new ArrayList<>();
-        for (PimdirCollections.Stored stored : collections.list(PimdirMeta.CONTACT)) {
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.CONTACT)) {
             int[] state = switches.get(stored.id);
             String id = ids.get(stored.id);
             books.add(
@@ -469,14 +469,24 @@ public class CardStore extends SQLiteOpenHelper {
     }
 
     /**
-     * A row's engine handle: its resource name, reconstructed for
-     * never-pushed rows (CardDAV creations name the resource id.vcf;
-     * the other backends address the bare id).
+     * A row's engine handle: the resource name its source binds it under,
+     * else the provisional handle a staged create waits under (SYNC §2).
+     *
+     * <p>Never a guess at the name the server will hand out: the handle is how
+     * the engine addresses the placement, and a create has no server name yet
+     * by definition. What it will be pushed as is
+     * {@link #resourceName(String, String)}, and what the binding ends up
+     * holding is whatever the push assigns.
      */
-    static String rowHandle(String url, String uri, String id) {
-        if (uri != null && !uri.isEmpty()) {
-            return uri;
-        }
+    static String rowHandle(String uri, String id) {
+        return uri != null && !uri.isEmpty() ? uri : PimdirStorage.provisionalOf(id);
+    }
+
+    /**
+     * The name a create offers the server: CardDAV names the resource
+     * {@code id.vcf}, the other backends address the bare id.
+     */
+    static String resourceName(String url, String id) {
         return isCarddavUrl(url) ? id + ".vcf" : id;
     }
 

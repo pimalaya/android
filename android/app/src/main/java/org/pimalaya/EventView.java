@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.UUID;
 
 /**
  * The page one agenda row opens onto: what the entry is, and the form
@@ -195,6 +196,15 @@ final class EventView {
     /** The object as it was read, for the parts the form does not edit. */
     private EventDetail detail;
 
+    /**
+     * Whether the entry is one the server has never seen.
+     *
+     * <p>It decides the save's precondition and nothing else: a create
+     * is guarded on the resource not existing, an edit on it not having
+     * moved, and the page in between is the same page.
+     */
+    private boolean creating;
+
     /** The working values, keyed as the bridge's edit object keys them. */
     private JSONObject model = new JSONObject();
 
@@ -215,14 +225,56 @@ final class EventView {
                 : summary;
     }
 
+    /**
+     * Opens the page on a new entry, in the given calendar.
+     *
+     * <p>The object is built before the page opens rather than at save
+     * time, so what is edited is an object like any other and the page
+     * has one shape: the entry exists locally the moment it is started,
+     * and it is the save that decides whether the server has it yet.
+     *
+     * <p>It is placed at the next whole hour, which is the guess that
+     * needs the least correcting: an entry started now is rarely for
+     * now, and every other default (midnight, this exact minute) is
+     * further from what the user then types.
+     */
+    void compose(EventStore.StoredCalendar calendar) {
+        String uid = UUID.randomUUID().toString();
+
+        Calendar start = Calendar.getInstance();
+        start.add(Calendar.HOUR_OF_DAY, 1);
+        start.set(Calendar.MINUTE, 0);
+        start.set(Calendar.SECOND, 0);
+
+        String ical;
+        try {
+            ical = host.client.newEvent(EVENT, uid, now(), format(start, false, false));
+        } catch (Exception error) {
+            Log.w("pimalaya", "new event failed", error);
+            host.showError(error, R.string.event_save_failed);
+            return;
+        }
+
+        open(null, new EventStore.StoredEvent(calendar.id, uid + ".ics", ical, ""), calendar, true);
+    }
+
     /** Opens the page on one agenda row. */
     void open(
             Occurrence occurrence,
             EventStore.StoredEvent event,
             EventStore.StoredCalendar calendar) {
+        open(occurrence, event, calendar, false);
+    }
+
+    private void open(
+            Occurrence occurrence,
+            EventStore.StoredEvent event,
+            EventStore.StoredCalendar calendar,
+            boolean creating) {
         this.occurrence = occurrence;
         this.event = event;
         this.calendar = calendar;
+        this.creating = creating;
         this.detail = detailOf(event);
 
         model = new JSONObject();
@@ -775,17 +827,24 @@ final class EventView {
                     try {
                         written = host.client.writeEvent(target.ical, edited);
                         String pushed = written;
+                        boolean isNew = creating;
                         etag =
                                 host.runner
                                         .session(account, PimDomain.CALENDAR)
                                         .call(
                                                 server ->
-                                                        host.client.updateEvent(
-                                                                server,
-                                                                collection.url,
-                                                                target.id,
-                                                                pushed,
-                                                                target.etag));
+                                                        isNew
+                                                                ? host.client.createEvent(
+                                                                        server,
+                                                                        collection.url,
+                                                                        target.id,
+                                                                        pushed)
+                                                                : host.client.updateEvent(
+                                                                        server,
+                                                                        collection.url,
+                                                                        target.id,
+                                                                        pushed,
+                                                                        target.etag));
                     } catch (Exception error) {
                         Log.w("pimalaya", "event save failed: " + target.id, error);
                         failure = error;
@@ -806,6 +865,74 @@ final class EventView {
                                         target.id,
                                         body,
                                         validator == null ? "" : validator);
+                                creating = false;
+                                host.calendarList.reload();
+                                host.showBack(MainActivity.PANEL_CALENDAR);
+                            });
+                });
+    }
+
+    /** Asks before deleting: an entry is one tap from being gone. */
+    void confirmDelete() {
+        new AlertDialog.Builder(host)
+                .setMessage(R.string.event_delete_confirm)
+                .setPositiveButton(R.string.event_delete, (dialog, which) -> delete())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * Removes the entry from its calendar, then from the store.
+     *
+     * <p>An entry the server has never seen is only ever local, so its
+     * delete is the page closing: there is nothing to remove and no
+     * precondition to guard it with.
+     */
+    private void delete() {
+        if (creating) {
+            host.showBack(MainActivity.PANEL_CALENDAR);
+            return;
+        }
+
+        AccountEntry account = accountOf(calendar.accountEmail);
+        if (account == null) {
+            host.toast(host.getString(R.string.message_no_account));
+            return;
+        }
+
+        EventStore.StoredEvent target = event;
+        EventStore.StoredCalendar collection = calendar;
+
+        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        host.io.execute(
+                () -> {
+                    Exception failure = null;
+                    try {
+                        host.runner
+                                .session(account, PimDomain.CALENDAR)
+                                .call(
+                                        server -> {
+                                            host.client.deleteEvent(
+                                                    server,
+                                                    collection.url,
+                                                    target.id,
+                                                    target.etag);
+                                            return null;
+                                        });
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "event delete failed: " + target.id, error);
+                        failure = error;
+                    }
+
+                    Exception outcome = failure;
+                    host.postAlive(
+                            () -> {
+                                host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
+                                if (outcome != null) {
+                                    host.showError(outcome, R.string.event_delete_failed);
+                                    return;
+                                }
+                                host.events.removeEvent(collection.id, target.id);
                                 host.calendarList.reload();
                                 host.showBack(MainActivity.PANEL_CALENDAR);
                             });

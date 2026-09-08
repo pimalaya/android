@@ -16,6 +16,11 @@ package org.pimalaya;
  * account advertises say which domains it serves. Three connections
  * there are three names for one endpoint and one credential, which is
  * exactly what one account with several domains is meant to express.
+ *
+ * <p>Mail is the one domain whose endpoint does not answer both ways:
+ * IMAP reads and SMTP submits, and they are two servers. So the mail
+ * connection carries a second endpoint, and every other one leaves it
+ * null, as does a JMAP mail connection whose one session submits too.
  */
 final class AccountConnection {
     /** Where the domain lives. */
@@ -24,8 +29,16 @@ final class AccountConnection {
     /** Which of the account's credentials signs in to it. */
     final String credentialId;
 
+    /** Where mail is submitted, or null when there is nowhere separate. */
+    final String submitUrl;
+
     AccountConnection(String baseUrl, String credentialId) {
+        this(baseUrl, credentialId, null);
+    }
+
+    AccountConnection(String baseUrl, String credentialId, String submitUrl) {
         this.baseUrl = baseUrl;
         this.credentialId = credentialId;
+        this.submitUrl = submitUrl;
     }
 }

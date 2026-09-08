@@ -70,9 +70,8 @@ public class MainActivity extends Activity {
     static final int PANEL_MAIL = 4;
     static final int PANEL_CALENDAR = 5;
     static final int PANEL_COMPOSE = 6;
-    static final int PANEL_EVENT = 7;
-    static final int PANEL_MESSAGE = 8;
-    static final int PANEL_EVENT_VIEW = 9;
+    static final int PANEL_MESSAGE = 7;
+    static final int PANEL_EVENT_VIEW = 8;
     private static final int PANEL_AUTH = 20;
     static final int PANEL_ACCOUNT = 21;
 
@@ -141,6 +140,9 @@ public class MainActivity extends Activity {
     /** The reader one message row opens onto. */
     MessageView messageView;
 
+    /** The composer the mail add button opens. */
+    MessageCompose compose;
+
     /** The connection wizard and its OAuth grants (see onCreate wiring). */
     private OnboardingFlow onboarding;
 
@@ -208,6 +210,7 @@ public class MainActivity extends Activity {
         mailList = new MailList(this, mail);
         eventView = new EventView(this);
         messageView = new MessageView(this);
+        compose = new MessageCompose(this);
         runner = new SyncRunner(this, base, pimdir, store, client, syncObserver());
         // NOTE: the two flows reference each other (grants land back in
         // the wizard), so one side binds late.
@@ -250,7 +253,7 @@ public class MainActivity extends Activity {
                 .ensure(
                         LocalBook.URL,
                         LocalBook.ACCOUNT,
-                        PimdirMeta.CONTACT,
+                        PimdirSummary.CONTACT,
                         getString(R.string.local_book));
         accounts.add(LocalBook.account());
         accounts.addAll(store.loadAll());
@@ -1275,7 +1278,7 @@ public class MainActivity extends Activity {
         }
 
         String handle =
-                CardStore.rowHandle(replica.book.url, replica.card.uri, replica.card.id);
+                CardStore.rowHandle(replica.card.uri, replica.card.id);
         JSONObject bodies;
         JSONObject resolution;
         try {
@@ -1408,6 +1411,35 @@ public class MainActivity extends Activity {
                                 openNewContact(
                                         books.get(which).book,
                                         books.get(which).accountEmail))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * Starts a new calendar entry, asking which calendar it lands in
+     * when there is more than one and taking it silently when there is
+     * one, exactly as a new contact picks its addressbook.
+     */
+    private void composeEvent() {
+        List<EventStore.StoredCalendar> calendars = events.loadCalendars();
+        if (calendars.isEmpty()) {
+            toast(getString(R.string.event_no_calendar));
+            return;
+        }
+        if (calendars.size() == 1) {
+            eventView.compose(calendars.get(0));
+            return;
+        }
+
+        CharSequence[] labels = new CharSequence[calendars.size()];
+        for (int index = 0; index < calendars.size(); index++) {
+            labels[index] =
+                    calendars.get(index).name + "\n" + calendars.get(index).accountEmail;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.save_target_title)
+                .setItems(labels, (dialog, which) -> eventView.compose(calendars.get(which)))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
@@ -1634,6 +1666,7 @@ public class MainActivity extends Activity {
                                 form.addField();
                             }
                         });
+        findViewById(R.id.bar_delete).setOnClickListener(view -> eventView.confirmDelete());
     }
 
     /**
@@ -2043,7 +2076,7 @@ public class MainActivity extends Activity {
                     showDomainBar(PANEL_MAIL);
                     mailList.reload();
                 };
-        mailScreen.fab = () -> show(PANEL_COMPOSE);
+        mailScreen.fab = () -> compose.open();
         screens.put(PANEL_MAIL, mailScreen);
 
         Screen calendar = new Screen();
@@ -2055,11 +2088,22 @@ public class MainActivity extends Activity {
                     // is rebuilt on arrival rather than cached across days.
                     calendarList.reload();
                 };
-        calendar.fab = () -> show(PANEL_EVENT);
+        calendar.fab = this::composeEvent;
         screens.put(PANEL_CALENDAR, calendar);
 
-        screens.put(PANEL_COMPOSE, frame(R.string.compose_new, PANEL_MAIL));
-        screens.put(PANEL_EVENT, frame(R.string.event_new, PANEL_CALENDAR));
+        // The composer is a frame with a send button and a back arrow
+        // that asks before losing what was typed.
+        Screen composer = new Screen();
+        composer.chrome =
+                () -> {
+                    ((TextView) findViewById(R.id.bar_title)).setText(R.string.compose_new);
+                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
+                    addFab(R.drawable.ic_send, R.string.compose_send);
+                };
+        composer.fab = () -> compose.send();
+        composer.barBack = () -> compose.close();
+        composer.systemBack = () -> compose.close();
+        screens.put(PANEL_COMPOSE, composer);
 
         // The two readers: a back arrow, no FAB, and a bar titled by
         // what is open rather than by the domain, since the domain is
@@ -2076,6 +2120,7 @@ public class MainActivity extends Activity {
                     findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
                     if (eventView.readable()) {
                         findViewById(R.id.contact_add_field).setVisibility(View.VISIBLE);
+                        findViewById(R.id.bar_delete).setVisibility(View.VISIBLE);
                         addFab(R.drawable.ic_save, R.string.event_save);
                     } else {
                         findViewById(R.id.fab).setVisibility(View.GONE);
@@ -2212,6 +2257,7 @@ public class MainActivity extends Activity {
                         R.id.contact_advanced,
                         R.id.contact_books,
                         R.id.contact_add_field,
+                        R.id.bar_delete,
                     }) {
                 findViewById(id).setVisibility(View.GONE);
             }

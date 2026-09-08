@@ -22,8 +22,9 @@ import java.util.List;
  *
  * <p>Events are stored as the iCalendar text the server sent, unparsed: what an
  * event renders as depends on the window being shown, so the expansion happens
- * at render time through the bridge. The summary beside it ({@link PimdirMeta})
- * is what an agenda row reads, so listing a month never parses a body.
+ * at render time through the bridge. No summary is written beside it: what an
+ * agenda row shows needs that same expansion, so the row carries the body and
+ * the validator its next write is guarded by, and nothing else.
  *
  * <p>There is no subscription switch. The old schema carried one, defaulted to
  * true and never written by anything, so it decided nothing; when a calendar
@@ -64,26 +65,20 @@ final class EventStore {
                             calendar.description,
                             calendar.color));
         }
-        collections.replace(accountEmail, PimdirMeta.CALENDAR, listed);
+        collections.replace(accountEmail, PimdirSummary.CALENDAR, listed);
     }
 
     /** Replaces one calendar collection's objects with the listed set. */
     void replaceEvents(String collectionId, List<Event> events) {
         List<PimdirItems.Row> rows = new ArrayList<>(events.size());
         for (Event event : events) {
-            rows.add(
-                    new PimdirItems.Row(
-                            event.id,
-                            event.ical,
-                            // NOTE: the summary an agenda row renders is not
-                            // derived here: it needs the expansion, which is the
-                            // bridge's, so the item carries the body and the
-                            // agenda projects it. What the meta does carry is
-                            // the validator the server handed over, which is
-                            // what lets an edit be pushed guarded instead of
-                            // overwriting whatever arrived since.
-                            PimdirMeta.calendarValidator(event.etag),
-                            ""));
+            // NOTE: the summary an agenda row renders is not derived here: it
+            // needs the expansion, which is the bridge's, so the item carries
+            // the body and the agenda projects it. What the row does carry is
+            // the validator the server handed over, as the base revision of
+            // its source binding, which is what lets an edit be pushed guarded
+            // instead of overwriting whatever arrived since.
+            rows.add(new PimdirItems.Row(event.id, event.ical, null, "", "[]", event.etag));
         }
         items.replace(collectionId, rows);
     }
@@ -112,7 +107,7 @@ final class EventStore {
 
     List<StoredCalendar> loadCalendars() {
         List<StoredCalendar> calendars = new ArrayList<>();
-        for (PimdirCollections.Stored stored : collections.list(PimdirMeta.CALENDAR)) {
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.CALENDAR)) {
             String account = accounts.idOf(stored.accountEmail);
             calendars.add(
                     new StoredCalendar(
@@ -149,19 +144,22 @@ final class EventStore {
         try (Cursor cursor =
                 items.readable()
                         .rawQuery(
-                                "SELECT i.collection, i.link_id, i.object_hash, i.meta FROM items i"
+                                "SELECT i.collection, i.link_id, i.object_hash, b.base_revision"
+                                        + " FROM items i"
                                         + " JOIN collections c ON c.id = i.collection"
+                                        + " LEFT JOIN bindings b ON b.collection = i.collection"
+                                        + " AND b.link_id = i.link_id AND b.source = ?"
                                         + " WHERE c.kind = ? AND i.deleted = 0"
                                         + " AND i.retained_at IS NULL"
                                         + " AND i.object_hash IS NOT NULL",
-                                new String[] {PimdirMeta.CALENDAR})) {
+                                new String[] {PimdirStorage.SERVER, PimdirSummary.CALENDAR})) {
             while (cursor.moveToNext()) {
                 events.add(
                         new StoredEvent(
                                 cursor.getString(0),
                                 cursor.getString(1),
                                 items.body(cursor.getString(2)),
-                                PimdirMeta.validatorOf(cursor.getString(3))));
+                                cursor.isNull(3) ? "" : cursor.getString(3)));
             }
         }
         return events;
@@ -179,7 +177,19 @@ final class EventStore {
             items.put(
                     db,
                     collectionId,
-                    new PimdirItems.Row(id, ical, PimdirMeta.calendarValidator(etag), ""));
+                    new PimdirItems.Row(id, ical, null, "", "[]", etag));
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /** Retires one stored object, for an entry the server no longer holds. */
+    void removeEvent(String collectionId, String id) {
+        android.database.sqlite.SQLiteDatabase db = items.writable();
+        db.beginTransaction();
+        try {
+            items.remove(db, collectionId, id);
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();

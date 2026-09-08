@@ -25,16 +25,12 @@ use io_people::v1::rest::people::{
 use serde_json::to_value;
 use vcard::{
     param::VcardParam,
-    prop::{VcardProp, VcardPropKind, VcardPropName},
-    tree::{
-        cst::VcardCst,
-        line::VcardLine,
-        prop::{
-            adr::ADR, email::EMAIL, r#fn::FN, impp::IMPP, lens::VcardPropLens, n::N,
-            nickname::NICKNAME, note::NOTE, org::ORG, related::RELATED, role::ROLE, tel::TEL,
-            title::TITLE, url::URL,
-        },
+    prop::{
+        VcardProp, VcardPropKind, VcardPropName, adr::ADR, email::EMAIL, r#fn::FN, impp::IMPP,
+        n::N, nickname::NICKNAME, note::NOTE, org::ORG, related::RELATED, role::ROLE, tel::TEL,
+        title::TITLE, url::URL,
     },
+    tree::{cst::VcardCst, line::VcardLine, prop::lens::VcardPropLens},
     value::{
         VcardValue,
         adr::VcardAdr,

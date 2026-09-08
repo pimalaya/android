@@ -1,9 +1,10 @@
-//! IMAP operations: the mailbox list and the envelope spine, run over
+//! IMAP operations: the mailbox list, the envelope spine, one message
+//! whole, and the three verbs a reader applies to one, run over
 //! io-imap's sans-io coroutines and the same Java transport the WebDAV
 //! side uses.
 //!
-//! Read-only and stateless per call, like the CalDAV side: one native
-//! call opens a connection, authenticates, does its work and drops it.
+//! Stateless per call, like the CalDAV side: one native call opens a
+//! connection, authenticates, does its work and drops it.
 //! What differs from WebDAV is that IMAP is a session rather than a
 //! request, so the whole account is walked in one call (connect once,
 //! list, then fetch every mailbox) instead of one call per collection.
@@ -12,18 +13,25 @@ use io_imap::{
     codec::fragmentizer::Fragmentizer,
     coroutine::{ImapCoroutine, ImapCoroutineState, ImapYield},
     rfc3501::{
+        append::{ImapMessageAppend, ImapMessageAppendOptions},
+        copy::{ImapMessageCopy, ImapMessageCopyOptions},
         examine::{ImapMailboxExamine, ImapMailboxExamineOptions},
         fetch::{ImapMessageFetch, ImapMessageFetchOptions},
         greeting::{ImapGreetingGet, ImapGreetingGetOptions},
         list::ImapMailboxList,
+        select::{ImapMailboxSelect, ImapMailboxSelectOptions},
+        store::{ImapMessageStoreOptions, ImapMessageStoreSilent},
     },
+    rfc6851::r#move::{ImapMessageMove, ImapMessageMoveOptions},
     sasl::auth_plain::{ImapAuthPlain, ImapAuthPlainOptions},
     types::{
+        IntoStatic,
         body::{Body, BodyStructure, Disposition},
         core::IString,
         fetch::{MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName},
-        flag::{Flag, FlagFetch, FlagNameAttribute},
+        flag::{Flag, FlagFetch, FlagNameAttribute, StoreType},
         mailbox::{ListMailbox, Mailbox},
+        response::Capability,
         sequence::SequenceSet,
     },
 };
@@ -44,6 +52,15 @@ pub struct ImapSession<'a, 'b, 'local> {
     client: &'a mut Client<'b, 'local>,
     fragmentizer: Fragmentizer,
     url: String,
+    /// What the server says it can do, read once at authentication.
+    ///
+    /// Kept because the write verbs are extensions and their fallbacks
+    /// are not equivalent: MOVE (RFC 6851) is one command where COPY
+    /// plus a marker is two and a half, and a mailbox-wide EXPUNGE
+    /// without UIDPLUS (RFC 4315) would take messages nobody here
+    /// deleted. Asking beats guessing, and CAPABILITY already came back
+    /// with the authentication.
+    capabilities: Vec<Capability<'static>>,
 }
 
 impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
@@ -52,6 +69,7 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
             client,
             fragmentizer: Fragmentizer::new(MAX_MESSAGE_SIZE),
             url: url.to_string(),
+            capabilities: Vec::new(),
         }
     }
 
@@ -90,7 +108,7 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
             ensure_capabilities: true,
         }))?;
 
-        self.run(ImapAuthPlain::new(
+        self.capabilities = self.run(ImapAuthPlain::new(
             None::<&str>,
             credentials.login,
             credentials.password,
@@ -99,12 +117,23 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
                 ensure_capabilities: true,
                 auto_id: None,
             },
-        ))
-        .map(|_| ())
+        ))?;
+
+        Ok(())
     }
 
     /// LIST, keeping the mailboxes that can actually hold messages.
     pub fn list_mailboxes(&mut self) -> Result<Vec<String>, BridgeError> {
+        Ok(self.list()?.into_iter().map(|(name, _)| name).collect())
+    }
+
+    /// LIST, as `(name, attributes)` pairs, the unselectable ones out.
+    ///
+    /// The attributes ride along because RFC 6154 puts the special-use
+    /// markers there: which mailbox is the trash is the server's answer
+    /// to give, and matching names against a list of words in a handful
+    /// of languages is the alternative.
+    fn list(&mut self) -> Result<Vec<(String, Vec<FlagNameAttribute<'static>>)>, BridgeError> {
         let reference: Mailbox = "".try_into().expect("empty LIST reference is valid");
         let pattern: ListMailbox = "*".try_into().expect("`*` LIST pattern is valid");
 
@@ -114,9 +143,12 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         Ok(listed
             .into_iter()
             .filter(|(_, _, attributes)| !attributes.contains(&FlagNameAttribute::Noselect))
-            .map(|(mailbox, _, _)| match mailbox {
-                Mailbox::Inbox => String::from("INBOX"),
-                Mailbox::Other(other) => String::from_utf8_lossy(other.as_ref()).into_owned(),
+            .map(|(mailbox, _, attributes)| {
+                let name = match mailbox {
+                    Mailbox::Inbox => String::from("INBOX"),
+                    Mailbox::Other(other) => String::from_utf8_lossy(other.as_ref()).into_owned(),
+                };
+                (name, attributes)
             })
             .collect())
     }
@@ -235,6 +267,171 @@ impl ImapSession<'_, '_, '_> {
             })
             .ok_or_else(|| BridgeError::from(format!("No message `{uid}` in `{mailbox}`")))
     }
+}
+
+/// The write verbs: what a reader does to a message once it is open.
+///
+/// SELECT rather than the EXAMINE the reads use, since a read-only
+/// mailbox refuses both a STORE and a MOVE. Silent variants throughout:
+/// the app already knows what it asked for, and the untagged FETCH the
+/// echoing form brings back is a response to parse for nothing.
+impl ImapSession<'_, '_, '_> {
+    /// SELECT a mailbox, then add or remove one marker on one message,
+    /// addressed by UID.
+    pub fn store_flag(
+        &mut self,
+        mailbox: &str,
+        uid: &str,
+        flag: &str,
+        add: bool,
+    ) -> Result<(), BridgeError> {
+        self.select(mailbox)?;
+
+        // NOTE: owned, so the coroutine outlives the borrowed marker.
+        let owned = flag.to_string();
+        let flag: Flag<'static> = Flag::try_from(owned.as_str())
+            .map(|flag| flag.into_static())
+            .map_err(|_| format!("Invalid message marker `{flag}`"))?;
+
+        self.run(ImapMessageStoreSilent::new(
+            uids(uid)?,
+            if add {
+                StoreType::Add
+            } else {
+                StoreType::Remove
+            },
+            vec![flag],
+            ImapMessageStoreOptions { uid: true },
+        ))
+    }
+
+    /// Deletes one message into the account's trash, naming the mailbox
+    /// it landed in, or [`None`] when the account names no trash and the
+    /// message was marked `\Deleted` where it is instead.
+    ///
+    /// Nothing is expunged either way. With no UIDPLUS (RFC 4315) an
+    /// expunge is mailbox-wide, so it would take every message another
+    /// client had marked; with it, the message is already out of the
+    /// mailbox and expunging its copy in the trash is not what deleting
+    /// asked for.
+    pub fn delete_message(
+        &mut self,
+        mailbox: &str,
+        uid: &str,
+    ) -> Result<Option<String>, BridgeError> {
+        // NOTE: `None` says the message stayed where it is, whether
+        // because the account names no trash or because it already is
+        // in it. Both are the same answer to the caller, which uses it
+        // to decide whether the row leaves its mailbox.
+        let trash = match self.special_use("\\Trash")? {
+            Some(trash) if trash != mailbox => trash,
+            _ => {
+                self.store_flag(mailbox, uid, "\\Deleted", true)?;
+                return Ok(None);
+            }
+        };
+
+        self.select(mailbox)?;
+        self.move_or_copy(uid, &trash)?;
+
+        Ok(Some(trash))
+    }
+
+    /// The mailbox the server marks with one RFC 6154 special-use
+    /// attribute, or [`None`] when it marks none with it.
+    fn special_use(&mut self, attribute: &str) -> Result<Option<String>, BridgeError> {
+        Ok(self
+            .list()?
+            .into_iter()
+            .find(|(_, attributes)| {
+                attributes
+                    .iter()
+                    .any(|held| held.to_string().eq_ignore_ascii_case(attribute))
+            })
+            .map(|(name, _)| name))
+    }
+
+    /// Relocates one message of the selected mailbox into `target`:
+    /// MOVE where the server has it, else the COPY the extension folds
+    /// into one command, with the original left marked `\Deleted`.
+    fn move_or_copy(&mut self, uid: &str, target: &str) -> Result<(), BridgeError> {
+        let name: Mailbox<'static> = target
+            .to_string()
+            .try_into()
+            .map_err(|_| format!("Invalid mailbox name `{target}`"))?;
+
+        if self.capabilities.contains(&Capability::Move) {
+            self.run(ImapMessageMove::new(
+                uids(uid)?,
+                name,
+                ImapMessageMoveOptions { uid: true },
+            ))?;
+
+            return Ok(());
+        }
+
+        self.run(ImapMessageCopy::new(
+            uids(uid)?,
+            name,
+            ImapMessageCopyOptions { uid: true },
+        ))?;
+
+        self.run(ImapMessageStoreSilent::new(
+            uids(uid)?,
+            StoreType::Add,
+            vec![Flag::Deleted],
+            ImapMessageStoreOptions { uid: true },
+        ))
+    }
+
+    /// Files a copy of a sent message in the account's sent mailbox
+    /// (RFC 6154 `\Sent`), naming it, or [`None`] when the account names
+    /// none and nothing was filed.
+    ///
+    /// The copy is the sender's own record, so it is appended already
+    /// `\Seen`: it is not new mail and an unread count that climbs every
+    /// time the user writes something is wrong about what it counts.
+    pub fn append_sent(&mut self, message: Vec<u8>) -> Result<Option<String>, BridgeError> {
+        let Some(sent) = self.special_use("\\Sent")? else {
+            return Ok(None);
+        };
+
+        let name: Mailbox<'static> = sent
+            .clone()
+            .try_into()
+            .map_err(|_| format!("Invalid mailbox name `{sent}`"))?;
+
+        self.run(ImapMessageAppend::new(
+            name,
+            message,
+            ImapMessageAppendOptions {
+                flags: vec![Flag::Seen],
+                ..Default::default()
+            },
+        ))?;
+
+        Ok(Some(sent))
+    }
+
+    /// SELECT one mailbox for writing.
+    fn select(&mut self, mailbox: &str) -> Result<(), BridgeError> {
+        let name: Mailbox<'static> = mailbox
+            .to_string()
+            .try_into()
+            .map_err(|_| format!("Invalid mailbox name `{mailbox}`"))?;
+
+        self.run(ImapMailboxSelect::new(
+            name,
+            ImapMailboxSelectOptions::default(),
+        ))
+        .map(|_| ())
+    }
+}
+
+/// One message's UID as the sequence set a UID command takes.
+fn uids(uid: &str) -> Result<SequenceSet, BridgeError> {
+    uid.try_into()
+        .map_err(|_| BridgeError::from(format!("Invalid message id `{uid}`")))
 }
 
 /// One raw RFC 5322 message as the reader shows it.

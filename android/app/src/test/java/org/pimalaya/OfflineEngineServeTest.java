@@ -39,7 +39,7 @@ public class OfflineEngineServeTest {
         List<Addressbook> books = List.of(new Addressbook("b1", "Book One", BOOK, null, null));
         store.replaceAddressbooks(EMAIL, books);
         new PimdirCollections(pimdir, context).replace(
-                EMAIL, PimdirMeta.CONTACT, PimdirCollections.of(EMAIL, books));
+                EMAIL, PimdirSummary.CONTACT, PimdirCollections.of(EMAIL, books));
 
         // No account (storage yields only) and no context (no phone
         // spoke): the shape the mutate driver runs with.
@@ -71,6 +71,12 @@ public class OfflineEngineServeTest {
                                                 new JSONObject()
                                                         .put("collection", BOOK)
                                                         .put("handle", "c1.vcf")
+                                                        // A body is fetched with
+                                                        // its identity: a
+                                                        // placement carrying one
+                                                        // and no link id is a
+                                                        // probe, not an item.
+                                                        .put("linkId", "uid-c1")
                                                         .put("object", hash)
                                                         .put("level", "full")
                                                         .put("status", "clean")

@@ -43,10 +43,15 @@ final class AccountEntry {
         this.credentials = new HashMap<>(credentials);
     }
 
+    /** One identity covering nothing yet, to connect domains onto. */
+    static AccountEntry empty(String email) {
+        return new AccountEntry(email, Map.of(), Map.of());
+    }
+
     /** One connected identity covering a single domain. */
     static AccountEntry of(
             String email, PimDomain domain, String baseUrl, AccountCredential credential) {
-        return new AccountEntry(email, Map.of(), Map.of()).with(domain, baseUrl, credential);
+        return empty(email).with(domain, baseUrl, credential);
     }
 
     /** Where a domain lives, or null when the account covers none. */
@@ -81,7 +86,8 @@ final class AccountEntry {
         if (connection == null || credential == null) {
             return null;
         }
-        return new Account(connection.baseUrl, credential.login, credential.secret);
+        return new Account(
+                connection.baseUrl, credential.login, credential.secret, connection.submitUrl);
     }
 
     /** The domains this account covers, in the enum's order. */
@@ -100,8 +106,18 @@ final class AccountEntry {
      * that gains it late.
      */
     AccountEntry with(PimDomain domain, String baseUrl, AccountCredential credential) {
+        return with(domain, baseUrl, null, credential);
+    }
+
+    /**
+     * The same account with one domain connected on two endpoints: where
+     * it is read and where it is written. Only mail has a second, and
+     * only over SMTP.
+     */
+    AccountEntry with(
+            PimDomain domain, String baseUrl, String submitUrl, AccountCredential credential) {
         Map<PimDomain, AccountConnection> merged = new EnumMap<>(connections);
-        merged.put(domain, new AccountConnection(baseUrl, credential.id));
+        merged.put(domain, new AccountConnection(baseUrl, credential.id, submitUrl));
 
         Map<String, AccountCredential> held = new HashMap<>(credentials);
         held.put(credential.id, credential);

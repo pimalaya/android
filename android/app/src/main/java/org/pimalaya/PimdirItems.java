@@ -4,6 +4,8 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.util.Log;
 
+import org.json.JSONObject;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -14,7 +16,7 @@ import java.util.Set;
 /**
  * Item-level writes and reads the app performs on its own, outside a sync.
  *
- * <p>{@link PimdirStorage} services what the io-replica engine asks for; this
+ * <p>{@link PimdirStorage} services what the io-pimdir engine asks for; this
  * is the other half, for everything the app does without the engine: staging an
  * edit the next sync will push, and refreshing the read-only mirrors that have
  * no engine at all (mail, calendar). Both write the same tables, so the object
@@ -52,20 +54,36 @@ final class PimdirItems {
     static final class Row {
         final String linkId;
         final String body;
-        final String meta;
+
+        /**
+         * The typed summary row (STORAGE Annex A) as {@link PimdirSummary}
+         * spells it on the wire, or null to keep whatever is stored.
+         */
+        final JSONObject summary;
+
         final String sortKey;
         final String flags;
 
-        Row(String linkId, String body, String meta, String sortKey, String flags) {
+        /**
+         * The revision this row was mirrored at, or null when the caller
+         * tracks none: a read-only mirror has no engine, so the validator its
+         * next write is guarded by is the base revision of its source binding
+         * and there is nowhere else for it to live.
+         */
+        final String revision;
+
+        Row(String linkId, String body, JSONObject summary, String sortKey, String flags,
+                String revision) {
             this.linkId = linkId;
             this.body = body;
-            this.meta = meta;
+            this.summary = summary;
             this.sortKey = sortKey;
             this.flags = flags;
+            this.revision = revision;
         }
 
-        Row(String linkId, String body, String meta, String sortKey) {
-            this(linkId, body, meta, sortKey, "[]");
+        Row(String linkId, String body, JSONObject summary, String sortKey) {
+            this(linkId, body, summary, sortKey, "[]", null);
         }
     }
 
@@ -114,37 +132,59 @@ final class PimdirItems {
 
         if (exists) {
             db.execSQL(
-                    "UPDATE items SET object_hash = ?, meta = ?, sort_key = ?, flags = ?,"
+                    "UPDATE items SET object_hash = ?, sort_key = ?, flags = ?,"
                             + " level = ?, deleted = 0, retained_at = NULL, retained_by = NULL"
                             + " WHERE collection = ? AND link_id = ?",
-                    new Object[] {
-                        hash, row.meta, row.sortKey, row.flags, FULL, collection, row.linkId
-                    });
+                    new Object[] {hash, row.sortKey, row.flags, FULL, collection, row.linkId});
         } else {
             db.execSQL(
-                    "INSERT INTO items(collection, link_id, seq, flags, object_hash, meta,"
-                            + " sort_key, level) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO items(collection, link_id, seq, flags, object_hash,"
+                            + " sort_key, level) VALUES(?, ?, ?, ?, ?, ?, ?)",
                     new Object[] {
                         collection, row.linkId, seqFor(db, row.linkId), row.flags, hash,
-                        row.meta, row.sortKey, FULL
+                        row.sortKey, FULL
                     });
         }
 
+        PimdirSummary.write(db, collection, row.linkId, row.summary);
+        if (row.revision != null) {
+            bindRevision(db, collection, row.linkId, row.revision);
+        }
         adjustRefcount(db, previous, hash);
         return hash;
     }
 
     /**
+     * Records the revision the mirror read the row at, as the base of its
+     * source binding.
+     *
+     * <p>A mirror has no engine, so this binding is not a merge base: it is
+     * where the one validator a guarded write needs belongs, and reading it
+     * back is how the write conditions itself on what the server held. The
+     * body is deliberately not pinned, since a mirror stages nothing to diff
+     * against it.
+     */
+    private void bindRevision(
+            SQLiteDatabase db, String collection, String linkId, String revision) {
+        db.execSQL(
+                "INSERT INTO bindings(collection, link_id, source, handle, base_revision,"
+                        + " base_present) VALUES(?, ?, ?, ?, ?, 1)"
+                        + " ON CONFLICT(collection, link_id, source) DO UPDATE SET"
+                        + " base_revision = excluded.base_revision, base_present = 1",
+                new Object[] {collection, linkId, PimdirStorage.SERVER, linkId, revision});
+    }
+
+    /**
      * Drops one item outright, releasing every body it referenced.
      *
-     * <p>Outright rather than retained: retention (SPEC.md §16) exists so a
+     * <p>Outright rather than retained: retention (SPEC.md §11) exists so a
      * store is never the last holder of a body a remote expunged, and it is the
      * sync seam's job because only the sync knows a source dropped an item. A
      * caller reaching this has decided the item goes.
      */
     void remove(SQLiteDatabase db, String collection, String linkId) {
         String object = objectOf(db, collection, linkId);
-        List<String> bases = baseObjectsOf(db, collection, linkId);
+        List<String> pinned = bindingObjectsOf(db, collection, linkId);
         String conflict = conflictObjectOf(db, collection, linkId);
 
         db.execSQL(
@@ -153,8 +193,8 @@ final class PimdirItems {
 
         adjustRefcount(db, object, null);
         adjustRefcount(db, conflict, null);
-        for (String base : bases) {
-            adjustRefcount(db, base, null);
+        for (String pin : pinned) {
+            adjustRefcount(db, pin, null);
         }
     }
 
@@ -303,18 +343,26 @@ final class PimdirItems {
         }
     }
 
-    private static List<String> baseObjectsOf(
+    /**
+     * Every body the item's bindings pin: the base each source last agreed on,
+     * and the diverging remote one a conflicted source is waiting to settle.
+     */
+    private static List<String> bindingObjectsOf(
             SQLiteDatabase db, String collection, String linkId) {
         try (Cursor cursor =
                 db.rawQuery(
-                        "SELECT base_object FROM bindings WHERE collection = ? AND link_id = ?"
-                                + " AND base_object IS NOT NULL",
+                        "SELECT base_object, conflict_object FROM bindings"
+                                + " WHERE collection = ? AND link_id = ?",
                         new String[] {collection, linkId})) {
-            List<String> bases = new ArrayList<>(cursor.getCount());
+            List<String> pinned = new ArrayList<>(cursor.getCount());
             while (cursor.moveToNext()) {
-                bases.add(cursor.getString(0));
+                for (int column = 0; column < 2; column++) {
+                    if (!cursor.isNull(column)) {
+                        pinned.add(cursor.getString(column));
+                    }
+                }
             }
-            return bases;
+            return pinned;
         }
     }
 }

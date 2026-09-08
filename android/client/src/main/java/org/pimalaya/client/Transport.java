@@ -101,6 +101,7 @@ final class Transport {
         switch (scheme) {
             case "https":
             case "imaps":
+            case "smtps":
                 // NOTE: the host-aware overload keeps the peer host, so
                 // TLS gets SNI and the platform validates the chain.
                 socket =
@@ -111,6 +112,7 @@ final class Transport {
                 break;
             case "http":
             case "imap":
+            case "smtp":
             case "tcp":
                 socket = plain;
                 break;
@@ -134,6 +136,10 @@ final class Transport {
                 return 993;
             case "imap":
                 return 143;
+            case "smtps":
+                return 465;
+            case "smtp":
+                return 587;
             default:
                 throw new PimalayaException("Transport URL '" + scheme + "' has no port");
         }

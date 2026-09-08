@@ -12,17 +12,17 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-ical-rs = { version = "0.1", default-features = false, features = ["jscalendar", "parser"] }
-io-http = { version = "0.3", default-features = false }
-io-imap = { version = "0.4", default-features = false }
-io-jmap = { version = "0.2", default-features = false }
-io-msgraph = { version = "0.2", default-features = false }
-io-oauth = { version = "0.2", default-features = false }
-io-people = { version = "0.2", default-features = false }
-io-pim-discovery = { version = "0.5", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
-io-pimdir = { version = "0.2", default-features = false }
-io-replica = { version = "0.3", default-features = false }
-io-webdav = { version = "0.1", default-features = false }
+ical-rs = { version = "0.5", default-features = false, features = ["jscalendar", "parser"] }
+io-http = { version = "0.5", default-features = false }
+io-imap = { version = "0.6", default-features = false }
+io-jmap = { version = "0.3", default-features = false }
+io-msgraph = { version = "0.3", default-features = false }
+io-oauth = { version = "0.3", default-features = false }
+io-people = { version = "0.3", default-features = false }
+io-pim-discovery = { version = "0.7", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
+io-pimdir = { version = "0.5", default-features = false }
+io-smtp = { version = "0.3", default-features = false }
+io-webdav = { version = "0.3", default-features = false }
 jni = "0.22"
 log = { version = "0.4", default-features = false }
 mail-parser = { version = "0.11", default-features = false, features = ["full_encoding"] }
@@ -32,10 +32,4 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.11", default-features = false }
 url = { version = "2", default-features = false }
-vcard-rs = { version = "0.2", default-features = false, features = ["parser", "jscontact"] }
-
-[patch.crates-io]
-io-jmap.git = "https://github.com/pimalaya/io-jmap.git"
-io-pimdir.git = "https://github.com/pimalaya/io-pimdir.git"
-io-replica.git = "https://github.com/pimalaya/io-replica.git"
-io-webdav.git = "https://github.com/pimalaya/io-webdav.git"
+vcard-rs = { version = "0.4", default-features = false, features = ["parser", "jscontact"] }

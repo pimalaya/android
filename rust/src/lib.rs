@@ -7,15 +7,28 @@
 //!
 //! ## Operations
 //!
-//! It exposes one entry point per operation: `search` turns an email
-//! into CardDAV service configs with their authentication methods
-//! (`discover` is the older context-root-only flavor), the `oauth*`
-//! entry points cover the authorization code grant with PKCE (authorize
-//! URL, redirect validation, code exchange, token refresh),
-//! `listAddressbooks` lists the account's collections (doubling as the
-//! onboarding connection check), and `listCards` / `createCard` /
-//! `updateCard` / `deleteCard` are the vCard CRUD the contact screens
-//! build on.
+//! It exposes one entry point per operation, per domain.
+//!
+//! Setup: `search` turns an email into service configs with their
+//! authentication methods (`discover` is the older context-root-only
+//! flavor), and the `oauth*` entry points cover the authorization code
+//! grant with PKCE (authorize URL, redirect validation, code exchange,
+//! token refresh).
+//!
+//! Contacts: `listAddressbooks` lists the account's collections
+//! (doubling as the onboarding connection check), and `listCards` /
+//! `createCard` / `updateCard` / `deleteCard` are the vCard CRUD the
+//! contact screens build on.
+//!
+//! Mail: `syncMail` walks an account's mailboxes, `fetchMessage` reads
+//! one whole, `setMessageFlag` and `deleteMessage` are what a reader
+//! writes back, and `sendMessage` composes a draft to RFC 5322 and
+//! hands it to the account's submission server.
+//!
+//! Calendar: `listCalendars` and `listEvents` read, `expandEvent` and
+//! `readEvent` project one object for the page that shows it, and
+//! `newEvent` / `createEvent` / `updateEvent` / `deleteEvent` are the
+//! iCalendar CRUD behind it.
 //!
 //! ## Backends
 //!
@@ -29,11 +42,17 @@
 //! and Google runs io-people's coroutines with the google module
 //! projecting People person resources to and from vCards.
 //!
+//! Mail and calendar dispatch the same way, over two backends each:
+//! IMAP over io-imap and CalDAV over io-webdav, or the RFC 8621 and
+//! draft-ietf-jmap-calendars verbs behind the `jmap://` marker.
+//! Submission is the one place the account carries a second endpoint,
+//! since IMAP reads and SMTP (io-smtp) writes, and they are two servers.
+//!
 //! ## Offline engine
 //!
-//! The `offline*` entry points run io-replica's replica engine (sync,
-//! upgrade, mutate), upcalling a Java `ReplicaDriver` on each yield so
-//! storage stays in the Java CardStore and remote operations reuse the
+//! The `offline*` entry points run io-pimdir's sync engine (sync,
+//! upgrade, mutate), upcalling a Java `OfflineDriver` on each yield so
+//! storage stays in the Java pimdir store and remote operations reuse the
 //! backend clients; `syncCards` and `multigetCards` are the CardDAV
 //! primitives its remote seam builds on (RFC 6578 sync-collection with a
 //! full-enumeration fallback, and addressbook-multiget body fetches).
@@ -44,9 +63,11 @@ mod client;
 mod ffi;
 mod google;
 mod jmap;
+mod mail;
 mod msgraph;
 mod oauth;
 mod offline;
 mod project;
 mod store;
+mod summary;
 mod types;

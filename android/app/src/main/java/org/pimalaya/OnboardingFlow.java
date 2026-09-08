@@ -310,6 +310,17 @@ final class OnboardingFlow {
         final AuthMethod method;
         final String login;
 
+        /**
+         * Where mail is submitted, for an IMAP option whose discovery run
+         * also turned up an SMTP endpoint; null everywhere else.
+         *
+         * <p>Not an option of its own, because submission is not a way to
+         * connect a domain: nobody picks between reading mail and sending
+         * it, and an SMTP row on the picker would connect to something
+         * that answers no listing. It rides the option that reads.
+         */
+        final String submitUrl;
+
         SetupOption(
                 String label,
                 String detail,
@@ -317,12 +328,24 @@ final class OnboardingFlow {
                 String resource,
                 AuthMethod method,
                 String login) {
+            this(label, detail, baseUrl, resource, method, login, null);
+        }
+
+        SetupOption(
+                String label,
+                String detail,
+                String baseUrl,
+                String resource,
+                AuthMethod method,
+                String login,
+                String submitUrl) {
             this.label = label;
             this.detail = detail;
             this.baseUrl = baseUrl;
             this.resource = resource;
             this.method = method;
             this.login = login;
+            this.submitUrl = submitUrl;
         }
 
         /** Whether this option signs in through a browser grant. */
@@ -559,6 +582,7 @@ final class OnboardingFlow {
             java.util.Collections.sort(
                     methods,
                     (left, right) -> Integer.compare(authRank(left.type), authRank(right.type)));
+            String submitUrl = "imap".equals(config.service) ? submissionUrl() : null;
             for (AuthMethod method : methods) {
                 options.add(
                         new SetupOption(
@@ -567,7 +591,8 @@ final class OnboardingFlow {
                                 baseUrl,
                                 resourceOf(config, method),
                                 method,
-                                login));
+                                login,
+                                submitUrl));
             }
         }
 
@@ -1177,11 +1202,16 @@ final class OnboardingFlow {
             if (setup.credential == null) {
                 continue;
             }
+            String submitUrl =
+                    setup.domain == PimDomain.MAIL && setup.selected != null
+                            ? setup.selected.submitUrl
+                            : null;
+            if (connectedAccount == null) {
+                connectedAccount = AccountEntry.empty(connectedEmail);
+            }
             connectedAccount =
-                    connectedAccount == null
-                            ? AccountEntry.of(
-                                    connectedEmail, setup.domain, setup.baseUrl, setup.credential)
-                            : connectedAccount.with(setup.domain, setup.baseUrl, setup.credential);
+                    connectedAccount.with(
+                            setup.domain, setup.baseUrl, submitUrl, setup.credential);
         }
         if (connectedAccount == null) {
             return;
@@ -1348,7 +1378,7 @@ final class OnboardingFlow {
         new PimdirCollections(host.pimdir, host)
                 .replace(
                         connectedEmail,
-                        PimdirMeta.CONTACT,
+                        PimdirSummary.CONTACT,
                         PimdirCollections.of(connectedEmail, pendingBooks));
 
         for (Addressbook book : pendingBooks) {
@@ -1440,6 +1470,32 @@ final class OnboardingFlow {
      * STARTTLS step, and a {@code starttls} endpoint driven as if it were
      * implicit would connect in the clear rather than fail.
      */
+    /**
+     * Where this address submits mail, from the same discovery run that
+     * found where it reads it, or null when nothing was found.
+     *
+     * <p>Implicit TLS only, for the reason {@link #endpointUrl} gives:
+     * this client has no STARTTLS step, and driving a {@code starttls}
+     * endpoint as if it were implicit would hand a message over in the
+     * clear rather than fail.
+     */
+    private String submissionUrl() {
+        for (ServiceConfig config : searchedConfigs) {
+            if (!"smtp".equals(config.service) || config.host == null) {
+                continue;
+            }
+            if (!"tls".equalsIgnoreCase(config.security)) {
+                Log.w(
+                        "pimalaya",
+                        "skip smtp at " + config.host + ": unsupported security "
+                                + config.security);
+                continue;
+            }
+            return "smtps://" + config.host + ":" + config.port;
+        }
+        return null;
+    }
+
     private static String endpointUrl(ServiceConfig config) {
         if (config.url != null) {
             return "jmap".equals(config.service)

@@ -163,7 +163,7 @@ final class SyncRunner {
                 new PimdirCollections(pimdir, context)
                         .replace(
                                 account.email,
-                                PimdirMeta.CONTACT,
+                                PimdirSummary.CONTACT,
                                 PimdirCollections.of(account.email, books));
             } catch (Exception error) {
                 Log.w("pimalaya", "addressbook recovery failed", error);

@@ -5,12 +5,8 @@ use core::str::FromStr;
 
 use serde_json::{Map, Value, json};
 use vcard::{
-    prop::VcardPropKind,
-    tree::{
-        cst::VcardCst,
-        merge::merge,
-        prop::{lens::VcardPropLens, rev::REV, uid::UID},
-    },
+    prop::{VcardPropKind, rev::REV, uid::UID},
+    tree::{cst::VcardCst, merge::VcardMerge, prop::lens::VcardPropLens},
 };
 
 use crate::project::{project, single_field, sort_arrays, text_prop};
@@ -64,7 +60,12 @@ pub fn merge_conflict(base: &str, local: &str, remote: &str) -> Result<Value, St
     let local = VcardCst::parse(local).map_err(|err| format!("Invalid vCard: {err}"))?;
     let remote = VcardCst::parse(remote).map_err(|err| format!("Invalid vCard: {err}"))?;
 
-    let report = merge(&base, &local, &remote);
+    let report = VcardMerge {
+        base: &base,
+        left: &local,
+        right: &remote,
+    }
+    .merge();
 
     Ok(json!({
         "vcard": report.merged.to_string(),
@@ -105,7 +106,14 @@ pub fn merge_conflict_form(base: &str, local: &str, remote: &str) -> Result<Valu
             VcardCst::parse(base_for_merge).map_err(|err| format!("Invalid vCard: {err}"))?;
         let left = VcardCst::parse(winner).map_err(|err| format!("Invalid vCard: {err}"))?;
         let right = VcardCst::parse(loser).map_err(|err| format!("Invalid vCard: {err}"))?;
-        merge(&base_cst, &left, &right).merged.to_string()
+        VcardMerge {
+            base: &base_cst,
+            left: &left,
+            right: &right,
+        }
+        .merge()
+        .merged
+        .to_string()
     };
 
     let mut model = project(&merged)?;
@@ -202,7 +210,14 @@ pub fn merge_cards(cards: &[String]) -> Result<Value, String> {
                 VcardCst::parse(merged.as_str()).map_err(|err| format!("Invalid vCard: {err}"))?;
             let right =
                 VcardCst::parse(card.as_str()).map_err(|err| format!("Invalid vCard: {err}"))?;
-            merge(&base, &left, &right).merged.to_string()
+            VcardMerge {
+                base: &base,
+                left: &left,
+                right: &right,
+            }
+            .merge()
+            .merged
+            .to_string()
         };
     }
 

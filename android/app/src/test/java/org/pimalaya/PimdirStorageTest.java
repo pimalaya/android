@@ -13,13 +13,14 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.PimalayaException;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.util.List;
 
 /**
- * io-replica's storage seam against a pimdir store.
+ * io-pimdir's storage seam against a pimdir store.
  *
  * <p>These drive the seam the way the engine does: JSON envelopes in, JSON out,
  * so what is checked is the contract rather than the SQL. The cases that matter
@@ -63,7 +64,7 @@ public class PimdirStorageTest {
         if (hash != null) {
             placement.put("object", hash);
         }
-        placement.put("meta", PimdirMeta.contact(new JSONObject().put("uid", linkId), 12));
+        placement.put("summary", contactSummary(linkId));
         if (sortKey != null) {
             placement.put("sortKey", sortKey);
         }
@@ -77,12 +78,34 @@ public class PimdirStorageTest {
         return op;
     }
 
+    /** The typed contact summary an engine write carries, as the wire spells it. */
+    private JSONObject contactSummary(String uid) throws Exception {
+        JSONObject row = new JSONObject();
+        row.put("uid", uid);
+        row.put("fn", "Alice");
+        row.put(
+                "addresses",
+                new JSONArray()
+                        .put(
+                                new JSONObject()
+                                        .put("role", "email")
+                                        .put("position", 0)
+                                        .put("address", uid + "@example.org")));
+        return new JSONObject().put("contact", row);
+    }
+
     private JSONArray batch(JSONObject... ops) {
         JSONArray writes = new JSONArray();
         for (JSONObject op : ops) {
             writes.put(op);
         }
         return writes;
+    }
+
+    private String stringOf(String sql, String... args) {
+        try (Cursor cursor = db.rawQuery(sql, args)) {
+            return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : null;
+        }
     }
 
     private long scalar(String sql, String... args) {
@@ -96,7 +119,7 @@ public class PimdirStorageTest {
         storage.applyWrites(
                 batch(storeObject("aa11", "BEGIN:VCARD"), upsert("a.vcf", "uid-a", "aa11", "alice")));
 
-        JSONObject loaded = storage.loadCollection("acct/Contacts");
+        JSONObject loaded = storage.loadCollection("acct/Contacts", null);
         JSONArray placements = loaded.getJSONArray("placements");
         assertEquals(1, placements.length());
 
@@ -132,7 +155,9 @@ public class PimdirStorageTest {
         storage.applyWrites(batch(storeObject("dd44", "two"), upsert("c.vcf", "uid-c", "dd44", null)));
 
         JSONObject placement =
-                storage.loadCollection("acct/Contacts").getJSONArray("placements").getJSONObject(0);
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("placements")
+                        .getJSONObject(0);
         assertEquals("carol", placement.getString("sortKey"));
         assertEquals("dd44", placement.getString("object"));
     }
@@ -165,13 +190,17 @@ public class PimdirStorageTest {
         assertEquals("removed", effects.getJSONObject(0).getString("kind"));
 
         // The row survives with its body pinned: for a backup the store is the
-        // only holder of what the remote expunged (SPEC.md §16).
+        // only holder of what the remote expunged (SPEC.md §11).
         assertEquals(1, scalar("SELECT count(*) FROM items WHERE retained_at IS NOT NULL"));
         assertEquals(1, scalar("SELECT count(*) FROM objects WHERE hash = 'aa77'"));
         assertTrue(new PimdirBlobs(store.blobs()).has("aa77"));
 
         // And it is invisible to the sync seam, so nothing re-derives it.
-        assertEquals(0, storage.loadCollection("acct/Contacts").getJSONArray("placements").length());
+        assertEquals(
+                0,
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("placements")
+                        .length());
     }
 
     @Test
@@ -188,7 +217,8 @@ public class PimdirStorageTest {
         drop.put("handle", "temp-1");
         storage.applyWrites(batch(drop, upsert("temp-1", "uid-h", "bb88", "hana")));
 
-        JSONArray placements = storage.loadCollection("acct/Contacts").getJSONArray("placements");
+        JSONArray placements =
+                storage.loadCollection("acct/Contacts", null).getJSONArray("placements");
         assertEquals("the rekeyed placement survived", 1, placements.length());
         assertEquals(0, scalar("SELECT count(*) FROM items WHERE retained_at IS NOT NULL"));
     }
@@ -242,12 +272,12 @@ public class PimdirStorageTest {
         storage.applyWrites(batch(op));
 
         assertEquals("sync-token-42",
-                storage.loadCollection("acct/Contacts").getString("checkpoint"));
+                storage.loadCollection("acct/Contacts", null).getString("checkpoint"));
     }
 
     @Test
     public void anEmptyCollectionLoadsEmptyRatherThanFailing() throws Exception {
-        JSONObject loaded = storage.loadCollection("acct/Nothing");
+        JSONObject loaded = storage.loadCollection("acct/Nothing", null);
 
         assertEquals(0, loaded.getJSONArray("placements").length());
         assertFalse("no checkpoint yet", loaded.has("checkpoint"));
@@ -276,26 +306,31 @@ public class PimdirStorageTest {
                 scalar("SELECT count(*) FROM bindings WHERE link_id = 'uid-k'"));
 
         // Each spoke sees its own handle for it.
-        assertEquals("k.vcf", storage.loadCollection("acct/Contacts")
+        assertEquals("k.vcf", storage.loadCollection("acct/Contacts", null)
                 .getJSONArray("placements").getJSONObject(0).getString("handle"));
         assertEquals("raw-7",
-                storage.loadCollection(PimdirStorage.phoneCollection("acct/Contacts"))
+                storage.loadCollection(PimdirStorage.phoneCollection("acct/Contacts"), null)
                         .getJSONArray("placements").getJSONObject(0).getString("handle"));
     }
 
     @Test
-    public void anUnboundSpokeSeesTheItemUnderItsLinkId() throws Exception {
+    public void anUnboundSpokeSeesTheItemUnderItsProvisionalHandle() throws Exception {
+        String phone = PimdirStorage.phoneCollection("acct/Contacts");
         storage.applyWrites(
                 batch(storeObject("cd34", "BODY"), upsert("l.vcf", "uid-l", "cd34", "lena")));
 
         // The phone has never projected this card, so it has no binding. The
-        // placement still has to reach that spoke, or the projection pass
-        // would have nothing to create.
+        // placement still has to reach that spoke, or the projection pass would
+        // have nothing to create, and it reaches it under the U+0001 handle the
+        // engine names a staged create by (SYNC §2) rather than under a name
+        // the phone might one day hand out itself.
         JSONObject placement =
-                storage.loadCollection(PimdirStorage.phoneCollection("acct/Contacts"))
-                        .getJSONArray("placements").getJSONObject(0);
+                storage.loadCollection(phone, null).getJSONArray("placements").getJSONObject(0);
 
-        assertEquals("uid-l", placement.getString("handle"));
+        String handle = placement.getString("handle");
+        assertEquals(PimdirStorage.provisionalOf("uid-l"), handle);
+        assertEquals("and it resolves back", "uid-l", PimdirStorage.nameOf(handle));
+        assertEquals("uid-l", storage.loadRow(phone, handle).getString("id"));
         assertFalse("nothing agreed with the phone yet", placement.has("base"));
     }
 
@@ -337,25 +372,29 @@ public class PimdirStorageTest {
     }
 
     @Test
-    public void aCapturedRemoteBodyMakesTheConflictResolvable() throws Exception {
-        JSONObject placement = upsert("p.vcf", "uid-p", "bb02", "pia").getJSONObject("placement");
-        placement.put("status", "conflict");
-        placement.put("conflictRevision", "etag-remote");
-        placement.put("base", new JSONObject().put("revision", "etag-base"));
-        JSONObject op = new JSONObject();
-        op.put("op", "upsert");
-        op.put("placement", placement);
-        storage.applyWrites(batch(storeObject("bb02", "LOCAL"), op));
+    public void aConflictWaitingOnItsRemoteBodyIsHydratedRatherThanOffered() throws Exception {
+        storage.applyWrites(batch(storeObject("bb02", "LOCAL"), conflicted("bb02", null)));
 
-        // Flagged but not yet resolvable: the resolution form needs the remote
-        // document, and until a sync captures it there is nothing to merge.
+        // Flagged but not yet resolvable: the resolution reads three documents
+        // and the diverging one has not landed, so the hydrate pass asks for it
+        // and nothing is offered to the form in the meantime.
         assertNull(storage.loadConflict("acct/Contacts", "p.vcf"));
+        assertEquals(List.of(), storage.loadConflicts("acct/Contacts"));
+        assertEquals("the conflict is what the upgrade pass now wants",
+                List.of("p.vcf"), storage.handlesBelowFull("acct/Contacts"));
+    }
+
+    @Test
+    public void theEngineSuppliedRemoteBodyMakesTheConflictResolvable() throws Exception {
+        storage.applyWrites(
+                batch(storeObject("bb02", "LOCAL"), storeObject("bb03", "REMOTE"),
+                        conflicted("bb02", "bb03")));
 
         List<JSONObject> conflicts = storage.loadConflicts("acct/Contacts");
         assertEquals(1, conflicts.size());
         assertEquals("etag-remote", conflicts.get(0).getString("conflictRevision"));
+        assertEquals("REMOTE", conflicts.get(0).getString("remoteVcard"));
 
-        storage.setConflictRemote("acct/Contacts", "p.vcf", "REMOTE");
         JSONObject bodies = storage.loadConflict("acct/Contacts", "p.vcf");
         assertEquals("LOCAL", bodies.getString("local"));
         assertEquals("REMOTE", bodies.getString("remote"));
@@ -363,37 +402,49 @@ public class PimdirStorageTest {
     }
 
     @Test
-    public void resolvingReleasesTheCapturedBody() throws Exception {
-        JSONObject placement = upsert("q.vcf", "uid-q", "cc03", "quin").getJSONObject("placement");
-        placement.put("status", "conflict");
-        JSONObject conflicted = new JSONObject();
-        conflicted.put("op", "upsert");
-        conflicted.put("placement", placement);
-        storage.applyWrites(batch(storeObject("cc03", "LOCAL"), conflicted));
-        storage.setConflictRemote("acct/Contacts", "q.vcf", "REMOTE");
+    public void resolvingReleasesTheDivergingBody() throws Exception {
+        storage.applyWrites(
+                batch(storeObject("cc03", "LOCAL"), storeObject("cc04", "REMOTE"),
+                        conflicted("cc03", "cc04")));
 
-        assertEquals(1, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-q'"));
+        assertEquals(1, scalar("SELECT conflicted FROM bindings WHERE link_id = 'uid-p'"));
+        assertEquals(1, scalar("SELECT refcount FROM objects WHERE hash = 'cc04'"));
 
-        // The next clean upsert is the resolution: the captured body has no
+        // The next clean upsert is the resolution: the diverging body has no
         // reader left, so it is released rather than pinned forever.
-        storage.applyWrites(batch(upsert("q.vcf", "uid-q", "cc03", "quin")));
+        storage.applyWrites(batch(upsert("p.vcf", "uid-p", "cc03", "pia")));
 
-        assertEquals(0, scalar("SELECT conflicted FROM items WHERE link_id = 'uid-q'"));
-        assertEquals(0, scalar(
-                "SELECT count(*) FROM objects WHERE hash = ?", PimdirHash.of("REMOTE")));
+        assertEquals(0, scalar("SELECT conflicted FROM bindings WHERE link_id = 'uid-p'"));
+        assertEquals("the diverging body has no reader left", 0,
+                scalar("SELECT count(*) FROM objects WHERE hash = 'cc04'"));
+    }
+
+    /**
+     * An upsert of the one conflicted placement these tests share, holding the
+     * staged local body and the diverging remote one the engine's upgrade pass
+     * supplies, or none while it has not run.
+     */
+    private JSONObject conflicted(String object, String conflictObject) throws Exception {
+        JSONObject placement = upsert("p.vcf", "uid-p", object, "pia").getJSONObject("placement");
+        placement.put("status", "conflict");
+        placement.put("conflictRevision", "etag-remote");
+        if (conflictObject != null) {
+            placement.put("conflictObject", conflictObject);
+        }
+
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", placement);
+        return op;
     }
 
     @Test
     public void theConflictRevisionIsRefreshedBeforeResolving() throws Exception {
-        JSONObject placement = upsert("r.vcf", "uid-r", "dd04", "remy").getJSONObject("placement");
-        placement.put("status", "conflict");
-        placement.put("conflictRevision", "etag-old");
-        JSONObject op = new JSONObject();
-        op.put("op", "upsert");
-        op.put("placement", placement);
-        storage.applyWrites(batch(storeObject("dd04", "LOCAL"), op));
+        storage.applyWrites(
+                batch(storeObject("dd04", "LOCAL"), storeObject("dd05", "REMOTE"),
+                        conflicted("dd04", "dd05")));
 
-        storage.setConflictRevision("acct/Contacts", "r.vcf", "etag-new");
+        storage.setConflictRevision("acct/Contacts", "p.vcf", "etag-new");
 
         assertEquals("etag-new",
                 storage.loadConflicts("acct/Contacts").get(0).getString("conflictRevision"));
@@ -447,5 +498,292 @@ public class PimdirStorageTest {
                 batch(storeObject("ab09", "TWO"), upsert("t.vcf", "uid-t", "ab09", "tom")));
 
         assertTrue(storage.pending(phone));
+    }
+
+    @Test
+    public void aSupersededDropRetiresNothing() throws Exception {
+        storage.applyWrites(
+                batch(storeObject("ba10", "body"), upsert("temp-2", "uid-u", "ba10", "ugo")));
+
+        // A rebuilt spine drops the old handle and upserts the new one. Only a
+        // deleted drop retires an item, so reading this one as a removal would
+        // retain what the same batch just renumbered.
+        JSONObject drop = new JSONObject();
+        drop.put("op", "drop");
+        drop.put("collection", "acct/Contacts");
+        drop.put("handle", "temp-2");
+        drop.put("reason", "superseded");
+        JSONArray effects = storage.applyWrites(batch(upsert("u.vcf", "uid-u", "ba10", "ugo"), drop));
+
+        assertEquals("a superseded drop is not a removal", 0, effects.length());
+        assertEquals(0, scalar("SELECT count(*) FROM items WHERE retained_at IS NOT NULL"));
+        assertEquals(
+                "u.vcf",
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("placements")
+                        .getJSONObject(0)
+                        .getString("handle"));
+    }
+
+    /** An upsert of a handle the enumeration reported and no fetch has named. */
+    private JSONObject probe(String handle) throws Exception {
+        JSONObject placement = new JSONObject();
+        placement.put("collection", "acct/Contacts");
+        placement.put("handle", handle);
+        placement.put("level", "probed");
+        placement.put("status", "clean");
+
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", placement);
+        return op;
+    }
+
+    @Test
+    public void anUnnamedHandleIsProbedRatherThanFiledAsAnItem() throws Exception {
+        storage.applyWrites(batch(probe("p.vcf")));
+
+        // An enumeration yields handles and no identities, and an item is keyed
+        // by its link id: filing the handle as one would mint an item the next
+        // fetch has to un-mint. So it waits in probes, and rides back to the
+        // merge as a probed placement.
+        assertEquals(0, scalar("SELECT count(*) FROM items"));
+        assertEquals(0, scalar("SELECT count(*) FROM bindings"));
+        assertEquals(1, scalar("SELECT count(*) FROM probes WHERE handle = 'p.vcf'"));
+
+        JSONObject placement =
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("placements")
+                        .getJSONObject(0);
+        assertEquals("p.vcf", placement.getString("handle"));
+        assertEquals("probed", placement.getString("level"));
+        assertFalse(placement.has("linkId"));
+    }
+
+    @Test
+    public void naminAProbedHandleBindsItOnceRatherThanTwice() throws Exception {
+        // The sequence a first sync runs: the enumeration probes the members,
+        // then the upgrade fetches their bodies and resolves each identity. The
+        // handle is one member of one source throughout, so it must end up
+        // bound once, whatever it was carried as in between.
+        storage.applyWrites(batch(probe("q.vcf")));
+        storage.applyWrites(
+                batch(storeObject("ba20", "body"), upsert("q.vcf", "uid-q", "ba20", "quinn")));
+
+        assertEquals(0, scalar("SELECT count(*) FROM probes"));
+        assertEquals(1, scalar("SELECT count(*) FROM items"));
+        assertEquals(1, scalar("SELECT count(*) FROM bindings WHERE handle = 'q.vcf'"));
+        assertEquals(
+                "uid-q",
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("placements")
+                        .getJSONObject(0)
+                        .getString("linkId"));
+    }
+
+    @Test
+    public void aProbedHandleIsWhatTheHydratePassAsksFor() throws Exception {
+        storage.applyWrites(batch(probe("h1.vcf"), probe("h2.vcf")));
+
+        // A probe holds no item row, so the pass that raises placements to
+        // their body cannot find it by joining items. Leaving it out is
+        // leaving every freshly enumerated member unfetched for good, which is
+        // an address book that syncs and stays empty.
+        assertEquals(List.of("h1.vcf", "h2.vcf"), storage.handlesBelowFull("acct/Contacts"));
+        assertTrue("and the quiet path does not skip it",
+                storage.pending("acct/Contacts"));
+
+        storage.applyWrites(
+                batch(storeObject("ba24", "body"), upsert("h1.vcf", "uid-h1", "ba24", "hana")));
+        assertEquals(List.of("h2.vcf"), storage.handlesBelowFull("acct/Contacts"));
+    }
+
+    @Test
+    public void aHandleNamingAnotherIdentityRetiresTheBindingItHeld() throws Exception {
+        storage.applyWrites(
+                batch(storeObject("ba21", "one"), upsert("r.vcf", "uid-r1", "ba21", "rita")));
+
+        // The resource was replaced in place: the same href, another card. A
+        // handle names one item per source, so the binding it held is retired
+        // rather than doubled, which the store's unique index would refuse.
+        storage.applyWrites(
+                batch(storeObject("ba22", "two"), upsert("r.vcf", "uid-r2", "ba22", "rosa")));
+
+        assertEquals(1, scalar("SELECT count(*) FROM bindings WHERE handle = 'r.vcf'"));
+        assertEquals(
+                "uid-r2",
+                stringOf("SELECT link_id FROM bindings WHERE handle = 'r.vcf'"));
+    }
+
+    @Test
+    public void aRekeyedDropRetiresNothingEither() throws Exception {
+        storage.applyWrites(
+                batch(storeObject("ba11", "body"), upsert("old-1", "uid-w", "ba11", "wes")));
+
+        // The third reason a drop carries (SYNC §8): a handle a rebuild
+        // renumbered. Only a deleted drop retires an item, so reading this one
+        // as a removal would propagate a delete to the collection's other
+        // sources over a handle space that merely moved.
+        JSONObject drop = new JSONObject();
+        drop.put("op", "drop");
+        drop.put("collection", "acct/Contacts");
+        drop.put("handle", "old-1");
+        drop.put("reason", "rekeyed");
+        JSONArray effects = storage.applyWrites(batch(upsert("new-1", "uid-w", "ba11", "wes"), drop));
+
+        assertEquals("a rekeyed drop is not a removal", 0, effects.length());
+        assertEquals(0, scalar("SELECT count(*) FROM items WHERE retained_at IS NOT NULL"));
+        assertEquals(
+                "new-1",
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("placements")
+                        .getJSONObject(0)
+                        .getString("handle"));
+    }
+
+    @Test
+    public void anUpsertWritesTheTypedSummaryAndKeepsItWhenItRestatesNone() throws Exception {
+        storage.applyWrites(
+                batch(storeObject("ba12", "body"), upsert("x.vcf", "uid-x", "ba12", "xena")));
+
+        assertEquals(1, scalar("SELECT count(*) FROM contact_summary WHERE link_id = 'uid-x'"));
+        assertEquals(
+                1,
+                scalar(
+                        "SELECT count(*) FROM item_address WHERE link_id = 'uid-x'"
+                                + " AND role = 'email' AND position = 0"));
+
+        // A flag push carries no summary, and a write that does not restate one
+        // keeps it, exactly as the sort key does: blanking it would strip every
+        // row a sync touched of what a listing renders.
+        JSONObject placement = upsert("x.vcf", "uid-x", "ba12", "xena").getJSONObject("placement");
+        placement.remove("summary");
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", placement);
+        storage.applyWrites(batch(op));
+
+        assertEquals(1, scalar("SELECT count(*) FROM contact_summary WHERE link_id = 'uid-x'"));
+    }
+
+    @Test
+    public void aLookupAnswersTheSizeBesideTheHash() throws Exception {
+        db.execSQL(
+                "INSERT INTO collections(id, account, kind, name)"
+                        + " VALUES('acct/INBOX', 'acct', 'message/rfc822', 'INBOX')");
+        db.execSQL("INSERT INTO objects(hash, size, refcount) VALUES('ba13', 7, 1)");
+        db.execSQL(
+                "INSERT INTO items(collection, link_id, seq, object_hash, level)"
+                        + " VALUES('acct/INBOX', 'mid-1', 1, 'ba13', 2)");
+        new PimdirBlobs(store.blobs()).put("ba13", "message".getBytes("UTF-8"));
+
+        JSONObject objects =
+                storage.lookupObjects(new JSONArray().put("mid-1")).getJSONObject("objects");
+
+        // The size is the witness an immutable link needs (SYNC §6): the engine
+        // records the object it dedups against without ever reading its bytes.
+        assertEquals("ba13", objects.getJSONObject("mid-1").getString("hash"));
+        assertEquals(7, objects.getJSONObject("mid-1").getInt("size"));
+    }
+
+    @Test
+    public void oneIdentityUnderTwoHandlesIsRefusedRatherThanRepointed() throws Exception {
+        storage.applyWrites(
+                batch(storeObject("bb11", "body"), upsert("v1.vcf", "uid-v", "bb11", "vera")));
+
+        // The same identity arrives under a second handle with nothing
+        // superseding the first: a double delivery, a retried append, a
+        // restore. Repointing the binding would destroy the only evidence the
+        // source holds it twice, and a later delete of the bound copy would
+        // then remove the only copy on a source nobody touched. The second copy
+        // is an item of its own under a key the engine mints (SPEC.md §9),
+        // which is what makes refusing a complete answer.
+        try {
+            storage.applyWrites(batch(upsert("v2.vcf", "uid-v", "bb11", "vera")));
+            throw new AssertionError("the repointing write was applied");
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage(), refused.getMessage().contains("v1.vcf"));
+        }
+
+        JSONArray placements =
+                storage.loadCollection("acct/Contacts", null).getJSONArray("placements");
+        assertEquals(1, placements.length());
+        assertEquals("the bound handle stays",
+                "v1.vcf", placements.getJSONObject(0).getString("handle"));
+    }
+
+    @Test
+    public void aScopedLoadAnswersTheRowsItWasAskedFor() throws Exception {
+        storage.applyWrites(batch(
+                storeObject("cc12", "one"), upsert("w.vcf", "uid-w", "cc12", "wendy"),
+                storeObject("cc13", "two"), upsert("x.vcf", "uid-x", "cc13", "xena")));
+
+        JSONObject byHandle = new JSONObject()
+                .put("kind", "handles")
+                .put("handles", new JSONArray().put("x.vcf"));
+        JSONArray narrowed =
+                storage.loadCollection("acct/Contacts", byHandle).getJSONArray("placements");
+        assertEquals(1, narrowed.length());
+        assertEquals("x.vcf", narrowed.getJSONObject(0).getString("handle"));
+
+        JSONObject byLink = new JSONObject()
+                .put("kind", "links")
+                .put("links", new JSONArray().put("uid-w"));
+        narrowed = storage.loadCollection("acct/Contacts", byLink).getJSONArray("placements");
+        assertEquals(1, narrowed.length());
+        assertEquals("w.vcf", narrowed.getJSONObject(0).getString("handle"));
+
+        // The scope is a floor, so an unnarrowed read still answers everything.
+        JSONObject all = new JSONObject().put("kind", "all");
+        assertEquals(
+                2, storage.loadCollection("acct/Contacts", all).getJSONArray("placements").length());
+    }
+
+    @Test
+    public void unreadMarkersStayUnreadAcrossAWrite() throws Exception {
+        JSONObject placement =
+                upsert("y.vcf", "uid-y", "cc14", "yuri").getJSONObject("placement");
+        placement.remove("flags");
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", placement);
+        storage.applyWrites(batch(storeObject("cc14", "body"), op));
+
+        // Absent means nobody has read the markers, which the column says as
+        // NULL. Storing an empty set instead would turn that into an
+        // authoritative "carries none" and clear whatever the other side knew.
+        JSONObject loaded =
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("placements")
+                        .getJSONObject(0);
+        assertFalse(loaded.has("flags"));
+
+        storage.applyWrites(batch(upsert("y.vcf", "uid-y", "cc14", "yuri")));
+        loaded = storage.loadCollection("acct/Contacts", null)
+                .getJSONArray("placements")
+                .getJSONObject(0);
+        assertEquals(0, loaded.getJSONArray("flags").length());
+    }
+
+    @Test
+    public void anAgreedBaseWithNoValuesSurvivesTheRoundTrip() throws Exception {
+        JSONObject placement =
+                upsert("z.vcf", "uid-z", "cc15", "zoe").getJSONObject("placement");
+        placement.put("base", new JSONObject());
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", placement);
+        storage.applyWrites(batch(storeObject("cc15", "body"), op));
+
+        // A base of no revision, no body and markers nobody has read is a real
+        // agreement its three value columns cannot express: reading presence off
+        // them alone has the placement come back as never-agreed, and the sync
+        // re-derives the same push on every run.
+        JSONObject loaded =
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("placements")
+                        .getJSONObject(0);
+        assertTrue(loaded.has("base"));
+        assertEquals(0, loaded.getJSONObject("base").length());
     }
 }

@@ -42,7 +42,7 @@
         fx = fenix.packages.${system};
         rust = fx.fromToolchainFile {
           file = ./rust-toolchain.toml;
-          sha256 = "sha256-OATSZm98Es5kIFuqaba+UvkQtFsVgJEBMmS+t6od5/U=";
+          sha256 = "sha256-P30Tm3O7vQAE725YtDCDHGjNrSsfZO4us11UwJGZSJo=";
         };
 
         # Bump these together; the NDK version must exist in the pinned

@@ -936,3 +936,19 @@ What had to change underneath:
 Existing accounts keep working, as accounts covering contacts; connecting mail
 or calendars onto one of them is the same flow with those domains ticked, and
 merges into the account rather than making a second.
+
+## 15. The write paths, 2026-09-03
+
+M4 (mail write) and the two verbs M5 was missing (calendar create and delete) landed, so all three domains write. What this section records is what moved and what deliberately did not; the behaviour itself now lives in [cairn/spec/](../cairn/spec), which this repository adopted the same night and which is the current truth from here on. This document stays the plan of record for what is *not* built.
+
+**Mail flags and deletion.** The IMAP session keeps the capabilities its authentication already returned, so the write verbs choose rather than guess: `MOVE` (RFC 6851) where the server has it, `COPY` plus a `\Deleted` marker where it does not. `LIST` carries its attributes now, so the trash and the sent mailbox are the ones the server marks (RFC 6154) rather than names matched against a word list per language. Nothing is ever expunged: without `UIDPLUS` an expunge is mailbox-wide and would take every message another client had marked.
+
+The JMAP half is one `Email/set` per verb, over the three keywords RFC 8621 §4.1.1 maps and no fourth: `\Deleted` has no counterpart there, deletion being a move, so an account naming no trash fails rather than being handed a keyword nobody defined.
+
+**Mail composition** is P3-4 with its scope cut to what one night could finish honestly: plain text, no attachments, no reply, no drafts, SMTP only. The message is composed in Rust (folding, RFC 2047 encoded words, quoted-printable) rather than in Java, for the reason every other document in this app is. The connection flow keeps the SMTP endpoint it had been discovering and discarding, which is the `AccountConnection` change: mail is the one domain whose server does not answer both ways.
+
+**What is left of P3, in order of what a user notices**: reply and forward (the composer takes no seed), attachments (an outgoing `multipart/mixed` and an incoming part opened through a FileProvider), drafts (a mailbox the composer does not have), and JMAP submission (`EmailSubmission/set` creates the message as an `Email` first and names it, which is a different shape from handing bytes over; an account with nowhere to submit is not offered as a sender rather than offered and refused).
+
+**Calendar create and delete** are the same push as the edit with a different precondition: a create guarded on the resource not existing, a delete on the ETag. A new entry is built from a bridge function that emits one component with the three properties RFC 5545 requires and nothing else, then parsed back before it is returned. P4-4's edit scope (this occurrence / this and following / all) is untouched and remains the real remaining cost of the domain.
+
+**Still true of both**: neither syncs incrementally. A mail refresh relists the newest 50 per mailbox and a calendar refresh relists each collection, which is P3-2 and P4-1's remainder and the reason the two domains are not on the replica engine that contacts run on.

@@ -429,6 +429,81 @@ public class PimalayaClient {
         }
     }
 
+    /**
+     * Adds or removes one marker on one message, named the IMAP way
+     * whichever backend answers.
+     */
+    public void setMessageFlag(
+            Account account, String mailbox, String id, String flag, boolean add) {
+        Transport transport = new Transport();
+        try {
+            object(
+                    Native.setMessageFlag(
+                            transport,
+                            account.baseUrl,
+                            account.login,
+                            account.password,
+                            mailbox,
+                            id,
+                            flag,
+                            add));
+        } finally {
+            transport.close();
+        }
+    }
+
+    /**
+     * Composes one draft and hands it over, then files the copy the
+     * sender keeps, answering the mailbox it landed in or null when the
+     * account named no sent mailbox.
+     *
+     * <p>{@code draft} is a JSON object of {@code from}, {@code fromName},
+     * {@code to}, {@code cc}, {@code bcc}, {@code subject}, {@code body},
+     * {@code date} and {@code messageId}: the composer's fields plus the
+     * two stamps, which are the caller's so the bridge stays a pure
+     * function of what it is handed.
+     */
+    public String sendMessage(Account account, String draft) {
+        Transport transport = new Transport();
+        try {
+            JSONObject reply =
+                    object(
+                            Native.sendMessage(
+                                    transport,
+                                    account.baseUrl,
+                                    account.submitUrl == null ? "" : account.submitUrl,
+                                    account.login,
+                                    account.password,
+                                    draft));
+            return optString(reply, "mailbox");
+        } finally {
+            transport.close();
+        }
+    }
+
+    /**
+     * Deletes one message into the account's trash, answering the
+     * mailbox it landed in, or null when the account named no trash and
+     * the message was marked deleted where it is instead.
+     */
+    public String deleteMessage(Account account, String mailbox, String id) {
+        Transport transport = new Transport();
+        try {
+            JSONObject reply =
+                    object(
+                            Native.deleteMessage(
+                                    transport,
+                                    account.baseUrl,
+                                    account.login,
+                                    account.password,
+                                    mailbox,
+                                    id));
+            return optString(reply, "mailbox");
+        } finally {
+            transport.close();
+        }
+    }
+
     /** Lists the account's calendars: the CalDAV discovery walk. */
     public List<Calendar> listCalendars(Account account) {
         Transport transport = new Transport();
@@ -609,6 +684,77 @@ public class PimalayaClient {
         } finally {
             transport.close();
         }
+    }
+
+    /**
+     * The object a new calendar entry starts from: one component
+     * carrying the identity, the composition stamp and the day it is
+     * placed on, and nothing else. Pure computation, no transport.
+     */
+    public String newEvent(String component, String uid, String stamp, String start) {
+        String created = Native.newEvent(component, uid, stamp, start).trim();
+
+        // NOTE: an object is the bridge's error shape here too, for the
+        // same reason it is in writeEvent.
+        if (created.startsWith("{")) {
+            object(created);
+            throw new PimalayaException("Unreadable bridge reply: expected an object");
+        }
+        return created;
+    }
+
+    /**
+     * Files a new object in a calendar, guarded on the resource not
+     * existing, and returns the ETag the server gave it.
+     */
+    public String createEvent(Account account, String calendarUrl, String id, String ical) {
+        Transport transport = new Transport();
+        try {
+            return etagOf(
+                    Native.createEvent(
+                            transport,
+                            account.baseUrl,
+                            calendarUrl,
+                            account.login,
+                            account.password,
+                            id,
+                            ical));
+        } finally {
+            transport.close();
+        }
+    }
+
+    /**
+     * Removes one object from its calendar, guarded by the ETag it was
+     * read with, for the same reason the update is.
+     */
+    public void deleteEvent(Account account, String calendarUrl, String id, String etag) {
+        Transport transport = new Transport();
+        try {
+            object(
+                    Native.deleteEvent(
+                            transport,
+                            account.baseUrl,
+                            calendarUrl,
+                            account.login,
+                            account.password,
+                            id,
+                            etag == null ? "" : etag));
+        } finally {
+            transport.close();
+        }
+    }
+
+    /**
+     * The ETag a calendar write answered with, null when the server sent
+     * none: a bare JSON string on success, an object on failure.
+     */
+    private static String etagOf(String reply) {
+        String trimmed = reply.trim();
+        if (trimmed.startsWith("{")) {
+            object(trimmed);
+        }
+        return trimmed.startsWith("\"") ? trimmed.substring(1, trimmed.length() - 1) : null;
     }
 
     /**

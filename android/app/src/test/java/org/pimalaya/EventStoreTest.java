@@ -61,7 +61,7 @@ public class EventStoreTest {
     @Test
     public void aCalendarIsACollectionOfItsOwnKind() {
         assertEquals(
-                1, scalar("SELECT count(*) FROM collections WHERE kind = ?", PimdirMeta.CALENDAR));
+                1, scalar("SELECT count(*) FROM collections WHERE kind = ?", PimdirSummary.CALENDAR));
 
         List<EventStore.StoredCalendar> calendars = store.loadCalendars();
         assertEquals(1, calendars.size());

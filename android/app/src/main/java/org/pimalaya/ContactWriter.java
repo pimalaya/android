@@ -110,7 +110,7 @@ final class ContactWriter {
             }
             engine.mutateEdit(
                     entry.book.url,
-                    CardStore.rowHandle(entry.book.url, entry.card.uri, entry.card.id),
+                    CardStore.rowHandle(entry.card.uri, entry.card.id),
                     vcard);
         }
     }
@@ -128,7 +128,7 @@ final class ContactWriter {
         new OfflineEngine(host.base, host.pimdir, host.client, null, null)
                 .mutateEdit(
                         replica.book.url,
-                        CardStore.rowHandle(replica.book.url, replica.card.uri, replica.card.id),
+                        CardStore.rowHandle(replica.card.uri, replica.card.id),
                         resolved);
     }
 
@@ -145,8 +145,7 @@ final class ContactWriter {
             new OfflineEngine(host.base, host.pimdir, host.client, null, null)
                     .mutateEdit(
                             survivor.book.url,
-                            CardStore.rowHandle(
-                                    survivor.book.url, survivor.card.uri, survivor.card.id),
+                            CardStore.rowHandle(survivor.card.uri, survivor.card.id),
                             vcard);
         }
 

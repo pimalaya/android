@@ -1,9 +1,9 @@
-//! io-replica engine bridge: runs the offline-first replica engine's
-//! coroutines (sync, upgrade, mutate) to completion, upcalling a Java
-//! `ReplicaDriver` with one JSON envelope per yield.
+//! io-pimdir engine bridge: runs the pimdir sync engine's coroutines
+//! (sync, upgrade, mutate) to completion, upcalling a Java
+//! `OfflineDriver` with one JSON envelope per yield.
 //!
 //! The engine is I/O-free: storage yields are serviced by the Java
-//! CardStore and remote yields by the Java backend clients, so this
+//! pimdir store and remote yields by the Java backend clients, so this
 //! module only translates between the engine types and the JSON wire
 //! shape, and never performs any I/O itself. Yields are batched by
 //! design (one fetch carries many handles, one push many changes), so
@@ -11,29 +11,31 @@
 //!
 //! Content hashes are opaque here: the Java side computes them
 //! (SHA-256 of the vCard bytes) on both the storage and the remote
-//! seam, and the engine only ever compares them.
+//! seam, and the engine only ever compares them. Summaries are not: a
+//! placement carries the typed row STORAGE Annex A defines, which
+//! [`crate::summary`] translates.
 
 use core::fmt::Display;
 
 use std::collections::BTreeMap;
 
-use io_replica::{
-    change::{ReplicaChange, ReplicaWriteOp},
-    collection::ReplicaCheckpoint,
+use io_pimdir::{
+    change::{PimdirChange, PimdirChangeKind, PimdirDropReason, PimdirWriteOp},
+    collection::PimdirCheckpoint,
     coroutine::*,
-    mutate::{ReplicaMutate, ReplicaMutation},
-    object::{ReplicaHash, ReplicaObject},
+    load::{PimdirLoadScope, PimdirLoaded},
+    mutate::{PimdirMutate, PimdirMutation},
+    object::{PimdirHash, PimdirObject},
     placement::{
-        ReplicaBase, ReplicaFlags, ReplicaHandle, ReplicaLevel, ReplicaLinkId, ReplicaMeta,
-        ReplicaOrigin, ReplicaPlacement, ReplicaStatus,
+        PimdirBase, PimdirFlags, PimdirHandle, PimdirLevel, PimdirLinkId, PimdirOrigin,
+        PimdirPlacement, PimdirStatus,
     },
     remote::{
-        ReplicaFetchedBody, ReplicaFetchedItem, ReplicaPushOutcome, ReplicaPushResult,
-        ReplicaRemoteItem, ReplicaRemoteSnapshot, ReplicaTier,
+        PimdirFetchedBody, PimdirFetchedItem, PimdirPushOutcome, PimdirPushResult,
+        PimdirRemoteItem, PimdirRemoteSnapshot, PimdirTier,
     },
-    storage::ReplicaLoaded,
-    sync::{ReplicaSync, ReplicaSyncOptions},
-    upgrade::ReplicaUpgrade,
+    sync::{PimdirSync, PimdirSyncOptions},
+    upgrade::PimdirUpgrade,
 };
 use jni::{
     Env, JValue, jni_sig, jni_str,
@@ -42,7 +44,7 @@ use jni::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, from_str, json};
 
-use crate::{client::clear_and_fail, types::BridgeError};
+use crate::{client::clear_and_fail, summary::SummaryJson, types::BridgeError};
 
 /// Reconciles `collection` with its remote through the Java driver,
 /// returning the sync report as JSON. With `full` the checkpoint is
@@ -53,12 +55,12 @@ pub fn sync<'local>(
     collection: &str,
     full: bool,
 ) -> Result<Value, BridgeError> {
-    let opts = ReplicaSyncOptions {
+    let opts = PimdirSyncOptions {
         push: true,
         full,
         ..Default::default()
     };
-    let report = Driver::new(env, driver).run(ReplicaSync::new(collection, opts))?;
+    let report = Driver::new(env, driver).run(PimdirSync::new(collection, opts))?;
 
     Ok(json!({
         "pulled": report.pulled,
@@ -78,8 +80,8 @@ pub fn upgrade<'local>(
     collection: &str,
     handles: Vec<String>,
 ) -> Result<Value, BridgeError> {
-    let handles = handles.into_iter().map(ReplicaHandle::from).collect();
-    let coroutine = ReplicaUpgrade::new(collection, handles, ReplicaTier::Full);
+    let handles = handles.into_iter().map(PimdirHandle::from).collect();
+    let coroutine = PimdirUpgrade::new(collection, handles, PimdirTier::Full);
     let report = Driver::new(env, driver).run(coroutine)?;
 
     Ok(json!({
@@ -99,10 +101,10 @@ pub fn mutate<'local>(
 ) -> Result<(), BridgeError> {
     let mutation: MutationJson =
         from_str(mutation).map_err(|err| format!("Invalid mutation: {err}"))?;
-    Driver::new(env, driver).run(ReplicaMutate::new(collection, mutation.into()))
+    Driver::new(env, driver).run(PimdirMutate::new(collection, mutation.into()))
 }
 
-/// Upcall handle to the Java `ReplicaDriver` servicing engine yields.
+/// Upcall handle to the Java `OfflineDriver` servicing engine yields.
 struct Driver<'a, 'local> {
     env: &'a mut Env<'local>,
     driver: &'a JObject<'local>,
@@ -117,16 +119,16 @@ impl<'a, 'local> Driver<'a, 'local> {
     /// through the Java driver.
     fn run<C, T, E>(&mut self, mut coroutine: C) -> Result<T, BridgeError>
     where
-        C: ReplicaCoroutine<Yield = ReplicaYield, Return = Result<T, E>>,
+        C: PimdirCoroutine<Yield = PimdirYield, Return = Result<T, E>>,
         E: Display,
     {
-        let mut arg: Option<ReplicaArg> = None;
+        let mut arg: Option<PimdirArg> = None;
 
         loop {
             match coroutine.resume(arg.take()) {
-                ReplicaCoroutineState::Complete(Ok(value)) => return Ok(value),
-                ReplicaCoroutineState::Complete(Err(err)) => return Err(err.to_string().into()),
-                ReplicaCoroutineState::Yielded(yielded) => {
+                PimdirCoroutineState::Complete(Ok(value)) => return Ok(value),
+                PimdirCoroutineState::Complete(Err(err)) => return Err(err.to_string().into()),
+                PimdirCoroutineState::Yielded(yielded) => {
                     let reply = self.upcall(&yield_json(&yielded))?;
                     arg = Some(parse_arg(&yielded, &reply)?);
                 }
@@ -134,7 +136,7 @@ impl<'a, 'local> Driver<'a, 'local> {
         }
     }
 
-    /// Upcalls `ReplicaDriver.serve` with one yield envelope and
+    /// Upcalls `OfflineDriver.serve` with one yield envelope and
     /// returns the raw JSON reply.
     fn upcall(&mut self, request: &str) -> Result<String, String> {
         let request = self
@@ -158,39 +160,40 @@ impl<'a, 'local> Driver<'a, 'local> {
 }
 
 /// Serializes one engine yield to its JSON envelope.
-fn yield_json(yielded: &ReplicaYield) -> String {
+fn yield_json(yielded: &PimdirYield) -> String {
     let envelope = match yielded {
-        ReplicaYield::WantsLoad(collection) => json!({
+        PimdirYield::WantsLoad { collection, scope } => json!({
             "op": "load",
             "collection": collection.as_str(),
+            "scope": scope_json(scope),
         }),
-        ReplicaYield::WantsLookupObject(links) => json!({
+        PimdirYield::WantsLookupObject(links) => json!({
             "op": "lookup",
-            "links": links.iter().map(ReplicaLinkId::as_str).collect::<Vec<_>>(),
+            "links": links.iter().map(PimdirLinkId::as_str).collect::<Vec<_>>(),
         }),
-        ReplicaYield::WantsWrite(ops) => json!({
+        PimdirYield::WantsWrite(ops) => json!({
             "op": "write",
             "writes": ops.iter().map(WriteOpJson::from).collect::<Vec<_>>(),
         }),
-        ReplicaYield::WantsEnumerate { collection, cursor } => json!({
+        PimdirYield::WantsEnumerate { collection, cursor } => json!({
             "op": "enumerate",
             "collection": collection.as_str(),
             "cursor": cursor.as_ref().map(checkpoint_str).filter(|c| !c.is_empty()),
         }),
-        ReplicaYield::WantsFetch {
+        PimdirYield::WantsFetch {
             collection,
             handles,
             tier,
         } => json!({
             "op": "fetch",
             "collection": collection.as_str(),
-            "handles": handles.iter().map(ReplicaHandle::as_str).collect::<Vec<_>>(),
+            "handles": handles.iter().map(PimdirHandle::as_str).collect::<Vec<_>>(),
             "tier": match tier {
-                ReplicaTier::Meta => "meta",
-                ReplicaTier::Full => "full",
+                PimdirTier::Meta => "meta",
+                PimdirTier::Full => "full",
             },
         }),
-        ReplicaYield::WantsPush {
+        PimdirYield::WantsPush {
             collection,
             changes,
         } => json!({
@@ -207,7 +210,7 @@ fn yield_json(yielded: &ReplicaYield) -> String {
 /// arg fed back on the next resume. A reply carrying an `error` field
 /// aborts the run, keeping the HTTP status the driver reported (a 401
 /// surfacing here is what triggers the token refresh upstairs).
-fn parse_arg(yielded: &ReplicaYield, reply: &str) -> Result<ReplicaArg, BridgeError> {
+fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeError> {
     let probe: ErrorJson =
         from_str(reply).map_err(|err| format!("Unreadable driver reply: {err}"))?;
     if let Some(error) = probe.error {
@@ -218,60 +221,60 @@ fn parse_arg(yielded: &ReplicaYield, reply: &str) -> Result<ReplicaArg, BridgeEr
     }
 
     let arg = match yielded {
-        ReplicaYield::WantsLoad(_) => {
+        PimdirYield::WantsLoad { .. } => {
             let loaded: LoadedJson = parse(reply)?;
-            ReplicaArg::Load(ReplicaLoaded {
+            PimdirArg::Load(PimdirLoaded {
                 placements: loaded
                     .placements
                     .into_iter()
-                    .map(ReplicaPlacement::from)
+                    .map(PimdirPlacement::from)
                     .collect(),
                 checkpoint: loaded
                     .checkpoint
                     .filter(|token| !token.is_empty())
-                    .map(|token| ReplicaCheckpoint(token.into_bytes())),
+                    .map(|token| PimdirCheckpoint(token.into_bytes())),
             })
         }
-        ReplicaYield::WantsLookupObject(_) => {
+        PimdirYield::WantsLookupObject(_) => {
             let lookup: LookupJson = parse(reply)?;
-            let objects: BTreeMap<ReplicaLinkId, ReplicaHash> = lookup
+            let objects: BTreeMap<PimdirLinkId, PimdirObject> = lookup
                 .objects
                 .into_iter()
-                .map(|(link, hash)| (ReplicaLinkId(link), ReplicaHash(hash)))
+                .map(|(link, object)| (PimdirLinkId(link), object.into()))
                 .collect();
-            ReplicaArg::LookupObject(objects)
+            PimdirArg::LookupObject(objects)
         }
-        ReplicaYield::WantsWrite(_) => ReplicaArg::Write,
-        ReplicaYield::WantsEnumerate { .. } => {
+        PimdirYield::WantsWrite(_) => PimdirArg::Write,
+        PimdirYield::WantsEnumerate { .. } => {
             let snapshot: SnapshotJson = parse(reply)?;
-            ReplicaArg::Enumerate(ReplicaRemoteSnapshot {
+            PimdirArg::Enumerate(PimdirRemoteSnapshot {
                 items: snapshot
                     .items
                     .into_iter()
-                    .map(|item| ReplicaRemoteItem {
-                        handle: ReplicaHandle(item.handle),
-                        flags: ReplicaFlags::from_iter(item.flags),
+                    .map(|item| PimdirRemoteItem {
+                        handle: PimdirHandle(item.handle),
+                        flags: PimdirFlags::from_iter(item.flags),
                         revision: item.revision,
                     })
                     .collect(),
-                vanished: snapshot.vanished.into_iter().map(ReplicaHandle).collect(),
+                vanished: snapshot.vanished.into_iter().map(PimdirHandle).collect(),
                 complete: snapshot.complete,
-                checkpoint: ReplicaCheckpoint(snapshot.checkpoint.unwrap_or_default().into_bytes()),
+                checkpoint: PimdirCheckpoint(snapshot.checkpoint.unwrap_or_default().into_bytes()),
             })
         }
-        ReplicaYield::WantsFetch { .. } => {
+        PimdirYield::WantsFetch { .. } => {
             let fetched: FetchedJson = parse(reply)?;
             let items = fetched
                 .items
                 .into_iter()
-                .map(|item| ReplicaFetchedItem {
-                    handle: ReplicaHandle(item.handle),
-                    link_id: ReplicaLinkId(item.link_id),
-                    meta: ReplicaMeta(item.meta),
+                .map(|item| PimdirFetchedItem {
+                    handle: PimdirHandle(item.handle),
+                    link_id: PimdirLinkId(item.link_id),
+                    summary: item.summary.map(Into::into),
                     sort_key: item.sort_key.into(),
                     body: match (item.hash, item.body) {
-                        (Some(hash), Some(body)) => Some(ReplicaFetchedBody::Inline {
-                            hash: ReplicaHash(hash),
+                        (Some(hash), Some(body)) => Some(PimdirFetchedBody::Inline {
+                            hash: PimdirHash(hash),
                             bytes: body.into_bytes(),
                         }),
                         _ => None,
@@ -279,25 +282,25 @@ fn parse_arg(yielded: &ReplicaYield, reply: &str) -> Result<ReplicaArg, BridgeEr
                     revision: item.revision,
                 })
                 .collect();
-            ReplicaArg::Fetch(items)
+            PimdirArg::Fetch(items)
         }
-        ReplicaYield::WantsPush { .. } => {
+        PimdirYield::WantsPush { .. } => {
             let pushed: PushedJson = parse(reply)?;
             let results = pushed
                 .results
                 .into_iter()
-                .map(|result| ReplicaPushResult {
-                    handle: ReplicaHandle(result.handle),
+                .map(|result| PimdirPushResult {
+                    handle: PimdirHandle(result.handle),
                     outcome: if result.accepted {
-                        ReplicaPushOutcome::Accepted
+                        PimdirPushOutcome::Accepted
                     } else {
-                        ReplicaPushOutcome::Rejected
+                        PimdirPushOutcome::Rejected
                     },
-                    assigned: result.assigned.map(ReplicaHandle),
+                    assigned: result.assigned.map(PimdirHandle),
                     revision: result.revision,
                 })
                 .collect();
-            ReplicaArg::Push(results)
+            PimdirArg::Push(results)
         }
     };
 
@@ -308,10 +311,31 @@ fn parse<'de, T: Deserialize<'de>>(reply: &'de str) -> Result<T, String> {
     from_str(reply).map_err(|err| format!("Unreadable driver reply: {err}"))
 }
 
+/// Which placements a load has to return, as the JSON wire states it.
+///
+/// A floor rather than a ceiling: the engine reads only the rows a
+/// mutation edits or an upgrade raises, so a whole-collection read costs
+/// the size of the mailbox where a flag change costs one row. A storage
+/// answering more than the scope asks for stays correct, which is what
+/// lets the Java side widen a list too long for one SQLite statement.
+fn scope_json(scope: &PimdirLoadScope) -> Value {
+    match scope {
+        PimdirLoadScope::All => json!({ "kind": "all" }),
+        PimdirLoadScope::Handles(handles) => json!({
+            "kind": "handles",
+            "handles": handles.iter().map(PimdirHandle::as_str).collect::<Vec<_>>(),
+        }),
+        PimdirLoadScope::Links(links) => json!({
+            "kind": "links",
+            "links": links.iter().map(PimdirLinkId::as_str).collect::<Vec<_>>(),
+        }),
+    }
+}
+
 /// Checkpoints are opaque bytes to the engine; every token this app
 /// round-trips (WebDAV sync-token, JMAP state) is text, so the wire
 /// carries them as plain strings.
-fn checkpoint_str(checkpoint: &ReplicaCheckpoint) -> String {
+fn checkpoint_str(checkpoint: &PimdirCheckpoint) -> String {
     String::from_utf8_lossy(&checkpoint.0).into_owned()
 }
 
@@ -336,57 +360,74 @@ struct PlacementJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     object: Option<String>,
     level: LevelJson,
+    /// The typed summary row (STORAGE Annex A), absent while nothing has
+    /// derived one. A write carrying none leaves the stored row alone,
+    /// on the same terms as the sort key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    meta: Option<String>,
+    summary: Option<SummaryJson>,
     /// The presentation sort key (pimdir SPEC.md 9.3). Round-tripped rather
     /// than defaulted on the way out: the reference write is a replace-all, so
     /// a sync that dropped the key would silently reset the ordering of every
     /// item it touched. Empty means unknown.
     #[serde(default)]
     sort_key: String,
-    #[serde(default)]
-    flags: Vec<String>,
+    /// The markers, or absent while nobody has read them: an item
+    /// enumerated but never fetched holds no opinion about its flags, and
+    /// reading that as "no markers" pushes the absence onto whichever
+    /// side did know them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    flags: Option<Vec<String>>,
     status: StatusJson,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     conflict_revision: Option<String>,
+    /// The remote body the conflict diverged from, at the revision beside
+    /// it, so the resolver reads base, local and remote from the store
+    /// alone. Absent until the upgrade pass fetches it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    conflict_object: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     base: Option<BaseJson>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     origin: Option<OriginJson>,
 }
 
-impl From<PlacementJson> for ReplicaPlacement {
+impl From<PlacementJson> for PimdirPlacement {
     fn from(wire: PlacementJson) -> Self {
         Self {
             collection: wire.collection.into(),
-            handle: ReplicaHandle(wire.handle),
-            link_id: wire.link_id.map(ReplicaLinkId),
-            object: wire.object.map(ReplicaHash),
+            handle: PimdirHandle(wire.handle),
+            link_id: wire.link_id.map(PimdirLinkId),
+            object: wire.object.map(PimdirHash),
             level: wire.level.into(),
-            meta: wire.meta.map(ReplicaMeta),
+            summary: wire.summary.map(Into::into),
             sort_key: wire.sort_key.into(),
-            flags: ReplicaFlags::from_iter(wire.flags),
+            flags: flags_from(wire.flags),
             status: wire.status.into(),
             conflict_revision: wire.conflict_revision,
-            base: wire.base.map(ReplicaBase::from),
-            origin: wire.origin.map(ReplicaOrigin::from),
+            conflict_object: wire.conflict_object.map(PimdirHash),
+            base: wire.base.map(PimdirBase::from),
+            origin: wire.origin.map(PimdirOrigin::from),
         }
     }
 }
 
-impl From<&ReplicaPlacement> for PlacementJson {
-    fn from(placement: &ReplicaPlacement) -> Self {
+impl From<&PimdirPlacement> for PlacementJson {
+    fn from(placement: &PimdirPlacement) -> Self {
         Self {
             collection: placement.collection.as_str().into(),
             handle: placement.handle.as_str().into(),
             link_id: placement.link_id.as_ref().map(|link| link.as_str().into()),
             object: placement.object.as_ref().map(|hash| hash.as_str().into()),
             level: placement.level.into(),
-            meta: placement.meta.as_ref().map(|meta| meta.0.clone()),
+            summary: placement.summary.as_ref().map(SummaryJson::from),
             sort_key: placement.sort_key.0.clone(),
-            flags: placement.flags.0.iter().cloned().collect(),
+            flags: flags_json(&placement.flags),
             status: placement.status.into(),
             conflict_revision: placement.conflict_revision.clone(),
+            conflict_object: placement
+                .conflict_object
+                .as_ref()
+                .map(|hash| hash.as_str().into()),
             base: placement.base.as_ref().map(BaseJson::from),
             origin: placement.origin.as_ref().map(OriginJson::from),
         }
@@ -399,31 +440,48 @@ impl From<&ReplicaPlacement> for PlacementJson {
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BaseJson {
-    #[serde(default)]
-    flags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    flags: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     revision: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     object: Option<String>,
 }
 
-impl From<BaseJson> for ReplicaBase {
+impl From<BaseJson> for PimdirBase {
     fn from(wire: BaseJson) -> Self {
         Self {
-            flags: ReplicaFlags::from_iter(wire.flags),
+            flags: flags_from(wire.flags),
             revision: wire.revision,
-            object: wire.object.map(ReplicaHash),
+            object: wire.object.map(PimdirHash),
         }
     }
 }
 
-impl From<&ReplicaBase> for BaseJson {
-    fn from(base: &ReplicaBase) -> Self {
+impl From<&PimdirBase> for BaseJson {
+    fn from(base: &PimdirBase) -> Self {
         Self {
-            flags: base.flags.0.iter().cloned().collect(),
+            flags: flags_json(&base.flags),
             revision: base.revision.clone(),
             object: base.object.as_ref().map(|hash| hash.as_str().into()),
         }
+    }
+}
+
+/// A known marker set as a JSON array, or `None` for one nobody has read
+/// yet: the wire says unknown by leaving the field out, matching the
+/// `NULL` column pimdir stores it in.
+fn flags_json(flags: &PimdirFlags) -> Option<Vec<String>> {
+    flags
+        .known()
+        .map(|flags| flags.iter().cloned().collect::<Vec<_>>())
+}
+
+/// The inverse of [`flags_json`].
+fn flags_from(flags: Option<Vec<String>>) -> PimdirFlags {
+    match flags {
+        Some(flags) => PimdirFlags::from_iter(flags),
+        None => PimdirFlags::Unknown,
     }
 }
 
@@ -435,17 +493,17 @@ struct OriginJson {
     handle: String,
 }
 
-impl From<OriginJson> for ReplicaOrigin {
+impl From<OriginJson> for PimdirOrigin {
     fn from(wire: OriginJson) -> Self {
         Self {
             collection: wire.collection.into(),
-            handle: ReplicaHandle(wire.handle),
+            handle: PimdirHandle(wire.handle),
         }
     }
 }
 
-impl From<&ReplicaOrigin> for OriginJson {
-    fn from(origin: &ReplicaOrigin) -> Self {
+impl From<&PimdirOrigin> for OriginJson {
+    fn from(origin: &PimdirOrigin) -> Self {
         Self {
             collection: origin.collection.as_str().into(),
             handle: origin.handle.as_str().into(),
@@ -462,7 +520,7 @@ enum LevelJson {
     Full,
 }
 
-impl From<LevelJson> for ReplicaLevel {
+impl From<LevelJson> for PimdirLevel {
     fn from(wire: LevelJson) -> Self {
         match wire {
             LevelJson::Probed => Self::Probed,
@@ -472,12 +530,12 @@ impl From<LevelJson> for ReplicaLevel {
     }
 }
 
-impl From<ReplicaLevel> for LevelJson {
-    fn from(level: ReplicaLevel) -> Self {
+impl From<PimdirLevel> for LevelJson {
+    fn from(level: PimdirLevel) -> Self {
         match level {
-            ReplicaLevel::Probed => Self::Probed,
-            ReplicaLevel::Meta => Self::Meta,
-            ReplicaLevel::Full => Self::Full,
+            PimdirLevel::Probed => Self::Probed,
+            PimdirLevel::Meta => Self::Meta,
+            PimdirLevel::Full => Self::Full,
         }
     }
 }
@@ -493,7 +551,7 @@ enum StatusJson {
     Created,
 }
 
-impl From<StatusJson> for ReplicaStatus {
+impl From<StatusJson> for PimdirStatus {
     fn from(wire: StatusJson) -> Self {
         match wire {
             StatusJson::Clean => Self::Clean,
@@ -505,14 +563,14 @@ impl From<StatusJson> for ReplicaStatus {
     }
 }
 
-impl From<ReplicaStatus> for StatusJson {
-    fn from(status: ReplicaStatus) -> Self {
+impl From<PimdirStatus> for StatusJson {
+    fn from(status: PimdirStatus) -> Self {
         match status {
-            ReplicaStatus::Clean => Self::Clean,
-            ReplicaStatus::Dirty => Self::Dirty,
-            ReplicaStatus::Tombstone => Self::Tombstone,
-            ReplicaStatus::Conflict => Self::Conflict,
-            ReplicaStatus::Created => Self::Created,
+            PimdirStatus::Clean => Self::Clean,
+            PimdirStatus::Dirty => Self::Dirty,
+            PimdirStatus::Tombstone => Self::Tombstone,
+            PimdirStatus::Conflict => Self::Conflict,
+            PimdirStatus::Created => Self::Created,
         }
     }
 }
@@ -530,6 +588,7 @@ enum WriteOpJson {
     Drop {
         collection: String,
         handle: String,
+        reason: DropReasonJson,
     },
     StoreObject {
         hash: String,
@@ -542,17 +601,22 @@ enum WriteOpJson {
     },
 }
 
-impl From<&ReplicaWriteOp> for WriteOpJson {
-    fn from(op: &ReplicaWriteOp) -> Self {
+impl From<&PimdirWriteOp> for WriteOpJson {
+    fn from(op: &PimdirWriteOp) -> Self {
         match op {
-            ReplicaWriteOp::UpsertPlacement(placement) => Self::Upsert {
+            PimdirWriteOp::UpsertPlacement(placement) => Self::Upsert {
                 placement: placement.into(),
             },
-            ReplicaWriteOp::DropPlacement { collection, handle } => Self::Drop {
+            PimdirWriteOp::DropPlacement {
+                collection,
+                handle,
+                reason,
+            } => Self::Drop {
                 collection: collection.as_str().into(),
                 handle: handle.as_str().into(),
+                reason: (*reason).into(),
             },
-            ReplicaWriteOp::StoreObject { object, body } => Self::StoreObject {
+            PimdirWriteOp::StoreObject { object, body } => Self::StoreObject {
                 hash: object.hash.as_str().into(),
                 size: object.size,
                 // A byteless op (an object streamed into the store during fetch)
@@ -563,7 +627,7 @@ impl From<&ReplicaWriteOp> for WriteOpJson {
                     .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
                     .unwrap_or_default(),
             },
-            ReplicaWriteOp::SetCheckpoint {
+            PimdirWriteOp::SetCheckpoint {
                 collection,
                 checkpoint,
             } => Self::SetCheckpoint {
@@ -574,37 +638,74 @@ impl From<&ReplicaWriteOp> for WriteOpJson {
     }
 }
 
+/// Why a placement is dropped, on the JSON wire.
+///
+/// The difference is whether the row's disappearance propagates: only a
+/// `deleted` drop retires the item. A `superseded` one is a provisional
+/// handle an accepted add replaced, and a `rekeyed` one a handle a
+/// rebuild renumbered (SYNC §8); the store must read neither as a
+/// removal.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum DropReasonJson {
+    Deleted,
+    Superseded,
+    Rekeyed,
+}
+
+impl From<PimdirDropReason> for DropReasonJson {
+    fn from(reason: PimdirDropReason) -> Self {
+        match reason {
+            PimdirDropReason::Deleted => Self::Deleted,
+            PimdirDropReason::Superseded => Self::Superseded,
+            PimdirDropReason::Rekeyed => Self::Rekeyed,
+        }
+    }
+}
+
 /// A remote change on the JSON wire (engine to Java only). The `add`
 /// variant carries no body: the Java side resolves the staged body
 /// from its own store by handle, or by the object hash when the
 /// handle is a provisional one it never staged (an engine-side
 /// resurrect). The link id is the idempotency key for a retried add.
+///
+/// Every change carries the engine's idempotency `key`, which names the
+/// target state it makes true: a driver that records the keys it applied
+/// recognises the replay a crash between a serviced push and its
+/// recording write produces, now that a run pushes in chunks.
 #[derive(Serialize)]
 #[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
 enum ChangeJson {
     Add {
+        key: String,
         handle: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         link_id: Option<String>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        flags: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        flags: Option<Vec<String>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         origin: Option<OriginJson>,
         #[serde(skip_serializing_if = "Option::is_none")]
         object: Option<String>,
     },
     Remove {
+        key: String,
         handle: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         to: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        link_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         if_match: Option<String>,
     },
     SetFlags {
+        key: String,
         handle: String,
-        flags: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        flags: Option<Vec<String>>,
     },
     Update {
+        key: String,
         handle: String,
         object: String,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -612,40 +713,48 @@ enum ChangeJson {
     },
 }
 
-impl From<&ReplicaChange> for ChangeJson {
-    fn from(change: &ReplicaChange) -> Self {
-        match change {
-            ReplicaChange::Add {
+impl From<&PimdirChange> for ChangeJson {
+    fn from(change: &PimdirChange) -> Self {
+        let key = change.key.as_str().into();
+
+        match &change.kind {
+            PimdirChangeKind::Add {
                 handle,
                 link_id,
                 flags,
                 origin,
                 object,
             } => Self::Add {
+                key,
                 handle: handle.as_str().into(),
                 link_id: link_id.as_ref().map(|link| link.as_str().into()),
-                flags: flags.0.iter().cloned().collect(),
+                flags: flags_json(flags),
                 origin: origin.as_ref().map(OriginJson::from),
                 object: object.as_ref().map(|hash| hash.as_str().into()),
             },
-            ReplicaChange::Remove {
+            PimdirChangeKind::Remove {
                 handle,
                 to,
+                link_id,
                 if_match,
             } => Self::Remove {
+                key,
                 handle: handle.as_str().into(),
                 to: to.as_ref().map(|to| to.as_str().into()),
+                link_id: link_id.as_ref().map(|link| link.as_str().into()),
                 if_match: if_match.clone(),
             },
-            ReplicaChange::SetFlags { handle, flags } => Self::SetFlags {
+            PimdirChangeKind::SetFlags { handle, flags } => Self::SetFlags {
+                key,
                 handle: handle.as_str().into(),
-                flags: flags.0.iter().cloned().collect(),
+                flags: flags_json(flags),
             },
-            ReplicaChange::Update {
+            PimdirChangeKind::Update {
                 handle,
                 object,
                 if_match,
             } => Self::Update {
+                key,
                 handle: handle.as_str().into(),
                 object: object.as_str().into(),
                 if_match: if_match.clone(),
@@ -665,7 +774,7 @@ enum MutationJson {
         size: usize,
         body: String,
         #[serde(default)]
-        meta: Option<String>,
+        summary: Option<SummaryJson>,
         /// Absent leaves the stored key alone; the spec makes a write that
         /// does not restate it preserve it, so an edit that has no new key
         /// must not send one rather than send an empty one.
@@ -674,7 +783,7 @@ enum MutationJson {
     },
 }
 
-impl From<MutationJson> for ReplicaMutation {
+impl From<MutationJson> for PimdirMutation {
     fn from(wire: MutationJson) -> Self {
         match wire {
             MutationJson::Edit {
@@ -682,16 +791,16 @@ impl From<MutationJson> for ReplicaMutation {
                 hash,
                 size,
                 body,
-                meta,
+                summary,
                 sort_key,
             } => Self::Edit {
-                handle: ReplicaHandle(handle),
-                object: ReplicaObject {
-                    hash: ReplicaHash(hash),
+                handle: PimdirHandle(handle),
+                object: PimdirObject {
+                    hash: PimdirHash(hash),
                     size,
                 },
                 body: body.into_bytes(),
-                meta: meta.map(ReplicaMeta),
+                summary: summary.map(Into::into),
                 sort_key: sort_key.map(Into::into),
             },
         }
@@ -712,7 +821,24 @@ struct LoadedJson {
 #[derive(Deserialize)]
 struct LookupJson {
     #[serde(default)]
-    objects: BTreeMap<String, String>,
+    objects: BTreeMap<String, ObjectJson>,
+}
+
+/// A stored body on the JSON wire: the hash naming it and the size the
+/// immutable link needs as its witness (SYNC §6).
+#[derive(Deserialize)]
+struct ObjectJson {
+    hash: String,
+    size: usize,
+}
+
+impl From<ObjectJson> for PimdirObject {
+    fn from(wire: ObjectJson) -> Self {
+        Self {
+            hash: PimdirHash(wire.hash),
+            size: wire.size,
+        }
+    }
 }
 
 /// Reply to an `enumerate` yield.
@@ -752,8 +878,10 @@ struct FetchedJson {
 struct FetchedItemJson {
     handle: String,
     link_id: String,
+    /// The summary the remote side derived, absent for a tier or a kind
+    /// that yields none.
     #[serde(default)]
-    meta: String,
+    summary: Option<SummaryJson>,
     /// The sort key the remote side derived beside the summary; empty when it
     /// derived none, which is the unknown key rather than one sorting first.
     #[serde(default)]

@@ -231,6 +231,18 @@
     <string name="message_to">To: %s</string>
     <string name="message_cc">Cc: %s</string>
     <string name="message_attachment_unnamed">(Unnamed)</string>
+
+    <!-- What the reader does to the message it has open. -->
+    <string name="message_mark_unread">Mark unread</string>
+    <string name="message_mark_read">Mark read</string>
+    <string name="message_flag">Mark important</string>
+    <string name="message_unflag">Unmark important</string>
+    <string name="message_delete">Delete</string>
+    <string name="message_delete_confirm">Delete this message?</string>
+    <string name="message_deleted">Moved to %s</string>
+    <string name="message_deleted_in_place">Marked deleted; it stays where it is</string>
+    <string name="message_write_failed">Could not write the change</string>
+
     <string name="size_bytes">%d B</string>
     <string name="size_kilobytes">%d kB</string>
     <string name="size_megabytes">%d MB</string>
@@ -276,6 +288,10 @@
     <string name="event_percent_hint">0 to 100</string>
     <string name="event_priority_hint">1 (highest) to 9</string>
     <string name="event_save_failed">Could not save the entry</string>
+    <string name="event_delete">Delete</string>
+    <string name="event_delete_confirm">Delete this entry?</string>
+    <string name="event_delete_failed">Could not delete the entry</string>
+    <string name="event_no_calendar">No calendar to put it in</string>
     <string name="event_unreadable">This entry could not be read</string>
     <string name="event_nothing_to_add">Nothing left to add</string>
     <string name="event_field_this_one">This occurrence</string>
@@ -284,9 +300,23 @@
 
     <string name="event_untitled">(No title)</string>
     <string name="compose_new">New message</string>
-    <string name="compose_placeholder">Writing messages is not wired yet</string>
+    <string name="compose_from_title">Send from</string>
+    <string name="compose_to">To</string>
+    <string name="compose_cc">Cc</string>
+    <string name="compose_bcc">Bcc</string>
+    <string name="compose_add_copies">Add Cc and Bcc</string>
+    <string name="compose_subject">Subject</string>
+    <string name="compose_body">Write your message</string>
+    <string name="compose_from">From %s</string>
+    <string name="compose_send">Send</string>
+    <string name="compose_sent">Sent, copy in %s</string>
+    <string name="compose_sent_no_copy">Sent; this account has no sent mailbox to file a copy in</string>
+    <string name="compose_failed">Could not send the message</string>
+    <string name="compose_no_account">No account this app can send from: sending needs an SMTP server, which is discovered when the account is connected</string>
+    <string name="compose_no_recipient">Enter at least one recipient</string>
+    <string name="compose_discard_confirm">Discard this message?</string>
+    <string name="compose_discard">Discard</string>
     <string name="event_new">New event</string>
-    <string name="event_new_placeholder">Creating events is not wired yet</string>
     <string name="event_component_event">Event</string>
     <string name="event_component_todo">To-do</string>
     <string name="event_component_journal">Journal entry</string>

@@ -25,6 +25,7 @@ mod google;
 mod graph;
 pub(crate) mod imap;
 mod jmap;
+pub(crate) mod smtp;
 
 use core::error::Error as StdError;
 

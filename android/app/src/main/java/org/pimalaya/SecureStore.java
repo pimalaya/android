@@ -180,7 +180,11 @@ public class SecureStore {
                             domain.id,
                             new JSONObject()
                                     .put("baseUrl", connection.baseUrl)
-                                    .put("credential", connection.credentialId));
+                                    .put("credential", connection.credentialId)
+                                    // NOTE: only mail ever has one, so the
+                                    // key is left out rather than written
+                                    // null on every other connection.
+                                    .putOpt("submitUrl", connection.submitUrl));
                 }
 
                 JSONObject credentials = new JSONObject();
@@ -264,7 +268,11 @@ public class SecureStore {
             located.put(
                     PimDomain.byId(id),
                     new AccountConnection(
-                            connection.getString("baseUrl"), connection.getString("credential")));
+                            connection.getString("baseUrl"),
+                            connection.getString("credential"),
+                            connection.isNull("submitUrl")
+                                    ? null
+                                    : connection.getString("submitUrl")));
         }
 
         return new AccountEntry(email, located, decoded);

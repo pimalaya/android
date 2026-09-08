@@ -48,7 +48,7 @@ public class CardStoreTest {
         List<Addressbook> listed = List.of(books);
         store.replaceAddressbooks(EMAIL, listed);
         new PimdirCollections(pimdir, context).replace(
-                EMAIL, PimdirMeta.CONTACT, PimdirCollections.of(EMAIL, listed));
+                EMAIL, PimdirSummary.CONTACT, PimdirCollections.of(EMAIL, listed));
     }
 
     private BookEntry only() {
@@ -123,7 +123,7 @@ public class CardStoreTest {
         // The store learned about a book this database has not seen: hiding it
         // would lose a whole address book to a bookkeeping gap.
         new PimdirCollections(pimdir, context)
-                .ensure("https://dav.example.com/books/b2/", EMAIL, PimdirMeta.CONTACT, "Book Two");
+                .ensure("https://dav.example.com/books/b2/", EMAIL, PimdirSummary.CONTACT, "Book Two");
 
         List<BookEntry> books = store.loadAllAddressbooks();
         assertEquals(2, books.size());

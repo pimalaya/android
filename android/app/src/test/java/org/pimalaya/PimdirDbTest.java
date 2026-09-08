@@ -186,4 +186,80 @@ public class PimdirDbTest {
         }
         assertArrayEquals(new byte[] {1, 2, 3}, blobs.get(hash));
     }
+
+    @Test
+    public void aStoreWrittenByAnEarlierDraftIsReconciledOnOpen() {
+        // While the spec is a draft, version 1 is edited in place, so such a
+        // store is not detectably out of date and onUpgrade never fires: the
+        // drift would surface as a query error instead. A draft folds a column
+        // both ways, so both directions are checked.
+        db.execSQL("ALTER TABLE bindings DROP COLUMN shared_object");
+        db.execSQL("ALTER TABLE bindings ADD COLUMN ambiguous_handles TEXT");
+        db.execSQL("DROP INDEX items_retained");
+        db.execSQL("CREATE INDEX items_retained ON items(collection, link_id)"
+                + " WHERE retained_at IS NOT NULL");
+        db.execSQL("DROP TABLE contact_summary");
+        // A column an index reads, dropped with the index that reads it: the
+        // reconcile has to widen the table before it creates what selects on
+        // it, or the store is refused a column the schema declares and it does
+        // not hold yet.
+        db.execSQL("DROP INDEX collections_by_changed");
+        db.execSQL("ALTER TABLE collections DROP COLUMN changed");
+        db.execSQL("DROP TRIGGER items_count_purge");
+        db.execSQL("CREATE TRIGGER items_count_purge AFTER DELETE ON items"
+                + " BEGIN UPDATE store_meta SET purges = purges WHERE id = 1; END");
+        store.close();
+
+        store = new PimdirDb(RuntimeEnvironment.getApplication());
+        db = store.getWritableDatabase();
+
+        assertTrue("a column the schema declares is added back",
+                hasColumn("bindings", "shared_object"));
+        assertFalse("a column it no longer declares is dropped",
+                hasColumn("bindings", "ambiguous_handles"));
+        // An index whose columns moved keeps its name, so CREATE INDEX IF NOT
+        // EXISTS leaves the old plan in place and only a drop can repair it.
+        assertEquals("seq", indexColumns("items_retained"));
+        // A table the draft added is created rather than waited for: a store
+        // written before the summary tables were declared holds no summary,
+        // and every write into one would fail on a table that is not there.
+        assertTrue("a table the schema declares is created",
+                hasColumn("contact_summary", "fn"));
+        assertTrue("a column an index reads is added before the index is",
+                hasColumn("collections", "changed"));
+        assertEquals("changed", indexColumns("collections_by_changed"));
+        // A trigger's body is not a column, so the shape check is its text.
+        assertTrue("a trigger whose body moved is rebuilt",
+                sqlOf("items_count_purge").contains("purges + 1"));
+    }
+
+    /** The statement an object was created with, as sqlite_master keeps it. */
+    private String sqlOf(String name) {
+        try (Cursor cursor =
+                db.rawQuery("SELECT sql FROM sqlite_master WHERE name = ?", new String[] {name})) {
+            return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : "";
+        }
+    }
+
+    private boolean hasColumn(String table, String column) {
+        try (Cursor cursor = db.rawQuery("PRAGMA table_info(" + table + ")", null)) {
+            while (cursor.moveToNext()) {
+                if (column.equals(cursor.getString(1))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** The last column of an index, which is what the reshape moved. */
+    private String indexColumns(String index) {
+        String last = null;
+        try (Cursor cursor = db.rawQuery("PRAGMA index_info(" + index + ")", null)) {
+            while (cursor.moveToNext()) {
+                last = cursor.getString(2);
+            }
+        }
+        return last;
+    }
 }
