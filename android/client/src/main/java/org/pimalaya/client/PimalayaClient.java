@@ -1,5 +1,7 @@
 package org.pimalaya.client;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -55,21 +57,27 @@ public class PimalayaClient {
 
     /**
      * Searches every discovery mechanism for service configs of every
-     * domain the app covers: PACC, RFC 6764 CardDAV and CalDAV
-     * resolve, Mozilla autoconfig (IMAP and SMTP) and RFC 8620 JMAP
-     * resolve, each carrying its endpoint and authentication methods,
-     * so the connection screen can list what the address actually
-     * offers. The input is an email address or a bare domain (every
-     * mechanism is domain-driven; a domain just skips the username
-     * hints), normally pre-gated by {@link #searchProvider}. The
-     * mechanisms run in parallel, each on its own transport; a
-     * failing mechanism is skipped. Their outputs merge in
-     * mechanism-priority order, and the merged configs' endpoints are
-     * probed in parallel for the authentication schemes they actually
-     * advertise. Resolver as in {@link #discover}.
+     * domain the app covers: the fixed provider rules, PACC, RFC 6764
+     * CardDAV and CalDAV resolve, Mozilla autoconfig (IMAP and SMTP)
+     * and RFC 8620 JMAP resolve, each carrying its endpoint and
+     * authentication methods, so the connection screen can list what
+     * the address actually offers. The input is an email address or a
+     * bare domain (every mechanism is domain-driven; a domain just
+     * skips the username hints). The mechanisms run in parallel, each
+     * on its own transport; a failing mechanism is skipped. Their
+     * outputs merge in mechanism-priority order, and the merged
+     * configs' endpoints are probed in parallel for the authentication
+     * schemes they actually advertise, a provider rule's excepted: what
+     * it says is the provider's own word. Resolver as in
+     * {@link #discover}.
+     *
+     * <p>The provider rules rank first, as io-pim-discovery's own sweep
+     * ranks them: they name Google's and Microsoft's endpoints and sign-ins
+     * for a custom domain as much as for their own, which nothing the
+     * domain publishes does.
      */
     public List<ServiceConfig> searchAll(String email, String resolver) {
-        String[] outputs = new String[5];
+        String[] outputs = new String[6];
         Thread[] mechanisms = new Thread[outputs.length];
         for (int index = 0; index < mechanisms.length; index++) {
             final int mechanism = index;
@@ -98,7 +106,12 @@ public class PimalayaClient {
         Thread[] probes = new Thread[probed.length];
         for (int index = 0; index < probes.length; index++) {
             final int at = index;
-            final String config = object(merged, at).toString();
+            final JSONObject found = object(merged, at);
+            final String config = found.toString();
+            if ("provider".equals(found.optString("source"))) {
+                probed[at] = config;
+                continue;
+            }
             probes[index] =
                     new Thread(
                             () -> {
@@ -132,12 +145,14 @@ public class PimalayaClient {
             int mechanism, Transport transport, String email, String resolver) {
         switch (mechanism) {
             case 0:
-                return Native.searchPacc(transport, email, resolver);
+                return Native.searchProvider(transport, email, resolver);
             case 1:
-                return Native.searchCarddav(transport, email, resolver);
+                return Native.searchPacc(transport, email, resolver);
             case 2:
-                return Native.searchCaldav(transport, email, resolver);
+                return Native.searchCarddav(transport, email, resolver);
             case 3:
+                return Native.searchCaldav(transport, email, resolver);
+            case 4:
                 return Native.searchAutoconfig(transport, email, resolver);
             default:
                 return Native.searchJmap(transport, email, resolver);
@@ -160,9 +175,12 @@ public class PimalayaClient {
         }
     }
 
-    /** Joins every thread, restoring the interrupt flag if raised. */
+    /** Joins every thread started, restoring the interrupt flag if raised. */
     private static void joinAll(Thread[] threads) {
         for (Thread thread : threads) {
+            if (thread == null) {
+                continue;
+            }
             try {
                 thread.join();
             } catch (InterruptedException error) {
@@ -247,6 +265,45 @@ public class PimalayaClient {
      */
     public static String jmapBase(String sessionUrl) {
         return base("jmap", sessionUrl);
+    }
+
+    /**
+     * What was typed for a submission server, as the endpoint it opens:
+     * STARTTLS on the submission port (587, RFC 6409) and on 25, implicit
+     * TLS on any other, 465 (RFC 8314 section 3.3) when none was typed. A
+     * URL passes through.
+     */
+    public static String submitUrl(String entered) {
+        if (entered.contains("://")) {
+            return entered;
+        }
+        if (!entered.contains(":")) {
+            return "smtps://" + entered + ":465";
+        }
+        String port = entered.substring(entered.lastIndexOf(':') + 1);
+        return (port.equals("587") || port.equals("25") ? "smtp://" : "smtps://") + entered;
+    }
+
+    /**
+     * The endpoint with a user in its userinfo, the way RFC 5092 section
+     * 3.2 names who an IMAP URL signs in as: what SASL XOAUTH2 presents
+     * beside a token, which carries no login of its own.
+     */
+    public static String withUser(String url, String user) {
+        try {
+            URI uri = URI.create(url);
+            return new URI(
+                            uri.getScheme(),
+                            user,
+                            uri.getHost(),
+                            uri.getPort(),
+                            uri.getPath(),
+                            uri.getQuery(),
+                            uri.getFragment())
+                    .toASCIIString();
+        } catch (URISyntaxException error) {
+            throw new PimalayaException("Invalid endpoint '" + url + "': " + error.getMessage());
+        }
     }
 
     /** Builds one account base URL through the bridge. */
@@ -848,18 +905,28 @@ public class PimalayaClient {
 
     /**
      * Files a new object in a calendar, guarded on the resource not
-     * existing, and returns the ETag the server gave it.
+     * existing, and returns where it landed: the name asked for, or the
+     * one a backend that names its own resources (Graph) gave it, with
+     * its ETag.
      */
-    public String createEvent(Transport transport, Account account, String calendarUrl, String id, String ical) {
-        return etagOf(
-                Native.createEvent(
-                        transport,
-                        account.baseUrl,
-                        calendarUrl,
-                        account.login,
-                        account.password,
-                        id,
-                        ical));
+    public EventRef createEvent(Transport transport, Account account, String calendarUrl, String id, String ical) {
+        JSONObject created =
+                object(
+                        Native.createEvent(
+                                transport,
+                                account.baseUrl,
+                                calendarUrl,
+                                account.login,
+                                account.password,
+                                id,
+                                ical));
+        try {
+            return new EventRef(
+                    created.getString("id"),
+                    created.isNull("etag") ? null : created.getString("etag"));
+        } catch (JSONException error) {
+            throw new PimalayaException("Unreadable created event: " + error.getMessage());
+        }
     }
 
     /**
@@ -876,18 +943,6 @@ public class PimalayaClient {
                         account.password,
                         id,
                         etag == null ? "" : etag));
-    }
-
-    /**
-     * The ETag a calendar write answered with, null when the server sent
-     * none: a bare JSON string on success, an object on failure.
-     */
-    private static String etagOf(String reply) {
-        String trimmed = reply.trim();
-        if (trimmed.startsWith("{")) {
-            object(trimmed);
-        }
-        return trimmed.startsWith("\"") ? trimmed.substring(1, trimmed.length() - 1) : null;
     }
 
     /**

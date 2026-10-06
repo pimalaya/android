@@ -8,17 +8,17 @@ status: current
 
 A calendar is a collection of kind `text/calendar` and an entry is one item in it, stored as the iCalendar text the server sent and never rewritten: what an entry renders as depends on the window being shown, so the recurrence expansion happens at render time and the summary beside it is what an agenda row reads.
 
-Two backends answer: a CalDAV context root, or the draft-ietf-jmap-calendars verbs behind the `jmap://` marker, whose JSCalendar payload is converted at the client boundary so the store keeps one shape.
+Three backends answer: a CalDAV context root, the draft-ietf-jmap-calendars verbs behind the `jmap://` marker, or Microsoft Graph behind the `msgraph://` one. The JMAP and Graph payloads are converted at the client boundary, JSCalendar by ical-rs and Graph events by io-msgraph, so the store keeps one shape.
 
 Every calendar runs io-pimdir's sync, and asks what changed. The enumerate is an RFC 6578 `sync-collection` REPORT from the cursor the last pass stored, answering resource names and ETags; the fetch is a `calendar-multiget` (RFC 4791 section 7.9) of the entries the merge asked about. A quiet calendar costs one report and no body. A reconcile is followed by an upgrade, which is not optional: a sync that finds the remote content changed drops the body on purpose, and an agenda reads its entries by their body.
 
 The enumeration takes the whole collection rather than filtering it to VEVENT: a `sync-collection` has no component filter, and the app wanted the others anyway. The expander places a to-do and a journal entry on a day like anything else with a date, and the entry page edits all three; the filter the old listing carried was the one place that disagreed.
 
-A JMAP calendar has no incremental read: draft-ietf-jmap-calendars would answer it through `CalendarEvent/changes`, which is not wired, so it answers a complete round and carries no cursor.
+A JMAP calendar has no incremental read: draft-ietf-jmap-calendars would answer it through `CalendarEvent/changes`, which is not wired, so it answers a complete round and carries no cursor. A Graph calendar has none either: its event delta runs over a time window only, and an event leaving the window would read as deleted. A server refusing a first `sync-collection` with 400, as Google does (it serves sync tokens at Depth 0 alone), is listed with a `PROPFIND` instead, which carries no token either.
 
 The entry page is the reading screen and the form at once, the way a contact's is. It edits the stored component rather than the occurrence that was tapped, an override with its own `RECURRENCE-ID` being what changing one date of a series means and not being written yet.
 
-Every write is CalDAV: a JMAP calendar takes `CalendarEvent/set` in JSCalendar, which is the conversion the read path does in the other direction and is not written yet, so it refuses rather than silently doing nothing.
+Every write is CalDAV or Graph: a JMAP calendar takes `CalendarEvent/set` in JSCalendar, which is the conversion the read path does in the other direction and is not written yet, so it refuses rather than silently doing nothing.
 
 ### Requirement: A pass puts back the bodies it dropped
 A calendar pass SHALL raise every placement its reconcile left below full back to its body, by reading the entries the merge named. An entry SHALL NOT leave the agenda because the server changed it.
@@ -90,3 +90,11 @@ The app SHALL stage a calendar entry's deletion, after asking, and the entry SHA
 - GIVEN a new entry that has not been saved
 - WHEN it is deleted
 - THEN the page closes and nothing is ever sent
+
+### Requirement: A Microsoft calendar runs over Graph
+A calendar connection behind the `msgraph://` marker SHALL list the user's calendars and read their events as iCalendar, a series with its exceptions as one entry. Every pass SHALL list the calendar in full. A write SHALL be refused when the event's revision moved since the edit was staged, and a created event SHALL be filed under the id Graph gave it.
+
+#### Scenario: An event edited on Outlook meanwhile
+- GIVEN an entry edited here and on Outlook since the last pass
+- WHEN the sync pushes the edit
+- THEN Graph is not written and the edit stays staged

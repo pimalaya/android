@@ -28,7 +28,10 @@ use io_imap::{
     },
     rfc5161::enable::ImapExtensionEnable,
     rfc6851::r#move::{ImapMessageMove, ImapMessageMoveOptions},
-    sasl::auth_plain::{ImapAuthPlain, ImapAuthPlainOptions},
+    sasl::{
+        auth_plain::{ImapAuthPlain, ImapAuthPlainOptions},
+        auth_xoauth2::{ImapAuthXoauth2, ImapAuthXoauth2Options},
+    },
     types::{
         IntoStatic,
         body::{Body, BodyStructure, Disposition},
@@ -45,7 +48,7 @@ use io_imap::{
 use url::Url;
 
 use crate::{
-    client::Client,
+    client::{Client, url_user},
     mail,
     types::{BridgeError, Credentials, Mailbox as MailboxEntry, Message},
 };
@@ -148,25 +151,45 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
 
     /// Consumes the greeting, then authenticates.
     ///
-    /// AUTHENTICATE PLAIN only: every provider this app onboards
-    /// supports it, and LOGIN would be a second code path for none of
-    /// them. A bearer-token account would need SASL XOAUTH2, which is
-    /// not wired here.
+    /// AUTHENTICATE PLAIN for a password, and LOGIN would be a second
+    /// code path for no provider this app onboards. A token (empty login)
+    /// takes XOAUTH2 as the user the URL names, which is what Google and
+    /// Microsoft accept, the latter nothing else.
     pub fn connect(&mut self, credentials: &Credentials) -> Result<(), BridgeError> {
         self.run(ImapGreetingGet::new(ImapGreetingGetOptions {
             ensure_capabilities: true,
         }))?;
 
-        self.state.capabilities = self.run(ImapAuthPlain::new(
-            None::<&str>,
-            credentials.login,
-            credentials.password,
-            ImapAuthPlainOptions {
-                initial_request: false,
-                ensure_capabilities: true,
-                auto_id: None,
-            },
-        ))?;
+        self.state.capabilities = if credentials.login.is_empty() {
+            let user = url_user(&self.state.url)?;
+            // NOTE: a refused token is the 401 of the HTTP backends, which
+            // is what the caller renews an access token on, an hour being
+            // all a provider's token lasts.
+            self.run(ImapAuthXoauth2::new(
+                user,
+                credentials.password,
+                ImapAuthXoauth2Options {
+                    initial_request: false,
+                    ensure_capabilities: true,
+                    auto_id: None,
+                },
+            ))
+            .map_err(|err| BridgeError {
+                message: err.message,
+                status: Some(401),
+            })?
+        } else {
+            self.run(ImapAuthPlain::new(
+                None::<&str>,
+                credentials.login,
+                credentials.password,
+                ImapAuthPlainOptions {
+                    initial_request: false,
+                    ensure_capabilities: true,
+                    auto_id: None,
+                },
+            ))?
+        };
 
         // NOTE: RFC 7162 section 3.1 requires an ENABLE before the
         // QRESYNC parameter may be used on a SELECT, and a server that

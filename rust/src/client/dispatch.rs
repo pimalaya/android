@@ -500,6 +500,18 @@ impl Client<'_, '_> {
                     complete: true,
                 }))
             }
+            // NOTE: Graph's event delta runs over a time window only, and
+            // an event leaving the window would read as deleted, so every
+            // round is a complete listing with no cursor.
+            Backend::Graph => Ok(Some(EventDelta {
+                changed: self.list_graph_events(
+                    credentials.password,
+                    account::book_segment(base_url, calendar_url),
+                )?,
+                vanished: Vec::new(),
+                token: None,
+                complete: true,
+            })),
             _ => {
                 let url = parse_url(calendar_url)?;
                 let delta = self.sync_caldav_events(&url, credentials, cursor)?;
@@ -531,6 +543,7 @@ impl Client<'_, '_> {
                     .filter(|event| ids.contains(&event.id.as_str()))
                     .collect())
             }
+            Backend::Graph => self.read_graph_events(credentials.password, ids),
             _ => {
                 let url = parse_url(calendar_url)?;
                 self.multiget_caldav_events(&url, credentials, ids)

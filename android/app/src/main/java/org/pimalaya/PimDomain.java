@@ -75,17 +75,18 @@ enum PimDomain {
     static Set<PimDomain> servedBy(String service) {
         Set<PimDomain> domains = new LinkedHashSet<>();
         switch (service) {
-            // NOTE: no SMTP. It is a mail service and discovery reports it, but
-            // this app only reads mail, so offering it would put an option on
-            // the screen that connects to nothing. It belongs here the day
-            // sending does.
+            // NOTE: no SMTP. It sends mail rather than reading it, so it rides
+            // under the mail connection as where that one submits, and a
+            // domain served by SMTP alone would be one nothing can read.
             case "imap":
+            case "msgraph":
                 domains.add(MAIL);
                 break;
             case "carddav":
                 domains.add(CONTACTS);
                 break;
             case "caldav":
+            case "msgraphCalendar":
                 domains.add(CALENDAR);
                 break;
             // NOTE: all three, and only because all three have a reader now.

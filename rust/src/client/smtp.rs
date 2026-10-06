@@ -5,28 +5,32 @@
 //! send is a whole session (greeting, EHLO, authentication, envelope,
 //! data) and there is nothing between two of them worth keeping open.
 //!
-//! Implicit TLS only, which is what the connection flow offers: this
-//! client has no STARTTLS step, and a `starttls` endpoint driven as if
-//! it were implicit would hand a message over in the clear rather than
-//! fail.
+//! Implicit TLS behind `smtps://`, STARTTLS behind `smtp://` (RFC 3207):
+//! the plain socket carries the greeting, `EHLO` and `STARTTLS` and
+//! nothing else, the transport upgrading it before anything is
+//! authenticated.
 
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use io_smtp::{
     coroutine::{SmtpCoroutine, SmtpCoroutineState, SmtpYield},
     message::{SmtpMessageSend, SmtpMessageSendError, SmtpMessageSendOptions},
+    rfc3207::starttls::SmtpStartTls,
     rfc5321::{
         SmtpDomain, SmtpEhloDomain, SmtpForwardPath, SmtpLocalPart, SmtpMailbox, SmtpReversePath,
         data::SmtpDataError, ehlo::SmtpEhlo, greeting::SmtpGreetingGet, mail::SmtpMailError,
         quit::SmtpQuit, rcpt::SmtpRcptError,
     },
-    sasl::auth_plain::{SmtpAuthPlain, SmtpAuthPlainOptions},
+    sasl::{
+        auth_plain::{SmtpAuthPlain, SmtpAuthPlainOptions},
+        auth_xoauth2::{SmtpAuthXoauth2, SmtpAuthXoauth2Options},
+    },
 };
 use secrecy::SecretString;
 use url::Url;
 
 use crate::{
-    client::Client,
+    client::{Client, url_user},
     mail::Composed,
     types::{BridgeError, Credentials},
 };
@@ -78,24 +82,47 @@ impl<'a, 'b, 'local> SmtpSession<'a, 'b, 'local> {
         }
     }
 
-    /// Consumes the greeting, says hello, then authenticates.
+    /// Consumes the greeting, says hello, upgrades an `smtp://` session to
+    /// TLS, then authenticates.
     ///
-    /// AUTHENTICATE PLAIN only, as on the IMAP side and for the same
-    /// reason: every provider this app onboards accepts it, and a
-    /// bearer-token account would need XOAUTH2, which is not wired here
-    /// either.
+    /// AUTH PLAIN for a password, as on the IMAP side, and XOAUTH2 for a
+    /// token (empty login) as the user the URL names.
     fn connect(&mut self, credentials: &Credentials) -> Result<(), BridgeError> {
         self.run(SmtpGreetingGet::new())?;
         self.run(SmtpEhlo::new(domain()))?;
 
+        if self.url.starts_with("smtp://") {
+            // NOTE: RFC 3207 section 6 forbids anything past the 220, so a
+            // reply carrying more is an injection attempt, refused before
+            // the upgrade it would have smuggled itself across.
+            let trailing = self.run(SmtpStartTls::new())?;
+            if !trailing.is_empty() {
+                return Err("SMTP server sent data past its STARTTLS reply".into());
+            }
+            self.client.starttls(&self.url)?;
+            // NOTE: the session restarts with the upgrade (RFC 3207
+            // section 4.2), so the server is asked again what it offers.
+            self.run(SmtpEhlo::new(domain()))?;
+        }
+
         let password = SecretString::from(credentials.password.to_string());
-        self.run(SmtpAuthPlain::new(
-            None::<&str>,
-            credentials.login,
-            &password,
-            domain(),
-            SmtpAuthPlainOptions::default(),
-        ))?;
+        if credentials.login.is_empty() {
+            let user = url_user(&self.url)?;
+            self.run(SmtpAuthXoauth2::new(
+                &user,
+                &password,
+                domain(),
+                SmtpAuthXoauth2Options::default(),
+            ))?;
+        } else {
+            self.run(SmtpAuthPlain::new(
+                None::<&str>,
+                credentials.login,
+                &password,
+                domain(),
+                SmtpAuthPlainOptions::default(),
+            ))?;
+        }
 
         Ok(())
     }

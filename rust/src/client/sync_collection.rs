@@ -10,7 +10,7 @@
 
 use io_webdav::{
     coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield},
-    rfc4918::GETETAG,
+    rfc4918::{GETETAG, send::WebdavSendError},
     rfc6578::sync_collection::{
         WebdavSyncCollection, WebdavSyncCollectionError, WebdavSyncCollectionOptions,
         WebdavSyncDelta,
@@ -59,6 +59,16 @@ impl Client<'_, '_> {
                     return Err(format!("Cannot enumerate the collection at {url}").into());
                 }
                 SyncRound::UnsupportedReport if sync_token.is_some() => return Ok(None),
+                // NOTE: Google answers a token-less `sync-collection` with
+                // 400 (it serves sync tokens at Depth 0 alone), so a first
+                // round it refuses is listed instead, every round after it
+                // too since the listing carries no token.
+                SyncRound::BadRequest(_) if token.is_none() && !opts.fallback => {
+                    opts.fallback = true;
+                    delta = WebdavSyncDelta::default();
+                    continue;
+                }
+                SyncRound::BadRequest(err) => return Err(err),
                 SyncRound::UnsupportedReport => {
                     opts.fallback = true;
                     token = None;
@@ -101,6 +111,12 @@ impl Client<'_, '_> {
                 )) => {
                     return Ok(SyncRound::UnsupportedReport);
                 }
+                WebdavCoroutineState::Complete(Err(
+                    err @ WebdavSyncCollectionError::Send(WebdavSendError::HttpStatus {
+                        status: 400,
+                        ..
+                    }),
+                )) => return Ok(SyncRound::BadRequest(coroutine_error(&err))),
                 WebdavCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                 WebdavCoroutineState::Yielded(WebdavYield::WantsWrite(bytes)) => {
                     self.write(target.as_str(), &bytes)?;
@@ -124,4 +140,6 @@ enum SyncRound {
     /// The server implements no `sync-collection` REPORT, so the
     /// `PROPFIND` fallback has to enumerate the collection instead.
     UnsupportedReport,
+    /// The server refused the request as malformed.
+    BadRequest(BridgeError),
 }

@@ -7,7 +7,7 @@
 > description of the code. Nothing in the app charges, prompts or checks an
 > entitlement today.
 
-The app is free and fully functional in every channel. Money comes from a support prompt on Google Play, framed as important to the project's survival rather than a casual tip, with one-time pay-what-you-want tiers, plus real services sold outside the app. There is no subscription and no paywall: the app never stops working, but the ask is earnest. This model supersedes the subscription gate described in subscription-entitlement.md.
+The app is free and fully functional in every channel. Money comes from a support prompt on Google Play, framed as important to the project's survival rather than a casual tip, with one-time pay-what-you-want tiers, plus real services sold outside the app. The client carries no subscription and no paywall: the app never stops working, but the ask is earnest. The one subscription is a hosted service, the provider plan for Google and Microsoft (below). This model supersedes the subscription gate described in subscription-entitlement.md.
 
 ## Why this shape
 
@@ -56,7 +56,7 @@ Customer-facing store descriptions, each under 200 characters, cumulative, in th
 
 ## Cross-cutting rules
 
-- No core feature is ever gated. Paid tiers buy recognition, a cause, and a thank-you, never functionality.
+- No core feature is ever gated. Paid tiers buy recognition, a cause, and a thank-you, never functionality. The provider plan sells convenience with a real per-user cost behind it, and every free way in stays open (see below).
 - Every name-listing is opt-in and allows a pseudonym or anonymous. The whole audience chose a privacy-first contacts app; publishing a real name as a reward is off-brand.
 - Social proof is an aggregate count only, and only shown when the number flatters. Small per-tier counts (early "3 people paid this") are negative social proof and stay hidden.
 - Public recognition escalates by tier: in-app plus the Pimalaya repository README at Backer, then pimalaya.org plus the Pimalaya GitHub organization README at Sponsor. Each named surface is a single file or page, never a name duplicated across every repository.
@@ -75,7 +75,54 @@ This replaces the subscription paywall in subscription-entitlement.md, which hol
 
 ## Not in this model
 
-One-time tiers make income inflow-dependent (a sawtooth), not recurring. Recurring revenue, if ever wanted, comes from a future hosted service (the Posteo blueprint: a service with real per-user cost and low churn), never from a subscription on the client itself.
+One-time tiers make income inflow-dependent (a sawtooth), not recurring. Recurring revenue, if ever wanted, comes from a future hosted service (the Posteo blueprint: a service with real per-user cost and low churn), never from a subscription on the client itself. The provider plan below is that service.
+
+## The provider plan: Google and Microsoft, OAuth and push
+
+Decided 2026-10-06. One monthly subscription, small, covering Google and Microsoft alike: signing in through Pimalaya's registered OAuth applications, and real-time push. From Pimalaya's side the two providers are the same product. You pay for a smooth integration, nothing else.
+
+### Why this is not a gated feature
+
+Every standard stays free: IMAP, SMTP, JMAP, CalDAV and CardDAV, whatever the provider. What the plan sells is convenience backed by a real, recurring, per-user cost:
+
+- Google's restricted Gmail scope (`https://mail.google.com/`, which IMAP needs too) requires a yearly paid CASA assessment, and an unverified app stops at 100 users in total.
+- Google's per-project quotas grow with the user base: the Calendar API, which CalDAV shares, bills past 1,000,000 requests a day.
+- Microsoft needs a paid Azure account for the Entra registration, and publisher verification for work tenants that only consent to verified publishers.
+- Push needs servers.
+
+A user who does not pay keeps every way in: an app password (Gmail, behind 2-step verification), their own OAuth client (the advanced setup's custom-client prompt), and polling instead of push. It is less smooth, and that is the whole difference. Nobody is tied to Pimalaya either: the mail stays at the provider, and any other client reaches it.
+
+The setup says so plainly. A Google or Microsoft section that cannot connect without the plan names the free ways in rather than looking broken; Outlook.com in particular turned password IMAP off in 2024, so its free way in is the user's own Entra application.
+
+### The server stores subscriptions, never tokens
+
+A client id shipped in an APK is public, so the gate cannot live in the app: the registered applications are confidential clients whose secret stays on Pimalaya's server. The server is a stateless token proxy.
+
+1. The phone opens the authorization in the browser, with PKCE. The provider redirects to a Pimalaya HTTPS callback, which hands the code straight back to the app.
+2. The phone sends the code to the server. The server checks the subscription, adds the secret, exchanges the code, returns the tokens to the phone, and stores nothing.
+3. Every refresh goes the same way: the phone sends its refresh token, the server checks the subscription, adds the secret, returns a new access token, and stores nothing.
+4. The phone then talks to IMAP, SMTP, CalDAV and Graph directly.
+
+A refresh token issued to a confidential client is useless without the secret, so a lapsed subscription ends access within the hour an access token lasts. There is no token database to leak. The floor is that the server holds each token in memory for the duration of an exchange, since the secret and the refresh token have to meet at the provider's token endpoint; neither provider binds tokens to a device in a way that would avoid it, so the server stays in CASA's scope. Being stateless, it replicates easily, which is the answer to availability: a proxy that is down stops every subscriber's mail within the hour.
+
+### Push without tokens on the server
+
+The phone creates the subscriptions with its own token, pointing at Pimalaya:
+
+- Gmail: the phone calls `users.watch` with Pimalaya's Pub/Sub topic. Google publishes `{emailAddress, historyId}`, and the server forwards a contentless "something changed" to the phone's push endpoint (FCM or UnifiedPush). The watch lasts 7 days; the phone renews it.
+- Graph: the phone creates the subscription with Pimalaya's webhook as its notification URL. The server answers the one-time validation and relays notifications, which carry a resource id and no content. A mail subscription lasts about 3 days; the phone renews it in the background.
+
+The server relays for subscribers only. It stores the subscription and, per user, an opaque mapping from a Gmail address or a Graph subscription id to the phone's push endpoint. A phone offline longer than a subscription's lifetime loses push until the app runs again, then polls and renews.
+
+The promise on the plan's page: we store your subscription, never your tokens and never your mail.
+
+### Against Spark
+
+Spark gives OAuth and push away, paid for by scale and by holding every user's tokens on its servers. Pimalaya does not compete on that ground. The free tier's pitch is what Spark cannot say: no middleman, standards first (JMAP providers push to the phone directly, with no Pimalaya server at all), mail, contacts and calendars local and offline. The plan is for whoever wants Google or Microsoft as smooth as Spark makes them, without a token database behind it.
+
+### Before release
+
+The app ships Google and Microsoft client ids today (`Oauth.java`), and onboarding uses them for every domain those providers serve. That is for testing only: a release build drops them, and routes both providers through the custom-client prompt until the proxy exists. Otherwise the plan would be free from day one, and every free user would count against the 100-user cap and the per-project quotas.
 
 ## Landed
 

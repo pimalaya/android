@@ -401,7 +401,7 @@ impl<'a, 'local> Client<'a, 'local> {
 impl<'a, 'local> Client<'a, 'local> {
     /// Runs a Microsoft Graph coroutine to completion, routing every
     /// yield to the transport stream opened on the Graph origin.
-    fn run_msgraph<C, T>(&mut self, mut coroutine: C) -> Result<T, BridgeError>
+    pub(super) fn run_msgraph<C, T>(&mut self, mut coroutine: C) -> Result<T, BridgeError>
     where
         C: MsgraphCoroutine<
                 Yield = MsgraphYield,
@@ -476,7 +476,7 @@ fn graph_card(contact: MsgraphContact) -> Card {
     }
 }
 
-fn parse_graph_url(raw: &str) -> Result<Url, BridgeError> {
+pub(super) fn parse_graph_url(raw: &str) -> Result<Url, BridgeError> {
     Url::parse(raw).map_err(|err| format!("Invalid Graph page URL `{raw}`: {err}").into())
 }
 

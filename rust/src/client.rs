@@ -23,6 +23,8 @@ mod discovery;
 mod dispatch;
 mod google;
 mod graph;
+mod graph_calendar;
+mod graph_mail;
 pub(crate) mod imap;
 mod jmap;
 pub(crate) mod smtp;
@@ -40,6 +42,7 @@ use jni::{
     jni_sig, jni_str,
     objects::{JByteArray, JObject},
 };
+use percent_encoding::percent_decode_str;
 use url::Url;
 
 use crate::{client::convert::coroutine_error, types::BridgeError};
@@ -177,12 +180,50 @@ impl<'a, 'local> Client<'a, 'local> {
 
         Ok(())
     }
+
+    /// Upgrades the URL's plain stream to TLS in place (RFC 3207), the
+    /// handshake verifying the URL's host.
+    pub(crate) fn starttls(&mut self, url: &str) -> Result<(), BridgeError> {
+        let url = self.env.new_string(url).map_err(|err| err.to_string())?;
+
+        self.env
+            .call_method(
+                self.transport,
+                jni_str!("starttls"),
+                jni_sig!("(Ljava/lang/String;)V"),
+                &[JValue::Object(&url)],
+            )
+            .map_err(|err| clear_and_fail(self.env, "transport starttls", err))?;
+
+        Ok(())
+    }
 }
 
 /// Catches and clears any pending Java exception, surfacing its class
 /// and message (a bare JNI error only says "Java exception was thrown").
 /// The lowercase op is capitalized so the user-facing message reads as a
 /// sentence.
+/// The user a mail endpoint signs in as with a token, named in its URL's
+/// userinfo the way RFC 5092 section 3.2 names an IMAP one.
+///
+/// A token carries no login, and SASL `XOAUTH2` still wants one: the
+/// connection flow writes the address into the URL it stores, so the
+/// credential stays the bare token every other protocol sends.
+pub(crate) fn url_user(url: &str) -> Result<String, BridgeError> {
+    let url = Url::parse(url).map_err(|err| format!("Invalid endpoint URL `{url}`: {err}"))?;
+    let user = percent_decode_str(url.username()).decode_utf8_lossy();
+
+    if user.is_empty() {
+        return Err(format!(
+            "No user to sign in to {} with a token",
+            url.origin().ascii_serialization()
+        )
+        .into());
+    }
+
+    Ok(user.into_owned())
+}
+
 pub(crate) fn clear_and_fail(env: &mut Env, op: &str, err: Error) -> String {
     let mut chars = op.chars();
     let op = match chars.next() {
@@ -205,6 +246,17 @@ mod tests {
     /// An email address searches by its domain part; a bare domain
     /// searches as itself with no email; an input without any domain
     /// is rejected.
+    #[test]
+    fn url_user_decodes_the_userinfo_an_address_was_written_into() {
+        use crate::client::url_user;
+
+        assert_eq!(
+            url_user("imaps://alice%40example.com@outlook.office365.com:993").unwrap(),
+            "alice@example.com"
+        );
+        assert!(url_user("smtp://smtp.office365.com:587").is_err());
+    }
+
     #[test]
     fn search_domain_accepts_emails_and_bare_domains() {
         let (email, domain) = search_domain("user@Example.COM.").unwrap();

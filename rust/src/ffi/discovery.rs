@@ -166,7 +166,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchJmap<'local>(
 /// `Native.searchMerge`: pure reduction of per-mechanism config lists
 /// (a JSON array of arrays, in mechanism-priority order) into one
 /// deduplicated list, restricted to the services the app drives
-/// (IMAP, CalDAV, CardDAV, JMAP). Returns a JSON array of service
+/// (IMAP, SMTP, CalDAV, CardDAV, JMAP, Graph mail and calendars). Returns a JSON array of service
 /// configs.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_searchMerge<'local>(
@@ -251,7 +251,7 @@ fn search_mechanism_json<'local>(
 
 /// Merges per-mechanism config lists (in priority order) through
 /// io-pim-discovery's pure collector, restricted to the services the
-/// app drives (CardDAV, JMAP).
+/// app drives.
 fn search_merge(lists: &str) -> Result<String, String> {
     let lists: Vec<Vec<DiscoveryServiceConfig>> =
         from_str(lists).map_err(|err| format!("Invalid config lists: {err}"))?;
@@ -260,13 +260,18 @@ fn search_merge(lists: &str) -> Result<String, String> {
     // gate before the connection screen, so a service missing from it is
     // discovered, merged away and never seen: CalDAV and IMAP were, which is
     // why a Fastmail address offered JMAP alone for calendars and mail while
-    // contacts, whose CardDAV was listed, offered both. SMTP stays out because
-    // nothing here sends.
+    // contacts, whose CardDAV was listed, offered both. SMTP is the submission
+    // server an IMAP account sends through, and Graph mail and calendars are
+    // what Microsoft serves beside IMAP. Graph and Google contacts are not merged: their
+    // sign-ins are the app's own (`OnboardingFlow.addProviderOptions`).
     let services = BTreeSet::from([
         DiscoveryService::Imap,
+        DiscoveryService::Smtp,
         DiscoveryService::Caldav,
         DiscoveryService::Carddav,
         DiscoveryService::Jmap,
+        DiscoveryService::Msgraph,
+        DiscoveryService::MsgraphCalendar,
     ]);
     let mut collector = DiscoveryConfigCollector::new(services);
 

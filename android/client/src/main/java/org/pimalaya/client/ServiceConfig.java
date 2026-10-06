@@ -93,20 +93,21 @@ public final class ServiceConfig {
                     security,
                     json.isNull("username") ? null : json.getString("username"),
                     auth,
-                    source(json.get("source")));
+                    source(json));
         } catch (JSONException error) {
             throw new PimalayaException("Unreadable service config: " + error.getMessage());
         }
     }
 
     /**
-     * Flattens the source tag: plain mechanisms come as strings,
-     * fixed provider rules as {@code {"provider": ".."}} objects.
+     * Flattens the source tag: a fixed provider rule comes as source
+     * {@code "provider"} beside a {@code provider} field naming it.
      */
-    private static String source(Object source) throws JSONException {
-        if (source instanceof JSONObject) {
-            return "provider:" + ((JSONObject) source).getString("provider");
+    private static String source(JSONObject json) throws JSONException {
+        String source = json.getString("source");
+        if ("provider".equals(source) && json.has("provider")) {
+            return "provider:" + json.getString("provider");
         }
-        return source.toString();
+        return source;
     }
 }

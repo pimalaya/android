@@ -26,7 +26,7 @@
     <string name="domain_connected">Already connected</string>
     <string name="domain_advanced_only">Needs the advanced setup</string>
     <string name="send_mail">Send mail</string>
-    <string name="send_mail_advanced" translatable="false">SMTP</string>
+    <string name="send_mail_advanced">Submission</string>
     <string name="send_mail_none">Do not send from this account</string>
     <string name="send_mail_advanced_only">Nothing was found to send through; the advanced setup can enter one</string>
     <string name="setup_step_title">Step %1$d/%2$d · %3$s · %4$s</string>

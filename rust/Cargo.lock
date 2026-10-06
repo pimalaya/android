@@ -377,6 +377,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e8b293ee52f1d10fe06d1224664d113a51f30285fc36154bfd3d8c1077c7622"
 dependencies = [
+ "jiff",
  "memchr",
  "serde_json",
 ]
@@ -590,7 +591,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "634eb7c50739e1a2c7762015068ebfd7fc82654bc80356293730d859dc038d80"
 dependencies = [
  "base64 0.23.1",
+ "ical-rs",
  "io-http",
+ "jiff",
  "log",
  "serde",
  "serde_json",
@@ -702,6 +705,7 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
+ "jiff-tzdb",
  "log",
  "portable-atomic",
  "portable-atomic-util",
@@ -729,6 +733,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "jiff-tzdb"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "142bd39932ad231f10513df9ab62661fead8719872150b7ad02a2df79f4e141e"
 
 [[package]]
 name = "jni"
@@ -875,9 +885,11 @@ dependencies = [
  "io-pimdir",
  "io-smtp",
  "io-webdav",
+ "jiff",
  "jni",
  "log",
  "mail-parser",
+ "percent-encoding",
  "rand",
  "secrecy",
  "serde",

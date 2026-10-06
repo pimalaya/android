@@ -12,6 +12,7 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.pimalaya.client.PimalayaClient;
 
 /**
  * The full-screen account settings controller behind the drawer: it
@@ -323,6 +324,11 @@ final class AccountSettings {
         if (account == null || !account.covers(PimDomain.MAIL)) {
             return;
         }
+        // NOTE: Graph submits through the account it reads from, so there
+        // is no server of its own to change.
+        if (PimalayaClient.isGraph(account.server(PimDomain.MAIL))) {
+            return;
+        }
 
         String current = account.server(PimDomain.MAIL).submitUrl;
         String value =
@@ -382,18 +388,15 @@ final class AccountSettings {
                 .show();
     }
 
-    /** What was typed, as the implicit-TLS endpoint a submission opens. */
+    /** What was typed, as the endpoint a submission opens. */
     private static String submitUrl(String entered) {
-        if (entered.contains("://")) {
-            return entered;
-        }
-        return entered.contains(":") ? "smtps://" + entered : "smtps://" + entered + ":465";
+        return PimalayaClient.submitUrl(entered);
     }
 
     /** The host part of an endpoint, the endpoint itself when it has none. */
     private static String hostOf(String url) {
         try {
-            return new java.net.URL(url.replaceFirst("^smtps://", "https://")).getHost();
+            return java.net.URI.create(url).getHost();
         } catch (Exception error) {
             return url;
         }

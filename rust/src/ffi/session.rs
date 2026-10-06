@@ -14,10 +14,11 @@
 //! returns and a global one would be a registration to leak; the
 //! transport stays Java's and rides in as an argument.
 //!
-//! JMAP sessions carry no protocol state, HTTP being self-contained.
-//! They exist anyway so that both backends are opened, used and closed
-//! the same way, and so that the transport under them pools its socket
-//! for the whole pass, which is the same win by the other route.
+//! JMAP and Graph sessions carry no protocol state, HTTP being
+//! self-contained. They exist anyway so that every backend is opened,
+//! used and closed the same way, and so that the transport under them
+//! pools its socket for the whole pass, which is the same win by the
+//! other route.
 
 use std::collections::BTreeMap;
 
@@ -42,18 +43,25 @@ pub struct MailSession {
 /// The protocol state a session carries, if its backend has any.
 enum MailKind {
     Imap(ImapState),
-    /// No protocol state, an HTTP request carrying its own, but a
-    /// pass's worth of answers all the same: the mailbox ids the roster
-    /// named, and the last mailbox enumerated, so a fetch reads what the
-    /// enumerate already asked for rather than asking again.
-    ///
-    /// RFC 8621 has `Email/changes`, which is where an incremental JMAP
-    /// round would go; until it is wired a mailbox answers whole, and
-    /// answering it twice per pass would be the avoidable half of that.
-    Jmap {
-        ids: BTreeMap<String, String>,
-        listed: BTreeMap<String, Message>,
-    },
+    Jmap(MailListing),
+    Graph(MailListing),
+}
+
+/// What an HTTP mail session remembers across a pass.
+///
+/// No protocol state, an HTTP request carrying its own, but a pass's
+/// worth of answers all the same: the mailbox ids the roster named, and
+/// the last mailbox enumerated, so a fetch reads what the enumerate
+/// already asked for rather than asking again.
+///
+/// RFC 8621 has `Email/changes` and Graph a message delta, which is
+/// where an incremental round would go; until they are wired a mailbox
+/// answers whole, and answering it twice per pass would be the avoidable
+/// half of that.
+#[derive(Default)]
+pub struct MailListing {
+    pub ids: BTreeMap<String, String>,
+    pub listed: BTreeMap<String, Message>,
 }
 
 impl MailSession {
@@ -71,10 +79,11 @@ impl MailSession {
                 // fails here rather than on the first verb that uses it.
                 let session_url = account::jmap_session_url(base_url)?;
                 client.jmap_session_check(&session_url, &credentials)?;
-                MailKind::Jmap {
-                    ids: BTreeMap::new(),
-                    listed: BTreeMap::new(),
-                }
+                MailKind::Jmap(MailListing::default())
+            }
+            Backend::Graph => {
+                client.graph_mail_check(password)?;
+                MailKind::Graph(MailListing::default())
             }
             _ => {
                 let url = parse_url(base_url)?;
@@ -105,22 +114,19 @@ impl MailSession {
 
     /// Whether the backend behind this session speaks JMAP.
     pub fn is_jmap(&self) -> bool {
-        matches!(self.kind, MailKind::Jmap { .. })
+        matches!(self.kind, MailKind::Jmap(_))
     }
 
-    /// The JMAP mailbox ids the roster named, by path.
-    pub fn jmap_ids(&mut self) -> &mut BTreeMap<String, String> {
-        match &mut self.kind {
-            MailKind::Jmap { ids, .. } => ids,
-            MailKind::Imap(_) => unreachable!("no JMAP mailbox ids on an IMAP session"),
-        }
+    /// Whether the backend behind this session is Microsoft Graph.
+    pub fn is_graph(&self) -> bool {
+        matches!(self.kind, MailKind::Graph(_))
     }
 
-    /// The messages the last JMAP enumerate read, by id.
-    pub fn jmap_listed(&mut self) -> &mut BTreeMap<String, Message> {
+    /// What this HTTP session remembers of the pass.
+    pub fn listing(&mut self) -> &mut MailListing {
         match &mut self.kind {
-            MailKind::Jmap { listed, .. } => listed,
-            MailKind::Imap(_) => unreachable!("no JMAP listing on an IMAP session"),
+            MailKind::Jmap(listing) | MailKind::Graph(listing) => listing,
+            MailKind::Imap(_) => unreachable!("no mailbox listing on an IMAP session"),
         }
     }
 
@@ -135,8 +141,8 @@ impl MailSession {
     ) -> Result<client::imap::ImapSession<'a, 'b, 'local>, BridgeError> {
         match &mut self.kind {
             MailKind::Imap(state) => Ok(client::imap::ImapSession::bind(client, state)),
-            MailKind::Jmap { .. } => {
-                Err("This account speaks JMAP, which has no IMAP session".into())
+            MailKind::Jmap(_) | MailKind::Graph(_) => {
+                Err("This account speaks HTTP, which has no IMAP session".into())
             }
         }
     }

@@ -88,9 +88,9 @@ public final class AuthMethod {
                 JSONObject grant = method.getJSONObject("oauthAuthorizationCodeGrant");
                 return new AuthMethod(
                         Type.OAUTH_AUTHORIZATION_CODE_GRANT,
-                        grant.getString("authorization_endpoint"),
+                        grant.getString("authorizationEndpoint"),
                         null,
-                        grant.getString("token_endpoint"),
+                        grant.getString("tokenEndpoint"),
                         grant.isNull("scope") ? null : grant.getString("scope"),
                         null);
             }
@@ -100,8 +100,8 @@ public final class AuthMethod {
                 return new AuthMethod(
                         Type.OAUTH_DEVICE_AUTHORIZATION_GRANT,
                         null,
-                        grant.getString("device_authorization_endpoint"),
-                        grant.getString("token_endpoint"),
+                        grant.getString("deviceAuthorizationEndpoint"),
+                        grant.getString("tokenEndpoint"),
                         grant.isNull("scope") ? null : grant.getString("scope"),
                         null);
             }

@@ -72,11 +72,11 @@ final class OauthFlow {
     }
 
     /**
-     * Starts a Google OAuth grant (the scope picks the backend: CardDAV
-     * against the given principal root, or the People API against a
-     * google sentinel base URL): prepares the PKCE session, then opens
-     * the authorization URL in the browser. The redirect comes back on
-     * the reversed-client-id custom scheme.
+     * Starts a Google OAuth grant with the app's own client, for whatever
+     * the scope covers (mail, calendars, CardDAV or the People API):
+     * prepares the PKCE session, then opens the authorization URL in the
+     * browser. The redirect comes back on the reversed-client-id custom
+     * scheme.
      */
     void startGoogleOauth(String email, String scope, String baseUrl) {
         pendingOauth =
@@ -110,21 +110,17 @@ final class OauthFlow {
     }
 
     /**
-     * Starts the Microsoft Graph OAuth grant, mirroring the Google one:
-     * PKCE session, browser, redirect on the pimalaya custom scheme.
-     * The connected account carries the msgraph sentinel base URL,
-     * which routes every addressbook and card operation through Graph
-     * instead of CardDAV.
+     * Starts a Microsoft OAuth grant with the app's own client, mirroring
+     * the Google one: PKCE session, browser, redirect on the pimalaya
+     * custom scheme. The scope addresses one API, Outlook's for mail or
+     * Graph's for contacts and calendars, Entra issuing a token for one.
      */
-    void startMicrosoftOauth(String email) {
+    void startMicrosoftOauth(String email, String scope, String baseUrl) {
         pendingOauth =
                 new OauthSession(
-                        Oauth.MICROSOFT_CLIENT_ID,
-                        null,
-                        Oauth.MICROSOFT_REDIRECT_URI,
-                        Oauth.MICROSOFT_SCOPE);
+                        Oauth.MICROSOFT_CLIENT_ID, null, Oauth.MICROSOFT_REDIRECT_URI, scope);
         pendingTokenEndpoint = Oauth.MICROSOFT_TOKEN_ENDPOINT;
-        pendingBaseUrl = org.pimalaya.client.PimalayaClient.msgraphBase(email);
+        pendingBaseUrl = baseUrl;
         pendingAccountEmail = email;
         pendingClientId = Oauth.MICROSOFT_CLIENT_ID;
         pendingClientSecret = null;

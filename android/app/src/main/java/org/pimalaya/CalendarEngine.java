@@ -192,13 +192,14 @@ final class CalendarEngine extends PimdirEngine {
                 // The resource name, never the handle: a staged create waits
                 // under a provisional handle until this push assigns a real
                 // one (SYNC §2), and the name it goes out under is the entry's
-                // own, which is what a later listing brings back.
+                // own, which is what a later listing brings back. Graph names
+                // its events itself, so the handle is whatever came back.
                 String name = PimdirStorage.nameOf(handle);
                 try {
-                    String etag =
+                    EventRef created =
                             client.createEvent(
                                     transport, account, url, name, row.getString("vcard"));
-                    return result(handle, true, name, etag);
+                    return result(handle, true, created.id, created.etag);
                 } catch (RuntimeException failure) {
                     // The resource is already there, which `If-None-Match: *`
                     // is exactly what asks: the create is refused rather than

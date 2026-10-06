@@ -212,7 +212,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_parseMessage<'local>(
 ///
 /// The mailbox is only IMAP's concern: a JMAP `Email` id addresses the
 /// message across the whole account, and the same message filed in two
-/// mailboxes is one object with one id.
+/// mailboxes is one object with one id. A Graph message id addresses
+/// it across the mailbox the same way.
 fn read_source(
     client: &mut Client<'_, '_>,
     handle: i64,
@@ -224,25 +225,30 @@ fn read_source(
         let url = session.jmap_url()?;
         return client.fetch_jmap_source(&url, &session.credentials(), id);
     }
+    if session.is_graph() {
+        return client.fetch_graph_source(session.credentials().password, id);
+    }
 
     client::imap::fetch_source(&mut session.imap(client)?, mailbox, id)
 }
 
 /// The account's mailboxes with whichever backend the session speaks.
 ///
-/// A JMAP session remembers the id each path maps to, since every later
+/// An HTTP session remembers the id each path maps to, since every later
 /// verb addresses a mailbox by id and the roster is the only place that
 /// answer comes from.
 fn list_mailboxes(client: &mut Client<'_, '_>, handle: i64) -> Result<Vec<Mailbox>, BridgeError> {
     let session = unsafe { session::borrow(handle) }?;
-    if !session.is_jmap() {
+    let listed = if session.is_jmap() {
+        let url = session.jmap_url()?;
+        client.list_jmap_mailbox_roster(&url, &session.credentials())?
+    } else if session.is_graph() {
+        client.list_graph_mailboxes(session.credentials().password)?
+    } else {
         return client::imap::list_mailboxes(&mut session.imap(client)?);
-    }
+    };
 
-    let url = session.jmap_url()?;
-    let listed = client.list_jmap_mailbox_roster(&url, &session.credentials())?;
-
-    let ids = session.jmap_ids();
+    let ids = &mut session.listing().ids;
     ids.clear();
     let mut roster = Vec::with_capacity(listed.len());
     for (id, mailbox) in listed {
@@ -264,21 +270,25 @@ fn enumerate(
     let session = unsafe { session::borrow(handle) }?;
     let cursor = Some(cursor).filter(|value| !value.is_empty());
 
-    if !session.is_jmap() {
+    if !session.is_jmap() && !session.is_graph() {
         let round = session.imap(client)?.enumerate(mailbox, cursor, limit)?;
         return Ok(round.into());
     }
 
-    let url = session.jmap_url()?;
-    let Some(id) = session.jmap_ids().get(mailbox).cloned() else {
-        return Err(format!("No JMAP mailbox named `{mailbox}`").into());
+    let Some(id) = session.listing().ids.get(mailbox).cloned() else {
+        return Err(format!("No mailbox named `{mailbox}`").into());
     };
-    let messages = client.query_jmap_mailbox(&url, &session.credentials(), &id, mailbox, limit)?;
+    let messages = if session.is_jmap() {
+        let url = session.jmap_url()?;
+        client.query_jmap_mailbox(&url, &session.credentials(), &id, mailbox, limit)?
+    } else {
+        client.query_graph_mailbox(session.credentials().password, &id, mailbox, limit)?
+    };
 
-    // Kept for the fetch that follows: with no `Email/changes` wired the
-    // round already read what the fetch would ask for, and asking twice
-    // would be the avoidable half of a whole round.
-    let listed = session.jmap_listed();
+    // Kept for the fetch that follows: with no incremental round wired
+    // the round already read what the fetch would ask for, and asking
+    // twice would be the avoidable half of a whole round.
+    let listed = &mut session.listing().listed;
     listed.clear();
     let mut items = Vec::with_capacity(messages.len());
     for message in messages {
@@ -308,19 +318,20 @@ fn fetch_envelopes(
     let ids: Vec<String> = from_str(ids).map_err(|err| format!("Invalid id list: {err}"))?;
     let session = unsafe { session::borrow(handle) }?;
 
-    if !session.is_jmap() {
+    if !session.is_jmap() && !session.is_graph() {
         let borrowed: Vec<&str> = ids.iter().map(String::as_str).collect();
         return session.imap(client)?.fetch_envelopes(mailbox, &borrowed);
     }
 
-    let listed = session.jmap_listed();
+    let listed = &session.listing().listed;
     Ok(ids
         .iter()
         .filter_map(|id| listed.get(id).cloned())
         .collect())
 }
 
-/// The IMAP markers a JMAP message carries, named the IMAP way.
+/// The IMAP markers an HTTP backend's message carries, named the IMAP
+/// way.
 fn flags_of(message: &Message) -> Vec<String> {
     let mut flags = Vec::new();
     if message.seen {
@@ -442,6 +453,9 @@ fn set_flag(
         let url = session.jmap_url()?;
         return client.set_jmap_keyword(&url, &session.credentials(), id, flag, add);
     }
+    if session.is_graph() {
+        return client.set_graph_flag(session.credentials().password, id, flag, add);
+    }
 
     session.imap(client)?.store_flag(mailbox, id, flag, add)
 }
@@ -458,6 +472,11 @@ fn delete_message(
         let url = session.jmap_url()?;
         return client
             .delete_jmap_message(&url, &session.credentials(), id)
+            .map(Some);
+    }
+    if session.is_graph() {
+        return client
+            .delete_graph_message(session.credentials().password, id)
             .map(Some);
     }
 
@@ -567,6 +586,18 @@ fn submit_message(
         return Err(Refused::transient(
             "Sending from a JMAP account is not supported yet",
         ));
+    }
+    if session.is_graph() {
+        // NOTE: Graph submits through the session it reads from and files
+        // the sent copy itself, so there is no copy to append and no
+        // mailbox to name: the next sync reads it from Sent Items.
+        return client
+            .send_graph_message(session.credentials().password, raw)
+            .map(|()| None)
+            .map_err(|err| Refused {
+                permanent: matches!(err.status, Some(400 | 403 | 404 | 413 | 422)),
+                message: err.to_string(),
+            });
     }
     if submit_url.is_empty() {
         return Err(Refused::transient(

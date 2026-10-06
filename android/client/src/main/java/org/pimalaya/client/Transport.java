@@ -17,9 +17,10 @@ import javax.net.ssl.SSLSocketFactory;
  * {@link #read} / {@link #write} by name on every yield, passing the
  * endpoint URL it wants to talk to; the pool lazily opens one connection
  * per origin (scheme, host, port) and reuses it for as long as the
- * transport is held. A {@code tcp} (DNS resolver) or {@code http} URL
- * gets a plain socket, an {@code https} URL a TLS socket validated by the
- * platform trust store.
+ * transport is held. A {@code tcp} (DNS resolver), {@code http} or
+ * {@code smtp} URL gets a plain socket, an {@code https} one a TLS socket
+ * validated by the platform trust store, and a plain one can be upgraded in
+ * place ({@link #starttls}).
  *
  * <p>How long it is held is the whole of what it costs. A sync pass that
  * opened one per verb paid a connect, a TLS handshake and, over IMAP, an
@@ -73,6 +74,38 @@ public final class Transport implements AutoCloseable {
         connection.output.flush();
     }
 
+    /**
+     * Upgrades the URL's plain socket to TLS in place, for a protocol that
+     * negotiates it on the connection it opened (RFC 3207).
+     *
+     * <p>Refused when the server already sent something past the reply that
+     * agreed to it: those bytes arrived in the clear, and reading them after
+     * the handshake is how a STARTTLS injection smuggles a response across.
+     */
+    public void starttls(String url) throws IOException {
+        URI uri = URI.create(url);
+        String origin = originOf(uri);
+        Connection connection = connections.get(origin);
+        if (connection == null) {
+            throw new PimalayaException("No connection to upgrade to " + origin);
+        }
+        if (connection.socket instanceof SSLSocket) {
+            throw new PimalayaException("Connection to " + origin + " is already encrypted");
+        }
+        if (connection.input.available() > 0) {
+            throw new PimalayaException(
+                    "Server at " + origin + " sent data before the TLS upgrade");
+        }
+
+        Socket socket =
+                ((SSLSocketFactory) SSLSocketFactory.getDefault())
+                        .createSocket(connection.socket, hostOf(uri), portOf(uri), true);
+        socket.setSoTimeout(READ_TIMEOUT_MS);
+        ((SSLSocket) socket).startHandshake();
+
+        connections.put(origin, new Connection(socket));
+    }
+
     /** Closes every open socket; call once the native operation returns. */
     public void close() {
         for (Connection connection : connections.values()) {
@@ -88,19 +121,13 @@ public final class Transport implements AutoCloseable {
     private Connection connect(String url) throws IOException {
         URI uri = URI.create(url);
         String scheme = uri.getScheme().toLowerCase(Locale.ROOT);
-        String host = uri.getHost();
-        int port = uri.getPort() != -1 ? uri.getPort() : defaultPort(scheme);
-        String origin = scheme + "://" + host + ":" + port;
+        String host = hostOf(uri);
+        int port = portOf(uri);
+        String origin = originOf(uri);
 
         Connection connection = connections.get(origin);
         if (connection != null) {
             return connection;
-        }
-
-        // NOTE: URI keeps brackets around IPv6 literals; the socket API
-        // wants the bare address.
-        if (host.startsWith("[") && host.endsWith("]")) {
-            host = host.substring(1, host.length() - 1);
         }
 
         Socket plain = new Socket();
@@ -134,6 +161,28 @@ public final class Transport implements AutoCloseable {
         connection = new Connection(socket);
         connections.put(origin, connection);
         return connection;
+    }
+
+    /** The pool key: scheme, host and port, any userinfo left out. */
+    private static String originOf(URI uri) {
+        return uri.getScheme().toLowerCase(Locale.ROOT) + "://" + uri.getHost() + ":" + portOf(uri);
+    }
+
+    /** The host to connect to, bare. */
+    private static String hostOf(URI uri) {
+        String host = uri.getHost();
+        // NOTE: URI keeps brackets around IPv6 literals; the socket API
+        // wants the bare address.
+        if (host.startsWith("[") && host.endsWith("]")) {
+            return host.substring(1, host.length() - 1);
+        }
+        return host;
+    }
+
+    private static int portOf(URI uri) {
+        return uri.getPort() != -1
+                ? uri.getPort()
+                : defaultPort(uri.getScheme().toLowerCase(Locale.ROOT));
     }
 
     private static int defaultPort(String scheme) {

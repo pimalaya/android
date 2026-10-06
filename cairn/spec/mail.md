@@ -14,7 +14,7 @@ Every mailbox runs io-pimdir's sync, on the session the pass opened. One LIST na
 
 A full round still takes a window off the end of a mailbox rather than all of it: this store holds a window and not a mailbox, which is the difference between a phone and a desktop replica. A delta round reports changes across the whole mailbox, so the window drifts a little older as flags move outside it; a later full round prunes it back.
 
-Two backends answer, told apart by the account's base URL: an IMAP session behind an `imaps://` URL, the RFC 8621 verbs behind the `jmap://` marker.
+Three backends answer, told apart by the account's base URL: an IMAP session behind an `imaps://` URL, the RFC 8621 verbs behind the `jmap://` marker, Microsoft Graph behind the `msgraph://` one. A Graph mailbox is a mail folder named by its path, and like a JMAP one it answers its newest messages whole every pass.
 
 The reader can write three things back, all of them into the store: the markers, whether the message has been read, and where it is filed. A fourth thing, a message of their own, does not go into the store at all: it is an action on the store's queue, pimdir's write door for what a process wants done somewhere else, with a mail submission as the standard's own worked example. The outbox is that queue read back.
 
@@ -63,7 +63,7 @@ A subject and a sender's name read off an IMAP `ENVELOPE` SHALL have their RFC 2
 - THEN it is stored as it came, rather than emptied
 
 ### Requirement: A message's markers can be written
-The app SHALL write the `\Seen`, `\Answered` and `\Flagged` markers of one message in the store, and the next sync SHALL push the difference between the staged set and the set the source last agreed on, so a keyword the app does not model is never replaced. The markers are named the IMAP way whichever backend answers, JMAP's keywords mapping onto the same three (RFC 8621 section 4.1.1).
+The app SHALL write the `\Seen`, `\Answered` and `\Flagged` markers of one message in the store, and the next sync SHALL push the difference between the staged set and the set the source last agreed on, so a keyword the app does not model is never replaced. The markers are named the IMAP way whichever backend answers, JMAP's keywords mapping onto the same three (RFC 8621 section 4.1.1). On Graph `\Seen` is `isRead` and `\Flagged` the follow-up flag; Graph keeps no answered marker, so a Graph message never carries `\Answered` and writing one is refused.
 
 #### Scenario: Marking a message read
 - GIVEN a message the store holds without `\Seen`
@@ -97,7 +97,7 @@ Opening a message SHALL mark it read in the store, once its body has arrived, an
 ### Requirement: A message is deleted into the account's trash
 Deleting a message SHALL stage a removal, and the row SHALL leave the list at once. The next sync SHALL move the message into the mailbox the account records as its trash, with MOVE or with a COPY where the server implements none. Nothing SHALL be expunged, an expunge without `UIDPLUS` being mailbox-wide and taking every message another client had marked.
 
-Where the account records no trash, or the message already sits in it, `\Deleted` SHALL be staged in place and the row SHALL stay in the list, which says so. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`, so there is nothing to mark it with, and staging a change nothing could carry out would fail once per sync forever.
+Where the account records no trash, or the message already sits in it, `\Deleted` SHALL be staged in place and the row SHALL stay in the list, which says so. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`, so there is nothing to mark it with, and staging a change nothing could carry out would fail once per sync forever. A Graph account always records one: its trash is the folder Graph names `deleteditems`, recognised by id when the roster is read, and a delete moves the message there.
 
 #### Scenario: An account with a trash
 - GIVEN an account recording a mailbox marked `\Trash`
@@ -121,7 +121,7 @@ Where the account records no trash, or the message already sits in it, `\Deleted
 - THEN the delete is refused saying so, and nothing is staged
 
 ### Requirement: A mail account carries where it submits and where its trash is
-A mail connection SHALL carry the endpoint mail is submitted through, beside the one it is read from, chosen in the connection flow from what discovery turned up or from what was entered by hand, and stored with it. Implicit TLS only: this client has no STARTTLS step, and driving a `starttls` endpoint as if it were implicit would hand a message over in the clear rather than fail. Every other domain carries none, and so does a mail account whose backend submits through the endpoint it reads from, or whose sending was switched off.
+A mail connection SHALL carry the endpoint mail is submitted through, beside the one it is read from, chosen in the connection flow from what discovery turned up or from what was entered by hand, and stored with it. Implicit TLS only: this client has no STARTTLS step, and driving a `starttls` endpoint as if it were implicit would hand a message over in the clear rather than fail. Every other domain carries none, and so does a mail account reading over JMAP, or whose sending was switched off. The sending question, headed Submission, SHALL be asked only once mail is read over IMAP, discovered or typed, or over Graph, and its rows SHALL follow that choice: IMAP reading is offered the SMTP servers and manual entry, Graph reading Graph alone, and both the row for not sending. A Graph account sending SHALL carry its own `msgraph://` base as its submit endpoint.
 
 The account SHALL also record the mailbox the server marks `\Trash` (RFC 6154), refreshed by every mail sync from the roster the LIST builds, so a delete decides between a move and a marker with no round trip.
 
@@ -177,6 +177,8 @@ The queued actions of an account SHALL be shown as its outbox, above everything 
 ### Requirement: A message is submitted and a copy is kept
 A sync draining the queue SHALL take an account's pending actions in append order and hand each message's bytes to the account's submit endpoint with the envelope its own address headers name, the `Bcc` among them, that header leaving the bytes on the way out so no copy a recipient receives names a blind one. It SHALL then `APPEND` the stripped copy into the mailbox the server marks `\Sent` (RFC 6154), already `\Seen`. The copy SHALL be filed after the submission and never instead of it, and a copy that could not be filed SHALL NOT be a reason to run the action again: the message has gone, and sending it a second time to file a record of it is worse than the missing record. An account with no sent mailbox SHALL send anyway and say no copy was kept.
 
+A Graph account SHALL hand the bytes, `Bcc` still in them, to `sendMail` on the session it reads from and file no copy: Graph reads the recipients off the headers, keeps the blind ones from the recipients, and files the sent copy in `Sent Items` itself. A refusal for good is a 400, 403, 404, 413 or 422 there.
+
 The row SHALL be removed by cancelling it once the message has been handed over, and never claimed before: a submission's effect is not a store mutation, so there is nothing to apply, and a claim that deleted the row before the server accepted the message would lose the message. Submission is therefore at-least-once, and a drain interrupted between the handover and the cancel SHALL send the message again.
 
 A submission the server refuses for good, which is a 5yz reply (RFC 5321 section 4.2.1), SHALL park the row with what the server said, counted as one attempt, shown as failed to send and never retried on its own; the drain SHALL carry on to the rows behind it. Any other failure SHALL count an attempt, leave the row pending and stop the drain, the usual cause being that there is no network and the next message would fail too. An action of a kind this app does not carry out SHALL be left pending and untouched, its attempts unbumped.
@@ -225,10 +227,26 @@ The app SHALL store an opened message as its item's object, as the bytes the ser
 - THEN it renders
 
 ### Requirement: A message body is read through the bridge
-The bridge SHALL answer the RFC 5322 source of one message (`fetchMessageSource`), and SHALL turn a source into what the reader draws with no network access (`parseMessage`). A JMAP account SHALL read that source by downloading the message's blob (RFC 8620 section 6.2), an IMAP one by fetching it whole with `BODY.PEEK[]`.
+The bridge SHALL answer the RFC 5322 source of one message (`fetchMessageSource`), and SHALL turn a source into what the reader draws with no network access (`parseMessage`). A JMAP account SHALL read that source by downloading the message's blob (RFC 8620 section 6.2), an IMAP one by fetching it whole with `BODY.PEEK[]`. A Graph account SHALL read it as the MIME Graph serves at `messages/{id}/$value`.
 
 #### Scenario: A JMAP message
 - GIVEN a JMAP account
 - WHEN a message is opened
 - THEN its `blobId` is read and the blob downloaded
 - AND the reader renders the same shape it renders an IMAP message from
+
+### Requirement: Mail signs in with a token
+An IMAP or SMTP connection whose credential is an OAuth token SHALL authenticate with SASL `XOAUTH2`, the user being the one its URL names. A mail connection signed in through a browser grant SHALL carry the address as that user, on the endpoint it reads from and on the one it submits to. A token IMAP refuses SHALL be renewed once, as an HTTP backend's 401 is.
+
+#### Scenario: A Microsoft mailbox
+- GIVEN mail connected through a Microsoft grant
+- WHEN a pass opens the mailbox
+- THEN the session authenticates with `XOAUTH2` as the address
+
+### Requirement: Submission speaks STARTTLS
+An `smtp://` submission endpoint SHALL be upgraded to TLS with `STARTTLS` before anything is authenticated or sent, and SHALL be refused when the server sends anything past its `220` reply.
+
+#### Scenario: Port 587
+- GIVEN a submission endpoint on port 587 with STARTTLS
+- WHEN a message is submitted
+- THEN the session is encrypted before `AUTH`, and nothing goes over the plain socket but `EHLO` and `STARTTLS`

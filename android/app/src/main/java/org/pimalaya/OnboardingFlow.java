@@ -14,7 +14,9 @@ import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.AuthMethod;
@@ -343,9 +345,17 @@ final class OnboardingFlow {
             this.login = login;
         }
 
-        /** Whether this option reads mail through a session that also sends. */
-        boolean submitsItself() {
-            return "jmap".equals(service);
+        /**
+         * Whether reading mail through this option asks where to send: IMAP
+         * and Graph do, manual entry being an IMAP server typed by hand.
+         */
+        boolean asksSubmission() {
+            return "imap".equals(service) || "msgraph".equals(service) || isManual();
+        }
+
+        /** Whether this option asks for a server instead of proposing one. */
+        boolean isManual() {
+            return service == null && method == null;
         }
 
         /** Whether this option signs in through a browser grant. */
@@ -379,11 +389,41 @@ final class OnboardingFlow {
         /** Whether picking it asks for a server rather than proposing one. */
         final boolean manual;
 
+        /**
+         * What the mail grant asks for on its behalf, null when nothing: it
+         * signs in with the mail connection's credential, so a browser
+         * grant for mail has to cover sending too.
+         */
+        final String scope;
+
+        /**
+         * Whether it submits through Graph, which only an account reading
+         * over Graph can: its token is Graph's, where SMTP takes Outlook's.
+         */
+        final boolean graph;
+
         SubmitOption(String label, String detail, String url, boolean manual) {
+            this(label, detail, url, manual, null, false);
+        }
+
+        SubmitOption(
+                String label,
+                String detail,
+                String url,
+                boolean manual,
+                String scope,
+                boolean graph) {
             this.label = label;
             this.detail = detail;
             this.url = url;
             this.manual = manual;
+            this.scope = scope;
+            this.graph = graph;
+        }
+
+        /** Whether it is the row that sends nothing. */
+        boolean none() {
+            return url == null && !manual && !graph;
         }
     }
 
@@ -512,17 +552,30 @@ final class OnboardingFlow {
                 setup.submitSelected =
                         setup.submitOptions.isEmpty() ? null : setup.submitOptions.get(0);
                 if (!simpleSetup()) {
-                    setup.submitOptions.add(
+                    // NOTE: offered only beside Graph reading, which
+                    // renderSection works out as the reading choice moves.
+                    if (discovered("msgraph")) {
+                        setup.submitOptions.add(
+                                new SubmitOption(
+                                        host.getString(R.string.config_msgraph),
+                                        "graph.microsoft.com",
+                                        PimalayaClient.msgraphBase(pendingEmail),
+                                        false,
+                                        null,
+                                        true));
+                    }
+                    SubmitOption none =
                             new SubmitOption(
-                                    host.getString(R.string.send_mail_none), null, null, false));
+                                    host.getString(R.string.send_mail_none), null, null, false);
+                    setup.submitOptions.add(none);
                     setup.submitOptions.add(
                             new SubmitOption(
                                     host.getString(R.string.domain_manual), null, null, true));
-                    if (setup.submitSelected == null) {
+                    if (setup.submitSelected == null || setup.submitSelected.graph) {
                         // The row for none, so the group opens on an answer
                         // rather than on nothing: not sending is a choice,
                         // and it is the only one this address offers.
-                        setup.submitSelected = setup.submitOptions.get(0);
+                        setup.submitSelected = none;
                     }
                 }
             }
@@ -768,26 +821,58 @@ final class OnboardingFlow {
             button.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
         }
 
-        for (int index = 0; index < setup.submitButtons.size(); index++) {
-            setup.submitButtons
-                    .get(index)
-                    .setChecked(setup.submitOptions.get(index) == setup.submitSelected);
+        // NOTE: the advanced setup's rows alone. A pick the reading choice
+        // no longer allows falls back to the first row it does, which is
+        // never empty: not sending is allowed beside every reader.
+        if (!setup.submitButtons.isEmpty()
+                && (setup.submitSelected == null || !offers(setup, setup.submitSelected))) {
+            for (SubmitOption option : setup.submitOptions) {
+                if (offers(setup, option)) {
+                    setup.submitSelected = option;
+                    break;
+                }
+            }
         }
+
         for (View view : setup.submitViews) {
             view.setVisibility(sends(setup) ? View.VISIBLE : View.GONE);
         }
+        for (int index = 0; index < setup.submitButtons.size(); index++) {
+            SubmitOption option = setup.submitOptions.get(index);
+            android.widget.RadioButton button = setup.submitButtons.get(index);
+            button.setChecked(option == setup.submitSelected);
+            button.setVisibility(sends(setup) && offers(setup, option) ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    /**
+     * Whether a sending row goes with what mail is read through.
+     *
+     * <p>Graph reading sends through Graph, and SMTP reading anything else:
+     * SMTP signs in with Outlook's token and Graph with Graph's, so pairing
+     * one with the other would be a second credential to store and renew
+     * for the same mailbox.
+     */
+    private static boolean offers(DomainSetup setup, SubmitOption option) {
+        if (option.none()) {
+            return true;
+        }
+        boolean graph = setup.selected != null && "msgraph".equals(setup.selected.service);
+        return option.graph == graph;
     }
 
     /**
      * Whether this section has a submission question to ask at all.
      *
-     * <p>A switched-off domain has none, and neither has one reading over
-     * JMAP: RFC 8621 submits through the session it reads from, so an
-     * SMTP server offered under it would be a second account to sign in
-     * to for something the first one already does.
+     * <p>Only once mail is read over IMAP or Graph, since the rows follow
+     * that choice and there is nothing to follow before it. A switched-off
+     * domain has none, and neither has one reading over JMAP: RFC 8621
+     * submits through the session it reads from, so a server offered under
+     * it would be a second account to sign in to for something the first
+     * one already does.
      */
     private static boolean sends(DomainSetup setup) {
-        return setup.enabled && (setup.selected == null || !setup.selected.submitsItself());
+        return setup.enabled && setup.selected != null && setup.selected.asksSubmission();
     }
 
     /**
@@ -871,7 +956,15 @@ final class OnboardingFlow {
             addProviderOptions(options);
         }
 
-        return options;
+        // NOTE: two rows reading the same are one choice offered twice, as
+        // when a server takes OAuth through more than one grant. The first
+        // kept is the best ranked.
+        Map<String, SetupOption> distinct = new LinkedHashMap<>();
+        for (SetupOption option : options) {
+            distinct.putIfAbsent(optionLabel(option), option);
+        }
+
+        return new ArrayList<>(distinct.values());
     }
 
     /** The option that asks for a server instead of proposing one. */
@@ -890,13 +983,17 @@ final class OnboardingFlow {
      */
     private void addProviderOptions(List<SetupOption> options) {
         if ("provider:google".equals(matchedProvider)) {
-            options.add(
-                    providerOption(
-                            R.string.config_carddav,
-                            PimalayaClient.googleCarddavBase(pendingEmail),
-                            Oauth.GOOGLE_AUTH_ENDPOINT,
-                            Oauth.GOOGLE_TOKEN_ENDPOINT,
-                            Oauth.GOOGLE_SCOPE));
+            // NOTE: the provider rule names Google's CardDAV itself now, so
+            // the hand-written one would be the same row twice.
+            if (!providerFound("carddav")) {
+                options.add(
+                        providerOption(
+                                R.string.config_carddav,
+                                PimalayaClient.googleCarddavBase(pendingEmail),
+                                Oauth.GOOGLE_AUTH_ENDPOINT,
+                                Oauth.GOOGLE_TOKEN_ENDPOINT,
+                                Oauth.GOOGLE_SCOPE));
+            }
             options.add(
                     providerOption(
                             R.string.config_google_api,
@@ -913,6 +1010,31 @@ final class OnboardingFlow {
                         Oauth.MICROSOFT_AUTH_ENDPOINT,
                         Oauth.MICROSOFT_TOKEN_ENDPOINT,
                         Oauth.MICROSOFT_SCOPE));
+    }
+
+    /** Whether discovery named this service, whatever found it. */
+    private boolean discovered(String service) {
+        for (ServiceConfig config : searchedConfigs) {
+            if (service.equals(config.service)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether a provider rule named this service. */
+    private boolean providerFound(String service) {
+        for (ServiceConfig config : searchedConfigs) {
+            if (service.equals(config.service) && fromProvider(config)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether a config came from a fixed provider rule (Google, Microsoft). */
+    private static boolean fromProvider(ServiceConfig config) {
+        return config.source != null && config.source.startsWith("provider:");
     }
 
     private SetupOption providerOption(
@@ -945,8 +1067,14 @@ final class OnboardingFlow {
      * under the same origin. That is a derivation, not a discovery: a provider
      * that separates the two will need its resource from RFC 9728 protected
      * resource metadata, which nothing fetches yet.
+     *
+     * <p>A provider rule's config asks for none: Google and Microsoft
+     * authorize by scope, and answer a resource with {@code invalid_target}.
      */
     private static String resourceOf(ServiceConfig config, AuthMethod method) {
+        if (fromProvider(config)) {
+            return null;
+        }
         if (config.url != null) {
             return config.url;
         }
@@ -975,12 +1103,17 @@ final class OnboardingFlow {
         }
     }
 
-    /** Auth precedence: OAuth 2.0 over API token over password. */
+    /**
+     * Auth precedence: OAuth 2.0 over API token over password, the device grant
+     * last among the OAuth ones since a phone has a browser.
+     */
     private static int authRank(AuthMethod.Type type) {
         switch (type) {
             case PASSWORD:
-                return 2;
+                return 3;
             case BEARER:
+                return 2;
+            case OAUTH_DEVICE_AUTHORIZATION_GRANT:
                 return 1;
             default:
                 return 0;
@@ -998,6 +1131,9 @@ final class OnboardingFlow {
                 return host.getString(R.string.config_imap);
             case "jmap":
                 return host.getString(R.string.config_jmap);
+            case "msgraph":
+            case "msgraphCalendar":
+                return host.getString(R.string.config_msgraph);
             default:
                 return service;
         }
@@ -1040,9 +1176,10 @@ final class OnboardingFlow {
      *
      * <p>A password and a token are one step each, because each is its own
      * secret however many domains share a server. Browser grants are pooled by
-     * authorization server and resource, so the domains one consent actually
-     * covers cost one hop: this is where "mail and calendars on one JMAP
-     * session" becomes a single step instead of two identical ones.
+     * authorization server and audience ({@link #audienceOf}), so the domains
+     * one consent actually covers cost one hop: this is where "mail and
+     * calendars on one JMAP session" becomes a single step instead of two
+     * identical ones.
      */
     private List<AuthStep> planAuthSteps() {
         List<AuthStep> steps = new ArrayList<>();
@@ -1058,7 +1195,7 @@ final class OnboardingFlow {
                 for (AuthStep candidate : steps) {
                     if (candidate.option.isOauth()
                             && sameAuthorizationServer(candidate.option.method, option.method)
-                            && sameResource(candidate.option.resource, option.resource)) {
+                            && audienceOf(candidate.option).equals(audienceOf(option))) {
                         shared = candidate;
                         break;
                     }
@@ -1179,9 +1316,24 @@ final class OnboardingFlow {
             DomainSetup setup = setups.get(domain);
             oauthGroup.put(domain, setup.selected.baseUrl);
             addScopes(scopes, setup.selected.method.scope);
+            // NOTE: submission signs in with mail's credential, so the grant
+            // that reads mail has to cover sending it too.
+            if (domain == PimDomain.MAIL && sends(setup) && setup.submitSelected != null) {
+                addScopes(scopes, setup.submitSelected.scope);
+            }
         }
 
         String scope = scopes.isEmpty() ? null : String.join(" ", scopes);
+        // NOTE: Google and Microsoft register no client dynamically, so their
+        // grants run with the app's own registration.
+        if (Oauth.GOOGLE_AUTH_ENDPOINT.equals(option.method.authorizationEndpoint)) {
+            oauth.startGoogleOauth(pendingEmail, scope, option.baseUrl);
+            return;
+        }
+        if (Oauth.MICROSOFT_AUTH_ENDPOINT.equals(option.method.authorizationEndpoint)) {
+            oauth.startMicrosoftOauth(pendingEmail, scope, option.baseUrl);
+            return;
+        }
         if (option.method.type == AuthMethod.Type.OAUTH_ISSUER) {
             // NOTE: the resource, never the base URL. A JMAP account's base is
             // the internal jmap:// marker and a mailbox's is imaps://, and an
@@ -1239,10 +1391,44 @@ final class OnboardingFlow {
                 && left.authorizationEndpoint.equals(right.authorizationEndpoint);
     }
 
-    /** Whether two options name the same protected resource, absence included. */
-    private static boolean sameResource(String left, String right) {
-        return left == null ? right == null : left.equals(right);
+    /**
+     * What one grant's token is for: the RFC 8707 resource it names, or else
+     * the APIs its scopes address.
+     *
+     * <p>Two options of one authorization server share a grant only when this
+     * agrees. Entra refuses one token for two APIs, so Microsoft mail (Outlook
+     * scopes) and calendars (Graph scopes) are two consents, a bare Graph
+     * scope (`Calendars.ReadWrite`) being Graph's. Google keeps its restricted
+     * mail scope on its own origin, so it gets a grant of its own too.
+     */
+    private static String audienceOf(SetupOption option) {
+        if (option.resource != null) {
+            return option.resource;
+        }
+        String scope = option.method == null ? null : option.method.scope;
+        if (scope == null) {
+            return "";
+        }
+
+        java.util.Set<String> apis = new java.util.TreeSet<>();
+        for (String part : scope.split("\\s+")) {
+            if (part.isEmpty() || OIDC_SCOPES.contains(part)) {
+                continue;
+            }
+            int scheme = part.indexOf("://");
+            if (scheme < 0) {
+                apis.add("https://graph.microsoft.com");
+                continue;
+            }
+            int path = part.indexOf('/', scheme + 3);
+            apis.add(path < 0 ? part : part.substring(0, path));
+        }
+        return String.join(" ", apis);
     }
+
+    /** OpenID Connect scopes, which address no API. */
+    private static final java.util.Set<String> OIDC_SCOPES =
+            java.util.Set.of("offline_access", "openid", "profile", "email");
 
     /**
      * Asks for the one thing discovery would have produced for this domain: a
@@ -1487,16 +1673,28 @@ final class OnboardingFlow {
             if (setup.credential == null) {
                 continue;
             }
+            String baseUrl = setup.baseUrl;
             String submitUrl =
                     setup.domain == PimDomain.MAIL && sends(setup) && setup.submitSelected != null
                             ? setup.submitSelected.url
                             : null;
+            // NOTE: a token signs in to IMAP and SMTP with SASL XOAUTH2,
+            // which names its user beside the token; the URL is where that
+            // user lives (RFC 5092 section 3.2), the credential staying the
+            // bare token every other protocol sends.
+            if (setup.domain == PimDomain.MAIL && setup.credential.login.isEmpty()) {
+                if (baseUrl.startsWith("imap")) {
+                    baseUrl = PimalayaClient.withUser(baseUrl, connectedEmail);
+                }
+                if (submitUrl != null && submitUrl.startsWith("smtp")) {
+                    submitUrl = PimalayaClient.withUser(submitUrl, connectedEmail);
+                }
+            }
             if (connectedAccount == null) {
                 connectedAccount = AccountEntry.empty(connectedEmail);
             }
             connectedAccount =
-                    connectedAccount.with(
-                            setup.domain, setup.baseUrl, submitUrl, setup.credential);
+                    connectedAccount.with(setup.domain, baseUrl, submitUrl, setup.credential);
         }
         if (connectedAccount == null) {
             return;
@@ -1751,35 +1949,51 @@ final class OnboardingFlow {
      * Everywhere this address submits mail, from the same discovery run
      * that found where it reads it, best first.
      *
-     * <p>Implicit TLS only, for the reason {@link #endpointUrl} gives:
-     * this client has no STARTTLS step, and driving a {@code starttls}
-     * endpoint as if it were implicit would hand a message over in the
-     * clear rather than fail. An endpoint skipped for that is logged and
-     * not offered, which is why an address can publish submission and
-     * still have nothing here.
+     * <p>Implicit TLS behind {@code smtps://} first, then STARTTLS behind
+     * {@code smtp://}, which the session upgrades before it authenticates.
+     * A plain endpoint is logged and not offered: nothing is ever submitted
+     * in the clear.
      */
     private List<SubmitOption> submissionOptions() {
-        List<SubmitOption> options = new ArrayList<>();
+        List<SubmitOption> implicit = new ArrayList<>();
+        List<SubmitOption> upgraded = new ArrayList<>();
 
         for (ServiceConfig config : searchedConfigs) {
             if (!"smtp".equals(config.service) || config.host == null) {
                 continue;
             }
-            if (!"tls".equalsIgnoreCase(config.security)) {
+            boolean tls = "tls".equalsIgnoreCase(config.security);
+            if (!tls && !"starttls".equalsIgnoreCase(config.security)) {
                 Log.w(
                         "pimalaya",
                         "skip smtp at " + config.host + ": unsupported security "
                                 + config.security);
                 continue;
             }
-            options.add(
-                    new SubmitOption(
-                            host.getString(R.string.config_smtp),
-                            config.host + ":" + config.port,
-                            "smtps://" + config.host + ":" + config.port,
-                            false));
+            String authority = config.host + ":" + config.port;
+            (tls ? implicit : upgraded)
+                    .add(
+                            new SubmitOption(
+                                    host.getString(R.string.config_smtp),
+                                    authority,
+                                    (tls ? "smtps://" : "smtp://") + authority,
+                                    false,
+                                    oauthScope(config),
+                                    false));
         }
-        return options;
+
+        implicit.addAll(upgraded);
+        return implicit;
+    }
+
+    /** The scope a config's browser grant asks for, or null when it has none. */
+    private static String oauthScope(ServiceConfig config) {
+        for (AuthMethod method : config.auth) {
+            if (method.type == AuthMethod.Type.OAUTH_AUTHORIZATION_CODE_GRANT) {
+                return method.scope;
+            }
+        }
+        return null;
     }
 
     /**
@@ -1787,10 +2001,9 @@ final class OnboardingFlow {
      * the row that was picked.
      *
      * <p>A host and a port, as the mail server's own manual entry asks for
-     * one, and 465 when none was typed: implicit-TLS submission is what
-     * this client speaks and RFC 8314 section 3.3 is where that port
-     * comes from. Nothing is signed in to, the submission using the
-     * credential mail signed in with.
+     * one: STARTTLS on 587, implicit TLS otherwise, and 465 when none was
+     * typed ({@link PimalayaClient#submitUrl}). Nothing is signed in to,
+     * the submission using the credential mail signed in with.
      */
     private void promptManualSubmission(DomainSetup setup, SubmitOption option) {
         EditText field =
@@ -1821,15 +2034,15 @@ final class OnboardingFlow {
                 .show();
     }
 
-    /** What was typed, as the implicit-TLS endpoint a submission opens. */
+    /** What was typed, as the endpoint a submission opens. */
     private static String submitUrl(String entered) {
-        if (entered.contains("://")) {
-            return entered;
-        }
-        return entered.contains(":") ? "smtps://" + entered : "smtps://" + entered + ":465";
+        return PimalayaClient.submitUrl(entered);
     }
 
-    private static String endpointUrl(ServiceConfig config) {
+    private String endpointUrl(ServiceConfig config) {
+        if ("msgraph".equals(config.service) || "msgraphCalendar".equals(config.service)) {
+            return PimalayaClient.msgraphBase(pendingEmail);
+        }
         if (config.url != null) {
             return "jmap".equals(config.service)
                     ? PimalayaClient.jmapBase(config.url)

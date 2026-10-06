@@ -5,7 +5,7 @@ The living record of real-provider testing: one section per provider, updated af
 Cross-provider notes:
 
 - Every backend enumerates incrementally since the io-offline migration (docs/io-offline-migration.md): the delta path (sync-collection, Graph delta, JMAP /changes, People sync tokens) and its expired-cursor fallback are exactly the code paths a test round should exercise (sync twice: the second pass must be a cheap delta, then edit remotely and sync again).
-- The configuration list only offers drivable variants: password, Bearer token, and OAuth code grants (custom client, or the Pimalaya client for Google and Microsoft once registered).
+- The configuration list only offers drivable variants: password, Bearer token, and OAuth code grants (custom client, or the Pimalaya client for Google and Microsoft, which is the provider plan once released).
 - Finding (CardDAV push, FIXED 2026-07-10): strict CardDAV servers (iCloud, Fastmail) reject a create/update with "HTTP 403: VCARD parse error" when the pushed vCard 3.0 omits the mandatory N property (RFC 2426). Contacts entered with only a display name are seeded as a bare BEGIN/VERSION/UID/END skeleton (MainActivity, PhoneRemote) and so carry FN but no N. The CardDAV write path now repairs the body before the PUT (rust/src/client.rs normalize_vcard, applied in create/update_carddav_card only, since JMAP and Google do not share the PUT path), delegating to vcard-rs VcardCst::fill_required: it appends an empty instance of every property the card's version requires (ExactlyOne / OneOrMore, keyed off the prop spec cardinality; N for 3.0), byte-preservingly and idempotently, and leaves 4.0 (where N is optional) untouched. Unparseable bodies are sent as-is. The fix lives in vcard-rs so every CardDAV consumer (pimalaya CLI) benefits. More lenient servers (Google, SabreDAV) accepted the same cards, which hid it until now.
 
 ## posteo (CardDAV, SabreDAV)
@@ -28,16 +28,21 @@ Cross-provider notes:
 - WIRED (2026-07-08): the app drives zero-registration OAuth end to end. When a config carries only an issuer (pimconf OauthIssuer, from PACC oauth-public), picking it fetches the 8414 metadata, registers a public client via 7591 (reverse-DNS custom-scheme redirect, no secret), then runs the code grant with PKCE over the OS-routed redirect (like the built-in Google/Microsoft flows), persisting the account with the issued client id so refresh works. No registration_endpoint (Google, Microsoft) falls back to the custom-client prompt with endpoints prefilled. Registration verified live against fastmail + Stalwart with curl; the in-app browser round-trip is still UNTESTED on device.
 - To verify: CardDAV sync-collection deltas; the JMAP Contacts path end to end (RFC 9610 ContactCard, /changes deltas, m:n addressbook memberships) over an API token.
 
-## Google (People API or CardDAV, OAuth)
+## Google (IMAP + SMTP, CalDAV, CardDAV or People API, OAuth)
 
-- Status: untested; waits on the OAuth client registration (BYO client works today via the custom-client prompt).
-- Auth: OAuth code grant with PKCE; contacts scope is "sensitive" (free verification).
-- Known behaviors: creates land in the myContacts system group (the engine patches the target group right after); memberships are m:n contact groups; updates guarded by the person etag; sync tokens bind to their field mask (the delta round always asks READ_FIELDS plus metadata).
-- To verify: sync-token deltas incl. the EXPIRED_SYNC_TOKEN fallback; deleted persons riding flagged in delta responses.
+- Status: untested on device. Onboarding offers every domain from io-pim-discovery's provider rule since 2026-10-06 (custom domains included, matched by MX).
+- Auth: OAuth code grant with PKCE. Calendar and contacts scopes are "sensitive" (free verification); Gmail's `https://mail.google.com/`, which IMAP and SMTP need too, is "restricted" (yearly paid CASA). An unverified app stops at 100 users in total. Password IMAP is off: without OAuth, Gmail takes an app password, which needs 2-step verification. Google and Microsoft sign-ins are the provider plan's (docs/monetization.md); the shipped client ids are for testing.
+- Quotas, per project: the Calendar API, which CalDAV shares, allows 10,000 requests a minute (600 per user) and bills past 1,000,000 a day; a 15-minute background sync costs roughly 500 requests a day per calendar user while Google's calendars are listed in full. Gmail over IMAP has no per-project quota, only per-user bandwidth.
+- Known behaviors (CalDAV): a `sync-collection` with no token answers 400 (sync tokens are served at Depth 0 only), so every pass falls back to a `PROPFIND` listing; the primary calendar's collection is `events`; a PUT stores the resource under a name of Google's.
+- Known behaviors (contacts): creates land in the myContacts system group (the engine patches the target group right after); memberships are m:n contact groups; updates guarded by the person etag; sync tokens bind to their field mask (the delta round always asks READ_FIELDS plus metadata). CardDAV rewrites the UID and ignores If-Match.
+- To verify: IMAP and SMTP over XOAUTH2; the CalDAV listing fallback; People sync-token deltas incl. the EXPIRED_SYNC_TOKEN fallback.
 
-## Microsoft (Graph, OAuth)
+## Microsoft (IMAP + SMTP, Graph, OAuth)
 
-- Status: untested; waits on the Entra app registration client id (BYO client works today).
-- Auth: OAuth code grant; Graph is bearer-only, no app passwords.
-- Known behaviors: no If-Match on updates (last-write-wins); the server assigns resource ids; delta rounds carry id and changeKey only (no $expand of the stash extended property in delta), bodies fetched per card; an expired deltaLink answers HTTP 410 and falls back to an initial round.
-- To verify: the whole contacts flow (never tested against a live tenant), delta rounds included.
+- Status: untested on device. Onboarding offers mail (IMAP, SMTP), contacts (Graph) and calendars (Graph) since 2026-10-06.
+- Auth: OAuth code grant only. Outlook.com turned password IMAP off in 2024. Mail scopes are Outlook's (`IMAP.AccessAsUser.All`, `SMTP.Send`) and contacts and calendars Graph's; Entra issues a token for one API, so they are two consents. A work tenant that only consents to verified publishers blocks an unverified app until its admin approves it; many tenants also turn SMTP AUTH off per mailbox.
+- Endpoints: IMAP `outlook.office365.com:993` (TLS), SMTP `smtp.office365.com:587` (STARTTLS only).
+- Throttling: 130,000 requests per 10 seconds per app across all tenants, and 10,000 per 10 minutes (4 concurrent) per app per mailbox. Nothing a phone reaches.
+- Known behaviors (contacts): no If-Match on updates (last-write-wins); the server assigns resource ids; delta rounds carry id and changeKey only (no $expand of the stash extended property in delta), bodies fetched per card; an expired deltaLink answers HTTP 410 and falls back to an initial round.
+- Known behaviors (calendars): the event delta runs over a time window only, so every pass lists a calendar in full; no conditional write, so the bridge checks the changeKey right before one and answers 412; the server names created events.
+- To verify: the whole flow against a live account, personal and work.

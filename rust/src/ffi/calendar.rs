@@ -5,12 +5,13 @@
 //! guarded by a precondition so a shared calendar is never overwritten
 //! blind.
 //!
-//! Two backends, told apart by the account's base URL the way the card
-//! and mail entry points do it: a CalDAV context root, or the
-//! draft-ietf-jmap-calendars verbs behind the `jmap://` marker. Both
-//! hand the agenda iCalendar text, the JMAP one converting its
-//! JSCalendar payload at the client boundary so the store keeps one
-//! shape under its `text/calendar` kind.
+//! Three backends, told apart by the account's base URL the way the card
+//! and mail entry points do it: a CalDAV context root, the
+//! draft-ietf-jmap-calendars verbs behind the `jmap://` marker, or
+//! Microsoft Graph behind the `msgraph://` one. All hand the agenda
+//! iCalendar text, the JMAP and Graph ones converting their JSON at the
+//! client boundary so the store keeps one shape under its `text/calendar`
+//! kind.
 
 use jni::{
     EnvUnowned,
@@ -23,7 +24,7 @@ use crate::{
     account::{self, Backend},
     client::Client,
     ffi::{error_json, parse_url, read_string},
-    types::{BridgeError, Calendar, Credentials, Event},
+    types::{BridgeError, Calendar, Credentials, Event, EventRef},
 };
 
 /// Why the three write verbs refuse a JMAP calendar.
@@ -176,6 +177,13 @@ fn list_calendars(
             }
             Ok(calendars)
         }
+        Backend::Graph => {
+            let mut calendars = client.list_graph_calendars(credentials.password)?;
+            for calendar in &mut calendars {
+                calendar.url = format!("{base_url}/{}", calendar.id);
+            }
+            Ok(calendars)
+        }
         // NOTE: a calendar account with no sentinel is a CalDAV context
         // root, the only other endpoint the connection flow builds.
         _ => client.list_caldav_calendars(&parse_url(base_url)?, credentials),
@@ -303,6 +311,12 @@ fn update_event(
 ) -> Result<Option<String>, BridgeError> {
     match Backend::of(base_url) {
         Backend::Jmap => Err(JMAP_UNSUPPORTED.into()),
+        Backend::Graph => client.update_graph_event(
+            credentials.password,
+            id,
+            ical,
+            Some(etag).filter(|etag| !etag.is_empty()),
+        ),
         _ => client.update_caldav_event(
             &parse_url(calendar_url)?,
             credentials,
@@ -370,8 +384,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_newEvent<'local>(
 }
 
 /// `Native.createEvent`: files a new object in a calendar, guarded on
-/// the resource not existing. Returns the new ETag, or the error the
-/// server answered with.
+/// the resource not existing. Returns `{id, etag}`, the resource it landed
+/// under, or the error the server answered with.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_createEvent<'local>(
     mut env: EnvUnowned<'local>,
@@ -405,7 +419,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createEvent<'local>(
             &id,
             &ical,
         ) {
-            Ok(etag) => to_string(&etag).unwrap_or_else(|err| error_json(err.to_string())),
+            Ok(created) => to_string(&created).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -459,7 +473,9 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteEvent<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// Files one new object with whichever backend the base URL names.
+/// Files one new object with whichever backend the base URL names,
+/// answering the resource it landed under: the name asked for on CalDAV,
+/// the id Graph minted.
 fn create_event(
     client: &mut Client<'_, '_>,
     base_url: &str,
@@ -467,10 +483,22 @@ fn create_event(
     credentials: &Credentials,
     id: &str,
     ical: &str,
-) -> Result<Option<String>, BridgeError> {
+) -> Result<EventRef, BridgeError> {
     match Backend::of(base_url) {
         Backend::Jmap => Err(JMAP_UNSUPPORTED.into()),
-        _ => client.create_caldav_event(&parse_url(calendar_url)?, credentials, id, ical),
+        Backend::Graph => client.create_graph_event(
+            credentials.password,
+            account::book_segment(base_url, calendar_url),
+            ical,
+        ),
+        _ => {
+            let etag =
+                client.create_caldav_event(&parse_url(calendar_url)?, credentials, id, ical)?;
+            Ok(EventRef {
+                id: id.to_string(),
+                etag,
+            })
+        }
     }
 }
 
@@ -485,6 +513,11 @@ fn delete_event(
 ) -> Result<(), BridgeError> {
     match Backend::of(base_url) {
         Backend::Jmap => Err(JMAP_UNSUPPORTED.into()),
+        Backend::Graph => client.delete_graph_event(
+            credentials.password,
+            id,
+            Some(etag).filter(|etag| !etag.is_empty()),
+        ),
         _ => client.delete_caldav_event(
             &parse_url(calendar_url)?,
             credentials,
