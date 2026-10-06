@@ -10,8 +10,12 @@ use io_webdav::{
     rfc6352::{
         addressbook::{CarddavAddressbook as DavAddressbook, list::CarddavAddressbookList},
         card::{
-            CarddavCardEntry, create::CarddavCardCreate, delete::CarddavCardDelete,
-            list::CarddavCardList, multiget::CarddavCardMultiget, read::CarddavCardRead,
+            CarddavCardEntry,
+            create::CarddavCardCreate,
+            delete::CarddavCardDelete,
+            list::{CarddavCardList, CarddavCardListOptions},
+            multiget::CarddavCardMultiget,
+            read::CarddavCardRead,
             update::CarddavCardUpdate,
         },
     },
@@ -80,10 +84,16 @@ impl<'a, 'local> Client<'a, 'local> {
         credentials: &Credentials,
     ) -> Result<Vec<Card>, BridgeError> {
         let auth = auth(credentials);
-        let coroutine = CarddavCardList::new(url, &auth, USER_AGENT, url.path());
-        let cards: BTreeSet<CarddavCardEntry> = self.run(url, coroutine)?;
+        let opts = CarddavCardListOptions::default();
+        let coroutine = CarddavCardList::new(url, &auth, USER_AGENT, url.path(), &opts);
+        let list = self.run(url, coroutine)?;
 
-        Ok(cards.into_iter().map(into_card).collect())
+        // NOTE: a truncated listing would read as deletions downstream.
+        if list.truncated {
+            return Err(format!("CardDAV server truncated the card listing of {url}").into());
+        }
+
+        Ok(list.cards.into_iter().map(into_card).collect())
     }
 
     /// Creates the card `id` inside the addressbook collection at

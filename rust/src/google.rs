@@ -3,7 +3,7 @@
 //! The People API exposes no vCard representation of a contact (the
 //! people endpoints only speak the JSON person resource), so the Google
 //! spoke synthesizes the vCard document of record itself: [`to_vcard`]
-//! projects an io-people person onto a fresh vCard 4.0 document,
+//! projects an io-gpeople person onto a fresh vCard 4.0 document,
 //! and [`to_person`] projects a vCard back onto a person. Per the
 //! custom property policy of docs/contacts-mapping.md only fields with
 //! a well-defined vCard slot are projected; People-only fields
@@ -16,11 +16,11 @@ use core::str::FromStr;
 
 use std::borrow::Cow;
 
-use io_people::v1::rest::people::{
-    PeopleAddress, PeopleBiography, PeopleBirthday, PeopleClientData, PeopleContentType,
-    PeopleDate, PeopleEmailAddress, PeopleImClient, PeopleName, PeopleNickname, PeopleOccupation,
-    PeopleOrganization, PeoplePerson, PeoplePersonField, PeoplePhoneNumber, PeopleRelation,
-    PeopleUrl,
+use io_gpeople::v1::rest::people::{
+    GpeopleAddress, GpeopleBiography, GpeopleBirthday, GpeopleClientData, GpeopleContentType,
+    GpeopleDate, GpeopleEmailAddress, GpeopleImClient, GpeopleName, GpeopleNickname,
+    GpeopleOccupation, GpeopleOrganization, GpeoplePerson, GpeoplePersonField, GpeoplePhoneNumber,
+    GpeopleRelation, GpeopleUrl,
 };
 use serde_json::to_value;
 use vcard::{
@@ -50,43 +50,43 @@ use crate::project::{MAX_STASH_LINE, escape_text, full_date, splice_props, text_
 /// clientData is managed too: it carries the stashed vCard remainder
 /// (but masked writes must merge foreign entries first, see the
 /// client's update).
-pub const MANAGED_FIELDS: &[PeoplePersonField] = &[
-    PeoplePersonField::Addresses,
-    PeoplePersonField::Biographies,
-    PeoplePersonField::Birthdays,
-    PeoplePersonField::ClientData,
-    PeoplePersonField::EmailAddresses,
-    PeoplePersonField::ImClients,
-    PeoplePersonField::Names,
-    PeoplePersonField::Nicknames,
-    PeoplePersonField::Occupations,
-    PeoplePersonField::Organizations,
-    PeoplePersonField::PhoneNumbers,
-    PeoplePersonField::Relations,
-    PeoplePersonField::Urls,
+pub const MANAGED_FIELDS: &[GpeoplePersonField] = &[
+    GpeoplePersonField::Addresses,
+    GpeoplePersonField::Biographies,
+    GpeoplePersonField::Birthdays,
+    GpeoplePersonField::ClientData,
+    GpeoplePersonField::EmailAddresses,
+    GpeoplePersonField::ImClients,
+    GpeoplePersonField::Names,
+    GpeoplePersonField::Nicknames,
+    GpeoplePersonField::Occupations,
+    GpeoplePersonField::Organizations,
+    GpeoplePersonField::PhoneNumbers,
+    GpeoplePersonField::Relations,
+    GpeoplePersonField::Urls,
 ];
 
 /// Person fields the projection reads: the managed set plus the
 /// Google-scoped fields minted as X-GOOGLE-* properties, read-only
 /// projections that stay out of every update mask.
-pub const READ_FIELDS: &[PeoplePersonField] = &[
-    PeoplePersonField::Addresses,
-    PeoplePersonField::Biographies,
-    PeoplePersonField::Birthdays,
-    PeoplePersonField::ClientData,
-    PeoplePersonField::EmailAddresses,
-    PeoplePersonField::ExternalIds,
-    PeoplePersonField::ImClients,
-    PeoplePersonField::Locations,
-    PeoplePersonField::Memberships,
-    PeoplePersonField::MiscKeywords,
-    PeoplePersonField::Names,
-    PeoplePersonField::Nicknames,
-    PeoplePersonField::Occupations,
-    PeoplePersonField::Organizations,
-    PeoplePersonField::PhoneNumbers,
-    PeoplePersonField::Relations,
-    PeoplePersonField::Urls,
+pub const READ_FIELDS: &[GpeoplePersonField] = &[
+    GpeoplePersonField::Addresses,
+    GpeoplePersonField::Biographies,
+    GpeoplePersonField::Birthdays,
+    GpeoplePersonField::ClientData,
+    GpeoplePersonField::EmailAddresses,
+    GpeoplePersonField::ExternalIds,
+    GpeoplePersonField::ImClients,
+    GpeoplePersonField::Locations,
+    GpeoplePersonField::Memberships,
+    GpeoplePersonField::MiscKeywords,
+    GpeoplePersonField::Names,
+    GpeoplePersonField::Nicknames,
+    GpeoplePersonField::Occupations,
+    GpeoplePersonField::Organizations,
+    GpeoplePersonField::PhoneNumbers,
+    GpeoplePersonField::Relations,
+    GpeoplePersonField::Urls,
 ];
 
 /// clientData key of the entry stashing the vCard remainder: every
@@ -114,12 +114,12 @@ pub fn person_id(resource_name: &str) -> &str {
         .unwrap_or(resource_name)
 }
 
-/// Projects an io-people person onto a fresh vCard 4.0 document.
+/// Projects an io-gpeople person onto a fresh vCard 4.0 document.
 ///
 /// The person id (resource name minus the `people/` prefix) becomes the
 /// UID, typed fields carry their home/work TYPE (phones also mobile as
 /// cell), and spouse and children relations become RELATED names.
-pub fn to_vcard(person: &PeoplePerson) -> String {
+pub fn to_vcard(person: &GpeoplePerson) -> String {
     let mut card = VcardCst::v4();
 
     let id = person_id(&person.resource_name);
@@ -146,6 +146,7 @@ pub fn to_vcard(person: &PeoplePerson) -> String {
             && n.suffixes.is_empty();
         if !empty {
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::N),
                 params: vec![],
                 value: VcardValue::N(n),
@@ -156,6 +157,7 @@ pub fn to_vcard(person: &PeoplePerson) -> String {
     for nickname in &person.nicknames {
         if let Some(nick) = opt(&nickname.value) {
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::Nickname),
                 params: vec![],
                 value: VcardValue::TextList(VcardTextList(vec![Cow::Owned(nick.to_string())])),
@@ -177,6 +179,7 @@ pub fn to_vcard(person: &PeoplePerson) -> String {
                 None => username.to_string(),
             };
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::Impp),
                 params: vec![],
                 value: VcardValue::Uri(VcardUri(Cow::Owned(uri))),
@@ -207,6 +210,7 @@ pub fn to_vcard(person: &PeoplePerson) -> String {
                 components.push(Cow::Owned(department.to_string()));
             }
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::Org),
                 params: vec![],
                 value: VcardValue::Org(VcardOrg(components)),
@@ -225,6 +229,7 @@ pub fn to_vcard(person: &PeoplePerson) -> String {
     for url in &person.urls {
         if let Some(page) = opt(&url.value) {
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::Url),
                 params: vec![],
                 value: VcardValue::Uri(VcardUri(Cow::Owned(page.to_string()))),
@@ -242,6 +247,7 @@ pub fn to_vcard(person: &PeoplePerson) -> String {
         ))
     }) {
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::Bday),
             params: vec![],
             value: VcardValue::DateAndOrTime(VcardDateAndOrTime(Cow::Owned(date))),
@@ -253,7 +259,7 @@ pub fn to_vcard(person: &PeoplePerson) -> String {
     if let Some(notes) = person
         .biographies
         .iter()
-        .find(|bio| bio.content_type != Some(PeopleContentType::TextHtml))
+        .find(|bio| bio.content_type != Some(GpeopleContentType::TextHtml))
         .and_then(|bio| opt(&bio.value))
     {
         card.push(text_prop(VcardPropKind::Note, vec![], notes));
@@ -280,7 +286,7 @@ pub fn to_vcard(person: &PeoplePerson) -> String {
     splice_props(vcard, &extra)
 }
 
-/// Projects a vCard onto an io-people person, the full-state
+/// Projects a vCard onto an io-gpeople person, the full-state
 /// projection: every managed field carries the vCard's values (empty
 /// when the vCard drops the property, which clears the masked field on
 /// update), while unmanaged People fields stay out of the body. Every
@@ -292,13 +298,13 @@ pub fn to_vcard(person: &PeoplePerson) -> String {
 /// through the request path, filled by the caller) and the minted
 /// X-GOOGLE-* properties are consumed, the server value being
 /// authoritative.
-pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
+pub fn to_person(vcard: &str) -> Result<GpeoplePerson, String> {
     let card = VcardCst::parse(vcard).map_err(|err| format!("Invalid vCard: {err}"))?;
     let version = card.version();
 
-    let mut person = PeoplePerson::default();
-    let mut name = PeopleName::default();
-    let mut org = PeopleOrganization::default();
+    let mut person = GpeoplePerson::default();
+    let mut name = GpeopleName::default();
+    let mut org = GpeopleOrganization::default();
     let mut notes = Vec::new();
     let mut stash = Vec::new();
     let mut name_seen = false;
@@ -342,7 +348,7 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
                 for nick in &all.0 {
                     let nick = nick.trim();
                     if !nick.is_empty() {
-                        person.nicknames.push(PeopleNickname {
+                        person.nicknames.push(GpeopleNickname {
                             value: Some(nick.to_string()),
                             ..Default::default()
                         });
@@ -355,7 +361,7 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
                 let email = EMAIL::decode(line, version);
                 let address = email.0.trim();
                 if !address.is_empty() {
-                    person.email_addresses.push(PeopleEmailAddress {
+                    person.email_addresses.push(GpeopleEmailAddress {
                         value: Some(address.to_string()),
                         email_type: std_type_of(&type_values(line)),
                         ..Default::default()
@@ -373,7 +379,7 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
                         Some((protocol, username)) => (Some(protocol.to_string()), username),
                         None => (None, address),
                     };
-                    person.im_clients.push(PeopleImClient {
+                    person.im_clients.push(GpeopleImClient {
                         username: Some(username.to_string()),
                         protocol,
                         ..Default::default()
@@ -387,7 +393,7 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
                 let tel = TEL::decode(line, version);
                 let number = tel.0.trim();
                 if !number.is_empty() {
-                    person.phone_numbers.push(PeoplePhoneNumber {
+                    person.phone_numbers.push(GpeoplePhoneNumber {
                         value: Some(number.to_string()),
                         phone_type: tel_type_of(&type_values(line)),
                         ..Default::default()
@@ -400,7 +406,7 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
             Ok(VcardPropKind::Adr) => {
                 let adr = ADR::decode(line, version);
 
-                let address = PeopleAddress {
+                let address = GpeopleAddress {
                     po_box: joined(&adr.po_box),
                     extended_address: joined(&adr.extended),
                     // NOTE: People's street is one multiline field, so
@@ -457,7 +463,7 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
                 let role = ROLE::decode(line, version);
                 let role = role.0.trim();
                 if person.occupations.is_empty() && !role.is_empty() {
-                    person.occupations.push(PeopleOccupation {
+                    person.occupations.push(GpeopleOccupation {
                         value: Some(role.to_string()),
                         ..Default::default()
                     });
@@ -470,7 +476,7 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
                 let url = URL::decode(line, version);
                 let page = url.0.trim();
                 if !page.is_empty() {
-                    person.urls.push(PeopleUrl {
+                    person.urls.push(GpeopleUrl {
                         value: Some(page.to_string()),
                         ..Default::default()
                     });
@@ -486,8 +492,8 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
                     && let Some(date) = full_date(&line.raw_value_str())
                 {
                     let mut parts = date.split('-').map(|part| part.parse().ok());
-                    person.birthdays.push(PeopleBirthday {
-                        date: Some(PeopleDate {
+                    person.birthdays.push(GpeopleBirthday {
+                        date: Some(GpeopleDate {
                             year: parts.next().flatten(),
                             month: parts.next().flatten(),
                             day: parts.next().flatten(),
@@ -535,7 +541,7 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
                     && text
                     && !related.is_empty()
                 {
-                    person.relations.push(PeopleRelation {
+                    person.relations.push(GpeopleRelation {
                         person: Some(related.to_string()),
                         relation_type: Some(relation_type.to_string()),
                         ..Default::default()
@@ -558,7 +564,7 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
     }
 
     if !stash.is_empty() {
-        person.client_data = vec![PeopleClientData {
+        person.client_data = vec![GpeopleClientData {
             key: Some(CLIENT_DATA_KEY.to_string()),
             value: Some(stash.join("\n")),
             ..Default::default()
@@ -580,9 +586,9 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
     }
 
     if !notes.is_empty() {
-        person.biographies.push(PeopleBiography {
+        person.biographies.push(GpeopleBiography {
             value: Some(notes.join("\n")),
-            content_type: Some(PeopleContentType::TextPlain),
+            content_type: Some(GpeopleContentType::TextPlain),
             ..Default::default()
         });
     }
@@ -594,13 +600,13 @@ pub fn to_person(vcard: &str) -> Result<PeoplePerson, String> {
 /// person and the base one (the state last synced with the server):
 /// the update mask shrinks to them, so unchanged fields are neither
 /// replaced nor clobbered by a concurrent edit.
-pub fn changed_fields(person: &PeoplePerson, base: &PeoplePerson) -> Vec<PeoplePersonField> {
+pub fn changed_fields(person: &GpeoplePerson, base: &GpeoplePerson) -> Vec<GpeoplePersonField> {
     let mut fields = Vec::new();
 
     macro_rules! push_changed {
         ($($field:ident => $variant:ident),* $(,)?) => {$(
             if person.$field != base.$field {
-                fields.push(PeoplePersonField::$variant);
+                fields.push(GpeoplePersonField::$variant);
             }
         )*};
     }
@@ -626,7 +632,7 @@ pub fn changed_fields(person: &PeoplePerson, base: &PeoplePerson) -> Vec<PeopleP
 
 /// The person's display name: the server-formatted one, the
 /// unstructured name, or composed from the parts.
-fn display_name(person: &PeoplePerson) -> String {
+fn display_name(person: &GpeoplePerson) -> String {
     let Some(name) = person.names.first() else {
         return String::new();
     };
@@ -654,7 +660,7 @@ fn display_name(person: &PeoplePerson) -> String {
 /// An ADR property from a People address, or None when every component
 /// is empty. People's street is one multiline field, so each of its
 /// lines becomes a vCard street component.
-fn adr_prop(address: &PeopleAddress) -> Option<VcardProp<'static>> {
+fn adr_prop(address: &GpeopleAddress) -> Option<VcardProp<'static>> {
     let street = address.street_address.as_deref().unwrap_or("");
     let value = VcardAdr {
         po_box: option_component(&address.po_box),
@@ -684,6 +690,7 @@ fn adr_prop(address: &PeopleAddress) -> Option<VcardProp<'static>> {
     }
 
     Some(VcardProp {
+        group: None,
         name: VcardPropName::Kind(VcardPropKind::Adr),
         params: std_type(&address.address_type)
             .map(type_param)
@@ -697,6 +704,7 @@ fn adr_prop(address: &PeopleAddress) -> Option<VcardProp<'static>> {
 /// explicit VALUE=text (RELATED defaults to a URI).
 fn related_prop(r#type: &'static str, name: &str) -> VcardProp<'static> {
     VcardProp {
+        group: None,
         name: VcardPropName::Kind(VcardPropKind::Related),
         params: vec![type_param(r#type), VcardParam::Value(Cow::Borrowed("text"))],
         value: VcardValue::Text(VcardText(Cow::Owned(name.to_string()))),
@@ -789,7 +797,7 @@ fn set_first(slot: &mut Option<String>, value: impl AsRef<str>) -> bool {
 /// are consumed on the way back. Group memberships are NOT minted:
 /// they are the card's addressbook memberships (docs/merged-view.md),
 /// surfaced structurally on the JNI card instead.
-fn minted_props(person: &PeoplePerson) -> Vec<String> {
+fn minted_props(person: &GpeoplePerson) -> Vec<String> {
     let mut lines = Vec::new();
 
     for id in &person.external_ids {
@@ -840,7 +848,7 @@ fn typed_line(name: &str, r#type: &Option<String>, value: &str) -> String {
 
 /// The stashed vCard remainder lines behind the person's pimalaya
 /// clientData entry.
-fn stash_lines(person: &PeoplePerson) -> Vec<String> {
+fn stash_lines(person: &GpeoplePerson) -> Vec<String> {
     person
         .client_data
         .iter()
@@ -889,9 +897,9 @@ mod tests {
     use super::*;
 
     /// A person filling every field the projection manages.
-    fn full_person() -> PeoplePerson {
-        PeoplePerson {
-            names: vec![PeopleName {
+    fn full_person() -> GpeoplePerson {
+        GpeoplePerson {
+            names: vec![GpeopleName {
                 unstructured_name: Some("Jane Doe".into()),
                 family_name: Some("Doe".into()),
                 given_name: Some("Jane".into()),
@@ -900,33 +908,33 @@ mod tests {
                 honorific_suffix: Some("PhD".into()),
                 ..Default::default()
             }],
-            nicknames: vec![PeopleNickname {
+            nicknames: vec![GpeopleNickname {
                 value: Some("Janie".into()),
                 ..Default::default()
             }],
-            email_addresses: vec![PeopleEmailAddress {
+            email_addresses: vec![GpeopleEmailAddress {
                 value: Some("jane@doe.org".into()),
                 email_type: Some("home".into()),
                 ..Default::default()
             }],
-            im_clients: vec![PeopleImClient {
+            im_clients: vec![GpeopleImClient {
                 username: Some("jane@doe.org".into()),
                 protocol: Some("xmpp".into()),
                 ..Default::default()
             }],
             phone_numbers: vec![
-                PeoplePhoneNumber {
+                GpeoplePhoneNumber {
                     value: Some("+331111".into()),
                     phone_type: Some("work".into()),
                     ..Default::default()
                 },
-                PeoplePhoneNumber {
+                GpeoplePhoneNumber {
                     value: Some("+333333".into()),
                     phone_type: Some("mobile".into()),
                     ..Default::default()
                 },
             ],
-            addresses: vec![PeopleAddress {
+            addresses: vec![GpeopleAddress {
                 street_address: Some("12 Main St".into()),
                 city: Some("Paris".into()),
                 region: Some("IDF".into()),
@@ -935,40 +943,40 @@ mod tests {
                 address_type: Some("home".into()),
                 ..Default::default()
             }],
-            organizations: vec![PeopleOrganization {
+            organizations: vec![GpeopleOrganization {
                 name: Some("ACME".into()),
                 department: Some("R&D".into()),
                 title: Some("Boss".into()),
                 ..Default::default()
             }],
-            occupations: vec![PeopleOccupation {
+            occupations: vec![GpeopleOccupation {
                 value: Some("Engineer".into()),
                 ..Default::default()
             }],
-            urls: vec![PeopleUrl {
+            urls: vec![GpeopleUrl {
                 value: Some("https://doe.org".into()),
                 ..Default::default()
             }],
-            birthdays: vec![PeopleBirthday {
-                date: Some(PeopleDate {
+            birthdays: vec![GpeopleBirthday {
+                date: Some(GpeopleDate {
                     year: Some(1983),
                     month: Some(4),
                     day: Some(1),
                 }),
                 ..Default::default()
             }],
-            biographies: vec![PeopleBiography {
+            biographies: vec![GpeopleBiography {
                 value: Some("a note".into()),
-                content_type: Some(PeopleContentType::TextPlain),
+                content_type: Some(GpeopleContentType::TextPlain),
                 ..Default::default()
             }],
             relations: vec![
-                PeopleRelation {
+                GpeopleRelation {
                     person: Some("John Doe".into()),
                     relation_type: Some("spouse".into()),
                     ..Default::default()
                 },
-                PeopleRelation {
+                GpeopleRelation {
                     person: Some("Jimmy".into()),
                     relation_type: Some("child".into()),
                     ..Default::default()
@@ -1088,8 +1096,8 @@ mod tests {
         assert_eq!(
             fields,
             vec![
-                PeoplePersonField::Biographies,
-                PeoplePersonField::PhoneNumbers
+                GpeoplePersonField::Biographies,
+                GpeoplePersonField::PhoneNumbers
             ]
         );
     }
@@ -1134,19 +1142,19 @@ mod tests {
 
     #[test]
     fn minted_props_project_and_consume() {
-        use io_people::v1::rest::people::{
-            PeopleContactGroupMembership, PeopleExternalId, PeopleMembership,
+        use io_gpeople::v1::rest::people::{
+            GpeopleContactGroupMembership, GpeopleExternalId, GpeopleMembership,
         };
 
         let mut person = full_person();
-        person.memberships = vec![PeopleMembership {
-            contact_group_membership: Some(PeopleContactGroupMembership {
+        person.memberships = vec![GpeopleMembership {
+            contact_group_membership: Some(GpeopleContactGroupMembership {
                 contact_group_resource_name: Some("contactGroups/myContacts".into()),
                 ..Default::default()
             }),
             ..Default::default()
         }];
-        person.external_ids = vec![PeopleExternalId {
+        person.external_ids = vec![GpeopleExternalId {
             value: Some("42".into()),
             id_type: Some("account".into()),
             ..Default::default()
@@ -1177,7 +1185,7 @@ mod tests {
         let edited = "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:X\r\nX-FOO:bar\r\nEND:VCARD\r\n";
 
         let fields = changed_fields(&to_person(edited).unwrap(), &to_person(base).unwrap());
-        assert_eq!(fields, vec![PeoplePersonField::ClientData]);
+        assert_eq!(fields, vec![GpeoplePersonField::ClientData]);
     }
 
     #[test]

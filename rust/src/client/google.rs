@@ -2,30 +2,30 @@
 //! addressbooks and cards, the batch create and delete verbs, group
 //! membership edits and the sync-token round.
 
-use io_http::rfc6750::bearer::HttpAuthBearer;
-use io_people::{
-    coroutine::{PeopleCoroutine, PeopleCoroutineState, PeopleYield},
+use io_gpeople::{
+    coroutine::{GpeopleCoroutine, GpeopleCoroutineState, GpeopleYield},
     v1::{
         rest::{
             contact_groups::{
-                PeopleContactGroupType,
-                list::{PeopleContactGroupsList, PeopleContactGroupsListParams},
-                members::modify::PeopleContactGroupMembersModify,
+                GpeopleContactGroupType,
+                list::{GpeopleContactGroupsList, GpeopleContactGroupsListParams},
+                members::modify::GpeopleContactGroupMembersModify,
             },
             people::{
-                PeoplePerson, PeoplePersonField,
-                batch_create_contacts::PeopleContactsBatchCreate,
-                batch_delete_contacts::PeopleContactsBatchDelete,
-                connections::list::{PeopleConnectionsList, PeopleConnectionsListParams},
-                create_contact::PeopleContactCreate,
-                delete_contact::PeopleContactDelete,
-                get::PeoplePersonGet,
-                update_contact::PeopleContactUpdate,
+                GpeoplePerson, GpeoplePersonField,
+                batch_create_contacts::GpeopleContactsBatchCreate,
+                batch_delete_contacts::GpeopleContactsBatchDelete,
+                connections::list::{GpeopleConnectionsList, GpeopleConnectionsListParams},
+                create_contact::GpeopleContactCreate,
+                delete_contact::GpeopleContactDelete,
+                get::GpeoplePersonGet,
+                update_contact::GpeopleContactUpdate,
             },
         },
-        send::{PEOPLE_API_BASE, PeopleSendError, PeopleSendOutput},
+        send::{GPEOPLE_API_BASE, GpeopleSendError, GpeopleSendOutput},
     },
 };
+use io_http::rfc6750::bearer::HttpAuthBearer;
 
 use crate::{
     client::{Client, convert::coroutine_error},
@@ -58,12 +58,12 @@ impl<'a, 'local> Client<'a, 'local> {
         let mut books = Vec::new();
         let mut page_token: Option<String> = None;
         loop {
-            let params = PeopleContactGroupsListParams {
+            let params = GpeopleContactGroupsListParams {
                 page_token: page_token.as_deref(),
                 ..Default::default()
             };
-            let coroutine =
-                PeopleContactGroupsList::new(&auth, &[], &params).map_err(|err| err.to_string())?;
+            let coroutine = GpeopleContactGroupsList::new(&auth, &[], &params)
+                .map_err(|err| err.to_string())?;
             let page = self.run_google(coroutine)?;
 
             for group in page.contact_groups {
@@ -93,7 +93,7 @@ impl<'a, 'local> Client<'a, 'local> {
                             color: None,
                         },
                     );
-                } else if group.group_type == Some(PeopleContactGroupType::UserContactGroup) {
+                } else if group.group_type == Some(GpeopleContactGroupType::UserContactGroup) {
                     let name = group
                         .name
                         .or(group.formatted_name)
@@ -123,11 +123,11 @@ impl<'a, 'local> Client<'a, 'local> {
     pub fn list_google_cards(&mut self, token: &str) -> Result<Vec<Card>, BridgeError> {
         let auth = HttpAuthBearer::new(token);
 
-        let params = PeopleConnectionsListParams {
+        let params = GpeopleConnectionsListParams {
             page_size: Some(100),
             ..Default::default()
         };
-        let coroutine = PeopleConnectionsList::new(&auth, google::READ_FIELDS, &params)
+        let coroutine = GpeopleConnectionsList::new(&auth, google::READ_FIELDS, &params)
             .map_err(|err| err.to_string())?;
         let mut page = self.run_google(coroutine)?;
 
@@ -137,13 +137,14 @@ impl<'a, 'local> Client<'a, 'local> {
 
             match page.next_page_token {
                 Some(next) => {
-                    let params = PeopleConnectionsListParams {
+                    let params = GpeopleConnectionsListParams {
                         page_size: Some(100),
                         page_token: Some(&next),
                         ..Default::default()
                     };
-                    let coroutine = PeopleConnectionsList::new(&auth, google::READ_FIELDS, &params)
-                        .map_err(|err| err.to_string())?;
+                    let coroutine =
+                        GpeopleConnectionsList::new(&auth, google::READ_FIELDS, &params)
+                            .map_err(|err| err.to_string())?;
                     page = self.run_google(coroutine)?;
                 }
                 None => break,
@@ -167,10 +168,10 @@ impl<'a, 'local> Client<'a, 'local> {
 
         // NOTE: metadata carries the deleted marker; a sync token binds
         // to its field mask, so every round asks the same one.
-        let fields: Vec<PeoplePersonField> = google::READ_FIELDS
+        let fields: Vec<GpeoplePersonField> = google::READ_FIELDS
             .iter()
             .copied()
-            .chain([PeoplePersonField::Metadata])
+            .chain([GpeoplePersonField::Metadata])
             .collect();
 
         let mut delta = CardDelta {
@@ -182,14 +183,14 @@ impl<'a, 'local> Client<'a, 'local> {
         let mut page_token: Option<String> = None;
 
         loop {
-            let params = PeopleConnectionsListParams {
+            let params = GpeopleConnectionsListParams {
                 page_size: Some(100),
                 page_token: page_token.as_deref(),
                 request_sync_token: true,
                 sync_token,
                 ..Default::default()
             };
-            let coroutine = PeopleConnectionsList::new(&auth, &fields, &params)
+            let coroutine = GpeopleConnectionsList::new(&auth, &fields, &params)
                 .map_err(|err| err.to_string())?;
             let page = match self.run_google(coroutine) {
                 Ok(page) => page,
@@ -230,7 +231,7 @@ impl<'a, 'local> Client<'a, 'local> {
         let person = google::to_person(vcard)?;
         let auth = HttpAuthBearer::new(token);
 
-        let coroutine = PeopleContactCreate::new(&auth, &person, google::READ_FIELDS, &[])
+        let coroutine = GpeopleContactCreate::new(&auth, &person, google::READ_FIELDS, &[])
             .map_err(|err| err.to_string())?;
         Ok(google_card(self.run_google(coroutine)?))
     }
@@ -239,7 +240,7 @@ impl<'a, 'local> Client<'a, 'local> {
     pub fn read_google_card(&mut self, token: &str, id: &str) -> Result<Card, BridgeError> {
         let auth = HttpAuthBearer::new(token);
         let coroutine =
-            PeoplePersonGet::new(&auth, &format!("people/{id}"), google::READ_FIELDS, &[])
+            GpeoplePersonGet::new(&auth, &format!("people/{id}"), google::READ_FIELDS, &[])
                 .map_err(|err| err.to_string())?;
 
         Ok(google_card(self.run_google(coroutine)?))
@@ -284,11 +285,15 @@ impl<'a, 'local> Client<'a, 'local> {
         // NOTE: a masked clientData update replaces the whole list, so
         // the server's foreign entries are merged in first (the etag
         // guards the race); the same fetch sources a missing etag.
-        let needs_merge = fields.contains(&PeoplePersonField::ClientData);
+        let needs_merge = fields.contains(&GpeoplePersonField::ClientData);
         if needs_merge || etag.is_none() {
-            let coroutine =
-                PeoplePersonGet::new(&auth, &resource_name, &[PeoplePersonField::ClientData], &[])
-                    .map_err(|err| err.to_string())?;
+            let coroutine = GpeoplePersonGet::new(
+                &auth,
+                &resource_name,
+                &[GpeoplePersonField::ClientData],
+                &[],
+            )
+            .map_err(|err| err.to_string())?;
             let current = self.run_google(coroutine)?;
 
             if needs_merge {
@@ -308,8 +313,9 @@ impl<'a, 'local> Client<'a, 'local> {
             person.etag = etag.unwrap_or_default().to_string();
         }
 
-        let coroutine = PeopleContactUpdate::new(&auth, &person, &fields, google::READ_FIELDS, &[])
-            .map_err(|err| err.to_string())?;
+        let coroutine =
+            GpeopleContactUpdate::new(&auth, &person, &fields, google::READ_FIELDS, &[])
+                .map_err(|err| err.to_string())?;
         match self.run_google(coroutine) {
             Ok(updated) => Ok(google_card(updated)),
             // NOTE: the connections.list etag the engine carries is
@@ -319,17 +325,17 @@ impl<'a, 'local> Client<'a, 'local> {
             Err(err)
                 if err.status == Some(400) && err.message.to_ascii_lowercase().contains("etag") =>
             {
-                let coroutine = PeoplePersonGet::new(
+                let coroutine = GpeoplePersonGet::new(
                     &auth,
                     &resource_name,
-                    &[PeoplePersonField::ClientData],
+                    &[GpeoplePersonField::ClientData],
                     &[],
                 )
                 .map_err(|err| err.to_string())?;
                 person.etag = self.run_google(coroutine)?.etag;
 
                 let coroutine =
-                    PeopleContactUpdate::new(&auth, &person, &fields, google::READ_FIELDS, &[])
+                    GpeopleContactUpdate::new(&auth, &person, &fields, google::READ_FIELDS, &[])
                         .map_err(|err| err.to_string())?;
                 Ok(google_card(self.run_google(coroutine)?))
             }
@@ -340,7 +346,7 @@ impl<'a, 'local> Client<'a, 'local> {
     /// Deletes the People contact `id`.
     pub fn delete_google_card(&mut self, token: &str, id: &str) -> Result<(), BridgeError> {
         let auth = HttpAuthBearer::new(token);
-        let coroutine = PeopleContactDelete::new(&auth, &format!("people/{id}"))
+        let coroutine = GpeopleContactDelete::new(&auth, &format!("people/{id}"))
             .map_err(|err| err.to_string())?;
         self.run_google(coroutine)?;
 
@@ -366,7 +372,7 @@ impl<'a, 'local> Client<'a, 'local> {
 
         let mut cards = Vec::with_capacity(persons.len());
         for chunk in persons.chunks(GOOGLE_CREATE_CHUNK) {
-            let coroutine = PeopleContactsBatchCreate::new(&auth, chunk, google::READ_FIELDS, &[])
+            let coroutine = GpeopleContactsBatchCreate::new(&auth, chunk, google::READ_FIELDS, &[])
                 .map_err(|err| err.to_string())?;
             let response = self.run_google(coroutine)?;
 
@@ -399,7 +405,7 @@ impl<'a, 'local> Client<'a, 'local> {
         let names: Vec<String> = ids.iter().map(|id| format!("people/{id}")).collect();
         for chunk in names.chunks(GOOGLE_DELETE_CHUNK) {
             let coroutine =
-                PeopleContactsBatchDelete::new(&auth, chunk).map_err(|err| err.to_string())?;
+                GpeopleContactsBatchDelete::new(&auth, chunk).map_err(|err| err.to_string())?;
             self.run_google(coroutine)?;
         }
 
@@ -421,7 +427,7 @@ impl<'a, 'local> Client<'a, 'local> {
         let person = vec![format!("people/{id}")];
 
         for group in add {
-            let coroutine = PeopleContactGroupMembersModify::new(
+            let coroutine = GpeopleContactGroupMembersModify::new(
                 &auth,
                 &format!("contactGroups/{group}"),
                 &person,
@@ -440,7 +446,7 @@ impl<'a, 'local> Client<'a, 'local> {
         }
 
         for group in remove {
-            let coroutine = PeopleContactGroupMembersModify::new(
+            let coroutine = GpeopleContactGroupMembersModify::new(
                 &auth,
                 &format!("contactGroups/{group}"),
                 &[],
@@ -476,22 +482,22 @@ impl<'a, 'local> Client<'a, 'local> {
     /// yield to the transport stream opened on the People API origin.
     fn run_google<C, T>(&mut self, mut coroutine: C) -> Result<T, BridgeError>
     where
-        C: PeopleCoroutine<
-                Yield = PeopleYield,
-                Return = Result<PeopleSendOutput<T>, PeopleSendError>,
+        C: GpeopleCoroutine<
+                Yield = GpeopleYield,
+                Return = Result<GpeopleSendOutput<T>, GpeopleSendError>,
             >,
     {
         let mut arg: Option<Vec<u8>> = None;
 
         loop {
             match coroutine.resume(arg.as_deref()) {
-                PeopleCoroutineState::Complete(Ok(output)) => return Ok(output.response),
-                PeopleCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
-                PeopleCoroutineState::Yielded(PeopleYield::WantsRead) => {
-                    arg = Some(self.read(PEOPLE_API_BASE)?);
+                GpeopleCoroutineState::Complete(Ok(output)) => return Ok(output.response),
+                GpeopleCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
+                GpeopleCoroutineState::Yielded(GpeopleYield::WantsRead) => {
+                    arg = Some(self.read(GPEOPLE_API_BASE)?);
                 }
-                PeopleCoroutineState::Yielded(PeopleYield::WantsWrite(bytes)) => {
-                    self.write(PEOPLE_API_BASE, &bytes)?;
+                GpeopleCoroutineState::Yielded(GpeopleYield::WantsWrite(bytes)) => {
+                    self.write(GPEOPLE_API_BASE, &bytes)?;
                     arg = None;
                 }
             }
@@ -499,12 +505,12 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 }
 
-/// io-people person to the JNI-facing card shape: the projected
+/// io-gpeople person to the JNI-facing card shape: the projected
 /// vCard document, the person id (resource name minus the `people/`
 /// prefix) as both display id and addressing key (uri), the person
 /// etag as ETag, and the contact group memberships (minus their
 /// `contactGroups/` prefix) as the card's books.
-fn google_card(person: PeoplePerson) -> Card {
+fn google_card(person: GpeoplePerson) -> Card {
     let vcard = google::to_vcard(&person);
     let id = google::person_id(&person.resource_name).to_string();
     let books = person

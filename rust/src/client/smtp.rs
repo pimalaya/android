@@ -14,7 +14,7 @@ use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use io_smtp::{
     coroutine::{SmtpCoroutine, SmtpCoroutineState, SmtpYield},
-    message::{SmtpMessageSend, SmtpMessageSendError},
+    message::{SmtpMessageSend, SmtpMessageSendError, SmtpMessageSendOptions},
     rfc5321::{
         SmtpDomain, SmtpEhloDomain, SmtpForwardPath, SmtpLocalPart, SmtpMailbox, SmtpReversePath,
         data::SmtpDataError, ehlo::SmtpEhlo, greeting::SmtpGreetingGet, mail::SmtpMailError,
@@ -123,6 +123,7 @@ impl<'a, 'b, 'local> SmtpSession<'a, 'b, 'local> {
             SmtpReversePath::from(sender),
             recipients,
             composed.message.clone(),
+            SmtpMessageSendOptions::default(),
         );
         let mut arg: Option<Vec<u8>> = None;
 

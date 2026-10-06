@@ -244,6 +244,7 @@ pub fn apply(vcard: &str, model: &Value) -> Result<String, String> {
             && n.suffixes.is_empty();
         if !empty {
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::N),
                 params: vec![],
                 value: VcardValue::N(n),
@@ -258,6 +259,7 @@ pub fn apply(vcard: &str, model: &Value) -> Result<String, String> {
         .collect();
     if !nicknames.is_empty() {
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::Nickname),
             params: vec![],
             value: VcardValue::TextList(VcardTextList(nicknames)),
@@ -310,6 +312,7 @@ pub fn apply(vcard: &str, model: &Value) -> Result<String, String> {
             && value.country.is_empty();
         if !empty {
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::Adr),
                 params: type_params(adr, version),
                 value: VcardValue::Adr(value),
@@ -336,6 +339,7 @@ pub fn apply(vcard: &str, model: &Value) -> Result<String, String> {
                 components.push(Cow::Owned(department.to_string()));
             }
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::Org),
                 params: vec![],
                 value: VcardValue::Org(VcardOrg(components)),
@@ -358,6 +362,7 @@ pub fn apply(vcard: &str, model: &Value) -> Result<String, String> {
     card.remove::<BDAY>();
     if let Some(date) = full_date(field(model, "birthday")) {
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::Bday),
             params: vec![],
             value: VcardValue::DateAndOrTime(VcardDateAndOrTime(Cow::Owned(date))),
@@ -367,6 +372,7 @@ pub fn apply(vcard: &str, model: &Value) -> Result<String, String> {
     card.remove::<URL>();
     for site in strings(model.get("websites")) {
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::Url),
             params: vec![],
             value: VcardValue::Uri(VcardUri(Cow::Owned(site))),
@@ -381,6 +387,7 @@ pub fn apply(vcard: &str, model: &Value) -> Result<String, String> {
     card.remove::<ANNIVERSARY>();
     if let Some(date) = full_date(field(model, "anniversary")) {
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::Anniversary),
             params: vec![],
             value: VcardValue::DateAndOrTime(VcardDateAndOrTime(Cow::Owned(date))),
@@ -402,6 +409,7 @@ pub fn apply(vcard: &str, model: &Value) -> Result<String, String> {
 
         if !sex.is_empty() || !identity.is_empty() {
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::Gender),
                 params: vec![],
                 value: VcardValue::Gender(VcardGender {
@@ -415,6 +423,7 @@ pub fn apply(vcard: &str, model: &Value) -> Result<String, String> {
     card.remove::<IMPP>();
     for impp in strings(model.get("impps")) {
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::Impp),
             params: vec![],
             value: VcardValue::Uri(VcardUri(Cow::Owned(impp))),
@@ -424,6 +433,7 @@ pub fn apply(vcard: &str, model: &Value) -> Result<String, String> {
     card.remove::<LANG>();
     for tag in strings(model.get("languages")) {
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::Lang),
             params: vec![],
             value: VcardValue::LanguageTag(VcardLanguageTag(Cow::Owned(tag))),
@@ -442,6 +452,7 @@ pub fn apply(vcard: &str, model: &Value) -> Result<String, String> {
         let mut params = type_params(relation, version);
         if value.contains(':') {
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::Related),
                 params,
                 value: VcardValue::Uri(VcardUri(Cow::Owned(value.to_string()))),
@@ -495,6 +506,7 @@ pub(crate) fn text_prop(
     value: &str,
 ) -> VcardProp<'static> {
     VcardProp {
+        group: None,
         name: VcardPropName::Kind(kind),
         params,
         value: VcardValue::Text(VcardText(Cow::Owned(value.to_string()))),

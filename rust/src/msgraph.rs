@@ -98,6 +98,7 @@ pub fn to_vcard(contact: &MsgraphContact) -> String {
         && n.prefixes.is_empty();
     if !empty {
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::N),
             params: vec![],
             value: VcardValue::N(n),
@@ -106,6 +107,7 @@ pub fn to_vcard(contact: &MsgraphContact) -> String {
 
     if let Some(nick) = opt(&contact.nick_name) {
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::Nickname),
             params: vec![],
             value: VcardValue::TextList(VcardTextList(vec![Cow::Owned(nick.to_string())])),
@@ -125,6 +127,7 @@ pub fn to_vcard(contact: &MsgraphContact) -> String {
         let im = im.trim();
         if !im.is_empty() {
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::Impp),
                 params: vec![],
                 value: VcardValue::Uri(VcardUri(Cow::Owned(im.to_string()))),
@@ -179,6 +182,7 @@ pub fn to_vcard(contact: &MsgraphContact) -> String {
             components.push(Cow::Owned(department.to_string()));
         }
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::Org),
             params: vec![],
             value: VcardValue::Org(VcardOrg(components)),
@@ -193,6 +197,7 @@ pub fn to_vcard(contact: &MsgraphContact) -> String {
     }
     if let Some(page) = opt(&contact.business_home_page) {
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::Url),
             params: vec![],
             value: VcardValue::Uri(VcardUri(Cow::Owned(page.to_string()))),
@@ -205,6 +210,7 @@ pub fn to_vcard(contact: &MsgraphContact) -> String {
         let date = birthday.split('T').next().unwrap_or(birthday);
         if let Some(date) = full_date(date) {
             card.push(VcardProp {
+                group: None,
                 name: VcardPropName::Kind(VcardPropKind::Bday),
                 params: vec![],
                 value: VcardValue::DateAndOrTime(VcardDateAndOrTime(Cow::Owned(date))),
@@ -224,6 +230,7 @@ pub fn to_vcard(contact: &MsgraphContact) -> String {
         .collect();
     if !categories.is_empty() {
         card.push(VcardProp {
+            group: None,
             name: VcardPropName::Kind(VcardPropKind::Categories),
             params: vec![],
             value: VcardValue::TextList(VcardTextList(categories)),
@@ -723,6 +730,7 @@ fn adr_prop(
     }
 
     Some(VcardProp {
+        group: None,
         name: VcardPropName::Kind(VcardPropKind::Adr),
         params: r#type.map(type_param).into_iter().collect(),
         value: VcardValue::Adr(value),
@@ -733,6 +741,7 @@ fn adr_prop(
 /// explicit VALUE=text (RELATED defaults to a URI).
 fn related_prop(r#type: &'static str, name: &str) -> VcardProp<'static> {
     VcardProp {
+        group: None,
         name: VcardPropName::Kind(VcardPropKind::Related),
         params: vec![type_param(r#type), VcardParam::Value(Cow::Borrowed("text"))],
         value: VcardValue::Text(VcardText(Cow::Owned(name.to_string()))),

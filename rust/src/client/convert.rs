@@ -5,9 +5,9 @@
 
 use core::error::Error as StdError;
 
+use io_gpeople::v1::send::GpeopleSendError;
 use io_jmap::rfc8620::{send::JmapSendError, session_get::JmapSessionGetError};
 use io_msgraph::v1::send::MsgraphSendError;
-use io_people::v1::send::PeopleSendError;
 use io_webdav::rfc4918::{follow_redirects::WebdavFollowRedirectsError, send::WebdavSendError};
 
 use crate::types::{BridgeError, PushOutcome};
@@ -24,7 +24,7 @@ pub(crate) fn coroutine_error(err: &(impl StdError + 'static)) -> BridgeError {
 /// Walks the failure's source chain down to the transport leaf that
 /// knows the HTTP status of the failed round, if the failure was one:
 /// io-webdav and io-jmap carry it on their send errors, io-msgraph
-/// and io-people expose it as an accessor.
+/// and io-gpeople expose it as an accessor.
 ///
 /// **Not every status is on a send error.** A few coroutines check the
 /// status themselves and fail with a variant of their own that formats
@@ -53,7 +53,7 @@ fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
         if let Some(send) = err.downcast_ref::<MsgraphSendError>() {
             return send.status();
         }
-        if let Some(send) = err.downcast_ref::<PeopleSendError>() {
+        if let Some(send) = err.downcast_ref::<GpeopleSendError>() {
             return send.status();
         }
         cause = err.source();
