@@ -5,17 +5,15 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.client.Account;
-import org.pimalaya.client.MailWalk;
+import org.pimalaya.client.MailSession;
+import org.pimalaya.client.MailRef;
+import org.pimalaya.client.MailRound;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.Message;
 import org.pimalaya.client.PimalayaClient;
 
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * The mail half of the engine: one driver per account, servicing the
@@ -30,6 +28,11 @@ import java.util.Map;
  * meta fetch is answered out of it. It is the same shape the contacts
  * driver uses for the account-level backends, and it is what keeps a sync
  * at one connection per account rather than one per mailbox.
+ *
+ * <p>The session it walks and writes on is the caller's, opened once
+ * for the pass and closed with it, so the three markers a reader moved
+ * go out on the connection the walk already had rather than on three of
+ * their own.
  *
  * <p>A meta fetch costs nothing for the second reason mail is unusual: a
  * message's handle <em>is</em> its link id, and the summary a listing
@@ -65,45 +68,25 @@ final class MailEngine extends PimdirEngine {
      */
     private static final String[] WRITABLE = {SEEN, ANSWERED, FLAGGED, DELETED};
 
-    /** Null on a driver that only stages mutations, which reach no server. */
-    private final Account account;
+    /** How many messages a full round takes off the end of a mailbox. */
+    private static final int PER_MAILBOX = 50;
+
+    /** The account's live connection; null on a driver that only stages,
+     *  whose mutations reach no server. */
+    private final MailSession session;
 
     /** What the account's collection ids are namespaced under. */
     private final String accountId;
 
-    /** The messages the pass's walk read, by mailbox then by handle. */
-    private final Map<String, Map<String, Message>> walked = new HashMap<>();
-
-    MailEngine(PimdirDb pimdir, PimalayaClient client, Account account, String accountId) {
+    MailEngine(PimdirDb pimdir, PimalayaClient client, MailSession session, String accountId) {
         super(pimdir, client);
-        this.account = account;
+        this.session = session;
         this.accountId = accountId;
     }
 
-    /**
-     * Walks the account once and primes the cache every mailbox's
-     * enumerate reads from, answering the mailboxes it found.
-     *
-     * <p>Called before the collections are reconciled, because it is what
-     * tells the sync which collections there are: a mailbox that was
-     * removed on the server is one the walk no longer lists.
-     */
-    List<Mailbox> walk(int perMailbox) {
-        MailWalk walk =
-                client.syncMail(account.baseUrl, account.login, account.password, perMailbox);
-
-        walked.clear();
-        for (Message message : walk.messages) {
-            walked.computeIfAbsent(message.mailbox, mailbox -> new LinkedHashMap<>())
-                    .put(message.id, message);
-        }
-        // NOTE: a mailbox the walk listed and read nothing from is still a
-        // mailbox, and its enumerate has to report an empty spine rather
-        // than no answer, or every message it holds would read as vanished.
-        for (Mailbox mailbox : walk.mailboxes) {
-            walked.computeIfAbsent(mailbox.name, name -> new LinkedHashMap<>());
-        }
-        return walk.mailboxes;
+    /** The account's mailboxes and the role each carries, in one round. */
+    List<Mailbox> mailboxes() {
+        return client.listMailboxes(session);
     }
 
     /**
@@ -128,57 +111,63 @@ final class MailEngine extends PimdirEngine {
     @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
-        Map<String, Message> messages = walked.get(mailboxOf(collection));
+        String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");
+        MailRound round =
+                client.enumerateMailbox(session, mailboxOf(collection), cursor, PER_MAILBOX);
 
         JSONArray items = new JSONArray();
-        for (Message message : messages == null ? List.<Message>of() : messages.values()) {
+        for (MailRef message : round.items) {
             JSONObject item = new JSONObject();
             item.put("handle", message.id);
-            item.put("flags", flagsOf(message));
+            item.put("flags", new JSONArray(message.flags));
             items.put(item);
         }
 
         JSONObject reply = new JSONObject();
         reply.put("items", items);
-        reply.put("vanished", new JSONArray());
-        // NOTE: complete, and it is a claim worth being careful about: the
-        // walk takes a window off the end of each mailbox, so everything
-        // before that window reads as vanished and is dropped. That is what
-        // the mirror has always held, a window rather than a mailbox, and
-        // saying otherwise would leave rows nothing can refresh.
-        reply.put("complete", true);
+        reply.put("vanished", new JSONArray(round.vanished));
+        // NOTE: a complete round is a claim worth being careful about: it
+        // covers the window this store holds and not the mailbox, so
+        // everything older than the window reads as vanished and is
+        // dropped. That is what the mirror has always held, and saying
+        // otherwise would leave rows nothing can refresh. A QRESYNC round
+        // is a delta and says so, so it retires only what the server
+        // reported gone.
+        reply.put("complete", round.complete);
+        if (!round.checkpoint.isEmpty()) {
+            reply.put("checkpoint", round.checkpoint);
+        }
         return reply;
     }
 
     /**
-     * The envelopes the walk read, with no body whichever tier is asked.
+     * The envelopes of the named messages, with no body whichever tier is
+     * asked.
      *
-     * <p>A message rises off the meta rung by being opened, and the reader
-     * is what files it: it fetches the bytes and stores them ({@link
-     * MailStore#saveSource}), which is one message at a time and only ever
-     * one the user asked for. Answering a body here would be two wrong
-     * things at once, an entire mailbox of downloads to reconcile a spine,
-     * and a message crossing a wire that carries text where a message is
-     * bytes.
+     * <p>Those and no others: a pass that found one new message reads one
+     * envelope, where the spine used to arrive as a window of every
+     * mailbox whether or not anything in it moved.
+     *
+     * <p>A body is a different question, and the reader's: it fetches the
+     * bytes and stores them ({@link MailStore#saveSource}), one message at
+     * a time and only ever one someone asked for. Answering one here would
+     * be an entire mailbox of downloads to reconcile a spine, and a
+     * message crossing a wire that carries text where a message is bytes.
      */
     @Override
     protected JSONObject fetch(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
-        Map<String, Message> messages = walked.get(mailboxOf(collection));
+        String mailbox = mailboxOf(collection);
+        List<String> handles = stringsOf(yielded.getJSONArray("handles"));
 
         JSONArray items = new JSONArray();
-        for (String handle : stringsOf(yielded.getJSONArray("handles"))) {
-            Message message = messages == null ? null : messages.get(handle);
-            if (message == null) {
-                continue;
-            }
-
+        for (Message message : client.fetchEnvelopes(session, mailbox, handles)) {
             JSONObject item = new JSONObject();
-            item.put("handle", handle);
+            item.put("handle", message.id);
             // The handle is the identity: an IMAP UID names the message
             // within its mailbox and a JMAP Email id across the account,
             // which is exactly what a link id has to do.
-            item.put("linkId", handle);
+            item.put("linkId", message.id);
             item.put(
                     "summary",
                     PimdirSummary.mail(
@@ -223,7 +212,7 @@ final class MailEngine extends PimdirEngine {
             case "setFlags":
                 return pushFlags(collection, mailbox, handle, change);
             case "remove":
-                client.deleteMessage(account, mailbox, handle);
+                client.deleteMessage(session, mailbox, handle);
                 return result(handle, true, null, null);
             default:
                 // NOTE: a message is not authored here and never edited: the
@@ -255,24 +244,9 @@ final class MailEngine extends PimdirEngine {
             if (base != null && wanted == has(base, flag)) {
                 continue;
             }
-            client.setMessageFlag(account, mailbox, handle, flag, wanted);
+            client.setMessageFlag(session, mailbox, handle, flag, wanted);
         }
         return result(handle, true, null, null);
-    }
-
-    /** One message's markers as the store's JSON array spells them. */
-    private static JSONArray flagsOf(Message message) {
-        JSONArray flags = new JSONArray();
-        if (message.seen) {
-            flags.put(SEEN);
-        }
-        if (message.answered) {
-            flags.put(ANSWERED);
-        }
-        if (message.flagged) {
-            flags.put(FLAGGED);
-        }
-        return flags;
     }
 
     /** Whether a marker set names one marker. */

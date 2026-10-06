@@ -1,59 +1,151 @@
 //! Mail JNI entry points.
 //!
-//! The reads are one call per account rather than one per mailbox: both
-//! backends authenticate once and walk every mailbox inside that one
-//! authentication, which is the whole difference from the WebDAV side's
-//! per-collection calls. The writes are one call per message, since
-//! that is what a reader does one of at a time.
+//! Every verb here but the two pure ones runs on a session the caller
+//! opened and holds ([`crate::ffi::session`]), so a pass that walks an
+//! account and then writes three markers is one connection rather than
+//! four. What the caller passes back on each call is the handle and the
+//! transport; what it never passes again is the endpoint or the
+//! credential, which the session holds.
 //!
-//! Two backends, told apart by the account's base URL the way the card
-//! entry points do it: an IMAP session behind an `imaps://` URL, or the
-//! RFC 8621 verbs behind the `jmap://` marker. A match here rather than
-//! a dispatch module, which for two branches would be indirection with
-//! nothing to dispatch.
+//! Two backends, told apart when the session is opened rather than on
+//! every verb: an IMAP session behind an `imaps://` URL, or the RFC 8621
+//! verbs behind the `jmap://` marker.
 
 use jni::{
     EnvUnowned,
     errors::{Error, LogErrorAndDefault},
     objects::{JByteArray, JClass, JObject, JString},
 };
+use serde::Serialize;
 use serde_json::{from_str, json, to_string};
 
 use crate::{
-    account::{self, Backend},
     client::{self, Client},
-    ffi::{error_json, parse_url, read_string},
+    ffi::{
+        error_json, parse_url, read_string,
+        session::{self, MailSession},
+    },
     mail::{self, Draft},
-    types::{BridgeError, Credentials, MailWalk},
+    types::{BridgeError, Mailbox, Message},
 };
 
-/// `Native.syncMail`: connects to the account's mail server, lists its
-/// mailboxes and returns the newest `limit` messages of each. Returns a
-/// JSON object of `{mailboxes, messages}`, the roster carrying the RFC
-/// 6154 role of each mailbox and the messages their envelope spine.
+/// `Native.openMailSession`: connects to the account's mail server and
+/// authenticates, answering `{"handle": n}` or `{"error": ".."}`.
+///
+/// The handle is a pointer the caller owns until it gives it back to
+/// `closeMailSession`, and it is only ever used from one thread at a
+/// time; the Java `MailSession` is what holds it to that.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_syncMail<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_openMailSession<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
     url: JString<'local>,
     login: JString<'local>,
     password: JString<'local>,
-    limit: i32,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let url = read_string(env, &url);
         let login = read_string(env, &login);
         let password = read_string(env, &password);
-        let credentials = Credentials {
-            login: &login,
-            password: &password,
+
+        let mut client = Client::new(env, &transport);
+        let json = match MailSession::open(&mut client, &url, &login, &password) {
+            Ok(opened) => json!({ "handle": session::into_handle(opened) }).to_string(),
+            Err(err) => error_json(err),
         };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.closeMailSession`: frees the session a handle names.
+///
+/// The sockets under it are the transport's, so closing that is the
+/// caller's other half of the same act.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_closeMailSession(
+    _env: EnvUnowned<'_>,
+    _class: JClass<'_>,
+    handle: i64,
+) {
+    unsafe { session::drop_handle(handle) };
+}
+
+/// `Native.listMailboxes`: the account's mailboxes and the RFC 6154 role
+/// of each. Returns a JSON array of `{name, role}` objects.
+///
+/// The roster alone. It used to carry a window of every mailbox's
+/// messages with it, because every native call was a connection; a
+/// session lasts the pass now, so each mailbox is enumerated when its
+/// turn comes and only what changed is read.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_listMailboxes<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    handle: i64,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let mut client = Client::new(env, &transport);
+        let json = match list_mailboxes(&mut client, handle) {
+            Ok(roster) => to_string(&roster).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.enumerateMailbox`: one mailbox's spine from the cursor the
+/// last pass stored, as `{items, vanished, complete, checkpoint}`, each
+/// item `{id, flags}` and no envelope.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_enumerateMailbox<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    handle: i64,
+    mailbox: JString<'local>,
+    cursor: JString<'local>,
+    limit: i32,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let mailbox = read_string(env, &mailbox);
+        let cursor = read_string(env, &cursor);
         let limit = limit.max(1) as u32;
 
         let mut client = Client::new(env, &transport);
-        let json = match sync_account(&mut client, &url, &credentials, limit) {
-            Ok(walk) => to_string(&walk).unwrap_or_else(|err| error_json(err.to_string())),
+        let json = match enumerate(&mut client, handle, &mailbox, &cursor, limit) {
+            Ok(round) => to_string(&round).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.fetchEnvelopes`: the envelope spine of the named messages,
+/// and of no others. Returns a JSON array of message objects.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_fetchEnvelopes<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    handle: i64,
+    mailbox: JString<'local>,
+    ids: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let mailbox = read_string(env, &mailbox);
+        let ids = read_string(env, &ids);
+
+        let mut client = Client::new(env, &transport);
+        let json = match fetch_envelopes(&mut client, handle, &mailbox, &ids) {
+            Ok(messages) => to_string(&messages).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -72,25 +164,16 @@ pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessageSource<'local
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
+    handle: i64,
     mailbox: JString<'local>,
     id: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let url = read_string(env, &url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let mailbox = read_string(env, &mailbox);
         let id = read_string(env, &id);
-        let credentials = Credentials {
-            login: &login,
-            password: &password,
-        };
 
         let mut client = Client::new(env, &transport);
-        let json = match read_source(&mut client, &url, &credentials, &mailbox, &id) {
+        let json = match read_source(&mut client, handle, &mailbox, &id) {
             Ok(source) => json!({ "source": mail::base64(&source) }).to_string(),
             Err(err) => error_json(err),
         };
@@ -104,8 +187,9 @@ pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessageSource<'local
 /// Returns a JSON object of
 /// `{subject, from, fromAddress, to, cc, date, kind, body, attachments}`.
 ///
-/// No transport, because there is nothing to reach for: the bytes are
-/// the argument. This is what a message opened a second time costs.
+/// No transport and no session, because there is nothing to reach for:
+/// the bytes are the argument. This is what a message opened a second
+/// time costs.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_parseMessage<'local>(
     mut env: EnvUnowned<'local>,
@@ -124,47 +208,164 @@ pub extern "system" fn Java_org_pimalaya_client_Native_parseMessage<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// Reads one message's source with whichever backend its base URL names.
+/// Reads one message's source with whichever backend the session speaks.
 ///
 /// The mailbox is only IMAP's concern: a JMAP `Email` id addresses the
 /// message across the whole account, and the same message filed in two
 /// mailboxes is one object with one id.
 fn read_source(
     client: &mut Client<'_, '_>,
-    base_url: &str,
-    credentials: &Credentials,
+    handle: i64,
     mailbox: &str,
     id: &str,
 ) -> Result<Vec<u8>, BridgeError> {
-    match Backend::of(base_url) {
-        Backend::Jmap => {
-            let session_url = account::jmap_session_url(base_url)?;
-            client.fetch_jmap_source(&session_url, credentials, id)
-        }
-        _ => {
-            let url = parse_url(base_url)?;
-            client::imap::fetch_source(client, &url, credentials, mailbox, id)
-        }
+    let session = unsafe { session::borrow(handle) }?;
+    if session.is_jmap() {
+        let url = session.jmap_url()?;
+        return client.fetch_jmap_source(&url, &session.credentials(), id);
     }
+
+    client::imap::fetch_source(&mut session.imap(client)?, mailbox, id)
 }
 
-/// Walks the account's mail with whichever backend its base URL names.
-fn sync_account(
+/// The account's mailboxes with whichever backend the session speaks.
+///
+/// A JMAP session remembers the id each path maps to, since every later
+/// verb addresses a mailbox by id and the roster is the only place that
+/// answer comes from.
+fn list_mailboxes(client: &mut Client<'_, '_>, handle: i64) -> Result<Vec<Mailbox>, BridgeError> {
+    let session = unsafe { session::borrow(handle) }?;
+    if !session.is_jmap() {
+        return client::imap::list_mailboxes(&mut session.imap(client)?);
+    }
+
+    let url = session.jmap_url()?;
+    let listed = client.list_jmap_mailbox_roster(&url, &session.credentials())?;
+
+    let ids = session.jmap_ids();
+    ids.clear();
+    let mut roster = Vec::with_capacity(listed.len());
+    for (id, mailbox) in listed {
+        ids.insert(mailbox.name.clone(), id);
+        roster.push(mailbox);
+    }
+
+    Ok(roster)
+}
+
+/// One mailbox's spine with whichever backend the session speaks.
+fn enumerate(
     client: &mut Client<'_, '_>,
-    base_url: &str,
-    credentials: &Credentials,
+    handle: i64,
+    mailbox: &str,
+    cursor: &str,
     limit: u32,
-) -> Result<MailWalk, BridgeError> {
-    match Backend::of(base_url) {
-        Backend::Jmap => {
-            let session_url = account::jmap_session_url(base_url)?;
-            client.sync_jmap_account(&session_url, credentials, limit)
-        }
-        // NOTE: a mail account with no sentinel is an `imaps://` URL,
-        // the only other endpoint the connection flow builds.
-        _ => {
-            let url = parse_url(base_url)?;
-            client::imap::sync_account(client, &url, credentials, limit)
+) -> Result<EnumerationJson, BridgeError> {
+    let session = unsafe { session::borrow(handle) }?;
+    let cursor = Some(cursor).filter(|value| !value.is_empty());
+
+    if !session.is_jmap() {
+        let round = session.imap(client)?.enumerate(mailbox, cursor, limit)?;
+        return Ok(round.into());
+    }
+
+    let url = session.jmap_url()?;
+    let Some(id) = session.jmap_ids().get(mailbox).cloned() else {
+        return Err(format!("No JMAP mailbox named `{mailbox}`").into());
+    };
+    let messages = client.query_jmap_mailbox(&url, &session.credentials(), &id, mailbox, limit)?;
+
+    // Kept for the fetch that follows: with no `Email/changes` wired the
+    // round already read what the fetch would ask for, and asking twice
+    // would be the avoidable half of a whole round.
+    let listed = session.jmap_listed();
+    listed.clear();
+    let mut items = Vec::with_capacity(messages.len());
+    for message in messages {
+        items.push(SpineJson {
+            id: message.id.clone(),
+            flags: flags_of(&message),
+        });
+        listed.insert(message.id.clone(), message);
+    }
+
+    Ok(EnumerationJson {
+        items,
+        vanished: Vec::new(),
+        complete: true,
+        checkpoint: String::new(),
+    })
+}
+
+/// The named messages' envelopes with whichever backend the session
+/// speaks.
+fn fetch_envelopes(
+    client: &mut Client<'_, '_>,
+    handle: i64,
+    mailbox: &str,
+    ids: &str,
+) -> Result<Vec<Message>, BridgeError> {
+    let ids: Vec<String> = from_str(ids).map_err(|err| format!("Invalid id list: {err}"))?;
+    let session = unsafe { session::borrow(handle) }?;
+
+    if !session.is_jmap() {
+        let borrowed: Vec<&str> = ids.iter().map(String::as_str).collect();
+        return session.imap(client)?.fetch_envelopes(mailbox, &borrowed);
+    }
+
+    let listed = session.jmap_listed();
+    Ok(ids
+        .iter()
+        .filter_map(|id| listed.get(id).cloned())
+        .collect())
+}
+
+/// The IMAP markers a JMAP message carries, named the IMAP way.
+fn flags_of(message: &Message) -> Vec<String> {
+    let mut flags = Vec::new();
+    if message.seen {
+        flags.push(String::from("\\Seen"));
+    }
+    if message.answered {
+        flags.push(String::from("\\Answered"));
+    }
+    if message.flagged {
+        flags.push(String::from("\\Flagged"));
+    }
+    flags
+}
+
+/// One enumerated mailbox on the JSON wire.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnumerationJson {
+    items: Vec<SpineJson>,
+    vanished: Vec<String>,
+    complete: bool,
+    checkpoint: String,
+}
+
+/// One member of an enumerated mailbox on the JSON wire.
+#[derive(Serialize)]
+struct SpineJson {
+    id: String,
+    flags: Vec<String>,
+}
+
+impl From<client::imap::Enumeration> for EnumerationJson {
+    fn from(round: client::imap::Enumeration) -> Self {
+        Self {
+            items: round
+                .items
+                .into_iter()
+                .map(|entry| SpineJson {
+                    id: entry.id,
+                    flags: entry.flags,
+                })
+                .collect(),
+            vanished: round.vanished,
+            complete: round.complete,
+            checkpoint: round.checkpoint,
         }
     }
 }
@@ -177,28 +378,19 @@ pub extern "system" fn Java_org_pimalaya_client_Native_setMessageFlag<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
+    handle: i64,
     mailbox: JString<'local>,
     id: JString<'local>,
     flag: JString<'local>,
     add: bool,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let url = read_string(env, &url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let mailbox = read_string(env, &mailbox);
         let id = read_string(env, &id);
         let flag = read_string(env, &flag);
-        let credentials = Credentials {
-            login: &login,
-            password: &password,
-        };
 
         let mut client = Client::new(env, &transport);
-        let json = match set_flag(&mut client, &url, &credentials, &mailbox, &id, &flag, add) {
+        let json = match set_flag(&mut client, handle, &mailbox, &id, &flag, add) {
             Ok(()) => String::from("{}"),
             Err(err) => error_json(err),
         };
@@ -217,25 +409,16 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteMessage<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
+    handle: i64,
     mailbox: JString<'local>,
     id: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let url = read_string(env, &url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let mailbox = read_string(env, &mailbox);
         let id = read_string(env, &id);
-        let credentials = Credentials {
-            login: &login,
-            password: &password,
-        };
 
         let mut client = Client::new(env, &transport);
-        let json = match delete_message(&mut client, &url, &credentials, &mailbox, &id) {
+        let json = match delete_message(&mut client, handle, &mailbox, &id) {
             Ok(trash) => json!({ "mailbox": trash }).to_string(),
             Err(err) => error_json(err),
         };
@@ -245,52 +428,40 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteMessage<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// Writes one marker with whichever backend the base URL names.
+/// Writes one marker with whichever backend the session speaks.
 fn set_flag(
     client: &mut Client<'_, '_>,
-    base_url: &str,
-    credentials: &Credentials,
+    handle: i64,
     mailbox: &str,
     id: &str,
     flag: &str,
     add: bool,
 ) -> Result<(), BridgeError> {
-    match Backend::of(base_url) {
-        Backend::Jmap => {
-            let session_url = account::jmap_session_url(base_url)?;
-            client.set_jmap_keyword(&session_url, credentials, id, flag, add)
-        }
-        _ => {
-            let url = parse_url(base_url)?;
-            let mut session = client::imap::ImapSession::new(client, &url);
-            session.connect(credentials)?;
-            session.store_flag(mailbox, id, flag, add)
-        }
+    let session = unsafe { session::borrow(handle) }?;
+    if session.is_jmap() {
+        let url = session.jmap_url()?;
+        return client.set_jmap_keyword(&url, &session.credentials(), id, flag, add);
     }
+
+    session.imap(client)?.store_flag(mailbox, id, flag, add)
 }
 
-/// Deletes one message with whichever backend the base URL names.
+/// Deletes one message with whichever backend the session speaks.
 fn delete_message(
     client: &mut Client<'_, '_>,
-    base_url: &str,
-    credentials: &Credentials,
+    handle: i64,
     mailbox: &str,
     id: &str,
 ) -> Result<Option<String>, BridgeError> {
-    match Backend::of(base_url) {
-        Backend::Jmap => {
-            let session_url = account::jmap_session_url(base_url)?;
-            client
-                .delete_jmap_message(&session_url, credentials, id)
-                .map(Some)
-        }
-        _ => {
-            let url = parse_url(base_url)?;
-            let mut session = client::imap::ImapSession::new(client, &url);
-            session.connect(credentials)?;
-            session.delete_message(mailbox, id)
-        }
+    let session = unsafe { session::borrow(handle) }?;
+    if session.is_jmap() {
+        let url = session.jmap_url()?;
+        return client
+            .delete_jmap_message(&url, &session.credentials(), id)
+            .map(Some);
     }
+
+    session.imap(client)?.delete_message(mailbox, id)
 }
 
 /// `Native.composeMessage`: one draft to the RFC 5322 message an outbox
@@ -322,32 +493,28 @@ pub extern "system" fn Java_org_pimalaya_client_Native_composeMessage<'local>(
 /// copy in the account's sent mailbox. Returns `{"mailbox": ".."}` naming
 /// where the copy landed, `{"mailbox": null}` when the account named no
 /// sent mailbox, or `{"error": ".."}`.
+///
+/// The submission opens its own connection, SMTP being a second server;
+/// the copy is filed on the session, which is already open.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
-    url: JString<'local>,
+    handle: i64,
     submit_url: JString<'local>,
-    login: JString<'local>,
-    password: JString<'local>,
     source: JByteArray<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let url = read_string(env, &url);
         let submit_url = read_string(env, &submit_url);
-        let login = read_string(env, &login);
-        let password = read_string(env, &password);
         let raw = env.convert_byte_array(&source).unwrap_or_default();
-        let credentials = Credentials {
-            login: &login,
-            password: &password,
-        };
 
         let mut client = Client::new(env, &transport);
-        let json = match submit_message(&mut client, &url, &submit_url, &credentials, &raw) {
+        let json = match submit_message(&mut client, handle, &submit_url, &raw) {
             Ok(sent) => json!({ "mailbox": sent }).to_string(),
-            Err(err) => error_json(err),
+            Err(refused) => {
+                json!({ "error": refused.message, "permanent": refused.permanent }).to_string()
+            }
         };
 
         Ok(env.new_string(json)?.into())
@@ -367,32 +534,72 @@ fn compose_message(draft: &str) -> Result<Vec<u8>, BridgeError> {
     mail::compose(&draft)
 }
 
+/// One submission that did not happen, and whether it ever could.
+///
+/// The queue reads this: a message the server refused is parked with
+/// what it said, and everything else stays queued for the next drain.
+struct Refused {
+    message: String,
+    permanent: bool,
+}
+
+impl Refused {
+    /// A failure that says nothing about the message, so the message
+    /// keeps its place in the queue.
+    fn transient(err: impl ToString) -> Self {
+        Self {
+            message: err.to_string(),
+            permanent: false,
+        }
+    }
+}
+
 /// Submits one stored message over SMTP and files the copy the sender
 /// keeps.
 fn submit_message(
     client: &mut Client<'_, '_>,
-    base_url: &str,
+    handle: i64,
     submit_url: &str,
-    credentials: &Credentials,
     raw: &[u8],
-) -> Result<Option<String>, BridgeError> {
-    if Backend::of(base_url) == Backend::Jmap {
-        return Err("Sending from a JMAP account is not supported yet".into());
+) -> Result<Option<String>, Refused> {
+    let session = unsafe { session::borrow(handle) }.map_err(Refused::transient)?;
+    if session.is_jmap() {
+        return Err(Refused::transient(
+            "Sending from a JMAP account is not supported yet",
+        ));
     }
     if submit_url.is_empty() {
-        return Err("This account has no server to send through".into());
+        return Err(Refused::transient(
+            "This account has no server to send through",
+        ));
     }
 
-    let composed = mail::envelope(raw)?;
-
-    client::smtp::send(client, &parse_url(submit_url)?, credentials, &composed)?;
+    let composed = mail::envelope(raw).map_err(Refused::transient)?;
+    let submit = parse_url(submit_url).map_err(Refused::transient)?;
+    client::smtp::send(client, &submit, &session.credentials(), &composed).map_err(|err| {
+        Refused {
+            permanent: err.is_permanent(),
+            message: err.to_string(),
+        }
+    })?;
 
     // NOTE: after the submission and never instead of it. A copy filed
     // for a message that was not sent is a lie the sender reads as a
     // sent message; a message sent with no copy filed is only a missing
     // record, which the next sync cannot invent but nobody loses over.
-    let url = parse_url(base_url)?;
-    let mut session = client::imap::ImapSession::new(client, &url);
-    session.connect(credentials)?;
-    session.append_sent(composed.message)
+    //
+    // Which is also why a failure here is not the caller's to retry:
+    // the message has gone, and running the action again to file its
+    // copy would send it a second time.
+    let filed = session
+        .imap(client)
+        .and_then(|mut imap| imap.append_sent(composed.message));
+
+    match filed {
+        Ok(mailbox) => Ok(mailbox),
+        Err(err) => {
+            log::warn!("could not file the sent copy: {err}");
+            Ok(None)
+        }
+    }
 }

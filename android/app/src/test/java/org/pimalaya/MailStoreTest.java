@@ -250,7 +250,7 @@ public class MailStoreTest {
         mailboxes(ONE, "INBOX");
         envelope(ONE, "INBOX", "1", "Unread", DATE);
 
-        assertNull(store.source(store.collectionOf(ONE, "INBOX"), "1"));
+        assertNull(store.source(store.loadMerged(10).get(0)));
         assertEquals(PimdirItems.META, scalar("SELECT level FROM items WHERE link_id = ?", "1"));
     }
 
@@ -262,15 +262,109 @@ public class MailStoreTest {
         String collection = store.collectionOf(ONE, "INBOX");
         store.saveSource(collection, "1", SOURCE.getBytes(StandardCharsets.UTF_8));
 
-        byte[] stored = store.source(collection, "1");
+        byte[] stored = store.source(store.loadMerged(10).get(0));
         assertEquals(SOURCE, new String(stored, StandardCharsets.UTF_8));
         assertEquals(PimdirItems.FULL, scalar("SELECT level FROM items WHERE link_id = ?", "1"));
     }
 
     @Test
-    public void theOutboxSurvivesARosterReplaceAndTheTrashIsRemembered() {
+    public void aQueuedMessageSurvivesARosterReplaceAndTheTrashIsRemembered() {
         mailboxes(ONE, "INBOX");
         String outbox = store.outboxOf(ONE);
+
+        store.queueSubmission(
+                ONE,
+                "queued@example.org",
+                "Waiting",
+                DATE,
+                SOURCE.getBytes(StandardCharsets.UTF_8));
+
+        // A roster replace drops every mail collection the account no longer
+        // lists, and no server lists an outbox: taking its silence for a
+        // removal would lose a message nothing could hand back. The queue
+        // rows are the ones a replace never looks at.
+        store.replaceMailboxes(
+                ONE, List.of(new Mailbox("INBOX", ""), new Mailbox("Bin", Mailbox.TRASH)));
+
+        List<MailStore.Outgoing> waiting = store.outgoing(ONE);
+        assertEquals(1, waiting.size());
+        assertEquals(SOURCE, new String(waiting.get(0).source, StandardCharsets.UTF_8));
+
+        assertEquals("read back with no network to ask", "Bin", store.trashOf(ONE));
+
+        // And it reads as pending, which is the one state where the store
+        // holds a message no server has.
+        MailStore.StoredMessage row = store.loadMerged(10).get(0);
+        assertTrue(row.pending);
+        assertFalse(row.failed);
+        assertEquals("Waiting", row.subject);
+        assertEquals(outbox, row.collection);
+        assertEquals(SOURCE, new String(store.source(row), StandardCharsets.UTF_8));
+
+        store.acknowledge(waiting.get(0).id);
+        assertTrue(store.outgoing(ONE).isEmpty());
+        assertEquals("the body goes with it", 0, scalar("SELECT count(*) FROM objects"));
+    }
+
+    @Test
+    public void aParkedSubmissionLeavesTheDrainAndStaysVisible() {
+        mailboxes(ONE, "INBOX");
+        store.queueSubmission(
+                ONE,
+                "refused@example.org",
+                "Refused",
+                DATE,
+                SOURCE.getBytes(StandardCharsets.UTF_8));
+
+        long queued = store.outgoing(ONE).get(0).id;
+        store.parkOutgoing(queued, "550 no such recipient");
+
+        assertTrue("nothing offers it to the server again", store.outgoing(ONE).isEmpty());
+
+        // Still a message the sender wrote, so it is still shown, saying
+        // that it was refused rather than disappearing.
+        MailStore.StoredMessage row = store.loadMerged(10).get(0);
+        assertTrue(row.failed);
+        assertTrue(row.pending);
+        assertEquals(SOURCE, new String(store.source(row), StandardCharsets.UTF_8));
+    }
+
+    @Test
+    public void anActionOfAnotherKindIsLeftAlone() {
+        mailboxes(ONE, "INBOX");
+        store.queueSubmission(
+                ONE, "mine@example.org", "Mine", DATE, SOURCE.getBytes(StandardCharsets.UTF_8));
+        queueForeign(store.outboxOf(ONE));
+
+        // Skipped rather than parked or applied: an owner that does not
+        // recognise a kind leaves the row exactly as it found it and never
+        // blocks the ones behind it (STORAGE section 15.2).
+        assertEquals(1, store.outgoing(ONE).size());
+        assertEquals(
+                "the foreign row is untouched",
+                2,
+                scalar("SELECT count(*) FROM queue WHERE error IS NULL"));
+    }
+
+    /** Appends one action of a kind this app does not carry out. */
+    private void queueForeign(String collection) {
+        pimdir.getWritableDatabase()
+                .execSQL(
+                        "INSERT INTO queue(created_at, producer, collection, action, payload)"
+                                + " VALUES(?, ?, ?, ?, ?)",
+                        new Object[] {DATE, "someone.else", collection, "set-flags", "{}"});
+    }
+
+    @Test
+    public void anOutboxWrittenAsItemsMovesOntoTheQueue() {
+        mailboxes(ONE, "INBOX");
+        String outbox = store.outboxOf(ONE);
+
+        // The shape the version before this one wrote: an item in a mail
+        // collection of its own, which nothing drains any more and which
+        // the next roster replace would cascade away.
+        new PimdirCollections(pimdir, RuntimeEnvironment.getApplication())
+                .ensure(outbox, ONE, PimdirSummary.MAIL, "Outbox");
 
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
@@ -279,7 +373,7 @@ public class MailStoreTest {
                     db,
                     outbox,
                     new PimdirItems.Row(
-                            "queued@example.org",
+                            "stranded@example.org",
                             SOURCE,
                             PimdirSummary.mail(
                                     null, "Waiting", "", ONE, null, DATE, SOURCE.length(), false),
@@ -291,28 +385,19 @@ public class MailStoreTest {
             db.endTransaction();
         }
 
-        // A roster replace drops every mail collection the account no longer
-        // lists, and no server lists an outbox: taking its silence for a
-        // removal would lose a message nothing could hand back.
-        store.replaceMailboxes(
-                ONE, List.of(new Mailbox("INBOX", ""), new Mailbox("Bin", Mailbox.TRASH)));
-
         List<MailStore.Outgoing> waiting = store.outgoing(ONE);
         assertEquals(1, waiting.size());
-        assertEquals("queued@example.org", waiting.get(0).id);
         assertEquals(SOURCE, new String(waiting.get(0).source, StandardCharsets.UTF_8));
 
-        assertEquals("read back with no network to ask", "Bin", store.trashOf(ONE));
+        assertEquals("the item is gone", 0, scalar("SELECT count(*) FROM items"));
+        assertEquals("and it is on the queue", 1, store.loadMerged(10).size());
 
-        // And it reads as pending, which is the one state where the store
-        // holds a message no server has.
         MailStore.StoredMessage row = store.loadMerged(10).get(0);
         assertTrue(row.pending);
-        assertEquals(outbox, row.collection);
+        assertEquals("Waiting", row.subject);
 
-        store.dropOutgoing(ONE, "queued@example.org");
-        assertTrue(store.outgoing(ONE).isEmpty());
-        assertEquals("the body goes with it", 0, scalar("SELECT count(*) FROM objects"));
+        // Twice is the same as once: nothing is left to move.
+        assertEquals(1, store.outgoing(ONE).size());
     }
 
     @Test

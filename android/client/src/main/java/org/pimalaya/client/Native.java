@@ -220,22 +220,52 @@ final class Native {
     static native String pimdirMigrations();
 
     /**
-     * Connects to the account's IMAP server, lists its mailboxes and
-     * returns the newest {@code limit} messages of each. One call per
-     * account, not per mailbox: IMAP is a session, so the whole walk
-     * happens inside one login. Returns a JSON object of
-     * {@code {mailboxes, messages}}, each mailbox
-     * {@code {name, role}} and each message
-     * {@code {mailbox, id, subject, from, fromAddress, date, seen,
-     * answered, flagged, hasAttachment}}.
+     * The account's mailboxes and the RFC 6154 role of each. Returns a
+     * JSON array of {@code {name, role}} objects.
      *
      * <p>The role is {@code trash} where the server marks the mailbox with
-     * the RFC 6154 attribute of that name, and empty where it marks it
-     * another or none. It rides along because a delete has to decide
-     * between a move and a marker with no network to ask.
+     * the attribute of that name, and empty where it marks it another or
+     * none. It rides along because a delete has to decide between a move
+     * and a marker with no network to ask.
      */
-    static native String syncMail(
-            Transport transport, String url, String login, String password, int limit);
+    static native String listMailboxes(Transport transport, long session);
+
+    /**
+     * One mailbox's spine from the cursor the last pass stored. Returns
+     * {@code {items, vanished, complete, checkpoint}}, each item
+     * {@code {id, flags}} and no envelope.
+     *
+     * <p>An empty cursor is a full round over the newest {@code limit}
+     * messages. A cursor and a QRESYNC server is a delta: the server
+     * streams what moved and what went, and {@code complete} says which
+     * of the two happened, so a delta never retires what it did not
+     * mention.
+     */
+    static native String enumerateMailbox(
+            Transport transport, long session, String mailbox, String cursor, int limit);
+
+    /**
+     * The envelope spine of the named messages, and of no others.
+     * {@code ids} is a JSON array of strings. Returns a JSON array of
+     * {@code {mailbox, id, subject, from, fromAddress, date, seen,
+     * answered, flagged, hasAttachment}}.
+     */
+    static native String fetchEnvelopes(
+            Transport transport, long session, String mailbox, String ids);
+
+    /**
+     * Connects to the account's mail server and authenticates, answering
+     * {@code {handle}}, the bridge session the other mail verbs run on.
+     *
+     * <p>The handle is a pointer: one owner, one thread at a time, freed
+     * once with {@link #closeMailSession}. {@link MailSession} is that
+     * owner.
+     */
+    static native String openMailSession(
+            Transport transport, String url, String login, String password);
+
+    /** Frees the session a handle names; the sockets are the caller's. */
+    static native void closeMailSession(long session);
 
     /**
      * Reads one message whole, as the RFC 5322 bytes the server holds.
@@ -247,12 +277,7 @@ final class Native {
      * addresses the message across the whole account.
      */
     static native String fetchMessageSource(
-            Transport transport,
-            String url,
-            String login,
-            String password,
-            String mailbox,
-            String id);
+            Transport transport, long session, String mailbox, String id);
 
     /**
      * Resolves one message's MIME tree into what a reader draws. Returns
@@ -272,9 +297,7 @@ final class Native {
      */
     static native String setMessageFlag(
             Transport transport,
-            String url,
-            String login,
-            String password,
+            long session,
             String mailbox,
             String id,
             String flag,
@@ -298,19 +321,14 @@ final class Native {
      * keeps. Returns {@code {mailbox}} naming where the copy landed, or
      * a null mailbox when the account named no sent mailbox.
      *
-     * <p>Two endpoints: the base URL is where mail is read, which is
-     * where the copy is filed, and the submit URL is where the message
-     * is handed over. The envelope comes off the message's own address
+     * <p>Two endpoints: the session is where mail is read, which is where
+     * the copy is filed, and the submit URL is where the message is
+     * handed over on a connection of its own. The envelope comes off the message's own address
      * headers, the {@code Bcc} among them, and that header leaves the
      * bytes on the way out.
      */
     static native String submitMessage(
-            Transport transport,
-            String url,
-            String submitUrl,
-            String login,
-            String password,
-            byte[] source);
+            Transport transport, long session, String submitUrl, byte[] source);
 
     /**
      * Deletes one message into the account's trash: the mailbox the
@@ -320,12 +338,7 @@ final class Native {
      * marked deleted where it is instead.
      */
     static native String deleteMessage(
-            Transport transport,
-            String url,
-            String login,
-            String password,
-            String mailbox,
-            String id);
+            Transport transport, long session, String mailbox, String id);
 
     /**
      * Lists the account's calendars off its base URL, CalDAV or JMAP.
@@ -336,15 +349,39 @@ final class Native {
             Transport transport, String baseUrl, String login, String password);
 
     /**
-     * Lists a calendar collection's events, each carrying its iCalendar
-     * text. Returns a JSON array of {@code {id, etag, ical}}.
+     * Enumerates a calendar collection from the cursor the last pass
+     * stored, answering which events moved and no bodies. Returns
+     * {@code {changed, vanished, token, complete}}, each change
+     * {@code {id, etag}}.
+     *
+     * <p>An empty cursor is an initial round. A cursor the server
+     * rejects is re-run as one, and {@code complete} says so, so a
+     * rejected round is never read as an emptied calendar.
      *
      * <p>Takes the account's base URL beside the collection's: it is
      * what names the backend, and a JMAP calendar's URL is an id behind
      * the account marker rather than something addressable on its own.
      */
-    static native String listEvents(
-            Transport transport, String baseUrl, String url, String login, String password);
+    static native String syncEvents(
+            Transport transport,
+            String baseUrl,
+            String url,
+            String login,
+            String password,
+            String cursor);
+
+    /**
+     * The iCalendar text of the named events, in one round. {@code ids}
+     * is a JSON array of strings. Returns a JSON array of
+     * {@code {id, etag, ical}}.
+     */
+    static native String multigetEvents(
+            Transport transport,
+            String baseUrl,
+            String url,
+            String login,
+            String password,
+            String ids);
 
     /**
      * The occurrences one calendar object denotes inside a civil

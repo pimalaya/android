@@ -8,7 +8,10 @@ use url::Url;
 use crate::{
     account::{self, Backend},
     client::Client,
-    types::{Addressbook, BridgeError, Card, CardDelta, Credentials, PushChange, PushOutcome},
+    types::{
+        Addressbook, BridgeError, Card, CardDelta, Credentials, Event, EventDelta, EventRef,
+        PushChange, PushOutcome,
+    },
 };
 
 /// Backend dispatch: the protocol-agnostic card and addressbook API the
@@ -432,4 +435,132 @@ fn href_resource(href: &str) -> Option<String> {
         return None;
     }
     Some(name.to_string())
+}
+
+/// CalDAV calendar enumeration, the calendar twin of the card rounds.
+impl Client<'_, '_> {
+    /// One calendar's incremental round, re-run as a complete one when
+    /// the server rejects the cursor.
+    ///
+    /// The same shape as [`Client::sync_cards`], for the same reason: a
+    /// still-rejected initial round must error rather than read as an
+    /// empty collection, which would look like every event was deleted.
+    pub fn sync_events(
+        &mut self,
+        base_url: &str,
+        calendar_url: &str,
+        credentials: &Credentials,
+        cursor: Option<&str>,
+    ) -> Result<EventDelta, BridgeError> {
+        if let Some(mut delta) =
+            self.sync_events_round(base_url, calendar_url, credentials, cursor)?
+        {
+            delta.complete = cursor.is_none();
+            return Ok(delta);
+        }
+
+        match self.sync_events_round(base_url, calendar_url, credentials, None)? {
+            Some(mut delta) => {
+                delta.complete = true;
+                Ok(delta)
+            }
+            None => Err(format!("Initial sync round rejected for {calendar_url}").into()),
+        }
+    }
+
+    /// One round against the backend behind the base URL; [`None`] when
+    /// the server rejected the cursor.
+    ///
+    /// A JMAP calendar has no incremental read wired, so it answers a
+    /// complete round every time and carries no cursor: the draft's
+    /// `CalendarEvent/changes` is what would go here.
+    fn sync_events_round(
+        &mut self,
+        base_url: &str,
+        calendar_url: &str,
+        credentials: &Credentials,
+        cursor: Option<&str>,
+    ) -> Result<Option<EventDelta>, BridgeError> {
+        match Backend::of(base_url) {
+            Backend::Jmap => {
+                let session_url = account::jmap_session_url(base_url)?;
+                let calendar_id = account::jmap_collection_id(calendar_url);
+                let events = self.list_jmap_events(&session_url, credentials, calendar_id)?;
+
+                Ok(Some(EventDelta {
+                    changed: events
+                        .into_iter()
+                        .map(|event| EventRef {
+                            id: event.id,
+                            etag: event.etag,
+                        })
+                        .collect(),
+                    vanished: Vec::new(),
+                    token: None,
+                    complete: true,
+                }))
+            }
+            _ => {
+                let url = parse_url(calendar_url)?;
+                let delta = self.sync_caldav_events(&url, credentials, cursor)?;
+                Ok(delta.map(into_event_delta))
+            }
+        }
+    }
+
+    /// The bodies of the named events, on either backend.
+    ///
+    /// A JMAP calendar has no multiget either, so it re-lists and picks
+    /// what was asked for: one request rather than one per event, which
+    /// is the property that matters here.
+    pub fn multiget_events(
+        &mut self,
+        base_url: &str,
+        calendar_url: &str,
+        credentials: &Credentials,
+        ids: &[&str],
+    ) -> Result<Vec<Event>, BridgeError> {
+        match Backend::of(base_url) {
+            Backend::Jmap => {
+                let session_url = account::jmap_session_url(base_url)?;
+                let calendar_id = account::jmap_collection_id(calendar_url);
+                let events = self.list_jmap_events(&session_url, credentials, calendar_id)?;
+
+                Ok(events
+                    .into_iter()
+                    .filter(|event| ids.contains(&event.id.as_str()))
+                    .collect())
+            }
+            _ => {
+                let url = parse_url(calendar_url)?;
+                self.multiget_caldav_events(&url, credentials, ids)
+            }
+        }
+    }
+}
+
+/// One WebDAV sync round as the calendar delta it stands for.
+fn into_event_delta(delta: WebdavSyncDelta) -> EventDelta {
+    let changed = delta
+        .changed
+        .into_iter()
+        .filter_map(|change| {
+            Some(EventRef {
+                id: href_resource(&change.href)?,
+                etag: change.etag,
+            })
+        })
+        .collect();
+    let vanished = delta
+        .vanished
+        .iter()
+        .filter_map(|href| href_resource(href))
+        .collect();
+
+    EventDelta {
+        changed,
+        vanished,
+        token: delta.sync_token,
+        complete: false,
+    }
 }

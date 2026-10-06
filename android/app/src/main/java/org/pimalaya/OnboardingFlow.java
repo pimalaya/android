@@ -20,6 +20,7 @@ import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.AuthMethod;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.ServiceConfig;
+import org.pimalaya.client.Transport;
 
 /**
  * The connection wizard behind the auth panel: the email (or server)
@@ -240,8 +241,10 @@ final class OnboardingFlow {
                     String provider = null;
                     if (!emailLogin().isEmpty()) {
                         try {
-                            List<ServiceConfig> hits =
-                                    host.client.searchProvider(pendingEmail, null);
+                            List<ServiceConfig> hits;
+                            try (Transport transport = new Transport()) {
+                                hits = host.client.searchProvider(transport, pendingEmail, null);
+                            }
                             provider = hits.isEmpty() ? null : hits.get(0).source;
                         } catch (Exception error) {
                             Log.w("pimalaya", "provider probe failed", error);
@@ -289,6 +292,18 @@ final class OnboardingFlow {
 
     /** One offered way to connect one domain: a server and a way in. */
     private static final class SetupOption {
+        /**
+         * The discovered service this connects, or null when nothing
+         * discovered it: a provider sign-in, or manual entry.
+         *
+         * <p>Kept beside the label, which is the same thing in the
+         * reader's words. What reads it is the submission section, which
+         * a JMAP option has nothing to offer: RFC 8621 submits through
+         * the session it reads from, so an SMTP server under it would be
+         * a second account nobody asked for.
+         */
+        final String service;
+
         final String label;
         final String detail;
 
@@ -311,42 +326,26 @@ final class OnboardingFlow {
         final AuthMethod method;
         final String login;
 
-        /**
-         * Where mail is submitted, for an IMAP option whose discovery run
-         * also turned up an SMTP endpoint; null everywhere else.
-         *
-         * <p>Not an option of its own, because submission is not a way to
-         * connect a domain: nobody picks between reading mail and sending
-         * it, and an SMTP row on the picker would connect to something
-         * that answers no listing. It rides the option that reads.
-         */
-        final String submitUrl;
-
         SetupOption(
+                String service,
                 String label,
                 String detail,
                 String baseUrl,
                 String resource,
                 AuthMethod method,
                 String login) {
-            this(label, detail, baseUrl, resource, method, login, null);
-        }
-
-        SetupOption(
-                String label,
-                String detail,
-                String baseUrl,
-                String resource,
-                AuthMethod method,
-                String login,
-                String submitUrl) {
+            this.service = service;
             this.label = label;
             this.detail = detail;
             this.baseUrl = baseUrl;
             this.resource = resource;
             this.method = method;
             this.login = login;
-            this.submitUrl = submitUrl;
+        }
+
+        /** Whether this option reads mail through a session that also sends. */
+        boolean submitsItself() {
+            return "jmap".equals(service);
         }
 
         /** Whether this option signs in through a browser grant. */
@@ -354,6 +353,37 @@ final class OnboardingFlow {
             return method != null
                     && method.type != AuthMethod.Type.PASSWORD
                     && method.type != AuthMethod.Type.BEARER;
+        }
+    }
+
+    /**
+     * One offered way to send: a server, or nowhere.
+     *
+     * <p>Its own type rather than another {@link SetupOption}, because it
+     * is not a way to connect a domain. Nobody picks between reading mail
+     * and sending it: the two ride together, the reading one decides how
+     * the account signs in, and this one only says where the messages go.
+     */
+    private static final class SubmitOption {
+        final String label;
+
+        /** The host a row names, null for the row that connects nothing. */
+        final String detail;
+
+        /**
+         * Where mail is submitted, null until manual entry answers and
+         * for the row that says not to send at all.
+         */
+        String url;
+
+        /** Whether picking it asks for a server rather than proposing one. */
+        final boolean manual;
+
+        SubmitOption(String label, String detail, String url, boolean manual) {
+            this.label = label;
+            this.detail = detail;
+            this.url = url;
+            this.manual = manual;
         }
     }
 
@@ -367,6 +397,22 @@ final class OnboardingFlow {
 
         final List<SetupOption> options = new ArrayList<>();
         final List<android.widget.RadioButton> buttons = new ArrayList<>();
+
+        /**
+         * Where this domain sends, for mail and for nothing else.
+         *
+         * <p>Every other domain leaves these empty: contacts and calendars
+         * have nothing to submit, and a mail account reading over JMAP
+         * submits through the session it already has.
+         */
+        final List<SubmitOption> submitOptions = new ArrayList<>();
+
+        final List<android.widget.RadioButton> submitButtons = new ArrayList<>();
+
+        /** Everything drawn under the submission heading, hidden with it. */
+        final List<View> submitViews = new ArrayList<>();
+
+        SubmitOption submitSelected;
 
         /**
          * Whether this domain is being connected at all.
@@ -456,6 +502,29 @@ final class OnboardingFlow {
                 setup.selected = passwordOption(setup);
             } else {
                 setup.options.add(manualOption());
+            }
+            if (domain == PimDomain.MAIL) {
+                setup.submitOptions.addAll(submissionOptions());
+                // NOTE: the best endpoint found, switched on. Connecting mail
+                // is asking for mail, and an account that reads and cannot
+                // answer is not what anybody meant; saying so is what the
+                // row for none is there for.
+                setup.submitSelected =
+                        setup.submitOptions.isEmpty() ? null : setup.submitOptions.get(0);
+                if (!simpleSetup()) {
+                    setup.submitOptions.add(
+                            new SubmitOption(
+                                    host.getString(R.string.send_mail_none), null, null, false));
+                    setup.submitOptions.add(
+                            new SubmitOption(
+                                    host.getString(R.string.domain_manual), null, null, true));
+                    if (setup.submitSelected == null) {
+                        // The row for none, so the group opens on an answer
+                        // rather than on nothing: not sending is a choice,
+                        // and it is the only one this address offers.
+                        setup.submitSelected = setup.submitOptions.get(0);
+                    }
+                }
             }
             connectable |= connectable(setup);
             setups.put(domain, setup);
@@ -596,8 +665,87 @@ final class OnboardingFlow {
             }
         }
 
+        if (setup.domain == PimDomain.MAIL) {
+            addSubmission(section, setup);
+        }
+
         renderSection(setup);
         return section;
+    }
+
+    /**
+     * Draws where mail is sent from, in the words of the setup running.
+     *
+     * <p>The standard setup says <em>send mail</em> and nothing else: it
+     * declined the protocol question, so naming SMTP here would be asking
+     * it again under a different heading. The advanced setup asked it, so
+     * it says SMTP, lists what was discovered, and offers manual entry
+     * and a row for not sending at all.
+     *
+     * <p>An address that publishes nothing to send through leaves the
+     * standard switch off and out of reach, naming the setup that can
+     * connect it: the same shape a domain out of reach already uses, and
+     * the reason it is a shape rather than an error is that reading mail
+     * still works.
+     */
+    private void addSubmission(LinearLayout section, DomainSetup setup) {
+        if (simpleSetup()) {
+            android.widget.Switch sends = new android.widget.Switch(host);
+            sends.setText(R.string.send_mail);
+            sends.setTextSize(15);
+            sends.setPadding(host.ui.dp(8), host.ui.dp(10), host.ui.dp(8), host.ui.dp(4));
+            sends.setEnabled(!setup.submitOptions.isEmpty());
+            sends.setChecked(setup.submitSelected != null);
+            sends.setOnCheckedChangeListener(
+                    (view, checked) ->
+                            setup.submitSelected =
+                                    checked ? setup.submitOptions.get(0) : null);
+            setup.submitViews.add(sends);
+            section.addView(sends);
+
+            if (setup.submitOptions.isEmpty()) {
+                TextView reach = note(R.string.send_mail_advanced_only);
+                setup.submitViews.add(reach);
+                section.addView(reach);
+            }
+            return;
+        }
+
+        TextView heading = note(R.string.send_mail_advanced);
+        setup.submitViews.add(heading);
+        section.addView(heading);
+
+        for (SubmitOption option : setup.submitOptions) {
+            android.widget.RadioButton button = new android.widget.RadioButton(host);
+            button.setText(submitLabel(option));
+            button.setTextSize(15);
+            button.setPadding(host.ui.dp(8), host.ui.dp(10), host.ui.dp(8), host.ui.dp(10));
+            button.setOnClickListener(
+                    view -> {
+                        setup.submitSelected = option;
+                        if (option.manual) {
+                            // NOTE: asked for now rather than during the
+                            // sign-in sequence, where the mail server's own
+                            // manual entry is asked for. Nothing signs in to
+                            // a submission endpoint of its own: it uses the
+                            // credential mail used, so there is no step of
+                            // its own to ask inside.
+                            promptManualSubmission(setup, option);
+                        }
+                        renderSection(setup);
+                    });
+            setup.submitButtons.add(button);
+            setup.submitViews.add(button);
+            section.addView(button);
+        }
+    }
+
+    /** A submission row's label: the protocol, and the server it names. */
+    private String submitLabel(SubmitOption option) {
+        if (option.detail != null) {
+            return option.label + " (" + option.detail + ")";
+        }
+        return option.url == null ? option.label : option.label + " (" + hostOf(option.url) + ")";
     }
 
     /** A secondary line under a section's switch. */
@@ -619,6 +767,27 @@ final class OnboardingFlow {
             // to skip past on the way to the domains they do want.
             button.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
         }
+
+        for (int index = 0; index < setup.submitButtons.size(); index++) {
+            setup.submitButtons
+                    .get(index)
+                    .setChecked(setup.submitOptions.get(index) == setup.submitSelected);
+        }
+        for (View view : setup.submitViews) {
+            view.setVisibility(sends(setup) ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    /**
+     * Whether this section has a submission question to ask at all.
+     *
+     * <p>A switched-off domain has none, and neither has one reading over
+     * JMAP: RFC 8621 submits through the session it reads from, so an
+     * SMTP server offered under it would be a second account to sign in
+     * to for something the first one already does.
+     */
+    private static boolean sends(DomainSetup setup) {
+        return setup.enabled && (setup.selected == null || !setup.selected.submitsItself());
     }
 
     /**
@@ -682,17 +851,16 @@ final class OnboardingFlow {
             java.util.Collections.sort(
                     methods,
                     (left, right) -> Integer.compare(authRank(left.type), authRank(right.type)));
-            String submitUrl = "imap".equals(config.service) ? submissionUrl() : null;
             for (AuthMethod method : methods) {
                 options.add(
                         new SetupOption(
+                                config.service,
                                 protocolName(config.service),
                                 detail,
                                 baseUrl,
                                 resourceOf(config, method),
                                 method,
-                                login,
-                                submitUrl));
+                                login));
             }
         }
 
@@ -709,7 +877,7 @@ final class OnboardingFlow {
     /** The option that asks for a server instead of proposing one. */
     private SetupOption manualOption() {
         return new SetupOption(
-                host.getString(R.string.domain_manual), null, null, null, null, null);
+                null, host.getString(R.string.domain_manual), null, null, null, null, null);
     }
 
     /**
@@ -750,6 +918,7 @@ final class OnboardingFlow {
     private SetupOption providerOption(
             int label, String baseUrl, String authEndpoint, String tokenEndpoint, String scope) {
         return new SetupOption(
+                null,
                 host.getString(label),
                 hostOf(baseUrl),
                 baseUrl,
@@ -1319,8 +1488,8 @@ final class OnboardingFlow {
                 continue;
             }
             String submitUrl =
-                    setup.domain == PimDomain.MAIL && setup.selected != null
-                            ? setup.selected.submitUrl
+                    setup.domain == PimDomain.MAIL && sends(setup) && setup.submitSelected != null
+                            ? setup.submitSelected.url
                             : null;
             if (connectedAccount == null) {
                 connectedAccount = AccountEntry.empty(connectedEmail);
@@ -1344,7 +1513,10 @@ final class OnboardingFlow {
         host.io.execute(
                 () -> {
                     try {
-                        List<Addressbook> fetched = host.client.listAddressbooks(contacts);
+                        List<Addressbook> fetched;
+                        try (Transport transport = new Transport()) {
+                            fetched = host.client.listAddressbooks(transport, contacts);
+                        }
                         host.main.post(
                                 () -> {
                                     resetConfigContinue();
@@ -1576,15 +1748,19 @@ final class OnboardingFlow {
      * implicit would connect in the clear rather than fail.
      */
     /**
-     * Where this address submits mail, from the same discovery run that
-     * found where it reads it, or null when nothing was found.
+     * Everywhere this address submits mail, from the same discovery run
+     * that found where it reads it, best first.
      *
      * <p>Implicit TLS only, for the reason {@link #endpointUrl} gives:
      * this client has no STARTTLS step, and driving a {@code starttls}
      * endpoint as if it were implicit would hand a message over in the
-     * clear rather than fail.
+     * clear rather than fail. An endpoint skipped for that is logged and
+     * not offered, which is why an address can publish submission and
+     * still have nothing here.
      */
-    private String submissionUrl() {
+    private List<SubmitOption> submissionOptions() {
+        List<SubmitOption> options = new ArrayList<>();
+
         for (ServiceConfig config : searchedConfigs) {
             if (!"smtp".equals(config.service) || config.host == null) {
                 continue;
@@ -1596,9 +1772,61 @@ final class OnboardingFlow {
                                 + config.security);
                 continue;
             }
-            return "smtps://" + config.host + ":" + config.port;
+            options.add(
+                    new SubmitOption(
+                            host.getString(R.string.config_smtp),
+                            config.host + ":" + config.port,
+                            "smtps://" + config.host + ":" + config.port,
+                            false));
         }
-        return null;
+        return options;
+    }
+
+    /**
+     * Asks for the server this account sends through, and remembers it on
+     * the row that was picked.
+     *
+     * <p>A host and a port, as the mail server's own manual entry asks for
+     * one, and 465 when none was typed: implicit-TLS submission is what
+     * this client speaks and RFC 8314 section 3.3 is where that port
+     * comes from. Nothing is signed in to, the submission using the
+     * credential mail signed in with.
+     */
+    private void promptManualSubmission(DomainSetup setup, SubmitOption option) {
+        EditText field =
+                host.ui.field(R.string.manual_submit_server, hostOf(pendingEmail));
+
+        LinearLayout fields = new LinearLayout(host);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(host.ui.dp(24), host.ui.dp(8), host.ui.dp(24), 0);
+        fields.addView(field);
+
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.send_mail_advanced)
+                .setMessage(R.string.manual_submit_message)
+                .setView(fields)
+                .setPositiveButton(
+                        R.string.password_submit,
+                        (dialog, which) -> {
+                            String entered = field.getText().toString().trim();
+                            option.url = entered.isEmpty() ? null : submitUrl(entered);
+                            renderSection(setup);
+                        })
+                .setNegativeButton(
+                        android.R.string.cancel,
+                        (dialog, which) -> {
+                            option.url = null;
+                            renderSection(setup);
+                        })
+                .show();
+    }
+
+    /** What was typed, as the implicit-TLS endpoint a submission opens. */
+    private static String submitUrl(String entered) {
+        if (entered.contains("://")) {
+            return entered;
+        }
+        return entered.contains(":") ? "smtps://" + entered : "smtps://" + entered + ":465";
     }
 
     private static String endpointUrl(ServiceConfig config) {

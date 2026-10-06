@@ -26,6 +26,7 @@ mod graph;
 pub(crate) mod imap;
 mod jmap;
 pub(crate) mod smtp;
+mod sync_collection;
 
 use core::error::Error as StdError;
 

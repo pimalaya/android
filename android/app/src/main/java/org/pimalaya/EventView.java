@@ -366,15 +366,24 @@ final class EventView {
             // The occurrence is one instance of the rule above, and the
             // rule is what an edit here changes, so this says which
             // instance was opened without pretending it can be moved.
+            if (occurrence != null) {
+                rows.add(
+                        sections.value(
+                                moment(occurrence.start, occurrence.allDay),
+                                R.string.event_field_this_one));
+            }
+        }
+        // NOTE: both of the rows above describe the occurrence that was
+        // tapped, and an entry being composed was tapped from nowhere: it
+        // is not placed until it is saved, so there is no instance to name
+        // and nothing to count down to. The page is the same page, and
+        // these are the two rows it cannot fill.
+        if (occurrence != null) {
             rows.add(
                     sections.value(
-                            moment(occurrence.start, occurrence.allDay),
-                            R.string.event_field_this_one));
+                            CalendarList.countdownLabel(host, occurrence),
+                            R.string.event_field_countdown));
         }
-        rows.add(
-                sections.value(
-                        CalendarList.countdownLabel(host, occurrence),
-                        R.string.event_field_countdown));
 
         sections.section(
                 R.string.event_section_when,

@@ -130,7 +130,7 @@ pub struct Event {
 /// a row renders ([`Message::has_attachment`]). A merged mail list draws
 /// exactly these fields, and fetching bodies for every message of every
 /// mailbox to draw a list would be the wrong trade.
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
     /// The mailbox the message was listed from.
@@ -175,18 +175,6 @@ pub struct Mailbox {
     /// is read once per sync and stored, because a delete has to decide
     /// between a move and a marker with no network to ask.
     pub role: String,
-}
-
-/// One walk of an account's mail: the mailboxes it holds and the newest
-/// messages of each.
-///
-/// One authentication answers both, which is why they cross together:
-/// the roster alone would be a second connection for two attributes.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MailWalk {
-    pub mailboxes: Vec<Mailbox>,
-    pub messages: Vec<Message>,
 }
 
 /// One message read whole: the headers a reader sees and the one body
@@ -254,6 +242,35 @@ pub struct CardDelta {
     /// True when the round listed the complete member set (an initial
     /// round, or an expired cursor re-run as one).
     pub complete: bool,
+}
+
+/// One incremental round of a calendar collection, surfaced to Java.
+///
+/// The calendar twin of [`CardDelta`], and the same shape for the same
+/// reason: an enumerate answers which members moved, and the bodies are
+/// read afterwards for the ones the merge asks about.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventDelta {
+    /// Resource names created or updated since the cursor, with their
+    /// ETags; no body, which is the point.
+    pub changed: Vec<EventRef>,
+    /// Resource names removed since the cursor.
+    pub vanished: Vec<String>,
+    /// The next cursor, when the backend issued one.
+    pub token: Option<String>,
+    /// True when the round listed the complete member set (an initial
+    /// round, or an expired cursor re-run as one).
+    pub complete: bool,
+}
+
+/// One member of an enumerated calendar: what it is called and what it
+/// stands at.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventRef {
+    pub id: String,
+    pub etag: Option<String>,
 }
 
 /// One change of a batched push round, handed down by the Java driver.

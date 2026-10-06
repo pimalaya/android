@@ -3,6 +3,7 @@ package org.pimalaya;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -36,16 +37,18 @@ import java.util.Map;
  * <p>The items themselves are written by {@link MailEngine} and never here: a
  * mailbox is reconciled rather than replaced, which is what lets a staged
  * marker or a staged delete survive a refresh. What is left here is the roster,
- * the reads a list and a reader do, and the outbox, which is a collection of
- * this app's own that no server ever enumerates.
+ * the reads a list and a reader do, and the outbox, which is not a mailbox at
+ * all but this account's pending submissions on the store's action queue
+ * ({@link PimdirQueue}).
  */
 final class MailStore {
     /**
-     * The mailbox name the outbox is keyed under.
+     * The collection the outbox's queue rows are filed against.
      *
      * <p>A control character, which no server hands out and no user types, so
-     * the collection cannot collide with a mailbox the account really holds.
-     * What is shown beside it is the collection's name, which is a word.
+     * it cannot collide with a mailbox the account really holds. It holds no
+     * items: an action addresses a collection, and this is the one a submission
+     * addresses.
      */
     private static final String OUTBOX = "\u0001outbox";
 
@@ -55,37 +58,37 @@ final class MailStore {
     private final PimdirItems items;
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
+    private final PimdirQueue queue;
     private final Context context;
 
     MailStore(Context context, PimdirDb store) {
         this.items = new PimdirItems(store);
         this.collections = new PimdirCollections(store, context);
         this.accounts = new PimdirAccount(context);
+        this.queue = new PimdirQueue(store, accounts);
         this.context = context;
     }
 
     /**
      * Replaces an account's mailbox roster with what the walk just listed,
-     * keeping the outbox and remembering where the trash is.
+     * and remembers where the trash is.
      *
-     * <p>The outbox is kept explicitly, because a roster replace drops every
-     * collection of the kind the account no longer lists and the outbox is by
-     * definition one no server lists. Dropping it would take the messages
-     * waiting in it with it, which is the one thing in the whole store nothing
-     * could re-fetch.
+     * <p>Nothing has to be held back from the replace any more. A roster
+     * replace drops every collection of the kind the account no longer lists,
+     * and the outbox is a queue collection of no kind, so it is not one of
+     * them: the messages waiting in it are rows the replace never looks at.
      */
     void replaceMailboxes(String accountEmail, List<Mailbox> mailboxes) {
         String account = accounts.idOf(accountEmail);
 
+        // NOTE: before the replace, which is the moment an outbox written by
+        // the version before this one would be dropped: it was a mail
+        // collection, so a roster that does not list it takes it and the
+        // messages in it.
+        migrateOutbox(accountEmail);
+
         List<PimdirCollections.Stored> listed =
                 MailEngine.collectionsOf(accountEmail, account, mailboxes);
-        listed.add(
-                new PimdirCollections.Stored(
-                        outboxOf(accountEmail),
-                        accountEmail,
-                        context.getString(R.string.mail_outbox),
-                        null,
-                        null));
 
         collections.replace(accountEmail, PimdirSummary.MAIL, listed);
 
@@ -125,21 +128,21 @@ final class MailStore {
         return PimdirAccount.collectionId(accounts.idOf(accountEmail), OUTBOX);
     }
 
-    /** Whether a collection id names an outbox rather than a mailbox. */
-    static boolean isOutbox(String collection) {
-        return collection.endsWith(PimdirAccount.SEPARATOR + OUTBOX);
-    }
-
     /**
-     * Creates the outbox of an account that has never synced, so a message
-     * can be written before the first walk has listed anything.
+     * Stages one composed message for the next drain to hand over.
+     *
+     * <p>The sort key rather than the date it was written from: it is what
+     * a row is ordered and dated by everywhere else in this store, and
+     * deriving it once here keeps the listing from parsing anything.
      */
-    void ensureOutbox(String accountEmail) {
-        collections.ensure(
+    void queueSubmission(String accountEmail, String messageId, String subject, String sortKey,
+            byte[] source) {
+        queue.enqueue(
                 outboxOf(accountEmail),
                 accountEmail,
-                PimdirSummary.MAIL,
-                context.getString(R.string.mail_outbox));
+                PimdirQueue.SUBMIT,
+                PimdirQueue.submission(accountEmail, messageId, subject, sortKey),
+                source);
     }
 
     /** One stored envelope, with the account it came from. */
@@ -147,12 +150,13 @@ final class MailStore {
         final String accountEmail;
 
         /**
-         * The collection holding it, which every store read addresses it by.
+         * The collection it belongs to, which every store read addresses
+         * it by.
          *
-         * <p>Carried rather than derived from the mailbox name beside it: the
-         * outbox is a collection whose name is a word and whose id is not, so
-         * deriving one from the other is right for every mailbox and wrong for
-         * the one that matters most.
+         * <p>Carried rather than derived from the mailbox name beside it,
+         * which a message waiting to go out does not have: its collection
+         * is the one its queue row is filed against, and no mailbox name
+         * would lead back to it.
          */
         final String collection;
 
@@ -173,7 +177,36 @@ final class MailStore {
         final boolean hasAttachment;
 
         /**
-         * Whether the message is waiting in the outbox, which is what a row
+         * The queue row this message is, or 0 when it is a message the
+         * store synced rather than one waiting to go out.
+         *
+         * <p>A waiting message is not an item: it is an action on the
+         * store's queue carrying the bytes to hand over, so this is the
+         * only handle there is to it, and every read and discard of one
+         * addresses it by this rather than by a collection and a link id.
+         */
+        final long queued;
+
+        /**
+         * The body that row pins, or null when the message is an item.
+         *
+         * <p>Carried on the row because it is the only address a queued
+         * message's bytes have: there is no item to look them up from,
+         * and the read that wants them happens long after the listing.
+         */
+        final String objectHash;
+
+        /**
+         * Whether the server refused it, which parked its row.
+         *
+         * <p>Still shown, and still holding its message: a parked action
+         * is the one thing a drain leaves behind for somebody to look at,
+         * and hiding it would be losing the message quietly.
+         */
+        final boolean failed;
+
+        /**
+         * Whether the message is waiting to go out, which is what a row
          * says of itself rather than something a caller works out: it is the
          * one state where the store holds a message no server has.
          */
@@ -192,7 +225,9 @@ final class MailStore {
                 boolean answered,
                 boolean flagged,
                 boolean hasAttachment,
-                boolean pending) {
+                long queued,
+                String objectHash,
+                boolean failed) {
             this.accountEmail = accountEmail;
             this.collection = collection;
             this.mailbox = mailbox;
@@ -205,7 +240,10 @@ final class MailStore {
             this.answered = answered;
             this.flagged = flagged;
             this.hasAttachment = hasAttachment;
-            this.pending = pending;
+            this.queued = queued;
+            this.objectHash = objectHash;
+            this.failed = failed;
+            this.pending = queued != 0;
         }
 
         /** The sender as a row shows them: the name, else the address. */
@@ -214,8 +252,139 @@ final class MailStore {
         }
     }
 
-    /** Every account's messages, newest first: the merged list itself. */
+    /**
+     * Every account's messages, newest first: the merged list itself.
+     *
+     * <p>Two reads, because a message waiting to go out is not an item: the
+     * descending scan of the sort key answers for everything the store synced,
+     * and the queue answers for what has not left yet (STORAGE section 15.4,
+     * a reader overlaying the pending actions on what it shows). They go on
+     * top rather than in date order, which is where a sender looks for a
+     * message they have just written and where a refusal has to be seen.
+     */
     List<StoredMessage> loadMerged(int limit) {
+        List<StoredMessage> messages = new ArrayList<>(outgoing());
+        messages.addAll(synced(limit));
+        return messages;
+    }
+
+    /**
+     * Everything waiting on the queue, across every account, newest first.
+     *
+     * <p>Parked rows among them: a refused message is still a message the
+     * sender wrote, and the row it shows says so rather than disappearing.
+     */
+    private List<StoredMessage> outgoing() {
+        List<PimdirQueue.Action> actions = new ArrayList<>(queue.pending());
+        actions.addAll(queue.parked());
+
+        List<StoredMessage> messages = new ArrayList<>();
+        for (PimdirQueue.Action action : actions) {
+            if (PimdirQueue.SUBMIT.equals(action.kind)) {
+                messages.add(outgoing(action));
+            }
+        }
+        java.util.Collections.sort(messages, (left, right) -> Long.compare(right.queued, left.queued));
+        return messages;
+    }
+
+    /** One queued submission as a row, read off the payload it was written with. */
+    private static StoredMessage outgoing(PimdirQueue.Action action) {
+        String from = action.payload.optString("from");
+
+        return new StoredMessage(
+                from,
+                action.collection,
+                "",
+                action.payload.optString("messageId"),
+                action.payload.optString("subject"),
+                "",
+                from,
+                PimdirSummary.stampOf(action.payload.optString("sortKey")),
+                // NOTE: read, because the sender wrote it. The copy the
+                // submission files carries \\Seen for the same reason.
+                true,
+                false,
+                false,
+                false,
+                action.id,
+                action.objectHash,
+                !action.pending());
+    }
+
+    /**
+     * Moves an outbox written as items onto the queue, once.
+     *
+     * <p>The version before this one held outgoing messages as items in a
+     * mail collection of their own. Nothing syncs those rows and nothing
+     * drains them any more, and the first roster replace after the upgrade
+     * would delete the collection and cascade them away, so they are
+     * enqueued as the submissions they always were and the rows are
+     * dropped. A store with none of them pays one indexed read.
+     */
+    private void migrateOutbox(String accountEmail) {
+        String collection = outboxOf(accountEmail);
+
+        List<Stranded> stranded = new ArrayList<>();
+        try (Cursor cursor =
+                items.readable()
+                        .rawQuery(
+                                "SELECT i.link_id, i.sort_key, s.subject FROM items i"
+                                        + " LEFT JOIN mail_summary s ON s.collection = i.collection"
+                                        + " AND s.link_id = i.link_id"
+                                        + " WHERE i.collection = ? AND i.deleted = 0"
+                                        + " ORDER BY i.sort_key ASC",
+                                new String[] {collection})) {
+            while (cursor.moveToNext()) {
+                stranded.add(
+                        new Stranded(
+                                cursor.getString(0),
+                                cursor.getString(1),
+                                cursor.isNull(2) ? "" : cursor.getString(2)));
+            }
+        }
+        if (stranded.isEmpty()) {
+            return;
+        }
+
+        for (Stranded message : stranded) {
+            byte[] source = items.objectBytes(collection, message.linkId);
+            if (source == null) {
+                Log.w("pimalaya", "an outbox message had no body, dropped: " + message.linkId);
+                continue;
+            }
+            queueSubmission(
+                    accountEmail, message.linkId, message.subject, message.sortKey, source);
+        }
+
+        SQLiteDatabase db = items.writable();
+        db.beginTransaction();
+        try {
+            for (Stranded message : stranded) {
+                items.remove(db, collection, message.linkId);
+            }
+            items.collectGarbage(db);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /** One message the version before this one left in an outbox of items. */
+    private static final class Stranded {
+        final String linkId;
+        final String sortKey;
+        final String subject;
+
+        Stranded(String linkId, String sortKey, String subject) {
+            this.linkId = linkId;
+            this.sortKey = sortKey;
+            this.subject = subject;
+        }
+    }
+
+    /** Every synced message, newest first. */
+    private List<StoredMessage> synced(int limit) {
         Map<String, PimdirCollections.Stored> mailboxes = new LinkedHashMap<>();
         for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
             mailboxes.put(stored.id, stored);
@@ -260,7 +429,9 @@ final class MailStore {
                                 has(flags, MailEngine.ANSWERED),
                                 has(flags, MailEngine.FLAGGED),
                                 !cursor.isNull(7) && cursor.getInt(7) == 1,
-                                isOutbox(collection)));
+                                0,
+                                null,
+                                false));
             }
         }
         return messages;
@@ -298,10 +469,16 @@ final class MailStore {
      * holds its envelope and not the message.
      *
      * <p>Which is the ordinary state of a mailbox: a sync stores the spine,
-     * and a message gains its body the first time someone opens it.
+     * and a message gains its body the first time someone opens it. A
+     * message that has not gone out yet is the other way round: it is
+     * nothing <em>but</em> a body, the one its queue row carries, so that
+     * is where it is read from.
      */
-    byte[] source(String collection, String id) {
-        return items.objectBytes(collection, id);
+    byte[] source(StoredMessage message) {
+        if (message.pending) {
+            return queue.body(message.objectHash);
+        }
+        return items.objectBytes(message.collection, message.id);
     }
 
     /** Files the message a reader just fetched, against its envelope. */
@@ -311,59 +488,65 @@ final class MailStore {
 
     /** One message waiting to be sent: what the drain hands over. */
     static final class Outgoing {
-        final String id;
+        /** The queue row, which is what acknowledging it addresses. */
+        final long id;
+
         final byte[] source;
 
-        Outgoing(String id, byte[] source) {
+        Outgoing(long id, byte[] source) {
             this.id = id;
             this.source = source;
         }
     }
 
-    /** The messages waiting in one account's outbox, oldest first. */
+    /**
+     * The messages waiting in one account's outbox, oldest first.
+     *
+     * <p>Append order, which is the order the queue owes a drain: the
+     * sender wrote them in it, and a server may well hold two messages of
+     * one conversation apart by nothing else.
+     */
     List<Outgoing> outgoing(String accountEmail) {
         String collection = outboxOf(accountEmail);
+        migrateOutbox(accountEmail);
 
-        List<String> ids = new ArrayList<>();
-        try (Cursor cursor =
-                items.readable()
-                        .rawQuery(
-                                "SELECT link_id FROM items WHERE collection = ?"
-                                        + " AND deleted = 0 AND retained_at IS NULL"
-                                        + " ORDER BY sort_key ASC",
-                                new String[] {collection})) {
-            while (cursor.moveToNext()) {
-                ids.add(cursor.getString(0));
+        List<Outgoing> waiting = new ArrayList<>();
+        for (PimdirQueue.Action action : queue.pending(collection)) {
+            if (!PimdirQueue.SUBMIT.equals(action.kind)) {
+                // NOTE: skipped, not parked, and not the end of the drain
+                // either: an action of a kind this app does not carry out
+                // is left exactly as it is for whatever does (STORAGE
+                // section 15.2).
+                continue;
             }
-        }
-
-        List<Outgoing> waiting = new ArrayList<>(ids.size());
-        for (String id : ids) {
-            byte[] source = items.objectBytes(collection, id);
+            byte[] source = queue.body(action.objectHash);
             if (source != null) {
-                waiting.add(new Outgoing(id, source));
+                waiting.add(new Outgoing(action.id, source));
             }
         }
         return waiting;
     }
 
     /**
-     * Drops one outgoing message once it has been handed over.
+     * Acknowledges one submission, which is what finishes it.
      *
-     * <p>Outright rather than as a tombstone: the outbox has no remote, so
-     * there is nobody a removal would ever be pushed to, and a tombstone
-     * would sit there being nothing forever.
+     * <p>Cancelling rather than applying: what the action asked for
+     * happened at a server and not in the store, so there is nothing here
+     * to apply and the row is removed by the process that carried it out
+     * (STORAGE section 15.5). It releases the body's pin with it.
      */
-    void dropOutgoing(String accountEmail, String id) {
-        SQLiteDatabase db = items.writable();
-        db.beginTransaction();
-        try {
-            items.remove(db, outboxOf(accountEmail), id);
-            items.collectGarbage(db);
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
-        }
+    void acknowledge(long queued) {
+        queue.acknowledge(queued);
+    }
+
+    /** Records why a submission will not be tried again. */
+    void parkOutgoing(long queued, String reason) {
+        queue.park(queued, reason);
+    }
+
+    /** Counts one failed attempt, leaving the message where it is. */
+    void retryOutgoing(long queued) {
+        queue.bumpAttempts(queued);
     }
 
     /** The distinct mailbox names seen, for the filter's collection axis. */

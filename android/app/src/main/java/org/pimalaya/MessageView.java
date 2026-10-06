@@ -19,6 +19,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
 
@@ -149,19 +150,27 @@ final class MessageView {
                     MessageBody loaded = null;
                     Exception failure = null;
                     try {
-                        byte[] source = host.mail.source(message.collection, message.id);
+                        byte[] source = host.mail.source(message);
+                        if (source == null && message.pending) {
+                            // NOTE: never fetched. A message waiting to go out
+                            // is nothing but the body its queue row carries, so
+                            // there is no server that has it and no mailbox to
+                            // ask: a missing body here is a lost message, not a
+                            // message yet to be read.
+                            throw new IllegalStateException(
+                                    host.getString(R.string.message_failed));
+                        }
                         if (source == null) {
-                            source =
-                                    host.runner
-                                            .session(account, PimDomain.MAIL)
-                                            .call(
-                                                    server ->
-                                                            host.client.fetchMessageSource(
-                                                                    server.baseUrl,
-                                                                    server.login,
-                                                                    server.password,
-                                                                    message.mailbox,
-                                                                    message.id));
+                            // NOTE: a connection of its own, opened and closed
+                            // around this one read. A reader opening a message
+                            // is not a pass, and holding one open for the time
+                            // someone spends reading would be holding it for
+                            // no work at all.
+                            try (MailSession session = host.openMail(account)) {
+                                source =
+                                        host.client.fetchMessageSource(
+                                                session, message.mailbox, message.id);
+                            }
                             host.mail.saveSource(message.collection, message.id, source);
                         }
                         loaded = host.client.parseMessage(source);
@@ -321,8 +330,9 @@ final class MessageView {
                     try {
                         if (message.pending) {
                             // Never sent, so there is nothing to move and
-                            // nowhere to tell: discarding it is the delete.
-                            host.mail.dropOutgoing(message.accountEmail, message.id);
+                            // nowhere to tell: withdrawing the action is
+                            // the delete, and it releases the body with it.
+                            host.mail.acknowledge(message.queued);
                         } else if (moves) {
                             host.mailEngine(message.accountEmail)
                                     .mutateRemove(message.collection, message.id);

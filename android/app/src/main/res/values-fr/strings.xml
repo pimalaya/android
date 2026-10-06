@@ -22,6 +22,9 @@
     <string name="domain_manual">Saisir les paramètres manuellement</string>
     <string name="domain_connected">Déjà connecté</string>
     <string name="domain_advanced_only">Nécessite la configuration avancée</string>
+    <string name="send_mail">Envoyer des e-mails</string>
+    <string name="send_mail_none">Ne pas envoyer depuis ce compte</string>
+    <string name="send_mail_advanced_only">Rien n\'a été trouvé pour envoyer ; la configuration avancée permet d\'en saisir un</string>
     <string name="domain_mail">E-mails</string>
     <string name="domain_contacts">Contacts</string>
     <string name="domain_calendar">Agenda</string>
@@ -36,6 +39,8 @@
     <string name="manual_message">Rien n\'a été découvert pour %1$s. Saisissez le serveur vous-même et Pimalaya continuera normalement.</string>
     <string name="manual_mail_server">Serveur de messagerie (hôte ou hôte:port)</string>
     <string name="manual_dav_url">URL du serveur</string>
+    <string name="manual_submit_server">Serveur d\'envoi (hôte ou hôte:port)</string>
+    <string name="manual_submit_message">Le serveur par lequel ce compte envoie. TLS implicite, port 465 sauf indication contraire.</string>
 
     <string name="setup_choice_title">Configuration du compte</string>
     <string name="setup_choice_message">Pimalaya peut tout configurer avec votre mot de passe, ou vous laisser choisir les serveurs, la connexion et ce qui est synchronisé.</string>
@@ -90,6 +95,8 @@
     <string name="local_book">Contacts locaux</string>
     <string name="delete_account">Supprimer le compte</string>
     <string name="account_enable">Activer ce compte</string>
+    <string name="account_send">Envoyer les e-mails via %1$s</string>
+    <string name="account_send_none">aucun serveur</string>
     <string name="account_advanced">Activer les paramètres avancés par carnet d\'adresses</string>
     <string name="book_enable">Activer ce carnet d\'adresses</string>
     <string name="book_remote_sync">Synchroniser à distance</string>
@@ -331,6 +338,8 @@
     <string name="message_deleted">Déplacé vers %s</string>
     <string name="message_deleted_in_place">Marqué supprimé ; il reste où il est</string>
     <string name="message_write_failed">Impossible d\'enregistrer la modification</string>
+    <string name="message_pending">En attente d\'envoi</string>
+    <string name="message_send_failed">Refusé par le serveur</string>
 
     <!-- Le compositeur. -->
     <string name="compose_from_title">Envoyer depuis</string>

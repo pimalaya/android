@@ -49,8 +49,8 @@ use crate::{
     },
     jmap,
     types::{
-        Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, MailWalk, Mailbox,
-        Message, PushChange, PushOutcome,
+        Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, Mailbox, Message,
+        PushChange, PushOutcome,
     },
 };
 
@@ -512,32 +512,41 @@ impl<'a, 'local> Client<'a, 'local> {
     /// collection. An unreadable mailbox is skipped rather than failing
     /// the account, exactly as a mailbox the IMAP session cannot
     /// EXAMINE is.
-    pub fn sync_jmap_account(
+    pub fn list_jmap_mailbox_roster(
         &mut self,
         session_url: &Url,
         credentials: &Credentials,
-        limit: u32,
-    ) -> Result<MailWalk, BridgeError> {
+    ) -> Result<Vec<(String, Mailbox)>, BridgeError> {
         let auth = jmap_auth(credentials);
         let session = self.jmap_session(session_url, &auth)?;
         let api_url = session.api_url.clone();
 
-        let listed = self.list_jmap_mailboxes(&session, &auth, &api_url)?;
+        Ok(self
+            .list_jmap_mailboxes(&session, &auth, &api_url)?
+            .into_iter()
+            .map(|(id, path, role)| (id, Mailbox { name: path, role }))
+            .collect())
+    }
 
-        let mut mailboxes = Vec::with_capacity(listed.len());
-        let mut messages = Vec::new();
-        for (id, path, role) in listed {
-            match self.list_jmap_messages(&session, &auth, &api_url, &id, &path, limit) {
-                Ok(found) => messages.extend(found),
-                Err(err) => log::warn!("skip mailbox {path}: {err}"),
-            }
-            mailboxes.push(Mailbox { name: path, role });
-        }
+    /// One mailbox's newest `limit` messages, whole.
+    ///
+    /// Whole because RFC 8621's `Email/changes` is not wired: this is
+    /// where an incremental round would go, and until it does the
+    /// caller keeps what comes back so the fetch beside it costs
+    /// nothing.
+    pub fn query_jmap_mailbox(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        mailbox_id: &str,
+        mailbox_path: &str,
+        limit: u32,
+    ) -> Result<Vec<Message>, BridgeError> {
+        let auth = jmap_auth(credentials);
+        let session = self.jmap_session(session_url, &auth)?;
+        let api_url = session.api_url.clone();
 
-        Ok(MailWalk {
-            mailboxes,
-            messages,
-        })
+        self.list_jmap_messages(&session, &auth, &api_url, mailbox_id, mailbox_path, limit)
     }
 
     /// The account's mailboxes as `(id, path, role)` triples, the path
@@ -867,6 +876,18 @@ impl<'a, 'local> Client<'a, 'local> {
     /// Fetches the JMAP session (RFC 8620 §2) from the session URL
     /// (a bare origin triggers /.well-known/jmap discovery), rebuilding
     /// the coroutine whenever the server answers 3xx.
+    /// Fetches the session resource and discards it, so a credential that
+    /// cannot sign in fails where the connection is opened rather than on
+    /// whichever verb happens to run first.
+    pub fn jmap_session_check(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+    ) -> Result<(), BridgeError> {
+        let auth = jmap_auth(credentials);
+        self.jmap_session(session_url, &auth).map(|_| ())
+    }
+
     fn jmap_session(
         &mut self,
         session_url: &Url,

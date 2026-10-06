@@ -107,17 +107,13 @@ final class MailList {
             // where "8 Aug 2026" leaves the reader to work it out. The
             // exact date is one tap away, in the message's own header.
             date.setText(Dates.day(host, message.stamp));
-            // A message waiting in the outbox says so where a message that
-            // has been somewhere says which mailbox: naming the outbox
-            // would answer where it is, and what the reader is asking is
-            // whether it has gone.
+            // A message waiting to go out says so where a message that has
+            // been somewhere says which mailbox: naming the outbox would
+            // answer where it is, and what the reader is asking is whether
+            // it has gone. One the server refused says that instead, which
+            // is the same question answered for good.
             ((TextView) view.findViewById(R.id.message_origin))
-                    .setText(
-                            (message.pending
-                                            ? host.getString(R.string.message_pending)
-                                            : message.mailbox)
-                                    + " · "
-                                    + message.accountEmail);
+                    .setText(state(message) + " · " + message.accountEmail);
 
             // The disc stands for the sender rather than the message, so
             // it is keyed by the address alone: a sender who changes how
@@ -139,6 +135,14 @@ final class MailList {
 
             return view;
         }
+    }
+
+    /** What a row says of where its message stands. */
+    private String state(MailStore.StoredMessage message) {
+        if (message.failed) {
+            return host.getString(R.string.message_send_failed);
+        }
+        return message.pending ? host.getString(R.string.message_pending) : message.mailbox;
     }
 
     /** Shows the flags the message carries, and hides the strip with none. */

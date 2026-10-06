@@ -43,7 +43,7 @@ public class OfflineEngineServeTest {
 
         // No account (storage yields only) and no context (no phone
         // spoke): the shape the mutate driver runs with.
-        engine = new OfflineEngine(store, pimdir, new PimalayaClient(), null, null);
+        engine = new OfflineEngine(store, pimdir, new PimalayaClient(), null, null, null);
     }
 
     @Test

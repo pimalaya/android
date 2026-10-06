@@ -34,14 +34,9 @@ public class PimalayaClient {
      * given DNS resolver (null for the default DNS-over-HTTPS one).
      * Throws when none is found.
      */
-    public String discover(String email, String resolver) {
-        Transport transport = new Transport();
-        try {
-            JSONObject reply = object(Native.discover(transport, email, resolver));
-            return string(reply, "url");
-        } finally {
-            transport.close();
-        }
+    public String discover(Transport transport, String email, String resolver) {
+        JSONObject reply = object(Native.discover(transport, email, resolver));
+        return string(reply, "url");
     }
 
     /**
@@ -54,13 +49,8 @@ public class PimalayaClient {
      * naming the provider), empty when no rule matched. Resolver as
      * in {@link #discover}.
      */
-    public List<ServiceConfig> searchProvider(String email, String resolver) {
-        Transport transport = new Transport();
-        try {
-            return configs(Native.searchProvider(transport, email, resolver));
-        } finally {
-            transport.close();
-        }
+    public List<ServiceConfig> searchProvider(Transport transport, String email, String resolver) {
+        return configs(Native.searchProvider(transport, email, resolver));
     }
 
     /**
@@ -188,27 +178,21 @@ public class PimalayaClient {
      * issued one (null for none). The code-exchange side lives on
      * {@link OauthSession}.
      */
-    public OauthTokens oauthRefresh(
-            String tokenEndpoint,
+    public OauthTokens oauthRefresh(Transport transport, String tokenEndpoint,
             String clientId,
             String clientSecret,
             String refreshToken,
             String scope) {
-        Transport transport = new Transport();
-        try {
-            JSONObject reply =
-                    object(
-                            Native.oauthRefreshAccessToken(
-                                    transport,
-                                    tokenEndpoint,
-                                    clientId,
-                                    clientSecret == null ? "" : clientSecret,
-                                    refreshToken,
-                                    scope == null ? "" : scope));
-            return OauthTokens.from(reply);
-        } finally {
-            transport.close();
-        }
+        JSONObject reply =
+                object(
+                        Native.oauthRefreshAccessToken(
+                                transport,
+                                tokenEndpoint,
+                                clientId,
+                                clientSecret == null ? "" : clientSecret,
+                                refreshToken,
+                                scope == null ? "" : scope));
+        return OauthTokens.from(reply);
     }
 
     /**
@@ -216,13 +200,8 @@ public class PimalayaClient {
      * issuer, so onboarding can drive the code grant and tell whether
      * the server lets a public client register itself (RFC 7591).
      */
-    public ServerMetadata oauthServerMetadata(String issuer) {
-        Transport transport = new Transport();
-        try {
-            return new ServerMetadata(object(Native.oauthServerMetadata(transport, issuer)));
-        } finally {
-            transport.close();
-        }
+    public ServerMetadata oauthServerMetadata(Transport transport, String issuer) {
+        return new ServerMetadata(object(Native.oauthServerMetadata(transport, issuer)));
     }
 
     /**
@@ -232,22 +211,16 @@ public class PimalayaClient {
      * secret rides in {@link OauthTokens}-style JSON but a public
      * client gets none.
      */
-    public String oauthRegisterClient(
-            String registrationEndpoint, String redirectUri, String clientName, String scope) {
-        Transport transport = new Transport();
-        try {
-            JSONObject reply =
-                    object(
-                            Native.oauthRegisterClient(
-                                    transport,
-                                    registrationEndpoint,
-                                    redirectUri,
-                                    clientName == null ? "" : clientName,
-                                    scope == null ? "" : scope));
-            return string(reply, "client_id");
-        } finally {
-            transport.close();
-        }
+    public String oauthRegisterClient(Transport transport, String registrationEndpoint, String redirectUri, String clientName, String scope) {
+        JSONObject reply =
+                object(
+                        Native.oauthRegisterClient(
+                                transport,
+                                registrationEndpoint,
+                                redirectUri,
+                                clientName == null ? "" : clientName,
+                                scope == null ? "" : scope));
+        return string(reply, "client_id");
     }
 
     /**
@@ -334,71 +307,122 @@ public class PimalayaClient {
      * the Graph contact folders (default Contacts folder first), the
      * JMAP AddressBooks, or the Google contact groups.
      */
-    public List<Addressbook> listAddressbooks(Account account) {
-        Transport transport = new Transport();
-        try {
-            JSONArray reply =
-                    array(
-                            Native.listAddressbooks(
-                                    transport, account.baseUrl, account.login, account.password));
+    public List<Addressbook> listAddressbooks(Transport transport, Account account) {
+        JSONArray reply =
+                array(
+                        Native.listAddressbooks(
+                                transport, account.baseUrl, account.login, account.password));
 
-            List<Addressbook> books = new ArrayList<>(reply.length());
-            for (int index = 0; index < reply.length(); index++) {
-                JSONObject book = object(reply, index);
-                books.add(
-                        new Addressbook(
-                                string(book, "id"),
-                                string(book, "name"),
-                                string(book, "url"),
-                                optString(book, "description"),
-                                optString(book, "color")));
-            }
-            return books;
-        } finally {
-            transport.close();
+        List<Addressbook> books = new ArrayList<>(reply.length());
+        for (int index = 0; index < reply.length(); index++) {
+            JSONObject book = object(reply, index);
+            books.add(
+                    new Addressbook(
+                            string(book, "id"),
+                            string(book, "name"),
+                            string(book, "url"),
+                            optString(book, "description"),
+                            optString(book, "color")));
         }
+        return books;
     }
 
     /**
-     * Walks an IMAP account: connect, list the mailboxes with the roles
-     * their RFC 6154 attributes mark, take the newest {@code limit}
-     * messages of each. One login for the whole account.
+     * The account's mailboxes with the roles their RFC 6154 attributes
+     * mark, in one round.
      */
-    public MailWalk syncMail(String url, String login, String password, int limit) {
-        Transport transport = new Transport();
-        try {
-            JSONObject reply = object(Native.syncMail(transport, url, login, password, limit));
+    public List<Mailbox> listMailboxes(MailSession session) {
+        JSONArray reply =
+                array(on(session, open -> Native.listMailboxes(open.transport(), open.handle())));
 
-            JSONArray listed = reply.optJSONArray("mailboxes");
-            List<Mailbox> mailboxes = new ArrayList<>(listed == null ? 0 : listed.length());
-            for (int index = 0; listed != null && index < listed.length(); index++) {
-                JSONObject mailbox = object(listed, index);
-                mailboxes.add(
-                        new Mailbox(string(mailbox, "name"), mailbox.optString("role")));
-            }
-
-            JSONArray listedMessages = reply.optJSONArray("messages");
-            List<Message> messages =
-                    new ArrayList<>(listedMessages == null ? 0 : listedMessages.length());
-            for (int index = 0; listedMessages != null && index < listedMessages.length(); index++) {
-                JSONObject message = object(listedMessages, index);
-                messages.add(
-                        new Message(
-                                string(message, "mailbox"),
-                                string(message, "id"),
-                                string(message, "subject"),
-                                string(message, "from"),
-                                string(message, "fromAddress"),
-                                string(message, "date"),
-                                message.optBoolean("seen"),
-                                message.optBoolean("answered"),
-                                message.optBoolean("flagged"),
-                                message.optBoolean("hasAttachment")));
-            }
-            return new MailWalk(mailboxes, messages);
-        } finally {
-            transport.close();
+        List<Mailbox> mailboxes = new ArrayList<>(reply.length());
+        for (int index = 0; index < reply.length(); index++) {
+            JSONObject mailbox = object(reply, index);
+            mailboxes.add(new Mailbox(string(mailbox, "name"), mailbox.optString("role")));
         }
+        return mailboxes;
+    }
+
+    /**
+     * One mailbox's spine from the cursor the last pass stored: which
+     * messages moved and which went, and no envelopes.
+     *
+     * <p>An empty cursor is a full round over the newest {@code limit}
+     * messages, which is what a first pass and a server without QRESYNC
+     * both get; with one, the server streams the delta and the round says
+     * so, so nothing it did not mention is retired.
+     */
+    public MailRound enumerateMailbox(
+            MailSession session, String mailbox, String cursor, int limit) {
+        JSONObject reply =
+                object(
+                        on(
+                                session,
+                                open ->
+                                        Native.enumerateMailbox(
+                                                open.transport(),
+                                                open.handle(),
+                                                mailbox,
+                                                cursor == null ? "" : cursor,
+                                                limit)));
+
+        JSONArray listed = reply.optJSONArray("items");
+        List<MailRef> items = new ArrayList<>(listed == null ? 0 : listed.length());
+        for (int index = 0; listed != null && index < listed.length(); index++) {
+            JSONObject item = object(listed, index);
+            items.add(new MailRef(string(item, "id"), strings(item.optJSONArray("flags"))));
+        }
+
+        return new MailRound(
+                items,
+                strings(reply.optJSONArray("vanished")),
+                reply.optBoolean("complete"),
+                reply.optString("checkpoint"));
+    }
+
+    /** The envelope spine of the named messages, and of no others. */
+    public List<Message> fetchEnvelopes(MailSession session, String mailbox, List<String> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        String named = new JSONArray(ids).toString();
+        JSONArray reply =
+                array(
+                        on(
+                                session,
+                                open ->
+                                        Native.fetchEnvelopes(
+                                                open.transport(),
+                                                open.handle(),
+                                                mailbox,
+                                                named)));
+
+        List<Message> messages = new ArrayList<>(reply.length());
+        for (int index = 0; index < reply.length(); index++) {
+            JSONObject message = object(reply, index);
+            messages.add(
+                    new Message(
+                            string(message, "mailbox"),
+                            string(message, "id"),
+                            string(message, "subject"),
+                            string(message, "from"),
+                            string(message, "fromAddress"),
+                            string(message, "date"),
+                            message.optBoolean("seen"),
+                            message.optBoolean("answered"),
+                            message.optBoolean("flagged"),
+                            message.optBoolean("hasAttachment")));
+        }
+        return messages;
+    }
+
+    /** The strings of a JSON array, empty when there is none. */
+    private static List<String> strings(JSONArray values) {
+        List<String> strings = new ArrayList<>(values == null ? 0 : values.length());
+        for (int index = 0; values != null && index < values.length(); index++) {
+            strings.add(values.optString(index));
+        }
+        return strings;
     }
 
     /**
@@ -411,18 +435,15 @@ public class PimalayaClient {
      * The caller stores what it gets and renders it through
      * {@link #parseMessage}, so a second open costs nothing.
      */
-    public byte[] fetchMessageSource(
-            String url, String login, String password, String mailbox, String id) {
-        Transport transport = new Transport();
-        try {
-            JSONObject reply =
-                    object(
-                            Native.fetchMessageSource(
-                                    transport, url, login, password, mailbox, id));
-            return Base64.getDecoder().decode(reply.optString("source"));
-        } finally {
-            transport.close();
-        }
+    public byte[] fetchMessageSource(MailSession session, String mailbox, String id) {
+        JSONObject reply =
+                object(
+                        on(
+                                session,
+                                open ->
+                                        Native.fetchMessageSource(
+                                                open.transport(), open.handle(), mailbox, id)));
+        return Base64.getDecoder().decode(reply.optString("source"));
     }
 
     /**
@@ -467,22 +488,18 @@ public class PimalayaClient {
      * whichever backend answers.
      */
     public void setMessageFlag(
-            Account account, String mailbox, String id, String flag, boolean add) {
-        Transport transport = new Transport();
-        try {
-            object(
-                    Native.setMessageFlag(
-                            transport,
-                            account.baseUrl,
-                            account.login,
-                            account.password,
-                            mailbox,
-                            id,
-                            flag,
-                            add));
-        } finally {
-            transport.close();
-        }
+            MailSession session, String mailbox, String id, String flag, boolean add) {
+        object(
+                on(
+                        session,
+                        open ->
+                                Native.setMessageFlag(
+                                        open.transport(),
+                                        open.handle(),
+                                        mailbox,
+                                        id,
+                                        flag,
+                                        add)));
     }
 
     /**
@@ -508,23 +525,33 @@ public class PimalayaClient {
      * Hands one stored message over, then files the copy the sender
      * keeps, answering the mailbox it landed in or null when the account
      * named no sent mailbox.
+     *
+     * @throws SubmissionRefused when the server refused the message for
+     *     good, which is what parks it rather than queueing it again.
      */
-    public String submitMessage(Account account, byte[] source) {
-        Transport transport = new Transport();
-        try {
-            JSONObject reply =
-                    object(
-                            Native.submitMessage(
-                                    transport,
-                                    account.baseUrl,
-                                    account.submitUrl == null ? "" : account.submitUrl,
-                                    account.login,
-                                    account.password,
-                                    source));
-            return optString(reply, "mailbox");
-        } finally {
-            transport.close();
+    public String submitMessage(MailSession session, byte[] source) {
+        String submitUrl = session.account().submitUrl;
+        // NOTE: run once, never retried, unlike every other verb on a
+        // session. Sending is the one thing here that is not idempotent:
+        // a submission that was accepted and then failed to file its copy
+        // looks exactly like one that never went, and running it again
+        // would send the message twice. A failure leaves it queued
+        // instead, which is what the outbox is for.
+        String json =
+                Native.submitMessage(
+                        session.transport(),
+                        session.handle(),
+                        submitUrl == null ? "" : submitUrl,
+                        source);
+
+        JSONObject reply = read(json);
+        String error = reply.optString("error");
+        if (!error.isEmpty()) {
+            throw reply.optBoolean("permanent")
+                    ? new SubmissionRefused(error)
+                    : new PimalayaException(error);
         }
+        return optString(reply, "mailbox");
     }
 
     /**
@@ -532,80 +559,156 @@ public class PimalayaClient {
      * mailbox it landed in, or null when the account named no trash and
      * the message was marked deleted where it is instead.
      */
-    public String deleteMessage(Account account, String mailbox, String id) {
+    public String deleteMessage(MailSession session, String mailbox, String id) {
+        JSONObject reply =
+                object(
+                        on(
+                                session,
+                                open ->
+                                        Native.deleteMessage(
+                                                open.transport(), open.handle(), mailbox, id)));
+        return optString(reply, "mailbox");
+    }
+
+    /**
+     * Opens one account's mail connection, greeted and authenticated, for
+     * a caller that will run several verbs on it and close it.
+     *
+     * <p>The unit is the account and not the mailbox, which is what both
+     * backends are shaped for: IMAP is one session over every mailbox and
+     * JMAP one session resource over the whole account.
+     */
+    public static MailSession openMail(Account account) {
         Transport transport = new Transport();
         try {
             JSONObject reply =
                     object(
-                            Native.deleteMessage(
+                            Native.openMailSession(
                                     transport,
                                     account.baseUrl,
                                     account.login,
-                                    account.password,
-                                    mailbox,
-                                    id));
-            return optString(reply, "mailbox");
-        } finally {
+                                    account.password));
+            return new MailSession(account, transport, MailSession.handleOf(reply));
+        } catch (RuntimeException failure) {
             transport.close();
+            throw failure;
+        }
+    }
+
+    /** One verb against an open session. */
+    private interface OnSession {
+        String run(MailSession session);
+    }
+
+    /**
+     * Runs one idempotent verb on a held session, reopening it once if it
+     * has died.
+     *
+     * <p>A held connection is a hint and never a promise: a server's idle
+     * timeout, a rebound NAT and a walk from wifi to cellular all end one
+     * under the app, and none of them announce it. So the first failure
+     * is read as the connection rather than as the verb, and the verb is
+     * given one honest attempt on a fresh session before its failure is
+     * reported as its own.
+     *
+     * <p>Idempotent is the condition and not a description: a refusal and
+     * a dead socket are not told apart here, so whatever runs through
+     * this runs twice whenever a server says no. Re-reading a message,
+     * re-storing a marker and re-moving a message that has already moved
+     * all cost a round trip and change nothing. Submitting a message does
+     * not, which is why it does not come through here.
+     */
+    private static String on(MailSession session, OnSession verb) {
+        try {
+            return verb.run(session);
+        } catch (RuntimeException failure) {
+            session.reopen();
+            return verb.run(session);
         }
     }
 
     /** Lists the account's calendars: the CalDAV discovery walk. */
-    public List<Calendar> listCalendars(Account account) {
-        Transport transport = new Transport();
-        try {
-            JSONArray reply =
-                    array(
-                            Native.listCalendars(
-                                    transport, account.baseUrl, account.login, account.password));
+    public List<Calendar> listCalendars(Transport transport, Account account) {
+        JSONArray reply =
+                array(
+                        Native.listCalendars(
+                                transport, account.baseUrl, account.login, account.password));
 
-            List<Calendar> calendars = new ArrayList<>(reply.length());
-            for (int index = 0; index < reply.length(); index++) {
-                JSONObject calendar = object(reply, index);
-                calendars.add(
-                        new Calendar(
-                                string(calendar, "id"),
-                                string(calendar, "name"),
-                                string(calendar, "url"),
-                                optString(calendar, "description"),
-                                optString(calendar, "color")));
-            }
-            return calendars;
-        } finally {
-            transport.close();
+        List<Calendar> calendars = new ArrayList<>(reply.length());
+        for (int index = 0; index < reply.length(); index++) {
+            JSONObject calendar = object(reply, index);
+            calendars.add(
+                    new Calendar(
+                            string(calendar, "id"),
+                            string(calendar, "name"),
+                            string(calendar, "url"),
+                            optString(calendar, "description"),
+                            optString(calendar, "color")));
         }
+        return calendars;
     }
 
     /**
-     * Lists a calendar collection's events. One CalDAV report, or one
-     * JMAP request, carries every event's body back, so a whole
-     * calendar costs a single round trip either way.
+     * Enumerates a calendar collection from the cursor the last pass
+     * stored: which events moved and which went, and no bodies.
+     *
+     * <p>The bodies are {@link #multigetEvents}, for the events the merge
+     * asks about. A round that carried them would be re-reading a whole
+     * calendar to find out that nothing in it changed, which is what this
+     * replaced.
      */
-    public List<Event> listEvents(Account account, String calendarUrl) {
-        Transport transport = new Transport();
-        try {
-            JSONArray reply =
-                    array(
-                            Native.listEvents(
-                                    transport,
-                                    account.baseUrl,
-                                    calendarUrl,
-                                    account.login,
-                                    account.password));
+    public EventDelta syncEvents(
+            Transport transport, Account account, String calendarUrl, String cursor) {
+        JSONObject reply =
+                object(
+                        Native.syncEvents(
+                                transport,
+                                account.baseUrl,
+                                calendarUrl,
+                                account.login,
+                                account.password,
+                                cursor == null ? "" : cursor));
 
-            List<Event> events = new ArrayList<>(reply.length());
-            for (int index = 0; index < reply.length(); index++) {
-                JSONObject event = object(reply, index);
-                events.add(
-                        new Event(
-                                string(event, "id"),
-                                optString(event, "etag"),
-                                string(event, "ical")));
-            }
-            return events;
-        } finally {
-            transport.close();
+        JSONArray listed = reply.optJSONArray("changed");
+        List<EventRef> changed = new ArrayList<>(listed == null ? 0 : listed.length());
+        for (int index = 0; listed != null && index < listed.length(); index++) {
+            JSONObject event = object(listed, index);
+            changed.add(new EventRef(string(event, "id"), optString(event, "etag")));
         }
+
+        return new EventDelta(
+                changed,
+                strings(reply.optJSONArray("vanished")),
+                optString(reply, "token"),
+                reply.optBoolean("complete"));
+    }
+
+    /** The iCalendar text of the named events, in one round. */
+    public List<Event> multigetEvents(
+            Transport transport, Account account, String calendarUrl, List<String> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        JSONArray reply =
+                array(
+                        Native.multigetEvents(
+                                transport,
+                                account.baseUrl,
+                                calendarUrl,
+                                account.login,
+                                account.password,
+                                new JSONArray(ids).toString()));
+
+        List<Event> events = new ArrayList<>(reply.length());
+        for (int index = 0; index < reply.length(); index++) {
+            JSONObject event = object(reply, index);
+            events.add(
+                    new Event(
+                            string(event, "id"),
+                            optString(event, "etag"),
+                            string(event, "ical")));
+        }
+        return events;
     }
 
     /**
@@ -703,33 +806,27 @@ public class PimalayaClient {
      * <p>Guarded on purpose: a calendar is shared, and an unguarded PUT
      * is how one client silently overwrites another's edit.
      */
-    public String updateEvent(
-            Account account, String calendarUrl, String id, String ical, String etag) {
-        Transport transport = new Transport();
-        try {
-            String reply =
-                    Native.updateEvent(
-                            transport,
-                            account.baseUrl,
-                            calendarUrl,
-                            account.login,
-                            account.password,
-                            id,
-                            ical,
-                            etag == null ? "" : etag);
+    public String updateEvent(Transport transport, Account account, String calendarUrl, String id, String ical, String etag) {
+        String reply =
+                Native.updateEvent(
+                        transport,
+                        account.baseUrl,
+                        calendarUrl,
+                        account.login,
+                        account.password,
+                        id,
+                        ical,
+                        etag == null ? "" : etag);
 
-            String trimmed = reply.trim();
-            if (trimmed.startsWith("{")) {
-                // An object here is the bridge's error shape; a success
-                // is the new ETag as a bare JSON string, or null.
-                object(trimmed);
-            }
-            return trimmed.startsWith("\"")
-                    ? trimmed.substring(1, trimmed.length() - 1)
-                    : null;
-        } finally {
-            transport.close();
+        String trimmed = reply.trim();
+        if (trimmed.startsWith("{")) {
+            // An object here is the bridge's error shape; a success
+            // is the new ETag as a bare JSON string, or null.
+            object(trimmed);
         }
+        return trimmed.startsWith("\"")
+                ? trimmed.substring(1, trimmed.length() - 1)
+                : null;
     }
 
     /**
@@ -753,42 +850,32 @@ public class PimalayaClient {
      * Files a new object in a calendar, guarded on the resource not
      * existing, and returns the ETag the server gave it.
      */
-    public String createEvent(Account account, String calendarUrl, String id, String ical) {
-        Transport transport = new Transport();
-        try {
-            return etagOf(
-                    Native.createEvent(
-                            transport,
-                            account.baseUrl,
-                            calendarUrl,
-                            account.login,
-                            account.password,
-                            id,
-                            ical));
-        } finally {
-            transport.close();
-        }
+    public String createEvent(Transport transport, Account account, String calendarUrl, String id, String ical) {
+        return etagOf(
+                Native.createEvent(
+                        transport,
+                        account.baseUrl,
+                        calendarUrl,
+                        account.login,
+                        account.password,
+                        id,
+                        ical));
     }
 
     /**
      * Removes one object from its calendar, guarded by the ETag it was
      * read with, for the same reason the update is.
      */
-    public void deleteEvent(Account account, String calendarUrl, String id, String etag) {
-        Transport transport = new Transport();
-        try {
-            object(
-                    Native.deleteEvent(
-                            transport,
-                            account.baseUrl,
-                            calendarUrl,
-                            account.login,
-                            account.password,
-                            id,
-                            etag == null ? "" : etag));
-        } finally {
-            transport.close();
-        }
+    public void deleteEvent(Transport transport, Account account, String calendarUrl, String id, String etag) {
+        object(
+                Native.deleteEvent(
+                        transport,
+                        account.baseUrl,
+                        calendarUrl,
+                        account.login,
+                        account.password,
+                        id,
+                        etag == null ? "" : etag));
     }
 
     /**
@@ -808,31 +895,21 @@ public class PimalayaClient {
      * one pass, each carrying its addressbook memberships as book ids
      * ({@link Card#books}).
      */
-    public List<Card> listAccountCards(Account account) {
-        Transport transport = new Transport();
-        try {
-            return cards(
-                    Native.listAccountCards(
-                            transport, account.baseUrl, account.login, account.password));
-        } finally {
-            transport.close();
-        }
+    public List<Card> listAccountCards(Transport transport, Account account) {
+        return cards(
+                Native.listAccountCards(
+                        transport, account.baseUrl, account.login, account.password));
     }
 
     /** Lists the cards of the addressbook collection at the given URL. */
-    public List<Card> listCards(Account account, String addressbookUrl) {
-        Transport transport = new Transport();
-        try {
-            return cards(
-                    Native.listCards(
-                            transport,
-                            account.baseUrl,
-                            addressbookUrl,
-                            account.login,
-                            account.password));
-        } finally {
-            transport.close();
-        }
+    public List<Card> listCards(Transport transport, Account account, String addressbookUrl) {
+        return cards(
+                Native.listCards(
+                        transport,
+                        account.baseUrl,
+                        addressbookUrl,
+                        account.login,
+                        account.password));
     }
 
     /**
@@ -846,58 +923,48 @@ public class PimalayaClient {
      * server no longer accepts re-runs an initial round bridge-side,
      * flagged {@link CardDelta#complete}.
      */
-    public CardDelta syncCards(Account account, String addressbookUrl, String syncToken) {
-        Transport transport = new Transport();
-        try {
-            String reply =
-                    Native.syncCards(
-                            transport,
-                            account.baseUrl,
-                            addressbookUrl,
-                            account.login,
-                            account.password,
-                            syncToken == null ? "" : syncToken);
+    public CardDelta syncCards(Transport transport, Account account, String addressbookUrl, String syncToken) {
+        String reply =
+                Native.syncCards(
+                        transport,
+                        account.baseUrl,
+                        addressbookUrl,
+                        account.login,
+                        account.password,
+                        syncToken == null ? "" : syncToken);
 
-            JSONObject parsed = object(reply);
-            JSONArray rows = parsed.optJSONArray("changed");
-            List<Card> changed = new ArrayList<>(rows == null ? 0 : rows.length());
-            for (int index = 0; rows != null && index < rows.length(); index++) {
-                changed.add(card(object(rows, index)));
-            }
-
-            JSONArray gone = parsed.optJSONArray("vanished");
-            List<String> vanished = new ArrayList<>(gone == null ? 0 : gone.length());
-            for (int index = 0; gone != null && index < gone.length(); index++) {
-                vanished.add(gone.optString(index));
-            }
-
-            return new CardDelta(
-                    changed,
-                    vanished,
-                    optString(parsed, "token"),
-                    parsed.optBoolean("complete"));
-        } finally {
-            transport.close();
+        JSONObject parsed = object(reply);
+        JSONArray rows = parsed.optJSONArray("changed");
+        List<Card> changed = new ArrayList<>(rows == null ? 0 : rows.length());
+        for (int index = 0; rows != null && index < rows.length(); index++) {
+            changed.add(card(object(rows, index)));
         }
+
+        JSONArray gone = parsed.optJSONArray("vanished");
+        List<String> vanished = new ArrayList<>(gone == null ? 0 : gone.length());
+        for (int index = 0; gone != null && index < gone.length(); index++) {
+            vanished.add(gone.optString(index));
+        }
+
+        return new CardDelta(
+                changed,
+                vanished,
+                optString(parsed, "token"),
+                parsed.optBoolean("complete"));
     }
 
     /**
      * Batch-fetches the cards at the given resource names inside a
      * CardDAV addressbook via REPORT addressbook-multiget.
      */
-    public List<Card> multigetCards(Account account, String addressbookUrl, List<String> uris) {
-        Transport transport = new Transport();
-        try {
-            return cards(
-                    Native.multigetCards(
-                            transport,
-                            addressbookUrl,
-                            account.login,
-                            account.password,
-                            new JSONArray(uris).toString()));
-        } finally {
-            transport.close();
-        }
+    public List<Card> multigetCards(Transport transport, Account account, String addressbookUrl, List<String> uris) {
+        return cards(
+                Native.multigetCards(
+                        transport,
+                        addressbookUrl,
+                        account.login,
+                        account.password,
+                        new JSONArray(uris).toString()));
     }
 
     /**
@@ -933,22 +1000,16 @@ public class PimalayaClient {
      * account-level backend, by book id: JMAP patches addressBookIds,
      * Google modifies group members.
      */
-    public void updateCardBooks(
-            Account account, String cardId, List<String> add, List<String> remove) {
-        Transport transport = new Transport();
-        try {
-            object(
-                    Native.updateCardBooks(
-                            transport,
-                            account.baseUrl,
-                            account.login,
-                            account.password,
-                            cardId,
-                            books(add),
-                            books(remove)));
-        } finally {
-            transport.close();
-        }
+    public void updateCardBooks(Transport transport, Account account, String cardId, List<String> add, List<String> remove) {
+        object(
+                Native.updateCardBooks(
+                        transport,
+                        account.baseUrl,
+                        account.login,
+                        account.password,
+                        cardId,
+                        books(add),
+                        books(remove)));
     }
 
     /**
@@ -956,40 +1017,30 @@ public class PimalayaClient {
      * with its ETag. The backends naming the resource themselves
      * return the server-assigned id instead of the given one.
      */
-    public Card createCard(Account account, String addressbookUrl, String id, String vcard) {
-        Transport transport = new Transport();
-        try {
-            return card(
-                    object(
-                            Native.createCard(
-                                    transport,
-                                    account.baseUrl,
-                                    addressbookUrl,
-                                    account.login,
-                                    account.password,
-                                    id,
-                                    vcard)));
-        } finally {
-            transport.close();
-        }
+    public Card createCard(Transport transport, Account account, String addressbookUrl, String id, String vcard) {
+        return card(
+                object(
+                        Native.createCard(
+                                transport,
+                                account.baseUrl,
+                                addressbookUrl,
+                                account.login,
+                                account.password,
+                                id,
+                                vcard)));
     }
 
     /** Reads the card at the given resource name from the addressbook collection. */
-    public Card readCard(Account account, String addressbookUrl, String uri) {
-        Transport transport = new Transport();
-        try {
-            return card(
-                    object(
-                            Native.readCard(
-                                    transport,
-                                    account.baseUrl,
-                                    addressbookUrl,
-                                    account.login,
-                                    account.password,
-                                    uri)));
-        } finally {
-            transport.close();
-        }
+    public Card readCard(Transport transport, Account account, String addressbookUrl, String uri) {
+        return card(
+                object(
+                        Native.readCard(
+                                transport,
+                                account.baseUrl,
+                                addressbookUrl,
+                                account.login,
+                                account.password,
+                                uri)));
     }
 
     /**
@@ -999,44 +1050,34 @@ public class PimalayaClient {
      * patches to the fields the edit changed; CardDAV PUTs the full
      * vCard and ignores it.
      */
-    public Card updateCard(Account account, String addressbookUrl, Card card, String baseVcard) {
-        Transport transport = new Transport();
-        try {
-            return card(
-                    object(
-                            Native.updateCard(
-                                    transport,
-                                    account.baseUrl,
-                                    addressbookUrl,
-                                    account.login,
-                                    account.password,
-                                    card.id,
-                                    card.uri == null ? "" : card.uri,
-                                    card.vcard,
-                                    baseVcard == null ? "" : baseVcard,
-                                    card.etag == null ? "" : card.etag)));
-        } finally {
-            transport.close();
-        }
+    public Card updateCard(Transport transport, Account account, String addressbookUrl, Card card, String baseVcard) {
+        return card(
+                object(
+                        Native.updateCard(
+                                transport,
+                                account.baseUrl,
+                                addressbookUrl,
+                                account.login,
+                                account.password,
+                                card.id,
+                                card.uri == null ? "" : card.uri,
+                                card.vcard,
+                                baseVcard == null ? "" : baseVcard,
+                                card.etag == null ? "" : card.etag)));
     }
 
     /** Deletes the card from the addressbook collection. */
-    public void deleteCard(Account account, String addressbookUrl, Card card) {
-        Transport transport = new Transport();
-        try {
-            object(
-                    Native.deleteCard(
-                            transport,
-                            account.baseUrl,
-                            addressbookUrl,
-                            account.login,
-                            account.password,
-                            card.id,
-                            card.uri == null ? "" : card.uri,
-                            card.etag == null ? "" : card.etag));
-        } finally {
-            transport.close();
-        }
+    public void deleteCard(Transport transport, Account account, String addressbookUrl, Card card) {
+        object(
+                Native.deleteCard(
+                        transport,
+                        account.baseUrl,
+                        addressbookUrl,
+                        account.login,
+                        account.password,
+                        card.id,
+                        card.uri == null ? "" : card.uri,
+                        card.etag == null ? "" : card.etag));
     }
 
     /**
@@ -1044,35 +1085,25 @@ public class PimalayaClient {
      * batch create verb), returning the created cards in input order
      * with their server-assigned ids.
      */
-    public List<Card> createCards(Account account, List<String> vcards) {
-        Transport transport = new Transport();
-        try {
-            return cards(
-                    Native.createCards(
-                            transport,
-                            account.baseUrl,
-                            account.login,
-                            account.password,
-                            new JSONArray(vcards).toString()));
-        } finally {
-            transport.close();
-        }
+    public List<Card> createCards(Transport transport, Account account, List<String> vcards) {
+        return cards(
+                Native.createCards(
+                        transport,
+                        account.baseUrl,
+                        account.login,
+                        account.password,
+                        new JSONArray(vcards).toString()));
     }
 
     /** Deletes a batch of cards by id (Google-only, like createCards). */
-    public void deleteCards(Account account, List<String> ids) {
-        Transport transport = new Transport();
-        try {
-            object(
-                    Native.deleteCards(
-                            transport,
-                            account.baseUrl,
-                            account.login,
-                            account.password,
-                            new JSONArray(ids).toString()));
-        } finally {
-            transport.close();
-        }
+    public void deleteCards(Transport transport, Account account, List<String> ids) {
+        object(
+                Native.deleteCards(
+                        transport,
+                        account.baseUrl,
+                        account.login,
+                        account.password,
+                        new JSONArray(ids).toString()));
     }
 
     /**
@@ -1081,20 +1112,15 @@ public class PimalayaClient {
      * error?}} outcome per change: a rejected change reports rejected
      * instead of failing the round.
      */
-    public JSONArray pushCards(Account account, String addressbookUrl, JSONArray changes) {
-        Transport transport = new Transport();
-        try {
-            return array(
-                    Native.pushCards(
-                            transport,
-                            account.baseUrl,
-                            addressbookUrl,
-                            account.login,
-                            account.password,
-                            changes.toString()));
-        } finally {
-            transport.close();
-        }
+    public JSONArray pushCards(Transport transport, Account account, String addressbookUrl, JSONArray changes) {
+        return array(
+                Native.pushCards(
+                        transport,
+                        account.baseUrl,
+                        addressbookUrl,
+                        account.login,
+                        account.password,
+                        changes.toString()));
     }
 
     /** Serializes a book id list for the bridge. */
@@ -1147,14 +1173,24 @@ public class PimalayaClient {
      * was an HTTP round.
      */
     static JSONObject object(String json) {
+        JSONObject reply = read(json);
+        String error = reply.optString("error");
+        if (!error.isEmpty()) {
+            throw new PimalayaException(error, reply.has("status") ? reply.optInt("status") : null);
+        }
+        return reply;
+    }
+
+    /**
+     * Parses an object reply and hands it back whole, failure included.
+     *
+     * <p>For the one caller that reads more of a failure than its
+     * message: a submission says whether it was refused, and
+     * {@link #object} would have thrown before anything could look.
+     */
+    private static JSONObject read(String json) {
         try {
-            JSONObject reply = new JSONObject(json.trim());
-            String error = reply.optString("error");
-            if (!error.isEmpty()) {
-                Integer status = reply.has("status") ? reply.getInt("status") : null;
-                throw new PimalayaException(error, status);
-            }
-            return reply;
+            return new JSONObject(json.trim());
         } catch (JSONException error) {
             throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
         }

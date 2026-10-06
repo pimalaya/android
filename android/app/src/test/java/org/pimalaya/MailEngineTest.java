@@ -164,35 +164,27 @@ public class MailEngineTest {
     }
 
     @Test
-    public void anOutgoingMessageIsStagedAsACreate() throws Exception {
+    public void anOutgoingMessageIsQueuedRatherThanStaged() {
         String source = "From: jane@example.com\r\nSubject: Hi\r\n\r\nthe body\r\n";
-        String outbox = store.outboxOf(EMAIL);
-        store.ensureOutbox(EMAIL);
+        String date = "Mon, 5 Jan 2026 09:00:00 +0000";
 
-        engine.mutateAdd(
-                outbox,
-                "queued@example.com",
-                source,
-                new JSONArray().put(MailEngine.SEEN),
-                PimdirSummary.mail(
-                        "<queued@example.com>",
-                        "Hi",
-                        "",
-                        EMAIL,
-                        null,
-                        "Mon, 5 Jan 2026 09:00:00 +0000",
-                        source.length(),
-                        false),
-                PimdirSummary.mailSortKey("Mon, 5 Jan 2026 09:00:00 +0000"));
+        store.queueSubmission(
+                EMAIL, "queued@example.com", "Hi", date, source.getBytes(StandardCharsets.UTF_8));
+
+        // No item: a message on its way out is an action the engine never
+        // sees, which is why nothing it stages has to be kept out of a
+        // reconcile or held back from a roster replace.
+        assertEquals(
+                "0",
+                scalar("SELECT count(*) FROM items WHERE collection = ?", store.outboxOf(EMAIL)));
 
         List<MailStore.Outgoing> waiting = store.outgoing(EMAIL);
         assertEquals(1, waiting.size());
-        assertEquals("queued@example.com", waiting.get(0).id);
         assertEquals(source, new String(waiting.get(0).source, StandardCharsets.UTF_8));
 
         MailStore.StoredMessage row = store.loadMerged(10).get(0);
         assertTrue("it says of itself that it has not gone yet", row.pending);
         assertEquals("Hi", row.subject);
-        assertEquals(outbox, row.collection);
+        assertEquals(store.outboxOf(EMAIL), row.collection);
     }
 }

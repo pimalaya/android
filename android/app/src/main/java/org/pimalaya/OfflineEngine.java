@@ -13,6 +13,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -22,6 +23,7 @@ import org.pimalaya.client.Account;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardDelta;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Transport;
 
 /**
  * One account's offline driver: the Rust bridge runs the engine's
@@ -55,6 +57,17 @@ final class OfflineEngine extends PimdirEngine {
     private final CardStore base;
 
     private final Account account;
+
+    /**
+     * The pass's primary connection, for its sequential verbs; null on a
+     * driver that only stages, which reaches no server.
+     *
+     * <p>A concurrent push does not use it. A transport serves one caller
+     * at a time, so each worker of a fan-out opens its own and closes it
+     * with itself, which is also what bounds a round at four connections
+     * rather than one per card.
+     */
+    private final Transport primary;
 
     /** The phone spoke's adapter; null on context-less (mutate) drivers. */
     private final PhoneRemote phone;
@@ -142,10 +155,12 @@ final class OfflineEngine extends PimdirEngine {
             CardStore base,
             PimdirDb pimdir,
             PimalayaClient client,
+            Transport primary,
             Account account,
             Context context) {
         super(pimdir, client);
         this.base = base;
+        this.primary = primary;
         this.account = account;
         this.phone = context == null ? null : new PhoneRemote(context, pimdir);
     }
@@ -385,7 +400,7 @@ final class OfflineEngine extends PimdirEngine {
         }
         String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");
 
-        CardDelta delta = client.syncCards(account, url, cursor);
+        CardDelta delta = client.syncCards(primary, account, url, cursor);
 
         for (Card card : delta.changed) {
             if (!card.vcard.isEmpty()) {
@@ -398,7 +413,7 @@ final class OfflineEngine extends PimdirEngine {
         // listing; anything changed between re-lists on the next round.
         if (isGraph() && delta.complete && !delta.changed.isEmpty()) {
             Map<String, Card> byHandle = new HashMap<>();
-            for (Card card : client.listCards(account, url)) {
+            for (Card card : client.listCards(primary, account, url)) {
                 byHandle.put(card.uri, card);
             }
             graphCards.put(url, byHandle);
@@ -496,7 +511,7 @@ final class OfflineEngine extends PimdirEngine {
                 String handle = handles.getString(index);
                 Card card = deltaCards.get(handle);
                 if (card == null) {
-                    card = client.readCard(account, url, handle);
+                    card = client.readCard(primary, account, url, handle);
                 }
                 items.put(fetchedItem(url, handle, card));
             }
@@ -506,7 +521,7 @@ final class OfflineEngine extends PimdirEngine {
                 String handle = handles.getString(index);
                 Card card = cached == null ? null : cached.get(handle);
                 if (card == null) {
-                    card = client.readCard(account, url, handle);
+                    card = client.readCard(primary, account, url, handle);
                 }
                 items.put(fetchedItem(url, handle, card));
             }
@@ -520,7 +535,7 @@ final class OfflineEngine extends PimdirEngine {
             for (int start = 0; start < uris.size(); start += MULTIGET_CHUNK) {
                 List<String> chunk =
                         uris.subList(start, Math.min(start + MULTIGET_CHUNK, uris.size()));
-                for (Card card : client.multigetCards(account, url, chunk)) {
+                for (Card card : client.multigetCards(primary, account, url, chunk)) {
                     items.put(fetchedItem(url, card.uri, card));
                 }
             }
@@ -624,7 +639,7 @@ final class OfflineEngine extends PimdirEngine {
     private JSONArray pushEach(String url, JSONArray changes) throws JSONException {
         JSONArray results = new JSONArray();
         for (int index = 0; index < changes.length(); index++) {
-            results.put(pushOne(url, changes.getJSONObject(index)));
+            results.put(pushOne(primary, url, changes.getJSONObject(index)));
         }
         return results;
     }
@@ -634,23 +649,48 @@ final class OfflineEngine extends PimdirEngine {
      * Results keep the change order; the first hard failure aborts the
      * round like its sequential counterpart, dropping the still-flying
      * requests with it (the next sync reconciles whatever landed).
+     *
+     * <p>One worker per connection rather than one task per connection: a
+     * transport serves one caller at a time, so the workers drain a
+     * shared queue on their own, and a round of forty cards costs four
+     * connections rather than forty.
      */
     private JSONArray pushAll(String url, JSONArray changes) throws JSONException {
         // NOTE: prime the book map single-threaded; the workers only read.
         bookId(url);
 
-        ExecutorService pool =
-                Executors.newFixedThreadPool(Math.min(PUSH_CONCURRENCY, changes.length()));
+        int workers = Math.min(PUSH_CONCURRENCY, changes.length());
+        JSONObject[] pushed = new JSONObject[changes.length()];
+        AtomicInteger next = new AtomicInteger();
+
+        ExecutorService pool = Executors.newFixedThreadPool(workers);
         try {
-            List<Future<JSONObject>> pending = new ArrayList<>(changes.length());
-            for (int index = 0; index < changes.length(); index++) {
-                JSONObject change = changes.getJSONObject(index);
-                pending.add(pool.submit(() -> pushOne(url, change)));
+            List<Future<?>> running = new ArrayList<>(workers);
+            for (int worker = 0; worker < workers; worker++) {
+                running.add(
+                        pool.submit(
+                                () -> {
+                                    try (Transport own = new Transport()) {
+                                        for (int index = next.getAndIncrement();
+                                                index < changes.length();
+                                                index = next.getAndIncrement()) {
+                                            pushed[index] =
+                                                    pushOne(
+                                                            own,
+                                                            url,
+                                                            changes.getJSONObject(index));
+                                        }
+                                    }
+                                    return null;
+                                }));
+            }
+            for (Future<?> future : running) {
+                future.get();
             }
 
             JSONArray results = new JSONArray();
-            for (Future<JSONObject> future : pending) {
-                results.put(future.get());
+            for (JSONObject result : pushed) {
+                results.put(result);
             }
             return results;
         } catch (InterruptedException interrupted) {
@@ -701,7 +741,7 @@ final class OfflineEngine extends PimdirEngine {
                 JSONObject plan = pushPlan("add", url, !change.isNull("origin"), false);
                 if ("membership".equals(plan.getString("action"))) {
                     client.updateCardBooks(
-                            account, row.getString("id"), List.of(bookId(url)), List.of());
+                            primary, account, row.getString("id"), List.of(bookId(url)), List.of());
                     results[index] = result(handle, true, handle, null);
                     continue;
                 }
@@ -717,19 +757,19 @@ final class OfflineEngine extends PimdirEngine {
                 JSONObject plan = pushPlan("remove", url, false, row.optBoolean("deleted"));
                 if ("membership".equals(plan.getString("action"))) {
                     client.updateCardBooks(
-                            account, row.getString("id"), List.of(), List.of(bookId(url)));
+                            primary, account, row.getString("id"), List.of(), List.of(bookId(url)));
                     results[index] = result(handle, true, null, null);
                     continue;
                 }
                 removes.add(index);
                 removeIds.add(row.getString("id"));
             } else {
-                results[index] = pushOne(url, change);
+                results[index] = pushOne(primary, url, change);
             }
         }
 
         if (!creates.isEmpty()) {
-            List<Card> created = client.createCards(account, createVcards);
+            List<Card> created = client.createCards(primary, account, createVcards);
             for (int at = 0; at < creates.size(); at++) {
                 Card card = created.get(at);
                 int index = creates.get(at);
@@ -737,7 +777,7 @@ final class OfflineEngine extends PimdirEngine {
                 JSONArray postCreate = createBooks.get(at);
                 for (int book = 0; postCreate != null && book < postCreate.length(); book++) {
                     client.updateCardBooks(
-                            account, card.id, List.of(postCreate.optString(book)), List.of());
+                            primary, account, card.id, List.of(postCreate.optString(book)), List.of());
                 }
                 results[index] =
                         result(
@@ -749,7 +789,7 @@ final class OfflineEngine extends PimdirEngine {
         }
 
         if (!removes.isEmpty()) {
-            client.deleteCards(account, removeIds);
+            client.deleteCards(primary, account, removeIds);
             for (int index : removes) {
                 results[index] =
                         result(changes.getJSONObject(index).getString("handle"), true, null, null);
@@ -841,7 +881,7 @@ final class OfflineEngine extends PimdirEngine {
         }
 
         if (batch.length() > 0) {
-            JSONArray replies = client.pushCards(account, url, batch);
+            JSONArray replies = client.pushCards(primary, account, url, batch);
             for (int at = 0; at < replies.length(); at++) {
                 JSONObject reply = replies.getJSONObject(at);
                 String ref = reply.getString("ref");
@@ -882,14 +922,15 @@ final class OfflineEngine extends PimdirEngine {
     }
 
     /** Dispatches one push change to its verb. */
-    private JSONObject pushOne(String url, JSONObject change) throws JSONException {
+    private JSONObject pushOne(Transport transport, String url, JSONObject change)
+            throws JSONException {
         switch (change.getString("op")) {
             case "add":
-                return pushAdd(url, change);
+                return pushAdd(transport, url, change);
             case "update":
-                return pushUpdate(url, change);
+                return pushUpdate(transport, url, change);
             case "remove":
-                return pushRemove(url, change);
+                return pushRemove(transport, url, change);
             default:
                 // NOTE: no flag pushes on any contacts backend.
                 return result(change.getString("handle"), true, null, null);
@@ -935,7 +976,8 @@ final class OfflineEngine extends PimdirEngine {
      * origin), a genuine create otherwise, with any post-create
      * membership patch the backend needs riding along.
      */
-    private JSONObject pushAdd(String url, JSONObject change) throws JSONException {
+    private JSONObject pushAdd(Transport transport, String url, JSONObject change)
+            throws JSONException {
         String handle = change.getString("handle");
         JSONObject row = offline.loadRow(url, handle);
         if (row == null) {
@@ -944,7 +986,8 @@ final class OfflineEngine extends PimdirEngine {
 
         JSONObject plan = pushPlan("add", url, !change.isNull("origin"), false);
         if ("membership".equals(plan.getString("action"))) {
-            client.updateCardBooks(account, row.getString("id"), List.of(bookId(url)), List.of());
+            client.updateCardBooks(
+                    transport, account, row.getString("id"), List.of(bookId(url)), List.of());
             // The body is already on the account, so the member this book now
             // holds is the one the origin names: assigning the provisional
             // handle instead would bind the book to a name the server never
@@ -960,19 +1003,20 @@ final class OfflineEngine extends PimdirEngine {
         // .vcf itself, so what goes out is the name this side calls the card
         // by. Sending the handle would file it under a control character.
         String name = CardStore.resourceName(url, PimdirStorage.nameOf(handle));
-        Card created = client.createCard(account, url, name, row.getString("vcard"));
+        Card created = client.createCard(transport, account, url, name, row.getString("vcard"));
 
         JSONArray postCreate = plan.optJSONArray("postCreateBooks");
         for (int index = 0; postCreate != null && index < postCreate.length(); index++) {
             client.updateCardBooks(
-                    account, created.id, List.of(postCreate.optString(index)), List.of());
+                    transport, account, created.id, List.of(postCreate.optString(index)), List.of());
         }
 
         return result(handle, true, created.uri, created.etag);
     }
 
     /** Pushes a staged content edit, guarded by the base revision. */
-    private JSONObject pushUpdate(String url, JSONObject change) throws JSONException {
+    private JSONObject pushUpdate(Transport transport, String url, JSONObject change)
+            throws JSONException {
         String handle = change.getString("handle");
         String ifMatch = change.isNull("ifMatch") ? null : change.getString("ifMatch");
         JSONObject row = offline.loadRow(url, handle);
@@ -984,6 +1028,7 @@ final class OfflineEngine extends PimdirEngine {
         try {
             Card updated =
                     client.updateCard(
+                            transport,
                             account,
                             url,
                             new Card(row.getString("id"), handle, ifMatch, row.getString("vcard")),
@@ -1005,6 +1050,7 @@ final class OfflineEngine extends PimdirEngine {
                             + "unchanged: " + handle);
             Card updated =
                     client.updateCard(
+                            transport,
                             account,
                             url,
                             new Card(row.getString("id"), handle, null, row.getString("vcard")),
@@ -1018,7 +1064,8 @@ final class OfflineEngine extends PimdirEngine {
      * patch when the card is not deleted on an account-level backend,
      * the card's deletion otherwise.
      */
-    private JSONObject pushRemove(String url, JSONObject change) throws JSONException {
+    private JSONObject pushRemove(Transport transport, String url, JSONObject change)
+            throws JSONException {
         String handle = change.getString("handle");
         String ifMatch = change.isNull("ifMatch") ? null : change.getString("ifMatch");
         JSONObject row = offline.loadRow(url, handle);
@@ -1028,12 +1075,14 @@ final class OfflineEngine extends PimdirEngine {
 
         JSONObject plan = pushPlan("remove", url, false, row.optBoolean("deleted"));
         if ("membership".equals(plan.getString("action"))) {
-            client.updateCardBooks(account, row.getString("id"), List.of(), List.of(bookId(url)));
+            client.updateCardBooks(
+                    transport, account, row.getString("id"), List.of(), List.of(bookId(url)));
             return result(handle, true, null, null);
         }
 
         try {
-            client.deleteCard(account, url, new Card(row.getString("id"), handle, ifMatch, ""));
+            client.deleteCard(
+                    transport, account, url, new Card(row.getString("id"), handle, ifMatch, ""));
         } catch (RuntimeException failure) {
             if (isGone(failure)) {
                 // NOTE: already deleted upstream; the removal converged.
@@ -1046,7 +1095,8 @@ final class OfflineEngine extends PimdirEngine {
                         "pimalaya",
                         "retrying delete unguarded, If-Match rejected but listing "
                                 + "unchanged: " + handle);
-                client.deleteCard(account, url, new Card(row.getString("id"), handle, null, ""));
+                client.deleteCard(
+                        transport, account, url, new Card(row.getString("id"), handle, null, ""));
             }
         }
         return result(handle, true, null, null);

@@ -7,8 +7,15 @@
      Three lines, subject first: in a merged inbox the subject is what
      distinguishes two rows, and the sender is the supporting line that
      says who it came from, above the mailbox and account that say where
-     from. The trailing column pairs the date with the message's flags,
-     the way the avatar pairs with the body. -->
+     from.
+
+     What the trailing marks belong to is what they sit beside. The date
+     is the subject's, so it ends the subject's line; the flags describe
+     the message where it is filed, so they end the mailbox and account
+     line. Both live inside the line they belong to rather than in a
+     column of their own beside all three, which is what kept them from
+     lining up with anything: a column can be top-aligned or centred, and
+     neither of those is "level with that line". -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -50,15 +57,37 @@
         android:layout_weight="1"
         android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/message_subject"
+        <!-- Baseline-aligned, which is what makes two different text
+             sizes read as one line: matching the tops would leave the
+             smaller one floating. -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:lineHeight="24dp"
-            android:maxLines="1"
-            android:textColor="?android:attr/textColorPrimary"
-            android:textSize="16sp" />
+            android:baselineAligned="true"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/message_subject"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:lineHeight="24dp"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/message_date"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:lineHeight="24dp"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="12sp" />
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/message_from"
@@ -70,66 +99,57 @@
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="13sp" />
 
-        <TextView
-            android:id="@+id/message_origin"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:ellipsize="end"
-            android:lineHeight="16dp"
-            android:maxLines="1"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="13sp" />
-
-    </LinearLayout>
-
-    <!-- Top-aligned rather than centred, so the date sits level with the
-         subject and the flags hang under it in the room the two
-         supporting lines leave, instead of the pair floating in the
-         middle of the row. -->
-    <LinearLayout
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top"
-        android:layout_marginStart="8dp"
-        android:gravity="end"
-        android:orientation="vertical">
-
-        <TextView
-            android:id="@+id/message_date"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:lineHeight="24dp"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="12sp" />
-
-        <!-- The state flags, in a fixed order so a row's icons stay
-             where the eye last found them: replied, then important. The
-             attachment is not here: it leads the row instead, in the
-             column the bar title leaves clear. -->
-        <LinearLayout
-            android:id="@+id/message_flags"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:gravity="end"
+            android:baselineAligned="false"
             android:orientation="horizontal">
 
-            <ImageView
-                android:id="@+id/message_answered"
-                android:layout_width="@dimen/message_flag"
-                android:layout_height="@dimen/message_flag"
-                android:layout_marginStart="4dp"
-                android:contentDescription="@string/message_answered"
-                android:src="@drawable/ic_reply"
-                android:tint="?android:attr/textColorSecondary" />
+            <TextView
+                android:id="@+id/message_origin"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:lineHeight="16dp"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="13sp" />
 
-            <ImageView
-                android:id="@+id/message_flagged"
-                android:layout_width="@dimen/message_flag"
-                android:layout_height="@dimen/message_flag"
-                android:layout_marginStart="4dp"
-                android:contentDescription="@string/message_flagged"
-                android:src="@drawable/ic_star"
-                android:tint="?android:attr/colorAccent" />
+            <!-- The state flags, in a fixed order so a row's icons stay
+                 where the eye last found them: replied, then important.
+                 Centred on the line rather than baselined, an icon
+                 having no baseline to align. The attachment is not here:
+                 it leads the row instead, in the column the bar title
+                 leaves clear. -->
+            <LinearLayout
+                android:id="@+id/message_flags"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:layout_marginStart="8dp"
+                android:gravity="end|center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/message_answered"
+                    android:layout_width="@dimen/message_flag"
+                    android:layout_height="@dimen/message_flag"
+                    android:layout_marginStart="4dp"
+                    android:contentDescription="@string/message_answered"
+                    android:src="@drawable/ic_reply"
+                    android:tint="?android:attr/textColorSecondary" />
+
+                <ImageView
+                    android:id="@+id/message_flagged"
+                    android:layout_width="@dimen/message_flag"
+                    android:layout_height="@dimen/message_flag"
+                    android:layout_marginStart="4dp"
+                    android:contentDescription="@string/message_flagged"
+                    android:src="@drawable/ic_star"
+                    android:tint="?android:attr/colorAccent" />
+
+            </LinearLayout>
 
         </LinearLayout>
 

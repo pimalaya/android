@@ -90,7 +90,8 @@ final class ContactWriter {
      * replica resolves it).
      */
     private void saveFanOut(JSONObject model) throws JSONException {
-        OfflineEngine engine = new OfflineEngine(host.base, host.pimdir, host.client, null, null);
+        OfflineEngine engine =
+                new OfflineEngine(host.base, host.pimdir, host.client, null, null, null);
         java.util.Set<String> staged = new java.util.HashSet<>();
 
         for (Entry entry : host.edit.replicas) {
@@ -125,7 +126,7 @@ final class ContactWriter {
     private void saveConflictResolution(JSONObject model) throws JSONException {
         Entry replica = host.edit.replicas.get(0);
         String resolved = Cards.applyCard(host.edit.vcard, model);
-        new OfflineEngine(host.base, host.pimdir, host.client, null, null)
+        new OfflineEngine(host.base, host.pimdir, host.client, null, null, null)
                 .mutateEdit(
                         replica.book.url,
                         CardStore.rowHandle(replica.card.uri, replica.card.id),
@@ -142,7 +143,7 @@ final class ContactWriter {
 
         String vcard = Cards.applyCard(survivor.card.vcard, model);
         if (!host.cardIndex(vcard).optString("hash").equals(survivor.hash)) {
-            new OfflineEngine(host.base, host.pimdir, host.client, null, null)
+            new OfflineEngine(host.base, host.pimdir, host.client, null, null, null)
                     .mutateEdit(
                             survivor.book.url,
                             CardStore.rowHandle(survivor.card.uri, survivor.card.id),

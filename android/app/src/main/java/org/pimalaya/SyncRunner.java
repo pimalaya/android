@@ -12,6 +12,7 @@ import org.pimalaya.client.Account;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
+import org.pimalaya.client.Transport;
 import org.pimalaya.client.OauthTokens;
 
 /**
@@ -108,7 +109,7 @@ final class SyncRunner {
 
         if (LocalBook.is(book.accountEmail)) {
             OfflineEngine.Report report = new OfflineEngine.Report();
-            engine(null).syncPhone(url, report);
+            engine(null, null).syncPhone(url, report);
             return report;
         }
 
@@ -119,13 +120,19 @@ final class SyncRunner {
         }
 
         AccountCredential contacts = entry.credential(PimDomain.CONTACTS);
-        try {
-            return engine(entry.server(PimDomain.CONTACTS)).syncBook(url, book.remoteSynced);
+        // NOTE: one connection for the book's whole pass, and another for
+        // the retry: a refreshed token is a new sign-in, so the session
+        // the refused one was on is not the session to keep using.
+        try (Transport primary = new Transport()) {
+            return engine(primary, entry.server(PimDomain.CONTACTS))
+                    .syncBook(url, book.remoteSynced);
         } catch (Exception error) {
             if (!expiredToken(error) || !contacts.renewable()) {
                 throw error;
             }
-            return engine(refresh(entry)).syncBook(url, book.remoteSynced);
+            try (Transport primary = new Transport()) {
+                return engine(primary, refresh(entry)).syncBook(url, book.remoteSynced);
+            }
         }
     }
 
@@ -157,8 +164,12 @@ final class SyncRunner {
                 continue;
             }
             try {
-                List<Addressbook> books =
-                        client.listAddressbooks(account.server(PimDomain.CONTACTS));
+                List<Addressbook> books;
+                try (Transport transport = new Transport()) {
+                    books =
+                            client.listAddressbooks(
+                                    transport, account.server(PimDomain.CONTACTS));
+                }
                 base.replaceAddressbooks(account.email, books);
                 new PimdirCollections(pimdir, context)
                         .replace(
@@ -226,7 +237,7 @@ final class SyncRunner {
             // purges the Android accounts of books no longer mirrored.
             Accounts.reconcile(context, phoneBooks);
 
-            OfflineEngine engine = engine(null);
+            OfflineEngine engine = engine(null, null);
             for (BookEntry entry : phoneBooks) {
                 bookStarted(entry);
                 engine.syncPhone(entry.book.url, report);
@@ -257,18 +268,20 @@ final class SyncRunner {
      */
     private void syncAccount(Account account, List<BookEntry> books, Outcome outcome)
             throws Exception {
-        OfflineEngine engine = engine(account);
+        try (Transport primary = new Transport()) {
+            OfflineEngine engine = engine(primary, account);
 
-        for (BookEntry entry : books) {
-            bookStarted(entry);
-            outcome.absorb(engine.syncBook(entry.book.url, entry.remoteSynced));
-            outcome.local |= entry.phoneSynced;
+            for (BookEntry entry : books) {
+                bookStarted(entry);
+                outcome.absorb(engine.syncBook(entry.book.url, entry.remoteSynced));
+                outcome.local |= entry.phoneSynced;
+            }
         }
     }
 
     /** An engine wired to the observer's progress display. */
-    private OfflineEngine engine(Account account) {
-        OfflineEngine engine = new OfflineEngine(base, pimdir, client, account, context);
+    private OfflineEngine engine(Transport primary, Account account) {
+        OfflineEngine engine = new OfflineEngine(base, pimdir, client, primary, account, context);
         if (observer != null) {
             engine.progress = observer::step;
         }
@@ -293,13 +306,17 @@ final class SyncRunner {
      */
     AccountEntry refreshed(AccountEntry entry, PimDomain domain) {
         AccountCredential credential = entry.credential(domain);
-        OauthTokens tokens =
-                client.oauthRefresh(
-                        credential.tokenEndpoint,
-                        credential.clientId,
-                        credential.clientSecret,
-                        credential.refreshToken,
-                        null);
+        OauthTokens tokens;
+        try (Transport transport = new Transport()) {
+            tokens =
+                    client.oauthRefresh(
+                            transport,
+                            credential.tokenEndpoint,
+                            credential.clientId,
+                            credential.clientSecret,
+                            credential.refreshToken,
+                            null);
+        }
 
         // One write. Every domain signing in with this credential is
         // renewed by it, because there is only ever the one copy.

@@ -10,24 +10,36 @@ A calendar is a collection of kind `text/calendar` and an entry is one item in i
 
 Two backends answer: a CalDAV context root, or the draft-ietf-jmap-calendars verbs behind the `jmap://` marker, whose JSCalendar payload is converted at the client boundary so the store keeps one shape.
 
-Every calendar runs io-pimdir's sync. The pass reads one listing per calendar, and it carries the objects themselves, so the enumerate and the fetch are both served from it and neither costs a request; what a pass does is reconcile rather than replace, which is what lets a staged create, edit or delete survive one. A reconcile is followed by an upgrade, which is not optional: a sync that finds the remote content changed drops the body on purpose, and an agenda reads its entries by their body. Incremental listing is not wired: CalDAV's ctag and sync-token rounds are what one would use, so every round is a complete one and reports itself as such.
+Every calendar runs io-pimdir's sync, and asks what changed. The enumerate is an RFC 6578 `sync-collection` REPORT from the cursor the last pass stored, answering resource names and ETags; the fetch is a `calendar-multiget` (RFC 4791 section 7.9) of the entries the merge asked about. A quiet calendar costs one report and no body. A reconcile is followed by an upgrade, which is not optional: a sync that finds the remote content changed drops the body on purpose, and an agenda reads its entries by their body.
+
+The enumeration takes the whole collection rather than filtering it to VEVENT: a `sync-collection` has no component filter, and the app wanted the others anyway. The expander places a to-do and a journal entry on a day like anything else with a date, and the entry page edits all three; the filter the old listing carried was the one place that disagreed.
+
+A JMAP calendar has no incremental read: draft-ietf-jmap-calendars would answer it through `CalendarEvent/changes`, which is not wired, so it answers a complete round and carries no cursor.
 
 The entry page is the reading screen and the form at once, the way a contact's is. It edits the stored component rather than the occurrence that was tapped, an override with its own `RECURRENCE-ID` being what changing one date of a series means and not being written yet.
 
 Every write is CalDAV: a JMAP calendar takes `CalendarEvent/set` in JSCalendar, which is the conversion the read path does in the other direction and is not written yet, so it refuses rather than silently doing nothing.
 
 ### Requirement: A pass puts back the bodies it dropped
-A calendar pass SHALL raise every placement its reconcile left below full back to its body, from the listing the pass already read. An entry SHALL NOT leave the agenda because the server changed it.
+A calendar pass SHALL raise every placement its reconcile left below full back to its body, by reading the entries the merge named. An entry SHALL NOT leave the agenda because the server changed it.
 
 #### Scenario: An entry the server changed
-- GIVEN a stored entry and a listing carrying a new revision for it
+- GIVEN a stored entry the enumerate reports at a new revision
 - WHEN the calendar is synced
 - THEN the entry is still in the agenda, carrying what the server now holds
 
 #### Scenario: An entry the server no longer holds
-- GIVEN a stored entry the listing omits
+- GIVEN a stored entry the enumerate reports vanished
 - WHEN the calendar is synced
 - THEN it leaves the agenda
+
+### Requirement: The entry page fills only the rows an entry has
+The entry page SHALL draw the rows describing the occurrence that was tapped only for an entry opened from one. An entry being composed has none: it is not placed until it is saved, so there is no instance to name and nothing to count down to.
+
+#### Scenario: A new entry
+- GIVEN the agenda's add button
+- WHEN the page opens on the entry it started
+- THEN it draws without the countdown and without naming an occurrence
 
 ### Requirement: A calendar entry can be created
 The app SHALL create a calendar entry from the entry page in the store alone: a fresh object carrying the `UID`, `DTSTAMP` and `DTSTART` RFC 5545 section 3.6.1 requires and nothing else, staged as a pending create. The next sync SHALL PUT it to a resource named after its `UID`, guarded by `If-None-Match: *`.

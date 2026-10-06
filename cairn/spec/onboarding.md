@@ -62,3 +62,41 @@ Finishing the connection flow SHALL synchronise every domain the account covers 
 - GIVEN a pass whose calendar listing fails
 - WHEN it finishes
 - THEN the domains that succeeded are shown, and the failure is reported once
+
+### Requirement: The setup names sending in the words of the setup it is in
+The connection flow SHALL offer where mail is submitted as part of connecting mail, and SHALL name it the way the chosen setup names everything else. The standard setup SHALL offer one switch reading *send mail*, carrying no protocol, on when the discovery run turned up an endpoint this client can drive and off and unswitchable when it did not, naming the setup that can connect it. The advanced setup SHALL list, under a switched-on mail section, one row per discovered submission configuration, a row for none, and manual entry. Implicit TLS only, this client having no STARTTLS step. Submission SHALL sign in with the credential the mail connection signed in with, and the flow SHALL NOT prompt a second time.
+
+#### Scenario: An address that publishes submission
+- GIVEN an address whose discovery turned up an implicit-TLS SMTP endpoint
+- WHEN the standard setup switches mail on
+- THEN a *send mail* switch is shown on under it
+- AND no protocol is named anywhere on the screen
+
+#### Scenario: An address that publishes none
+- GIVEN an address whose discovery turned up no submission this client can drive
+- WHEN the standard setup is shown
+- THEN the *send mail* switch is off, unswitchable, and says the advanced setup can connect it
+
+#### Scenario: The same address, advanced
+- GIVEN the same address
+- WHEN the advanced setup switches mail on
+- THEN the section lists its SMTP configurations, a row for none, and manual entry
+- AND manual entry asks for a host and builds an implicit-TLS endpoint on port 465 when none was typed
+
+#### Scenario: Sending switched off
+- GIVEN an address that publishes submission
+- WHEN the flow finishes with sending switched off
+- THEN the account stores no submit endpoint, and is not offered as a sender
+
+### Requirement: An account can gain a sender after it is connected
+The account settings screen SHALL show, for an account covering mail, where that account submits, and SHALL let it be entered, changed or emptied. What is entered is read the way the advanced setup reads it: a host, or a host and a port, as an implicit-TLS endpoint on port 465 by default. Changing it SHALL leave the account's credential and the endpoint it reads from alone, and SHALL take effect without a sign-in.
+
+#### Scenario: An account connected before submission existed
+- GIVEN a mail account carrying no submit endpoint
+- WHEN one is entered in its settings
+- THEN the account is offered as a sender, with no reconnection and no second sign-in
+
+#### Scenario: Emptying it
+- GIVEN a mail account that sends
+- WHEN the field is emptied
+- THEN the account stores no submit endpoint and is no longer offered as a sender

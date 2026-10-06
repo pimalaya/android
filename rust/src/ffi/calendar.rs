@@ -17,7 +17,7 @@ use jni::{
     errors::{Error, LogErrorAndDefault},
     objects::{JClass, JObject, JString},
 };
-use serde_json::to_string;
+use serde_json::{from_str, to_string};
 
 use crate::{
     account::{self, Backend},
@@ -67,11 +67,15 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listCalendars<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// `Native.listEvents`: lists a calendar collection's events, each
-/// carrying its iCalendar text. Returns a JSON array of
-/// `{id, etag, ical}` objects.
+/// `Native.syncEvents`: enumerates a calendar collection from the
+/// cursor the last pass stored, answering which events moved and no
+/// bodies. Returns `{changed, vanished, token, complete}`.
+///
+/// An empty cursor is an initial round. A cursor the server rejects is
+/// re-run as one, and the reply says so through `complete`, so the
+/// caller never reads a rejected round as an emptied calendar.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_listEvents<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_syncEvents<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -79,19 +83,57 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listEvents<'local>(
     url: JString<'local>,
     login: JString<'local>,
     password: JString<'local>,
+    cursor: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let base_url = read_string(env, &base_url);
         let url = read_string(env, &url);
         let login = read_string(env, &login);
         let password = read_string(env, &password);
+        let cursor = read_string(env, &cursor);
         let credentials = Credentials {
             login: &login,
             password: &password,
         };
 
         let mut client = Client::new(env, &transport);
-        let json = match list_events(&mut client, &base_url, &url, &credentials) {
+        let cursor = Some(cursor.as_str()).filter(|value| !value.is_empty());
+        let json = match client.sync_events(&base_url, &url, &credentials, cursor) {
+            Ok(delta) => to_string(&delta).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.multigetEvents`: the iCalendar text of the named events, in
+/// one round. Returns a JSON array of `{id, etag, ical}` objects.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_multigetEvents<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    base_url: JString<'local>,
+    url: JString<'local>,
+    login: JString<'local>,
+    password: JString<'local>,
+    ids: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let base_url = read_string(env, &base_url);
+        let url = read_string(env, &url);
+        let login = read_string(env, &login);
+        let password = read_string(env, &password);
+        let ids = read_string(env, &ids);
+        let credentials = Credentials {
+            login: &login,
+            password: &password,
+        };
+
+        let mut client = Client::new(env, &transport);
+        let json = match multiget(&mut client, &base_url, &url, &credentials, &ids) {
             Ok(events) => to_string(&events).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
@@ -99,6 +141,20 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listEvents<'local>(
         Ok(env.new_string(json)?.into())
     })
     .resolve::<LogErrorAndDefault>()
+}
+
+/// The named events, the ids arriving as a JSON array of strings.
+fn multiget(
+    client: &mut Client<'_, '_>,
+    base_url: &str,
+    calendar_url: &str,
+    credentials: &Credentials,
+    ids: &str,
+) -> Result<Vec<Event>, BridgeError> {
+    let ids: Vec<String> = from_str(ids).map_err(|err| format!("Invalid id list: {err}"))?;
+    let borrowed: Vec<&str> = ids.iter().map(String::as_str).collect();
+
+    client.multiget_events(base_url, calendar_url, credentials, &borrowed)
 }
 
 /// Lists the account's calendars with whichever backend its base URL
@@ -123,23 +179,6 @@ fn list_calendars(
         // NOTE: a calendar account with no sentinel is a CalDAV context
         // root, the only other endpoint the connection flow builds.
         _ => client.list_caldav_calendars(&parse_url(base_url)?, credentials),
-    }
-}
-
-/// Lists one calendar collection's events, on either backend.
-fn list_events(
-    client: &mut Client<'_, '_>,
-    base_url: &str,
-    calendar_url: &str,
-    credentials: &Credentials,
-) -> Result<Vec<Event>, BridgeError> {
-    match Backend::of(base_url) {
-        Backend::Jmap => {
-            let session_url = account::jmap_session_url(base_url)?;
-            let calendar_id = account::jmap_collection_id(calendar_url);
-            client.list_jmap_events(&session_url, credentials, calendar_id)
-        }
-        _ => client.list_caldav_events(&parse_url(calendar_url)?, credentials),
     }
 }
 

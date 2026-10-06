@@ -7,22 +7,26 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Event;
+import org.pimalaya.client.EventDelta;
+import org.pimalaya.client.EventRef;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Transport;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * The calendar half of the engine: one driver per account, servicing the
  * remote yields of every calendar it holds.
  *
- * <p>The simplest of the three drivers, because a calendar listing
- * carries the objects themselves: the enumerate that lists a collection
- * has already read every body, so the fetch beside it is a cache lookup
- * and no round trip. What that buys is the whole point of the engine
- * here, a staged create, edit or delete surviving a refresh instead of
- * being replaced by it.
+ * <p>It asks what changed. The enumerate is an RFC 6578 `sync-collection`
+ * from the cursor the last pass stored, answering hrefs and ETags, and
+ * the fetch is a `calendar-multiget` of the handles the merge asked
+ * about. A quiet calendar costs one report; it used to cost every body
+ * it holds, because the only listing there was carried them all.
+ *
+ * <p>The transport it reads and writes on is the caller's, opened once
+ * for the pass and closed with it, so every round of every calendar
+ * shares one connection.
  *
  * <p>Incremental listing is not wired: CalDAV's ctag and sync-token
  * rounds are what one would use, so every enumerate is a complete round
@@ -34,57 +38,47 @@ import java.util.Map;
 final class CalendarEngine extends PimdirEngine {
     private final Account account;
 
+    /** The pass's sockets; null on a driver that only stages. */
+    private final Transport transport;
+
     /** What the account's collection ids are namespaced under. */
     private final String accountId;
 
-    /** The bodies the pass's enumerate listed, by collection and handle. */
-    private final Map<String, Map<String, Event>> listed = new HashMap<>();
-
-    CalendarEngine(PimdirDb pimdir, PimalayaClient client, Account account, String accountId) {
+    CalendarEngine(
+            PimdirDb pimdir,
+            PimalayaClient client,
+            Transport transport,
+            Account account,
+            String accountId) {
         super(pimdir, client);
+        this.transport = transport;
         this.account = account;
         this.accountId = accountId;
     }
 
     /**
-     * Reconciles one calendar with the objects just listed off its server:
-     * pull, push what is staged, then put back the bodies the pull dropped.
+     * Reconciles one calendar with its server: pull what changed, push
+     * what is staged, then read back the bodies the pull dropped.
      *
-     * <p>The listing is the caller's, as the account walk is the mail
-     * driver's, so a pass makes exactly one request per calendar however
-     * many rounds the merge needs.
+     * <p>What changed and not what there is. The enumerate asks the
+     * collection for the members that moved since the cursor the last
+     * pass stored, and the fetch reads the bodies of the ones the merge
+     * asks about; a quiet calendar costs one report and no body at all,
+     * where it used to cost every body it holds.
      *
-     * <p>The hydrate is not optional. A sync that finds the remote content
-     * changed drops the object and leaves the placement below full, and
-     * the agenda reads entries by their body: without this pass a remote
-     * edit would empty the calendar until something else refetched it,
-     * which nothing does.
+     * <p>The hydrate is not optional. A sync that finds the remote
+     * content changed drops the body on purpose, and the agenda reads its
+     * entries by their body: without this pass a remote edit would empty
+     * the calendar until something else refetched it, which nothing does.
      */
-    void sync(String collection, List<Event> events) {
-        Map<String, Event> bodies = new HashMap<>(events.size());
-        for (Event event : events) {
-            bodies.put(event.id, event);
-        }
-        listed.put(collection, bodies);
-
-        try {
-            step(Progress.STAGE_SERVER, 0);
-            Log.d(
-                    "pimalaya",
-                    "calendar sync " + collection + ": "
-                            + client.offlineSync(this, collection, false));
-            hydrate(collection);
-        } finally {
-            listed.remove(collection);
-        }
+    void sync(String collection) {
+        step(Progress.STAGE_SERVER, 0);
+        Log.d(
+                "pimalaya",
+                "calendar sync " + collection + ": "
+                        + client.offlineSync(this, collection, false));
+        hydrate(collection);
     }
-
-    /**
-     * Announces nothing: a calendar's fetch is a lookup in the listing the
-     * pass already read, so there is no download to report.
-     */
-    @Override
-    protected void hydrating(String collection, int count) {}
 
     /**
      * The calendar's address behind a collection id, which is what every
@@ -97,10 +91,11 @@ final class CalendarEngine extends PimdirEngine {
     @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
-        Map<String, Event> bodies = listed.get(collection);
+        String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");
+        EventDelta delta = client.syncEvents(transport, account, urlOf(collection), cursor);
 
         JSONArray items = new JSONArray();
-        for (Event event : bodies == null ? List.<Event>of() : bodies.values()) {
+        for (EventRef event : delta.changed) {
             JSONObject item = new JSONObject();
             item.put("handle", event.id);
             if (event.etag != null) {
@@ -111,32 +106,34 @@ final class CalendarEngine extends PimdirEngine {
 
         JSONObject reply = new JSONObject();
         reply.put("items", items);
-        reply.put("vanished", new JSONArray());
-        reply.put("complete", true);
+        reply.put("vanished", new JSONArray(delta.vanished));
+        reply.put("complete", delta.complete);
+        if (delta.token != null) {
+            reply.put("checkpoint", delta.token);
+        }
         return reply;
     }
 
+    /**
+     * The bodies of the named events, in one `calendar-multiget`.
+     *
+     * <p>The handles the merge asked about and no others, which is the
+     * whole difference between a pass that reads one edited entry and one
+     * that reads five hundred to find it.
+     */
     @Override
     protected JSONObject fetch(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
-        Map<String, Event> bodies = listed.get(collection);
+        List<String> handles = stringsOf(yielded.getJSONArray("handles"));
 
         JSONArray items = new JSONArray();
-        for (String handle : stringsOf(yielded.getJSONArray("handles"))) {
-            // NOTE: a handle the listing did not carry is one the server
-            // dropped between the two, so it is left out rather than read
-            // again: the enumerate that follows reports it vanished.
-            Event event = bodies == null ? null : bodies.get(handle);
-            if (event == null) {
-                continue;
-            }
-
+        for (Event event : client.multigetEvents(transport, account, urlOf(collection), handles)) {
             JSONObject item = new JSONObject();
-            item.put("handle", handle);
+            item.put("handle", event.id);
             // The resource name is the identity: an entry is one object in
             // one calendar, and the UID inside it is what names the series
             // rather than the resource.
-            item.put("linkId", handle);
+            item.put("linkId", event.id);
             item.put("hash", PimdirHash.of(event.ical));
             item.put("body", event.ical);
             // NOTE: no key and no summary. What an agenda row shows needs the
@@ -198,7 +195,9 @@ final class CalendarEngine extends PimdirEngine {
                 // own, which is what a later listing brings back.
                 String name = PimdirStorage.nameOf(handle);
                 try {
-                    String etag = client.createEvent(account, url, name, row.getString("vcard"));
+                    String etag =
+                            client.createEvent(
+                                    transport, account, url, name, row.getString("vcard"));
                     return result(handle, true, name, etag);
                 } catch (RuntimeException failure) {
                     // The resource is already there, which `If-None-Match: *`
@@ -218,7 +217,7 @@ final class CalendarEngine extends PimdirEngine {
                 try {
                     String etag =
                             client.updateEvent(
-                                    account, url, handle, row.getString("vcard"), ifMatch);
+                                    transport, account, url, handle, row.getString("vcard"), ifMatch);
                     return result(handle, true, null, etag);
                 } catch (RuntimeException failure) {
                     if (isPreconditionFailure(failure)) {
@@ -229,7 +228,7 @@ final class CalendarEngine extends PimdirEngine {
             }
             case "remove":
                 try {
-                    client.deleteEvent(account, url, handle, ifMatch);
+                    client.deleteEvent(transport, account, url, handle, ifMatch);
                 } catch (RuntimeException failure) {
                     if (isGone(failure)) {
                         // Already gone upstream: the removal converged.

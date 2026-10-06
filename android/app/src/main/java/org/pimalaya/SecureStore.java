@@ -115,6 +115,42 @@ public class SecureStore {
         }
     }
 
+    /**
+     * Points one account's mail at a submission endpoint, or at none,
+     * then persists.
+     *
+     * <p>The endpoint alone: the credential and the server mail is read
+     * from are left exactly as they were, this being a repair of one
+     * setting and not a reconnection. An account covering no mail is
+     * left alone, there being nothing to point.
+     */
+    public AccountEntry submitThrough(String email, String submitUrl) {
+        synchronized (LOCK) {
+            List<AccountEntry> entries = loadAll();
+
+            AccountEntry existing = null;
+            for (AccountEntry entry : entries) {
+                if (entry.email.equals(email)) {
+                    existing = entry;
+                }
+            }
+            if (existing == null || !existing.covers(PimDomain.MAIL)) {
+                return existing;
+            }
+
+            AccountEntry merged =
+                    existing.with(
+                            PimDomain.MAIL,
+                            existing.server(PimDomain.MAIL).baseUrl,
+                            submitUrl,
+                            existing.credential(PimDomain.MAIL));
+            entries.removeIf(entry -> entry.email.equals(email));
+            entries.add(merged);
+            save(entries);
+            return merged;
+        }
+    }
+
     /** Removes an address and every domain it covered, then persists. */
     public void remove(String email) {
         synchronized (LOCK) {

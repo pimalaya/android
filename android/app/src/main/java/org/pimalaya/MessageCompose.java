@@ -6,12 +6,10 @@ import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Account;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -203,28 +201,17 @@ final class MessageCompose {
                     Exception failure = null;
                     try {
                         byte[] source = host.client.composeMessage(draft);
-                        host.mail.ensureOutbox(sender.email);
-                        host.mailEngine(sender.email)
-                                .mutateAdd(
-                                        host.mail.outboxOf(sender.email),
-                                        // The `Message-ID` is the identity, which
-                                        // is what a link id is: it is minted here
-                                        // and stamped on the message, so the copy
-                                        // the sync files in the sent mailbox comes
-                                        // back under the same name.
-                                        PimdirSummary.bare(messageId),
-                                        new String(source, StandardCharsets.UTF_8),
-                                        new JSONArray().put(MailEngine.SEEN),
-                                        PimdirSummary.mail(
-                                                messageId,
-                                                subject,
-                                                "",
-                                                sender.email,
-                                                to,
-                                                date,
-                                                source.length,
-                                                false),
-                                        PimdirSummary.mailSortKey(date));
+                        // The `Message-ID` is the identity, which is what
+                        // the payload names it by: it is minted here and
+                        // stamped on the message, so the copy the drain
+                        // files in the sent mailbox comes back under the
+                        // same name.
+                        host.mail.queueSubmission(
+                                sender.email,
+                                PimdirSummary.bare(messageId),
+                                subject,
+                                PimdirSummary.mailSortKey(date),
+                                source);
                     } catch (Exception error) {
                         Log.w("pimalaya", "compose failed: " + sender.email, error);
                         failure = error;

@@ -38,9 +38,12 @@ import org.pimalaya.client.Cards;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Card;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.Transport;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
+import org.pimalaya.client.SubmissionRefused;
 
 /**
  * Single-activity host walking the app's screens through a ViewFlipper.
@@ -871,7 +874,12 @@ public class MainActivity extends Activity {
 
         getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         View content = getLayoutInflater().inflate(R.layout.dialog_sync, null);
-        ((TextView) content.findViewById(R.id.sync_dialog_title))
+        // NOTE: both lines from the first frame, never the title alone. A
+        // pass has a round trip or two to make before it can name what it
+        // is on, and a dialog that shows one line for that long is a
+        // different dialog, laid out differently, that then jumps.
+        ((TextView) content.findViewById(R.id.sync_dialog_title)).setText(syncDomain);
+        ((TextView) content.findViewById(R.id.sync_dialog_detail))
                 .setText(R.string.sync_overlay_preparing);
         syncDialog =
                 new AlertDialog.Builder(this)
@@ -879,6 +887,12 @@ public class MainActivity extends Activity {
                         .setCancelable(false)
                         .show();
     }
+
+    /**
+     * What the sync dialog names before a pass can name a collection: the
+     * domain being synced, which is known the moment the user asks for it.
+     */
+    private int syncDomain = R.string.domain_contacts;
 
     /** Sets the dialog's addressbook line (callable off the main thread). */
     private void syncTitle(String book) {
@@ -942,6 +956,7 @@ public class MainActivity extends Activity {
      * on screen.
      */
     void syncRemote() {
+        syncDomain = R.string.domain_contacts;
         setSyncing(true);
 
         io.execute(
@@ -1008,29 +1023,38 @@ public class MainActivity extends Activity {
      * happened to share them.
      */
     void syncMail() {
+        syncDomain = R.string.domain_mail;
         setSyncing(true);
         io.execute(
                 () -> {
                     Exception failure = null;
                     int sent = 0;
                     for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
-                        SyncRunner.Session session = runner.session(account, PimDomain.MAIL);
+                        // One connection for the account's whole pass: the
+                        // drain, the walk and every marker the reader moved
+                        // go out on it rather than on one apiece.
+                        try (MailSession session = openMail(account)) {
+                            // NOTE: the outbox first, so a message sent a
+                            // moment ago is already in the sent mailbox by the
+                            // time the walk beside it lists one.
+                            try {
+                                sent += drainOutbox(account, session);
+                            } catch (Exception error) {
+                                Log.w("pimalaya", "outbox drain failed: " + account.email, error);
+                                if (failure == null) {
+                                    failure = error;
+                                }
+                            }
 
-                        // NOTE: the outbox first, so a message sent a moment
-                        // ago is already in the sent mailbox by the time the
-                        // walk beside it lists one.
-                        try {
-                            sent += drainOutbox(account, session);
-                        } catch (Exception error) {
-                            Log.w("pimalaya", "outbox drain failed: " + account.email, error);
+                            Exception error = fetchMail(account, session);
                             if (failure == null) {
                                 failure = error;
                             }
-                        }
-
-                        Exception error = fetchMail(account, session);
-                        if (failure == null) {
-                            failure = error;
+                        } catch (Exception error) {
+                            Log.w("pimalaya", "mail sync failed: " + account.email, error);
+                            if (failure == null) {
+                                failure = error;
+                            }
                         }
                     }
 
@@ -1059,25 +1083,63 @@ public class MainActivity extends Activity {
      * Hands over everything waiting in one account's outbox, on the
      * calling thread, answering how many went out.
      *
-     * <p>One at a time, and the row goes only once the submission has
-     * been accepted and the sent copy filed: a message the server refused
-     * stays in the outbox, which is what makes the outbox worth having
-     * over a send that fails and loses what was typed. The failure stops
-     * the drain rather than skipping to the next message, since the usual
-     * cause is that there is no network and the next one would fail too.
+     * <p>One at a time, in the append order the queue owes them, and the
+     * row goes only once the submission has been accepted: the message
+     * has left, so acknowledging it is what finishes the action (STORAGE
+     * section 15.5). A submission is therefore at-least-once, and a drain
+     * that dies between the handover and the acknowledgement sends the
+     * message twice, which is the trade against losing it.
+     *
+     * <p>A failure has two answers. A message the server refused for good
+     * is parked carrying what it said, and the drain carries on to the
+     * ones behind it: nothing will ever make that message acceptable, and
+     * leaving it queued would offer it again on every sync for ever.
+     * Anything else counts an attempt and stops the drain where it is,
+     * since the usual cause is that there is no network and the next
+     * message would fail too.
      */
-    private int drainOutbox(AccountEntry account, SyncRunner.Session session) throws Exception {
+    private int drainOutbox(AccountEntry account, MailSession session) throws Exception {
         int sent = 0;
         for (MailStore.Outgoing waiting : mail.outgoing(account.email)) {
-            session.call(server -> client.submitMessage(server, waiting.source));
-            mail.dropOutgoing(account.email, waiting.id);
+            try {
+                client.submitMessage(session, waiting.source);
+            } catch (SubmissionRefused refused) {
+                Log.w("pimalaya", "submission refused: " + account.email, refused);
+                mail.parkOutgoing(waiting.id, refused.getMessage());
+                continue;
+            } catch (Exception error) {
+                mail.retryOutgoing(waiting.id);
+                throw error;
+            }
+            mail.acknowledge(waiting.id);
             sent += 1;
         }
         return sent;
     }
 
-    /** How many messages are taken from the end of each mailbox. */
-    private static final int MAIL_PER_MAILBOX = 50;
+    /**
+     * Opens one account's mail connection, renewing its access token once
+     * if the server refuses the sign-in.
+     *
+     * <p>The refresh belongs here rather than around each verb, because
+     * the session <em>is</em> the sign-in: a token that expired is a
+     * connection that cannot be opened, and one already open outlives the
+     * token that opened it.
+     */
+    MailSession openMail(AccountEntry account) {
+        try {
+            return PimalayaClient.openMail(account.server(PimDomain.MAIL));
+        } catch (Exception refused) {
+            AccountCredential credential = account.credential(PimDomain.MAIL);
+            if (!SyncRunner.expiredToken(refused) || !credential.renewable()) {
+                throw refused instanceof RuntimeException
+                        ? (RuntimeException) refused
+                        : new IllegalStateException(refused);
+            }
+            return PimalayaClient.openMail(
+                    runner.refreshed(account, PimDomain.MAIL).server(PimDomain.MAIL));
+        }
+    }
 
     /** The stored accounts connected for one domain. */
     List<AccountEntry> accountsFor(PimDomain domain) {
@@ -1099,6 +1161,7 @@ public class MainActivity extends Activity {
      * calendar's objects, so this is one round trip per calendar.
      */
     void syncCalendars() {
+        syncDomain = R.string.domain_calendar;
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1139,28 +1202,30 @@ public class MainActivity extends Activity {
      * replacing is reconcile, which is what lets a staged marker or a
      * staged delete survive it.
      *
-     * <p>The whole pass sits inside one {@code call}, so an access token
-     * that expired part-way is refreshed and the pass runs again against
-     * the refreshed connection.
+     * <p>The session is the caller's, opened for the pass and closed with
+     * it, so the walk and every write the reconcile pushes share one
+     * connection.
      */
-    private Exception fetchMail(AccountEntry account, SyncRunner.Session session) {
+    private Exception fetchMail(AccountEntry account, MailSession session) {
         try {
-            session.call(
-                    server -> {
-                        MailEngine engine =
-                                new MailEngine(pimdir, client, server, accountIdOf(account.email));
-                        engine.progress = this::syncStep;
+            MailEngine engine =
+                    new MailEngine(pimdir, client, session, accountIdOf(account.email));
+            engine.progress = this::syncStep;
 
-                        syncTitle(account.email);
-                        List<Mailbox> mailboxes = engine.walk(MAIL_PER_MAILBOX);
-                        mail.replaceMailboxes(account.email, mailboxes);
+            // NOTE: the step beside the title, not after it. Listing the
+            // mailboxes is a round trip, and a dialog naming the account
+            // over a blank line for the length of one reads as a dialog
+            // that has not started.
+            syncTitle(account.email);
+            syncStep(PimdirEngine.Progress.STAGE_SERVER, 0);
 
-                        for (Mailbox mailbox : mailboxes) {
-                            syncTitle(mailbox.name);
-                            engine.sync(mail.collectionOf(account.email, mailbox.name));
-                        }
-                        return null;
-                    });
+            List<Mailbox> mailboxes = engine.mailboxes();
+            mail.replaceMailboxes(account.email, mailboxes);
+
+            for (Mailbox mailbox : mailboxes) {
+                syncTitle(mailbox.name);
+                engine.sync(mail.collectionOf(account.email, mailbox.name));
+            }
             return null;
         } catch (Exception error) {
             Log.w("pimalaya", "mail sync failed: " + account.email, error);
@@ -1176,45 +1241,52 @@ public class MainActivity extends Activity {
     private Exception fetchCalendars(AccountEntry account) {
         // NOTE: one session for the whole account, so the listing and every
         // event round after it share the token a refresh may have replaced
-        // part-way.
+        // part-way, and one transport under it, so they share its socket.
         SyncRunner.Session session = runner.session(account, PimDomain.CALENDAR);
-        try {
-            syncTitle(account.email);
-            events.replaceCalendars(
-                    account.email, session.call(server -> client.listCalendars(server)));
-        } catch (Exception error) {
-            Log.w("pimalaya", "calendar list failed: " + account.email, error);
-            return error;
-        }
-
-        Exception failure = null;
-        for (EventStore.StoredCalendar calendar : events.loadCalendars()) {
-            if (!calendar.accountEmail.equals(account.email)) {
-                continue;
-            }
+        try (Transport transport = new Transport()) {
             try {
-                syncTitle(calendar.name);
-                session.call(
-                        server -> {
-                            CalendarEngine engine =
-                                    new CalendarEngine(
-                                            pimdir, client, server, accountIdOf(account.email));
-                            engine.progress = this::syncStep;
-                            // NOTE: the listing is read here rather than inside
-                            // the enumerate yield, so a pass makes one request
-                            // per calendar however many rounds the merge needs.
-                            engine.sync(
-                                    calendar.id, client.listEvents(server, calendar.url));
-                            return null;
-                        });
+                // NOTE: as the mail pass does, and for the same reason: the
+                // calendar listing is a discovery walk, and it is the
+                // slowest round trip of the pass.
+                syncTitle(account.email);
+                syncStep(PimdirEngine.Progress.STAGE_SERVER, 0);
+                events.replaceCalendars(
+                        account.email,
+                        session.call(server -> client.listCalendars(transport, server)));
             } catch (Exception error) {
-                Log.w("pimalaya", "calendar sync failed: " + calendar.url, error);
-                if (failure == null) {
-                    failure = error;
+                Log.w("pimalaya", "calendar list failed: " + account.email, error);
+                return error;
+            }
+
+            Exception failure = null;
+            for (EventStore.StoredCalendar calendar : events.loadCalendars()) {
+                if (!calendar.accountEmail.equals(account.email)) {
+                    continue;
+                }
+                try {
+                    syncTitle(calendar.name);
+                    session.call(
+                            server -> {
+                                CalendarEngine engine =
+                                        new CalendarEngine(
+                                                pimdir,
+                                                client,
+                                                transport,
+                                                server,
+                                                accountIdOf(account.email));
+                                engine.progress = this::syncStep;
+                                engine.sync(calendar.id);
+                                return null;
+                            });
+                } catch (Exception error) {
+                    Log.w("pimalaya", "calendar sync failed: " + calendar.url, error);
+                    if (failure == null) {
+                        failure = error;
+                    }
                 }
             }
+            return failure;
         }
-        return failure;
     }
 
     /** The store id one account's collections are namespaced under. */
@@ -1241,7 +1313,7 @@ public class MainActivity extends Activity {
 
     /** A calendar driver that only stages, on the same terms. */
     CalendarEngine calendarEngine(String email) {
-        return new CalendarEngine(pimdir, client, null, accountIdOf(email));
+        return new CalendarEngine(pimdir, client, null, null, accountIdOf(email));
     }
 
     /**
@@ -1256,6 +1328,13 @@ public class MainActivity extends Activity {
      * not work rather than as one that only did a third of itself.
      */
     void syncConnected(AccountEntry account) {
+        // The first domain it covers, which is the one it lands on.
+        syncDomain =
+                account.covers(PimDomain.MAIL)
+                        ? R.string.domain_mail
+                        : account.covers(PimDomain.CONTACTS)
+                                ? R.string.domain_contacts
+                                : R.string.domain_calendar;
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1268,7 +1347,11 @@ public class MainActivity extends Activity {
 
                     Exception failure = null;
                     if (account.covers(PimDomain.MAIL)) {
-                        failure = fetchMail(account, runner.session(account, PimDomain.MAIL));
+                        try (MailSession session = openMail(account)) {
+                            failure = fetchMail(account, session);
+                        } catch (Exception error) {
+                            failure = error;
+                        }
                     }
                     if (account.covers(PimDomain.CALENDAR)) {
                         Exception error = fetchCalendars(account);
@@ -1310,6 +1393,7 @@ public class MainActivity extends Activity {
             return;
         }
 
+        syncDomain = R.string.domain_contacts;
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1344,6 +1428,7 @@ public class MainActivity extends Activity {
             return;
         }
 
+        syncDomain = R.string.domain_contacts;
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1468,7 +1553,7 @@ public class MainActivity extends Activity {
             // conflict. The toast is the tap's only visible outcome, so
             // without it the vanishing flag reads as a bug.
             try {
-                new OfflineEngine(base, pimdir, client, null, null)
+                new OfflineEngine(base, pimdir, client, null, null, null)
                         .mutateEdit(replica.book.url, handle, resolution.optString("vcard"));
             } catch (Exception error) {
                 showError(error, R.string.save_failed);

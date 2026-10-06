@@ -6,6 +6,13 @@
 //! current-user-principal, home-set, list) against a different collection
 //! type, so the discovery half is shared outright and only the two
 //! reports differ.
+//!
+//! The enumeration takes the whole collection rather than filtering it to
+//! VEVENT, as the old `calendar-query` did: a `sync-collection` has no
+//! component filter, and the app wanted the others anyway. The expander
+//! places a to-do and a journal entry on a day like anything else with a
+//! date, and the entry page edits all three; the filter was the one place
+//! that disagreed.
 
 use std::collections::BTreeSet;
 
@@ -19,10 +26,11 @@ use io_webdav::{
         },
         item::{
             CaldavItemEntry, create::CaldavItemCreate, delete::CaldavItemDelete,
-            list::CaldavItemList, update::CaldavItemUpdate,
+            multiget::CaldavItemMultiget, update::CaldavItemUpdate,
         },
     },
     rfc4918::WebdavAuth,
+    rfc6578::sync_collection::WebdavSyncDelta,
 };
 use url::Url;
 
@@ -30,10 +38,6 @@ use crate::{
     client::{Client, USER_AGENT},
     types::{BridgeError, Calendar, Event},
 };
-
-/// The VCALENDAR child the agenda reads. Journals and to-dos live in the
-/// same collections and would otherwise arrive as undated rows.
-const VEVENT_FILTER: &str = r#"<C:comp-filter name="VEVENT" />"#;
 
 impl<'a, 'local> Client<'a, 'local> {
     /// Walks current-user-principal -> calendar-home-set -> list,
@@ -83,17 +87,31 @@ impl<'a, 'local> Client<'a, 'local> {
 
     /// Lists the events of the calendar collection at `url`.
     ///
-    /// One `calendar-query` REPORT carries every event's `calendar-data`
-    /// back, so a whole calendar costs a single round trip and no
-    /// per-item GET.
-    pub fn list_caldav_events(
+    /// Answers hrefs and ETags alone, from the cursor the last pass
+    /// stored: what a pass needs to know is which events moved, and a
+    /// calendar that answered with every body would send five hundred of
+    /// them to report that none did.
+    pub fn sync_caldav_events(
         &mut self,
         url: &Url,
         credentials: &crate::types::Credentials,
+        sync_token: Option<&str>,
+    ) -> Result<Option<WebdavSyncDelta>, BridgeError> {
+        self.sync_dav_collection(url, &auth(credentials), sync_token)
+    }
+
+    /// Batch-fetches the events at the given resource names inside the
+    /// calendar collection at `url`, via REPORT `calendar-multiget`
+    /// (RFC 4791 section 7.9).
+    pub fn multiget_caldav_events(
+        &mut self,
+        url: &Url,
+        credentials: &crate::types::Credentials,
+        ids: &[&str],
     ) -> Result<Vec<Event>, BridgeError> {
         let auth = auth(credentials);
-        let coroutine = CaldavItemList::new(url, &auth, USER_AGENT, url.path(), VEVENT_FILTER);
-        let items: BTreeSet<CaldavItemEntry> = self.run(url, coroutine)?;
+        let coroutine = CaldavItemMultiget::new(url, &auth, USER_AGENT, url.path(), ids);
+        let items: Vec<CaldavItemEntry> = self.run(url, coroutine)?;
 
         Ok(items.into_iter().map(into_event).collect())
     }

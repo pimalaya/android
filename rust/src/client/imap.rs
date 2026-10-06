@@ -3,11 +3,15 @@
 //! io-imap's sans-io coroutines and the same Java transport the WebDAV
 //! side uses.
 //!
-//! Stateless per call, like the CalDAV side: one native call opens a
-//! connection, authenticates, does its work and drops it.
-//! What differs from WebDAV is that IMAP is a session rather than a
-//! request, so the whole account is walked in one call (connect once,
-//! list, then fetch every mailbox) instead of one call per collection.
+//! The session outlives the call that opened it ([`ImapState`]), so a
+//! pass connects once and every verb after it is a command rather than a
+//! login. That is what makes a per-mailbox enumerate affordable, and the
+//! enumerate is where the work went: a mailbox with a
+//! `(UIDVALIDITY, HIGHESTMODSEQ)` cursor on a QRESYNC server answers
+//! what moved, and envelopes are read for the UIDs a caller names rather
+//! than for a window of every mailbox, every pass.
+
+use core::num::{NonZeroU32, NonZeroU64};
 
 use io_imap::{
     codec::fragmentizer::Fragmentizer,
@@ -15,19 +19,22 @@ use io_imap::{
     rfc3501::{
         append::{ImapMessageAppend, ImapMessageAppendOptions},
         copy::{ImapMessageCopy, ImapMessageCopyOptions},
-        examine::{ImapMailboxExamine, ImapMailboxExamineOptions},
+        examine::{ExamineData, ImapMailboxExamine, ImapMailboxExamineOptions},
         fetch::{ImapMessageFetch, ImapMessageFetchOptions},
         greeting::{ImapGreetingGet, ImapGreetingGetOptions},
         list::ImapMailboxList,
         select::{ImapMailboxSelect, ImapMailboxSelectOptions},
         store::{ImapMessageStoreOptions, ImapMessageStoreSilent},
     },
+    rfc5161::enable::ImapExtensionEnable,
     rfc6851::r#move::{ImapMessageMove, ImapMessageMoveOptions},
     sasl::auth_plain::{ImapAuthPlain, ImapAuthPlainOptions},
     types::{
         IntoStatic,
         body::{Body, BodyStructure, Disposition},
-        core::IString,
+        command::SelectParameter,
+        core::{Atom, IString, Vec1},
+        extensions::enable::CapabilityEnable,
         fetch::{MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName},
         flag::{Flag, FlagFetch, FlagNameAttribute, StoreType},
         mailbox::{ListMailbox, Mailbox},
@@ -40,16 +47,25 @@ use url::Url;
 use crate::{
     client::Client,
     mail,
-    types::{BridgeError, Credentials, MailWalk, Mailbox as MailboxEntry, Message},
+    types::{BridgeError, Credentials, Mailbox as MailboxEntry, Message},
 };
 
 /// io-imap's own fragmentizer ceiling, 100 MiB per message.
 const MAX_MESSAGE_SIZE: u32 = 100 * 1024 * 1024;
 
-/// One IMAP session: the shared JNI client plus the per-connection
-/// fragmentizer and the URL its socket is keyed by.
-pub struct ImapSession<'a, 'b, 'local> {
-    client: &'a mut Client<'b, 'local>,
+/// Everything about an IMAP session that outlives one native call.
+///
+/// Held by the caller across calls and handed back with a fresh
+/// [`Client`] each time, which is what makes a connection last a whole
+/// pass instead of a command: a session is a conversation, so reusing
+/// the socket without reusing this would replay a greeting the server
+/// has already answered and block until the read timed out.
+///
+/// It deliberately holds no JNI reference. The environment and the
+/// transport belong to one call, so keeping either here would be keeping
+/// a pointer the JVM invalidates on return; the caller owns the transport
+/// and passes it back in, and nothing has to be registered or freed.
+pub struct ImapState {
     fragmentizer: Fragmentizer,
     url: String,
     /// What the server says it can do, read once at authentication.
@@ -61,16 +77,49 @@ pub struct ImapSession<'a, 'b, 'local> {
     /// deleted. Asking beats guessing, and CAPABILITY already came back
     /// with the authentication.
     capabilities: Vec<Capability<'static>>,
+    /// The mailbox currently selected on this connection.
+    ///
+    /// A run of commands on one mailbox then selects once rather than
+    /// per command, which is most of what holding the session buys on
+    /// top of the handshake it saves. Every path that selects records it
+    /// here, so a skipped select is always a select that already
+    /// happened; a read and a write select the mailbox differently, so
+    /// which of the two it was is recorded with it.
+    selected: Option<(String, Access)>,
 }
 
-impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
-    pub fn new(client: &'a mut Client<'b, 'local>, url: &Url) -> Self {
+/// How a mailbox was opened, since the two are not interchangeable.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Access {
+    /// EXAMINE: read-only, and it must not clear anyone's `\Recent`.
+    Read,
+    /// SELECT: what a STORE or a MOVE needs.
+    Write,
+}
+
+impl ImapState {
+    /// The state of a connection nothing has authenticated yet.
+    fn new(url: &Url) -> Self {
         Self {
-            client,
             fragmentizer: Fragmentizer::new(MAX_MESSAGE_SIZE),
             url: url.to_string(),
             capabilities: Vec::new(),
+            selected: None,
         }
+    }
+}
+
+/// One session bound to one native call: the state that outlives the
+/// call, and the JNI client that does not.
+pub struct ImapSession<'a, 'b, 'local> {
+    client: &'a mut Client<'b, 'local>,
+    state: &'a mut ImapState,
+}
+
+impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
+    /// Binds a held session to the call that is about to use it.
+    pub fn bind(client: &'a mut Client<'b, 'local>, state: &'a mut ImapState) -> Self {
+        Self { client, state }
     }
 
     /// Drives a coroutine to completion, servicing every read and write
@@ -83,14 +132,14 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         let mut arg: Option<Vec<u8>> = None;
 
         loop {
-            match coroutine.resume(&mut self.fragmentizer, arg.as_deref()) {
+            match coroutine.resume(&mut self.state.fragmentizer, arg.as_deref()) {
                 ImapCoroutineState::Complete(Ok(value)) => return Ok(value),
                 ImapCoroutineState::Complete(Err(err)) => return Err(err.to_string().into()),
                 ImapCoroutineState::Yielded(ImapYield::WantsRead) => {
-                    arg = Some(self.client.read(&self.url)?);
+                    arg = Some(self.client.read(&self.state.url)?);
                 }
                 ImapCoroutineState::Yielded(ImapYield::WantsWrite(bytes)) => {
-                    self.client.write(&self.url, &bytes)?;
+                    self.client.write(&self.state.url, &bytes)?;
                     arg = None;
                 }
             }
@@ -108,7 +157,7 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
             ensure_capabilities: true,
         }))?;
 
-        self.capabilities = self.run(ImapAuthPlain::new(
+        self.state.capabilities = self.run(ImapAuthPlain::new(
             None::<&str>,
             credentials.login,
             credentials.password,
@@ -119,7 +168,39 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
             },
         ))?;
 
+        // NOTE: RFC 7162 section 3.1 requires an ENABLE before the
+        // QRESYNC parameter may be used on a SELECT, and a server that
+        // never saw one answers the parameter `BAD invalid select
+        // modifier`. Sent once, here, because ENABLE is a property of the
+        // connection and the connection now lasts the pass.
+        if self.supports_qresync() {
+            let enabled = Vec1::try_from(vec![
+                CapabilityEnable::CondStore,
+                CapabilityEnable::from(
+                    Atom::try_from("QRESYNC").expect("`QRESYNC` is a valid IMAP atom"),
+                ),
+            ])
+            .expect("two capabilities are not none");
+
+            // A refused ENABLE costs the incremental round and nothing
+            // else, so it forgets the capability rather than failing the
+            // connection: an account that syncs slowly beats one that
+            // does not open. Every enumerate after this then takes the
+            // full round directly instead of asking once per mailbox.
+            if let Err(err) = self.run(ImapExtensionEnable::new(enabled)) {
+                log::warn!("QRESYNC not enabled, enumerating whole: {err}");
+                self.state
+                    .capabilities
+                    .retain(|capability| capability != &Capability::QResync);
+            }
+        }
+
         Ok(())
+    }
+
+    /// Whether the server advertises QRESYNC (RFC 7162).
+    fn supports_qresync(&self) -> bool {
+        self.state.capabilities.contains(&Capability::QResync)
     }
 
     /// LIST, as `(name, attributes)` pairs, the unselectable ones out.
@@ -155,60 +236,196 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
     /// clear anyone's `\Recent`. The window is taken off the end of the
     /// sequence set, since a merged inbox wants the newest mail and
     /// fetching a 200000-message mailbox whole is not an option.
-    pub fn fetch_envelopes(
+    ///
+    /// Incrementally where the server and the cursor allow it: a
+    /// `(UIDVALIDITY, HIGHESTMODSEQ)` pair against a QRESYNC server is a
+    /// `SELECT (QRESYNC ..)`, and the server streams the messages whose
+    /// flags moved and the UIDs that went. Anything else is a full round
+    /// over the window, which is what a first pass, a rebuilt handle
+    /// space and a server without the extension all get.
+    pub fn enumerate(
         &mut self,
         mailbox: &str,
+        cursor: Option<&str>,
         limit: u32,
-    ) -> Result<Vec<Message>, BridgeError> {
-        // NOTE: owned, so the coroutine outlives the borrowed name.
+    ) -> Result<Enumeration, BridgeError> {
+        if let Some((validity, modseq)) = cursor.and_then(decode_cursor)
+            && modseq > 0
+            && self.supports_qresync()
+            && let Some(validity) = NonZeroU32::new(validity)
+            && let Some(delta) = self.select_qresync(mailbox, validity, modseq)?
+        {
+            return Ok(delta);
+        }
+
+        // NOTE: always examined, cache or no cache: what this needs from
+        // the command is how many messages the mailbox holds, which is
+        // the one thing a skipped select cannot tell it.
+        let data = self.examine(mailbox)?;
+        let checkpoint = encode_cursor(
+            data.uid_validity.map(NonZeroU32::get).unwrap_or(0),
+            data.highest_mod_seq.unwrap_or(0),
+        );
+
+        let exists = data.exists.unwrap_or(0);
+        if exists == 0 {
+            return Ok(Enumeration {
+                items: Vec::new(),
+                vanished: Vec::new(),
+                complete: true,
+                checkpoint,
+            });
+        }
+
+        let first = exists.saturating_sub(limit).max(1);
+        let items = self.fetch_spine(&format!("{first}:{exists}"), false)?;
+
+        Ok(Enumeration {
+            items,
+            vanished: Vec::new(),
+            complete: true,
+            checkpoint,
+        })
+    }
+
+    /// A QRESYNC `SELECT (QRESYNC (uidvalidity modseq))`, or [`None`]
+    /// when the mailbox's handle space was rebuilt under the cursor and
+    /// a full round is owed instead.
+    fn select_qresync(
+        &mut self,
+        mailbox: &str,
+        validity: NonZeroU32,
+        modseq: u64,
+    ) -> Result<Option<Enumeration>, BridgeError> {
+        let Some(mod_sequence_value) = NonZeroU64::new(modseq) else {
+            return Ok(None);
+        };
         let name: Mailbox<'static> = mailbox
             .to_string()
             .try_into()
             .map_err(|_| format!("Invalid mailbox name `{mailbox}`"))?;
 
-        let data = self.run(ImapMailboxExamine::new(
+        self.state.selected = None;
+        let selected = self.run(ImapMailboxSelect::new(
             name,
-            ImapMailboxExamineOptions::default(),
-        ))?;
+            ImapMailboxSelectOptions {
+                parameters: vec![SelectParameter::QResync {
+                    uid_validity: validity,
+                    mod_sequence_value,
+                    known_uids: None,
+                    seq_match_data: None,
+                }],
+            },
+        ));
 
-        let exists = data.exists.unwrap_or(0);
-        if exists == 0 {
-            return Ok(Vec::new());
+        // NOTE: a server that advertised QRESYNC and then refuses the
+        // parameter owes the caller a full round, not a failed pass. The
+        // capability and the ENABLE are what should make this
+        // unreachable, so it is logged rather than swallowed: reaching it
+        // means a server said one thing and did another.
+        let data = match selected {
+            Ok(data) => data,
+            Err(err) => {
+                log::warn!("QRESYNC select refused for {mailbox}, enumerating whole: {err}");
+                return Ok(None);
+            }
+        };
+        self.state.selected = Some((mailbox.into(), Access::Write));
+
+        // A new UIDVALIDITY means every UID this side holds names another
+        // message now (RFC 3501 2.3.1.1), so the delta describes a
+        // mailbox that no longer exists and the caller owes a full round.
+        let validity_now = data.uid_validity.map(NonZeroU32::get).unwrap_or(0);
+        if validity_now != validity.get() {
+            return Ok(None);
         }
 
-        let first = exists.saturating_sub(limit).max(1);
-        let range = format!("{first}:{exists}");
-        let sequence_set: SequenceSet = range
-            .as_str()
-            .try_into()
-            .map_err(|_| format!("Invalid sequence set `{range}`"))?;
+        Ok(Some(Enumeration {
+            items: data
+                .changed
+                .iter()
+                .filter_map(|fetch| spine_entry(&fetch.items.clone().into_inner()))
+                .collect(),
+            vanished: data
+                .vanished_earlier
+                .iter()
+                .map(|uid| uid.get().to_string())
+                .collect(),
+            complete: false,
+            checkpoint: encode_cursor(validity_now, data.highest_mod_seq.unwrap_or(modseq)),
+        }))
+    }
 
-        // NOTE: BODYSTRUCTURE is the one structural item a listing asks
-        // for, and only because there is no other way to know a message
-        // carries an attachment: IMAP has no flag for it, unlike JMAP's
-        // hasAttachment. It costs a MIME tree per message rather than a
-        // body, which is what keeps this a spine fetch.
+    /// The envelopes of the named UIDs, and of nothing else.
+    ///
+    /// What the engine's fetch yield asks for, rather than a window: a
+    /// pass that found one new message reads one envelope. `BODYSTRUCTURE`
+    /// rides along because IMAP has no attachment flag, unlike JMAP's
+    /// `hasAttachment`, and it is affordable here for the same reason the
+    /// fetch is: it is asked for a handful of messages rather than for
+    /// every message of every mailbox, every pass.
+    pub fn fetch_envelopes(
+        &mut self,
+        mailbox: &str,
+        uids: &[&str],
+    ) -> Result<Vec<Message>, BridgeError> {
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !self.opened(mailbox) {
+            self.examine(mailbox)?;
+        }
+
+        let set = uids.join(",");
         let items = MacroOrMessageDataItemNames::MessageDataItemNames(vec![
             MessageDataItemName::Uid,
             MessageDataItemName::Envelope,
             MessageDataItemName::Flags,
             MessageDataItemName::BodyStructure,
         ]);
+        let sequence_set: SequenceSet = set
+            .as_str()
+            .try_into()
+            .map_err(|_| format!("Invalid sequence set `{set}`"))?;
 
         let fetched = self.run(ImapMessageFetch::new(
             sequence_set,
             items,
-            ImapMessageFetchOptions::default(),
+            ImapMessageFetchOptions {
+                uid: true,
+                ..Default::default()
+            },
         ))?;
 
-        // NOTE: returned in sequence order, which is roughly arrival
-        // order. Ordering the merged list is the store's job, since it
-        // sorts across accounts and needs the parsed date to do it; a
-        // sort here would be on the raw RFC 5322 text, which is not
-        // chronological.
         Ok(fetched
             .into_values()
             .map(|items| message(mailbox, items.into_inner()))
+            .collect())
+    }
+
+    /// A UID-and-flags spine over one sequence set: what an enumerate
+    /// needs and nothing more.
+    fn fetch_spine(&mut self, set: &str, uid: bool) -> Result<Vec<SpineEntry>, BridgeError> {
+        let sequence_set: SequenceSet = set
+            .try_into()
+            .map_err(|_| format!("Invalid sequence set `{set}`"))?;
+        let items = MacroOrMessageDataItemNames::MessageDataItemNames(vec![
+            MessageDataItemName::Uid,
+            MessageDataItemName::Flags,
+        ]);
+
+        let fetched = self.run(ImapMessageFetch::new(
+            sequence_set,
+            items,
+            ImapMessageFetchOptions {
+                uid,
+                ..Default::default()
+            },
+        ))?;
+
+        Ok(fetched
+            .into_values()
+            .filter_map(|items| spine_entry(&items.into_inner()))
             .collect())
     }
 }
@@ -221,15 +438,12 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
 /// fetch is the wrong place to make it silently.
 impl ImapSession<'_, '_, '_> {
     pub fn fetch_raw(&mut self, mailbox: &str, uid: &str) -> Result<Vec<u8>, BridgeError> {
-        let name: Mailbox<'static> = mailbox
-            .to_string()
-            .try_into()
-            .map_err(|_| format!("Invalid mailbox name `{mailbox}`"))?;
-
-        self.run(ImapMailboxExamine::new(
-            name,
-            ImapMailboxExamineOptions::default(),
-        ))?;
+        // Whichever way the mailbox is already open: both a SELECT and an
+        // EXAMINE allow a FETCH, so reading one message after another in
+        // the same mailbox opens it once.
+        if !self.opened(mailbox) {
+            self.examine(mailbox)?;
+        }
 
         let sequence_set: SequenceSet = uid
             .try_into()
@@ -355,7 +569,7 @@ impl ImapSession<'_, '_, '_> {
             .try_into()
             .map_err(|_| format!("Invalid mailbox name `{target}`"))?;
 
-        if self.capabilities.contains(&Capability::Move) {
+        if self.state.capabilities.contains(&Capability::Move) {
             self.run(ImapMessageMove::new(
                 uids(uid)?,
                 name,
@@ -408,18 +622,57 @@ impl ImapSession<'_, '_, '_> {
         Ok(Some(sent))
     }
 
-    /// SELECT one mailbox for writing.
-    fn select(&mut self, mailbox: &str) -> Result<(), BridgeError> {
+    /// Whether the mailbox is already open, either way: both a SELECT and
+    /// an EXAMINE allow a read.
+    fn opened(&self, mailbox: &str) -> bool {
+        matches!(&self.state.selected, Some((open, _)) if open == mailbox)
+    }
+
+    /// EXAMINE one mailbox, whether or not it is already open, and answer
+    /// what the server said about it.
+    ///
+    /// Read-only, and deliberately: a listing must not clear anyone's
+    /// `\Recent`, which is what a SELECT of the same mailbox would do.
+    fn examine(&mut self, mailbox: &str) -> Result<ExamineData, BridgeError> {
+        // NOTE: owned, so the coroutine outlives the borrowed name.
         let name: Mailbox<'static> = mailbox
             .to_string()
             .try_into()
             .map_err(|_| format!("Invalid mailbox name `{mailbox}`"))?;
 
+        self.state.selected = None;
+        let data = self.run(ImapMailboxExamine::new(
+            name,
+            ImapMailboxExamineOptions::default(),
+        ))?;
+        self.state.selected = Some((mailbox.into(), Access::Read));
+
+        Ok(data)
+    }
+
+    /// SELECT one mailbox for writing, unless it already is.
+    fn select(&mut self, mailbox: &str) -> Result<(), BridgeError> {
+        if self.state.selected.as_ref() == Some(&(mailbox.into(), Access::Write)) {
+            return Ok(());
+        }
+
+        let name: Mailbox<'static> = mailbox
+            .to_string()
+            .try_into()
+            .map_err(|_| format!("Invalid mailbox name `{mailbox}`"))?;
+
+        // NOTE: recorded before the command rather than after it. A
+        // select that failed part-way leaves the connection on a mailbox
+        // nobody can name, and claiming the old one is still open would
+        // send the next command somewhere it was never meant to go.
+        self.state.selected = None;
         self.run(ImapMailboxSelect::new(
             name,
             ImapMailboxSelectOptions::default(),
-        ))
-        .map(|_| ())
+        ))?;
+        self.state.selected = Some((mailbox.into(), Access::Write));
+
+        Ok(())
     }
 }
 
@@ -594,51 +847,44 @@ fn text_of(value: &IString) -> String {
 /// from the same bytes once the store holds them, which is what makes
 /// opening a message a second time cost nothing.
 pub fn fetch_source(
-    client: &mut Client<'_, '_>,
-    url: &Url,
-    credentials: &Credentials,
+    session: &mut ImapSession<'_, '_, '_>,
     mailbox: &str,
     id: &str,
 ) -> Result<Vec<u8>, BridgeError> {
-    let mut session = ImapSession::new(client, url);
-    session.connect(credentials)?;
-
     session.fetch_raw(mailbox, id)
 }
 
-/// Walks a whole account: connect once, list the mailboxes with the
-/// roles their attributes mark, then take the newest `limit` messages of
-/// each.
-pub fn sync_account(
+/// Opens a session on `url` and authenticates it, for a caller that will
+/// hold it across calls.
+pub fn open(
     client: &mut Client<'_, '_>,
     url: &Url,
     credentials: &Credentials,
-    limit: u32,
-) -> Result<MailWalk, BridgeError> {
-    let mut session = ImapSession::new(client, url);
-    session.connect(credentials)?;
+) -> Result<ImapState, BridgeError> {
+    let mut state = ImapState::new(url);
+    ImapSession::bind(client, &mut state).connect(credentials)?;
 
-    let listed = session.list()?;
-    let mut mailboxes = Vec::with_capacity(listed.len());
-    let mut messages = Vec::new();
+    Ok(state)
+}
 
-    for (name, attributes) in listed {
-        // NOTE: one unreadable mailbox (a shared folder the account
-        // cannot EXAMINE) must not fail the whole account.
-        match session.fetch_envelopes(&name, limit) {
-            Ok(found) => messages.extend(found),
-            Err(err) => log::warn!("skip mailbox {name}: {err}"),
-        }
-        mailboxes.push(MailboxEntry {
+/// The account's mailboxes, with the roles their attributes mark.
+///
+/// The roster and nothing else. It used to take a window of every
+/// mailbox with it, because every native call was a connection and a
+/// per-mailbox verb would have been a per-mailbox login; a session lasts
+/// the pass now, so each mailbox is enumerated when its turn comes and
+/// only what changed is read.
+pub fn list_mailboxes(
+    session: &mut ImapSession<'_, '_, '_>,
+) -> Result<Vec<MailboxEntry>, BridgeError> {
+    Ok(session
+        .list()?
+        .into_iter()
+        .map(|(name, attributes)| MailboxEntry {
             role: role_of(&attributes),
             name,
-        });
-    }
-
-    Ok(MailWalk {
-        mailboxes,
-        messages,
-    })
+        })
+        .collect())
 }
 
 /// The role a mailbox's RFC 6154 attributes give it, of the one a write
@@ -714,4 +960,66 @@ mod tests {
         assert!(attaches(&part(None, Some("attachment"))));
         assert!(attaches(&part(Some("invoice.pdf"), Some("ATTACHMENT"))));
     }
+}
+
+/// One enumerated mailbox: what moved, what went, and where the next
+/// round resumes.
+pub struct Enumeration {
+    pub items: Vec<SpineEntry>,
+    /// UIDs the server reported expunged since the cursor.
+    pub vanished: Vec<String>,
+    /// True when the round listed the whole window rather than a delta,
+    /// so the caller may retire what it did not mention.
+    pub complete: bool,
+    /// The `(UIDVALIDITY, HIGHESTMODSEQ)` pair the next round resumes
+    /// from, opaque to everyone above.
+    pub checkpoint: String,
+}
+
+/// One member of an enumerated mailbox: its UID and its markers.
+pub struct SpineEntry {
+    pub id: String,
+    pub flags: Vec<String>,
+}
+
+/// One FETCH response as the spine entry it stands for; [`None`] when it
+/// carried no UID, which is nothing this can address.
+fn spine_entry(items: &[MessageDataItem<'static>]) -> Option<SpineEntry> {
+    let mut id = None;
+    let mut flags = Vec::new();
+
+    for item in items {
+        match item {
+            MessageDataItem::Uid(uid) => id = Some(uid.get().to_string()),
+            MessageDataItem::Flags(fetched) => {
+                flags = fetched
+                    .iter()
+                    .filter_map(|flag| match flag {
+                        FlagFetch::Flag(flag) => Some(flag.to_string()),
+                        _ => None,
+                    })
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+
+    Some(SpineEntry { id: id?, flags })
+}
+
+/// The cursor a mailbox resumes from, as the two numbers it is.
+///
+/// Text rather than bytes because the store keeps a checkpoint as text,
+/// and two decimal numbers behind a colon read the same in a log as they
+/// do in the column.
+fn encode_cursor(uid_validity: u32, highest_mod_seq: u64) -> String {
+    format!("{uid_validity}:{highest_mod_seq}")
+}
+
+/// The inverse of [`encode_cursor`]; [`None`] for anything it did not
+/// write, which is what a store written by an earlier version holds.
+fn decode_cursor(cursor: &str) -> Option<(u32, u64)> {
+    let (validity, modseq) = cursor.split_once(':')?;
+
+    Some((validity.parse().ok()?, modseq.parse().ok()?))
 }

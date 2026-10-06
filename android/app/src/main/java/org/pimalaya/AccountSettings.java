@@ -103,6 +103,8 @@ final class AccountSettings {
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT);
 
+        addSubmission(content, rowParams);
+
         boolean anyEnabled = false;
         for (BookSettings staged : bookSettings.values()) {
             anyEnabled |= staged.enabled;
@@ -300,6 +302,101 @@ final class AccountSettings {
         // The subscription switches move what the contacts root shows.
         host.reloadContacts();
         leave();
+    }
+
+    /**
+     * Where this account sends, and a way to change it.
+     *
+     * <p>The one setting on this screen an account can be missing
+     * outright: a mail account connected before submission was asked
+     * about, or one whose address published nothing to send through, has
+     * no sender and no way to become one. Without this the repair is
+     * deleting the account and hoping discovery goes differently.
+     *
+     * <p>Committed when the dialog closes rather than staged for the
+     * FAB, which commits the addressbook switches: this is one endpoint,
+     * it is entered and it is done, and holding it back would make the
+     * screen say something the account does not.
+     */
+    private void addSubmission(LinearLayout content, LinearLayout.LayoutParams rowParams) {
+        AccountEntry account = host.accountFor(settingsEmail);
+        if (account == null || !account.covers(PimDomain.MAIL)) {
+            return;
+        }
+
+        String current = account.server(PimDomain.MAIL).submitUrl;
+        String value =
+                current == null || current.isEmpty()
+                        ? host.getString(R.string.account_send_none)
+                        : hostOf(current);
+
+        TextView row = new TextView(host);
+        row.setText(host.getString(R.string.account_send, value));
+        row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        row.setTextColor(host.resolveColor(android.R.attr.textColorPrimary));
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(host.dp(48));
+        row.setPadding(host.dp(16), 0, host.dp(16), 0);
+        row.setOnClickListener(view -> promptSubmission(current));
+        content.addView(row, rowParams);
+
+        View line = new View(host);
+        line.setBackgroundColor(host.getColor(R.color.surface));
+        LinearLayout.LayoutParams lineParams =
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, host.dp(1));
+        lineParams.setMargins(0, host.dp(12), 0, host.dp(12));
+        content.addView(line, lineParams);
+    }
+
+    /**
+     * Asks for the server this account sends through, emptied to send
+     * through none.
+     *
+     * <p>A host and a port, port 465 when none is typed, implicit TLS
+     * either way: the same endpoint the advanced setup takes, for the
+     * same reason, which is that this client has no STARTTLS step.
+     */
+    private void promptSubmission(String current) {
+        String email = settingsEmail;
+        android.widget.EditText field =
+                host.ui.field(R.string.manual_submit_server, current == null ? "" : hostOf(current));
+
+        LinearLayout fields = new LinearLayout(host);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(host.dp(24), host.dp(8), host.dp(24), 0);
+        fields.addView(field);
+
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.send_mail)
+                .setMessage(R.string.manual_submit_message)
+                .setView(fields)
+                .setPositiveButton(
+                        R.string.password_submit,
+                        (dialog, which) -> {
+                            String entered = field.getText().toString().trim();
+                            host.store.submitThrough(
+                                    email, entered.isEmpty() ? null : submitUrl(entered));
+                            renderAccountSettings();
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** What was typed, as the implicit-TLS endpoint a submission opens. */
+    private static String submitUrl(String entered) {
+        if (entered.contains("://")) {
+            return entered;
+        }
+        return entered.contains(":") ? "smtps://" + entered : "smtps://" + entered + ":465";
+    }
+
+    /** The host part of an endpoint, the endpoint itself when it has none. */
+    private static String hostOf(String url) {
+        try {
+            return new java.net.URL(url.replaceFirst("^smtps://", "https://")).getHost();
+        } catch (Exception error) {
+            return url;
+        }
     }
 
     /** Leaves the settings screen, landing on the still-open drawer. */

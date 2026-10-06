@@ -16,6 +16,7 @@ import org.json.JSONObject;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.OauthSession;
 import org.pimalaya.client.OauthTokens;
+import org.pimalaya.client.Transport;
 import org.pimalaya.client.ServerMetadata;
 
 /**
@@ -355,7 +356,10 @@ final class OauthFlow {
         host.io.execute(
                 () -> {
                     try {
-                        ServerMetadata metadata = host.client.oauthServerMetadata(issuer);
+                        ServerMetadata metadata;
+                        try (Transport transport = new Transport()) {
+                            metadata = host.client.oauthServerMetadata(transport, issuer);
+                        }
                         if (metadata.authorizationEndpoint == null
                                 || metadata.tokenEndpoint == null) {
                             throw new IllegalStateException(
@@ -390,12 +394,16 @@ final class OauthFlow {
                         // the wrong domain's puts the wrong thing on the
                         // consent screen.
                         String scope = metadata.domainScope(domains);
-                        String clientId =
-                                host.client.oauthRegisterClient(
-                                        metadata.registrationEndpoint,
-                                        Oauth.REDIRECT_URI,
-                                        host.getString(R.string.app_name),
-                                        scope);
+                        String clientId;
+                        try (Transport transport = new Transport()) {
+                            clientId =
+                                    host.client.oauthRegisterClient(
+                                            transport,
+                                            metadata.registrationEndpoint,
+                                            Oauth.REDIRECT_URI,
+                                            host.getString(R.string.app_name),
+                                            scope);
+                        }
                         Log.d(
                                 "pimalaya",
                                 "issuer grant: client "

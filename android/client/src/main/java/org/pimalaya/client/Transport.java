@@ -16,14 +16,24 @@ import javax.net.ssl.SSLSocketFactory;
  * URL-keyed pool of sockets for the Rust bridge. The native driver calls
  * {@link #read} / {@link #write} by name on every yield, passing the
  * endpoint URL it wants to talk to; the pool lazily opens one connection
- * per origin (scheme, host, port) and reuses it for the rest of the
- * call. A {@code tcp} (DNS resolver) or {@code http} URL gets a plain
- * socket, an {@code https} URL a TLS socket validated by the platform
- * trust store.
+ * per origin (scheme, host, port) and reuses it for as long as the
+ * transport is held. A {@code tcp} (DNS resolver) or {@code http} URL
+ * gets a plain socket, an {@code https} URL a TLS socket validated by the
+ * platform trust store.
  *
- * <p>Not thread-safe: one {@code Transport} serves one native call.
+ * <p>How long it is held is the whole of what it costs. A sync pass that
+ * opened one per verb paid a connect, a TLS handshake and, over IMAP, an
+ * authentication to carry each command; one held for the pass pays them
+ * once. The sockets are the cheap half of that on IMAP, where the session
+ * above them has to last too ({@link MailSession}); on the HTTP backends
+ * they are the whole of it, a request carrying its own state.
+ *
+ * <p>Not thread-safe, and that is the whole of its contract: one
+ * transport serves one caller at a time. It is held for as long as the
+ * caller wants its sockets kept, which is a whole sync pass rather than
+ * one call, and a fan-out gives each worker its own rather than sharing.
  */
-final class Transport {
+public final class Transport implements AutoCloseable {
     private static final int CONNECT_TIMEOUT_MS = 10_000;
     private static final int READ_TIMEOUT_MS = 30_000;
 

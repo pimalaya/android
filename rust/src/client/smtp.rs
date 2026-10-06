@@ -10,12 +10,15 @@
 //! it were implicit would hand a message over in the clear rather than
 //! fail.
 
+use core::fmt::{Display, Formatter, Result as FmtResult};
+
 use io_smtp::{
     coroutine::{SmtpCoroutine, SmtpCoroutineState, SmtpYield},
-    message::SmtpMessageSend,
+    message::{SmtpMessageSend, SmtpMessageSendError},
     rfc5321::{
         SmtpDomain, SmtpEhloDomain, SmtpForwardPath, SmtpLocalPart, SmtpMailbox, SmtpReversePath,
-        ehlo::SmtpEhlo, greeting::SmtpGreetingGet, quit::SmtpQuit,
+        data::SmtpDataError, ehlo::SmtpEhlo, greeting::SmtpGreetingGet, mail::SmtpMailError,
+        quit::SmtpQuit, rcpt::SmtpRcptError,
     },
     sasl::auth_plain::{SmtpAuthPlain, SmtpAuthPlainOptions},
 };
@@ -102,25 +105,107 @@ impl<'a, 'b, 'local> SmtpSession<'a, 'b, 'local> {
     /// The envelope is the composition's, not the headers': a blind copy
     /// is a recipient the headers deliberately do not name, so reading
     /// the recipients back off the message would drop it.
-    fn submit(&mut self, composed: &Composed) -> Result<(), BridgeError> {
-        let sender = mailbox(&composed.sender)?;
+    ///
+    /// The loop is written out here rather than run through [`Self::run`]
+    /// because this is the one exchange whose failure has to survive
+    /// typed. The queue has two answers for a failed action, park and
+    /// retry, and a string cannot be asked which one it is.
+    fn submit(&mut self, composed: &Composed) -> Result<(), SmtpSendError> {
+        let sender = mailbox(&composed.sender).map_err(SmtpSendError::transient)?;
+
         let mut recipients = Vec::with_capacity(composed.recipients.len());
         for recipient in &composed.recipients {
-            recipients.push(SmtpForwardPath::from(mailbox(recipient)?));
+            let recipient = mailbox(recipient).map_err(SmtpSendError::transient)?;
+            recipients.push(SmtpForwardPath::from(recipient));
         }
 
-        self.run(SmtpMessageSend::new(
+        let mut send = SmtpMessageSend::new(
             SmtpReversePath::from(sender),
             recipients,
             composed.message.clone(),
-        ))?;
+        );
+        let mut arg: Option<Vec<u8>> = None;
+
+        loop {
+            match send.resume(arg.as_deref()) {
+                SmtpCoroutineState::Complete(Ok(_)) => break,
+                SmtpCoroutineState::Complete(Err(err)) => return Err(refusal(err)),
+                SmtpCoroutineState::Yielded(SmtpYield::WantsRead) => {
+                    let read = self.client.read(&self.url);
+                    arg = Some(read.map_err(SmtpSendError::transient)?);
+                }
+                SmtpCoroutineState::Yielded(SmtpYield::WantsWrite(bytes)) => {
+                    self.client
+                        .write(&self.url, &bytes)
+                        .map_err(SmtpSendError::transient)?;
+                    arg = None;
+                }
+            }
+        }
 
         // NOTE: QUIT rather than dropping the socket. A server that is
         // never told the session ended keeps it open until its own
         // timeout, and the transport pools by origin, so the next send
         // of the same run would meet a connection the server has half
         // forgotten.
-        self.run(SmtpQuit::new()).map(|_| ())
+        self.run(SmtpQuit::new())
+            .map(|_| ())
+            .map_err(SmtpSendError::transient)
+    }
+}
+
+/// Why one submission failed, in the only terms the outbox cares about.
+///
+/// The queue has two answers for a failed action, and this is what picks
+/// between them: a message the server refused is parked carrying what it
+/// said, and everything else stays pending for the drain that follows.
+#[derive(Debug)]
+pub enum SmtpSendError {
+    /// The server refused this message, and would refuse it again.
+    Refused(String),
+    /// Anything else: no network, TLS, authentication, a 4yz reply.
+    Transient(String),
+}
+
+impl SmtpSendError {
+    /// Whether another attempt would only earn a second refusal.
+    pub fn is_permanent(&self) -> bool {
+        matches!(self, Self::Refused(_))
+    }
+
+    fn transient(err: impl Display) -> Self {
+        Self::Transient(err.to_string())
+    }
+}
+
+impl Display for SmtpSendError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
+        match self {
+            Self::Refused(message) | Self::Transient(message) => formatter.write_str(message),
+        }
+    }
+}
+
+/// One send failure as the queue reads it.
+///
+/// A 5yz reply is the server's final word on this message and a 4yz one
+/// asks for the same message later (RFC 5321 section 4.2.1), which is
+/// exactly the difference between parking the action and leaving it
+/// pending. Anything with no reply code at all never reached a verdict,
+/// so it is the environment's failure and retries.
+fn refusal(err: SmtpMessageSendError) -> SmtpSendError {
+    let code = match &err {
+        SmtpMessageSendError::MailFrom(SmtpMailError::Rejected { code, .. })
+        | SmtpMessageSendError::RcptTo(SmtpRcptError::Rejected { code, .. })
+        | SmtpMessageSendError::Data(SmtpDataError::CommandRejected { code, .. })
+        | SmtpMessageSendError::Data(SmtpDataError::BodyRejected { code, .. }) => *code,
+        _ => 0,
+    };
+
+    if (500..600).contains(&code) {
+        SmtpSendError::Refused(err.to_string())
+    } else {
+        SmtpSendError::Transient(err.to_string())
     }
 }
 
@@ -148,8 +233,56 @@ pub fn send(
     url: &Url,
     credentials: &Credentials,
     composed: &Composed,
-) -> Result<(), BridgeError> {
+) -> Result<(), SmtpSendError> {
     let mut session = SmtpSession::new(client, url);
-    session.connect(credentials)?;
+    session
+        .connect(credentials)
+        .map_err(SmtpSendError::transient)?;
     session.submit(composed)
+}
+
+#[cfg(test)]
+mod tests {
+    use io_smtp::{
+        message::SmtpMessageSendError,
+        rfc5321::{data::SmtpDataError, mail::SmtpMailError, rcpt::SmtpRcptError},
+    };
+
+    use super::refusal;
+
+    #[test]
+    fn a_5yz_reply_is_the_servers_last_word() {
+        let err = SmtpMessageSendError::RcptTo(SmtpRcptError::Rejected {
+            code: 550,
+            message: "No such recipient".into(),
+        });
+
+        assert!(refusal(err).is_permanent(), "expected a refusal");
+    }
+
+    #[test]
+    fn a_4yz_reply_asks_for_the_same_message_later() {
+        let err = SmtpMessageSendError::MailFrom(SmtpMailError::Rejected {
+            code: 450,
+            message: "Mailbox busy".into(),
+        });
+
+        assert!(
+            !refusal(err).is_permanent(),
+            "a temporary reply keeps the message queued"
+        );
+    }
+
+    #[test]
+    fn a_rejected_body_is_read_the_same_way_as_a_rejected_command() {
+        let err = SmtpMessageSendError::Data(SmtpDataError::BodyRejected {
+            code: 552,
+            message: "Message too large".into(),
+        });
+
+        assert!(
+            refusal(err).is_permanent(),
+            "the verdict is the reply code, whichever step earned it"
+        );
+    }
 }

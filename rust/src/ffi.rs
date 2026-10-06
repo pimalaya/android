@@ -20,6 +20,7 @@ mod oauth;
 mod offline;
 mod pimdir;
 mod project;
+pub(crate) mod session;
 
 use jni::{Env, objects::JString};
 use serde_json::{Value, from_str, to_string};

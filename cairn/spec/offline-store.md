@@ -149,8 +149,84 @@ Every action the reader takes in any domain SHALL be applied to the store alone 
 - WHEN the sync pushes it
 - THEN the sync reports the refusal, the write staying staged
 
+### Requirement: A pass asks what changed
+Every domain SHALL enumerate a collection from the cursor its last pass stored, and SHALL report the round as incomplete so nothing it did not mention is retired. A collection with no cursor, or one whose cursor the server rejects, SHALL be enumerated whole. A body SHALL be read only for a member the merge asked about.
+
+#### Scenario: A calendar nothing touched
+- GIVEN a calendar synced once
+- WHEN it is synced again with nothing changed
+- THEN one REPORT carries the answer and no event body is read
+
+#### Scenario: A mailbox nothing touched
+- GIVEN a mailbox synced once against a QRESYNC server
+- WHEN it is synced again with nothing changed
+- THEN the select carries the answer and no envelope is fetched
+
+#### Scenario: One member changed
+- GIVEN a collection of five hundred members, one of them edited remotely
+- WHEN it is synced
+- THEN one body is read
+
+#### Scenario: A cursor the server rejects
+- GIVEN a stored cursor the server no longer accepts
+- WHEN the collection is enumerated
+- THEN the round falls back to a complete one and stores a fresh cursor
+
+### Requirement: A pass opens its connections once
+A sync pass SHALL open its connections when it starts and close them when it ends, and every verb it runs SHALL use them. It SHALL NOT open a connection per verb. A fan-out SHALL give each worker its own, a connection serving one caller at a time.
+
+#### Scenario: A mail pass with changes to push
+- GIVEN an account with three staged markers
+- WHEN the mailbox is synced
+- THEN one session carries the walk and all three writes
+
+#### Scenario: A calendar pass
+- GIVEN an account with three calendars
+- WHEN the agenda is refreshed
+- THEN one transport carries the calendar listing, every event listing and every write
+
+#### Scenario: A fan-out
+- GIVEN a push the contacts driver runs over several workers
+- WHEN it runs
+- THEN each worker has its own connection, none of them shared, and the round costs as many as there are workers
+
+### Requirement: A mail session outlives the call that opened it
+The bridge SHALL hold an IMAP session across native calls, connected and authenticated once, addressed by a handle the caller keeps and frees. Nothing on the bridge side SHALL hold a JNI reference between calls: the caller owns the transport and passes it back on every call. A run of commands on one mailbox SHALL select it once.
+
+#### Scenario: A second command on one session
+- GIVEN an open session
+- WHEN a second verb runs on it
+- THEN it sends its command without a greeting or an authentication
+
+#### Scenario: A handle the caller has freed
+- GIVEN a session that was closed
+- WHEN a verb names its handle
+- THEN it is refused rather than followed
+
+### Requirement: A connection the server dropped is reopened once
+An idempotent verb failing on a held session SHALL reopen it and run once more, and SHALL report the failure only if that fails too. A server idle timeout, a rebound NAT and a walk from wifi to cellular all end a connection under the app, so a held one is a hint and never a promise.
+
+Submitting a message SHALL NOT be retried: a submission that was accepted and then failed to file its copy is indistinguishable from one that never went, and running it again would send the message twice. Its failure SHALL leave the message in the outbox.
+
+#### Scenario: An idle timeout
+- GIVEN a session the server has since closed
+- WHEN the next marker is written on it
+- THEN the session is reopened and the write succeeds
+
+#### Scenario: The reopen fails too
+- GIVEN no network at all
+- WHEN a verb runs on a held session
+- THEN the failure is reported rather than retried forever
+
+#### Scenario: A submission that failed
+- GIVEN a server that accepted a message and then refused the filed copy
+- WHEN the drain reports it
+- THEN nothing is sent a second time
+
 ### Requirement: A sync says what it is working on, in every domain
 The modal sync dialog SHALL name what the pass is on and what it is doing: the collection being reconciled as its title, and the step it stands at as its detail line. The three domains SHALL report both, so a wait reads the same whichever one is being synced.
+
+Neither line SHALL ever be empty while the dialog is up. It SHALL open naming the domain the user asked to sync over a line saying it is preparing, since a pass has a round trip or two to make before it can name a collection, and SHALL replace both as the pass reaches one.
 
 #### Scenario: A mail pass
 - GIVEN more than one mailbox
@@ -161,6 +237,16 @@ The modal sync dialog SHALL name what the pass is on and what it is doing: the c
 - GIVEN more than one calendar
 - WHEN the agenda is refreshed
 - THEN the dialog names each calendar as it starts, over the same lines
+
+#### Scenario: The roster round
+- GIVEN a pass that has to list an account's mailboxes or calendars first
+- WHEN it starts
+- THEN the title and the line under it are both set before that round, never the title alone over a blank line
+
+#### Scenario: The first frame
+- GIVEN a sync the user has just asked for
+- WHEN the dialog opens, before any round trip
+- THEN it names the domain being synced over a line saying it is preparing, rather than one line over an empty one
 
 ### Requirement: A placement's status is derived from the row
 The store SHALL derive what a placement owes rather than store it, by the first rule that applies (pimdir SYNC §3): conflict when either the binding or the item is conflicted, tombstone when the item is deleted and the source binds it, created when the source binds it with no base or does not bind it at all, dirty when the flags differ from the base's, both known, or a mutable kind's body differs from the base's, clean otherwise. An item no source binds and the store holds no body for SHALL be projected for nobody. A placement holding no body SHALL project below full, whatever the stored level claims.

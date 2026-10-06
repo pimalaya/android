@@ -6,8 +6,7 @@ use std::{borrow::Cow, collections::BTreeSet};
 use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
 use io_pim_discovery::rfc6764::{service::DiscoveryDavService, well_known::DiscoveryWellKnown};
 use io_webdav::{
-    coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield},
-    rfc4918::{GETETAG, WebdavAuth},
+    rfc4918::WebdavAuth,
     rfc6352::{
         addressbook::{CarddavAddressbook as DavAddressbook, list::CarddavAddressbookList},
         card::{
@@ -16,16 +15,13 @@ use io_webdav::{
             update::CarddavCardUpdate,
         },
     },
-    rfc6578::sync_collection::{
-        WebdavSyncCollection, WebdavSyncCollectionError, WebdavSyncCollectionOptions,
-        WebdavSyncDelta,
-    },
+    rfc6578::sync_collection::WebdavSyncDelta,
 };
 use url::Url;
 use vcard::tree::cst::VcardCst;
 
 use crate::{
-    client::{Client, USER_AGENT, convert::coroutine_error},
+    client::{Client, USER_AGENT},
     types::{Addressbook, BridgeError, Card, Credentials},
 };
 
@@ -191,45 +187,7 @@ impl<'a, 'local> Client<'a, 'local> {
         credentials: &Credentials,
         sync_token: Option<&str>,
     ) -> Result<Option<WebdavSyncDelta>, BridgeError> {
-        let auth = auth(credentials);
-        let mut opts = WebdavSyncCollectionOptions::default();
-        let mut token = sync_token.map(str::to_string);
-        let mut delta = WebdavSyncDelta::default();
-
-        loop {
-            let coroutine = WebdavSyncCollection::new(
-                url,
-                &auth,
-                USER_AGENT,
-                url.path(),
-                token.as_deref(),
-                &[GETETAG],
-                opts,
-            );
-            let page = match self.run_sync_collection(url, coroutine)? {
-                SyncRound::Page(page) => page,
-                SyncRound::InvalidToken => return Ok(None),
-                SyncRound::UnsupportedReport if opts.fallback => {
-                    return Err(format!("Cannot enumerate the addressbook at {url}").into());
-                }
-                SyncRound::UnsupportedReport if sync_token.is_some() => return Ok(None),
-                SyncRound::UnsupportedReport => {
-                    opts.fallback = true;
-                    token = None;
-                    delta = WebdavSyncDelta::default();
-                    continue;
-                }
-            };
-
-            delta.changed.extend(page.changed);
-            delta.vanished.extend(page.vanished);
-            delta.sync_token = page.sync_token;
-
-            if !page.truncated {
-                return Ok(Some(delta));
-            }
-            token = delta.sync_token.clone();
-        }
+        self.sync_dav_collection(url, &auth(credentials), sync_token)
     }
 
     /// Batch-fetches the cards at the given resource names (as the
@@ -247,53 +205,6 @@ impl<'a, 'local> Client<'a, 'local> {
 
         Ok(cards.into_iter().map(into_card).collect())
     }
-
-    /// Drives one `sync-collection` round, surfacing the two refusals
-    /// the caller acts on instead of erasing them (the generic
-    /// [`Self::run`] erases the error variants they ride in).
-    fn run_sync_collection(
-        &mut self,
-        target: &Url,
-        mut coroutine: WebdavSyncCollection,
-    ) -> Result<SyncRound, BridgeError> {
-        let mut arg: Option<Vec<u8>> = None;
-
-        loop {
-            match coroutine.resume(arg.as_deref()) {
-                WebdavCoroutineState::Complete(Ok(delta)) => return Ok(SyncRound::Page(delta)),
-                WebdavCoroutineState::Complete(Err(
-                    WebdavSyncCollectionError::InvalidSyncToken,
-                )) => {
-                    return Ok(SyncRound::InvalidToken);
-                }
-                WebdavCoroutineState::Complete(Err(
-                    WebdavSyncCollectionError::UnsupportedReport,
-                )) => {
-                    return Ok(SyncRound::UnsupportedReport);
-                }
-                WebdavCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
-                WebdavCoroutineState::Yielded(WebdavYield::WantsWrite(bytes)) => {
-                    self.write(target.as_str(), &bytes)?;
-                    arg = None;
-                }
-                WebdavCoroutineState::Yielded(WebdavYield::WantsRead) => {
-                    arg = Some(self.read(target.as_str())?);
-                }
-            }
-        }
-    }
-}
-
-/// What one `sync-collection` round answered.
-enum SyncRound {
-    /// The round ran and returned this page of the delta.
-    Page(WebdavSyncDelta),
-    /// The server rejected the sync token, so the collection has to be
-    /// enumerated from scratch.
-    InvalidToken,
-    /// The server implements no `sync-collection` REPORT, so the
-    /// `PROPFIND` fallback has to enumerate the collection instead.
-    UnsupportedReport,
 }
 
 /// Auth scheme from the credentials: an empty login means the
