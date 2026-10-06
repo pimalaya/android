@@ -19,6 +19,7 @@ use io_msgraph::{
                     MsgraphContactsList, MsgraphContactsListParams, MsgraphContactsListResponse,
                 },
                 update::MsgraphContactUpdate,
+                vcard::MSGRAPH_CONTACT_STASH_EXPAND,
             },
         },
         send::{MSGRAPH_API_BASE, MsgraphSend, MsgraphSendError, MsgraphSendOutput},
@@ -33,7 +34,6 @@ use crate::{
         Client,
         convert::{coroutine_error, rejected, required},
     },
-    msgraph,
     types::{Addressbook, BridgeError, Card, CardDelta, PushChange, PushOutcome},
 };
 
@@ -107,10 +107,9 @@ impl<'a, 'local> Client<'a, 'local> {
         let auth = HttpAuthBearer::new(token);
         let folder = (!folder.is_empty()).then_some(folder);
 
-        let expand = graph_expand();
         let params = MsgraphContactsListParams {
             top: Some(100),
-            expand: Some(&expand),
+            expand: Some(MSGRAPH_CONTACT_STASH_EXPAND),
             ..Default::default()
         };
         let coroutine = MsgraphContactsList::new(&auth, "me", folder, &params)
@@ -143,7 +142,7 @@ impl<'a, 'local> Client<'a, 'local> {
         folder: &str,
         vcard: &str,
     ) -> Result<Card, BridgeError> {
-        let contact = msgraph::to_new_contact(vcard)?;
+        let contact = MsgraphContact::create_from_vcard(vcard)?;
         let auth = HttpAuthBearer::new(token);
         let folder = (!folder.is_empty()).then_some(folder);
 
@@ -154,15 +153,14 @@ impl<'a, 'local> Client<'a, 'local> {
         // NOTE: create responses cannot $expand, so the stash just sent
         // is re-attached before projecting the card.
         created.single_value_extended_properties =
-            msgraph::to_contact(vcard)?.single_value_extended_properties;
+            MsgraphContact::from_vcard(vcard)?.single_value_extended_properties;
         Ok(graph_card(created))
     }
 
     /// Reads the Graph contact `id`, projected onto a vCard document.
     pub fn read_graph_card(&mut self, token: &str, id: &str) -> Result<Card, BridgeError> {
         let auth = HttpAuthBearer::new(token);
-        let expand = graph_expand();
-        let coroutine = MsgraphContactGet::new(&auth, "me", id, Some(&expand))
+        let coroutine = MsgraphContactGet::new(&auth, "me", id, Some(MSGRAPH_CONTACT_STASH_EXPAND))
             .map_err(|err| err.to_string())?;
         Ok(graph_card(self.run_msgraph(coroutine)?))
     }
@@ -181,8 +179,8 @@ impl<'a, 'local> Client<'a, 'local> {
         base_vcard: Option<&str>,
     ) -> Result<Card, BridgeError> {
         let contact = match base_vcard {
-            Some(base) => msgraph::to_contact_delta(vcard, base)?,
-            None => msgraph::to_new_contact(vcard)?,
+            Some(base) => MsgraphContact::update_from_vcard(vcard, base)?,
+            None => MsgraphContact::create_from_vcard(vcard)?,
         };
         let auth = HttpAuthBearer::new(token);
 
@@ -193,7 +191,7 @@ impl<'a, 'local> Client<'a, 'local> {
         // NOTE: update responses cannot $expand, so the full stash
         // (a delta may skip it in the body) is re-attached first.
         updated.single_value_extended_properties =
-            msgraph::to_contact(vcard)?.single_value_extended_properties;
+            MsgraphContact::from_vcard(vcard)?.single_value_extended_properties;
         Ok(graph_card(updated))
     }
 
@@ -238,15 +236,15 @@ impl<'a, 'local> Client<'a, 'local> {
                             method: "POST",
                             url: create_url.clone(),
                             headers: Some(GraphBatchHeaders::JSON),
-                            body: Some(msgraph::to_new_contact(vcard)?),
+                            body: Some(MsgraphContact::create_from_vcard(vcard)?),
                         }
                     }
                     "update" => {
                         let id = required(&change.id, "update", "id")?;
                         let vcard = required(&change.vcard, "update", "vcard")?;
                         let contact = match change.base_vcard.as_deref() {
-                            Some(base) => msgraph::to_contact_delta(vcard, base)?,
-                            None => msgraph::to_new_contact(vcard)?,
+                            Some(base) => MsgraphContact::update_from_vcard(vcard, base)?,
+                            None => MsgraphContact::create_from_vcard(vcard)?,
                         };
                         GraphBatchRequest {
                             id: index.to_string(),
@@ -466,7 +464,7 @@ impl<'a, 'local> Client<'a, 'local> {
 /// vCard document, the Graph id as both display id and addressing key
 /// (uri), and the changeKey as ETag.
 fn graph_card(contact: MsgraphContact) -> Card {
-    let vcard = msgraph::to_vcard(&contact);
+    let vcard = contact.to_vcard();
     Card {
         id: contact.id.clone(),
         uri: contact.id,
@@ -478,15 +476,6 @@ fn graph_card(contact: MsgraphContact) -> Card {
 
 pub(super) fn parse_graph_url(raw: &str) -> Result<Url, BridgeError> {
     Url::parse(raw).map_err(|err| format!("Invalid Graph page URL `{raw}`: {err}").into())
-}
-
-/// The `$expand` clause fetching the bridge's stash extended property
-/// along with the contact (Graph omits extended properties otherwise).
-fn graph_expand() -> String {
-    format!(
-        "singleValueExtendedProperties($filter=id eq '{}')",
-        msgraph::EXTENDED_PROP_ID
-    )
 }
 
 /// The Graph JSON batching envelope (`POST $batch`).

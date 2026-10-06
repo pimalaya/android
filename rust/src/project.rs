@@ -793,49 +793,6 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// Longest raw property line the provider backends stash server-side.
-/// Longer lines (base64 PHOTO blobs, essentially) stay only in the
-/// local document of record instead of risking the whole write against
-/// undocumented provider size limits.
-pub(crate) const MAX_STASH_LINE: usize = 8 * 1024;
-
-/// Splices raw property lines (logical lines without their ending)
-/// into a serialized vCard, right before its END:VCARD line.
-pub(crate) fn splice_props(vcard: String, lines: &[String]) -> String {
-    if lines.is_empty() {
-        return vcard;
-    }
-
-    let mut extra = lines.join("\r\n");
-    extra.push_str("\r\n");
-
-    match vcard.rfind("END:VCARD") {
-        Some(position) => {
-            let mut out = vcard;
-            out.insert_str(position, &extra);
-            out
-        }
-        None => vcard + &extra,
-    }
-}
-
-/// Escapes a text value for a minted property line (RFC 6350 3.4:
-/// backslash, comma, semicolon and newline).
-pub(crate) fn escape_text(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '\\' => out.push_str("\\\\"),
-            ',' => out.push_str("\\,"),
-            ';' => out.push_str("\\;"),
-            '\n' => out.push_str("\\n"),
-            '\r' => {}
-            _ => out.push(character),
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

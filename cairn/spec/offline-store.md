@@ -48,6 +48,14 @@ The store SHALL reconcile its own shape against the canonical pimdir DDL on open
 - WHEN the app reconciles
 - THEN it changes nothing about that table, rather than reading the empty answer as "every column is stale"
 
+### Requirement: A schema version is migrated, not recreated
+The store SHALL reach a newer schema version by running every canonical migration above its own, in order, stamping `store_meta.version` with each version reached, as io-pimdir's own runner does. It SHALL recreate the store only on a downgrade, whose newer shape no migration reads back.
+
+#### Scenario: A store one version behind
+- GIVEN a store at version 1 holding a staged edit and a queued message
+- WHEN an app shipping version 2 opens it
+- THEN migration 2 runs, `store_meta.version` reads 2, and the edit and the message are still there
+
 ### Requirement: An item carries the standard's summary
 The store SHALL record what a reader lists an item from in its kind's summary table and the people it names in `item_address`, as pimdir STORAGE Annex A defines them, written through the canonical statements. It SHALL NOT keep a summary convention of its own in the item row, and SHALL derive one through io-pimdir wherever the body is on hand.
 

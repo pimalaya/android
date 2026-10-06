@@ -1,6 +1,6 @@
 # Google People API backend
 
-The fourth backend behind PimalayaClient: accounts whose base URL carries the `google://<email>` sentinel route every operation through io-gpeople's coroutines, with rust/src/google.rs projecting People person resources to and from the vCard document of record. The account exposes one Contacts addressbook (the People API has no folders; contact groups are m:n labels), and contacts list through `people.connections.list` paging.
+The fourth backend behind PimalayaClient: accounts whose base URL carries the `google://<email>` sentinel route every operation through io-gpeople's coroutines, with io-gpeople's `vcard` feature projecting People person resources to and from the vCard document of record. The account exposes one Contacts addressbook (the People API has no folders; contact groups are m:n labels), and contacts list through `people.connections.list` paging.
 
 Two People mechanics shape the projection:
 
@@ -9,7 +9,7 @@ Two People mechanics shape the projection:
 
 ## vCard 4.0 to People mapping
 
-Every property of RFC 6350 §6, plus the registered extensions worth a row. **Bold** = implemented in rust/src/google.rs today; *candidate* = a People slot exists but is not wired yet; no slot = nothing on the People side.
+Every property of RFC 6350 §6, plus the registered extensions worth a row. **Bold** = implemented in io-gpeople's vCard projection today; *candidate* = a People slot exists but is not wired yet; no slot = nothing on the People side.
 
 | vCard 4.0 | Google People |
 |---|---|
@@ -102,4 +102,4 @@ The rule for projecting People-only data into the vCard, so a card moved to anot
 
 This is a deliberate exception to the "never mint X-* properties" rule of [contacts-mapping.md](contacts-mapping.md): that rule targets phone-side user data, where competing client spellings breed duplicates. Here the minting side is a backend projection with a fixed, documented vocabulary, and the data has no standard slot by definition. The policy addendum belongs in contacts-mapping.md when this lands.
 
-Both sections above are implemented; the cross-backend behavior (shared with Microsoft Graph) is specified in [custom-data.md](custom-data.md). The stash lands in a `clientData` entry under the key `pimalaya.vcard`, stash writes merge foreign `clientData` entries under the etag guard, and external ids, misc keywords and locations ride the vCard as read-only X-GOOGLE-* properties (group memberships are structural addressbook memberships instead, per [merged-view.md](merged-view.md)). The portable graduations (the *candidate* rows of the mapping table) remain future work.
+Both sections above are implemented; the cross-backend behavior (shared with Microsoft Graph) is specified in [custom-data.md](custom-data.md). The stash lands in a `clientData` entry under the key `cardamum.vcard` (io-gpeople's `GPEOPLE_PERSON_STASH_KEY`, shared with Cardamum), stash writes merge foreign `clientData` entries under the etag guard, and external ids, misc keywords and locations ride the vCard as read-only X-GOOGLE-* properties (group memberships are structural addressbook memberships instead, per [merged-view.md](merged-view.md)). The portable graduations (the *candidate* rows of the mapping table) remain future work.

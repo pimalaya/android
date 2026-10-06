@@ -20,6 +20,7 @@ use io_gpeople::{
                 delete_contact::GpeopleContactDelete,
                 get::GpeoplePersonGet,
                 update_contact::GpeopleContactUpdate,
+                vcard::{GPEOPLE_PERSON_STASH_KEY, GPEOPLE_PERSON_VCARD_FIELDS},
             },
         },
         send::{GPEOPLE_API_BASE, GpeopleSendError, GpeopleSendOutput},
@@ -29,9 +30,27 @@ use io_http::rfc6750::bearer::HttpAuthBearer;
 
 use crate::{
     client::{Client, convert::coroutine_error},
-    google,
     types::{Addressbook, BridgeError, Card, CardDelta},
 };
+
+/// The person fields an update with no base replaces: every field the
+/// vCard projection writes, `clientData` (the stash) included.
+/// People-only fields stay out, so they survive the update untouched.
+const MANAGED_FIELDS: &[GpeoplePersonField] = &[
+    GpeoplePersonField::Addresses,
+    GpeoplePersonField::Biographies,
+    GpeoplePersonField::Birthdays,
+    GpeoplePersonField::ClientData,
+    GpeoplePersonField::EmailAddresses,
+    GpeoplePersonField::ImClients,
+    GpeoplePersonField::Names,
+    GpeoplePersonField::Nicknames,
+    GpeoplePersonField::Occupations,
+    GpeoplePersonField::Organizations,
+    GpeoplePersonField::PhoneNumbers,
+    GpeoplePersonField::Relations,
+    GpeoplePersonField::Urls,
+];
 
 /// How many contacts one people.batchCreateContacts call carries.
 const GOOGLE_CREATE_CHUNK: usize = 200;
@@ -127,7 +146,7 @@ impl<'a, 'local> Client<'a, 'local> {
             page_size: Some(100),
             ..Default::default()
         };
-        let coroutine = GpeopleConnectionsList::new(&auth, google::READ_FIELDS, &params)
+        let coroutine = GpeopleConnectionsList::new(&auth, GPEOPLE_PERSON_VCARD_FIELDS, &params)
             .map_err(|err| err.to_string())?;
         let mut page = self.run_google(coroutine)?;
 
@@ -143,7 +162,7 @@ impl<'a, 'local> Client<'a, 'local> {
                         ..Default::default()
                     };
                     let coroutine =
-                        GpeopleConnectionsList::new(&auth, google::READ_FIELDS, &params)
+                        GpeopleConnectionsList::new(&auth, GPEOPLE_PERSON_VCARD_FIELDS, &params)
                             .map_err(|err| err.to_string())?;
                     page = self.run_google(coroutine)?;
                 }
@@ -168,7 +187,7 @@ impl<'a, 'local> Client<'a, 'local> {
 
         // NOTE: metadata carries the deleted marker; a sync token binds
         // to its field mask, so every round asks the same one.
-        let fields: Vec<GpeoplePersonField> = google::READ_FIELDS
+        let fields: Vec<GpeoplePersonField> = GPEOPLE_PERSON_VCARD_FIELDS
             .iter()
             .copied()
             .chain([GpeoplePersonField::Metadata])
@@ -205,9 +224,7 @@ impl<'a, 'local> Client<'a, 'local> {
                     .and_then(|metadata| metadata.deleted)
                     .unwrap_or(false);
                 if deleted {
-                    delta
-                        .vanished
-                        .push(google::person_id(&person.resource_name).to_string());
+                    delta.vanished.push(person.id().to_string());
                 } else {
                     delta.changed.push(google_card(person));
                 }
@@ -228,10 +245,10 @@ impl<'a, 'local> Client<'a, 'local> {
     /// Creates the vCard as a People contact. The server names the
     /// resource, so the returned card carries the server-assigned id.
     pub fn create_google_card(&mut self, token: &str, vcard: &str) -> Result<Card, BridgeError> {
-        let person = google::to_person(vcard)?;
+        let person = GpeoplePerson::from_vcard(vcard)?;
         let auth = HttpAuthBearer::new(token);
 
-        let coroutine = GpeopleContactCreate::new(&auth, &person, google::READ_FIELDS, &[])
+        let coroutine = GpeopleContactCreate::new(&auth, &person, GPEOPLE_PERSON_VCARD_FIELDS, &[])
             .map_err(|err| err.to_string())?;
         Ok(google_card(self.run_google(coroutine)?))
     }
@@ -239,9 +256,13 @@ impl<'a, 'local> Client<'a, 'local> {
     /// Reads the People contact `id`, projected onto a vCard document.
     pub fn read_google_card(&mut self, token: &str, id: &str) -> Result<Card, BridgeError> {
         let auth = HttpAuthBearer::new(token);
-        let coroutine =
-            GpeoplePersonGet::new(&auth, &format!("people/{id}"), google::READ_FIELDS, &[])
-                .map_err(|err| err.to_string())?;
+        let coroutine = GpeoplePersonGet::new(
+            &auth,
+            &format!("people/{id}"),
+            GPEOPLE_PERSON_VCARD_FIELDS,
+            &[],
+        )
+        .map_err(|err| err.to_string())?;
 
         Ok(google_card(self.run_google(coroutine)?))
     }
@@ -265,12 +286,12 @@ impl<'a, 'local> Client<'a, 'local> {
         let auth = HttpAuthBearer::new(token);
         let resource_name = format!("people/{id}");
 
-        let mut person = google::to_person(vcard)?;
+        let mut person = GpeoplePerson::from_vcard(vcard)?;
         person.resource_name = resource_name.clone();
 
         let fields = match base_vcard {
-            Some(base) => google::changed_fields(&person, &google::to_person(base)?),
-            None => google::MANAGED_FIELDS.to_vec(),
+            Some(base) => person.changed_fields(&GpeoplePerson::from_vcard(base)?),
+            None => MANAGED_FIELDS.to_vec(),
         };
         if fields.is_empty() {
             return Ok(Card {
@@ -300,7 +321,7 @@ impl<'a, 'local> Client<'a, 'local> {
                 let mut merged: Vec<_> = current
                     .client_data
                     .into_iter()
-                    .filter(|entry| entry.key.as_deref() != Some(google::CLIENT_DATA_KEY))
+                    .filter(|entry| entry.key.as_deref() != Some(GPEOPLE_PERSON_STASH_KEY))
                     .collect();
                 merged.append(&mut person.client_data);
                 person.client_data = merged;
@@ -314,7 +335,7 @@ impl<'a, 'local> Client<'a, 'local> {
         }
 
         let coroutine =
-            GpeopleContactUpdate::new(&auth, &person, &fields, google::READ_FIELDS, &[])
+            GpeopleContactUpdate::new(&auth, &person, &fields, GPEOPLE_PERSON_VCARD_FIELDS, &[])
                 .map_err(|err| err.to_string())?;
         match self.run_google(coroutine) {
             Ok(updated) => Ok(google_card(updated)),
@@ -334,9 +355,14 @@ impl<'a, 'local> Client<'a, 'local> {
                 .map_err(|err| err.to_string())?;
                 person.etag = self.run_google(coroutine)?.etag;
 
-                let coroutine =
-                    GpeopleContactUpdate::new(&auth, &person, &fields, google::READ_FIELDS, &[])
-                        .map_err(|err| err.to_string())?;
+                let coroutine = GpeopleContactUpdate::new(
+                    &auth,
+                    &person,
+                    &fields,
+                    GPEOPLE_PERSON_VCARD_FIELDS,
+                    &[],
+                )
+                .map_err(|err| err.to_string())?;
                 Ok(google_card(self.run_google(coroutine)?))
             }
             Err(err) => Err(err),
@@ -367,13 +393,14 @@ impl<'a, 'local> Client<'a, 'local> {
 
         let persons = vcards
             .iter()
-            .map(|vcard| google::to_person(vcard))
-            .collect::<Result<Vec<_>, String>>()?;
+            .map(|vcard| GpeoplePerson::from_vcard(vcard))
+            .collect::<Result<Vec<_>, _>>()?;
 
         let mut cards = Vec::with_capacity(persons.len());
         for chunk in persons.chunks(GOOGLE_CREATE_CHUNK) {
-            let coroutine = GpeopleContactsBatchCreate::new(&auth, chunk, google::READ_FIELDS, &[])
-                .map_err(|err| err.to_string())?;
+            let coroutine =
+                GpeopleContactsBatchCreate::new(&auth, chunk, GPEOPLE_PERSON_VCARD_FIELDS, &[])
+                    .map_err(|err| err.to_string())?;
             let response = self.run_google(coroutine)?;
 
             // NOTE: a count mismatch would misattribute server ids to
@@ -511,8 +538,8 @@ impl<'a, 'local> Client<'a, 'local> {
 /// etag as ETag, and the contact group memberships (minus their
 /// `contactGroups/` prefix) as the card's books.
 fn google_card(person: GpeoplePerson) -> Card {
-    let vcard = google::to_vcard(&person);
-    let id = google::person_id(&person.resource_name).to_string();
+    let vcard = person.to_vcard();
+    let id = person.id().to_string();
     let books = person
         .memberships
         .iter()

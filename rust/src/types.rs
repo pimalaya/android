@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use io_gpeople::v1::rest::people::vcard::GpeoplePersonVcardError;
+use io_msgraph::v1::rest::users::contacts::vcard::MsgraphContactVcardError;
 use serde::{Deserialize, Serialize};
 
 /// One failed bridge operation, serialized as the error reply the
@@ -38,6 +40,18 @@ impl From<String> for BridgeError {
 impl From<&str> for BridgeError {
     fn from(message: &str) -> Self {
         message.to_string().into()
+    }
+}
+
+impl From<GpeoplePersonVcardError> for BridgeError {
+    fn from(err: GpeoplePersonVcardError) -> Self {
+        err.to_string().into()
+    }
+}
+
+impl From<MsgraphContactVcardError> for BridgeError {
+    fn from(err: MsgraphContactVcardError) -> Self {
+        err.to_string().into()
     }
 }
 

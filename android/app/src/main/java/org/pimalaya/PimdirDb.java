@@ -79,21 +79,50 @@ final class PimdirDb extends SQLiteOpenHelper {
 
     @Override
     public void onCreate(SQLiteDatabase db) {
-        // NOTE: execSQL compiles one statement per call, and the canonical
-        // schema is one script whose comments contain semicolons and whose
-        // triggers contain statements, so the split has to strip comments and
-        // read a trigger body whole (PimdirSql.schema).
-        for (String statement : PimdirSql.schema()) {
-            db.execSQL(statement);
+        migrate(db, 0);
+    }
+
+    @Override
+    public void onUpgrade(SQLiteDatabase db, int from, int to) {
+        migrate(db, from);
+    }
+
+    /**
+     * Runs every canonical migration above version {@code from}, in order,
+     * stamping {@code store_meta} with each version reached (STORAGE §6), the
+     * way io-pimdir's own runner does. The helper wraps the whole run in one
+     * transaction and sets {@code user_version} once it commits.
+     *
+     * <p>Migrated rather than recreated: the store holds what only it holds,
+     * staged edits and the outbox, which a recreate would lose.
+     */
+    private static void migrate(SQLiteDatabase db, int from) {
+        String[] migrations = PimdirSql.migrations();
+
+        for (int index = from; index < migrations.length; index++) {
+            // NOTE: execSQL compiles one statement per call, and a migration
+            // is one script whose comments contain semicolons and whose
+            // triggers contain statements, so the split has to strip comments
+            // and read a trigger body whole (PimdirSql.split).
+            for (String statement : PimdirSql.split(migrations[index])) {
+                db.execSQL(statement);
+            }
+
+            int reached = index + 1;
+            if (reached == 1) {
+                // NOTE: the recorded algorithm has to be the one the app
+                // actually computes (PimdirHash), or every blob in the store is
+                // filed under a name no other pimdir reader can verify.
+                Map<String, Object> meta = new LinkedHashMap<>();
+                meta.put("version", reached);
+                meta.put("hash_algo", PimdirHash.ALGORITHM);
+                PimdirSql.Bound init = PimdirSql.bind("INIT_STORE_META", meta);
+                db.execSQL(init.sql, init.args);
+            } else {
+                db.execSQL(
+                        "UPDATE store_meta SET version = ? WHERE id = 1", new Object[] {reached});
+            }
         }
-        // NOTE: the recorded algorithm has to be the one the app actually
-        // computes (PimdirHash), or every blob in the store is filed under a
-        // name no other pimdir reader can verify.
-        Map<String, Object> meta = new LinkedHashMap<>();
-        meta.put("version", PimdirSql.version());
-        meta.put("hash_algo", PimdirHash.ALGORITHM);
-        PimdirSql.Bound init = PimdirSql.bind("INIT_STORE_META", meta);
-        db.execSQL(init.sql, init.args);
     }
 
     @Override
@@ -332,12 +361,12 @@ final class PimdirDb extends SQLiteOpenHelper {
     }
 
     @Override
-    public void onUpgrade(SQLiteDatabase db, int from, int to) {
-        // NOTE: while the pimdir spec is draft, version 1 is edited in place
-        // and a store written by an earlier draft is recreated rather than
-        // migrated (STORAGE.md Status). The store is a cache of a sync, so the
-        // cost is one refetch. Every table goes, read from the store rather
-        // than listed here: the list is what would go stale.
+    public void onDowngrade(SQLiteDatabase db, int from, int to) {
+        // NOTE: a store written by a newer app has a shape this one cannot
+        // read, and no migration runs backwards, so it is recreated: what it
+        // staged and never pushed is lost, which only a downgrade costs. Every
+        // table goes, read from the store rather than listed here: the list
+        // is what would go stale.
         List<String> tables = new ArrayList<>();
         try (Cursor cursor =
                 db.rawQuery(
@@ -351,11 +380,6 @@ final class PimdirDb extends SQLiteOpenHelper {
         for (String table : tables) {
             db.execSQL("DROP TABLE IF EXISTS " + table);
         }
-        onCreate(db);
-    }
-
-    @Override
-    public void onDowngrade(SQLiteDatabase db, int from, int to) {
-        onUpgrade(db, from, to);
+        migrate(db, 0);
     }
 }
