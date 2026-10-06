@@ -1039,7 +1039,19 @@ public class PimalayaClient {
      * Returns the upgrade report {@code {upgraded, fetched, deduped}}.
      */
     public JSONObject offlineUpgrade(OfflineDriver driver, String collection, List<String> handles) {
-        return object(Native.offlineUpgrade(driver, collection, new JSONArray(handles).toString()));
+        return object(
+                Native.offlineUpgrade(driver, collection, new JSONArray(handles).toString(), true));
+    }
+
+    /**
+     * Raises the given handles to the meta detail tier through the
+     * io-offline engine: each is named and summarised, and no body is
+     * read. Returns the upgrade report {@code {upgraded, fetched, deduped}}.
+     */
+    public JSONObject offlineUpgradeMeta(
+            OfflineDriver driver, String collection, List<String> handles) {
+        return object(
+                Native.offlineUpgrade(driver, collection, new JSONArray(handles).toString(), false));
     }
 
     /**

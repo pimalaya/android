@@ -71,17 +71,24 @@ pub fn sync<'local>(
     }))
 }
 
-/// Raises `handles` in `collection` to the full detail tier through
-/// the Java driver (bodies deduped by link id against the object
-/// store), returning the upgrade report as JSON.
+/// Raises `handles` in `collection` to the full detail tier, or to the
+/// meta one without `full`, through the Java driver (bodies deduped by
+/// link id against the object store), returning the upgrade report as
+/// JSON.
 pub fn upgrade<'local>(
     env: &mut Env<'local>,
     driver: &JObject<'local>,
     collection: &str,
     handles: Vec<String>,
+    full: bool,
 ) -> Result<Value, BridgeError> {
     let handles = handles.into_iter().map(PimdirHandle::from).collect();
-    let coroutine = PimdirUpgrade::new(collection, handles, PimdirTier::Full);
+    let tier = if full {
+        PimdirTier::Full
+    } else {
+        PimdirTier::Meta
+    };
+    let coroutine = PimdirUpgrade::new(collection, handles, tier);
     let report = Driver::new(env, driver).run(coroutine)?;
 
     Ok(json!({

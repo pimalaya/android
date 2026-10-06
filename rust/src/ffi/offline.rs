@@ -40,9 +40,10 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
 }
 
 /// `Native.offlineUpgrade`: raises the given handles (a JSON string
-/// array) to the full detail tier through the io-pimdir engine,
-/// servicing every engine yield via the given `OfflineDriver`. Returns
-/// the upgrade report `{"upgraded", "fetched", "deduped"}`.
+/// array) to the full detail tier, or to the meta one without `full`,
+/// through the io-pimdir engine, servicing every engine yield via the
+/// given `OfflineDriver`. Returns the upgrade report
+/// `{"upgraded", "fetched", "deduped"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
     mut env: EnvUnowned<'local>,
@@ -50,6 +51,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
     driver: JObject<'local>,
     collection: JString<'local>,
     handles: JString<'local>,
+    full: jboolean,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let collection = read_string(env, &collection);
@@ -57,7 +59,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
 
         let json = match parse_strings(&handles) {
             Err(err) => error_json(err),
-            Ok(handles) => match offline::upgrade(env, &driver, &collection, handles) {
+            Ok(handles) => match offline::upgrade(env, &driver, &collection, handles, full) {
                 Ok(report) => report.to_string(),
                 Err(err) => error_json(err),
             },

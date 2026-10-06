@@ -626,11 +626,12 @@ final class Native {
 
     /**
      * Raises the given handles (a JSON string array) to the full
-     * detail tier through the io-offline engine, servicing every
-     * engine yield via the driver. Returns the upgrade report
-     * {@code {upgraded, fetched, deduped}}.
+     * detail tier, or to the meta one without {@code full}, through the
+     * io-offline engine, servicing every engine yield via the driver.
+     * Returns the upgrade report {@code {upgraded, fetched, deduped}}.
      */
-    static native String offlineUpgrade(OfflineDriver driver, String collection, String handles);
+    static native String offlineUpgrade(
+            OfflineDriver driver, String collection, String handles, boolean full);
 
     /**
      * Stages a local mutation (a JSON object, e.g. {@code {"op":

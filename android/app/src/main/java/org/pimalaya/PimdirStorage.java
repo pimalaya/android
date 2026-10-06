@@ -1060,13 +1060,27 @@ final class PimdirStorage {
             // a body, for. It holds no item row, so the join above cannot see
             // it, and leaving it out is leaving every freshly enumerated
             // member unfetched forever.
-            try (Cursor probed =
-                    db.rawQuery(
-                            "SELECT handle FROM probes WHERE collection = ? AND source = ?",
-                            new String[] {collection, source})) {
-                while (probed.moveToNext()) {
-                    handles.add(probed.getString(0));
-                }
+            handles.addAll(probedHandles(engineCollection));
+            return handles;
+        }
+    }
+
+    /**
+     * The handles of one collection the enumeration reported and no upgrade
+     * has named yet: they hold no item row, so no listing shows them.
+     */
+    List<String> probedHandles(String engineCollection) {
+        SQLiteDatabase db = store.getReadableDatabase();
+
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT handle FROM probes WHERE collection = ? AND source = ?",
+                        new String[] {
+                            collectionOf(engineCollection), sourceOf(engineCollection)
+                        })) {
+            List<String> handles = new ArrayList<>(cursor.getCount());
+            while (cursor.moveToNext()) {
+                handles.add(cursor.getString(0));
             }
             return handles;
         }

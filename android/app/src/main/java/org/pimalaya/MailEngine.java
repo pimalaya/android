@@ -94,13 +94,24 @@ final class MailEngine extends PimdirEngine {
      *
      * <p>No hydrate after it, unlike a calendar: a mailbox is a spine and
      * a message rises off it by being opened, so a placement below full is
-     * the ordinary state of one rather than something to repair.
+     * the ordinary state of one rather than something to repair. A probe
+     * is not: the sync files a new message as an unnamed handle with no
+     * summary, which no listing shows, so a meta upgrade names it off its
+     * envelope.
      */
     void sync(String collection) {
         step(Progress.STAGE_SERVER, 0);
         Log.d(
                 "pimalaya",
                 "mail sync " + collection + ": " + client.offlineSync(this, collection, false));
+
+        List<String> probed = offline.probedHandles(collection);
+        if (!probed.isEmpty()) {
+            Log.d(
+                    "pimalaya",
+                    "name " + collection + " (" + probed.size() + " probed): "
+                            + client.offlineUpgradeMeta(this, collection, probed));
+        }
     }
 
     /** The mailbox behind a collection id, which is what IMAP names it by. */
