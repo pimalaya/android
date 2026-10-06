@@ -16,7 +16,8 @@ use crate::{
 /// `Native.offlineSync`: reconciles the collection with its remote
 /// through the io-pimdir engine, servicing every engine yield via the
 /// given `OfflineDriver`. With `full` the checkpoint is ignored and the
-/// whole remote is enumerated. Returns the sync report
+/// whole remote is enumerated, and without `content` no body is pushed.
+/// Returns the sync report
 /// `{"pulled", "pushed", "conflicts", "rejected", "refreshed"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
@@ -25,11 +26,12 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
     driver: JObject<'local>,
     collection: JString<'local>,
     full: jboolean,
+    content: jboolean,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let collection = read_string(env, &collection);
 
-        let json = match offline::sync(env, &driver, &collection, full) {
+        let json = match offline::sync(env, &driver, &collection, full, content) {
             Ok(report) => report.to_string(),
             Err(err) => error_json(err),
         };

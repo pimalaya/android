@@ -339,6 +339,7 @@
     <string name="message_deleted_in_place">Marqué supprimé ; il reste où il est</string>
     <string name="message_write_failed">Impossible d\'enregistrer la modification</string>
     <string name="message_pending">En attente d\'envoi</string>
+    <string name="mail_outbox">Boîte d\'envoi</string>
     <string name="message_send_failed">Refusé par le serveur</string>
 
     <!-- Le compositeur. -->
@@ -346,6 +347,7 @@
     <string name="compose_to">À</string>
     <string name="compose_cc">Cc</string>
     <string name="compose_bcc">Cci</string>
+    <string name="compose_remove_recipient">Retirer %1$s</string>
     <string name="compose_add_copies">Ajouter Cc et Cci</string>
     <string name="compose_subject">Objet</string>
     <string name="compose_body">Écrivez votre message</string>

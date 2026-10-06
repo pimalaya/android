@@ -103,7 +103,7 @@ final class MailEngine extends PimdirEngine {
         step(Progress.STAGE_SERVER, 0);
         Log.d(
                 "pimalaya",
-                "mail sync " + collection + ": " + client.offlineSync(this, collection, false));
+                "mail sync " + collection + ": " + client.offlineSyncImmutable(this, collection));
 
         List<String> probed = offline.probedHandles(collection);
         if (!probed.isEmpty()) {

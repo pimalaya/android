@@ -55,13 +55,6 @@ final class ContactsList {
 
     /** Wires the list, its bar buttons, the search field and the pull-down. */
     void setUp() {
-        host.findViewById(R.id.contacts_more).setOnClickListener(this::showMoreMenu);
-        host.findViewById(R.id.contacts_birthdays)
-                .setOnClickListener(
-                        view -> new Birthdays(host).show(new ArrayList<>(sortedContacts)));
-        host.findViewById(R.id.contacts_duplicates)
-                .setOnClickListener(
-                        view -> new DuplicateReview(host).find(new ArrayList<>(contacts)));
         // Pull-to-refresh runs the same syncAll as the drawer; its own
         // spinner retracts right away, the modal dialog carries the wait.
         androidx.swiperefreshlayout.widget.SwipeRefreshLayout refresh =
@@ -439,10 +432,8 @@ final class ContactsList {
     /** Swaps the title for the search pill and opens the keyboard. */
     private void openSearch() {
         searchOpen = true;
-        // NOTE: the navigation goes with the title. Leaving it up gave
-        // the field two buttons' worth of bar to grow into and the query
-        // no room. The birthday and duplicate icons do stay, so the pill
-        // shrinks to end at them.
+        // NOTE: the navigation goes with the title, so the field takes the
+        // bar up to its clear cross, which sits beside the overflow.
         host.showDomainButtons(false);
         host.findViewById(R.id.bar_menu).setVisibility(View.GONE);
         host.findViewById(R.id.contacts_search).setVisibility(View.GONE);
@@ -480,8 +471,7 @@ final class ContactsList {
         host.findViewById(R.id.bar_title).setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         host.findViewById(R.id.contacts_search)
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
-        host.findViewById(R.id.contacts_more_slot)
-                .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        host.findViewById(R.id.bar_more).setVisibility(selectionMode ? View.GONE : View.VISIBLE);
     }
 
     /**
@@ -517,16 +507,10 @@ final class ContactsList {
         boolean navigating = !selectionMode && !searchOpen;
         host.findViewById(R.id.bar_menu).setVisibility(navigating ? View.VISIBLE : View.GONE);
         host.showDomainButtons(navigating);
-        host.findViewById(R.id.bar_filter)
-                .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.contacts_search)
                 .setVisibility(selectionMode || searchOpen ? View.GONE : View.VISIBLE);
-        host.findViewById(R.id.contacts_birthdays)
+        host.findViewById(R.id.bar_more)
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
-        host.findViewById(R.id.contacts_duplicates)
-                .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
-        host.findViewById(R.id.contacts_more_slot)
-                .setVisibility(selectionMode || searchOpen ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.contacts_close)
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         // Merging needs at least two physical cards.
@@ -591,29 +575,21 @@ final class ContactsList {
     }
 
     /**
-     * The contacts overflow: what is management rather than action.
-     * Searching, the birthday peek and the duplicate finder are bar
-     * buttons; syncing is the drawer's and the pull-down's.
-     *
-     * <p>Text-only: the framework popup renders forced icons flush
-     * against their labels on some Android releases.
+     * The contacts entries of the bar's overflow, after the filter.
+     * Searching stays a bar button; syncing is the drawer's and the
+     * pull-down's.
      */
-    private void showMoreMenu(View anchor) {
-        android.widget.PopupMenu menu = new android.widget.PopupMenu(host, anchor);
-        item(menu, R.string.subscriptions_title, host::openAccountsDrawer);
-        item(menu, R.string.import_contacts, host::importContacts);
-        item(menu, R.string.export_contacts, host::exportContacts);
-        menu.show();
-    }
-
-    /** One menu entry carrying its own action. */
-    private static void item(android.widget.PopupMenu menu, int label, Runnable action) {
-        menu.getMenu()
-                .add(label)
-                .setOnMenuItemClickListener(
-                        entry -> {
-                            action.run();
-                            return true;
-                        });
+    void addMenuItems(android.widget.PopupMenu menu) {
+        MainActivity.item(
+                menu,
+                R.string.birthdays_title,
+                () -> new Birthdays(host).show(new ArrayList<>(sortedContacts)));
+        MainActivity.item(
+                menu,
+                R.string.dup_find,
+                () -> new DuplicateReview(host).find(new ArrayList<>(contacts)));
+        MainActivity.item(menu, R.string.subscriptions_title, host::openAccountsDrawer);
+        MainActivity.item(menu, R.string.import_contacts, host::importContacts);
+        MainActivity.item(menu, R.string.export_contacts, host::exportContacts);
     }
 }

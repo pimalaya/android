@@ -259,6 +259,7 @@
     <string name="message_deleted_in_place">Marked deleted; it stays where it is</string>
     <string name="message_write_failed">Could not write the change</string>
     <string name="message_pending">Waiting to be sent</string>
+    <string name="mail_outbox">Outbox</string>
     <string name="message_send_failed">Refused by the server</string>
     <string name="message_delete_no_trash">This account names no trash mailbox, and JMAP has no marker to delete a message in place with</string>
 
@@ -323,6 +324,7 @@
     <string name="compose_to">To</string>
     <string name="compose_cc">Cc</string>
     <string name="compose_bcc">Bcc</string>
+    <string name="compose_remove_recipient">Remove %1$s</string>
     <string name="compose_add_copies">Add Cc and Bcc</string>
     <string name="compose_subject">Subject</string>
     <string name="compose_body">Write your message</string>

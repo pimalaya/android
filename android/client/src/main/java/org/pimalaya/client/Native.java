@@ -619,10 +619,11 @@ final class Native {
      * Reconciles the collection with its remote through the io-offline
      * engine, servicing every engine yield via the driver; with
      * {@code full} the checkpoint is ignored and the whole remote is
-     * enumerated. Returns the sync report {@code {pulled, pushed,
-     * conflicts, rejected, refreshed}}.
+     * enumerated; without {@code content} no body is pushed. Returns the
+     * sync report {@code {pulled, pushed, conflicts, rejected, refreshed}}.
      */
-    static native String offlineSync(OfflineDriver driver, String collection, boolean full);
+    static native String offlineSync(
+            OfflineDriver driver, String collection, boolean full, boolean content);
 
     /**
      * Raises the given handles (a JSON string array) to the full

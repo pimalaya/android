@@ -39,6 +39,11 @@ final class MessageCompose {
     /** The pattern an RFC 5322 date is written in (section 3.3). */
     private static final String DATE_FORMAT = "EEE, d MMM yyyy HH:mm:ss Z";
 
+    /** The three address fields. */
+    private static final int[] RECIPIENTS = {
+        R.id.compose_to, R.id.compose_cc, R.id.compose_bcc
+    };
+
     private final MainActivity host;
 
     /** Which account the message is sent from; null while none is open. */
@@ -92,8 +97,10 @@ final class MessageCompose {
 
         ((TextView) host.findViewById(R.id.compose_from))
                 .setText(host.getString(R.string.compose_from, account.email));
-        for (int id : new int[] {R.id.compose_to, R.id.compose_cc, R.id.compose_bcc,
-                    R.id.compose_subject, R.id.compose_body}) {
+        for (int id : RECIPIENTS) {
+            ((RecipientField) host.findViewById(id)).clear();
+        }
+        for (int id : new int[] {R.id.compose_subject, R.id.compose_body}) {
             ((EditText) host.findViewById(id)).setText("");
         }
 
@@ -134,13 +141,12 @@ final class MessageCompose {
 
     /** Whether every field of the composer is still blank. */
     private boolean empty() {
-        for (int id : new int[] {R.id.compose_to, R.id.compose_cc, R.id.compose_bcc,
-                    R.id.compose_subject, R.id.compose_body}) {
-            if (!value(id).isEmpty()) {
+        for (int id : RECIPIENTS) {
+            if (!recipients(id).isEmpty()) {
                 return false;
             }
         }
-        return true;
+        return value(R.id.compose_subject).isEmpty() && value(R.id.compose_body).isEmpty();
     }
 
     /**
@@ -161,9 +167,9 @@ final class MessageCompose {
         if (account == null) {
             return;
         }
-        if (value(R.id.compose_to).isEmpty()
-                && value(R.id.compose_cc).isEmpty()
-                && value(R.id.compose_bcc).isEmpty()) {
+        if (recipients(R.id.compose_to).isEmpty()
+                && recipients(R.id.compose_cc).isEmpty()
+                && recipients(R.id.compose_bcc).isEmpty()) {
             host.toast(host.getString(R.string.compose_no_recipient));
             return;
         }
@@ -173,7 +179,7 @@ final class MessageCompose {
         // that follows is not.
         String messageId = messageId(account.email);
         String date = now();
-        String to = value(R.id.compose_to);
+        String to = recipients(R.id.compose_to);
         String subject = value(R.id.compose_subject);
 
         String draft;
@@ -182,8 +188,8 @@ final class MessageCompose {
                     new JSONObject()
                             .put("from", account.email)
                             .put("to", to)
-                            .put("cc", value(R.id.compose_cc))
-                            .put("bcc", value(R.id.compose_bcc))
+                            .put("cc", recipients(R.id.compose_cc))
+                            .put("bcc", recipients(R.id.compose_bcc))
                             .put("subject", subject)
                             .put("body", value(R.id.compose_body))
                             .put("date", date)
@@ -234,6 +240,11 @@ final class MessageCompose {
 
     private String value(int id) {
         return ((EditText) host.findViewById(id)).getText().toString().trim();
+    }
+
+    /** One address field's recipients, comma separated. */
+    private String recipients(int id) {
+        return ((RecipientField) host.findViewById(id)).value();
     }
 
     /** Now, as the date RFC 5322 section 3.3 writes. */

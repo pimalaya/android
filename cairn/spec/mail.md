@@ -62,6 +62,29 @@ A subject and a sender's name read off an IMAP `ENVELOPE` SHALL have their RFC 2
 - WHEN the account is walked
 - THEN it is stored as it came, rather than emptied
 
+### Requirement: A sync skips what the filter hides
+A mail pass SHALL list every account's mailboxes and SHALL NOT reconcile a mailbox the filter hides, by its account or by its name.
+
+#### Scenario: A hidden mailbox
+- GIVEN a mailbox unchecked in the filter
+- WHEN mail is synced
+- THEN the mailbox is still offered by the filter, and nothing in it is read or pushed
+
+### Requirement: A mail sync pushes no body
+A mail sync SHALL NOT push content: a message is immutable once sent, and a body the reader stored SHALL NOT be read as an edit. A marker staged on an opened message SHALL be pushed as a marker.
+
+#### Scenario: Flagging an opened message
+- GIVEN a message whose body was stored by opening it
+- WHEN it is flagged and mail is synced
+- THEN the push is a `setFlags`, and the server is flagged
+
+### Requirement: A recipient is a chip
+Each address field of the composer SHALL hold one removable chip per recipient. A separator (comma, semicolon, space), the keyboard's next action or leaving the field SHALL turn what was typed into chips, and backspace on an empty input SHALL take the last chip back into it.
+
+#### Scenario: A pasted list
+- GIVEN `a@x.org, b@y.org` pasted into the To field
+- THEN two chips are shown, and the message is addressed to both
+
 ### Requirement: A message's markers can be written
 The app SHALL write the `\Seen`, `\Answered` and `\Flagged` markers of one message in the store, and the next sync SHALL push the difference between the staged set and the set the source last agreed on, so a keyword the app does not model is never replaced. The markers are named the IMAP way whichever backend answers, JMAP's keywords mapping onto the same three (RFC 8621 section 4.1.1). On Graph `\Seen` is `isRead` and `\Flagged` the follow-up flag; Graph keeps no answered marker, so a Graph message never carries `\Answered` and writing one is refused. On Gmail `\Seen` is the absence of `UNREAD` and `\Flagged` is `STARRED`, with no answered marker either.
 
@@ -158,6 +181,8 @@ The app SHALL compose a message from the composer's fields: `Date`, `Message-ID`
 Submitting SHALL compose the message on the device and stage it as one action on the store's queue: the app's own `submit` kind, a versioned payload naming the sender and what a listing draws, and the composed message written to the blob directory and pinned by the enqueue, all in the one transaction the standard prescribes for a producer. The payload carries the subject and the date because a waiting message is not an item and has no summary row beside it, and parsing a message to draw a list is what the sort key exists to avoid.
 
 The queued actions of an account SHALL be shown as its outbox, above everything the store synced, and discarding one SHALL cancel its row and release its pin, there being nothing anywhere to tell. A parked one SHALL be shown too, saying it was refused rather than that it is waiting: a message the sender wrote is not something to drop quietly.
+
+The waiting messages SHALL be filed under a mailbox named *Outbox*, which the filter's collection axis SHALL offer first, so they can be shown alone or hidden like any mailbox.
 
 #### Scenario: Composed with no network
 - GIVEN no network

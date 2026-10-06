@@ -1030,7 +1030,16 @@ public class PimalayaClient {
      * {@code {pulled, pushed, conflicts, rejected, refreshed}}.
      */
     public JSONObject offlineSync(OfflineDriver driver, String collection, boolean full) {
-        return object(Native.offlineSync(driver, collection, full));
+        return object(Native.offlineSync(driver, collection, full, true));
+    }
+
+    /**
+     * The same for a collection whose bodies never change, mail: only
+     * flags and membership are pushed, so a body a read stored is never
+     * mistaken for an edit.
+     */
+    public JSONObject offlineSyncImmutable(OfflineDriver driver, String collection) {
+        return object(Native.offlineSync(driver, collection, false, false));
     }
 
     /**

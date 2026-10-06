@@ -232,29 +232,55 @@ Submitting a message SHALL NOT be retried: a submission that was accepted and th
 - THEN nothing is sent a second time
 
 ### Requirement: A sync says what it is working on, in every domain
-The modal sync dialog SHALL name what the pass is on and what it is doing: the collection being reconciled as its title, and the step it stands at as its detail line. The three domains SHALL report both, so a wait reads the same whichever one is being synced.
+The modal sync dialog SHALL name what the pass is on and what it is doing: the domain being reconciled as its title (*Emails*, *Contacts*, *Calendars*), and the step it stands at as its detail line. The three domains SHALL report both, so a wait reads the same whichever one is being synced.
 
-Neither line SHALL ever be empty while the dialog is up. It SHALL open naming the domain the user asked to sync over a line saying it is preparing, since a pass has a round trip or two to make before it can name a collection, and SHALL replace both as the pass reaches one.
+Neither line SHALL ever be empty while the dialog is up. It SHALL open naming the first domain the pass reaches over a line saying it is preparing, and SHALL replace the title as the pass moves to the next domain and the detail line as it steps.
 
-#### Scenario: A mail pass
-- GIVEN more than one mailbox
-- WHEN the mail list is refreshed
-- THEN the dialog names each mailbox as it starts, over a line saying whether it is exchanging with the server or sending changes
-
-#### Scenario: A calendar pass
-- GIVEN more than one calendar
-- WHEN the agenda is refreshed
-- THEN the dialog names each calendar as it starts, over the same lines
+#### Scenario: A pass over every domain
+- GIVEN the drawer's sync
+- WHEN it moves from contacts to mail to calendars
+- THEN the title reads *Contacts*, then *Emails*, then *Calendars*
 
 #### Scenario: The roster round
 - GIVEN a pass that has to list an account's mailboxes or calendars first
 - WHEN it starts
-- THEN the title and the line under it are both set before that round, never the title alone over a blank line
+- THEN the detail line is set before that round, never a title over a blank line
 
 #### Scenario: The first frame
 - GIVEN a sync the user has just asked for
 - WHEN the dialog opens, before any round trip
 - THEN it names the domain being synced over a line saying it is preparing, rather than one line over an empty one
+
+### Requirement: The drawer's sync covers every domain
+The drawer's sync SHALL reconcile contacts, then mail, then calendars, and SHALL report one failure at most, the contacts one first.
+
+#### Scenario: A marker staged on the phone
+- GIVEN a message flagged in the reader
+- WHEN the drawer's sync runs
+- THEN the flag is pushed to the server
+
+### Requirement: The filter offers what it can hide
+The filter's account axis SHALL list the accounts covering the domain on screen, and SHALL NOT list the on-device account, whose one address book is on the collection axis.
+
+#### Scenario: A contacts-only account on the mail list
+- GIVEN an account connected for contacts alone
+- WHEN the filter is opened over the mail list
+- THEN the account is not listed
+
+### Requirement: A list bar keeps search out and the rest in an overflow
+Every list screen SHALL show the same add glyph, and SHALL carry its secondary actions behind one ⋮ overflow, accented while the filter hides anything: the filter on every list, then on contacts the birthdays, the duplicate remover, the address books, import and export. Search SHALL stay a bar button, and an open search SHALL take the bar up to its clear cross, beside the overflow.
+
+#### Scenario: The contacts bar
+- WHEN the contacts list is shown
+- THEN its bar carries search and the overflow, and nothing else after the navigation
+
+### Requirement: A deleted account takes its mail and calendars
+Deleting an account SHALL drop its mailboxes and their messages, whatever its outbox still holds, and its calendars and their events. Its contacts SHALL move into the on-device book.
+
+#### Scenario: Deleting a mail account
+- GIVEN an account with synced mail
+- WHEN it is deleted
+- THEN none of its messages is listed
 
 ### Requirement: A placement's status is derived from the row
 The store SHALL derive what a placement owes rather than store it, by the first rule that applies (pimdir SYNC §3): conflict when either the binding or the item is conflicted, tombstone when the item is deleted and the source binds it, created when the source binds it with no base or does not bind it at all, dirty when the flags differ from the base's, both known, or a mutable kind's body differs from the base's, clean otherwise. An item no source binds and the store holds no body for SHALL be projected for nobody. A placement holding no body SHALL project below full, whatever the stored level claims.

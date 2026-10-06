@@ -34,7 +34,7 @@ use io_pimdir::{
         PimdirFetchedBody, PimdirFetchedItem, PimdirPushOutcome, PimdirPushResult,
         PimdirRemoteItem, PimdirRemoteSnapshot, PimdirTier,
     },
-    sync::{PimdirSync, PimdirSyncOptions},
+    sync::{PimdirPushRights, PimdirSync, PimdirSyncOptions},
     upgrade::PimdirUpgrade,
 };
 use jni::{
@@ -48,15 +48,23 @@ use crate::{client::clear_and_fail, summary::SummaryJson, types::BridgeError};
 
 /// Reconciles `collection` with its remote through the Java driver,
 /// returning the sync report as JSON. With `full` the checkpoint is
-/// ignored and the whole remote is enumerated (recovery path).
+/// ignored and the whole remote is enumerated (recovery path). Without
+/// `content` no body is ever pushed, which is what an immutable kind
+/// wants: a message body stored by a read then reads as a local edit,
+/// and an update pushed for it would withhold the flags beside it.
 pub fn sync<'local>(
     env: &mut Env<'local>,
     driver: &JObject<'local>,
     collection: &str,
     full: bool,
+    content: bool,
 ) -> Result<Value, BridgeError> {
     let opts = PimdirSyncOptions {
         push: true,
+        rights: PimdirPushRights {
+            content,
+            ..PimdirPushRights::all()
+        },
         full,
         ..Default::default()
     };

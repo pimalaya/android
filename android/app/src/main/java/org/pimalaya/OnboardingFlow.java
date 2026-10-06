@@ -14,9 +14,11 @@ import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.AuthMethod;
@@ -1996,6 +1998,7 @@ final class OnboardingFlow {
                             connected.email,
                             domain,
                             connected.connection(domain).baseUrl,
+                            connected.connection(domain).submitUrl,
                             connected.credential(domain));
         }
 
@@ -2071,8 +2074,19 @@ final class OnboardingFlow {
         // choice offered twice, as when two mechanisms found one server or
         // it takes OAuth through two grants. The first kept is the best
         // ranked.
+        // A row naming no method is the same server again when another
+        // mechanism found it with one, as IMAP never offers such a row at all.
+        Set<String> signed = new HashSet<>();
+        for (SubmitOption option : implicit) {
+            if (option.auth != null) {
+                signed.add(option.url);
+            }
+        }
         Map<String, SubmitOption> distinct = new LinkedHashMap<>();
         for (SubmitOption option : implicit) {
+            if (option.auth == null && signed.contains(option.url)) {
+                continue;
+            }
             distinct.putIfAbsent(submitLabel(option), option);
         }
         return new ArrayList<>(distinct.values());

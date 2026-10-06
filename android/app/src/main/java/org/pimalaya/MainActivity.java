@@ -243,7 +243,7 @@ public class MainActivity extends Activity {
             findViewById(Domains.buttonOf(panel))
                     .setOnClickListener(view -> switchDomain(panel));
         }
-        findViewById(R.id.bar_filter).setOnClickListener(view -> openFilter());
+        findViewById(R.id.bar_more).setOnClickListener(this::showMoreMenu);
 
         // The modal dialog binds once here and covers every sync entry
         // point through the shared syncing flag.
@@ -819,17 +819,12 @@ public class MainActivity extends Activity {
 
     /**
      * The runner's hooks into this activity's presentation: the loader
-     * dialog's title and detail lines, and the in-memory account cache
-     * a token refresh must keep current (mutated on the main thread the
-     * drawer reads it from).
+     * dialog's detail line, and the in-memory account cache a token
+     * refresh must keep current (mutated on the main thread the drawer
+     * reads it from).
      */
     private SyncRunner.Observer syncObserver() {
         return new SyncRunner.Observer() {
-            @Override
-            public void bookStarted(BookEntry book) {
-                syncTitle(book.book.name);
-            }
-
             @Override
             public void step(int stage, int count) {
                 syncStep(stage, count);
@@ -859,8 +854,8 @@ public class MainActivity extends Activity {
      * Shows or hides the modal sync dialog: non-cancelable (no outside
      * tap, no back), so the wait is explicit instead of an ambiguous
      * spinner, while the screen behind stays fully visible. The title
-     * carries the addressbook, the detail the current engine step, and
-     * the screen stays on for the duration.
+     * carries the domain, the detail the current engine step, and the
+     * screen stays on for the duration.
      */
     private void showSyncDialog(boolean active) {
         if (!active) {
@@ -889,18 +884,19 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * What the sync dialog names before a pass can name a collection: the
-     * domain being synced, which is known the moment the user asks for it.
+     * The domain the sync dialog names: the title is which of the three a
+     * pass is on, the detail line what it is doing there.
      */
-    private int syncDomain = R.string.domain_contacts;
+    private volatile int syncDomain = R.string.contacts_title;
 
-    /** Sets the dialog's addressbook line (callable off the main thread). */
-    private void syncTitle(String book) {
+    /** Names the domain a pass moved on to (callable off the main thread). */
+    private void syncTitle(int domain) {
+        syncDomain = domain;
         main.post(
                 () -> {
                     if (syncDialog != null) {
                         ((TextView) syncDialog.findViewById(R.id.sync_dialog_title))
-                                .setText(book);
+                                .setText(domain);
                     }
                 });
     }
@@ -956,7 +952,7 @@ public class MainActivity extends Activity {
      * on screen.
      */
     void syncRemote() {
-        syncDomain = R.string.domain_contacts;
+        syncDomain = R.string.contacts_title;
         setSyncing(true);
 
         io.execute(
@@ -1023,60 +1019,69 @@ public class MainActivity extends Activity {
      * happened to share them.
      */
     void syncMail() {
-        syncDomain = R.string.domain_mail;
+        syncDomain = R.string.mail_title;
         setSyncing(true);
         io.execute(
                 () -> {
-                    Exception failure = null;
-                    int sent = 0;
-                    for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
-                        // One connection for the account's whole pass: the
-                        // drain, the walk and every marker the reader moved
-                        // go out on it rather than on one apiece.
-                        try (MailSession session = openMail(account)) {
-                            // NOTE: the outbox first, so a message sent a
-                            // moment ago is already in the sent mailbox by the
-                            // time the walk beside it lists one.
-                            try {
-                                sent += drainOutbox(account, session);
-                            } catch (Exception error) {
-                                Log.w("pimalaya", "outbox drain failed: " + account.email, error);
-                                if (failure == null) {
-                                    failure = error;
-                                }
-                            }
-
-                            Exception error = fetchMail(account, session);
-                            if (failure == null) {
-                                failure = error;
-                            }
-                        } catch (Exception error) {
-                            Log.w("pimalaya", "mail sync failed: " + account.email, error);
-                            if (failure == null) {
-                                failure = error;
-                            }
-                        }
-                    }
-
-                    Exception outcome = failure;
-                    int drained = sent;
+                    MailPass pass = mailPass();
                     postAlive(
                             () -> {
                                 setSyncing(false);
                                 mailList.reload();
-                                if (drained > 0) {
-                                    toast(
-                                            getResources()
-                                                    .getQuantityString(
-                                                            R.plurals.outbox_sent,
-                                                            drained,
-                                                            drained));
-                                }
-                                if (outcome != null) {
-                                    showError(outcome, R.string.sync_failed);
+                                reportMail(pass);
+                                if (pass.failure != null) {
+                                    showError(pass.failure, R.string.sync_failed);
                                 }
                             });
                 });
+    }
+
+    /** What one mail pass over every account came to. */
+    private static final class MailPass {
+        Exception failure;
+        int sent;
+    }
+
+    /** Every mail account's outbox drained and mailboxes synced, on the calling thread. */
+    private MailPass mailPass() {
+        syncTitle(R.string.mail_title);
+        MailPass pass = new MailPass();
+        for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
+            // One connection for the account's whole pass: the drain, the
+            // walk and every marker the reader moved go out on it rather
+            // than on one apiece.
+            try (MailSession session = openMail(account)) {
+                // NOTE: the outbox first, so a message sent a moment ago is
+                // already in the sent mailbox by the time the walk beside it
+                // lists one.
+                try {
+                    pass.sent += drainOutbox(account, session);
+                } catch (Exception error) {
+                    Log.w("pimalaya", "outbox drain failed: " + account.email, error);
+                    if (pass.failure == null) {
+                        pass.failure = error;
+                    }
+                }
+
+                Exception error = fetchMail(account, session);
+                if (pass.failure == null) {
+                    pass.failure = error;
+                }
+            } catch (Exception error) {
+                Log.w("pimalaya", "mail sync failed: " + account.email, error);
+                if (pass.failure == null) {
+                    pass.failure = error;
+                }
+            }
+        }
+        return pass;
+    }
+
+    /** Says how many queued messages a pass sent, when it sent any. */
+    private void reportMail(MailPass pass) {
+        if (pass.sent > 0) {
+            toast(getResources().getQuantityString(R.plurals.outbox_sent, pass.sent, pass.sent));
+        }
     }
 
     /**
@@ -1161,33 +1166,37 @@ public class MainActivity extends Activity {
      * calendar's objects, so this is one round trip per calendar.
      */
     void syncCalendars() {
-        syncDomain = R.string.domain_calendar;
+        syncDomain = R.string.calendar_title;
         setSyncing(true);
         io.execute(
                 () -> {
-                    Exception failure = null;
-                    // NOTE: the calendar accounts, rather than the contacts
-                    // accounts that happened to be CalDAV-shaped. That filter
-                    // was the closest thing to a calendar account the app had
-                    // before the connection flow could make one, and it walked
-                    // a CardDAV home looking for calendars.
-                    for (AccountEntry account : accountsFor(PimDomain.CALENDAR)) {
-                        Exception error = fetchCalendars(account);
-                        if (failure == null) {
-                            failure = error;
-                        }
-                    }
-
-                    Exception outcome = failure;
+                    Exception failure = calendarPass();
                     postAlive(
                             () -> {
                                 setSyncing(false);
                                 calendarList.reload();
-                                if (outcome != null) {
-                                    showError(outcome, R.string.sync_failed);
+                                if (failure != null) {
+                                    showError(failure, R.string.sync_failed);
                                 }
                             });
                 });
+    }
+
+    /** Every calendar account synced, on the calling thread. Answers the first failure. */
+    private Exception calendarPass() {
+        syncTitle(R.string.calendar_title);
+        Exception failure = null;
+        // NOTE: the calendar accounts, rather than the contacts accounts that
+        // happened to be CalDAV-shaped. That filter was the closest thing to a
+        // calendar account the app had before the connection flow could make
+        // one, and it walked a CardDAV home looking for calendars.
+        for (AccountEntry account : accountsFor(PimDomain.CALENDAR)) {
+            Exception error = fetchCalendars(account);
+            if (failure == null) {
+                failure = error;
+            }
+        }
+        return failure;
     }
 
     /**
@@ -1212,18 +1221,20 @@ public class MainActivity extends Activity {
                     new MailEngine(pimdir, client, session, accountIdOf(account.email));
             engine.progress = this::syncStep;
 
-            // NOTE: the step beside the title, not after it. Listing the
-            // mailboxes is a round trip, and a dialog naming the account
-            // over a blank line for the length of one reads as a dialog
-            // that has not started.
-            syncTitle(account.email);
+            // NOTE: the step at once. Listing the mailboxes is a round trip,
+            // and a dialog over a blank line for the length of one reads as
+            // a dialog that has not started.
             syncStep(PimdirEngine.Progress.STAGE_SERVER, 0);
 
             List<Mailbox> mailboxes = engine.mailboxes();
             mail.replaceMailboxes(account.email, mailboxes);
 
             for (Mailbox mailbox : mailboxes) {
-                syncTitle(mailbox.name);
+                // NOTE: what the filter hides is not synced either. The roster
+                // above still is, so the filter keeps offering it.
+                if (!filter.accepts(account.email, mailbox.name)) {
+                    continue;
+                }
                 engine.sync(mail.collectionOf(account.email, mailbox.name));
             }
             return null;
@@ -1248,7 +1259,6 @@ public class MainActivity extends Activity {
                 // NOTE: as the mail pass does, and for the same reason: the
                 // calendar listing is a discovery walk, and it is the
                 // slowest round trip of the pass.
-                syncTitle(account.email);
                 syncStep(PimdirEngine.Progress.STAGE_SERVER, 0);
                 events.replaceCalendars(
                         account.email,
@@ -1264,7 +1274,6 @@ public class MainActivity extends Activity {
                     continue;
                 }
                 try {
-                    syncTitle(calendar.name);
                     session.call(
                             server -> {
                                 CalendarEngine engine =
@@ -1328,13 +1337,13 @@ public class MainActivity extends Activity {
      * not work rather than as one that only did a third of itself.
      */
     void syncConnected(AccountEntry account) {
-        // The first domain it covers, which is the one it lands on.
+        // The first domain the pass reaches, in the order below.
         syncDomain =
-                account.covers(PimDomain.MAIL)
-                        ? R.string.domain_mail
-                        : account.covers(PimDomain.CONTACTS)
-                                ? R.string.domain_contacts
-                                : R.string.domain_calendar;
+                account.covers(PimDomain.CONTACTS)
+                        ? R.string.contacts_title
+                        : account.covers(PimDomain.MAIL)
+                                ? R.string.mail_title
+                                : R.string.calendar_title;
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1347,6 +1356,7 @@ public class MainActivity extends Activity {
 
                     Exception failure = null;
                     if (account.covers(PimDomain.MAIL)) {
+                        syncTitle(R.string.mail_title);
                         try (MailSession session = openMail(account)) {
                             failure = fetchMail(account, session);
                         } catch (Exception error) {
@@ -1354,6 +1364,7 @@ public class MainActivity extends Activity {
                         }
                     }
                     if (account.covers(PimDomain.CALENDAR)) {
+                        syncTitle(R.string.calendar_title);
                         Exception error = fetchCalendars(account);
                         if (failure == null) {
                             failure = error;
@@ -1386,6 +1397,10 @@ public class MainActivity extends Activity {
         return account.covers(PimDomain.CONTACTS) ? PANEL_CONTACTS : PANEL_CALENDAR;
     }
 
+    /**
+     * Syncs every domain in turn, contacts then mail then calendars, the
+     * dialog naming each as it goes.
+     */
     void syncAll() {
         // NOTE: only the phone passes need the contacts permission;
         // reconciling the Android accounts runs regardless.
@@ -1393,7 +1408,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        syncDomain = R.string.domain_contacts;
+        syncDomain = R.string.contacts_title;
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1405,11 +1420,22 @@ public class MainActivity extends Activity {
                     if (outcome.failure == null) {
                         outcome.failure = failure;
                     }
+
+                    MailPass sent = mailPass();
+                    Exception calendars = calendarPass();
+                    Exception other = sent.failure != null ? sent.failure : calendars;
                     postAlive(
                             () -> {
                                 setSyncing(false);
                                 reloadContacts();
+                                mailList.reload();
+                                calendarList.reload();
                                 reportSync(outcome);
+                                reportMail(sent);
+                                // NOTE: one error dialog, the contacts one first.
+                                if (other != null && outcome.failure == null) {
+                                    showError(other, R.string.sync_failed);
+                                }
                             });
                 });
     }
@@ -1428,7 +1454,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        syncDomain = R.string.domain_contacts;
+        syncDomain = R.string.contacts_title;
         setSyncing(true);
         io.execute(
                 () -> {
@@ -2051,7 +2077,7 @@ public class MainActivity extends Activity {
 
         findViewById(R.id.bar_title).setVisibility(View.GONE);
         findViewById(R.id.bar_menu).setVisibility(View.VISIBLE);
-        showFilterButton();
+        showMoreButton();
     }
 
     /** Retitles the bar, for a page whose own edits change its title. */
@@ -2072,9 +2098,9 @@ public class MainActivity extends Activity {
         findViewById(R.id.bar_spacer).setVisibility(visibility);
     }
 
-    /** The merged view's filter, on every list screen, accented while it bites. */
-    private void showFilterButton() {
-        android.widget.ImageButton button = findViewById(R.id.bar_filter);
+    /** The overflow, on every list screen, accented while the filter bites. */
+    private void showMoreButton() {
+        android.widget.ImageButton button = findViewById(R.id.bar_more);
         button.setVisibility(View.VISIBLE);
         button.setImageTintList(
                 android.content.res.ColorStateList.valueOf(
@@ -2099,11 +2125,47 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * The list screens' overflow: the filter, then the domain's own
+     * entries.
+     *
+     * <p>Text-only: the framework popup renders forced icons flush against
+     * their labels on some Android releases.
+     */
+    private void showMoreMenu(View anchor) {
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
+        item(menu, R.string.filter_title, this::openFilter);
+        if (screen == PANEL_CONTACTS) {
+            contactsList.addMenuItems(menu);
+        }
+        menu.show();
+    }
+
+    /** One overflow entry carrying its own action. */
+    static void item(android.widget.PopupMenu menu, int label, Runnable action) {
+        menu.getMenu()
+                .add(label)
+                .setOnMenuItemClickListener(
+                        entry -> {
+                            action.run();
+                            return true;
+                        });
+    }
+
     /** Opens the two-axis filter over the subscribed books and accounts. */
     private void openFilter() {
+        // NOTE: the accounts covering the domain on screen, and never the
+        // on-device one: its single book is on the collection axis already,
+        // and it holds no mail or calendar a box could hide.
+        PimDomain domain =
+                screen == PANEL_CALENDAR
+                        ? PimDomain.CALENDAR
+                        : screen == PANEL_MAIL ? PimDomain.MAIL : PimDomain.CONTACTS;
         MergedFilter.Axis byAccount = filter.accountAxis(getString(R.string.filter_accounts));
         for (AccountEntry account : accounts) {
-            byAccount.add(account.email, account.email);
+            if (account.covers(domain) && !LocalBook.is(account.email)) {
+                byAccount.add(account.email, account.email);
+            }
         }
 
         // The collection axis follows the domain on screen: addressbooks
@@ -2131,7 +2193,7 @@ public class MainActivity extends Activity {
                 this,
                 java.util.Arrays.asList(byAccount, byCollection),
                 () -> {
-                    showFilterButton();
+                    showMoreButton();
                     contactsList.reRender();
                     calendarList.reload();
                     mailList.reload();
@@ -2292,7 +2354,7 @@ public class MainActivity extends Activity {
         contacts.chrome =
                 () -> {
                     android.widget.ImageButton fab = findViewById(R.id.fab);
-                    fab.setImageResource(R.drawable.ic_person_add);
+                    fab.setImageResource(R.drawable.ic_add);
                     fab.setContentDescription(getString(R.string.contacts_add));
                     fab.setVisibility(View.VISIBLE);
                     // NOTE: after updateSelectionUi, which hides the
@@ -2492,17 +2554,14 @@ public class MainActivity extends Activity {
                         R.id.bar_domain_contacts,
                         R.id.bar_domain_calendar,
                         R.id.bar_spacer,
-                        R.id.bar_filter,
+                        R.id.bar_more,
                         R.id.contacts_close,
                         R.id.contacts_search_pill,
                         R.id.contacts_search_close,
                         R.id.contacts_search,
-                        R.id.contacts_birthdays,
-                        R.id.contacts_duplicates,
                         R.id.contacts_merge,
                         R.id.contacts_delete,
                         R.id.contacts_select_all_slot,
-                        R.id.contacts_more_slot,
                         R.id.contact_advanced,
                         R.id.contact_books,
                         R.id.contact_add_field,

@@ -66,6 +66,8 @@ Finishing the connection flow SHALL synchronise every domain the account covers 
 ### Requirement: The setup names sending in the words of the setup it is in
 The connection flow SHALL offer where mail is submitted as part of connecting mail, and SHALL name it the way the chosen setup names everything else. The standard setup SHALL offer one switch reading *send mail*, carrying no protocol, on when the discovery run turned up an endpoint this client can drive and off and unswitchable when it did not, naming the setup that can connect it. The advanced setup SHALL list, under a switched-on mail section, one row per discovered submission configuration, a row for none, and manual entry. Implicit TLS and STARTTLS are both driven. Submission SHALL sign in with the credential the mail connection signed in with, and the flow SHALL NOT prompt a second time.
 
+The advanced setup SHALL list one row per discovered submission endpoint and sign-in method, as it lists reading rows, and SHALL drop a row naming no method when the same endpoint is offered with one.
+
 #### Scenario: An address that publishes submission
 - GIVEN an address whose discovery turned up an implicit-TLS SMTP endpoint
 - WHEN the standard setup switches mail on
@@ -87,6 +89,16 @@ The connection flow SHALL offer where mail is submitted as part of connecting ma
 - GIVEN an address that publishes submission
 - WHEN the flow finishes with sending switched off
 - THEN the account stores no submit endpoint, and is not offered as a sender
+
+#### Scenario: Sending switched on
+- GIVEN an address that publishes submission
+- WHEN the flow finishes with sending switched on
+- THEN the account stores the submit endpoint, and is offered as a sender
+
+#### Scenario: One server found twice
+- GIVEN an SMTP endpoint discovered once with a password method and once with none
+- WHEN the advanced setup switches mail on
+- THEN it is listed once, with its method
 
 ### Requirement: An account can gain a sender after it is connected
 The account settings screen SHALL show, for an account covering mail, where that account submits, and SHALL let it be entered, changed or emptied. What is entered is read the way the advanced setup reads it: a host, or a host and a port, STARTTLS on port 587 and implicit TLS otherwise, on port 465 by default. Changing it SHALL leave the account's credential and the endpoint it reads from alone, and SHALL take effect without a sign-in.

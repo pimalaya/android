@@ -188,20 +188,6 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- The merged view's two-axis filter, on every list screen: the
-             account axis is common to all of them. Tinted with the
-             accent while anything is hidden, so a narrowed list never
-             looks like an empty one. -->
-        <ImageButton
-            android:id="@+id/bar_filter"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/filter_title"
-            android:src="@drawable/ic_filter_list"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
-
         <!-- Contacts: opens the in-bar search field. -->
         <ImageButton
             android:id="@+id/contacts_search"
@@ -213,25 +199,18 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- Contacts: the next-birthday dialog. -->
+        <!-- Every list screen's overflow: the merged view's two-axis
+             filter, and on contacts the birthday peek, the duplicate
+             remover and the management entries. Tinted with the accent
+             while the filter hides anything, so a narrowed list never
+             looks like an empty one. -->
         <ImageButton
-            android:id="@+id/contacts_birthdays"
+            android:id="@+id/bar_more"
             android:layout_width="@dimen/app_bar_button"
             android:layout_height="@dimen/app_bar_button"
             android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/birthdays_title"
-            android:src="@drawable/ic_birthday"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
-
-        <!-- Contacts: the duplicate remover. -->
-        <ImageButton
-            android:id="@+id/contacts_duplicates"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/dup_find"
-            android:src="@drawable/ic_duplicates"
+            android:contentDescription="@string/more"
+            android:src="@drawable/ic_more_vert"
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
@@ -272,26 +251,6 @@
                 android:layout_gravity="center"
                 android:buttonTint="?android:attr/textColorPrimary"
                 android:contentDescription="@string/select_all" />
-
-        </FrameLayout>
-
-        <!-- Contacts: what is management rather than action, behind one
-             overflow (addressbooks, import, export). The slot id gates
-             its whole visibility. -->
-        <FrameLayout
-            android:id="@+id/contacts_more_slot"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:visibility="gone">
-
-            <ImageButton
-                android:id="@+id/contacts_more"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/more"
-                android:src="@drawable/ic_more_vert"
-                android:tint="?android:attr/textColorPrimary" />
 
         </FrameLayout>
 

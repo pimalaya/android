@@ -93,9 +93,15 @@ public class SecureStore {
      * <p>This is what makes "set up calendar for this account" a step rather
      * than a second account: the entry is merged into the one that is already
      * there, and only appears as a new account when the address is new.
+     *
+     * <p>The submission endpoint rides along, null for every domain but mail.
      */
     public AccountEntry connect(
-            String email, PimDomain domain, String baseUrl, AccountCredential credential) {
+            String email,
+            PimDomain domain,
+            String baseUrl,
+            String submitUrl,
+            AccountCredential credential) {
         synchronized (LOCK) {
             List<AccountEntry> entries = loadAll();
             AccountEntry existing = null;
@@ -106,9 +112,8 @@ public class SecureStore {
             }
 
             AccountEntry merged =
-                    existing == null
-                            ? AccountEntry.of(email, domain, baseUrl, credential)
-                            : existing.with(domain, baseUrl, credential);
+                    (existing == null ? AccountEntry.empty(email) : existing)
+                            .with(domain, baseUrl, submitUrl, credential);
             entries.removeIf(entry -> entry.email.equals(email));
             entries.add(merged);
             save(entries);

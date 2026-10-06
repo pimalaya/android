@@ -497,8 +497,15 @@ final class AccountSettings {
         // app's own state and are dropped separately.
         host.contacts.detachToLocal(urls, LocalBook.URL);
         host.base.forgetAccount(email);
+        // NOTE: mail and events do not outlive it: they are the server's,
+        // and left behind they would stay listed under an account the
+        // filter no longer offers to hide.
+        host.mail.forget(email);
+        host.events.forget(email);
         host.accounts.removeIf(entry -> entry.email.equals(email));
         host.reloadHome();
+        host.mailList.reload();
+        host.calendarList.reload();
 
         // NOTE: the deleted books' phone accounts go explicitly (their
         // rows are already gone, so a reconcile could not name them);

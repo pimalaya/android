@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The message composer: the envelope on top, the text under it.
 
-     One column of plain fields rather than chips: an address is typed
-     or pasted, and a chip editor is a lot of machinery to say the same
-     thing with. The copy fields open only when they are asked for, so
-     the ordinary message is three fields and a body. Its bar elements
+     Each address field holds one chip per recipient (RecipientField),
+     since a comma is not something anybody should have to know to
+     write to two people. The copy fields open only when they are asked
+     for, so the ordinary message is three fields and a body. Its bar elements
      live in the persistent chrome (activity_main.xml). -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -25,33 +25,24 @@
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="13sp" />
 
-        <EditText
+        <org.pimalaya.RecipientField
             android:id="@+id/compose_to"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="@string/compose_to"
-            android:imeOptions="actionNext"
-            android:inputType="textEmailAddress"
-            android:singleLine="true" />
+            android:hint="@string/compose_to" />
 
-        <EditText
+        <org.pimalaya.RecipientField
             android:id="@+id/compose_cc"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="@string/compose_cc"
-            android:imeOptions="actionNext"
-            android:inputType="textEmailAddress"
-            android:singleLine="true"
             android:visibility="gone" />
 
-        <EditText
+        <org.pimalaya.RecipientField
             android:id="@+id/compose_bcc"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="@string/compose_bcc"
-            android:imeOptions="actionNext"
-            android:inputType="textEmailAddress"
-            android:singleLine="true"
             android:visibility="gone" />
 
         <TextView

@@ -30,9 +30,6 @@ final class SyncRunner {
      * every hook fires on the sync thread.
      */
     interface Observer {
-        /** A book's pass is starting (the loader titles itself). */
-        void bookStarted(BookEntry book);
-
         /** An engine stage stepped (the loader's detail line). */
         void step(int stage, int count);
 
@@ -105,7 +102,6 @@ final class SyncRunner {
      */
     OfflineEngine.Report syncBook(BookEntry book) throws Exception {
         String url = book.book.url;
-        bookStarted(book);
 
         if (LocalBook.is(book.accountEmail)) {
             OfflineEngine.Report report = new OfflineEngine.Report();
@@ -239,7 +235,6 @@ final class SyncRunner {
 
             OfflineEngine engine = engine(null, null);
             for (BookEntry entry : phoneBooks) {
-                bookStarted(entry);
                 engine.syncPhone(entry.book.url, report);
             }
         } catch (Exception error) {
@@ -272,7 +267,6 @@ final class SyncRunner {
             OfflineEngine engine = engine(primary, account);
 
             for (BookEntry entry : books) {
-                bookStarted(entry);
                 outcome.absorb(engine.syncBook(entry.book.url, entry.remoteSynced));
                 outcome.local |= entry.phoneSynced;
             }
@@ -394,12 +388,6 @@ final class SyncRunner {
             }
         }
         return null;
-    }
-
-    private void bookStarted(BookEntry book) {
-        if (observer != null) {
-            observer.bookStarted(book);
-        }
     }
 
     /** True for an HTTP 401 from any backend (expired or revoked token). */

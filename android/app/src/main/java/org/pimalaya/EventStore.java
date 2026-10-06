@@ -73,6 +73,11 @@ final class EventStore {
         collections.replace(accountEmail, PimdirSummary.CALENDAR, listed);
     }
 
+    /** Drops one account's calendars and their events. */
+    void forget(String accountEmail) {
+        collections.replace(accountEmail, PimdirSummary.CALENDAR, List.of());
+    }
+
     /** One stored calendar, with the account it belongs to. */
     static final class StoredCalendar {
         /** The backend's own address, what a listing round asks for. */

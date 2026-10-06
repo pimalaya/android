@@ -8,6 +8,7 @@ import android.content.Context;
 import android.database.Cursor;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
@@ -18,6 +19,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -151,6 +153,55 @@ public class MailEngineTest {
                 new JSONObject(engine.serve(load.toString())).getJSONArray("placements");
 
         assertEquals("clean", placements.getJSONObject(0).getString("status"));
+    }
+
+    /**
+     * An opened message holds a body its base does not, which the engine
+     * reads as a content edit; the mail sync pushes no content, so a marker
+     * staged on it still goes out as a marker rather than as an update.
+     */
+    @Test
+    public void aMarkerOnAnOpenedMessageIsPushedAsAMarker() throws Exception {
+        store.saveSource(collection, "42", "From: a@b.c\r\n\r\nbody\r\n".getBytes(StandardCharsets.UTF_8));
+        engine.mutateFlags(
+                collection,
+                "42",
+                MailEngine.withFlag(store.flagsOf(collection, "42"), MailEngine.FLAGGED, true));
+
+        List<String> pushed = new ArrayList<>();
+        PimdirEngine remote =
+                new PimdirEngine(pimdir, new PimalayaClient()) {
+                    @Override
+                    protected JSONObject enumerate(JSONObject yielded) throws JSONException {
+                        JSONObject item =
+                                new JSONObject()
+                                        .put("handle", "42")
+                                        .put("flags", new JSONArray().put("$junk"));
+                        return new JSONObject()
+                                .put("items", new JSONArray().put(item))
+                                .put("vanished", new JSONArray())
+                                .put("complete", true);
+                    }
+
+                    @Override
+                    protected JSONObject fetch(JSONObject yielded) {
+                        return new JSONObject();
+                    }
+
+                    @Override
+                    protected JSONObject push(JSONObject yielded) throws JSONException {
+                        JSONObject change = yielded.getJSONArray("changes").getJSONObject(0);
+                        pushed.add(change.getString("op"));
+                        return new JSONObject()
+                                .put(
+                                        "results",
+                                        new JSONArray()
+                                                .put(result(change.getString("handle"), true, null, null)));
+                    }
+                };
+        new PimalayaClient().offlineSyncImmutable(remote, collection);
+
+        assertEquals(List.of("setFlags"), pushed);
     }
 
     @Test

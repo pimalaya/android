@@ -106,6 +106,29 @@ final class MailStore {
     }
 
     /**
+     * Drops everything one account's mail left in the store: its mailboxes,
+     * their messages, and whatever was still waiting to go out.
+     */
+    void forget(String accountEmail) {
+        String outbox = outboxOf(accountEmail);
+        List<PimdirQueue.Action> waiting = new ArrayList<>(queue.pending(outbox));
+        for (PimdirQueue.Action action : queue.parked()) {
+            if (action.collection.equals(outbox)) {
+                waiting.add(action);
+            }
+        }
+        for (PimdirQueue.Action action : waiting) {
+            queue.acknowledge(action.id);
+        }
+
+        collections.replace(accountEmail, PimdirSummary.MAIL, List.of());
+        context.getSharedPreferences(TRASH_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .remove(accountEmail)
+                .apply();
+    }
+
+    /**
      * The mailbox one account deletes into, empty when it marks none.
      *
      * <p>Kept beside the roster rather than asked for at the moment of a
@@ -289,13 +312,13 @@ final class MailStore {
     }
 
     /** One queued submission as a row, read off the payload it was written with. */
-    private static StoredMessage outgoing(PimdirQueue.Action action) {
+    private StoredMessage outgoing(PimdirQueue.Action action) {
         String from = action.payload.optString("from");
 
         return new StoredMessage(
                 from,
                 action.collection,
-                "",
+                outboxName(),
                 action.payload.optString("messageId"),
                 action.payload.optString("subject"),
                 "",
@@ -549,9 +572,21 @@ final class MailStore {
         queue.bumpAttempts(queued);
     }
 
-    /** The distinct mailbox names seen, for the filter's collection axis. */
+    /**
+     * The name the outbox goes by in the list and the filter: a mailbox like
+     * any other to the reader, though no server holds it.
+     */
+    String outboxName() {
+        return context.getString(R.string.mail_outbox);
+    }
+
+    /**
+     * The distinct mailbox names seen, for the filter's collection axis,
+     * the outbox first.
+     */
     List<String> loadMailboxes() {
         List<String> mailboxes = new ArrayList<>();
+        mailboxes.add(outboxName());
         for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
             if (!mailboxes.contains(stored.name)) {
                 mailboxes.add(stored.name);
