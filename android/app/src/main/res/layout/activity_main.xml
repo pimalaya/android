@@ -37,7 +37,7 @@
         android:id="@+id/app_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:background="@color/surface"
+        android:background="?android:attr/colorBackground"
         android:gravity="center_vertical"
         android:minHeight="@dimen/app_bar_height"
         android:orientation="horizontal"
@@ -47,9 +47,10 @@
         <!-- Editor, addressbooks, advanced and auth screens. -->
         <ImageButton
             android:id="@+id/bar_back"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_margin="4dp"
+            android:background="@drawable/button_tonal"
             android:contentDescription="@string/back"
             android:src="@drawable/ic_arrow_back"
             android:tint="?android:attr/textColorPrimary"
@@ -60,9 +61,10 @@
              not an action, and the drawer it opened had to be guessed. -->
         <ImageButton
             android:id="@+id/bar_menu"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_margin="4dp"
+            android:background="@drawable/button_tonal"
             android:contentDescription="@string/accounts_open"
             android:src="@drawable/ic_menu"
             android:tint="?android:attr/textColorPrimary"
@@ -94,62 +96,6 @@
             android:paddingEnd="@dimen/app_bar_title_padding"
             android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
             android:textColor="?android:attr/textColorPrimary" />
-
-        <!-- Contacts search mode: the pill replaces the title. Its
-             negative end margin slides it under the clear cross that
-             follows, so the cross reads as inside the field while
-             staying a regular bar button. -->
-        <FrameLayout
-            android:id="@+id/contacts_search_pill"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:layout_marginTop="4dp"
-            android:layout_marginEnd="-48dp"
-            android:layout_marginBottom="4dp"
-            android:background="@drawable/search_background"
-            android:visibility="gone">
-
-            <EditText
-                android:id="@+id/contacts_search_input"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:background="@null"
-                android:hint="@string/contacts_search"
-                android:imeOptions="actionSearch"
-                android:inputType="text"
-                android:maxLines="1"
-                android:paddingStart="24dp"
-                android:paddingEnd="48dp"
-                android:textColor="?android:attr/textColorPrimary"
-                android:textColorHint="?android:attr/textColorSecondary"
-                android:textSize="16sp" />
-
-        </FrameLayout>
-
-        <!-- Contacts search mode: clears the query and restores the
-             title; the pill extends underneath it. -->
-        <ImageButton
-            android:id="@+id/contacts_search_close"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/clear"
-            android:src="@drawable/ic_close"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
-
-        <!-- Contacts: opens the in-bar search field. -->
-        <ImageButton
-            android:id="@+id/contacts_search"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/contacts_search"
-            android:src="@drawable/ic_search"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
 
         <!-- Contacts: the next-birthday dialog. -->
         <ImageButton
@@ -273,6 +219,57 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
+        <!-- Reader: what is done to the open message as a whole, one
+             tonal pill of the two. The star stays beside the subject. -->
+        <LinearLayout
+            android:id="@+id/message_actions"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/button_tonal"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:visibility="gone">
+
+            <ImageButton
+                android:id="@+id/message_view_unread"
+                android:layout_width="40dp"
+                android:layout_height="36dp"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/message_mark_unread"
+                android:src="@drawable/ic_visibility_off"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <ImageButton
+                android:id="@+id/message_view_delete"
+                android:layout_width="40dp"
+                android:layout_height="36dp"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/message_delete"
+                android:src="@drawable/ic_delete_bar"
+                android:tint="?android:attr/textColorPrimary" />
+
+        </LinearLayout>
+
+        <!-- Composer: send, an accent pill naming what it does. -->
+        <TextView
+            android:id="@+id/bar_send"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/button_pill"
+            android:drawableStart="@drawable/ic_send"
+            android:drawablePadding="6dp"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="16dp"
+            android:text="@string/compose_send"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
         <!-- Editor: remove what is open. In the bar rather than on the
              page, because it acts on the whole of what the page shows
              and not on any one row of it. -->
@@ -314,6 +311,134 @@
 
     </ViewFlipper>
 
+    <!-- The app's top-level navigation, on the three lists only: one
+         item per domain, mail, contacts then calendars, the one on
+         screen on an accent pill (showDomainBar). It takes the bottom
+         system inset, so the lists above it need none. -->
+    <LinearLayout
+        android:id="@+id/bottom_nav"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@color/surface"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:id="@+id/nav_mail"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/nav_height"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <FrameLayout
+                android:layout_width="@dimen/nav_indicator_width"
+                android:layout_height="@dimen/nav_indicator_height">
+
+                <ImageView
+                    android:layout_width="@dimen/item_icon"
+                    android:layout_height="@dimen/item_icon"
+                    android:layout_gravity="center"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_domain_mail" />
+
+                <!-- The unread count, over the icon's top end. -->
+                <TextView
+                    android:id="@+id/nav_mail_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="16dp"
+                    android:layout_gravity="top|end"
+                    android:layout_marginEnd="6dp"
+                    android:background="@drawable/count_badge"
+                    android:gravity="center"
+                    android:minWidth="16dp"
+                    android:paddingStart="4dp"
+                    android:paddingEnd="4dp"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/domain_mail"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/nav_contacts"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/nav_height"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <FrameLayout
+                android:layout_width="@dimen/nav_indicator_width"
+                android:layout_height="@dimen/nav_indicator_height">
+
+                <ImageView
+                    android:layout_width="@dimen/item_icon"
+                    android:layout_height="@dimen/item_icon"
+                    android:layout_gravity="center"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_domain_contacts" />
+
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/domain_contacts"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/nav_calendar"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/nav_height"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <FrameLayout
+                android:layout_width="@dimen/nav_indicator_width"
+                android:layout_height="@dimen/nav_indicator_height">
+
+                <ImageView
+                    android:layout_width="@dimen/item_icon"
+                    android:layout_height="@dimen/item_icon"
+                    android:layout_gravity="center"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_domain_calendar" />
+
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/domain_calendar"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
     </LinearLayout>
 
     <!-- The auth sheet: a whole-frame overlay with its own bar, fading
@@ -354,9 +479,49 @@
 
     </FrameLayout>
 
+    <!-- The lists' add button: the FAB's disc stretched over a label,
+         which folds away while the list scrolls down (ListHeader). It
+         sits above the bottom navigation the lists carry; the plain FAB
+         above serves every other screen. -->
+    <LinearLayout
+        android:id="@+id/fab_extended"
+        android:layout_width="wrap_content"
+        android:layout_height="@dimen/fab"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="@dimen/fab_margin"
+        android:layout_marginBottom="@dimen/fab_above_nav"
+        android:background="@drawable/fab_extended"
+        android:clickable="true"
+        android:elevation="@dimen/fab_elevation"
+        android:focusable="true"
+        android:gravity="center_vertical"
+        android:minWidth="@dimen/fab"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/fab_extended_icon"
+            android:layout_width="@dimen/item_icon"
+            android:layout_height="@dimen/item_icon"
+            android:contentDescription="@null"
+            android:src="@drawable/ic_add" />
+
+        <TextView
+            android:id="@+id/fab_extended_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:maxLines="1"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
     </FrameLayout>
 
-    <!-- The accounts drawer: a title bar, the domain rows, the plain account
+    <!-- The drawer: a title bar, the mailboxes, the plain account
          rows (reloadHome fills home_container; each row opens the
          account's settings screen) and a fixed footer of actions. Width
          caps at 320dp per the drawer spec. -->
@@ -376,7 +541,7 @@
             android:id="@+id/drawer_header"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/surface"
+            android:background="?android:attr/colorBackground"
             android:gravity="center_vertical"
             android:minHeight="@dimen/app_bar_height"
             android:orientation="horizontal"
@@ -404,135 +569,54 @@
 
         </LinearLayout>
 
-        <!-- The app's top-level navigation: one row per domain, the one
-             being shown on an accent pill (showDomainBar). Here rather
-             than in the app bar, where they crowded the domain's own
-             actions. The pill is inset from the drawer's edges and pads
-             inside it, so its icon lines up with the other rows' (see
-             the drawer_item dimens). In the app bar's tone, so the
-             navigation reads as one block with the title bar. -->
-        <LinearLayout
-            android:id="@+id/drawer_domains"
-            android:background="@color/surface"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp">
-
-            <LinearLayout
-                android:id="@+id/drawer_domain_mail"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@drawable/domain_item"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:minHeight="@dimen/item_height"
-                android:orientation="horizontal"
-                android:layout_marginStart="@dimen/drawer_item_inset"
-                android:layout_marginEnd="@dimen/drawer_item_inset"
-                android:paddingStart="@dimen/drawer_item_inner"
-                android:paddingEnd="@dimen/drawer_item_inner">
-
-                <ImageView
-                    android:layout_width="@dimen/item_icon"
-                    android:layout_height="@dimen/item_icon"
-                    android:layout_marginEnd="@dimen/item_gap"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_domain_mail" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/mail_title"
-                    android:textSize="@dimen/item_text" />
-
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/drawer_domain_contacts"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@drawable/domain_item"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:minHeight="@dimen/item_height"
-                android:orientation="horizontal"
-                android:layout_marginStart="@dimen/drawer_item_inset"
-                android:layout_marginEnd="@dimen/drawer_item_inset"
-                android:paddingStart="@dimen/drawer_item_inner"
-                android:paddingEnd="@dimen/drawer_item_inner">
-
-                <ImageView
-                    android:layout_width="@dimen/item_icon"
-                    android:layout_height="@dimen/item_icon"
-                    android:layout_marginEnd="@dimen/item_gap"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_domain_contacts" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/contacts_title"
-                    android:textSize="@dimen/item_text" />
-
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/drawer_domain_calendar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@drawable/domain_item"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:minHeight="@dimen/item_height"
-                android:orientation="horizontal"
-                android:layout_marginStart="@dimen/drawer_item_inset"
-                android:layout_marginEnd="@dimen/drawer_item_inset"
-                android:paddingStart="@dimen/drawer_item_inner"
-                android:paddingEnd="@dimen/drawer_item_inner">
-
-                <ImageView
-                    android:layout_width="@dimen/item_icon"
-                    android:layout_height="@dimen/item_icon"
-                    android:layout_marginEnd="@dimen/item_gap"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_domain_calendar" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/calendar_title"
-                    android:textSize="@dimen/item_text" />
-
-            </LinearLayout>
-
-        </LinearLayout>
-
-        <!-- A light divider rather than the surface tone, which vanishes
-             against the surface block above it in the light theme. -->
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="@color/divider_light" />
-
         <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1">
 
+            <!-- The mailboxes, each narrowing the mail list to itself,
+                 then the accounts, each opening its settings. Both are
+                 filled by reloadHome. -->
             <ScrollView
                 android:layout_width="match_parent"
                 android:layout_height="match_parent">
 
                 <LinearLayout
-                    android:id="@+id/home_container"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical" />
+                    android:orientation="vertical"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="8dp">
+
+                    <TextView
+                        android:id="@+id/drawer_mailboxes_title"
+                        style="@style/SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="@dimen/drawer_item_padding"
+                        android:text="@string/drawer_mailboxes" />
+
+                    <LinearLayout
+                        android:id="@+id/drawer_mailboxes"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+
+                    <TextView
+                        android:id="@+id/drawer_accounts_title"
+                        style="@style/SectionHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="@dimen/drawer_item_padding"
+                        android:text="@string/drawer_accounts" />
+
+                    <LinearLayout
+                        android:id="@+id/home_container"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+
+                </LinearLayout>
 
             </ScrollView>
 

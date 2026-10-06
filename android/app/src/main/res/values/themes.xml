@@ -4,15 +4,16 @@
     <!-- DeviceDefault so the app inherits the phone maker's palette
          (colorAccent, text colours), not a fixed Google one; the night
          variant in values-night/ switches to the dark base, so the app
-         follows the system light/dark setting. The chrome (app bars,
-         panel headers, status bar) sits on the app's neutral surface
-         colour rather than colorPrimary, whose tone varies too much
-         across vendors and versions to pair with textColorPrimary. -->
+         follows the system light/dark setting. The main bars and the
+         status bar sit on the page tone, the cards, pills and bottom
+         navigation on the app's neutral surface colour, never on
+         colorPrimary, whose tone varies too much across vendors and
+         versions to pair with textColorPrimary. -->
     <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.Light.NoActionBar">
 
-        <!-- Matches the surface app bars on API 26-34; API 35+ ignores
+        <!-- Matches the app bars on API 26-34; API 35+ ignores
              both, edge-to-edge padding the bars instead. -->
-        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:statusBarColor">?android:attr/colorBackground</item>
         <item name="android:windowLightStatusBar">true</item>
 
     </style>

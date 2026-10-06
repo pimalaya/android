@@ -1,29 +1,27 @@
 package org.pimalaya;
 
 /**
- * The three list domains: the order the drawer offers them in, and what
- * each one is called and drawn with.
+ * The three list domains: the order the bottom navigation offers them
+ * in, and what each one is called and drawn with.
  *
- * <p>The app's top-level navigation is three drawer rows, and this is
- * the one place that says which three and in what order.
+ * <p>The app's top-level navigation is three bottom bar items, and this
+ * is the one place that says which three and in what order.
  */
 final class Domains {
-    /** The list screens, in the order the drawer offers them. */
+    /** The list screens, in the order the bottom navigation offers them. */
     static final int[] PANELS = {
         MainActivity.PANEL_MAIL, MainActivity.PANEL_CONTACTS, MainActivity.PANEL_CALENDAR,
     };
 
-    /** The drawer row that switches to one domain. */
+    /** The bottom navigation item that switches to one domain. */
     static int buttonOf(int panel) {
         if (panel == MainActivity.PANEL_MAIL) {
-            return R.id.drawer_domain_mail;
+            return R.id.nav_mail;
         }
-        return panel == MainActivity.PANEL_CALENDAR
-                ? R.id.drawer_domain_calendar
-                : R.id.drawer_domain_contacts;
+        return panel == MainActivity.PANEL_CALENDAR ? R.id.nav_calendar : R.id.nav_contacts;
     }
 
-    /** One domain's name, which its drawer row reads. */
+    /** One domain's name, which its large title reads. */
     static int titleOf(int panel) {
         if (panel == MainActivity.PANEL_MAIL) {
             return R.string.mail_title;

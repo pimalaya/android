@@ -1,107 +1,111 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- M3 two-line list item. The avatar is the app bar button's circle,
-     starting where the bar title's first letter does, so the rows hang
-     off the domain's name rather than off the screen edge, and the
-     column that leaves clear on the left carries the sticky section
-     letter (panel_contacts). The row stays full-bleed so its ripple
-     spans the whole line.
-
-     The trailing end is the bar's too: the selection checkbox sits in a
-     button-wide slot flush with the bar's select-all. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Contact row, one of its letter's card (CardRows sets row_card's
+     background by its place in the card): the disc, the name over one
+     supporting line, and a trailing slot for the selection checkbox or
+     the divergence flag. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="?android:attr/selectableItemBackground"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
-    android:paddingStart="@dimen/item_start"
-    android:paddingTop="10dp"
-    android:paddingEnd="@dimen/app_bar_padding"
-    android:paddingBottom="10dp">
-
-    <TextView
-        android:id="@+id/contact_avatar"
-        android:layout_width="@dimen/item_avatar"
-        android:layout_height="@dimen/item_avatar"
-        android:layout_marginEnd="@dimen/item_gap"
-        android:gravity="center"
-        android:textColor="#ffffff"
-        android:textSize="18sp" />
+    android:paddingStart="@dimen/card_gutter"
+    android:paddingEnd="@dimen/card_gutter">
 
     <LinearLayout
-        android:layout_width="0dp"
+        android:id="@+id/row_card"
+        android:duplicateParentState="true"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="4dp"
+        android:paddingBottom="10dp">
+
+        <TextView
+            android:id="@+id/contact_avatar"
+            android:layout_width="@dimen/card_avatar"
+            android:layout_height="@dimen/card_avatar"
+            android:layout_marginEnd="12dp"
+            android:gravity="center"
+            android:textColor="#ffffff"
+            android:textSize="18sp" />
 
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/contact_name"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:lineHeight="24dp"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="16sp" />
+
+                <ImageView
+                    android:id="@+id/contact_link_icon"
+                    android:layout_width="16dp"
+                    android:layout_height="16dp"
+                    android:layout_marginStart="8dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_link_add"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/contact_links"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="2dp"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13sp"
+                    android:visibility="gone" />
+
+            </LinearLayout>
 
             <TextView
-                android:id="@+id/contact_name"
-                android:layout_width="wrap_content"
+                android:id="@+id/contact_subtitle"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:lineHeight="24dp"
-                android:textColor="?android:attr/textColorPrimary"
-                android:textSize="16sp" />
-
-            <ImageView
-                android:id="@+id/contact_link_icon"
-                android:layout_width="16dp"
-                android:layout_height="16dp"
-                android:layout_marginStart="8dp"
-                android:contentDescription="@null"
-                android:src="@drawable/ic_link_add"
-                android:visibility="gone" />
-
-            <TextView
-                android:id="@+id/contact_links"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="2dp"
+                android:lineHeight="16dp"
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="13sp"
                 android:visibility="gone" />
 
         </LinearLayout>
 
-        <TextView
-            android:id="@+id/contact_subtitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:lineHeight="16dp"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="13sp"
-            android:visibility="gone" />
+        <FrameLayout
+            android:id="@+id/contact_end_slot"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:visibility="gone">
+
+            <CheckBox
+                android:id="@+id/contact_check"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:clickable="false"
+                android:focusable="false"
+                android:visibility="gone" />
+            <ImageView
+                android:id="@+id/contact_diverged"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/contact_diverged"
+                android:src="@drawable/ic_diverged"
+                android:visibility="gone" />
+
+        </FrameLayout>
 
     </LinearLayout>
 
-    <FrameLayout
-        android:id="@+id/contact_end_slot"
-        android:layout_width="@dimen/app_bar_button"
-        android:layout_height="@dimen/app_bar_button"
-        android:visibility="gone">
-
-        <CheckBox
-            android:id="@+id/contact_check"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:clickable="false"
-            android:focusable="false"
-            android:visibility="gone" />
-        <ImageView
-            android:id="@+id/contact_diverged"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_gravity="center"
-            android:contentDescription="@string/contact_diverged"
-            android:src="@drawable/ic_diverged"
-            android:visibility="gone" />
-
-    </FrameLayout>
-
-</LinearLayout>
+</FrameLayout>

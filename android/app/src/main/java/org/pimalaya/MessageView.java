@@ -43,8 +43,8 @@ import java.util.List;
  * message has no business running.
  */
 final class MessageView {
-    /** How wide a badge row may run: the card's own inner width. */
-    private static final int CARD_INSET = 64;
+    /** How wide a badge row may run: the reader's own inner width. */
+    private static final int CARD_INSET = 32;
 
     private final MainActivity host;
 
@@ -83,16 +83,6 @@ final class MessageView {
         load(message);
     }
 
-    /** What the bar titles itself with while the reader is up. */
-    String title() {
-        if (current == null) {
-            return "";
-        }
-        return current.sender().isEmpty()
-                ? host.getString(R.string.message_no_sender)
-                : current.sender();
-    }
-
     /** The header the store already knows, drawn before anything loads. */
     private void header(MailStore.StoredMessage message) {
         TextView avatar = host.findViewById(R.id.message_view_avatar);
@@ -105,8 +95,11 @@ final class MessageView {
                                 ? host.getString(R.string.message_no_subject)
                                 : message.subject);
         ((TextView) host.findViewById(R.id.message_view_from)).setText(sender(message));
-        ((TextView) host.findViewById(R.id.message_view_recipients))
+        ((TextView) host.findViewById(R.id.message_view_mailbox))
                 .setText(message.mailbox + " · " + message.accountEmail);
+        // NOTE: the recipients come with the body, and a line of the
+        // previous message's must not linger until then.
+        host.findViewById(R.id.message_view_recipients).setVisibility(View.GONE);
         date(message.stamp);
     }
 
@@ -236,17 +229,37 @@ final class MessageView {
         host.findViewById(R.id.message_view_delete).setOnClickListener(view -> confirmDelete());
     }
 
+    /** Stages one marker on the open message, then redraws the buttons. */
+    private void write(String flag, boolean add) {
+        MailStore.StoredMessage message = current;
+        stageFlag(
+                message,
+                flag,
+                add,
+                () -> {
+                    if (current != message) {
+                        return;
+                    }
+                    if (MailEngine.SEEN.equals(flag)) {
+                        seen = add;
+                    } else if (MailEngine.FLAGGED.equals(flag)) {
+                        flagged = add;
+                    }
+                    actions();
+                    host.mailList.reload();
+                });
+    }
+
     /**
-     * Stages one marker, then redraws the buttons.
+     * Stages one marker on a message, then runs {@code done} on the main
+     * thread; the reader's toggles and the list's star both write here.
      *
      * <p>The store and nothing else. The next sync pushes the difference
      * between what is staged and what the server last agreed on, so a
      * marker written with the radio off is a marker written, and the only
-     * thing the reader waits for is a disk write.
+     * thing either waits for is a disk write.
      */
-    private void write(String flag, boolean add) {
-        MailStore.StoredMessage message = current;
-
+    void stageFlag(MailStore.StoredMessage message, String flag, boolean add, Runnable done) {
         host.io.execute(
                 () -> {
                     Exception failure = null;
@@ -267,20 +280,11 @@ final class MessageView {
                     Exception error = failure;
                     host.postAlive(
                             () -> {
-                                if (current != message) {
-                                    return;
-                                }
                                 if (error != null) {
                                     host.showError(error, R.string.message_write_failed);
                                     return;
                                 }
-                                if (MailEngine.SEEN.equals(flag)) {
-                                    seen = add;
-                                } else if (MailEngine.FLAGGED.equals(flag)) {
-                                    flagged = add;
-                                }
-                                actions();
-                                host.mailList.reload();
+                                done.run();
                             });
                 });
     }
@@ -388,8 +392,9 @@ final class MessageView {
     /** Fills the header in from the fetch, then shows the body. */
     private void render(MessageBody message) {
         if (!message.to.isEmpty()) {
-            ((TextView) host.findViewById(R.id.message_view_recipients))
-                    .setText(recipients(message));
+            TextView recipients = host.findViewById(R.id.message_view_recipients);
+            recipients.setText(recipients(message));
+            recipients.setVisibility(View.VISIBLE);
         }
 
         long stamp = MailDate.toStamp(message.date);

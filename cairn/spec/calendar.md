@@ -106,3 +106,11 @@ A calendar connection behind the `google://` marker SHALL list the user's calend
 - GIVEN a series whose one occurrence was moved on Google since the last pass
 - WHEN the calendar syncs
 - THEN the entry is read again, the moved occurrence with it
+
+### Requirement: The agenda offers the coming days
+The agenda's header SHALL carry a strip of the next fourteen days, and pressing one SHALL scroll the agenda to the first entry on or after it.
+
+#### Scenario: Jumping to Friday
+- GIVEN entries on Wednesday and Saturday
+- WHEN Friday is pressed in the strip
+- THEN the agenda scrolls to Saturday's card

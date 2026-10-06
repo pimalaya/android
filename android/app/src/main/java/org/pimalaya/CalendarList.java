@@ -1,25 +1,30 @@
 package org.pimalaya;
 
 import android.content.Context;
+import android.text.format.DateFormat;
+import android.text.format.DateUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
 import org.pimalaya.client.Occurrence;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * The calendar screen: one agenda merging every calendar of
- * every account, the same merged view the contacts list gives contacts.
+ * every account, the same merged view the contacts list gives contacts,
+ * grouped into one card per day under a strip of the coming days.
  *
  * <p>Rows are <em>occurrences</em>, not stored events: a weekly meeting
  * is one row per week inside the window. Expansion runs through the
@@ -39,12 +44,21 @@ final class CalendarList {
     /** Seconds in a day, the threshold a length is told in days past. */
     private static final long DAY = 86400;
 
+    /** How many days the strip over the agenda offers. */
+    private static final int STRIP_DAYS = 14;
+
     private final MainActivity host;
     private final EventStore store;
     private final Adapter adapter = new Adapter();
+    private final CardSections<Row> sections = new CardSections<>();
 
     /** The rows on screen, one per occurrence, earliest first. */
     private final List<Row> rows = new ArrayList<>();
+
+    private ListHeader header;
+
+    /** The day the strip has selected, as a civil `YYYYMMDD` stamp. */
+    private String selectedDay;
 
     CalendarList(MainActivity host, EventStore store) {
         this.host = host;
@@ -77,11 +91,14 @@ final class CalendarList {
 
     void setUp() {
         ListView list = host.findViewById(R.id.calendar_list);
+        header = new ListHeader(host, list, MainActivity.PANEL_CALENDAR);
         list.setAdapter(adapter);
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
-                    Row row = rows.get(position);
-                    host.eventView.open(row.occurrence, row.event, row.calendar);
+                    Row row = sections.row(header.rowAt(position));
+                    if (row != null) {
+                        host.eventView.open(row.occurrence, row.event, row.calendar);
+                    }
                 });
 
         androidx.swiperefreshlayout.widget.SwipeRefreshLayout refresh =
@@ -130,9 +147,120 @@ final class CalendarList {
 
         rows.sort((left, right) -> left.occurrence.start.compareTo(right.occurrence.start));
 
+        sections.fill(rows, row -> dayLabel(dayOf(row)));
         adapter.notifyDataSetChanged();
+        header.meta(
+                host.getResources()
+                        .getQuantityString(R.plurals.calendar_meta, rows.size(), rows.size()));
+        strip(from);
         host.findViewById(R.id.calendar_empty)
                 .setVisibility(rows.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    /** The civil day an occurrence starts on. */
+    private static String dayOf(Row row) {
+        String start = row.occurrence.start;
+        return start.length() >= 8 ? start.substring(0, 8) : start;
+    }
+
+    /**
+     * What a day's card is headed with: today and tomorrow by name, then
+     * the weekday and the date, since an agenda is read by the calendar
+     * and not by distance.
+     */
+    private String dayLabel(String day) {
+        String today = today();
+        if (day.equals(today)) {
+            return host.getString(R.string.date_today);
+        }
+        if (day.equals(plusDays(today, 1))) {
+            return host.getString(R.string.date_tomorrow);
+        }
+        return DateUtils.formatDateTime(
+                host,
+                stampOf(day),
+                DateUtils.FORMAT_SHOW_WEEKDAY
+                        | DateUtils.FORMAT_SHOW_DATE
+                        | DateUtils.FORMAT_NO_YEAR);
+    }
+
+    /**
+     * Fills the strip of the coming days, each a weekday over its number,
+     * the selected one on the accent. Pressing one scrolls the agenda to
+     * the first entry on or after it.
+     */
+    private void strip(String from) {
+        if (selectedDay == null || selectedDay.compareTo(from) < 0) {
+            selectedDay = from;
+        }
+
+        LinearLayout days = header.days();
+        days.removeAllViews();
+        for (int offset = 0; offset < STRIP_DAYS; offset++) {
+            String day = plusDays(from, offset);
+            long stamp = stampOf(day);
+            boolean selected = day.equals(selectedDay);
+            int color =
+                    selected
+                            ? host.accentContrast()
+                            : host.ui.resolveColor(android.R.attr.textColorPrimary);
+
+            TextView weekday = new TextView(host);
+            weekday.setText(DateFormat.format("EEE", new Date(stamp)));
+            weekday.setTextSize(12);
+            weekday.setTextColor(color);
+            weekday.setAlpha(selected ? 1f : 0.7f);
+
+            TextView number = new TextView(host);
+            number.setText(DateFormat.format("d", new Date(stamp)));
+            number.setTextSize(17);
+            number.setTypeface(null, android.graphics.Typeface.BOLD);
+            number.setTextColor(color);
+
+            LinearLayout cell = new LinearLayout(host);
+            cell.setOrientation(LinearLayout.VERTICAL);
+            cell.setGravity(android.view.Gravity.CENTER);
+            cell.setBackgroundResource(
+                    selected ? R.drawable.button_pill : R.drawable.button_tonal);
+            cell.addView(weekday);
+            cell.addView(number);
+            cell.setOnClickListener(
+                    view -> {
+                        selectedDay = day;
+                        strip(from);
+                        scrollTo(day);
+                    });
+
+            LinearLayout.LayoutParams params =
+                    new LinearLayout.LayoutParams(host.dp(48), host.dp(60));
+            params.setMarginEnd(host.dp(6));
+            days.addView(cell, params);
+        }
+    }
+
+    /** Scrolls the agenda to the first card on or after a day. */
+    private void scrollTo(String day) {
+        ListView list = host.findViewById(R.id.calendar_list);
+        for (Row row : rows) {
+            if (dayOf(row).compareTo(day) >= 0) {
+                int position = sections.positionOf(dayLabel(dayOf(row)));
+                list.setSelectionFromTop(list.getHeaderViewsCount() + position, host.dp(8));
+                return;
+            }
+        }
+        list.setSelection(list.getCount() - 1);
+    }
+
+    ListHeader header() {
+        return header;
+    }
+
+    /** When an occurrence starts, as its card's leading column says it. */
+    private String startLabel(Occurrence occurrence) {
+        if (occurrence.allDay) {
+            return host.getString(R.string.event_all_day);
+        }
+        return DateFormat.getTimeFormat(host).format(new Date(stampOf(occurrence.start)));
     }
 
     /** Today as a civil `YYYYMMDD` stamp, in the device's own zone. */
@@ -227,12 +355,10 @@ final class CalendarList {
      * How far off an occurrence is, in the app's shared date vocabulary:
      * in 20 minutes, in 3 days, 2 hours ago.
      *
-     * <p>It sits where a mail row puts its date, and for the same
-     * reason: the agenda is one scrolling scale of time, and the
-     * distance is what says where on it a row is. An all-day entry
-     * counts in whole days, since a birthday is on a day and reading it
-     * as five hours ago because the day started this morning would be
-     * nonsense.
+     * <p>The entry page says it beside the exact moment. An all-day
+     * entry counts in whole days, since a birthday is on a day and
+     * reading it as five hours ago because the day started this morning
+     * would be nonsense.
      */
     static String countdownLabel(Context context, Occurrence occurrence) {
         long stamp = stampOf(occurrence.start);
@@ -264,12 +390,12 @@ final class CalendarList {
     private final class Adapter extends BaseAdapter {
         @Override
         public int getCount() {
-            return rows.size();
+            return sections.size();
         }
 
         @Override
         public Object getItem(int position) {
-            return rows.get(position);
+            return sections.row(position);
         }
 
         @Override
@@ -278,13 +404,33 @@ final class CalendarList {
         }
 
         @Override
+        public int getViewTypeCount() {
+            return 2;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return sections.isHeader(position) ? 1 : 0;
+        }
+
+        @Override
+        public boolean isEnabled(int position) {
+            return !sections.isHeader(position);
+        }
+
+        @Override
         public View getView(int position, View recycled, ViewGroup parent) {
+            if (sections.isHeader(position)) {
+                return sections.headerView(position, recycled, parent);
+            }
+
             View view = recycled;
             if (view == null) {
                 view = LayoutInflater.from(host).inflate(R.layout.item_event, parent, false);
             }
+            sections.shape(view, position);
 
-            Row row = rows.get(position);
+            Row row = sections.row(position);
             Occurrence occurrence = row.occurrence;
 
             ((TextView) view.findViewById(R.id.event_summary))
@@ -304,13 +450,13 @@ final class CalendarList {
                                     : duration + " · " + row.calendar.name);
 
             ((TextView) view.findViewById(R.id.event_countdown))
-                    .setText(countdownLabel(host, occurrence));
+                    .setText(startLabel(occurrence));
 
             // The disc stands for the calendar, initial and colour both,
             // the way the mail row's disc stands for its sender; the
             // colour is keyed by the calendar's id, so renaming one
             // keeps the colour the eye learned. What kind of entry it is
-            // leads the row instead, in its own column.
+            // ends the title's line instead.
             TextView avatar = view.findViewById(R.id.event_avatar);
             avatar.setText(Avatar.letter(row.calendar.name));
             avatar.setBackground(Avatar.disc(host, Avatar.colorOf(row.calendar.color, row.calendar.id)));

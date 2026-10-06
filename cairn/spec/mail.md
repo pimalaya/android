@@ -19,17 +19,25 @@ Four backends answer, told apart by the account's base URL: an IMAP session behi
 The reader can write three things back, all of them into the store: the markers, whether the message has been read, and where it is filed. A fourth thing, a message of their own, does not go into the store at all: it is an action on the store's queue, pimdir's write door for what a process wants done somewhere else, with a mail submission as the standard's own worked example. The outbox is that queue read back.
 
 ### Requirement: A row's trailing marks sit on the line they describe
-A message row SHALL end the subject's line with the date and the mailbox-and-account line with the markers, each aligned with the line it belongs to rather than stacked in a column beside all three. Text pairs SHALL align on their baselines, two sizes reading as one line only that way.
+A message row SHALL lead with a dot while unread, end the sender's line with the time, the subject's line with a star toggling the important marker, and the mailbox-and-account line with the replied mark, each aligned with the line it belongs to rather than stacked in a column beside all three. An attachment SHALL add a chip under the three lines.
 
 #### Scenario: A row with a long subject
 - GIVEN a subject wider than the row
 - WHEN it is drawn
-- THEN it ellipsizes and the date keeps its place at the end of that same line
+- THEN it ellipsizes and the star keeps its place at the end of that same line
 
 #### Scenario: A row with markers
 - GIVEN a message that was replied to and marked important
 - WHEN it is drawn
-- THEN the two icons end the mailbox and account line, not the sender's
+- THEN its star is filled in the accent at the end of the subject's line, and the replied mark ends the mailbox and account line
+
+### Requirement: The mail list narrows what it shows
+The mail list SHALL offer a search over the sender and the subject, an unread chip and an attachments chip, and SHALL narrow to one mailbox picked in the drawer. None of these SHALL change what syncs, which the filter alone decides.
+
+#### Scenario: A mailbox from the drawer
+- GIVEN mail in two accounts' INBOX and Archive
+- WHEN Archive is picked in the drawer
+- THEN the list shows both accounts' Archive under the title Archive
 
 ### Requirement: An extension is enabled before it is used
 A connection SHALL ENABLE CONDSTORE and QRESYNC when it opens, where the server advertises them, RFC 7162 section 3.1 requiring it before a SELECT may carry the QRESYNC parameter. A refused ENABLE SHALL forget the capability rather than fail the connection, and a QRESYNC select the server refuses anyway SHALL fall back to a full round.

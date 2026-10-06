@@ -33,7 +33,7 @@
 
 ## Features
 
-- **Three domains, one app**: mail, contacts and calendars behind three icons in the top bar, over one store and one account list.
+- **Three domains, one app**: mail, contacts and calendars behind a bottom bar, over one store and one account list.
 - **Merged views**: each domain is a single list across every account and every collection, filterable on both axes, rather than a mailbox or an addressbook at a time.
 - **Multiple accounts and backends**: keep CardDAV, JMAP, Microsoft and Google addressbooks side by side in a single app.
 - **Offline first**: every contact is stored locally and rendered instantly, with edits pushed on the next sync.

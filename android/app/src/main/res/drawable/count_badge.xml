@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A count over an icon (the mail tab's unread messages): an accent
+     pill that stays round for one digit and stretches for more. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="?android:attr/colorAccent" />
+    <corners android:radius="1000dp" />
+</shape>

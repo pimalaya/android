@@ -237,16 +237,20 @@ public class MainActivity extends Activity {
 
         setUpFab(R.id.fab);
         findViewById(R.id.fab).setOnClickListener(view -> onFabClick());
+        findViewById(R.id.fab_extended).setOnClickListener(view -> onFabClick());
+        ((android.widget.ImageView) findViewById(R.id.fab_extended_icon))
+                .setImageTintList(ColorStateList.valueOf(accentContrast()));
+        ((TextView) findViewById(R.id.fab_extended_label)).setTextColor(accentContrast());
+        ((TextView) findViewById(R.id.bar_send)).setTextColor(accentContrast());
+        ((TextView) findViewById(R.id.bar_send))
+                .setCompoundDrawableTintList(ColorStateList.valueOf(accentContrast()));
+        findViewById(R.id.bar_send).setOnClickListener(view -> compose.send());
         findViewById(R.id.bar_back).setOnClickListener(view -> onBarBack());
         findViewById(R.id.bar_menu).setOnClickListener(view -> openAccountsDrawer());
         for (int panel : Domains.PANELS) {
-            findViewById(Domains.buttonOf(panel))
-                    .setOnClickListener(
-                            view -> {
-                                drawer.closeDrawer(Gravity.START);
-                                switchDomain(panel);
-                            });
+            findViewById(Domains.buttonOf(panel)).setOnClickListener(view -> switchDomain(panel));
         }
+        ((TextView) findViewById(R.id.nav_mail_badge)).setTextColor(accentContrast());
         findViewById(R.id.bar_filter).setOnClickListener(view -> openFilter());
 
         // The modal dialog binds once here and covers every sync entry
@@ -613,7 +617,7 @@ public class MainActivity extends Activity {
     }
 
     /** Black or white, whichever reads on the accent colour. */
-    private int accentContrast() {
+    int accentContrast() {
         int accent = resolveColor(android.R.attr.colorAccent);
         return android.graphics.Color.luminance(accent) > 0.5f
                 ? android.graphics.Color.BLACK
@@ -717,11 +721,11 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Rebuilds the drawer's accounts listing: one row per connected
+     * Rebuilds the drawer: the mailboxes, then one row per connected
      * account (the local book stays hidden), the email with a trailing
-     * settings cog. Tapping the row opens the account's settings
-     * screen: activation, cadence, the per-addressbook advanced
-     * switches and deletion, so the drawer itself stays a plain list.
+     * chevron. Tapping an account opens its settings screen:
+     * activation, cadence, the per-addressbook advanced switches and
+     * deletion, so the drawer itself stays a plain list.
      */
     void reloadHome() {
         // With no real account the drawer shows an empty state, and its
@@ -729,6 +733,33 @@ public class MainActivity extends Activity {
         boolean hasAccount = hasRealAccount();
         findViewById(R.id.drawer_sync).setVisibility(hasAccount ? View.VISIBLE : View.GONE);
         findViewById(R.id.drawer_empty).setVisibility(hasAccount ? View.GONE : View.VISIBLE);
+        findViewById(R.id.drawer_accounts_title)
+                .setVisibility(hasAccount ? View.VISIBLE : View.GONE);
+
+        // Every mailbox name across the accounts, one row each: the mail
+        // list's merged view narrowed to that name, whichever account
+        // holds it. All of them first, the list's default.
+        List<String> names = mail.loadMailboxes();
+        LinearLayout mailboxes = findViewById(R.id.drawer_mailboxes);
+        mailboxes.removeAllViews();
+        findViewById(R.id.drawer_mailboxes_title)
+                .setVisibility(names.isEmpty() ? View.GONE : View.VISIBLE);
+        if (!names.isEmpty()) {
+            mailboxes.addView(
+                    mailboxRow(
+                            R.drawable.ic_domain_mail,
+                            getString(R.string.mail_all),
+                            mailList.mailbox() == null,
+                            null));
+            for (String name : names) {
+                mailboxes.addView(
+                        mailboxRow(
+                                R.drawable.ic_folder_open,
+                                name,
+                                name.equals(mailList.mailbox()),
+                                name));
+            }
+        }
 
         LinearLayout container = findViewById(R.id.home_container);
         container.removeAllViews();
@@ -781,6 +812,59 @@ public class MainActivity extends Activity {
             row.addView(chevron, chevronParams);
             row.setOnClickListener(view -> openAccountSettings(email));
             container.addView(row);
+        }
+    }
+
+    /**
+     * One drawer mailbox row, the one the mail list shows on an accent
+     * pill inset from the drawer's edges.
+     */
+    private View mailboxRow(int icon, String label, boolean selected, String mailbox) {
+        int color = selected ? accentContrast() : resolveColor(android.R.attr.textColorPrimary);
+
+        android.widget.ImageView glyph = new android.widget.ImageView(this);
+        glyph.setImageResource(icon);
+        glyph.setImageTintList(ColorStateList.valueOf(color));
+        LinearLayout.LayoutParams glyphParams =
+                new LinearLayout.LayoutParams(dimen(R.dimen.item_icon), dimen(R.dimen.item_icon));
+        glyphParams.setMarginEnd(dimen(R.dimen.item_gap));
+
+        TextView text = new TextView(this);
+        text.setText(label);
+        itemText(text);
+        text.setTextColor(color);
+        text.setSingleLine(true);
+        text.setEllipsize(android.text.TextUtils.TruncateAt.END);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dimen(R.dimen.item_height));
+        row.setPadding(dimen(R.dimen.drawer_item_inner), 0, dimen(R.dimen.drawer_item_inner), 0);
+        row.setBackgroundResource(selected ? R.drawable.domain_selected : R.drawable.domain_item);
+        row.addView(glyph, glyphParams);
+        row.addView(text);
+        row.setOnClickListener(view -> openMailbox(mailbox));
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.setMarginStart(dimen(R.dimen.drawer_item_inset));
+        params.setMarginEnd(dimen(R.dimen.drawer_item_inset));
+        row.setLayoutParams(params);
+        return row;
+    }
+
+    /** Narrows the mail list to one mailbox (all of them with null) and shows it. */
+    private void openMailbox(String mailbox) {
+        drawer.closeDrawer(Gravity.START);
+        mailList.showMailbox(mailbox);
+        ((android.widget.ListView) findViewById(R.id.mail_list)).setSelection(0);
+        if (screen == PANEL_MAIL) {
+            showDomainTitle(PANEL_MAIL);
+        } else {
+            switchDomain(PANEL_MAIL);
         }
     }
 
@@ -2062,24 +2146,34 @@ public class MainActivity extends Activity {
 
     /**
      * The list chrome for one domain: the burger onto the drawer, the
-     * domain's name, and the filter every list shares. The domain's own
-     * actions come after, from its screen. The drawer's domain buttons
-     * follow along, this one on its accent pill.
+     * domain's name (once its large title scrolls away), the filter
+     * every list shares, and the bottom navigation with this domain on
+     * its accent pill. The domain's own actions come after, from its
+     * screen.
      */
     private void showDomainBar(int panel) {
         for (int target : Domains.PANELS) {
             boolean selected = target == panel;
-            int color =
-                    selected
-                            ? accentContrast()
-                            : ui.resolveColor(android.R.attr.textColorPrimary);
-            android.widget.LinearLayout row = findViewById(Domains.buttonOf(target));
-            row.setBackgroundResource(
-                    selected ? R.drawable.domain_selected : R.drawable.domain_item);
-            ((android.widget.ImageView) row.getChildAt(0))
-                    .setImageTintList(ColorStateList.valueOf(color));
-            ((TextView) row.getChildAt(1)).setTextColor(color);
+            LinearLayout item = findViewById(Domains.buttonOf(target));
+            android.widget.FrameLayout indicator = (android.widget.FrameLayout) item.getChildAt(0);
+            indicator.setBackgroundResource(selected ? R.drawable.domain_selected : 0);
+            ((android.widget.ImageView) indicator.getChildAt(0))
+                    .setImageTintList(
+                            ColorStateList.valueOf(
+                                    selected
+                                            ? accentContrast()
+                                            : ui.resolveColor(android.R.attr.textColorSecondary)));
+            TextView label = (TextView) item.getChildAt(1);
+            label.setTextColor(
+                    ui.resolveColor(
+                            selected
+                                    ? android.R.attr.textColorPrimary
+                                    : android.R.attr.textColorSecondary));
+            label.setTypeface(
+                    null,
+                    selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
         }
+        findViewById(R.id.bottom_nav).setVisibility(View.VISIBLE);
 
         showDomainTitle(panel);
         findViewById(R.id.bar_menu).setVisibility(View.VISIBLE);
@@ -2091,11 +2185,77 @@ public class MainActivity extends Activity {
         ((TextView) findViewById(R.id.bar_title)).setText(title);
     }
 
-    /** Titles the bar with a list domain's name. */
+    /**
+     * Titles the bar with a list domain's name, shown only once the
+     * list's own large title has scrolled away.
+     */
     void showDomainTitle(int panel) {
         TextView title = findViewById(R.id.bar_title);
-        title.setText(Domains.titleOf(panel));
+        title.setText(
+                panel == PANEL_MAIL && mailList.mailbox() != null
+                        ? mailList.mailbox()
+                        : getString(Domains.titleOf(panel)));
         title.setVisibility(View.VISIBLE);
+        title.animate().cancel();
+        title.setAlpha(headerOf(panel).scrolled() ? 1f : 0f);
+    }
+
+    /** Fades the bar's title in or out as a large title leaves or returns. */
+    void showBarTitle(boolean shown) {
+        if (screen == PANEL_CONTACTS && contactsList.isSelectionMode()) {
+            return;
+        }
+        findViewById(R.id.bar_title).animate().alpha(shown ? 1f : 0f).setDuration(150);
+    }
+
+    /** The large title heading one list. */
+    private ListHeader headerOf(int panel) {
+        if (panel == PANEL_MAIL) {
+            return mailList.header();
+        }
+        return panel == PANEL_CALENDAR ? calendarList.header() : contactsList.header();
+    }
+
+    /** Raises the extended FAB as a list screen's add button. */
+    private void listFab(int label) {
+        ((TextView) findViewById(R.id.fab_extended_label)).setText(label);
+        findViewById(R.id.fab_extended).setContentDescription(getString(label));
+        findViewById(R.id.fab_extended).setVisibility(View.VISIBLE);
+        findViewById(R.id.fab).setVisibility(View.GONE);
+        foldFab(false);
+    }
+
+    /** Folds the extended FAB to its glyph, or unfolds its label. */
+    void foldFab(boolean folded) {
+        View label = findViewById(R.id.fab_extended_label);
+        int visibility = folded ? View.GONE : View.VISIBLE;
+        if (label.getVisibility() == visibility) {
+            return;
+        }
+        android.transition.TransitionManager.beginDelayedTransition(
+                (android.view.ViewGroup) findViewById(R.id.fab_extended).getParent());
+        label.setVisibility(visibility);
+    }
+
+    /** The mail item's unread count, hidden at zero. */
+    void showMailBadge(int unread) {
+        TextView badge = findViewById(R.id.nav_mail_badge);
+        badge.setText(unread > 99 ? "99+" : String.valueOf(unread));
+        badge.setVisibility(unread > 0 ? View.VISIBLE : View.GONE);
+    }
+
+    /** A list's add button, inert while the list works (an import, an export). */
+    void setListBusy(boolean busy) {
+        View add = findViewById(R.id.fab_extended);
+        add.setEnabled(!busy);
+        add.setAlpha(busy ? 0.4f : 1f);
+    }
+
+    /** The composer's send button, inert while the message is written out. */
+    void setSending(boolean sending) {
+        View send = findViewById(R.id.bar_send);
+        send.setEnabled(!sending);
+        send.setAlpha(sending ? 0.4f : 1f);
     }
 
     /** The filter, on every list screen, accented while it bites. */
@@ -2110,8 +2270,8 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Switches to another domain. A lateral move from a drawer list, so
-     * it has no direction to slide in and swaps in place.
+     * Switches to another domain. A lateral move from the bottom
+     * navigation, so it has no direction to slide in and swaps in place.
      */
     private void switchDomain(int target) {
         if (target != screen) {
@@ -2347,16 +2507,11 @@ public class MainActivity extends Activity {
         Screen contacts = new Screen();
         contacts.chrome =
                 () -> {
-                    android.widget.ImageButton fab = findViewById(R.id.fab);
-                    fab.setImageResource(R.drawable.ic_add);
-                    fab.setContentDescription(getString(R.string.contacts_add));
-                    fab.setVisibility(View.VISIBLE);
-                    // NOTE: after updateSelectionUi, which hides the
-                    // switcher when a selection is running.
+                    listFab(R.string.contacts_new_short);
+                    showDomainBar(PANEL_CONTACTS);
+                    // NOTE: after the domain bar, which a running
+                    // selection then takes over.
                     contactsList.updateSelectionUi();
-                    if (!contactsList.isSelectionMode() && !contactsList.isSearchOpen()) {
-                        showDomainBar(PANEL_CONTACTS);
-                    }
                 };
         contacts.fab = this::addContact;
         contacts.systemBack =
@@ -2370,14 +2525,12 @@ public class MainActivity extends Activity {
         screens.put(PANEL_CONTACTS, contacts);
 
         // Mail and calendar share the contacts list's chrome shape: the
-        // domain switcher instead of a title, and an add FAB opening the
-        // domain's editor. Their lists are read-only, so the editors are
-        // frames for now; the FAB is there because where a domain's new
-        // item is created should not move once they are filled in.
+        // burger, the bottom navigation and an extended add button
+        // opening the domain's editor.
         Screen mailScreen = new Screen();
         mailScreen.chrome =
                 () -> {
-                    addFab(R.drawable.ic_add, R.string.compose_new);
+                    listFab(R.string.compose_new);
                     showDomainBar(PANEL_MAIL);
                     mailList.reload();
                 };
@@ -2387,7 +2540,7 @@ public class MainActivity extends Activity {
         Screen calendar = new Screen();
         calendar.chrome =
                 () -> {
-                    addFab(R.drawable.ic_add, R.string.event_new);
+                    listFab(R.string.event_new);
                     showDomainBar(PANEL_CALENDAR);
                     // The window the agenda covers starts at today, so it
                     // is rebuilt on arrival rather than cached across days.
@@ -2396,24 +2549,30 @@ public class MainActivity extends Activity {
         calendar.fab = this::composeEvent;
         screens.put(PANEL_CALENDAR, calendar);
 
-        // The composer is a frame with a send button and a back arrow
-        // that asks before losing what was typed.
+        // The composer is a frame with a send button in the bar and a
+        // back arrow that asks before losing what was typed.
         Screen composer = new Screen();
         composer.chrome =
                 () -> {
                     ((TextView) findViewById(R.id.bar_title)).setText(R.string.compose_new);
                     findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
-                    addFab(R.drawable.ic_send, R.string.compose_send);
+                    findViewById(R.id.bar_send).setVisibility(View.VISIBLE);
+                    setSending(false);
                 };
-        composer.fab = () -> compose.send();
         composer.barBack = () -> compose.close();
         composer.systemBack = () -> compose.close();
         screens.put(PANEL_COMPOSE, composer);
 
-        // The two readers: a back arrow, no FAB, and a bar titled by
-        // what is open rather than by the domain, since the domain is
-        // where the back arrow goes.
-        screens.put(PANEL_MESSAGE, reader(() -> messageView.title(), PANEL_MAIL));
+        // The message reader: a back arrow and the message's actions,
+        // untitled since the page leads with the subject itself.
+        Screen message = reader(() -> "", PANEL_MAIL);
+        Runnable readerChrome = message.chrome;
+        message.chrome =
+                () -> {
+                    readerChrome.run();
+                    findViewById(R.id.message_actions).setVisibility(View.VISIBLE);
+                };
+        screens.put(PANEL_MESSAGE, message);
 
         // A calendar entry's page is its form, the way a contact's is:
         // the same rows read and edited, the add-field button beside the
@@ -2529,6 +2688,8 @@ public class MainActivity extends Activity {
         // the screen's own chrome re-applies its state after.
         fab.setImageAlpha(255);
         fab.setBackgroundTintList(null);
+        fab.setVisibility(View.GONE);
+        findViewById(R.id.fab_extended).setVisibility(View.GONE);
         fab.setImageTintList(android.content.res.ColorStateList.valueOf(accentContrast()));
         findViewById(R.id.fab_progress).setVisibility(View.GONE);
         setFabEnabled(R.id.fab, true);
@@ -2549,9 +2710,6 @@ public class MainActivity extends Activity {
                         R.id.contacts_duplicates,
                         R.id.contacts_transfer,
                         R.id.contacts_close,
-                        R.id.contacts_search_pill,
-                        R.id.contacts_search_close,
-                        R.id.contacts_search,
                         R.id.contacts_merge,
                         R.id.contacts_delete,
                         R.id.contacts_select_all_slot,
@@ -2559,10 +2717,16 @@ public class MainActivity extends Activity {
                         R.id.contact_books,
                         R.id.contact_add_field,
                         R.id.bar_delete,
+                        R.id.message_actions,
+                        R.id.bar_send,
+                        R.id.bottom_nav,
                     }) {
                 findViewById(id).setVisibility(View.GONE);
             }
-            findViewById(R.id.bar_title).setVisibility(View.VISIBLE);
+            TextView title = findViewById(R.id.bar_title);
+            title.setVisibility(View.VISIBLE);
+            title.animate().cancel();
+            title.setAlpha(1f);
         }
 
         entry.chrome.run();
@@ -2720,7 +2884,14 @@ public class MainActivity extends Activity {
         // bottom folds in the keyboard so the FAB rides above it.
         padBottom(R.id.fab_frame, 0, bottom);
         padBottom(R.id.account_fab_frame, 0, bottom);
-        padBottom(R.id.contacts_list, 88, bottom);
+        // The bottom navigation takes the system bar's inset, never the
+        // keyboard's, and the extended FAB rides above it.
+        padBottom(R.id.bottom_nav, 0, bars.bottom);
+        android.view.ViewGroup.MarginLayoutParams extended =
+                (android.view.ViewGroup.MarginLayoutParams)
+                        findViewById(R.id.fab_extended).getLayoutParams();
+        extended.bottomMargin = dimen(R.dimen.fab_above_nav) + bars.bottom;
+        findViewById(R.id.fab_extended).setLayoutParams(extended);
         // The drawer's fixed bottom band takes the inset; the list above
         // it needs none.
         padBottom(R.id.drawer_actions, 0, bottom);

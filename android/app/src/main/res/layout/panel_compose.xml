@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The message composer: the envelope on top, the text under it.
+<!-- The message composer: one card of labelled rows for who it is
+     from, who it goes to and what it is about, then the text under it.
+     Sending is the bar's (bar_send).
 
      Each address field holds one chip per recipient (RecipientField),
      since a comma is not something anybody should have to know to
-     write to two people. The copy fields open only when they are asked
-     for, so the ordinary message is three fields and a body. Its bar elements
-     live in the persistent chrome (activity_main.xml). -->
+     write to two people. The copy rows open only when they are asked
+     for, so the ordinary message is three rows and a body. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -15,55 +16,145 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:padding="@dimen/item_padding">
+        android:paddingStart="16dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="16dp">
 
-        <TextView
-            android:id="@+id/compose_from"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingBottom="4dp"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="13sp" />
+            android:background="@drawable/card_background"
+            android:divider="@drawable/divider_thin"
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="8dp"
+            android:showDividers="middle">
 
-        <org.pimalaya.RecipientField
-            android:id="@+id/compose_to"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/compose_to" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:minHeight="50dp"
+                android:orientation="horizontal">
 
-        <org.pimalaya.RecipientField
-            android:id="@+id/compose_cc"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/compose_cc"
-            android:visibility="gone" />
+                <TextView
+                    style="@style/ComposeLabel"
+                    android:text="@string/compose_from_label" />
 
-        <org.pimalaya.RecipientField
-            android:id="@+id/compose_bcc"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/compose_bcc"
-            android:visibility="gone" />
+                <TextView
+                    android:id="@+id/compose_from"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="16sp" />
 
-        <TextView
-            android:id="@+id/compose_copies"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="end"
-            android:background="@drawable/ripple_circle"
-            android:padding="8dp"
-            android:text="@string/compose_add_copies"
-            android:textColor="?android:attr/colorAccent"
-            android:textSize="13sp" />
+            </LinearLayout>
 
-        <EditText
-            android:id="@+id/compose_subject"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/compose_subject"
-            android:imeOptions="actionNext"
-            android:inputType="textCapSentences"
-            android:singleLine="true" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:minHeight="50dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    style="@style/ComposeLabel"
+                    android:text="@string/compose_to" />
+
+                <org.pimalaya.RecipientField
+                    android:id="@+id/compose_to"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+
+                <!-- Opens the two copy rows, then goes. -->
+                <TextView
+                    android:id="@+id/compose_copies"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/ripple_circle"
+                    android:contentDescription="@string/compose_add_copies"
+                    android:padding="8dp"
+                    android:text="@string/compose_copies_short"
+                    android:textColor="?android:attr/colorAccent"
+                    android:textSize="14sp" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/compose_cc_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:minHeight="50dp"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <TextView
+                    style="@style/ComposeLabel"
+                    android:text="@string/compose_cc" />
+
+                <org.pimalaya.RecipientField
+                    android:id="@+id/compose_cc"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/compose_bcc_row"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:minHeight="50dp"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <TextView
+                    style="@style/ComposeLabel"
+                    android:text="@string/compose_bcc" />
+
+                <org.pimalaya.RecipientField
+                    android:id="@+id/compose_bcc"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:minHeight="50dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    style="@style/ComposeLabel"
+                    android:labelFor="@+id/compose_subject"
+                    android:text="@string/compose_subject" />
+
+                <EditText
+                    android:id="@+id/compose_subject"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@null"
+                    android:imeOptions="actionNext"
+                    android:inputType="textCapSentences"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
+                    android:singleLine="true"
+                    android:textSize="16sp" />
+
+            </LinearLayout>
+
+        </LinearLayout>
 
         <EditText
             android:id="@+id/compose_body"
@@ -71,10 +162,14 @@
             android:layout_height="0dp"
             android:layout_marginTop="8dp"
             android:layout_weight="1"
+            android:background="@null"
             android:gravity="top"
             android:hint="@string/compose_body"
             android:inputType="textMultiLine|textCapSentences"
-            android:minLines="8" />
+            android:lineSpacingExtra="4dp"
+            android:minLines="8"
+            android:padding="8dp"
+            android:textSize="16sp" />
 
     </LinearLayout>
 

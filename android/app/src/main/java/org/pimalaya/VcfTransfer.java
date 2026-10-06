@@ -11,7 +11,7 @@ import org.pimalaya.client.Card;
  * The vCard file import and export behind the contacts list: it reads a
  * chosen file off the main thread and stores each card it holds in the
  * picked addressbook, and writes the active contacts view out as a
- * single vCard file, both behind the shared FAB loader. It reaches the
+ * single vCard file, both with the add button inert. It reaches the
  * base, accounts, the io executor and the contacts list through the
  * host, which keeps the SAF pickers and the {@code onActivityResult}
  * router and calls in through {@link #importFile} and
@@ -67,8 +67,8 @@ final class VcfTransfer {
      * and shows muted until placed).
      */
     private void importInto(Uri uri, BookEntry target) {
-        // The FAB disables and spins while the file reads, as in the auth flow.
-        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        // The add button goes inert while the file reads.
+        host.setListBusy(true);
         host.io.execute(
                 () -> {
                     int count = 0;
@@ -82,7 +82,7 @@ final class VcfTransfer {
                     Exception error = failure;
                     host.main.post(
                             () -> {
-                                host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
+                                host.setListBusy(false);
                                 if (error != null) {
                                     host.showError(error, R.string.import_failed);
                                 } else {
@@ -122,11 +122,11 @@ final class VcfTransfer {
     /**
      * Writes the active contacts view (the currently listed, search-filtered
      * contacts) to the chosen file as one vCard file, each contact's raw
-     * document appended verbatim, off the main thread behind the FAB loader.
+     * document appended verbatim, off the main thread with the add button inert.
      */
     void exportFile(Uri uri) {
         List<Group> snapshot = new ArrayList<>(host.visibleGroups());
-        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        host.setListBusy(true);
         host.io.execute(
                 () -> {
                     Exception failure = null;
@@ -138,7 +138,7 @@ final class VcfTransfer {
                     Exception error = failure;
                     host.main.post(
                             () -> {
-                                host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
+                                host.setListBusy(false);
                                 if (error != null) {
                                     host.showError(error, R.string.export_failed);
                                 } else {

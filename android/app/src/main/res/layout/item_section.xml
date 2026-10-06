@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A grouped list's section header: the day, the letter, or what the
+     card under it holds, lined up with the text inside the cards. -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/section_label"
+    style="@style/SectionHeader"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingStart="20dp" />

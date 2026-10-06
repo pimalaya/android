@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The extended FAB on the lists: the FAB's accent and corners under
+     a bounded ripple, wide enough for its label. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?android:attr/colorControlHighlight">
+    <item>
+        <shape>
+            <solid android:color="?android:attr/colorAccent" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+</ripple>

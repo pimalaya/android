@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A row inside a card of several: square, so the card reads as one block. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?android:attr/colorControlHighlight">
+    <item>
+        <shape>
+            <solid android:color="@color/surface" />
+            <corners android:radius="0dp" />
+        </shape>
+    </item>
+</ripple>

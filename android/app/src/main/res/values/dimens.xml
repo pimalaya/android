@@ -27,38 +27,30 @@
     <dimen name="drawer_item_inner">16dp</dimen>
     <dimen name="drawer_item_padding">28dp</dimen>
 
-    <!-- A mail row's flag glyph: sized off the line it sits on (13sp)
-         rather than the 24dp icon grid, so three of them fit under a
-         date without widening the trailing column. -->
+    <!-- A row's trailing glyph (replied, an entry's kind): sized off
+         the line it ends rather than the 24dp icon grid. -->
     <dimen name="message_flag">16dp</dimen>
 
-    <!-- The column a list row's disc sits in: the app bar button's
-         diameter, so the disc centres on the axis of a bar button
-         however big the disc itself is. -->
-    <dimen name="item_avatar">@dimen/app_bar_button</dimen>
-
-    <!-- How far the disc sits inside that column, drawn rather than
-         laid out (Avatar insets it). Smaller than the column because a
-         disc the exact size of a bar button reads as another button;
-         inset rather than shrunk, because shrinking the view would
-         take the disc off the button's axis and drag the text after it.
-         This is the one number to change to resize every avatar. -->
+    <!-- How far a disc sits inside its view, drawn rather than laid out
+         (Avatar insets it), so a disc can be smaller than its column
+         without leaving the column's axis. This is the one number to
+         change to resize every avatar. -->
     <dimen name="item_avatar_inset">2dp</dimen>
 
-    <!-- Where a list row's avatar starts: under the bar title's first
-         letter, which is the bar padding plus the burger plus the gap
-         before it (4 + 48 + 4), so the rows hang off the title.
-         Flush with the burger instead read as clamped against the
-         screen edge.
+    <!-- The grouped lists: rows sit in rounded cards inset from the
+         screen edge, under a section header, below a large title. -->
+    <dimen name="card_radius">22dp</dimen>
+    <dimen name="card_gutter">12dp</dimen>
+    <dimen name="card_avatar">42dp</dimen>
+    <dimen name="large_title">32sp</dimen>
 
-         The mail and agenda rows reach it by padding 4dp and leading
-         with an item_lead column; the contacts row pads the whole 56dp,
-         since what fills its column is an overlay above the list rather
-         than anything the row itself draws. -->
-    <dimen name="item_start">56dp</dimen>
+    <!-- The bottom navigation: an icon on its indicator pill over a
+         label, per item. -->
+    <dimen name="nav_height">80dp</dimen>
+    <dimen name="nav_indicator_width">64dp</dimen>
+    <dimen name="nav_indicator_height">32dp</dimen>
 
-    <!-- The leading column every list row keeps clear, inside
-         item_start: the contacts list puts its sticky section letter
-         there, the agenda a countdown, the mail list a paperclip. -->
-    <dimen name="item_lead">@dimen/app_bar_button</dimen>
+    <!-- The extended FAB's distance from the bottom: the navigation's
+         height plus the usual FAB margin. -->
+    <dimen name="fab_above_nav">96dp</dimen>
 </resources>

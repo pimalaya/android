@@ -1,9 +1,7 @@
 package org.pimalaya;
 
-import android.content.Context;
 import android.view.View;
 import android.widget.CheckBox;
-import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.TextView;
 import java.util.ArrayList;
@@ -11,8 +9,9 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * The contacts screen: the merged list, its recycling adapter, the
- * in-bar search and the multi-select mode. It owns the display state
+ * The contacts screen: the merged list grouped into one card per
+ * letter, its recycling adapter, the header search and the multi-select
+ * mode. It owns the display state
  * (the replica pool, the grouped rows, the sorted-and-filtered rows,
  * the selection and search flags) and rebuilds it off the main thread
  * through {@link ContactPool}; the host keeps the chrome bar it shares
@@ -34,26 +33,22 @@ final class ContactsList {
     private List<Group> sortedContacts = new ArrayList<>();
 
     private final Adapter adapter = new Adapter();
+    private final CardSections<Group> sections = new CardSections<>();
+    private ListHeader header;
 
     /** Multi-select state, keyed by merged group. */
     private boolean selectionMode;
 
     private final Set<String> selectedKeys = new java.util.HashSet<>();
 
-    /** Whether the in-bar search field is open. */
-    private boolean searchOpen;
-
     /** Lower-cased raw-vCard filter; empty shows all. */
     private String searchQuery = "";
-
-    /** Debounced search refresh, so typing does not re-render per keystroke. */
-    private Runnable pendingSearch;
 
     ContactsList(MainActivity host) {
         this.host = host;
     }
 
-    /** Wires the list, its bar buttons, the search field and the pull-down. */
+    /** Wires the list, its bar buttons, the header search and the pull-down. */
     void setUp() {
         // Pull-to-refresh runs the same syncAll as the drawer; its own
         // spinner retracts right away, the modal dialog carries the wait.
@@ -80,39 +75,27 @@ final class ContactsList {
         host.findViewById(R.id.contacts_select_all)
                 .setOnClickListener(view -> toggleSelectAll());
 
-        host.findViewById(R.id.contacts_search).setOnClickListener(view -> openSearch());
-        host.findViewById(R.id.contacts_search_close).setOnClickListener(view -> closeSearch());
-        ((EditText) host.findViewById(R.id.contacts_search_input))
-                .addTextChangedListener(
-                        new android.text.TextWatcher() {
-                            @Override
-                            public void beforeTextChanged(
-                                    CharSequence s, int start, int count, int after) {}
-
-                            @Override
-                            public void onTextChanged(
-                                    CharSequence s, int start, int before, int count) {}
-
-                            @Override
-                            public void afterTextChanged(android.text.Editable s) {
-                                String query = s.toString().trim().toLowerCase();
-                                if (pendingSearch != null) {
-                                    host.main.removeCallbacks(pendingSearch);
-                                }
-                                pendingSearch =
-                                        () -> {
-                                            searchQuery = query;
-                                            render();
-                                        };
-                                host.main.postDelayed(pendingSearch, 250);
-                            }
-                        });
-
         ListView list = host.findViewById(R.id.contacts_list);
+        header = new ListHeader(host, list, MainActivity.PANEL_CONTACTS);
+        header.search(
+                R.string.contacts_search,
+                query -> {
+                    searchQuery = query;
+                    render();
+                });
         list.setAdapter(adapter);
+
+        // A letter's header selects its whole section, the only unit the
+        // list has beside one contact; a row opens or, during a
+        // selection, toggles.
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
-                    Group group = sortedContacts.get(position);
+                    int row = header.rowAt(position);
+                    if (sections.isHeader(row)) {
+                        toggleLetter(sections.header(row));
+                        return;
+                    }
+                    Group group = sections.row(row);
                     if (selectionMode) {
                         toggleSelection(group.key);
                     } else {
@@ -121,27 +104,18 @@ final class ContactsList {
                 });
         list.setOnItemLongClickListener(
                 (parent, view, position, id) -> {
+                    Group group = sections.row(header.rowAt(position));
+                    if (group == null) {
+                        return false;
+                    }
                     selectionMode = true;
-                    toggleSelection(sortedContacts.get(position).key);
+                    toggleSelection(group.key);
                     return true;
                 });
+    }
 
-        TextView sticky = host.findViewById(R.id.contacts_sticky_letter);
-        sticky.setOnClickListener(view -> toggleLetter(sticky.getText().toString()));
-        list.setOnScrollListener(
-                new android.widget.AbsListView.OnScrollListener() {
-                    @Override
-                    public void onScrollStateChanged(android.widget.AbsListView v, int state) {}
-
-                    @Override
-                    public void onScroll(
-                            android.widget.AbsListView v, int first, int count, int total) {
-                        if (first < sortedContacts.size()) {
-                            sticky.setText(
-                                    Avatar.letter(sortedContacts.get(first).primary().displayName()));
-                        }
-                    }
-                });
+    ListHeader header() {
+        return header;
     }
 
     /**
@@ -178,7 +152,7 @@ final class ContactsList {
     }
 
     boolean isSearchOpen() {
-        return searchOpen;
+        return !searchQuery.isEmpty();
     }
 
     /** Re-applies the filter and the query to the rows already grouped. */
@@ -192,7 +166,6 @@ final class ContactsList {
      * float to the top so they cannot be missed.
      */
     private void render() {
-        TextView sticky = host.findViewById(R.id.contacts_sticky_letter);
         updateSelectionUi();
 
         sortedContacts = new ArrayList<>();
@@ -217,47 +190,44 @@ final class ContactsList {
             }
         }
 
-        // NOTE: conflicts float to the top; the stable sort keeps the
-        // bridge's display-name order within each bucket.
+        // NOTE: conflicts float to the top, under a header of their own;
+        // the stable sort keeps the bridge's display-name order within
+        // each bucket, which is what makes each letter one run.
         java.util.Collections.sort(
                 sortedContacts,
                 (left, right) -> Boolean.compare(right.conflicted(), left.conflicted()));
+        sections.fill(sortedContacts, this::sectionOf);
         adapter.notifyDataSetChanged();
+        header.meta(
+                host.getResources()
+                        .getQuantityString(
+                                R.plurals.contacts_meta,
+                                sortedContacts.size(),
+                                sortedContacts.size()));
 
         // One empty state for every cause: a search miss, an empty
         // addressbook, or no account.
-        boolean empty = sortedContacts.isEmpty();
-        host.findViewById(R.id.contacts_empty).setVisibility(empty ? View.VISIBLE : View.GONE);
-        sticky.setText(empty ? "" : Avatar.letter(sortedContacts.get(0).primary().displayName()));
+        host.findViewById(R.id.contacts_empty)
+                .setVisibility(sortedContacts.isEmpty() ? View.VISIBLE : View.GONE);
+    }
 
-        // A letterless button is a button that does nothing, so the whole
-        // slot goes with the rows it labels.
-        View slot = host.findViewById(R.id.contacts_sticky_slot);
-        slot.setVisibility(empty ? View.GONE : View.VISIBLE);
-
-        // NOTE: rows are uniform, so sizing the slot to one row height
-        // centres its button on the row whose letter it shows.
-        ListView list = host.findViewById(R.id.contacts_list);
-        list.post(
-                () -> {
-                    View first = list.getChildAt(0);
-                    if (first != null && slot.getLayoutParams().height != first.getHeight()) {
-                        slot.getLayoutParams().height = first.getHeight();
-                        slot.requestLayout();
-                    }
-                });
+    /** The card a contact goes in: its letter, or the conflicts' own. */
+    private String sectionOf(Group group) {
+        return group.conflicted()
+                ? host.getString(R.string.contacts_conflicts)
+                : Avatar.letter(group.primary().displayName());
     }
 
     /** Recycling adapter for the contacts list. */
     private final class Adapter extends android.widget.BaseAdapter {
         @Override
         public int getCount() {
-            return sortedContacts.size();
+            return sections.size();
         }
 
         @Override
         public Object getItem(int position) {
-            return sortedContacts.get(position);
+            return sections.row(position);
         }
 
         @Override
@@ -266,13 +236,28 @@ final class ContactsList {
         }
 
         @Override
+        public int getViewTypeCount() {
+            return 2;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return sections.isHeader(position) ? 1 : 0;
+        }
+
+        @Override
         public View getView(int position, View convertView, android.view.ViewGroup parent) {
+            if (sections.isHeader(position)) {
+                return sections.headerView(position, convertView, parent);
+            }
+
             View row =
                     convertView != null
                             ? convertView
                             : host.getLayoutInflater().inflate(R.layout.item_contact, parent, false);
+            sections.shape(row, position);
 
-            Group group = sortedContacts.get(position);
+            Group group = sections.row(position);
             Entry entry = group.primary();
             String name = entry.displayName();
 
@@ -401,7 +386,7 @@ final class ContactsList {
 
     /**
      * Selects every contact under a letter, or clears them when they are
-     * all already selected: the sticky letter's tap.
+     * all already selected: a letter header's tap.
      *
      * <p>Outside a selection it starts one, so the button does something
      * wherever it is pressed. A long press on a row starts a selection
@@ -411,7 +396,7 @@ final class ContactsList {
     private void toggleLetter(String letter) {
         List<String> keys = new ArrayList<>();
         for (Group group : sortedContacts) {
-            if (letter.equals(Avatar.letter(group.primary().displayName()))) {
+            if (letter.equals(sectionOf(group))) {
                 keys.add(group.key);
             }
         }
@@ -436,56 +421,16 @@ final class ContactsList {
         adapter.notifyDataSetChanged();
     }
 
-    /** Swaps the title for the search pill and opens the keyboard. */
-    private void openSearch() {
-        searchOpen = true;
-        // NOTE: the burger goes with the title, so the field takes the
-        // bar up to its clear cross, which sits beside the filter.
-        host.findViewById(R.id.bar_title).setVisibility(View.GONE);
-        host.findViewById(R.id.bar_menu).setVisibility(View.GONE);
-        showActions(false);
-        host.findViewById(R.id.contacts_search_pill).setVisibility(View.VISIBLE);
-        host.findViewById(R.id.contacts_search_close).setVisibility(View.VISIBLE);
-
-        EditText input = host.findViewById(R.id.contacts_search_input);
-        input.requestFocus();
-        android.view.inputmethod.InputMethodManager imm =
-                (android.view.inputmethod.InputMethodManager)
-                        host.getSystemService(Context.INPUT_METHOD_SERVICE);
-        imm.showSoftInput(input, 0);
-    }
-
-    /** Clears the query and gives the bar its buttons back. */
+    /** Clears the query, which the header's field holds. */
     void closeSearch() {
-        ((EditText) host.findViewById(R.id.contacts_search_input)).setText("");
         // NOTE: the watcher clears the query only after its debounce, so
         // reset it now too, or an immediate reload filters the stale one.
         searchQuery = "";
-        if (!searchOpen) {
-            return;
-        }
-        searchOpen = false;
-
-        host.hideKeyboard();
-        // The chrome only moves while the contacts screen shows it.
-        if (!host.onContactsScreen()) {
-            return;
-        }
-        host.findViewById(R.id.contacts_search_pill).setVisibility(View.GONE);
-        host.findViewById(R.id.contacts_search_close).setVisibility(View.GONE);
-        host.findViewById(R.id.bar_menu).setVisibility(selectionMode ? View.GONE : View.VISIBLE);
-        // NOTE: a running selection already wrote its count there.
-        if (selectionMode) {
-            host.findViewById(R.id.bar_title).setVisibility(View.VISIBLE);
-        } else {
-            host.showDomainTitle(MainActivity.PANEL_CONTACTS);
-        }
-        showActions(!selectionMode);
-        host.findViewById(R.id.bar_filter).setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        header.clearSearch();
     }
 
     /**
-     * Raises or hides the contacts' own bar buttons: search, birthdays,
+     * Raises or hides the contacts' own bar buttons: birthdays,
      * duplicates and import/export. The filter is every list's and
      * follows its own rule.
      */
@@ -493,7 +438,6 @@ final class ContactsList {
         int visibility = shown ? View.VISIBLE : View.GONE;
         for (int id :
                 new int[] {
-                    R.id.contacts_search,
                     R.id.contacts_birthdays,
                     R.id.contacts_duplicates,
                     R.id.contacts_transfer,
@@ -513,30 +457,18 @@ final class ContactsList {
             return;
         }
 
-        // The selected count takes the title's spot, so an open search
-        // gives way.
-        if (selectionMode) {
-            closeSearch();
-        }
-
         // A selection takes the domain name's place with its count,
-        // since navigating away mid-selection is not what the bar is
-        // for; a search takes the whole title slot with its pill.
+        // shown whatever the scroll, since navigating away mid-selection
+        // is not what the bar is for.
         TextView title = host.findViewById(R.id.bar_title);
-        title.setText(host.getString(R.string.selected_count, selectedKeys.size()));
-        title.setVisibility(selectionMode && !searchOpen ? View.VISIBLE : View.GONE);
-        host.findViewById(R.id.contacts_search_pill)
-                .setVisibility(searchOpen ? View.VISIBLE : View.GONE);
-        host.findViewById(R.id.contacts_search_close)
-                .setVisibility(searchOpen ? View.VISIBLE : View.GONE);
-
-        // The burger and the domain name are what a list screen's bar
-        // is; both yield to the two modes that take the bar over.
-        boolean navigating = !selectionMode && !searchOpen;
-        host.findViewById(R.id.bar_menu).setVisibility(navigating ? View.VISIBLE : View.GONE);
+        boolean navigating = !selectionMode;
         if (navigating) {
             host.showDomainTitle(MainActivity.PANEL_CONTACTS);
+        } else {
+            title.setText(host.getString(R.string.selected_count, selectedKeys.size()));
+            title.setAlpha(1f);
         }
+        host.findViewById(R.id.bar_menu).setVisibility(navigating ? View.VISIBLE : View.GONE);
         showActions(navigating);
         host.findViewById(R.id.bar_filter)
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
@@ -555,7 +487,8 @@ final class ContactsList {
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         ((CheckBox) host.findViewById(R.id.contacts_select_all))
                 .setChecked(selectionMode && allSelected());
-        host.findViewById(R.id.fab).setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        host.findViewById(R.id.fab_extended)
+                .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
     }
 
     /** Confirms, then stages a delete for every selected contact. */

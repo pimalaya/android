@@ -31,6 +31,36 @@
     <string name="mail_title">E-mails</string>
     <string name="contacts_title">Contacts</string>
     <string name="calendar_title">Agendas</string>
+
+    <!-- Les grands titres, les sections, la navigation et les puces. -->
+    <plurals name="mail_meta">
+        <item quantity="one">%1$d message</item>
+        <item quantity="other">%1$d messages</item>
+    </plurals>
+    <plurals name="mail_meta_unread">
+        <item quantity="one">%1$d non lu · %2$d messages</item>
+        <item quantity="other">%1$d non lus · %2$d messages</item>
+    </plurals>
+    <plurals name="contacts_meta">
+        <item quantity="one">%1$d contact</item>
+        <item quantity="other">%1$d contacts</item>
+    </plurals>
+    <plurals name="calendar_meta">
+        <item quantity="one">%1$d entrée à venir</item>
+        <item quantity="other">%1$d entrées à venir</item>
+    </plurals>
+    <string name="mail_search">Rechercher dans les e-mails</string>
+    <string name="date_unknown">Sans date</string>
+    <string name="mail_chip_unread">Non lus</string>
+    <string name="mail_chip_attachments">Pièces jointes</string>
+    <string name="mail_all">Toutes les boîtes</string>
+    <string name="drawer_mailboxes">Boîtes aux lettres</string>
+    <string name="drawer_accounts">Comptes</string>
+    <string name="contacts_conflicts">À vérifier</string>
+    <string name="contacts_new_short">Nouveau contact</string>
+    <string name="message_attachment_chip">Pièce jointe</string>
+    <string name="compose_from_label">De</string>
+    <string name="compose_copies_short">Cc/Cci</string>
     <string name="setup_step_title">Étape %1$d/%2$d · %3$s · %4$s</string>
     <string name="setup_step_one">%1$s · Connexion</string>
     <string name="setup_step_domain">%1$s · Étape %2$d/%3$d</string>

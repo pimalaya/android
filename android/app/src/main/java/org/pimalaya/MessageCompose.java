@@ -95,8 +95,7 @@ final class MessageCompose {
     private void open(AccountEntry account) {
         this.account = account;
 
-        ((TextView) host.findViewById(R.id.compose_from))
-                .setText(host.getString(R.string.compose_from, account.email));
+        ((TextView) host.findViewById(R.id.compose_from)).setText(account.email);
         for (int id : RECIPIENTS) {
             ((RecipientField) host.findViewById(id)).clear();
         }
@@ -109,11 +108,11 @@ final class MessageCompose {
         host.show(MainActivity.PANEL_COMPOSE);
     }
 
-    /** Whether the two copy fields are showing, and their reveal with them. */
+    /** Whether the two copy rows are showing, and their reveal with them. */
     private void copies(boolean shown) {
         int visibility = shown ? View.VISIBLE : View.GONE;
-        host.findViewById(R.id.compose_cc).setVisibility(visibility);
-        host.findViewById(R.id.compose_bcc).setVisibility(visibility);
+        host.findViewById(R.id.compose_cc_row).setVisibility(visibility);
+        host.findViewById(R.id.compose_bcc_row).setVisibility(visibility);
         host.findViewById(R.id.compose_copies).setVisibility(shown ? View.GONE : View.VISIBLE);
     }
 
@@ -201,7 +200,7 @@ final class MessageCompose {
         }
 
         AccountEntry sender = account;
-        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        host.setSending(true);
         host.io.execute(
                 () -> {
                     Exception failure = null;
@@ -226,7 +225,7 @@ final class MessageCompose {
                     Exception outcome = failure;
                     host.postAlive(
                             () -> {
-                                host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
+                                host.setSending(false);
                                 if (outcome != null) {
                                     host.showError(outcome, R.string.compose_failed);
                                     return;

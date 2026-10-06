@@ -17,6 +17,7 @@
             android:layout_height="match_parent"
             android:clipToPadding="false"
             android:divider="@null"
+            android:listSelector="@android:color/transparent"
             android:dividerHeight="0dp"
             android:paddingBottom="88dp"
             android:scrollbars="none" />
@@ -50,40 +51,8 @@
             android:text="@string/empty_title"
             android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
             android:textColor="?android:attr/textColorSecondary"
-	    android:textSize="18sp" />
+            android:textSize="18sp" />
 
     </LinearLayout>
-
-    <!-- The section letter of the row at the top of the list, in the
-         leading column every row keeps clear: the rows start under the
-         bar title, and this is what that space is for on the contacts
-         side (the agenda puts a countdown there, the mail list a
-         paperclip).
-
-         The slot is one row tall (set to the real height at render time)
-         and centres a bar-button-sized round button in it, on the bar
-         logo's own axis, so the letter is the same circle with the same
-         ripple as every other button in the app; tapping it selects its
-         whole section. -->
-    <FrameLayout
-        android:id="@+id/contacts_sticky_slot"
-        android:layout_width="@dimen/app_bar_button"
-        android:layout_height="66dp"
-        android:layout_gravity="start"
-        android:layout_marginStart="@dimen/app_bar_padding">
-
-        <TextView
-            android:id="@+id/contacts_sticky_letter"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:layout_gravity="center"
-            android:background="@drawable/ripple_circle"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center"
-            android:textColor="?android:attr/colorAccent"
-            android:textStyle="bold" />
-
-    </FrameLayout>
 
 </FrameLayout>

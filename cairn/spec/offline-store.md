@@ -267,20 +267,36 @@ The filter's account axis SHALL list the accounts covering the domain on screen,
 - WHEN the filter is opened over the mail list
 - THEN the account is not listed
 
-### Requirement: The drawer switches domains
-The drawer SHALL open on a title bar, a closing cross beside the app's name, then one row per domain, an icon and its name like the footer's actions, mail, contacts then calendars, the one on screen drawn on an accent pill, over the account rows and the footer of actions. A list screen's bar SHALL carry the burger and the domain's name, and SHALL NOT carry the domain buttons.
+### Requirement: The bottom bar switches domains
+A bottom navigation bar SHALL switch between mail, contacts and calendars, in that order, the one on screen on an accent pill, mail carrying the count of unread messages among those listed. It SHALL show on the three lists only. The drawer SHALL open on a title bar, a closing cross beside the app's name, then the mailboxes, all of them first and the one the mail list shows on an accent pill, then the account rows and the footer of actions. A list screen's bar SHALL carry the burger and SHALL NOT carry the domain buttons.
 
 #### Scenario: Switching to the calendars
 - GIVEN the mail list
-- WHEN the drawer is opened and the calendars row is pressed
-- THEN the drawer closes on the agenda, swapped in with no slide, its bar titled with the calendars' name
+- WHEN the calendars item of the bottom bar is pressed
+- THEN the agenda is swapped in with no slide, the calendars item on the accent pill
+
+### Requirement: A list opens on a large title
+Every list screen SHALL open on a large title naming what it shows over a supporting line counting it, scrolling with the rows. The bar SHALL carry the same title only once the large one has scrolled out of sight. The list's add button SHALL be an extended one, its label folding away while the list scrolls down and coming back when it scrolls up.
+
+#### Scenario: Scrolling the mail list
+- GIVEN the mail list at its top
+- WHEN it is scrolled past its large title
+- THEN the bar shows the title, and the add button folds to its glyph
+
+### Requirement: A list groups its rows into cards
+Every list screen SHALL group its rows into rounded cards under a section header: mail by the day a message arrived, contacts by their letter with conflicts first under a header of their own, the agenda by the day an entry starts. Pressing a contacts letter header SHALL select that section, or clear it when it is all selected.
+
+#### Scenario: Two days of mail
+- GIVEN messages from today and from yesterday
+- WHEN the mail list is shown
+- THEN today's sit in one card under Today and yesterday's in another under Yesterday
 
 ### Requirement: A list bar carries its actions inline
-Every list screen SHALL show the same add glyph, and SHALL carry its actions as bar buttons with no overflow: on contacts search, the birthdays, the duplicate remover and one import/export button opening a menu of the two, then on every list the filter last, accented while it hides anything. An open search SHALL take the bar up to its clear cross, beside the filter.
+Every list screen SHALL carry its actions as bar buttons with no overflow: on contacts the birthdays, the duplicate remover and one import/export button opening a menu of the two, then on every list the filter last, accented while it hides anything. A list's search SHALL sit in its header, under the large title, not in the bar.
 
 #### Scenario: The contacts bar
 - WHEN the contacts list is shown
-- THEN its bar carries search, birthdays, duplicates, import/export and the filter after the burger and the title
+- THEN its bar carries birthdays, duplicates, import/export and the filter after the burger, and its search field sits under the large title
 
 ### Requirement: A deleted account takes its mail and calendars
 Deleting an account SHALL drop its mailboxes and their messages, whatever its outbox still holds, and its calendars and their events. Its contacts SHALL move into the on-device book.

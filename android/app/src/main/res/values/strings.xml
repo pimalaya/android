@@ -195,6 +195,34 @@
     <string name="filter_accounts">Accounts</string>
     <string name="filter_collections">Collections</string>
     <string name="filter_reset">Show all</string>
+
+    <!-- The large titles' supporting lines and the lists' sections. -->
+    <plurals name="mail_meta">
+        <item quantity="one">%1$d message</item>
+        <item quantity="other">%1$d messages</item>
+    </plurals>
+    <plurals name="mail_meta_unread">
+        <item quantity="one">%1$d unread · %2$d messages</item>
+        <item quantity="other">%1$d unread · %2$d messages</item>
+    </plurals>
+    <plurals name="contacts_meta">
+        <item quantity="one">%1$d contact</item>
+        <item quantity="other">%1$d contacts</item>
+    </plurals>
+    <plurals name="calendar_meta">
+        <item quantity="one">%1$d upcoming entry</item>
+        <item quantity="other">%1$d upcoming entries</item>
+    </plurals>
+    <string name="mail_search">Search mail</string>
+    <string name="date_unknown">Undated</string>
+    <string name="mail_chip_unread">Unread</string>
+    <string name="mail_chip_attachments">Attachments</string>
+    <string name="mail_all">All mailboxes</string>
+    <string name="drawer_mailboxes">Mailboxes</string>
+    <string name="drawer_accounts">Accounts</string>
+    <string name="contacts_conflicts">To review</string>
+    <string name="date_tomorrow">Tomorrow</string>
+    <string name="contacts_new_short">New contact</string>
     <!-- The date vocabulary the three lists and the two readers share.
          A span is worded once and then placed by date_in or date_ago,
          so a unit is spelled in one place whichever direction it runs
@@ -240,6 +268,7 @@
     <string name="message_answered">Replied</string>
     <string name="message_flagged">Important</string>
     <string name="message_attachment">Has an attachment</string>
+    <string name="message_attachment_chip">Attachment</string>
 
     <!-- The message reader. -->
     <string name="message_failed">Could not read the message</string>
@@ -327,9 +356,10 @@
     <string name="compose_bcc">Bcc</string>
     <string name="compose_remove_recipient">Remove %1$s</string>
     <string name="compose_add_copies">Add Cc and Bcc</string>
+    <string name="compose_copies_short">Cc/Bcc</string>
+    <string name="compose_from_label">From</string>
     <string name="compose_subject">Subject</string>
     <string name="compose_body">Write your message</string>
-    <string name="compose_from">From %s</string>
     <string name="compose_send">Send</string>
     <string name="compose_queued">In the outbox; it goes out on the next sync</string>
     <plurals name="outbox_sent">

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A tonal pill: the surface tone under a bounded ripple, for the
+     search fields, the bar's round buttons and an unselected chip. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?android:attr/colorControlHighlight">
+    <item>
+        <shape>
+            <solid android:color="@color/surface" />
+            <corners android:radius="1000dp" />
+        </shape>
+    </item>
+</ripple>
