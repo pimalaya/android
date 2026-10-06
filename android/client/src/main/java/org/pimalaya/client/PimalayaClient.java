@@ -249,8 +249,8 @@ public class PimalayaClient {
         return base("googleCarddav", email);
     }
 
-    /** A Google People account's base URL for the email. */
-    public static String googlePeopleBase(String email) {
+    /** A Google API account's base URL for the email: People, Gmail or Calendar. */
+    public static String googleBase(String email) {
         return base("google", email);
     }
 

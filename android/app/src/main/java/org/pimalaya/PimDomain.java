@@ -80,6 +80,7 @@ enum PimDomain {
             // domain served by SMTP alone would be one nothing can read.
             case "imap":
             case "msgraph":
+            case "gmail":
                 domains.add(MAIL);
                 break;
             case "carddav":
@@ -87,6 +88,7 @@ enum PimDomain {
                 break;
             case "caldav":
             case "msgraphCalendar":
+            case "gcal":
                 domains.add(CALENDAR);
                 break;
             // NOTE: all three, and only because all three have a reader now.

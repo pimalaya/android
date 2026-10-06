@@ -8,7 +8,7 @@ status: current
 
 A calendar is a collection of kind `text/calendar` and an entry is one item in it, stored as the iCalendar text the server sent and never rewritten: what an entry renders as depends on the window being shown, so the recurrence expansion happens at render time and the summary beside it is what an agenda row reads.
 
-Three backends answer: a CalDAV context root, the draft-ietf-jmap-calendars verbs behind the `jmap://` marker, or Microsoft Graph behind the `msgraph://` one. The JMAP and Graph payloads are converted at the client boundary, JSCalendar by ical-rs and Graph events by io-msgraph, so the store keeps one shape.
+Four backends answer: a CalDAV context root, the draft-ietf-jmap-calendars verbs behind the `jmap://` marker, Microsoft Graph behind the `msgraph://` one, or the Google Calendar API behind `google://`. The JMAP, Graph and Google payloads are converted at the client boundary, JSCalendar by ical-rs and Graph and Google events by io-msgraph and io-gcal, so the store keeps one shape.
 
 Every calendar runs io-pimdir's sync, and asks what changed. The enumerate is an RFC 6578 `sync-collection` REPORT from the cursor the last pass stored, answering resource names and ETags; the fetch is a `calendar-multiget` (RFC 4791 section 7.9) of the entries the merge asked about. A quiet calendar costs one report and no body. A reconcile is followed by an upgrade, which is not optional: a sync that finds the remote content changed drops the body on purpose, and an agenda reads its entries by their body.
 
@@ -98,3 +98,11 @@ A calendar connection behind the `msgraph://` marker SHALL list the user's calen
 - GIVEN an entry edited here and on Outlook since the last pass
 - WHEN the sync pushes the edit
 - THEN Graph is not written and the edit stays staged
+
+### Requirement: A Google calendar can run over the Calendar API
+A calendar connection behind the `google://` marker SHALL list the user's calendar list and read events as iCalendar, a series with its changed and cancelled instances as one entry, those instances read through the series' `iCalUID`. An entry's revision SHALL be the master's ETag folded with its instances', so an instance edited on Google moves the entry. Every pass SHALL list the calendar in full. A write SHALL go to the master with Google's `If-Match`, after the folded revision is checked, and a created event SHALL be imported so it keeps its UID.
+
+#### Scenario: An instance edited on Google
+- GIVEN a series whose one occurrence was moved on Google since the last pass
+- WHEN the calendar syncs
+- THEN the entry is read again, the moved occurrence with it

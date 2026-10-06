@@ -21,6 +21,8 @@ mod carddav;
 mod convert;
 mod discovery;
 mod dispatch;
+mod gcal;
+pub(crate) mod gmail;
 mod google;
 mod graph;
 mod graph_calendar;

@@ -346,11 +346,20 @@ final class OnboardingFlow {
         }
 
         /**
-         * Whether reading mail through this option asks where to send: IMAP
-         * and Graph do, manual entry being an IMAP server typed by hand.
+         * Whether reading mail through this option asks where to send: IMAP,
+         * Graph and Gmail do, manual entry being an IMAP server typed by
+         * hand.
          */
         boolean asksSubmission() {
-            return "imap".equals(service) || "msgraph".equals(service) || isManual();
+            return "imap".equals(service) || readsOverApi() || isManual();
+        }
+
+        /**
+         * Whether this option reads mail over a provider API, which sends
+         * through the same API and nothing else.
+         */
+        boolean readsOverApi() {
+            return "msgraph".equals(service) || "gmail".equals(service);
         }
 
         /** Whether this option asks for a server instead of proposing one. */
@@ -397,13 +406,21 @@ final class OnboardingFlow {
         final String scope;
 
         /**
-         * Whether it submits through Graph, which only an account reading
-         * over Graph can: its token is Graph's, where SMTP takes Outlook's.
+         * The provider API it submits through (`msgraph`, `gmail`), null for
+         * SMTP and the rows around it. Only an account reading over that API
+         * can: its token is the API's, where SMTP takes the mail server's.
          */
-        final boolean graph;
+        final String through;
+
+        /**
+         * How an SMTP row signs in, null for the rows that name no method.
+         * It signs in with the mail connection's credential, so only a row
+         * of the same kind as the mail sign-in can use it.
+         */
+        final AuthMethod.Type auth;
 
         SubmitOption(String label, String detail, String url, boolean manual) {
-            this(label, detail, url, manual, null, false);
+            this(label, detail, url, manual, null, null, null);
         }
 
         SubmitOption(
@@ -412,18 +429,20 @@ final class OnboardingFlow {
                 String url,
                 boolean manual,
                 String scope,
-                boolean graph) {
+                String through,
+                AuthMethod.Type auth) {
             this.label = label;
             this.detail = detail;
             this.url = url;
             this.manual = manual;
             this.scope = scope;
-            this.graph = graph;
+            this.through = through;
+            this.auth = auth;
         }
 
         /** Whether it is the row that sends nothing. */
         boolean none() {
-            return url == null && !manual && !graph;
+            return url == null && !manual && through == null;
         }
     }
 
@@ -549,11 +568,11 @@ final class OnboardingFlow {
                 // is asking for mail, and an account that reads and cannot
                 // answer is not what anybody meant; saying so is what the
                 // row for none is there for.
-                setup.submitSelected =
-                        setup.submitOptions.isEmpty() ? null : setup.submitOptions.get(0);
+                setup.submitSelected = firstOffered(setup);
                 if (!simpleSetup()) {
-                    // NOTE: offered only beside Graph reading, which
-                    // renderSection works out as the reading choice moves.
+                    // NOTE: offered only beside reading over the same API,
+                    // which renderSection works out as the reading choice
+                    // moves.
                     if (discovered("msgraph")) {
                         setup.submitOptions.add(
                                 new SubmitOption(
@@ -562,7 +581,19 @@ final class OnboardingFlow {
                                         PimalayaClient.msgraphBase(pendingEmail),
                                         false,
                                         null,
-                                        true));
+                                        "msgraph",
+                                        null));
+                    }
+                    if (discovered("gmail")) {
+                        setup.submitOptions.add(
+                                new SubmitOption(
+                                        host.getString(R.string.config_gmail),
+                                        "gmail.googleapis.com",
+                                        PimalayaClient.googleBase(pendingEmail),
+                                        false,
+                                        null,
+                                        "gmail",
+                                        null));
                     }
                     SubmitOption none =
                             new SubmitOption(
@@ -571,7 +602,7 @@ final class OnboardingFlow {
                     setup.submitOptions.add(
                             new SubmitOption(
                                     host.getString(R.string.domain_manual), null, null, true));
-                    if (setup.submitSelected == null || setup.submitSelected.graph) {
+                    if (setup.submitSelected == null || setup.submitSelected.through != null) {
                         // The row for none, so the group opens on an answer
                         // rather than on nothing: not sending is a choice,
                         // and it is the only one this address offers.
@@ -747,16 +778,15 @@ final class OnboardingFlow {
             sends.setText(R.string.send_mail);
             sends.setTextSize(15);
             sends.setPadding(host.ui.dp(8), host.ui.dp(10), host.ui.dp(8), host.ui.dp(4));
-            sends.setEnabled(!setup.submitOptions.isEmpty());
+            SubmitOption best = firstOffered(setup);
+            sends.setEnabled(best != null);
             sends.setChecked(setup.submitSelected != null);
             sends.setOnCheckedChangeListener(
-                    (view, checked) ->
-                            setup.submitSelected =
-                                    checked ? setup.submitOptions.get(0) : null);
+                    (view, checked) -> setup.submitSelected = checked ? best : null);
             setup.submitViews.add(sends);
             section.addView(sends);
 
-            if (setup.submitOptions.isEmpty()) {
+            if (best == null) {
                 TextView reach = note(R.string.send_mail_advanced_only);
                 setup.submitViews.add(reach);
                 section.addView(reach);
@@ -795,8 +825,9 @@ final class OnboardingFlow {
 
     /** A submission row's label: the protocol, and the server it names. */
     private String submitLabel(SubmitOption option) {
+        String auth = option.auth == null ? "" : " · " + authName(option.auth);
         if (option.detail != null) {
-            return option.label + " (" + option.detail + ")";
+            return option.label + " (" + option.detail + ")" + auth;
         }
         return option.url == null ? option.label : option.label + " (" + hostOf(option.url) + ")";
     }
@@ -848,17 +879,54 @@ final class OnboardingFlow {
     /**
      * Whether a sending row goes with what mail is read through.
      *
-     * <p>Graph reading sends through Graph, and SMTP reading anything else:
-     * SMTP signs in with Outlook's token and Graph with Graph's, so pairing
-     * one with the other would be a second credential to store and renew
-     * for the same mailbox.
+     * <p>Reading over a provider API sends through that API, and SMTP goes
+     * with anything else: Microsoft's SMTP signs in with Outlook's token
+     * and Graph with Graph's, so pairing one with the other would be a
+     * second credential to store and renew for the same mailbox. Gmail's
+     * one token would cover both, and is kept to the same shape.
      */
     private static boolean offers(DomainSetup setup, SubmitOption option) {
         if (option.none()) {
             return true;
         }
-        boolean graph = setup.selected != null && "msgraph".equals(setup.selected.service);
-        return option.graph == graph;
+        String api =
+                setup.selected != null && setup.selected.readsOverApi()
+                        ? setup.selected.service
+                        : null;
+        if (!java.util.Objects.equals(option.through, api)) {
+            return false;
+        }
+        if (option.auth == null || setup.selected == null) {
+            return true;
+        }
+        // NOTE: a manual mail server is signed in to with a password.
+        AuthMethod.Type reading =
+                setup.selected.method == null
+                        ? AuthMethod.Type.PASSWORD
+                        : setup.selected.method.type;
+        return authKind(option.auth) == authKind(reading);
+    }
+
+    /** An authentication method's kind: OAuth's grants are one kind. */
+    private static int authKind(AuthMethod.Type type) {
+        switch (type) {
+            case PASSWORD:
+                return 2;
+            case BEARER:
+                return 1;
+            default:
+                return 0;
+        }
+    }
+
+    /** The first sending row that goes with what mail is read through. */
+    private static SubmitOption firstOffered(DomainSetup setup) {
+        for (SubmitOption option : setup.submitOptions) {
+            if (!option.none() && !option.manual && offers(setup, option)) {
+                return option;
+            }
+        }
+        return null;
     }
 
     /**
@@ -997,7 +1065,7 @@ final class OnboardingFlow {
             options.add(
                     providerOption(
                             R.string.config_google_api,
-                            PimalayaClient.googlePeopleBase(pendingEmail),
+                            PimalayaClient.googleBase(pendingEmail),
                             Oauth.GOOGLE_AUTH_ENDPOINT,
                             Oauth.GOOGLE_TOKEN_ENDPOINT,
                             Oauth.GOOGLE_PEOPLE_SCOPE));
@@ -1134,6 +1202,10 @@ final class OnboardingFlow {
             case "msgraph":
             case "msgraphCalendar":
                 return host.getString(R.string.config_msgraph);
+            case "gmail":
+                return host.getString(R.string.config_gmail);
+            case "gcal":
+                return host.getString(R.string.config_gcal);
             default:
                 return service;
         }
@@ -1971,29 +2043,39 @@ final class OnboardingFlow {
                 continue;
             }
             String authority = config.host + ":" + config.port;
-            (tls ? implicit : upgraded)
-                    .add(
-                            new SubmitOption(
-                                    host.getString(R.string.config_smtp),
-                                    authority,
-                                    (tls ? "smtps://" : "smtp://") + authority,
-                                    false,
-                                    oauthScope(config),
-                                    false));
-        }
+            String url = (tls ? "smtps://" : "smtp://") + authority;
 
-        implicit.addAll(upgraded);
-        return implicit;
-    }
-
-    /** The scope a config's browser grant asks for, or null when it has none. */
-    private static String oauthScope(ServiceConfig config) {
-        for (AuthMethod method : config.auth) {
-            if (method.type == AuthMethod.Type.OAUTH_AUTHORIZATION_CODE_GRANT) {
-                return method.scope;
+            List<AuthMethod> methods = new ArrayList<>(config.auth);
+            java.util.Collections.sort(
+                    methods,
+                    (left, right) -> Integer.compare(authRank(left.type), authRank(right.type)));
+            if (methods.isEmpty()) {
+                methods.add(null);
+            }
+            for (AuthMethod method : methods) {
+                (tls ? implicit : upgraded)
+                        .add(
+                                new SubmitOption(
+                                        host.getString(R.string.config_smtp),
+                                        authority,
+                                        url,
+                                        false,
+                                        method == null ? null : method.scope,
+                                        null,
+                                        method == null ? null : method.type));
             }
         }
-        return null;
+        implicit.addAll(upgraded);
+
+        // NOTE: the reading rows' rule: two rows reading the same are one
+        // choice offered twice, as when two mechanisms found one server or
+        // it takes OAuth through two grants. The first kept is the best
+        // ranked.
+        Map<String, SubmitOption> distinct = new LinkedHashMap<>();
+        for (SubmitOption option : implicit) {
+            distinct.putIfAbsent(submitLabel(option), option);
+        }
+        return new ArrayList<>(distinct.values());
     }
 
     /**
@@ -2042,6 +2124,9 @@ final class OnboardingFlow {
     private String endpointUrl(ServiceConfig config) {
         if ("msgraph".equals(config.service) || "msgraphCalendar".equals(config.service)) {
             return PimalayaClient.msgraphBase(pendingEmail);
+        }
+        if ("gmail".equals(config.service) || "gcal".equals(config.service)) {
+            return PimalayaClient.googleBase(pendingEmail);
         }
         if (config.url != null) {
             return "jmap".equals(config.service)

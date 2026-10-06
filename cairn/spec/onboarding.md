@@ -113,7 +113,7 @@ The protocol sweep SHALL run the fixed provider rules (by domain, then by MX) be
 #### Scenario: A Google address
 - GIVEN an address whose mail exchanges live at Google
 - WHEN discovery runs
-- THEN mail (IMAP), sending (SMTP), contacts (CardDAV, People API) and calendars (CalDAV) are offered
+- THEN mail (IMAP, Gmail API), sending (SMTP), contacts (CardDAV, People API) and calendars (CalDAV, Calendar API) are offered
 
 ### Requirement: A provider grant is the app's own
 A browser grant against Google's or Microsoft's authorization server SHALL run with the app's registered client and SHALL NOT send an RFC 8707 resource. Domains SHALL share one grant only when their scopes address the same API.

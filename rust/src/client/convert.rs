@@ -5,6 +5,8 @@
 
 use core::error::Error as StdError;
 
+use io_gcal::v3::send::GcalSendError;
+use io_gmail::v1::send::GmailSendError;
 use io_gpeople::v1::send::GpeopleSendError;
 use io_jmap::rfc8620::{send::JmapSendError, session_get::JmapSessionGetError};
 use io_msgraph::v1::send::MsgraphSendError;
@@ -54,6 +56,12 @@ fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
             return send.status();
         }
         if let Some(send) = err.downcast_ref::<GpeopleSendError>() {
+            return send.status();
+        }
+        if let Some(send) = err.downcast_ref::<GcalSendError>() {
+            return send.status();
+        }
+        if let Some(send) = err.downcast_ref::<GmailSendError>() {
             return send.status();
         }
         cause = err.source();

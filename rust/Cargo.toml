@@ -13,6 +13,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 ical-rs = { version = "0.5", default-features = false, features = ["jscalendar", "parser"] }
+io-gcal = { version = "0.1", default-features = false, features = ["ical"] }
+io-gmail = { version = "0.4", default-features = false }
 io-gpeople = { version = "0.4", default-features = false }
 io-http = { version = "0.5", default-features = false }
 io-imap = { version = "0.7", default-features = false }

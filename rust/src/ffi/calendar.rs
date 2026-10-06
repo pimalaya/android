@@ -184,6 +184,13 @@ fn list_calendars(
             }
             Ok(calendars)
         }
+        Backend::Google => {
+            let mut calendars = client.list_gcal_calendars(credentials.password)?;
+            for calendar in &mut calendars {
+                calendar.url = format!("{base_url}/{}", calendar.id);
+            }
+            Ok(calendars)
+        }
         // NOTE: a calendar account with no sentinel is a CalDAV context
         // root, the only other endpoint the connection flow builds.
         _ => client.list_caldav_calendars(&parse_url(base_url)?, credentials),
@@ -313,6 +320,13 @@ fn update_event(
         Backend::Jmap => Err(JMAP_UNSUPPORTED.into()),
         Backend::Graph => client.update_graph_event(
             credentials.password,
+            id,
+            ical,
+            Some(etag).filter(|etag| !etag.is_empty()),
+        ),
+        Backend::Google => client.update_gcal_event(
+            credentials.password,
+            account::book_segment(base_url, calendar_url),
             id,
             ical,
             Some(etag).filter(|etag| !etag.is_empty()),
@@ -491,6 +505,11 @@ fn create_event(
             account::book_segment(base_url, calendar_url),
             ical,
         ),
+        Backend::Google => client.create_gcal_event(
+            credentials.password,
+            account::book_segment(base_url, calendar_url),
+            ical,
+        ),
         _ => {
             let etag =
                 client.create_caldav_event(&parse_url(calendar_url)?, credentials, id, ical)?;
@@ -515,6 +534,12 @@ fn delete_event(
         Backend::Jmap => Err(JMAP_UNSUPPORTED.into()),
         Backend::Graph => client.delete_graph_event(
             credentials.password,
+            id,
+            Some(etag).filter(|etag| !etag.is_empty()),
+        ),
+        Backend::Google => client.delete_gcal_event(
+            credentials.password,
+            account::book_segment(base_url, calendar_url),
             id,
             Some(etag).filter(|etag| !etag.is_empty()),
         ),

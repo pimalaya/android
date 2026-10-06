@@ -26,7 +26,7 @@ use url::Url;
 
 use crate::{
     account::{self, Backend},
-    client::{self, Client, imap::ImapState},
+    client::{self, Client, gmail::GmailEnvelope, imap::ImapState},
     ffi::parse_url,
     types::{BridgeError, Credentials, Message},
 };
@@ -45,6 +45,7 @@ enum MailKind {
     Imap(ImapState),
     Jmap(MailListing),
     Graph(MailListing),
+    Gmail(MailListing),
 }
 
 /// What an HTTP mail session remembers across a pass.
@@ -58,10 +59,15 @@ enum MailKind {
 /// where an incremental round would go; until they are wired a mailbox
 /// answers whole, and answering it twice per pass would be the avoidable
 /// half of that.
+///
+/// Gmail answers a label with ids alone, so its session also keeps every
+/// envelope it read, by message id: a message filed under two labels, or
+/// moved in a delta two mailboxes replay, is read once per pass.
 #[derive(Default)]
 pub struct MailListing {
     pub ids: BTreeMap<String, String>,
     pub listed: BTreeMap<String, Message>,
+    pub envelopes: BTreeMap<String, GmailEnvelope>,
 }
 
 impl MailSession {
@@ -84,6 +90,10 @@ impl MailSession {
             Backend::Graph => {
                 client.graph_mail_check(password)?;
                 MailKind::Graph(MailListing::default())
+            }
+            Backend::Google => {
+                client.gmail_history_id(password)?;
+                MailKind::Gmail(MailListing::default())
             }
             _ => {
                 let url = parse_url(base_url)?;
@@ -122,10 +132,22 @@ impl MailSession {
         matches!(self.kind, MailKind::Graph(_))
     }
 
+    /// Whether the backend behind this session is the Gmail API.
+    pub fn is_gmail(&self) -> bool {
+        matches!(self.kind, MailKind::Gmail(_))
+    }
+
+    /// Whether the backend behind this session is IMAP.
+    pub fn is_imap(&self) -> bool {
+        matches!(self.kind, MailKind::Imap(_))
+    }
+
     /// What this HTTP session remembers of the pass.
     pub fn listing(&mut self) -> &mut MailListing {
         match &mut self.kind {
-            MailKind::Jmap(listing) | MailKind::Graph(listing) => listing,
+            MailKind::Jmap(listing) | MailKind::Graph(listing) | MailKind::Gmail(listing) => {
+                listing
+            }
             MailKind::Imap(_) => unreachable!("no mailbox listing on an IMAP session"),
         }
     }
@@ -141,7 +163,7 @@ impl MailSession {
     ) -> Result<client::imap::ImapSession<'a, 'b, 'local>, BridgeError> {
         match &mut self.kind {
             MailKind::Imap(state) => Ok(client::imap::ImapSession::bind(client, state)),
-            MailKind::Jmap(_) | MailKind::Graph(_) => {
+            MailKind::Jmap(_) | MailKind::Graph(_) | MailKind::Gmail(_) => {
                 Err("This account speaks HTTP, which has no IMAP session".into())
             }
         }

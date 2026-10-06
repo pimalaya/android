@@ -512,6 +512,18 @@ impl Client<'_, '_> {
                 token: None,
                 complete: true,
             })),
+            // NOTE: Google's sync token reports instances, and an instance
+            // moving is its series moving, so every round is a complete
+            // listing folded into series, with no cursor.
+            Backend::Google => Ok(Some(EventDelta {
+                changed: self.list_gcal_events(
+                    credentials.password,
+                    account::book_segment(base_url, calendar_url),
+                )?,
+                vanished: Vec::new(),
+                token: None,
+                complete: true,
+            })),
             _ => {
                 let url = parse_url(calendar_url)?;
                 let delta = self.sync_caldav_events(&url, credentials, cursor)?;
@@ -544,6 +556,11 @@ impl Client<'_, '_> {
                     .collect())
             }
             Backend::Graph => self.read_graph_events(credentials.password, ids),
+            Backend::Google => self.read_gcal_events(
+                credentials.password,
+                account::book_segment(base_url, calendar_url),
+                ids,
+            ),
             _ => {
                 let url = parse_url(calendar_url)?;
                 self.multiget_caldav_events(&url, credentials, ids)

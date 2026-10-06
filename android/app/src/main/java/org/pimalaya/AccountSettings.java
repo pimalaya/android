@@ -12,6 +12,7 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
 
 /**
@@ -324,9 +325,10 @@ final class AccountSettings {
         if (account == null || !account.covers(PimDomain.MAIL)) {
             return;
         }
-        // NOTE: Graph submits through the account it reads from, so there
-        // is no server of its own to change.
-        if (PimalayaClient.isGraph(account.server(PimDomain.MAIL))) {
+        // NOTE: Graph and Gmail submit through the account they read from,
+        // so there is no server of its own to change.
+        Account mail = account.server(PimDomain.MAIL);
+        if (PimalayaClient.isGraph(mail) || PimalayaClient.isGoogle(mail)) {
             return;
         }
 

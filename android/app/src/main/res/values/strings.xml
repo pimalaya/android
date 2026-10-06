@@ -53,6 +53,8 @@
     <string name="config_smtp" translatable="false">SMTP</string>
     <string name="config_jmap" translatable="false">JMAP</string>
     <string name="config_google_api" translatable="false">Google People API</string>
+    <string name="config_gmail" translatable="false">Gmail API</string>
+    <string name="config_gcal" translatable="false">Google Calendar API</string>
     <string name="config_msgraph" translatable="false">Microsoft Graph</string>
     <string name="config_soon">Coming soon</string>
     <string name="config_password">Password</string>

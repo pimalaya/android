@@ -20,7 +20,7 @@ use serde::Serialize;
 use serde_json::{from_str, json, to_string};
 
 use crate::{
-    client::{self, Client},
+    client::{self, Client, gmail::GmailEnvelope},
     ffi::{
         error_json, parse_url, read_string,
         session::{self, MailSession},
@@ -212,8 +212,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_parseMessage<'local>(
 ///
 /// The mailbox is only IMAP's concern: a JMAP `Email` id addresses the
 /// message across the whole account, and the same message filed in two
-/// mailboxes is one object with one id. A Graph message id addresses
-/// it across the mailbox the same way.
+/// mailboxes is one object with one id. Graph and Gmail message ids
+/// address it across the mailbox the same way.
 fn read_source(
     client: &mut Client<'_, '_>,
     handle: i64,
@@ -227,6 +227,9 @@ fn read_source(
     }
     if session.is_graph() {
         return client.fetch_graph_source(session.credentials().password, id);
+    }
+    if session.is_gmail() {
+        return client.fetch_gmail_source(session.credentials().password, id);
     }
 
     client::imap::fetch_source(&mut session.imap(client)?, mailbox, id)
@@ -244,6 +247,8 @@ fn list_mailboxes(client: &mut Client<'_, '_>, handle: i64) -> Result<Vec<Mailbo
         client.list_jmap_mailbox_roster(&url, &session.credentials())?
     } else if session.is_graph() {
         client.list_graph_mailboxes(session.credentials().password)?
+    } else if session.is_gmail() {
+        client.list_gmail_mailboxes(session.credentials().password)?
     } else {
         return client::imap::list_mailboxes(&mut session.imap(client)?);
     };
@@ -270,7 +275,7 @@ fn enumerate(
     let session = unsafe { session::borrow(handle) }?;
     let cursor = Some(cursor).filter(|value| !value.is_empty());
 
-    if !session.is_jmap() && !session.is_graph() {
+    if session.is_imap() {
         let round = session.imap(client)?.enumerate(mailbox, cursor, limit)?;
         return Ok(round.into());
     }
@@ -278,6 +283,9 @@ fn enumerate(
     let Some(id) = session.listing().ids.get(mailbox).cloned() else {
         return Err(format!("No mailbox named `{mailbox}`").into());
     };
+    if session.is_gmail() {
+        return enumerate_gmail(client, session, &id, cursor, limit);
+    }
     let messages = if session.is_jmap() {
         let url = session.jmap_url()?;
         client.query_jmap_mailbox(&url, &session.credentials(), &id, mailbox, limit)?
@@ -307,6 +315,91 @@ fn enumerate(
     })
 }
 
+/// One Gmail label's spine: the history replayed from the cursor when
+/// Gmail still holds it, the label's newest `limit` messages otherwise.
+///
+/// A message the history names is re-read, and is an item if it still
+/// carries the label and gone from this mailbox if it does not. The
+/// checkpoint of a full round is taken before the listing, so what moves
+/// during it is replayed by the next round rather than missed.
+fn enumerate_gmail(
+    client: &mut Client<'_, '_>,
+    session: &mut MailSession,
+    label: &str,
+    cursor: Option<&str>,
+    limit: u32,
+) -> Result<EnumerationJson, BridgeError> {
+    let token = session.credentials().password.to_string();
+
+    if let Some(start) = cursor
+        && let Some((touched, next)) = client.gmail_history(&token, start)?
+    {
+        let mut items = Vec::new();
+        let mut vanished = Vec::new();
+        for id in touched {
+            match gmail_envelope(client, session, &token, &id)? {
+                Some(envelope) if envelope.labels.iter().any(|filed| filed == label) => {
+                    items.push(SpineJson {
+                        flags: flags_of(&envelope.message),
+                        id,
+                    });
+                }
+                _ => vanished.push(id),
+            }
+        }
+
+        return Ok(EnumerationJson {
+            items,
+            vanished,
+            complete: false,
+            checkpoint: next,
+        });
+    }
+
+    let checkpoint = client.gmail_history_id(&token)?;
+    let mut items = Vec::new();
+    for id in client.list_gmail_label(&token, label, limit)? {
+        if let Some(envelope) = gmail_envelope(client, session, &token, &id)? {
+            items.push(SpineJson {
+                flags: flags_of(&envelope.message),
+                id,
+            });
+        }
+    }
+
+    Ok(EnumerationJson {
+        items,
+        vanished: Vec::new(),
+        complete: true,
+        checkpoint,
+    })
+}
+
+/// One Gmail message's labels and envelope, read once per pass.
+///
+/// The session lasts one pass, so what it holds was read during it: a
+/// message two labels list, or two mailboxes' histories replay, costs
+/// one read.
+fn gmail_envelope(
+    client: &mut Client<'_, '_>,
+    session: &mut MailSession,
+    token: &str,
+    id: &str,
+) -> Result<Option<GmailEnvelope>, BridgeError> {
+    if let Some(envelope) = session.listing().envelopes.get(id) {
+        return Ok(Some(envelope.clone()));
+    }
+
+    let envelope = client.gmail_envelope(token, id)?;
+    if let Some(envelope) = &envelope {
+        session
+            .listing()
+            .envelopes
+            .insert(id.to_string(), envelope.clone());
+    }
+    Ok(envelope)
+}
+
 /// The named messages' envelopes with whichever backend the session
 /// speaks.
 fn fetch_envelopes(
@@ -318,9 +411,22 @@ fn fetch_envelopes(
     let ids: Vec<String> = from_str(ids).map_err(|err| format!("Invalid id list: {err}"))?;
     let session = unsafe { session::borrow(handle) }?;
 
-    if !session.is_jmap() && !session.is_graph() {
+    if session.is_imap() {
         let borrowed: Vec<&str> = ids.iter().map(String::as_str).collect();
         return session.imap(client)?.fetch_envelopes(mailbox, &borrowed);
+    }
+
+    if session.is_gmail() {
+        let token = session.credentials().password.to_string();
+        let mut messages = Vec::with_capacity(ids.len());
+        for id in &ids {
+            if let Some(envelope) = gmail_envelope(client, session, &token, id)? {
+                let mut message = envelope.message;
+                message.mailbox = mailbox.to_string();
+                messages.push(message);
+            }
+        }
+        return Ok(messages);
     }
 
     let listed = &session.listing().listed;
@@ -456,6 +562,13 @@ fn set_flag(
     if session.is_graph() {
         return client.set_graph_flag(session.credentials().password, id, flag, add);
     }
+    if session.is_gmail() {
+        client.set_gmail_flag(session.credentials().password, id, flag, add)?;
+        // NOTE: dropped rather than patched, so a later read in the same
+        // pass asks Gmail what the change left.
+        session.listing().envelopes.remove(id);
+        return Ok(());
+    }
 
     session.imap(client)?.store_flag(mailbox, id, flag, add)
 }
@@ -478,6 +591,11 @@ fn delete_message(
         return client
             .delete_graph_message(session.credentials().password, id)
             .map(Some);
+    }
+    if session.is_gmail() {
+        let trash = client.delete_gmail_message(session.credentials().password, id)?;
+        session.listing().envelopes.remove(id);
+        return Ok(Some(trash));
     }
 
     session.imap(client)?.delete_message(mailbox, id)
@@ -587,17 +705,19 @@ fn submit_message(
             "Sending from a JMAP account is not supported yet",
         ));
     }
-    if session.is_graph() {
-        // NOTE: Graph submits through the session it reads from and files
-        // the sent copy itself, so there is no copy to append and no
-        // mailbox to name: the next sync reads it from Sent Items.
-        return client
-            .send_graph_message(session.credentials().password, raw)
-            .map(|()| None)
-            .map_err(|err| Refused {
-                permanent: matches!(err.status, Some(400 | 403 | 404 | 413 | 422)),
-                message: err.to_string(),
-            });
+    if session.is_graph() || session.is_gmail() {
+        // NOTE: Graph and Gmail submit through the session they read from
+        // and file the sent copy themselves, so there is no copy to append
+        // and no mailbox to name: the next sync reads it from there.
+        let token = session.credentials().password;
+        let sent = match session.is_graph() {
+            true => client.send_graph_message(token, raw),
+            false => client.send_gmail_message(token, raw),
+        };
+        return sent.map(|()| None).map_err(|err| Refused {
+            permanent: matches!(err.status, Some(400 | 403 | 404 | 413 | 422)),
+            message: err.to_string(),
+        });
     }
     if submit_url.is_empty() {
         return Err(Refused::transient(

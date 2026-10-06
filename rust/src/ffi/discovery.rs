@@ -166,7 +166,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchJmap<'local>(
 /// `Native.searchMerge`: pure reduction of per-mechanism config lists
 /// (a JSON array of arrays, in mechanism-priority order) into one
 /// deduplicated list, restricted to the services the app drives
-/// (IMAP, SMTP, CalDAV, CardDAV, JMAP, Graph mail and calendars). Returns a JSON array of service
+/// (IMAP, SMTP, CalDAV, CardDAV, JMAP, Graph mail and calendars, Gmail, Google Calendar). Returns a JSON array of service
 /// configs.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_searchMerge<'local>(
@@ -261,8 +261,9 @@ fn search_merge(lists: &str) -> Result<String, String> {
     // discovered, merged away and never seen: CalDAV and IMAP were, which is
     // why a Fastmail address offered JMAP alone for calendars and mail while
     // contacts, whose CardDAV was listed, offered both. SMTP is the submission
-    // server an IMAP account sends through, and Graph mail and calendars are
-    // what Microsoft serves beside IMAP. Graph and Google contacts are not merged: their
+    // server an IMAP account sends through; Graph mail and calendars, and the
+    // Gmail and Google Calendar APIs, are what Microsoft and Google serve
+    // beside the standards. Graph and Google contacts are not merged: their
     // sign-ins are the app's own (`OnboardingFlow.addProviderOptions`).
     let services = BTreeSet::from([
         DiscoveryService::Imap,
@@ -272,6 +273,8 @@ fn search_merge(lists: &str) -> Result<String, String> {
         DiscoveryService::Jmap,
         DiscoveryService::Msgraph,
         DiscoveryService::MsgraphCalendar,
+        DiscoveryService::Gmail,
+        DiscoveryService::Gcal,
     ]);
     let mut collector = DiscoveryConfigCollector::new(services);
 
