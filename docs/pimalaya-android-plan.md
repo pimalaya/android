@@ -951,4 +951,4 @@ The JMAP half is one `Email/set` per verb, over the three keywords RFC 8621 §4.
 
 **Calendar create and delete** are the same push as the edit with a different precondition: a create guarded on the resource not existing, a delete on the ETag. A new entry is built from a bridge function that emits one component with the three properties RFC 5545 requires and nothing else, then parsed back before it is returned. P4-4's edit scope (this occurrence / this and following / all) is untouched and remains the real remaining cost of the domain.
 
-**Still true of both**: neither syncs incrementally. A mail refresh relists the newest 50 per mailbox and a calendar refresh relists each collection, which is P3-2 and P4-1's remainder and the reason the two domains are not on the replica engine that contacts run on.
+**No longer true** (superseded 2026-09-08 by the io-pimdir engine port): both used to relist on every refresh, the newest 50 per mailbox and every calendar resource. Both now run the engine contacts run on, a mailbox enumerating on its modseq under QRESYNC and a calendar on its sync token.
