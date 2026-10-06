@@ -157,6 +157,7 @@
     <string name="add_title">Ajouter</string>
     <string name="add_contact">Ajouter un contact</string>
     <string name="import_contacts">Importer des contacts</string>
+    <string name="contacts_transfer">Importer ou exporter</string>
     <string name="import_done">%1$d contact(s) importé(s)</string>
     <string name="import_failed">Impossible d\'importer le fichier</string>
     <string name="import_target_title">Importer dans le carnet</string>
@@ -176,7 +177,6 @@
     <string name="no_account">Aucun compte trouvé</string>
 
     <string name="back">Retour</string>
-    <string name="more">Plus</string>
     <string name="delete_selected">Supprimer les contacts sélectionnés</string>
     <string name="cancel_selection">Annuler la sélection</string>
     <string name="select_all">Tout sélectionner</string>

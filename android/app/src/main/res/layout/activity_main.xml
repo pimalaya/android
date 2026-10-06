@@ -79,58 +79,10 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- The app's whole top-level navigation: one button per domain,
-             the one being shown drawn in the accent. Three buttons and
-             no name, because the glyphs are the same three the empty
-             states and the agenda rows use, and a title beside them
-             said the same thing twice while taking the width the
-             domain's own actions need.
-
-             The first of them begins at item_start (4 + 48 + 4), which
-             is where every list row's avatar begins: the rows hang off
-             the navigation. -->
-        <ImageButton
-            android:id="@+id/bar_domain_mail"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:layout_marginStart="@dimen/app_bar_title_padding"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/mail_title"
-            android:src="@drawable/ic_domain_mail"
-            android:visibility="gone" />
-
-        <ImageButton
-            android:id="@+id/bar_domain_contacts"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/contacts_title"
-            android:src="@drawable/ic_domain_contacts"
-            android:visibility="gone" />
-
-        <ImageButton
-            android:id="@+id/bar_domain_calendar"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/calendar_title"
-            android:src="@drawable/ic_domain_calendar"
-            android:visibility="gone" />
-
-        <!-- The gap between the navigation and the domain's actions.
-             Only the list screens raise it: every other screen's title
-             is weighted and is its own spacer. -->
-        <View
-            android:id="@+id/bar_spacer"
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1"
-            android:visibility="gone" />
-
-        <!-- Every other screen's title: the contact's name on the
-             editor, the selected count during a selection. It
-             ellipsizes rather than pushing the trailing buttons off a
-             narrow bar. -->
+        <!-- The screen's title: the domain's name on the lists, the
+             contact's name on the editor, the selected count during a
+             selection. It ellipsizes rather than pushing the trailing
+             buttons off a narrow bar. -->
         <TextView
             android:id="@+id/bar_title"
             android:layout_width="0dp"
@@ -199,18 +151,50 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- Every list screen's overflow: the merged view's two-axis
-             filter, and on contacts the birthday peek, the duplicate
-             remover and the management entries. Tinted with the accent
-             while the filter hides anything, so a narrowed list never
-             looks like an empty one. -->
+        <!-- Contacts: the next-birthday dialog. -->
         <ImageButton
-            android:id="@+id/bar_more"
+            android:id="@+id/contacts_birthdays"
             android:layout_width="@dimen/app_bar_button"
             android:layout_height="@dimen/app_bar_button"
             android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/more"
-            android:src="@drawable/ic_more_vert"
+            android:contentDescription="@string/birthdays_title"
+            android:src="@drawable/ic_birthday"
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
+
+        <!-- Contacts: the duplicate remover. -->
+        <ImageButton
+            android:id="@+id/contacts_duplicates"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/dup_find"
+            android:src="@drawable/ic_find_duplicates"
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
+
+        <!-- Contacts: import and export, one menu of the two. -->
+        <ImageButton
+            android:id="@+id/contacts_transfer"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/contacts_transfer"
+            android:src="@drawable/ic_import_export"
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
+
+        <!-- Every list screen's two-axis filter, last so it sits at the
+             same spot whatever the domain. Tinted with the accent while
+             it hides anything, so a narrowed list never looks like an
+             empty one. -->
+        <ImageButton
+            android:id="@+id/bar_filter"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/filter_title"
+            android:src="@drawable/ic_filter_list"
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
@@ -372,10 +356,10 @@
 
     </FrameLayout>
 
-    <!-- The accounts drawer: a title bar over the plain account rows
-         (reloadHome fills home_container; each row opens the account's
-         settings screen) and a fixed footer of actions. Width caps at
-         320dp per the drawer spec. -->
+    <!-- The accounts drawer: a title bar, the domain rows, the plain account
+         rows (reloadHome fills home_container; each row opens the
+         account's settings screen) and a fixed footer of actions. Width
+         caps at 320dp per the drawer spec. -->
     <LinearLayout
         android:id="@+id/drawer_panel"
         android:layout_width="320dp"
@@ -385,9 +369,9 @@
         android:elevation="16dp"
         android:orientation="vertical">
 
-        <!-- Title bar: a closing cross then the title, in the shared
-             nav-icon-first bar shape, as tall as the app bar so their
-             bottoms line up. -->
+        <!-- Title bar: a closing cross then the app's name, in the
+             shared nav-icon-first bar shape, as tall as the app bar so
+             their bottoms line up. -->
         <LinearLayout
             android:id="@+id/drawer_header"
             android:layout_width="match_parent"
@@ -414,11 +398,126 @@
                 android:layout_weight="1"
                 android:paddingStart="@dimen/app_bar_title_padding"
                 android:paddingEnd="@dimen/app_bar_title_padding"
-                android:text="@string/subscriptions_title"
+                android:text="@string/app_name"
                 android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
                 android:textColor="?android:attr/textColorPrimary" />
 
         </LinearLayout>
+
+        <!-- The app's top-level navigation: one row per domain, the one
+             being shown on an accent pill (showDomainBar). Here rather
+             than in the app bar, where they crowded the domain's own
+             actions. The pill is inset from the drawer's edges and pads
+             inside it, so its icon lines up with the other rows' (see
+             the drawer_item dimens). In the app bar's tone, so the
+             navigation reads as one block with the title bar. -->
+        <LinearLayout
+            android:id="@+id/drawer_domains"
+            android:background="@color/surface"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp">
+
+            <LinearLayout
+                android:id="@+id/drawer_domain_mail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/domain_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:minHeight="@dimen/item_height"
+                android:orientation="horizontal"
+                android:layout_marginStart="@dimen/drawer_item_inset"
+                android:layout_marginEnd="@dimen/drawer_item_inset"
+                android:paddingStart="@dimen/drawer_item_inner"
+                android:paddingEnd="@dimen/drawer_item_inner">
+
+                <ImageView
+                    android:layout_width="@dimen/item_icon"
+                    android:layout_height="@dimen/item_icon"
+                    android:layout_marginEnd="@dimen/item_gap"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_domain_mail" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/mail_title"
+                    android:textSize="@dimen/item_text" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/drawer_domain_contacts"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/domain_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:minHeight="@dimen/item_height"
+                android:orientation="horizontal"
+                android:layout_marginStart="@dimen/drawer_item_inset"
+                android:layout_marginEnd="@dimen/drawer_item_inset"
+                android:paddingStart="@dimen/drawer_item_inner"
+                android:paddingEnd="@dimen/drawer_item_inner">
+
+                <ImageView
+                    android:layout_width="@dimen/item_icon"
+                    android:layout_height="@dimen/item_icon"
+                    android:layout_marginEnd="@dimen/item_gap"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_domain_contacts" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/contacts_title"
+                    android:textSize="@dimen/item_text" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/drawer_domain_calendar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/domain_item"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:minHeight="@dimen/item_height"
+                android:orientation="horizontal"
+                android:layout_marginStart="@dimen/drawer_item_inset"
+                android:layout_marginEnd="@dimen/drawer_item_inset"
+                android:paddingStart="@dimen/drawer_item_inner"
+                android:paddingEnd="@dimen/drawer_item_inner">
+
+                <ImageView
+                    android:layout_width="@dimen/item_icon"
+                    android:layout_height="@dimen/item_icon"
+                    android:layout_marginEnd="@dimen/item_gap"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_domain_calendar" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/calendar_title"
+                    android:textSize="@dimen/item_text" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- A light divider rather than the surface tone, which vanishes
+             against the surface block above it in the light theme. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/divider_light" />
 
         <FrameLayout
             android:layout_width="match_parent"
@@ -474,13 +573,13 @@
 
         </FrameLayout>
 
-        <!-- Bottom actions behind a thin app-bar-tone delimiter: add
+        <!-- Bottom actions behind the same divider as the domain rows: add
              account, then sync, then About (its dialog carries the app
              version). -->
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:background="@color/surface" />
+            android:background="@color/divider_light" />
 
         <LinearLayout
             android:id="@+id/drawer_actions"
@@ -498,8 +597,8 @@
                 android:gravity="center_vertical"
                 android:minHeight="@dimen/item_height"
                 android:orientation="horizontal"
-                android:paddingStart="@dimen/item_padding"
-                android:paddingEnd="@dimen/item_padding">
+                android:paddingStart="@dimen/drawer_item_padding"
+                android:paddingEnd="@dimen/drawer_item_padding">
 
                 <ImageView
                     android:layout_width="@dimen/item_icon"
@@ -528,8 +627,8 @@
                 android:gravity="center_vertical"
                 android:minHeight="@dimen/item_height"
                 android:orientation="horizontal"
-                android:paddingStart="@dimen/item_padding"
-                android:paddingEnd="@dimen/item_padding">
+                android:paddingStart="@dimen/drawer_item_padding"
+                android:paddingEnd="@dimen/drawer_item_padding">
 
                 <ImageView
                     android:layout_width="@dimen/item_icon"
@@ -558,8 +657,8 @@
                 android:gravity="center_vertical"
                 android:minHeight="@dimen/item_height"
                 android:orientation="horizontal"
-                android:paddingStart="@dimen/item_padding"
-                android:paddingEnd="@dimen/item_padding">
+                android:paddingStart="@dimen/drawer_item_padding"
+                android:paddingEnd="@dimen/drawer_item_padding">
 
                 <ImageView
                     android:layout_width="@dimen/item_icon"

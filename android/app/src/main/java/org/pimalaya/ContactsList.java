@@ -66,6 +66,13 @@ final class ContactsList {
                     host.syncAll();
                 });
 
+        host.findViewById(R.id.contacts_birthdays)
+                .setOnClickListener(
+                        view -> new Birthdays(host).show(new ArrayList<>(sortedContacts)));
+        host.findViewById(R.id.contacts_duplicates)
+                .setOnClickListener(
+                        view -> new DuplicateReview(host).find(new ArrayList<>(contacts)));
+        host.findViewById(R.id.contacts_transfer).setOnClickListener(this::showTransferMenu);
         host.findViewById(R.id.contacts_merge).setOnClickListener(view -> mergeSelected());
         host.findViewById(R.id.contacts_delete)
                 .setOnClickListener(view -> confirmDeleteSelected());
@@ -432,11 +439,11 @@ final class ContactsList {
     /** Swaps the title for the search pill and opens the keyboard. */
     private void openSearch() {
         searchOpen = true;
-        // NOTE: the navigation goes with the title, so the field takes the
-        // bar up to its clear cross, which sits beside the overflow.
-        host.showDomainButtons(false);
+        // NOTE: the burger goes with the title, so the field takes the
+        // bar up to its clear cross, which sits beside the filter.
+        host.findViewById(R.id.bar_title).setVisibility(View.GONE);
         host.findViewById(R.id.bar_menu).setVisibility(View.GONE);
-        host.findViewById(R.id.contacts_search).setVisibility(View.GONE);
+        showActions(false);
         host.findViewById(R.id.contacts_search_pill).setVisibility(View.VISIBLE);
         host.findViewById(R.id.contacts_search_close).setVisibility(View.VISIBLE);
 
@@ -467,11 +474,32 @@ final class ContactsList {
         host.findViewById(R.id.contacts_search_pill).setVisibility(View.GONE);
         host.findViewById(R.id.contacts_search_close).setVisibility(View.GONE);
         host.findViewById(R.id.bar_menu).setVisibility(selectionMode ? View.GONE : View.VISIBLE);
-        host.showDomainButtons(!selectionMode);
-        host.findViewById(R.id.bar_title).setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-        host.findViewById(R.id.contacts_search)
-                .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
-        host.findViewById(R.id.bar_more).setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+        // NOTE: a running selection already wrote its count there.
+        if (selectionMode) {
+            host.findViewById(R.id.bar_title).setVisibility(View.VISIBLE);
+        } else {
+            host.showDomainTitle(MainActivity.PANEL_CONTACTS);
+        }
+        showActions(!selectionMode);
+        host.findViewById(R.id.bar_filter).setVisibility(selectionMode ? View.GONE : View.VISIBLE);
+    }
+
+    /**
+     * Raises or hides the contacts' own bar buttons: search, birthdays,
+     * duplicates and import/export. The filter is every list's and
+     * follows its own rule.
+     */
+    private void showActions(boolean shown) {
+        int visibility = shown ? View.VISIBLE : View.GONE;
+        for (int id :
+                new int[] {
+                    R.id.contacts_search,
+                    R.id.contacts_birthdays,
+                    R.id.contacts_duplicates,
+                    R.id.contacts_transfer,
+                }) {
+            host.findViewById(id).setVisibility(visibility);
+        }
     }
 
     /**
@@ -491,7 +519,7 @@ final class ContactsList {
             closeSearch();
         }
 
-        // A selection takes the domain dropdown's place with its count,
+        // A selection takes the domain name's place with its count,
         // since navigating away mid-selection is not what the bar is
         // for; a search takes the whole title slot with its pill.
         TextView title = host.findViewById(R.id.bar_title);
@@ -502,14 +530,15 @@ final class ContactsList {
         host.findViewById(R.id.contacts_search_close)
                 .setVisibility(searchOpen ? View.VISIBLE : View.GONE);
 
-        // The logo and the domain dropdown are what a list screen's bar
+        // The burger and the domain name are what a list screen's bar
         // is; both yield to the two modes that take the bar over.
         boolean navigating = !selectionMode && !searchOpen;
         host.findViewById(R.id.bar_menu).setVisibility(navigating ? View.VISIBLE : View.GONE);
-        host.showDomainButtons(navigating);
-        host.findViewById(R.id.contacts_search)
-                .setVisibility(selectionMode || searchOpen ? View.GONE : View.VISIBLE);
-        host.findViewById(R.id.bar_more)
+        if (navigating) {
+            host.showDomainTitle(MainActivity.PANEL_CONTACTS);
+        }
+        showActions(navigating);
+        host.findViewById(R.id.bar_filter)
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.contacts_close)
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
@@ -574,22 +603,11 @@ final class ContactsList {
         return false;
     }
 
-    /**
-     * The contacts entries of the bar's overflow, after the filter.
-     * Searching stays a bar button; syncing is the drawer's and the
-     * pull-down's.
-     */
-    void addMenuItems(android.widget.PopupMenu menu) {
-        MainActivity.item(
-                menu,
-                R.string.birthdays_title,
-                () -> new Birthdays(host).show(new ArrayList<>(sortedContacts)));
-        MainActivity.item(
-                menu,
-                R.string.dup_find,
-                () -> new DuplicateReview(host).find(new ArrayList<>(contacts)));
-        MainActivity.item(menu, R.string.subscriptions_title, host::openAccountsDrawer);
+    /** The import/export button's menu: the two directions it covers. */
+    private void showTransferMenu(View anchor) {
+        android.widget.PopupMenu menu = new android.widget.PopupMenu(host, anchor);
         MainActivity.item(menu, R.string.import_contacts, host::importContacts);
         MainActivity.item(menu, R.string.export_contacts, host::exportContacts);
+        menu.show();
     }
 }

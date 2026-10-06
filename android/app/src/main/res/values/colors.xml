@@ -4,6 +4,7 @@
     <!-- Neutral surfaces; the night variant lives in values-night/. Every
          other colour is pulled from the device theme (?android:attr/...). -->
     <color name="divider">#BDBDBD</color>
+    <color name="divider_light">#E0E0E0</color>
     <color name="surface">#EEEEEE</color>
 
 </resources>

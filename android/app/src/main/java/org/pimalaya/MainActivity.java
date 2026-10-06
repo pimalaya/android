@@ -241,9 +241,13 @@ public class MainActivity extends Activity {
         findViewById(R.id.bar_menu).setOnClickListener(view -> openAccountsDrawer());
         for (int panel : Domains.PANELS) {
             findViewById(Domains.buttonOf(panel))
-                    .setOnClickListener(view -> switchDomain(panel));
+                    .setOnClickListener(
+                            view -> {
+                                drawer.closeDrawer(Gravity.START);
+                                switchDomain(panel);
+                            });
         }
-        findViewById(R.id.bar_more).setOnClickListener(this::showMoreMenu);
+        findViewById(R.id.bar_filter).setOnClickListener(view -> openFilter());
 
         // The modal dialog binds once here and covers every sync entry
         // point through the shared syncing flag.
@@ -548,10 +552,8 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Refreshes the accounts drawer and slides it over the list (which
-     * stays put). Reached from the bar's logo, which is the leading slot
-     * a burger would take, and from the contacts overflow, where the
-     * per-book switches behind each account are what is wanted.
+     * Refreshes the drawer and slides it over the list (which stays
+     * put). Reached from the bar's burger.
      */
     void openAccountsDrawer() {
         reloadHome();
@@ -771,7 +773,8 @@ public class MainActivity extends Activity {
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setMinimumHeight(dimen(R.dimen.item_height));
-            row.setPadding(dimen(R.dimen.item_padding), 0, dimen(R.dimen.item_padding), 0);
+            row.setPadding(
+                    dimen(R.dimen.drawer_item_padding), 0, dimen(R.dimen.drawer_item_padding), 0);
             row.setBackgroundResource(resolveAttr(android.R.attr.selectableItemBackground));
             row.addView(glyph, glyphParams);
             row.addView(label);
@@ -2058,26 +2061,29 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * The list chrome for one domain: the burger onto the accounts
-     * drawer, the three domain buttons with this one accented, and the
-     * filter every list shares. The domain's own actions come after,
-     * from its screen.
+     * The list chrome for one domain: the burger onto the drawer, the
+     * domain's name, and the filter every list shares. The domain's own
+     * actions come after, from its screen. The drawer's domain buttons
+     * follow along, this one on its accent pill.
      */
     private void showDomainBar(int panel) {
-        showDomainButtons(true);
         for (int target : Domains.PANELS) {
-            ((ImageButton) findViewById(Domains.buttonOf(target)))
-                    .setImageTintList(
-                            ColorStateList.valueOf(
-                                    ui.resolveColor(
-                                            target == panel
-                                                    ? android.R.attr.colorAccent
-                                                    : android.R.attr.textColorPrimary)));
+            boolean selected = target == panel;
+            int color =
+                    selected
+                            ? accentContrast()
+                            : ui.resolveColor(android.R.attr.textColorPrimary);
+            android.widget.LinearLayout row = findViewById(Domains.buttonOf(target));
+            row.setBackgroundResource(
+                    selected ? R.drawable.domain_selected : R.drawable.domain_item);
+            ((android.widget.ImageView) row.getChildAt(0))
+                    .setImageTintList(ColorStateList.valueOf(color));
+            ((TextView) row.getChildAt(1)).setTextColor(color);
         }
 
-        findViewById(R.id.bar_title).setVisibility(View.GONE);
+        showDomainTitle(panel);
         findViewById(R.id.bar_menu).setVisibility(View.VISIBLE);
-        showMoreButton();
+        showFilterButton();
     }
 
     /** Retitles the bar, for a page whose own edits change its title. */
@@ -2085,22 +2091,16 @@ public class MainActivity extends Activity {
         ((TextView) findViewById(R.id.bar_title)).setText(title);
     }
 
-    /**
-     * Raises or hides the three domain buttons together with the gap
-     * that follows them: they are sized to themselves, so without the
-     * gap the bar would pull the domain's actions up against them.
-     */
-    void showDomainButtons(boolean shown) {
-        int visibility = shown ? View.VISIBLE : View.GONE;
-        for (int panel : Domains.PANELS) {
-            findViewById(Domains.buttonOf(panel)).setVisibility(visibility);
-        }
-        findViewById(R.id.bar_spacer).setVisibility(visibility);
+    /** Titles the bar with a list domain's name. */
+    void showDomainTitle(int panel) {
+        TextView title = findViewById(R.id.bar_title);
+        title.setText(Domains.titleOf(panel));
+        title.setVisibility(View.VISIBLE);
     }
 
-    /** The overflow, on every list screen, accented while the filter bites. */
-    private void showMoreButton() {
-        android.widget.ImageButton button = findViewById(R.id.bar_more);
+    /** The filter, on every list screen, accented while it bites. */
+    private void showFilterButton() {
+        android.widget.ImageButton button = findViewById(R.id.bar_filter);
         button.setVisibility(View.VISIBLE);
         button.setImageTintList(
                 android.content.res.ColorStateList.valueOf(
@@ -2110,38 +2110,21 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Switches to another domain. A lateral move and not a descent, so
-     * it animates like a back navigation going left and a forward one
-     * going right, matching the order the buttons sit in.
+     * Switches to another domain. A lateral move from a drawer list, so
+     * it has no direction to slide in and swaps in place.
      */
     private void switchDomain(int target) {
-        if (target == screen) {
-            return;
-        }
-        if (Domains.indexOf(target) < Domains.indexOf(screen)) {
-            showBack(target);
-        } else {
-            show(target);
+        if (target != screen) {
+            showInstant(target);
         }
     }
 
     /**
-     * The list screens' overflow: the filter, then the domain's own
-     * entries.
+     * One popup entry carrying its own action.
      *
      * <p>Text-only: the framework popup renders forced icons flush against
      * their labels on some Android releases.
      */
-    private void showMoreMenu(View anchor) {
-        android.widget.PopupMenu menu = new android.widget.PopupMenu(this, anchor);
-        item(menu, R.string.filter_title, this::openFilter);
-        if (screen == PANEL_CONTACTS) {
-            contactsList.addMenuItems(menu);
-        }
-        menu.show();
-    }
-
-    /** One overflow entry carrying its own action. */
     static void item(android.widget.PopupMenu menu, int label, Runnable action) {
         menu.getMenu()
                 .add(label)
@@ -2193,7 +2176,7 @@ public class MainActivity extends Activity {
                 this,
                 java.util.Arrays.asList(byAccount, byCollection),
                 () -> {
-                    showMoreButton();
+                    showFilterButton();
                     contactsList.reRender();
                     calendarList.reload();
                     mailList.reload();
@@ -2218,9 +2201,20 @@ public class MainActivity extends Activity {
     }
 
     private void show(int panel, int inAnim, int outAnim) {
-        hideKeyboard();
         flipper.setInAnimation(this, inAnim);
         flipper.setOutAnimation(this, outAnim);
+        flip(panel);
+    }
+
+    /** Swaps the screen in place, for a lateral move with no direction. */
+    private void showInstant(int panel) {
+        flipper.setInAnimation(null);
+        flipper.setOutAnimation(null);
+        flip(panel);
+    }
+
+    private void flip(int panel) {
+        hideKeyboard();
         flipper.setDisplayedChild(panel);
         screen = panel;
         applyChrome(panel);
@@ -2550,11 +2544,10 @@ public class MainActivity extends Activity {
                     new int[] {
                         R.id.bar_back,
                         R.id.bar_menu,
-                        R.id.bar_domain_mail,
-                        R.id.bar_domain_contacts,
-                        R.id.bar_domain_calendar,
-                        R.id.bar_spacer,
-                        R.id.bar_more,
+                        R.id.bar_filter,
+                        R.id.contacts_birthdays,
+                        R.id.contacts_duplicates,
+                        R.id.contacts_transfer,
                         R.id.contacts_close,
                         R.id.contacts_search_pill,
                         R.id.contacts_search_close,

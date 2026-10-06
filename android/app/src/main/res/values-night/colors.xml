@@ -2,6 +2,7 @@
 <resources>
 
     <color name="divider">#424242</color>
+    <color name="divider_light">#363636</color>
     <color name="surface">#2A2A2A</color>
 
 </resources>

@@ -19,14 +19,22 @@
     <dimen name="item_gap">16dp</dimen>
     <dimen name="item_text">16sp</dimen>
 
+    <!-- The drawer's rows, after the M3 navigation drawer: the domain
+         pill inset from the drawer's edges, then the padding inside it.
+         Every other drawer row pads their sum, so all the icons line up
+         on one column. -->
+    <dimen name="drawer_item_inset">12dp</dimen>
+    <dimen name="drawer_item_inner">16dp</dimen>
+    <dimen name="drawer_item_padding">28dp</dimen>
+
     <!-- A mail row's flag glyph: sized off the line it sits on (13sp)
          rather than the 24dp icon grid, so three of them fit under a
          date without widening the trailing column. -->
     <dimen name="message_flag">16dp</dimen>
 
     <!-- The column a list row's disc sits in: the app bar button's
-         diameter, so the disc centres on the axis of the bar's first
-         domain button however big the disc itself is. -->
+         diameter, so the disc centres on the axis of a bar button
+         however big the disc itself is. -->
     <dimen name="item_avatar">@dimen/app_bar_button</dimen>
 
     <!-- How far the disc sits inside that column, drawn rather than
@@ -37,9 +45,9 @@
          This is the one number to change to resize every avatar. -->
     <dimen name="item_avatar_inset">2dp</dimen>
 
-    <!-- Where a list row's avatar starts: under the bar's first domain
-         button, which is the bar padding plus the burger plus the gap
-         before it (4 + 48 + 4), so the rows hang off the navigation.
+    <!-- Where a list row's avatar starts: under the bar title's first
+         letter, which is the bar padding plus the burger plus the gap
+         before it (4 + 48 + 4), so the rows hang off the title.
          Flush with the burger instead read as clamped against the
          screen edge.
 

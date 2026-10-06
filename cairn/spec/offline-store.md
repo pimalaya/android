@@ -267,12 +267,20 @@ The filter's account axis SHALL list the accounts covering the domain on screen,
 - WHEN the filter is opened over the mail list
 - THEN the account is not listed
 
-### Requirement: A list bar keeps search out and the rest in an overflow
-Every list screen SHALL show the same add glyph, and SHALL carry its secondary actions behind one ⋮ overflow, accented while the filter hides anything: the filter on every list, then on contacts the birthdays, the duplicate remover, the address books, import and export. Search SHALL stay a bar button, and an open search SHALL take the bar up to its clear cross, beside the overflow.
+### Requirement: The drawer switches domains
+The drawer SHALL open on a title bar, a closing cross beside the app's name, then one row per domain, an icon and its name like the footer's actions, mail, contacts then calendars, the one on screen drawn on an accent pill, over the account rows and the footer of actions. A list screen's bar SHALL carry the burger and the domain's name, and SHALL NOT carry the domain buttons.
+
+#### Scenario: Switching to the calendars
+- GIVEN the mail list
+- WHEN the drawer is opened and the calendars row is pressed
+- THEN the drawer closes on the agenda, swapped in with no slide, its bar titled with the calendars' name
+
+### Requirement: A list bar carries its actions inline
+Every list screen SHALL show the same add glyph, and SHALL carry its actions as bar buttons with no overflow: on contacts search, the birthdays, the duplicate remover and one import/export button opening a menu of the two, then on every list the filter last, accented while it hides anything. An open search SHALL take the bar up to its clear cross, beside the filter.
 
 #### Scenario: The contacts bar
 - WHEN the contacts list is shown
-- THEN its bar carries search and the overflow, and nothing else after the navigation
+- THEN its bar carries search, birthdays, duplicates, import/export and the filter after the burger and the title
 
 ### Requirement: A deleted account takes its mail and calendars
 Deleting an account SHALL drop its mailboxes and their messages, whatever its outbox still holds, and its calendars and their events. Its contacts SHALL move into the on-device book.

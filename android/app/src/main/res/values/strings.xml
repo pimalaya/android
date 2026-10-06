@@ -191,6 +191,7 @@
     <string name="mail_empty">No message</string>
     <string name="calendar_empty">No event</string>
     <string name="filter_title">Filter</string>
+    <string name="contacts_transfer">Import or export</string>
     <string name="filter_accounts">Accounts</string>
     <string name="filter_collections">Collections</string>
     <string name="filter_reset">Show all</string>
@@ -348,7 +349,6 @@
     <string name="no_account">No account found</string>
 
     <string name="back">Back</string>
-    <string name="more">More</string>
     <string name="delete_selected">Delete selected contacts</string>
     <string name="cancel_selection">Cancel selection</string>
     <string name="select_all">Select all</string>
