@@ -43,6 +43,9 @@ final class PimdirDb extends SQLiteOpenHelper {
 
     private final File blobs;
 
+    /** The application context, for what a driver keeps beside the store. */
+    private final Context context;
+
     /**
      * The per-domain databases this store replaced.
      *
@@ -58,6 +61,9 @@ final class PimdirDb extends SQLiteOpenHelper {
         super(context, new File(storeDir(context), DATABASE).getAbsolutePath(), null,
                 PimdirSql.version());
         this.blobs = new File(storeDir(context), "objects");
+        this.context = context.getApplicationContext() == null
+                ? context
+                : context.getApplicationContext();
         for (String superseded : SUPERSEDED) {
             context.deleteDatabase(superseded);
         }
@@ -70,6 +76,14 @@ final class PimdirDb extends SQLiteOpenHelper {
             throw new IllegalStateException("Could not create the pimdir store at " + dir);
         }
         return dir;
+    }
+
+    /**
+     * The application context the store was opened in, for the settings a
+     * driver reads beside it (an account's mail bound, {@link MailScope}).
+     */
+    Context context() {
+        return context;
     }
 
     /** The content-addressed blob directory beside the database. */
@@ -170,7 +184,21 @@ final class PimdirDb extends SQLiteOpenHelper {
             }
         }
 
-        for (Map.Entry<String, Map<String, String>> table : canonicalColumns().entrySet()) {
+        // A table a later draft folded out (the probes of SYNC §3, before
+        // every member arrived named) goes, its rows being what the next
+        // listing restates. The platform's own tables are not the schema's
+        // to judge.
+        Map<String, Map<String, String>> canonical = canonicalColumns();
+        for (Map.Entry<String, String> held : existing.entrySet()) {
+            String name = held.getKey();
+            boolean table = held.getValue().trim().toUpperCase().startsWith("CREATE TABLE");
+            if (table && !canonical.containsKey(name) && !name.startsWith("sqlite_")
+                    && !name.startsWith("android_")) {
+                db.execSQL("DROP TABLE IF EXISTS " + name);
+            }
+        }
+
+        for (Map.Entry<String, Map<String, String>> table : canonical.entrySet()) {
             Set<String> held = columnsOf(db, table.getKey());
             // NOTE: an empty side means the question cannot be asked rather
             // than that the answer is "everything": no such table yet, or a
@@ -326,10 +354,16 @@ final class PimdirDb extends SQLiteOpenHelper {
      * Whether a column carrying this declaration can be added to a populated
      * table: SQLite refuses one that is {@code NOT NULL} with no default,
      * having no value to write into the rows already there.
+     *
+     * <p>Read before any {@code CHECK}: a check is an expression, and one
+     * saying {@code covered_at IS NOT NULL OR ...} constrains nothing the
+     * rows already there do not satisfy.
      */
     private static boolean addable(String declaration) {
         String upper = declaration.toUpperCase();
-        return !upper.contains("NOT NULL") || upper.contains("DEFAULT");
+        int check = upper.indexOf("CHECK");
+        String constraints = check < 0 ? upper : upper.substring(0, check);
+        return !constraints.contains("NOT NULL") || constraints.contains("DEFAULT");
     }
 
     /**

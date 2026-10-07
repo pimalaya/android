@@ -28,7 +28,11 @@ use io_jmap::{
         JMAP_MAIL_CAPABILITY,
         email::{
             JMAP_KEYWORD_ANSWERED, JMAP_KEYWORD_FLAGGED, JMAP_KEYWORD_SEEN, JmapEmail,
-            JmapEmailAddress, JmapEmailProperty, get::*, query::*, set::*,
+            JmapEmailAddress, JmapEmailProperty,
+            changes::{JmapEmailChanges, JmapEmailChangesError, JmapEmailChangesOptions},
+            get::*,
+            query::*,
+            set::*,
         },
         mailbox::{JmapMailbox, JmapMailboxRole, get::*},
     },
@@ -38,6 +42,10 @@ use io_jmap::{
         contact_card::{JmapContactCard, changes::*, get::*, query::*, set::*},
     },
 };
+use io_pimdir::summary::{
+    PimdirAddress,
+    mail::{PimdirMailSummary, decode},
+};
 use secrecy::SecretString;
 use serde_json::Value;
 use url::Url;
@@ -46,13 +54,36 @@ use crate::{
     client::{
         Client,
         convert::{coroutine_error, rejected, required},
+        listing::{
+            JMAP_PAGE, Listing, MailPage, MailRequest, Named, RECEIVED_MARGIN_DAYS, Scope, flags,
+            utc,
+        },
     },
     jmap,
     types::{
-        Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, Mailbox, Message,
+        Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, Mailbox,
         PushChange, PushOutcome,
     },
 };
+
+/// The `Email` properties a listing names a member by: Annex A's summary
+/// and addresses, the markers, and the mailboxes a delta checks the
+/// member is still in. The date is `sentAt`, the `Date` header, never
+/// `receivedAt`; the attachment mark the server's own `hasAttachment`.
+const SUMMARY_PROPERTIES: [JmapEmailProperty; 12] = [
+    JmapEmailProperty::Id,
+    JmapEmailProperty::MailboxIds,
+    JmapEmailProperty::Keywords,
+    JmapEmailProperty::Size,
+    JmapEmailProperty::MessageId,
+    JmapEmailProperty::InReplyTo,
+    JmapEmailProperty::From,
+    JmapEmailProperty::To,
+    JmapEmailProperty::Cc,
+    JmapEmailProperty::Subject,
+    JmapEmailProperty::SentAt,
+    JmapEmailProperty::HasAttachment,
+];
 
 /// How many changes one JMAP ContactCard/set call carries: well under
 /// every server's advertised maxObjectsInSet, so no session lookup.
@@ -528,25 +559,195 @@ impl<'a, 'local> Client<'a, 'local> {
             .collect())
     }
 
-    /// One mailbox's newest `limit` messages, whole.
+    /// One page of a mailbox's listing (pimdir SYNC §4, §5).
     ///
-    /// Whole because RFC 8621's `Email/changes` is not wired: this is
-    /// where an incremental round would go, and until it does the
-    /// caller keeps what comes back so the fetch beside it costs
-    /// nothing.
-    pub fn query_jmap_mailbox(
+    /// A round is an `Email/query` in the mailbox sorted by `receivedAt`
+    /// newest first, narrowed to what was received from two days below
+    /// the scope's floor, 500 a page capped by the server's
+    /// `maxObjectsInGet`, its position the resume cursor; the `Email`
+    /// state read before the first page is the checkpoint. A delta is
+    /// `Email/changes` from it: what was created or updated is read again
+    /// and is a member while it is still in this mailbox, gone from it
+    /// otherwise, and what was destroyed is gone. A state the server can
+    /// no longer compute changes from is refused for the engine to open a
+    /// round.
+    pub fn list_jmap_page(
         &mut self,
         session_url: &Url,
         credentials: &Credentials,
         mailbox_id: &str,
-        mailbox_path: &str,
-        limit: u32,
-    ) -> Result<Vec<Message>, BridgeError> {
+        request: &MailRequest,
+    ) -> Result<MailPage, BridgeError> {
         let auth = jmap_auth(credentials);
         let session = self.jmap_session(session_url, &auth)?;
         let api_url = session.api_url.clone();
+        let scope = &request.scope;
 
-        self.list_jmap_messages(&session, &auth, &api_url, mailbox_id, mailbox_path, limit)
+        let (position, band) = match &request.listing {
+            Listing::Delta { checkpoint } => {
+                return self
+                    .jmap_mail_delta(&session, &auth, &api_url, mailbox_id, checkpoint, scope);
+            }
+            Listing::Round { cursor, band } => match cursor.as_deref() {
+                None => (0, *band),
+                Some(cursor) => match cursor.parse::<u64>() {
+                    Ok(position) => (position, *band),
+                    Err(_) => return Ok(MailPage::rejected()),
+                },
+            },
+        };
+
+        // NOTE: before the query, so what moves while the round lists is
+        // the next delta's.
+        let checkpoint = match (position, band) {
+            (0, false) => Some(self.jmap_email_state(&session, &auth, &api_url)?),
+            _ => None,
+        };
+
+        let limit = JMAP_PAGE.min(max_objects_in_get(&session));
+        let filter = JmapEmailFilter {
+            in_mailbox: Some(mailbox_id.to_string()),
+            after: scope
+                .received_since(RECEIVED_MARGIN_DAYS)
+                .map(|since| since.strftime("%Y-%m-%dT%H:%M:%SZ").to_string()),
+            before: scope
+                .received_until(RECEIVED_MARGIN_DAYS)
+                .map(|until| until.strftime("%Y-%m-%dT%H:%M:%SZ").to_string()),
+            ..Default::default()
+        };
+        let opts = JmapEmailQueryOptions {
+            filter: Some(JmapFilter::Condition(filter)),
+            sort: Some(vec![JmapEmailComparator::received_at_desc()]),
+            position: Some(position),
+            limit: Some(limit),
+            properties: Some(SUMMARY_PROPERTIES.to_vec()),
+        };
+        let coroutine =
+            JmapEmailQuery::new(&session, &auth, opts).map_err(|err| err.to_string())?;
+        let out = self.run_jmap(&api_url, coroutine)?;
+
+        let listed = out.emails.len() as u64;
+        let reached = out.position + listed;
+        let more = listed > 0 && out.total.is_none_or(|total| reached < total);
+        let items = out
+            .emails
+            .into_iter()
+            .filter_map(|email| named(email, scope))
+            .collect();
+
+        Ok(MailPage::round(
+            items,
+            more.then(|| reached.to_string()),
+            checkpoint,
+        ))
+    }
+
+    /// The account's `Email` state, what a delta lists from.
+    fn jmap_email_state(
+        &mut self,
+        session: &JmapSession,
+        auth: &SecretString,
+        api_url: &Url,
+    ) -> Result<String, BridgeError> {
+        let opts = JmapEmailGetOptions {
+            properties: Some(vec![JmapEmailProperty::Id]),
+            ..Default::default()
+        };
+        let coroutine =
+            JmapEmailGet::new(session, auth, Vec::new(), opts).map_err(|err| err.to_string())?;
+        Ok(self.run_jmap(api_url, coroutine)?.new_state)
+    }
+
+    /// What changed in one mailbox since `state`, as one delta page.
+    fn jmap_mail_delta(
+        &mut self,
+        session: &JmapSession,
+        auth: &SecretString,
+        api_url: &Url,
+        mailbox_id: &str,
+        state: &str,
+        scope: &Scope,
+    ) -> Result<MailPage, BridgeError> {
+        let mut touched = Vec::new();
+        let mut vanished = Vec::new();
+        let mut since = state.to_string();
+
+        loop {
+            let coroutine = JmapEmailChanges::new(
+                session,
+                auth,
+                since.clone(),
+                JmapEmailChangesOptions::default(),
+            )
+            .map_err(|err| err.to_string())?;
+            let Some(out) = self.run_email_changes(api_url, coroutine)? else {
+                return Ok(MailPage::rejected());
+            };
+            touched.extend(out.created);
+            touched.extend(out.updated);
+            vanished.extend(out.destroyed);
+            since = out.new_state;
+            if !out.has_more_changes {
+                break;
+            }
+        }
+        touched.sort();
+        touched.dedup();
+
+        let mut items = Vec::new();
+        let chunk = JMAP_PAGE.min(max_objects_in_get(session)).max(1) as usize;
+        for ids in touched.chunks(chunk) {
+            let opts = JmapEmailGetOptions {
+                properties: Some(SUMMARY_PROPERTIES.to_vec()),
+                ..Default::default()
+            };
+            let coroutine = JmapEmailGet::new(session, auth, ids.to_vec(), opts)
+                .map_err(|err| err.to_string())?;
+            let out = self.run_jmap(api_url, coroutine)?;
+            vanished.extend(out.not_found);
+
+            for email in out.emails {
+                let filed = email
+                    .mailbox_ids
+                    .as_ref()
+                    .is_some_and(|mailboxes| mailboxes.get(mailbox_id).copied().unwrap_or(false));
+                match filed {
+                    true => items.extend(named(email, scope)),
+                    // NOTE: moved out of this mailbox, which is a removal
+                    // here whatever its date.
+                    false => vanished.extend(email.id),
+                }
+            }
+        }
+
+        Ok(MailPage::delta(items, vanished, since))
+    }
+
+    /// Drives one `Email/changes`, surfacing a state the server can no
+    /// longer compute changes from as [`None`].
+    fn run_email_changes(
+        &mut self,
+        api_url: &Url,
+        mut coroutine: JmapEmailChanges,
+    ) -> Result<Option<JmapChangesOutput>, BridgeError> {
+        let mut arg: Option<Vec<u8>> = None;
+
+        loop {
+            match coroutine.resume(arg.as_deref()) {
+                JmapCoroutineState::Complete(Ok(out)) => return Ok(Some(out)),
+                JmapCoroutineState::Complete(Err(JmapEmailChangesError::Changes(
+                    JmapChangesError::Method(JmapMethodError::CannotCalculateChanges { .. }),
+                ))) => return Ok(None),
+                JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
+                JmapCoroutineState::Yielded(JmapYield::WantsRead) => {
+                    arg = Some(self.http_read(api_url.as_str())?);
+                }
+                JmapCoroutineState::Yielded(JmapYield::WantsWrite(bytes)) => {
+                    self.http_write(api_url.as_str(), &bytes)?;
+                    arg = None;
+                }
+            }
+        }
     }
 
     /// The account's mailboxes as `(id, path, role)` triples, the path
@@ -661,47 +862,6 @@ impl<'a, 'local> Client<'a, 'local> {
                 }
             }
         }
-    }
-
-    /// The newest `limit` messages of one mailbox: an `Email/query`
-    /// bounded to it, batched with the `Email/get` that fetches the
-    /// envelope spine of what it matched.
-    fn list_jmap_messages(
-        &mut self,
-        session: &JmapSession,
-        auth: &SecretString,
-        api_url: &Url,
-        mailbox_id: &str,
-        mailbox_path: &str,
-        limit: u32,
-    ) -> Result<Vec<Message>, BridgeError> {
-        let filter = JmapEmailFilter {
-            in_mailbox: Some(mailbox_id.to_string()),
-            ..Default::default()
-        };
-        let opts = JmapEmailQueryOptions {
-            filter: Some(JmapFilter::Condition(filter)),
-            sort: Some(vec![JmapEmailComparator::received_at_desc()]),
-            limit: Some(limit.into()),
-            properties: Some(vec![
-                JmapEmailProperty::Id,
-                JmapEmailProperty::Subject,
-                JmapEmailProperty::From,
-                JmapEmailProperty::ReceivedAt,
-                JmapEmailProperty::Keywords,
-                JmapEmailProperty::HasAttachment,
-            ]),
-            ..Default::default()
-        };
-
-        let coroutine = JmapEmailQuery::new(session, auth, opts).map_err(|err| err.to_string())?;
-        let out = self.run_jmap(api_url, coroutine)?;
-
-        Ok(out
-            .emails
-            .into_iter()
-            .map(|email| message(mailbox_path, email))
-            .collect())
     }
 
     /// Adds or removes one keyword on one message.
@@ -1049,35 +1209,72 @@ fn encode(value: &str) -> String {
     encoded
 }
 
-/// One JMAP Email to the JNI-facing shape.
+/// The server's `maxObjectsInGet` (RFC 8620 §2), the ceiling of one
+/// page; the page size itself when the server states none.
+fn max_objects_in_get(session: &JmapSession) -> u64 {
+    session
+        .capabilities
+        .get("urn:ietf:params:jmap:core")
+        .and_then(|core| core.get("maxObjectsInGet"))
+        .and_then(Value::as_u64)
+        .filter(|max| *max > 0)
+        .unwrap_or(JMAP_PAGE)
+}
+
+/// One JMAP Email, named by the summary its properties read, when its
+/// `Date` falls in the scope.
 ///
-/// Seen is a keyword rather than a flag on this backend, and it is
-/// mapped here so the rest of the app keeps one notion of seen. The
-/// date crosses as the RFC 3339 `receivedAt` the server sent, which the
-/// store's sort key normalises alongside the RFC 5322 dates IMAP
-/// returns.
-fn message(mailbox: &str, email: JmapEmail) -> Message {
-    let sender = email.from.as_deref().and_then(<[JmapEmailAddress]>::first);
-    let from = sender.map(display_name).unwrap_or_default();
-    let from_address = sender
-        .map(|address| address.email.clone())
-        .unwrap_or_default();
+/// Seen is a keyword rather than a flag on this backend, mapped here so
+/// the rest of the app keeps one notion of seen.
+fn named(email: JmapEmail, scope: &Scope) -> Option<Named> {
+    let summary = email_summary(&email);
+    if !scope.contains(summary.date.as_deref()) {
+        return None;
+    }
+    let flags = flags(
+        keyword(&email, JMAP_KEYWORD_SEEN),
+        keyword(&email, JMAP_KEYWORD_ANSWERED),
+        keyword(&email, JMAP_KEYWORD_FLAGGED),
+    );
+    Some(Named::new(email.id?, flags, summary))
+}
 
-    let seen = keyword(&email, JMAP_KEYWORD_SEEN);
-    let answered = keyword(&email, JMAP_KEYWORD_ANSWERED);
-    let flagged = keyword(&email, JMAP_KEYWORD_FLAGGED);
+/// The Annex A summary of one JMAP Email: the date is `sentAt` (the
+/// `Date` header) in UTC, the attachment mark `hasAttachment`.
+fn email_summary(email: &JmapEmail) -> PimdirMailSummary {
+    let list = |addresses: &Option<Vec<JmapEmailAddress>>| -> Vec<PimdirAddress> {
+        addresses
+            .iter()
+            .flatten()
+            .filter_map(|address| {
+                let canonical = PimdirAddress::canonical(&address.email);
+                (!canonical.is_empty()).then(|| PimdirAddress {
+                    address: canonical,
+                    name: Some(display_name(address)).filter(|name| !name.is_empty()),
+                })
+            })
+            .collect()
+    };
+    let from = list(&email.from);
+    let first = from.first().cloned();
 
-    Message {
-        mailbox: mailbox.to_string(),
-        id: email.id.unwrap_or_default(),
-        subject: email.subject.unwrap_or_default(),
+    PimdirMailSummary {
+        message_id: email
+            .message_id
+            .as_ref()
+            .and_then(|ids| ids.first())
+            .cloned(),
+        in_reply_to: email.in_reply_to.clone().unwrap_or_default(),
+        subject: email.subject.as_deref().map(decode).unwrap_or_default(),
+        sender: first.as_ref().map(|address| address.address.clone()),
+        sender_name: first.and_then(|address| address.name),
+        date: email.sent_at.as_deref().and_then(utc),
+        size: email.size,
+        attachment: email.has_attachment,
         from,
-        from_address,
-        date: email.received_at.unwrap_or_default(),
-        seen,
-        answered,
-        flagged,
-        has_attachment: email.has_attachment.unwrap_or(false),
+        to: list(&email.to),
+        cc: list(&email.cc),
+        bcc: Vec::new(),
     }
 }
 

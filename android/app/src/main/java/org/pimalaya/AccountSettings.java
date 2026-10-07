@@ -106,6 +106,7 @@ final class AccountSettings {
                         LinearLayout.LayoutParams.WRAP_CONTENT);
 
         addSubmission(content, rowParams);
+        addMailScope(content);
 
         boolean anyEnabled = false;
         for (BookSettings staged : bookSettings.values()) {
@@ -347,6 +348,75 @@ final class AccountSettings {
         row.setPadding(host.dp(16), 0, host.dp(16), 0);
         row.setOnClickListener(view -> promptSubmission(current));
         content.addView(row, rowParams);
+
+        View line = new View(host);
+        line.setBackgroundColor(host.getColor(R.color.surface));
+        LinearLayout.LayoutParams lineParams =
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, host.dp(1));
+        lineParams.setMargins(0, host.dp(12), 0, host.dp(12));
+        content.addView(line, lineParams);
+    }
+
+    /**
+     * How much of this account's mail syncs: all of it, or the last N
+     * months.
+     *
+     * <p>Committed when picked rather than staged for the FAB, as the
+     * sending server is. A narrower bound frees what falls below it at
+     * once, the messages staying on the server; a wider one is listed by
+     * the next sync.
+     */
+    private void addMailScope(LinearLayout content) {
+        AccountEntry account = host.accountFor(settingsEmail);
+        if (account == null || !account.covers(PimDomain.MAIL)) {
+            return;
+        }
+        String email = settingsEmail;
+
+        Spinner scope = new Spinner(host);
+        android.widget.ArrayAdapter<CharSequence> choices =
+                android.widget.ArrayAdapter.createFromResource(
+                        host, R.array.mail_scopes, R.layout.spinner_form_item);
+        choices.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        scope.setAdapter(choices);
+        scope.setPadding(0, 0, scope.getPaddingRight(), 0);
+        scope.setMinimumHeight(host.dp(48));
+
+        int months = host.mail.monthsOf(email);
+        int shown = 0;
+        for (int index = 0; index < MailScope.MONTHS.length; index++) {
+            if (MailScope.MONTHS[index] == months) {
+                shown = index;
+            }
+        }
+        scope.setSelection(shown);
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        // NOTE: lined up with the cadence spinner below it.
+        params.setMarginStart(host.dp(16));
+        params.setMarginEnd(host.dp(4));
+        content.addView(scope, params);
+        onIntervalPicked(
+                scope,
+                position -> {
+                    int picked = MailScope.MONTHS[position];
+                    host.io.execute(
+                            () -> {
+                                try {
+                                    int collected = host.mail.bound(email, picked);
+                                    Log.d(
+                                            "pimalaya",
+                                            "mail of " + email + " bounded to " + picked
+                                                    + " months, " + collected + " collected");
+                                } catch (Exception error) {
+                                    Log.w("pimalaya", "mail bound failed for " + email, error);
+                                }
+                                host.postAlive(host.mailList::reload);
+                            });
+                });
 
         View line = new View(host);
         line.setBackgroundColor(host.getColor(R.color.surface));

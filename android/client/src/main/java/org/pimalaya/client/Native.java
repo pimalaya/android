@@ -231,27 +231,16 @@ final class Native {
     static native String listMailboxes(Transport transport, long session);
 
     /**
-     * One mailbox's spine from the cursor the last pass stored. Returns
-     * {@code {items, vanished, complete, checkpoint}}, each item
-     * {@code {id, flags}} and no envelope.
-     *
-     * <p>An empty cursor is a full round over the newest {@code limit}
-     * messages. A cursor and a QRESYNC server is a delta: the server
-     * streams what moved and what went, and {@code complete} says which
-     * of the two happened, so a delta never retires what it did not
-     * mention.
+     * One page of a mailbox's listing, the engine's {@code enumerate}
+     * yield answered (pimdir SYNC sections 4 and 5). {@code request} is
+     * the yield's {@code {listing, scope}} as the engine wrote it. Returns
+     * the reply the engine reads: {@code {items, vanished, complete, last,
+     * cursor?, checkpoint?}}, every item {@code {handle, flags, linkId,
+     * summary, sortKey}} named by its meta, or {@code {cursorRejected:
+     * true}} when the source refused the resume cursor.
      */
     static native String enumerateMailbox(
-            Transport transport, long session, String mailbox, String cursor, int limit);
-
-    /**
-     * The envelope spine of the named messages, and of no others.
-     * {@code ids} is a JSON array of strings. Returns a JSON array of
-     * {@code {mailbox, id, subject, from, fromAddress, date, seen,
-     * answered, flagged, hasAttachment}}.
-     */
-    static native String fetchEnvelopes(
-            Transport transport, long session, String mailbox, String ids);
+            Transport transport, long session, String mailbox, String request);
 
     /**
      * Connects to the account's mail server and authenticates, answering
@@ -619,11 +608,20 @@ final class Native {
      * Reconciles the collection with its remote through the io-offline
      * engine, servicing every engine yield via the driver; with
      * {@code full} the checkpoint is ignored and the whole remote is
-     * enumerated; without {@code content} no body is pushed. Returns the
-     * sync report {@code {pulled, pushed, conflicts, rejected, refreshed}}.
+     * enumerated; without {@code content} no body is pushed. {@code since}
+     * bounds a mail collection's scope on the {@code Date} header (RFC
+     * 3339 {@code Z}, empty for none), and {@code scopeBound} says whether
+     * the connector's checkpoint is bound to the scope it was made under.
+     * Returns the sync report
+     * {@code {pulled, pushed, conflicts, rejected, refreshed, waiting}}.
      */
     static native String offlineSync(
-            OfflineDriver driver, String collection, boolean full, boolean content);
+            OfflineDriver driver,
+            String collection,
+            boolean full,
+            boolean content,
+            String since,
+            boolean scopeBound);
 
     /**
      * Raises the given handles (a JSON string array) to the full

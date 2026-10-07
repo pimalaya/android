@@ -6,15 +6,13 @@ status: current
 
 # Mail
 
-Mail is a spine: a pass connects to an account once and reconciles each of its mailboxes on that session, storing what changed as items with a summary and no body, which is what pimdir's detail ladder calls the meta level. The merged list is one descending scan of the sort key across every mail collection, so a listing never parses a date.
+Mail is a list of summaries: a pass connects to an account once and lists each of its mailboxes on that session, storing every message as an item with its summary and sort key and no body, which is what pimdir's detail ladder calls the meta level. The merged list is one descending scan of the sort key across the mail collections the filter lets through, read a page at a time around the scroll position and sized by a count, so a listing never parses a date and never holds the whole store.
 
 A message rises off that rung by being opened: what the open fetched is filed as the item's object, so the item reaches full and every read after it, offline included, is a read of the store.
 
-Every mailbox runs io-pimdir's sync, on the session the pass opened. One LIST names the mailboxes and each is enumerated in turn: a mailbox carrying a `(UIDVALIDITY, HIGHESTMODSEQ)` cursor on a QRESYNC server is selected with the QRESYNC parameter and the server streams what moved and what went, and anything else falls back to a select and a windowed `UID FLAGS` spine. The connection ENABLEs CONDSTORE and QRESYNC once when it opens, which RFC 7162 section 3.1 requires before the parameter may be used at all. Envelopes are fetched for the UIDs the merge names and no others, so a mailbox nothing touched costs one select. The sync files a new message as a probe, an unnamed handle no listing shows, so every mailbox sync is followed by a meta upgrade of its probes: their envelopes are fetched, each is named by its handle and given its summary, and no body is read.
+Every mailbox runs io-pimdir's sync, on the session the pass opened, within the account's bound: all of its mail, or the last N months on the `Date` header. One LIST names the mailboxes and each is listed in turn. A mailbox carrying a `(UIDVALIDITY, HIGHESTMODSEQ)` checkpoint on a QRESYNC server is selected with the QRESYNC parameter, the server streams what moved and what went, and the messages that moved are read for their header fields in the same pass. Anything else is a round: the UIDs `UID SEARCH` finds in the scope, newest first, read 500 at a time by `UID FETCH` for their markers, their size and the header fields pimdir STORAGE Annex A derives a summary from, `Content-Type` among them and no `BODYSTRUCTURE`. The connection ENABLEs CONDSTORE and QRESYNC once when it opens, which RFC 7162 section 3.1 requires before the parameter may be used at all. Every message a page lists arrives named, so it is listed the moment its page lands: there is no probe and no upgrade after the sync. Each page is one write with the round's resume cursor, so a pass cut off resumes below its last page, and only the round's last page retires what it found absent, within the bound; mail outside the bound is never deleted by a sync, only by narrowing the bound.
 
-A full round still takes a window off the end of a mailbox rather than all of it: this store holds a window and not a mailbox, which is the difference between a phone and a desktop replica. A delta round reports changes across the whole mailbox, so the window drifts a little older as flags move outside it; a later full round prunes it back.
-
-Four backends answer, told apart by the account's base URL: an IMAP session behind an `imaps://` URL, the RFC 8621 verbs behind the `jmap://` marker, Microsoft Graph behind the `msgraph://` one, the Gmail API behind `google://`. A Graph mailbox is a mail folder named by its path, and like a JMAP one it answers its newest messages whole every pass. A Gmail mailbox is a label filing mail, its name already a path; a first round reads its newest messages one metadata read each, and every round after replays the history from the `historyId` it stopped at, reading again only the messages that moved.
+Four backends answer, told apart by the account's base URL: an IMAP session behind an `imaps://` URL, the RFC 8621 verbs behind the `jmap://` marker, Microsoft Graph behind the `msgraph://` one, the Gmail API behind `google://`. A Graph mailbox is a mail folder named by its path, listed by its message delta filtered on the reception date two days below the bound, 1,000 messages a page with the summary `$select`, ending with the delta link every pass after it resumes from. A JMAP mailbox is an `Email/query` sorted by `receivedAt`, 500 a page capped by the server's `maxObjectsInGet`, then `Email/changes` from the state read before its first page. A Gmail mailbox is a label filing mail, its name already a path, listed 100 ids a page narrowed by `after:`, each read for its metadata under the account's pacing, and every round after replays the history from the `historyId` taken before its first page, reading again only the messages that moved.
 
 The reader can write three things back, all of them into the store: the markers, whether the message has been read, and where it is filed. A fourth thing, a message of their own, does not go into the store at all: it is an action on the store's queue, pimdir's write door for what a process wants done somewhere else, with a mail submission as the standard's own worked example. The outbox is that queue read back.
 
@@ -32,7 +30,7 @@ A message row SHALL lead the sender's line with the replied mark and end it with
 - THEN the sender's line opens with the replied mark and ends with the time and the dot, and the subject's line ends with the yellow star and the paperclip under that dot
 
 ### Requirement: The mail list narrows what it shows
-The mail list SHALL be one page over every mailbox the filter lets through, and SHALL offer a search over the sender and the subject, an unread chip and an attachments chip. None of these SHALL change what syncs, which the filter alone decides.
+The mail list SHALL list every stored message of every mailbox the filter lets through, and SHALL offer a search over the sender and the subject, an unread chip and an attachments chip, all answered by the store over every stored message. None of these SHALL change what syncs, which the filter alone decides.
 
 #### Scenario: Unread only
 - GIVEN read and unread mail in two accounts
@@ -40,7 +38,7 @@ The mail list SHALL be one page over every mailbox the filter lets through, and 
 - THEN the list shows both accounts' unread messages and nothing else
 
 ### Requirement: The mail list selects
-A long press on a message SHALL start a selection holding it, and while one runs a tap SHALL add or remove a message rather than open it. The bar SHALL then carry the count, read or unread, star or unstar, delete after asking, and select-all, each over the whole selection, a toggle going the way that changes something. Back SHALL clear the selection.
+A long press on a message SHALL start a selection holding it, and while one runs a tap SHALL add or remove a message rather than open it. The bar SHALL then carry the count, read or unread, star or unstar, delete after asking, and select-all, each over the whole selection, a toggle going the way that changes something. The selection SHALL be keyed by store id, and select-all SHALL select what the list's query lets through, read whole only when the bar acts on it. Back SHALL clear the selection.
 
 #### Scenario: Starring three messages
 - GIVEN three messages, one of them starred
@@ -59,24 +57,6 @@ A connection SHALL ENABLE CONDSTORE and QRESYNC when it opens, where the server 
 - GIVEN a server that answers the parameter with a protocol error
 - WHEN a mailbox is enumerated
 - THEN the mailbox is enumerated whole and the pass carries on
-
-### Requirement: An envelope's text is decoded before it is stored
-A subject and a sender's name read off an IMAP `ENVELOPE` SHALL have their RFC 2047 encoded words decoded before the store holds them, by the same decoder a message read whole goes through. A value carrying no encoded word SHALL be stored byte for byte. A JMAP account carries none: RFC 8621 hands the decoded value over already.
-
-#### Scenario: A subject in another script
-- GIVEN a message whose subject the sender wrote as encoded words
-- WHEN the account is walked
-- THEN the list row shows the subject, not `=?UTF-8?B?...?=`
-
-#### Scenario: A sender's own name
-- GIVEN a `From` display name written as encoded words
-- WHEN the account is walked
-- THEN the row and the reader's header show the same name
-
-#### Scenario: A value that only looks encoded
-- GIVEN a subject containing `=?` and nothing decodable behind it
-- WHEN the account is walked
-- THEN it is stored as it came, rather than emptied
 
 ### Requirement: A sync skips what the filter hides
 A mail pull SHALL list the shown accounts' mailboxes and SHALL NOT reconcile a mailbox the filter hides, by its account or by its name. The drawer's sync SHALL reconcile every mailbox.
@@ -301,11 +281,11 @@ An `smtp://` submission endpoint SHALL be upgraded to TLS with `STARTTLS` before
 - THEN the session is encrypted before `AUTH`, and nothing goes over the plain socket but `EHLO` and `STARTTLS`
 
 ### Requirement: A message's date is its Date header
-A Graph message's date SHALL be its `sentDateTime`, which is Graph's name for the `Date` header that pimdir STORAGE Annex A.1 stores and sorts mail by, and a Graph mailbox's newest messages SHALL be the newest by it. A message with no date SHALL be stored with none, never with its reception time in its place.
+A message's date SHALL be its `Date` header, which pimdir STORAGE Annex A.1 stores and sorts mail by, on every backend: the header itself on IMAP and Gmail (asked for among the metadata headers), `sentDateTime` on Graph, `sentAt` on JMAP. A message with no date SHALL be stored with none, never with its reception time in its place.
 
 #### Scenario: A message received late
-- GIVEN a Graph message sent at 08:00 and received at 08:05
-- WHEN the mailbox is synced
+- GIVEN a message sent at 08:00 and received at 08:05
+- WHEN its mailbox is synced
 - THEN the message's date is 08:00
 
 ### Requirement: An HTTP sync rides out throttling
@@ -328,3 +308,65 @@ Gmail API requests SHALL be paced near 40 a second across every worker of the pr
 - GIVEN several workers reading Gmail envelopes at once
 - WHEN they run
 - THEN their requests together go out at about 40 a second
+
+### Requirement: A mailbox is stored whole
+A mail round SHALL list every message of a mailbox within the account's bound, newest first in the source's own recency order, a page at a time (500 UIDs per IMAP `UID FETCH`, 1,000 per Graph message delta page, 100 ids per Gmail `messages.list`, 500 per JMAP `Email/query` capped by the server's `maxObjectsInGet`), each page landing in one write. Every message a page lists SHALL arrive named by the summary and sort key of pimdir STORAGE Annex A read in the listing itself, with no body: IMAP from `FLAGS`, `RFC822.SIZE` and the header fields Annex A reads, `Content-Type` among them and no `BODYSTRUCTURE`; Graph from the summary `$select`; Gmail from its metadata read; JMAP from `Email/get`'s summary properties. An interrupted round SHALL resume from the cursor its last landed page left, and a cursor the source refuses SHALL restart the round. A round's last page SHALL retire only what it found absent within the bound; mail outside the bound SHALL never be deleted by a sync.
+
+#### Scenario: A first pass over a large mailbox
+- GIVEN a mailbox of 100k messages and an empty store
+- WHEN it is synced
+- THEN the newest messages are listed once the first page lands, before the pass ends
+- AND once it ends, every message is listed with its subject, sender and date
+
+#### Scenario: An interrupted first pass
+- GIVEN a first pass cut off after its first page
+- WHEN the mailbox is synced again
+- THEN it resumes below the last landed page rather than from the top
+
+#### Scenario: A bounded account
+- GIVEN an account bounded to the last 6 months
+- WHEN it is synced
+- THEN older messages are neither fetched nor listed, and none already stored is deleted
+
+### Requirement: An account bounds its mail
+An account's settings SHALL offer to sync all of its mail or the last 1, 3, 6, 12 or 24 months, the floor being the first day of the month that many months back, on the `Date` header (a message with no usable date in every scope). A provider's received-date filter SHALL only narrow a listing, two days below the floor (IMAP `SENTSINCE` one day below). Widening the bound SHALL have the next sync list what it now lacks: the band below the old floor where the backend's checkpoint is not bound to a scope (IMAP, Gmail, JMAP), the whole wider scope where it is (Graph). Narrowing it SHALL collect the stored messages dated below the new floor that owe nothing to the server, their mailboxes keeping them there.
+
+#### Scenario: Narrowing to a year
+- GIVEN an account syncing all of its mail
+- WHEN its bound is set to the last year
+- THEN the messages older than that leave the store, except one with a change not pushed yet
+- AND nothing is deleted on the server
+
+#### Scenario: Widening again
+- GIVEN that account
+- WHEN its bound is set back to all mail and it is synced
+- THEN the older messages are listed again
+
+### Requirement: The mail list loads lazily
+The mail list SHALL hold only the rows near the scroll position, read a page at a time from the store and the far pages evicted, sized by a count of what the filter, the chips and the search let through, with a placeholder row while a page loads. It SHALL place its day headers from one count per day, without loading rows. The messages waiting to go out SHALL stay on top, outside the paged query. Search, the chips and the unread badge SHALL be conditions of the store's query and cover every stored message. A list showing the store SHALL redraw as a pass's pages land.
+
+#### Scenario: Scrolling to old mail
+- GIVEN 100k stored messages
+- WHEN the list is flung to its end
+- THEN the oldest message is shown, and memory holds a bounded number of rows
+
+#### Scenario: Searching old mail
+- GIVEN a message from three years ago, stored
+- WHEN its sender is searched with no network
+- THEN it is found
+
+### Requirement: A listing's text is decoded before it is stored
+A subject and a sender's name a listing reads SHALL be stored with their RFC 2047 encoded words decoded, through io-pimdir's Annex A derivation of the header fields the listing read; JMAP and Graph hand the decoded value over already. A value carrying no encoded word SHALL be stored as it came.
+
+#### Scenario: A subject in another script
+- GIVEN a message whose subject the sender wrote as encoded words
+- WHEN its mailbox is listed
+- THEN the list row shows the subject, not `=?UTF-8?B?...?=`
+
+### Requirement: The attachment mark is corrected by the body
+A listing SHALL mark a message as carrying an attachment from the source's own flag where it states one (Graph `hasAttachments`, JMAP `hasAttachment`), else when its top-level `Content-Type` is `multipart/mixed`. Opening the message SHALL replace that mark with the one the walk of its parts gives.
+
+#### Scenario: A list footer
+- GIVEN a `multipart/mixed` message carrying no attachment, listed with a paperclip
+- WHEN it is opened
+- THEN its row loses the paperclip

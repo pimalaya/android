@@ -2,11 +2,14 @@
 //! Gmail keeps of them, the Gmail half of what `syncMail` does over
 //! IMAP, JMAP and Graph.
 //!
-//! A label lists message ids and nothing else, so a message's envelope
-//! and markers cost one metadata read each. The first round of a label
-//! pays that for its window; every round after replays the mailbox's
-//! history from the `historyId` it stopped at and reads again only the
-//! messages that moved, which is what keeps a quiet mailbox one request.
+//! A label lists message ids and nothing else, so a message's summary
+//! and markers cost one metadata read each, paced under the account's
+//! quota. A round lists the label 100 ids a page (newest first, narrowed
+//! by `after:` two days below the scope's floor), each page's ids read
+//! for their headers, the page token being the resume cursor; every pass
+//! after it replays the mailbox's history from the `historyId` taken at
+//! the round's first page and reads again only the messages that moved,
+//! which is what keeps a quiet mailbox one request.
 
 use io_gmail::{
     coroutine::*,
@@ -28,30 +31,65 @@ use io_gmail::{
     },
 };
 use io_http::rfc6750::bearer::HttpAuthBearer;
-use jiff::Timestamp;
+use io_pimdir::summary::{
+    PimdirSummary,
+    mail::{PimdirMailSummary, derive_meta},
+};
 
 use crate::{
-    client::{Client, convert::coroutine_error, throttle},
-    mail,
-    types::{BridgeError, Mailbox, Message},
+    client::{
+        Client,
+        convert::coroutine_error,
+        listing::{GMAIL_PAGE, Named, RECEIVED_MARGIN_DAYS, Scope, flags},
+        throttle,
+    },
+    types::{BridgeError, Mailbox},
 };
 
 /// The label Gmail files deleted mail under.
 const TRASH: &str = "TRASH";
 
-/// The headers a metadata read asks for: what a row shows.
-const ENVELOPE_HEADERS: [&str; 3] = ["Subject", "From", "Date"];
+/// The headers a metadata read asks for: what Annex A's summary and
+/// addresses are derived from, `Date` the `Date` header and never Gmail's
+/// reception time, `Content-Type` for the attachment mark read without
+/// the body.
+const ENVELOPE_HEADERS: [&str; 8] = [
+    "Date",
+    "From",
+    "To",
+    "Cc",
+    "Subject",
+    "Message-ID",
+    "In-Reply-To",
+    "Content-Type",
+];
 
 /// System labels that are markers or views rather than places mail is
 /// filed, and so no mailbox.
 const NOT_MAILBOXES: [&str; 5] = ["UNREAD", "STARRED", "IMPORTANT", "CHAT", "YELLOW_STAR"];
 
-/// One message's metadata: its labels and its envelope, the mailbox
-/// left for the caller to fill.
+/// One message's metadata: its labels, its markers and its summary.
 #[derive(Clone)]
 pub struct GmailEnvelope {
     pub labels: Vec<String>,
-    pub message: Message,
+    pub flags: Vec<String>,
+    pub summary: PimdirMailSummary,
+}
+
+impl GmailEnvelope {
+    /// The member this message is in a label's listing, when its `Date`
+    /// falls in the scope.
+    pub fn named(&self, id: &str, scope: &Scope) -> Option<Named> {
+        scope
+            .contains(self.summary.date.as_deref())
+            .then(|| Named::new(id.to_string(), self.flags.clone(), self.summary.clone()))
+    }
+}
+
+/// One page of a label's ids, and the token of the next.
+pub struct GmailIds {
+    pub ids: Vec<String>,
+    pub next: Option<String>,
 }
 
 impl<'a, 'local> Client<'a, 'local> {
@@ -96,31 +134,47 @@ impl<'a, 'local> Client<'a, 'local> {
             .collect())
     }
 
-    /// The newest `limit` message ids filed under a label.
-    pub fn list_gmail_label(
+    /// One page of the ids filed under a label, newest first, narrowed
+    /// to what Gmail received from two days below the scope's floor
+    /// (`after:`, whole days in Gmail's own zone, hence the margin) and up
+    /// to two days above its ceiling.
+    pub fn list_gmail_page(
         &mut self,
         token: &str,
         label: &str,
-        limit: u32,
-    ) -> Result<Vec<String>, BridgeError> {
+        scope: &Scope,
+        page_token: Option<&str>,
+    ) -> Result<GmailIds, BridgeError> {
         let auth = HttpAuthBearer::new(token);
         let label_ids = [label.to_string()];
+        let mut query = Vec::new();
+        if let Some(since) = scope.received_since(RECEIVED_MARGIN_DAYS) {
+            query.push(format!("after:{}", since.as_second()));
+        }
+        if let Some(until) = scope.received_until(RECEIVED_MARGIN_DAYS) {
+            query.push(format!("before:{}", until.as_second()));
+        }
+        let query = query.join(" ");
         let params = GmailMessagesListParams {
+            q: Some(query.as_str()).filter(|query| !query.is_empty()),
             label_ids: &label_ids,
-            max_results: Some(limit),
+            max_results: Some(GMAIL_PAGE),
+            page_token,
             include_spam_trash: label == TRASH || label == "SPAM",
-            ..Default::default()
         };
 
         let coroutine =
             GmailMessagesList::new(&auth, "me", &params).map_err(|err| err.to_string())?;
         let page = self.run_gmail(coroutine)?;
 
-        Ok(page
-            .messages
-            .into_iter()
-            .map(|message| message.id)
-            .collect())
+        Ok(GmailIds {
+            ids: page
+                .messages
+                .into_iter()
+                .map(|message| message.id)
+                .collect(),
+            next: page.next_page_token,
+        })
     }
 
     /// The messages that moved since `start`, and the history id the next
@@ -288,49 +342,40 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 }
 
-/// One metadata read to the labels and envelope it carries.
+/// One metadata read to the labels, markers and summary it carries.
 ///
 /// The header values are what the sender wrote, encoded words included,
-/// so they go through the parser a stored message goes through rather
-/// than being taken as text. The date is Gmail's own reception time,
-/// as JMAP's is.
+/// so they are read as a header block through the derivation a stored
+/// message goes through: the date is the `Date` header, never Gmail's
+/// reception time, and the attachment mark the top-level `Content-Type`.
 fn envelope(message: GmailMessage) -> GmailEnvelope {
     let payload = message.payload.unwrap_or_default();
 
     let mut headers = String::new();
-    for name in ENVELOPE_HEADERS {
-        if let Some(value) = payload.header(name) {
-            headers.push_str(&format!("{name}: {value}\r\n"));
+    for header in &payload.headers {
+        if ENVELOPE_HEADERS
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(&header.name))
+        {
+            headers.push_str(&format!("{}: {}\r\n", header.name, header.value));
         }
     }
     headers.push_str("\r\n");
-    let parsed = mail::parse(headers.as_bytes()).ok();
 
-    let date = message
-        .internal_date
-        .as_deref()
-        .and_then(|millis| millis.parse::<i64>().ok())
-        .and_then(|millis| Timestamp::from_millisecond(millis).ok())
-        .map(|timestamp| timestamp.to_string())
-        .unwrap_or_default();
+    let derivation = derive_meta(headers.as_bytes(), message.size_estimate, None);
+    let summary = match derivation.summary {
+        Some(PimdirSummary::Mail(summary)) => summary,
+        _ => PimdirMailSummary::default(),
+    };
     let labels = message.label_ids;
 
     GmailEnvelope {
-        message: Message {
-            mailbox: String::new(),
-            id: message.id,
-            subject: parsed
-                .as_ref()
-                .map(|p| p.subject.clone())
-                .unwrap_or_default(),
-            from: parsed.as_ref().map(|p| p.from.clone()).unwrap_or_default(),
-            from_address: parsed.map(|p| p.from_address).unwrap_or_default(),
-            date,
-            seen: !labels.iter().any(|label| label == "UNREAD"),
-            answered: false,
-            flagged: labels.iter().any(|label| label == "STARRED"),
-            has_attachment: payload.mime_type.as_deref() == Some("multipart/mixed"),
-        },
+        flags: flags(
+            !labels.iter().any(|label| label == "UNREAD"),
+            false,
+            labels.iter().any(|label| label == "STARRED"),
+        ),
+        summary,
         labels,
     }
 }
@@ -350,11 +395,14 @@ mod tests {
         let message = GmailMessage {
             id: "m1".into(),
             label_ids: vec!["INBOX".into(), "UNREAD".into(), "STARRED".into()],
-            internal_date: Some("1700000000000".into()),
+            // NOTE: the reception, a day after the `Date`: never the date.
+            internal_date: Some("1700086400000".into()),
             payload: Some(GmailMessagePayload {
                 headers: vec![
                     header("Subject", "=?UTF-8?Q?Caf=C3=A9?="),
                     header("From", "=?UTF-8?Q?Ren=C3=A9?= <rene@example.org>"),
+                    header("Date", "Tue, 14 Nov 2023 22:13:20 +0000"),
+                    header("Content-Type", "multipart/mixed; boundary=x"),
                 ],
                 ..Default::default()
             }),
@@ -363,11 +411,15 @@ mod tests {
 
         let envelope = envelope(message);
 
-        assert_eq!(envelope.message.subject, "Café");
-        assert_eq!(envelope.message.from, "René");
-        assert_eq!(envelope.message.from_address, "rene@example.org");
-        assert_eq!(envelope.message.date, "2023-11-14T22:13:20Z");
-        assert!(!envelope.message.seen);
-        assert!(envelope.message.flagged);
+        assert_eq!(envelope.summary.subject, "Café");
+        assert_eq!(envelope.summary.sender_name.as_deref(), Some("René"));
+        assert_eq!(envelope.summary.sender.as_deref(), Some("rene@example.org"));
+        assert_eq!(
+            envelope.summary.date.as_deref(),
+            Some("2023-11-14T22:13:20Z")
+        );
+        assert_eq!(envelope.summary.attachment, Some(true));
+        assert!(!envelope.flags.iter().any(|flag| flag == "\\Seen"));
+        assert!(envelope.flags.iter().any(|flag| flag == "\\Flagged"));
     }
 }

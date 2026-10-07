@@ -16,3 +16,13 @@ The io-offline engine hands the driver one WantsPush yield per collection round 
 Observed: unchecking a book's local (phone) mirror still runs a sync for a while and reports ~150 pushes at the end, with nothing edited. No data loss, just an unexpected full-set push.
 
 Explanation (confirmed by reading the axis code): setBookState clears the phone axis when mirroring goes off (the data-loss fix, see docs/phone-sync-plan.md), so a phone pass that still runs before the spoke tears down sees every card as never-projected (status created) and re-adds the full set; the pushes hit the phone axis only (local, cheap), not the server. The remaining polish would be skipping the phone passes as soon as the mirror flag is off rather than while the Android account still exists.
+
+## Mail listing page sizes (unmeasured here)
+
+The whole-mailbox listing (cairn change full-mail-index, on pimdir's `scoped-mail-sync`) pages every backend: IMAP 500 UIDs per `UID FETCH` of `FLAGS`, `RFC822.SIZE` and nine header fields (no `BODYSTRUCTURE`), Graph 1,000 messages per message delta page, Gmail 100 ids per `messages.list` with one paced metadata read each, JMAP 500 per `Email/query` capped by `maxObjectsInGet`; the list reads 50 rows a page and keeps 24 pages. These are the joint plan's defaults. The only measurement behind them is Graph's on the test tenant (2026-10-07, recorded in pimdir's `scoped-mail-sync` proposal: the summary `$select` honours 1,000 a page, first page in under 3 s); nothing was measured on IMAP, Gmail or the store over JNI from this repository, so the three benchmark items of full-mail-index stay open, carried by the joint plan's task 0.
+
+Things to look at once there are numbers:
+
+- A server without QRESYNC answers every pass with a round, so every pass relists the scope's headers; a CONDSTORE-only delta (`CHANGEDSINCE` plus a UID search for expunges) would spare it.
+- Gmail reads metadata one request per message (io-gmail has no batch endpoint): about 40 a second, so an unbounded 100k-message account takes about 40 minutes of metadata on its first pass, the newest first.
+- A list page read from an offset (a fling far from any loaded page) reads the canonical statement as a subquery and pays for the rows it skips.

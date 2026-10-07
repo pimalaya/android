@@ -232,18 +232,13 @@ fn without_bcc(raw: &[u8]) -> Vec<u8> {
 /// One header value as a reader sees it: RFC 2047 encoded words decoded,
 /// everything else left as it came.
 ///
-/// The counterpart of [`header`], and the half an envelope needs. A
-/// message read whole is decoded by the parser on the way through, but an
-/// IMAP `ENVELOPE` is the header text itself: the subject and the sender's
-/// name arrive exactly as they were written on the wire, encoded words
-/// and all, and a list drawing them raw shows `=?UTF-8?B?...?=` where the
-/// reader below it shows a name.
+/// The counterpart of [`header`], what proves its encoded words read back.
 ///
-/// Decoded by parsing a synthetic header rather than by hand, so the
-/// charsets, the base64 and quoted-printable spellings, and the
-/// whitespace rule of section 6.2 are the ones the reader already uses,
-/// rather than a second implementation of the same RFC that agrees with
-/// it until it does not.
+/// A listing no longer needs it: every connector names a message through
+/// io-pimdir's Annex A derivation, which decodes the header fields it
+/// reads. It stays as the round-trip witness of [`header`], decoding a
+/// synthetic header through the parser a reader uses.
+#[cfg(test)]
 pub fn decode_header(raw: &str) -> String {
     // A value carrying no encoded word is returned untouched, which is
     // most of them: it spares the parse, and it guarantees that a header
@@ -334,6 +329,12 @@ pub fn parse(raw: &[u8]) -> Result<MessageBody, BridgeError> {
                 size: part.contents().len() as u64,
             })
             .collect(),
+        attachment_mark: match io_pimdir::summary::mail::derive(raw).summary {
+            Some(io_pimdir::summary::PimdirSummary::Mail(summary)) => {
+                summary.attachment.unwrap_or(false)
+            }
+            _ => false,
+        },
     })
 }
 

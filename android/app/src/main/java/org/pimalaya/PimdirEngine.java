@@ -116,7 +116,7 @@ abstract class PimdirEngine implements OfflineDriver {
                     applied(offline.applyWrites(yielded.getJSONArray("writes")));
                     return "{}";
                 case "enumerate":
-                    return enumerate(yielded).toString();
+                    return named(yielded, enumerate(yielded)).toString();
                 case "fetch":
                     return fetch(yielded).toString();
                 case "push":
@@ -139,6 +139,104 @@ abstract class PimdirEngine implements OfflineDriver {
 
     /** The collection's member spine, as the reply to an enumerate yield. */
     protected abstract JSONObject enumerate(JSONObject yielded) throws JSONException;
+
+    /**
+     * Whether this driver's listings already name every member they carry
+     * (SYNC §4), which a mail listing does off the headers it reads; a
+     * driver answering handles and revisions alone leaves the naming to
+     * {@link #named}.
+     */
+    protected boolean listingsNamed() {
+        return false;
+    }
+
+    /** How many bodies one naming read asks for: the DAV multiget batch. */
+    private static final int NAMING_BATCH = 64;
+
+    /**
+     * Names every member a page lists, so nothing reaches the store unnamed
+     * (SYNC §4): a member this source already binds under a revision that
+     * has not moved is named by the link id the store holds, and every
+     * other one, new or changed, carries its body, read through this
+     * driver's own {@link #fetch} 64 at a time, with the identity, summary
+     * and sort key derived from it.
+     *
+     * <p>Where the meta of a DAV kind is its body, this is the read that
+     * names it; it replaces the probe the store used to keep and the
+     * upgrade that named it after the fact. A member whose body cannot be
+     * read any more (gone between the listing and the read) is left out.
+     */
+    private JSONObject named(JSONObject yielded, JSONObject page) throws JSONException {
+        JSONArray items = page.optJSONArray("items");
+        if (listingsNamed() || items == null || items.length() == 0) {
+            return page;
+        }
+
+        String collection = yielded.getString("collection");
+        List<String> handles = new ArrayList<>(items.length());
+        for (int index = 0; index < items.length(); index++) {
+            handles.add(items.getJSONObject(index).getString("handle"));
+        }
+        java.util.Map<String, String[]> bound = offline.bound(collection, handles);
+
+        List<String> unread = new ArrayList<>();
+        for (int index = 0; index < items.length(); index++) {
+            JSONObject item = items.getJSONObject(index);
+            String[] held = bound.get(item.getString("handle"));
+            String revision = item.isNull("revision") ? null : item.optString("revision", null);
+            if (held != null && java.util.Objects.equals(held[1], revision)) {
+                item.put("linkId", held[0]);
+            } else {
+                unread.add(item.getString("handle"));
+            }
+        }
+        if (unread.isEmpty()) {
+            return page;
+        }
+
+        hydrating(collection, unread.size());
+        java.util.Map<String, JSONObject> bodies = new java.util.HashMap<>();
+        for (int from = 0; from < unread.size(); from += NAMING_BATCH) {
+            JSONObject asked = new JSONObject();
+            asked.put("collection", collection);
+            asked.put(
+                    "handles",
+                    new JSONArray(unread.subList(from, Math.min(unread.size(), from + NAMING_BATCH))));
+            asked.put("tier", "full");
+            JSONArray fetched = fetch(asked).optJSONArray("items");
+            for (int index = 0; fetched != null && index < fetched.length(); index++) {
+                JSONObject body = fetched.getJSONObject(index);
+                bodies.put(body.getString("handle"), body);
+            }
+        }
+
+        JSONArray kept = new JSONArray();
+        for (int index = 0; index < items.length(); index++) {
+            JSONObject item = items.getJSONObject(index);
+            if (item.has("linkId")) {
+                kept.put(item);
+                continue;
+            }
+            JSONObject body = bodies.get(item.getString("handle"));
+            if (body == null) {
+                Log.w("pimalaya", "listed but unreadable, left out: " + item.getString("handle"));
+                continue;
+            }
+            for (String field : new String[] {"linkId", "summary", "sortKey", "hash", "body"}) {
+                if (body.has(field) && !body.isNull(field)) {
+                    item.put(field, body.get(field));
+                }
+            }
+            // NOTE: the listing's revision wins where it gave one, which is
+            // the flavour the next listing compares against.
+            if (!item.has("revision") && body.has("revision")) {
+                item.put("revision", body.get("revision"));
+            }
+            kept.put(item);
+        }
+        page.put("items", kept);
+        return page;
+    }
 
     /** The named members at the asked tier, as the reply to a fetch yield. */
     protected abstract JSONObject fetch(JSONObject yielded) throws JSONException;

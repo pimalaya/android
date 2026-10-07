@@ -44,6 +44,13 @@ public final class MessageBody {
     /** What the message carries beside its body. */
     public final List<Attachment> attachments;
 
+    /**
+     * The attachment mark the walk of the parts gives (pimdir STORAGE Annex
+     * A.1), which replaces the one a listing read off the top-level
+     * {@code Content-Type} once the body is in.
+     */
+    public final boolean attachmentMark;
+
     public MessageBody(
             String subject,
             String from,
@@ -53,7 +60,8 @@ public final class MessageBody {
             String date,
             String kind,
             String body,
-            List<Attachment> attachments) {
+            List<Attachment> attachments,
+            boolean attachmentMark) {
         this.subject = subject;
         this.from = from;
         this.fromAddress = fromAddress;
@@ -63,6 +71,7 @@ public final class MessageBody {
         this.kind = kind;
         this.body = body;
         this.attachments = attachments;
+        this.attachmentMark = attachmentMark;
     }
 
     /**

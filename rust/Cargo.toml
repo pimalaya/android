@@ -12,6 +12,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+chrono = { version = "0.4", default-features = false }
 ical-rs = { version = "0.5", default-features = false, features = ["jscalendar", "parser"] }
 io-gcal = { version = "0.1", default-features = false, features = ["ical"] }
 io-gmail = { version = "0.4", default-features = false }
@@ -19,10 +20,10 @@ io-gpeople = { version = "0.4", default-features = false, features = ["vcard"] }
 io-http = { version = "0.5", default-features = false }
 io-imap = { version = "0.7", default-features = false }
 io-jmap = { version = "0.4", default-features = false }
-io-msgraph = { version = "0.4", default-features = false, features = ["ical", "vcard"] }
+io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "00ef069234d1a97335ea174f918491b703f39238", default-features = false, features = ["ical", "vcard"] }
 io-oauth = { version = "0.3", default-features = false }
 io-pim-discovery = { version = "0.9", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
-io-pimdir = { version = "0.6", default-features = false }
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "35a1c3f1c8102be7664f5e89db562d68f2333687", default-features = false }
 io-smtp = { version = "0.5", default-features = false }
 io-webdav = { version = "0.5", default-features = false }
 jiff = { version = "0.2", default-features = false, features = ["std"] }

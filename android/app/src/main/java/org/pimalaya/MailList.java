@@ -12,9 +12,22 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 
 /**
  * The mail screen: one list merging every mailbox of every account,
@@ -23,38 +36,79 @@ import java.util.List;
  * <p>This is the view the plan is really about. Plain IMAP cannot give
  * it: a client selects one mailbox at a time, so a cross-mailbox,
  * cross-account list has to be assembled locally. Here the store holds
- * every account's envelope spines in one table and the list is a single
- * descending scan over it, with the account and mailbox shown per row
- * and filterable on both axes.
+ * every account's mailboxes whole, and the list is one descending scan
+ * over them, with the account and mailbox shown per row and filterable on
+ * both axes.
  *
- * <p>On top of the merged filter, which also decides what syncs, the
- * screen narrows what it shows without touching what syncs: a search
- * over the sender and the subject, and the two chips (unread,
- * attachments). A long press starts a selection the bar then acts on.
+ * <p>It loads lazily. Its size is a count of what the filter, the chips
+ * and the search let through, its day headers are placed from one count
+ * per day, and its rows are read a page at a time around the scroll
+ * position, far pages evicted, a placeholder standing in for a row whose
+ * page is still on its way. Search, the chips and the unread badge are
+ * conditions of the store's query, so they cover every stored message;
+ * none of them changes what syncs, which the filter alone decides. The
+ * messages waiting to go out stay on top, outside the paged query. A long
+ * press starts a selection the bar then acts on, keyed by store id, and
+ * selecting all is a query rather than a walk over rows in memory.
  */
 final class MailList {
-    /** How many rows the merged list holds at once. */
-    private static final int PAGE = 500;
+    /** How many rows one page read brings in. */
+    private static final int PAGE = 50;
+
+    /** How many pages are kept around the scroll position. */
+    private static final int CACHED_PAGES = 24;
+
+    /** How long a burst of sync writes is let settle before the list redraws. */
+    private static final long SETTLE_MILLIS = 400;
 
     private final MainActivity host;
     private final MailStore store;
     private final Adapter adapter = new Adapter();
-    private final CardSections<MailStore.StoredMessage> sections = new CardSections<>();
 
-    /** The page the merged filter lets through, before the view narrows it. */
-    private final List<MailStore.StoredMessage> page = new ArrayList<>();
+    /** One reader, so pages and counts never race each other. */
+    private final ExecutorService reads = Executors.newSingleThreadExecutor();
+
+    /** What the list shows now; replaced whole by each reload. */
+    private Layout layout = Layout.empty();
+
+    /** The query the current layout was read under; null before the first. */
+    private MailStore.Query currentQuery;
+
+    /** Bumped by every reload, so an answer to an older one is dropped. */
+    private int generation;
+
+    /** The pages read, by index, the least recently drawn dropped first. */
+    private final Map<Integer, List<MailStore.StoredMessage>> pages =
+            new LinkedHashMap<Integer, List<MailStore.StoredMessage>>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(
+                        Map.Entry<Integer, List<MailStore.StoredMessage>> eldest) {
+                    return size() > CACHED_PAGES;
+                }
+            };
+
+    /** The pages on their way, so a row drawn twice asks once. */
+    private final Set<Integer> loading = new HashSet<>();
 
     private ListHeader header;
-
-    /** The selected messages, keyed by their store id, in no order. */
-    private final java.util.Set<String> selected = new java.util.HashSet<>();
-
-    /** The rows on screen, what select-all and the actions walk. */
-    private final List<MailStore.StoredMessage> shown = new ArrayList<>();
 
     private String query = "";
     private boolean unreadOnly;
     private boolean attachmentsOnly;
+
+    /** The messages selected one by one, keyed by their store id. */
+    private final Map<String, MailStore.StoredMessage> selected = new LinkedHashMap<>();
+
+    /**
+     * Whether everything the query lets through is selected, the rows in
+     * {@link #excluded} aside: a query rather than a set of rows.
+     */
+    private boolean allSelected;
+
+    private final Set<String> excluded = new HashSet<>();
+
+    /** A reload asked for by a sync write, held until the burst settles. */
+    private final Runnable settled = this::reload;
 
     MailList(MainActivity host, MailStore store) {
         this.host = host;
@@ -69,7 +123,7 @@ final class MailList {
                 R.string.mail_search,
                 settled -> {
                     query = settled;
-                    render();
+                    reload();
                 });
         LinearLayout chips = header.chips();
         Chips.add(
@@ -79,7 +133,7 @@ final class MailList {
                 R.drawable.ic_visibility_off,
                 on -> {
                     unreadOnly = on;
-                    render();
+                    reload();
                 });
         Chips.add(
                 host,
@@ -88,13 +142,13 @@ final class MailList {
                 R.drawable.ic_attach_file,
                 on -> {
                     attachmentsOnly = on;
-                    render();
+                    reload();
                 });
 
         list.setAdapter(adapter);
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
-                    MailStore.StoredMessage message = sections.row(header.rowAt(position));
+                    MailStore.StoredMessage message = messageAt(header.rowAt(position));
                     if (message == null) {
                         return;
                     }
@@ -106,7 +160,7 @@ final class MailList {
                 });
         list.setOnItemLongClickListener(
                 (parent, view, position, id) -> {
-                    MailStore.StoredMessage message = sections.row(header.rowAt(position));
+                    MailStore.StoredMessage message = messageAt(header.rowAt(position));
                     if (message == null) {
                         return false;
                     }
@@ -126,88 +180,345 @@ final class MailList {
                     refresh.setRefreshing(false);
                     host.syncMail();
                 });
+
+        // NOTE: a first pass lands its pages one write at a time, and the
+        // top of the list is what has to show while the rest fills in.
+        MailEngine.onWrite =
+                () ->
+                        host.main.post(
+                                () -> {
+                                    host.main.removeCallbacks(settled);
+                                    host.main.postDelayed(settled, SETTLE_MILLIS);
+                                });
     }
 
     ListHeader header() {
         return header;
     }
 
-    /** Rebuilds the list from the store, dropping what the filter hides. */
-    void reload() {
-        page.clear();
-        int unread = 0;
-        for (MailStore.StoredMessage message : store.loadMerged(PAGE)) {
-            if (host.filter.accepts(message.accountEmail, message.mailbox)) {
-                page.add(message);
-                if (!message.seen && !message.pending) {
-                    unread++;
-                }
-            }
-        }
+    // ---- the layout -------------------------------------------------------
 
-        // NOTE: counted over the page the list holds, not the whole
-        // store: the badge says there is something new to read, which
-        // the newest few hundred messages answer.
-        host.showMailBadge(unread);
-        render();
+    /**
+     * Reads the list's shape from the store again: the counts that size
+     * it, the per-day counts that place its headers, the badge, and the
+     * pages around where the list stands, then swaps it in whole, so what
+     * is on screen never flashes through placeholders.
+     */
+    void reload() {
+        int asked = ++generation;
+        ListView list = host.findViewById(R.id.mail_list);
+        int around = Math.max(0, header.rowAt(list.getFirstVisiblePosition()));
+        MergedFilter filter = host.filter;
+        String words = query;
+        boolean unread = unreadOnly;
+        boolean attachments = attachmentsOnly;
+        String outboxLabel = store.outboxName();
+        String undated = host.getString(R.string.date_unknown);
+
+        reads.execute(
+                () -> {
+                    MailStore.Query listed =
+                            store.query(filter::accepts, unread, attachments, words);
+                    MailStore.Query everything = store.query(filter::accepts, false, false, "");
+
+                    List<MailStore.StoredMessage> outbox = new ArrayList<>();
+                    for (MailStore.StoredMessage message : store.outgoing()) {
+                        if (filter.accepts(message.accountEmail, message.mailbox)
+                                && !unread
+                                && !attachments
+                                && matches(message, words)) {
+                            outbox.add(message);
+                        }
+                    }
+
+                    List<MailStore.Day> days = store.countByDay(listed, shift());
+                    long shownUnread = store.count(listed.unread());
+                    long badge = store.unread(everything);
+                    Layout next = Layout.of(host, outbox, outboxLabel, undated, days, shownUnread);
+
+                    // NOTE: the pages around where the list stands, read
+                    // before the swap, so the rows on screen stay drawn.
+                    Map<Integer, List<MailStore.StoredMessage>> read = new HashMap<>();
+                    int first = Math.max(0, around - outbox.size()) / PAGE;
+                    MailStore.StoredMessage after = null;
+                    for (int page = Math.max(0, first - 1); page <= first + 1; page++) {
+                        if ((long) page * PAGE >= next.synced) {
+                            break;
+                        }
+                        List<MailStore.StoredMessage> rows =
+                                store.page(listed, after, (long) page * PAGE, PAGE);
+                        read.put(page, rows);
+                        after = rows.size() < PAGE ? null : rows.get(rows.size() - 1);
+                    }
+
+                    host.main.post(
+                            () -> {
+                                if (asked != generation) {
+                                    return;
+                                }
+                                currentQuery = listed;
+                                layout = next;
+                                pages.clear();
+                                loading.clear();
+                                pages.putAll(read);
+                                host.showMailBadge((int) Math.min(Integer.MAX_VALUE, badge));
+                                render();
+                            });
+                });
     }
 
-    /** Narrows the page to what the screen asks for, and lays it out. */
+    /** Draws the current layout: the rows, the line under the title, the empty state. */
     private void render() {
-        List<MailStore.StoredMessage> rows = new ArrayList<>();
-        int unread = 0;
-        for (MailStore.StoredMessage message : page) {
-            if (unreadOnly && message.seen) {
-                continue;
-            }
-            if (attachmentsOnly && !message.hasAttachment) {
-                continue;
-            }
-            if (!query.isEmpty() && !matches(message)) {
-                continue;
-            }
-            rows.add(message);
-            if (!message.seen && !message.pending) {
-                unread++;
-            }
-        }
-
-        shown.clear();
-        shown.addAll(rows);
-        // NOTE: a selected message the list no longer shows (deleted,
-        // filtered out) leaves the selection with it.
-        java.util.Set<String> kept = new java.util.HashSet<>();
-        for (MailStore.StoredMessage message : rows) {
-            if (selected.contains(keyOf(message))) {
-                kept.add(keyOf(message));
-            }
-        }
-        selected.retainAll(kept);
-        sections.fill(rows, this::sectionOf);
         adapter.notifyDataSetChanged();
         updateSelectionUi();
 
         android.content.res.Resources resources = host.getResources();
+        int rows = (int) Math.min(Integer.MAX_VALUE, layout.rows());
+        int unread = (int) Math.min(Integer.MAX_VALUE, layout.unread);
         header.meta(
                 unread > 0
                         ? resources.getQuantityString(
-                                R.plurals.mail_meta_unread, unread, unread, rows.size())
-                        : resources.getQuantityString(R.plurals.mail_meta, rows.size(), rows.size()));
+                                R.plurals.mail_meta_unread, unread, unread, rows)
+                        : resources.getQuantityString(R.plurals.mail_meta, rows, rows));
         host.findViewById(R.id.mail_empty)
-                .setVisibility(rows.isEmpty() ? View.VISIBLE : View.GONE);
+                .setVisibility(rows == 0 ? View.VISIBLE : View.GONE);
     }
 
-    /** Whether the search finds the message in its sender or subject. */
-    private boolean matches(MailStore.StoredMessage message) {
-        return (message.subject + " " + message.fromName + " " + message.fromAddress)
-                .toLowerCase()
-                .contains(query);
+    /**
+     * The SQLite modifier moving a UTC instant onto the device's wall clock
+     * today, so a day header falls where the reader's midnight does.
+     */
+    private static String shift() {
+        int minutes = TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000;
+        return String.format(Locale.ROOT, "%+d minutes", minutes);
     }
 
-    /** The day a message falls on, which is the card it goes in. */
-    private String sectionOf(MailStore.StoredMessage message) {
-        String day = Dates.day(host, message.stamp);
-        return day.isEmpty() ? host.getString(R.string.date_unknown) : day;
+    /** Whether the search finds a waiting message in its sender or subject. */
+    private static boolean matches(MailStore.StoredMessage message, String words) {
+        return words.isEmpty()
+                || (message.subject + " " + message.fromName + " " + message.fromAddress)
+                        .toLowerCase()
+                        .contains(words);
+    }
+
+    /**
+     * The list's shape: the waiting messages on top, then one section per
+     * day label, each sized by its count, and where each header falls.
+     */
+    private static final class Layout {
+        final List<MailStore.StoredMessage> outbox;
+
+        /** How many synced rows follow the waiting ones. */
+        final long synced;
+
+        /** How many shown rows are unread. */
+        final long unread;
+
+        final List<String> labels = new ArrayList<>();
+
+        /** Each section's first row, counted from the first waiting one. */
+        final List<Long> firstRow = new ArrayList<>();
+
+        final List<Long> rowCount = new ArrayList<>();
+
+        /** Each section's header position. */
+        int[] headerAt = new int[0];
+
+        int size;
+
+        private Layout(List<MailStore.StoredMessage> outbox, long synced, long unread) {
+            this.outbox = outbox;
+            this.synced = synced;
+            this.unread = unread;
+        }
+
+        static Layout empty() {
+            return new Layout(List.of(), 0, 0);
+        }
+
+        /**
+         * Lays the counts out: the outbox under its own name, then the days,
+         * consecutive days sharing a label (two weeks ago) sharing a card.
+         */
+        static Layout of(
+                MainActivity host,
+                List<MailStore.StoredMessage> outbox,
+                String outboxLabel,
+                String undated,
+                List<MailStore.Day> days,
+                long unread) {
+            long synced = 0;
+            for (MailStore.Day day : days) {
+                synced += day.count;
+            }
+            Layout layout = new Layout(outbox, synced, unread);
+
+            long row = 0;
+            if (!outbox.isEmpty()) {
+                layout.add(outboxLabel, row, outbox.size(), false);
+                row += outbox.size();
+            }
+            boolean daysStarted = false;
+            for (MailStore.Day day : days) {
+                if (day.count <= 0) {
+                    continue;
+                }
+                String label = day.day == null ? undated : labelOf(host, day.day, undated);
+                layout.add(label, row, day.count, daysStarted);
+                daysStarted = true;
+                row += day.count;
+            }
+            layout.place();
+            return layout;
+        }
+
+        private void add(String label, long first, long count, boolean merge) {
+            int last = labels.size() - 1;
+            if (merge && last >= 0 && labels.get(last).equals(label)) {
+                rowCount.set(last, rowCount.get(last) + count);
+                return;
+            }
+            labels.add(label);
+            firstRow.add(first);
+            rowCount.add(count);
+        }
+
+        private void place() {
+            headerAt = new int[labels.size()];
+            long position = 0;
+            for (int section = 0; section < labels.size(); section++) {
+                headerAt[section] = (int) Math.min(Integer.MAX_VALUE, position);
+                position += 1 + rowCount.get(section);
+            }
+            size = (int) Math.min(Integer.MAX_VALUE, position);
+        }
+
+        long rows() {
+            return outbox.size() + synced;
+        }
+
+        /** The section a position falls in. */
+        int sectionAt(int position) {
+            int low = 0;
+            int high = headerAt.length - 1;
+            while (low < high) {
+                int middle = (low + high + 1) >>> 1;
+                if (headerAt[middle] <= position) {
+                    low = middle;
+                } else {
+                    high = middle - 1;
+                }
+            }
+            return low;
+        }
+
+        boolean isHeader(int position) {
+            return headerAt.length > 0 && headerAt[sectionAt(position)] == position;
+        }
+
+        /** The row a position draws, counted from the first waiting one; -1 at a header. */
+        long rowAt(int position) {
+            if (position < 0 || position >= size || headerAt.length == 0) {
+                return -1;
+            }
+            int section = sectionAt(position);
+            if (headerAt[section] == position) {
+                return -1;
+            }
+            return firstRow.get(section) + (position - headerAt[section] - 1);
+        }
+
+        /** The background a row draws with, by its place in its card. */
+        int shapeAt(int position) {
+            int section = sectionAt(position);
+            long offset = position - headerAt[section] - 1;
+            boolean first = offset == 0;
+            boolean last = offset == rowCount.get(section) - 1;
+            if (first && last) {
+                return R.drawable.row_card_single;
+            }
+            if (first) {
+                return R.drawable.row_card_top;
+            }
+            return last ? R.drawable.row_card_bottom : R.drawable.row_card_middle;
+        }
+
+        /** A day of the store's count, labelled the way a row's day is. */
+        private static String labelOf(MainActivity host, String day, String undated) {
+            try {
+                long noon =
+                        LocalDate.parse(day)
+                                .atTime(12, 0)
+                                .atZone(ZoneId.systemDefault())
+                                .toInstant()
+                                .toEpochMilli();
+                String label = Dates.day(host, noon);
+                return label.isEmpty() ? undated : label;
+            } catch (RuntimeException error) {
+                return undated;
+            }
+        }
+    }
+
+    // ---- the rows ---------------------------------------------------------
+
+    /**
+     * The message a position draws, or null at a header or while its page
+     * is on its way, in which case the page is asked for.
+     */
+    private MailStore.StoredMessage messageAt(int position) {
+        long row = layout.rowAt(position);
+        if (row < 0) {
+            return null;
+        }
+        if (row < layout.outbox.size()) {
+            return layout.outbox.get((int) row);
+        }
+        long synced = row - layout.outbox.size();
+        int page = (int) (synced / PAGE);
+        int offset = (int) (synced % PAGE);
+
+        List<MailStore.StoredMessage> rows = pages.get(page);
+        if (rows == null) {
+            load(page);
+            return null;
+        }
+        // NOTE: the next page too, so a steady scroll finds it read.
+        if (offset > PAGE / 2 && (long) (page + 1) * PAGE < layout.synced) {
+            load(page + 1);
+        }
+        return offset < rows.size() ? rows.get(offset) : null;
+    }
+
+    /**
+     * Reads one page: after the page before it when that one is read (a
+     * keyset, what a scroll costs), from its offset otherwise (what a fling
+     * to the far end costs).
+     */
+    private void load(int page) {
+        if (pages.containsKey(page) || currentQuery == null || !loading.add(page)) {
+            return;
+        }
+        int asked = generation;
+        MailStore.Query listed = currentQuery;
+        List<MailStore.StoredMessage> previous = pages.get(page - 1);
+        MailStore.StoredMessage after =
+                previous == null || previous.size() < PAGE ? null : previous.get(PAGE - 1);
+
+        reads.execute(
+                () -> {
+                    List<MailStore.StoredMessage> rows =
+                            store.page(listed, after, (long) page * PAGE, PAGE);
+                    host.main.post(
+                            () -> {
+                                if (asked != generation) {
+                                    return;
+                                }
+                                loading.remove(page);
+                                pages.put(page, rows);
+                                adapter.notifyDataSetChanged();
+                            });
+                });
     }
 
     /**
@@ -230,12 +541,12 @@ final class MailList {
     private final class Adapter extends BaseAdapter {
         @Override
         public int getCount() {
-            return sections.size();
+            return layout.size;
         }
 
         @Override
         public Object getItem(int position) {
-            return sections.row(position);
+            return messageAt(position);
         }
 
         @Override
@@ -250,83 +561,116 @@ final class MailList {
 
         @Override
         public int getItemViewType(int position) {
-            return sections.isHeader(position) ? 1 : 0;
+            return layout.isHeader(position) ? 1 : 0;
         }
 
         @Override
         public boolean isEnabled(int position) {
-            return !sections.isHeader(position);
+            return !layout.isHeader(position);
         }
 
         @Override
         public View getView(int position, View recycled, ViewGroup parent) {
-            if (sections.isHeader(position)) {
-                return sections.headerView(position, recycled, parent);
+            if (layout.isHeader(position)) {
+                View view = recycled;
+                if (view == null) {
+                    view =
+                            LayoutInflater.from(parent.getContext())
+                                    .inflate(R.layout.item_section, parent, false);
+                }
+                ((TextView) view).setText(layout.labels.get(layout.sectionAt(position)));
+                return view;
             }
 
             View view = recycled;
             if (view == null) {
                 view = LayoutInflater.from(host).inflate(R.layout.item_message, parent, false);
             }
-            sections.shape(view, position);
+            int shape = layout.shapeAt(position);
+            view.findViewById(R.id.row_card).setBackgroundResource(shape);
             view.findViewById(R.id.message_divider)
-                    .setVisibility(sections.opensCard(position) ? View.GONE : View.VISIBLE);
+                    .setVisibility(
+                            shape == R.drawable.row_card_top || shape == R.drawable.row_card_single
+                                    ? View.GONE
+                                    : View.VISIBLE);
 
-            MailStore.StoredMessage message = sections.row(position);
-            TextView subject = view.findViewById(R.id.message_subject);
-            TextView from = view.findViewById(R.id.message_from);
-            TextView date = view.findViewById(R.id.message_date);
-
-            subject.setText(
-                    message.subject.isEmpty()
-                            ? host.getString(R.string.message_no_subject)
-                            : message.subject);
-            from.setText(
-                    message.sender().isEmpty()
-                            ? host.getString(R.string.message_no_sender)
-                            : message.sender());
-            date.setText(timeOf(message));
-            // A message waiting to go out says so where a message that has
-            // been somewhere says which mailbox: naming the outbox would
-            // answer where it is, and what the reader is asking is whether
-            // it has gone. One the server refused says that instead, which
-            // is the same question answered for good.
-            ((TextView) view.findViewById(R.id.message_origin))
-                    .setText(state(message) + " · " + message.accountEmail);
-
-            // The disc stands for the sender rather than the message, so
-            // it is keyed by the address alone: a sender who changes how
-            // their name is spelled keeps the colour the eye learned.
-            TextView avatar = view.findViewById(R.id.message_avatar);
-            avatar.setText(Avatar.letter(message.fromAddress));
-            avatar.setBackground(Avatar.circle(host, message.fromAddress));
-            boolean checked = selected.contains(keyOf(message));
-            avatar.setVisibility(checked ? View.INVISIBLE : View.VISIBLE);
-            ImageView check = view.findViewById(R.id.message_check);
-            check.setVisibility(checked ? View.VISIBLE : View.GONE);
-            if (checked) {
-                check.setBackground(host.getDrawable(R.drawable.unread_dot));
-                check.setImageTintList(
-                        android.content.res.ColorStateList.valueOf(host.accentContrast()));
+            MailStore.StoredMessage message = messageAt(position);
+            if (message == null) {
+                placeholder(view);
+            } else {
+                bind(view, message);
             }
-
-            // Unread is carried by the dot, the weight of the sender and
-            // the subject, and the time taking the accent.
-            boolean unread = !message.seen && !message.pending;
-            view.findViewById(R.id.message_dot)
-                    .setVisibility(unread ? View.VISIBLE : View.GONE);
-            from.setTypeface(null, unread ? Typeface.BOLD : Typeface.NORMAL);
-            subject.setTypeface(null, unread ? Typeface.BOLD : Typeface.NORMAL);
-            date.setTextColor(
-                    host.ui.resolveColor(
-                            unread
-                                    ? android.R.attr.colorAccent
-                                    : android.R.attr.textColorSecondary));
-
-            bindMarks(view, message);
-
             return view;
         }
+    }
+
+    /** A row whose page is still on its way: its card, and nothing in it yet. */
+    private void placeholder(View view) {
+        ((TextView) view.findViewById(R.id.message_subject)).setText("");
+        ((TextView) view.findViewById(R.id.message_from)).setText("");
+        ((TextView) view.findViewById(R.id.message_date)).setText("");
+        ((TextView) view.findViewById(R.id.message_origin)).setText("");
+        TextView avatar = view.findViewById(R.id.message_avatar);
+        avatar.setText("");
+        avatar.setBackground(Avatar.circle(host, ""));
+        avatar.setVisibility(View.VISIBLE);
+        view.findViewById(R.id.message_check).setVisibility(View.GONE);
+        view.findViewById(R.id.message_dot).setVisibility(View.GONE);
+        view.findViewById(R.id.message_star).setVisibility(View.GONE);
+        view.findViewById(R.id.message_attachment).setVisibility(View.GONE);
+        view.findViewById(R.id.message_answered).setVisibility(View.GONE);
+    }
+
+    /** One message's row. */
+    private void bind(View view, MailStore.StoredMessage message) {
+        TextView subject = view.findViewById(R.id.message_subject);
+        TextView from = view.findViewById(R.id.message_from);
+        TextView date = view.findViewById(R.id.message_date);
+
+        subject.setText(
+                message.subject.isEmpty()
+                        ? host.getString(R.string.message_no_subject)
+                        : message.subject);
+        from.setText(
+                message.sender().isEmpty()
+                        ? host.getString(R.string.message_no_sender)
+                        : message.sender());
+        date.setText(timeOf(message));
+        // A message waiting to go out says so where a message that has
+        // been somewhere says which mailbox: naming the outbox would
+        // answer where it is, and what the reader is asking is whether
+        // it has gone. One the server refused says that instead, which
+        // is the same question answered for good.
+        ((TextView) view.findViewById(R.id.message_origin))
+                .setText(state(message) + " · " + message.accountEmail);
+
+        // The disc stands for the sender rather than the message, so
+        // it is keyed by the address alone: a sender who changes how
+        // their name is spelled keeps the colour the eye learned.
+        TextView avatar = view.findViewById(R.id.message_avatar);
+        avatar.setText(Avatar.letter(message.fromAddress));
+        avatar.setBackground(Avatar.circle(host, message.fromAddress));
+        boolean checked = isSelected(message);
+        avatar.setVisibility(checked ? View.INVISIBLE : View.VISIBLE);
+        ImageView check = view.findViewById(R.id.message_check);
+        check.setVisibility(checked ? View.VISIBLE : View.GONE);
+        if (checked) {
+            check.setBackground(host.getDrawable(R.drawable.unread_dot));
+            check.setImageTintList(
+                    android.content.res.ColorStateList.valueOf(host.accentContrast()));
+        }
+
+        // Unread is carried by the dot, the weight of the sender and
+        // the subject, and the time taking the accent.
+        boolean unread = !message.seen && !message.pending;
+        view.findViewById(R.id.message_dot).setVisibility(unread ? View.VISIBLE : View.GONE);
+        from.setTypeface(null, unread ? Typeface.BOLD : Typeface.NORMAL);
+        subject.setTypeface(null, unread ? Typeface.BOLD : Typeface.NORMAL);
+        date.setTextColor(
+                host.ui.resolveColor(
+                        unread ? android.R.attr.colorAccent : android.R.attr.textColorSecondary));
+
+        bindMarks(view, message);
     }
 
     /** What a row says of where its message stands. */
@@ -354,18 +698,40 @@ final class MailList {
     // ---- the selection ----------------------------------------------------
 
     boolean isSelectionMode() {
-        return !selected.isEmpty();
+        return allSelected || !selected.isEmpty();
     }
 
     /** What a message is known by in the selection, across accounts. */
     private static String keyOf(MailStore.StoredMessage message) {
-        return message.collection + "/" + message.id;
+        return message.pending
+                ? "\u0001queued/" + message.queued
+                : message.collection + "/" + message.id;
+    }
+
+    private boolean isSelected(MailStore.StoredMessage message) {
+        return allSelected
+                ? !excluded.contains(keyOf(message))
+                : selected.containsKey(keyOf(message));
+    }
+
+    /** How many messages the selection holds. */
+    private long selectedCount() {
+        return allSelected ? Math.max(0, layout.rows() - excluded.size()) : selected.size();
     }
 
     /** Adds a message to the selection, or takes it out. */
     private void toggle(MailStore.StoredMessage message) {
-        if (!selected.remove(keyOf(message))) {
-            selected.add(keyOf(message));
+        String key = keyOf(message);
+        if (allSelected) {
+            if (!excluded.remove(key)) {
+                excluded.add(key);
+            }
+            if (excluded.size() >= layout.rows()) {
+                allSelected = false;
+                excluded.clear();
+            }
+        } else if (selected.remove(key) == null) {
+            selected.put(key, message);
         }
         adapter.notifyDataSetChanged();
         updateSelectionUi();
@@ -373,32 +739,48 @@ final class MailList {
 
     void exitSelection() {
         selected.clear();
+        excluded.clear();
+        allSelected = false;
         adapter.notifyDataSetChanged();
         updateSelectionUi();
     }
 
-    /** Selects every shown message, or clears them when all already are. */
+    /**
+     * Selects everything the query lets through, or clears the selection
+     * when it already is: a flag over the query, read whole only when the
+     * bar acts on it.
+     */
     void toggleSelectAll() {
-        boolean all = selected.size() == shown.size();
+        boolean all = allSelected && excluded.isEmpty();
         selected.clear();
-        if (!all) {
-            for (MailStore.StoredMessage message : shown) {
-                selected.add(keyOf(message));
-            }
-        }
+        excluded.clear();
+        allSelected = !all && layout.rows() > 0;
         adapter.notifyDataSetChanged();
         updateSelectionUi();
     }
 
-    /** The selected messages, in list order. */
-    private List<MailStore.StoredMessage> selection() {
-        List<MailStore.StoredMessage> messages = new ArrayList<>();
-        for (MailStore.StoredMessage message : shown) {
-            if (selected.contains(keyOf(message))) {
-                messages.add(message);
-            }
+    /**
+     * Hands the selected messages over once they are read: the rows picked
+     * one by one as they are, everything the query lets through read from
+     * the store, off the main thread, when all of it is selected.
+     */
+    private void withSelection(Consumer<List<MailStore.StoredMessage>> act) {
+        if (!allSelected) {
+            act.accept(new ArrayList<>(selected.values()));
+            return;
         }
-        return messages;
+        MailStore.Query listed = currentQuery;
+        List<MailStore.StoredMessage> outbox = new ArrayList<>(layout.outbox);
+        Set<String> left = new HashSet<>(excluded);
+        reads.execute(
+                () -> {
+                    List<MailStore.StoredMessage> messages = new ArrayList<>(outbox);
+                    if (listed != null) {
+                        messages.addAll(store.all(listed));
+                    }
+                    messages.removeIf(message -> left.contains(keyOf(message)));
+                    host.main.post(() -> act.accept(Collections.unmodifiableList(messages)));
+                });
     }
 
     /**
@@ -415,7 +797,10 @@ final class MailList {
         TextView title = host.findViewById(R.id.bar_title);
         if (selecting) {
             title.animate().cancel();
-            title.setText(host.getString(R.string.selected_count, selected.size()));
+            title.setText(
+                    host.getString(
+                            R.string.selected_count,
+                            (int) Math.min(Integer.MAX_VALUE, selectedCount())));
             title.setAlpha(1f);
         } else {
             host.showDomainTitle(MainActivity.PANEL_MAIL);
@@ -427,12 +812,15 @@ final class MailList {
         host.findViewById(R.id.selection_all_slot)
                 .setVisibility(selecting ? View.VISIBLE : View.GONE);
         ((android.widget.CheckBox) host.findViewById(R.id.selection_all))
-                .setChecked(selecting && selected.size() == shown.size());
+                .setChecked(selecting && allSelected && excluded.isEmpty());
         host.findViewById(R.id.fab_extended).setVisibility(selecting ? View.GONE : View.VISIBLE);
 
-        boolean anyUnread = false;
-        boolean anyPlain = false;
-        for (MailStore.StoredMessage message : selection()) {
+        // NOTE: a selection of everything is read from the counts: unread
+        // when the store counts any, and starring rather than reading every
+        // flag back, the store counting the unread and not the starred.
+        boolean anyUnread = allSelected && layout.unread > 0;
+        boolean anyPlain = allSelected;
+        for (MailStore.StoredMessage message : selected.values()) {
             anyUnread |= !message.seen && !message.pending;
             anyPlain |= !message.flagged && !message.pending;
         }
@@ -453,39 +841,46 @@ final class MailList {
 
     /** Marks the selection read, or unread when it all already is. */
     private void markSelected() {
-        List<MailStore.StoredMessage> messages = selection();
-        boolean anyUnread = false;
-        for (MailStore.StoredMessage message : messages) {
-            anyUnread |= !message.seen && !message.pending;
-        }
-        host.messageView.stageFlag(messages, MailEngine.SEEN, anyUnread, this::reload);
+        withSelection(
+                messages -> {
+                    boolean anyUnread = false;
+                    for (MailStore.StoredMessage message : messages) {
+                        anyUnread |= !message.seen && !message.pending;
+                    }
+                    host.messageView.stageFlag(messages, MailEngine.SEEN, anyUnread, this::reload);
+                });
     }
 
     /** Stars the selection, or unstars it when it all already is. */
     private void flagSelected() {
-        List<MailStore.StoredMessage> messages = selection();
-        boolean anyPlain = false;
-        for (MailStore.StoredMessage message : messages) {
-            anyPlain |= !message.flagged && !message.pending;
-        }
-        host.messageView.stageFlag(messages, MailEngine.FLAGGED, anyPlain, this::reload);
+        withSelection(
+                messages -> {
+                    boolean anyPlain = false;
+                    for (MailStore.StoredMessage message : messages) {
+                        anyPlain |= !message.flagged && !message.pending;
+                    }
+                    host.messageView.stageFlag(
+                            messages, MailEngine.FLAGGED, anyPlain, this::reload);
+                });
     }
 
     /** Asks, then stages the selection's deletion. */
     private void deleteSelected() {
-        List<MailStore.StoredMessage> messages = selection();
-        new android.app.AlertDialog.Builder(host)
-                .setMessage(
-                        host.getResources()
-                                .getQuantityString(
-                                        R.plurals.messages_delete_confirm,
-                                        messages.size(),
-                                        messages.size()))
-                .setPositiveButton(
-                        R.string.message_delete,
-                        (dialog, which) ->
-                                host.messageView.stageDelete(messages, this::exitSelection))
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        withSelection(
+                messages ->
+                        new android.app.AlertDialog.Builder(host)
+                                .setMessage(
+                                        host.getResources()
+                                                .getQuantityString(
+                                                        R.plurals.messages_delete_confirm,
+                                                        messages.size(),
+                                                        messages.size()))
+                                .setPositiveButton(
+                                        R.string.message_delete,
+                                        (dialog, which) ->
+                                                host.messageView.stageDelete(
+                                                        messages, this::exitSelection))
+                                .setNegativeButton(android.R.string.cancel, null)
+                                .show());
     }
 }

@@ -138,43 +138,6 @@ pub struct Event {
     pub ical: String,
 }
 
-/// One message's envelope spine, surfaced to the Java client.
-///
-/// The spine only: no body and no MIME structure, just the one bit of it
-/// a row renders ([`Message::has_attachment`]). A merged mail list draws
-/// exactly these fields, and fetching bodies for every message of every
-/// mailbox to draw a list would be the wrong trade.
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Message {
-    /// The mailbox the message was listed from.
-    pub mailbox: String,
-    /// What the backend addresses the message by, within its mailbox:
-    /// the IMAP UID as text, the opaque Email id on JMAP. A string
-    /// rather than a number because only one of the two is one.
-    pub id: String,
-    /// Decoded `Subject`, empty when the message carries none.
-    pub subject: String,
-    /// The first `From` display name, empty when the sender sent none.
-    /// Kept apart from the address rather than folded into one label,
-    /// because a row shows the name while the avatar beside it is
-    /// derived from the address, which is the half that never changes.
-    pub from: String,
-    /// The first `From` address itself, empty when the envelope carries
-    /// no sender at all.
-    pub from_address: String,
-    /// The envelope `Date`, still RFC 5322 text.
-    pub date: String,
-    /// Whether the message carries `\Seen` (JMAP `$seen`).
-    pub seen: bool,
-    /// Whether the message carries `\Answered` (JMAP `$answered`).
-    pub answered: bool,
-    /// Whether the message carries `\Flagged` (JMAP `$flagged`).
-    pub flagged: bool,
-    /// Whether any MIME part is dispositioned as an attachment.
-    pub has_attachment: bool,
-}
-
 /// One mailbox the account holds, and what the server says it is for.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -223,6 +186,10 @@ pub struct MessageBody {
     pub body: String,
     /// What the message carries beside its body.
     pub attachments: Vec<MessageAttachment>,
+    /// The attachment mark of pimdir STORAGE Annex A.1 from the walk of
+    /// the parts: what replaces, once the body is read, the mark a listing
+    /// read off the top-level `Content-Type` alone.
+    pub attachment_mark: bool,
 }
 
 /// One attachment of a message, named and measured but not carried.

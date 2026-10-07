@@ -28,7 +28,7 @@ use crate::{
     account::{self, Backend},
     client::{self, Client, gmail::GmailEnvelope, imap::ImapState},
     ffi::parse_url,
-    types::{BridgeError, Credentials, Message},
+    types::{BridgeError, Credentials},
 };
 
 /// One account's live mail connection, held across native calls.
@@ -42,7 +42,7 @@ pub struct MailSession {
 
 /// The protocol state a session carries, if its backend has any.
 enum MailKind {
-    Imap(ImapState),
+    Imap(Box<ImapState>),
     Jmap(MailListing),
     Graph(MailListing),
     Gmail(MailListing),
@@ -51,14 +51,8 @@ enum MailKind {
 /// What an HTTP mail session remembers across a pass.
 ///
 /// No protocol state, an HTTP request carrying its own, but a pass's
-/// worth of answers all the same: the mailbox ids the roster named, and
-/// the last mailbox enumerated, so a fetch reads what the enumerate
-/// already asked for rather than asking again.
-///
-/// RFC 8621 has `Email/changes` and Graph a message delta, which is
-/// where an incremental round would go; until they are wired a mailbox
-/// answers whole, and answering it twice per pass would be the avoidable
-/// half of that.
+/// worth of answers all the same: the mailbox ids the roster named, which
+/// every later verb addresses a mailbox by.
 ///
 /// Gmail answers a label with ids alone, so its session also keeps every
 /// envelope it read, by message id: a message filed under two labels, or
@@ -66,7 +60,6 @@ enum MailKind {
 #[derive(Default)]
 pub struct MailListing {
     pub ids: BTreeMap<String, String>,
-    pub listed: BTreeMap<String, Message>,
     pub envelopes: BTreeMap<String, GmailEnvelope>,
 }
 
@@ -97,7 +90,7 @@ impl MailSession {
             }
             _ => {
                 let url = parse_url(base_url)?;
-                MailKind::Imap(client::imap::open(client, &url, &credentials)?)
+                MailKind::Imap(Box::new(client::imap::open(client, &url, &credentials)?))
             }
         };
 

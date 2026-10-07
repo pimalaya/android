@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use io_pimdir::{
     change::{PimdirChange, PimdirChangeKind, PimdirDropReason, PimdirWriteOp},
-    collection::PimdirCheckpoint,
+    collection::{PimdirCheckpoint, PimdirCoverage, PimdirCursor, PimdirRound, PimdirScope},
     coroutine::*,
     load::{PimdirLoadScope, PimdirLoaded},
     mutate::{PimdirMutate, PimdirMutation},
@@ -31,8 +31,9 @@ use io_pimdir::{
         PimdirPlacement, PimdirStatus,
     },
     remote::{
-        PimdirFetchedBody, PimdirFetchedItem, PimdirPushOutcome, PimdirPushResult,
-        PimdirRemoteItem, PimdirRemoteSnapshot, PimdirTier,
+        PimdirEnumerate, PimdirEnumerated, PimdirFetchedBody, PimdirFetchedItem, PimdirListing,
+        PimdirPushOutcome, PimdirPushResult, PimdirRemoteItem, PimdirRemoteMeta,
+        PimdirRemoteSnapshot, PimdirTier,
     },
     sync::{PimdirPushRights, PimdirSync, PimdirSyncOptions},
     upgrade::PimdirUpgrade,
@@ -52,13 +53,25 @@ use crate::{client::clear_and_fail, summary::SummaryJson, types::BridgeError};
 /// `content` no body is ever pushed, which is what an immutable kind
 /// wants: a message body stored by a read then reads as a local edit,
 /// and an update pushed for it would withhold the flags beside it.
+///
+/// `since` bounds a mail collection's scope on the `Date` header (SYNC
+/// §5), empty for none, and `scope_bound` says whether the connector's
+/// checkpoint is bound to the scope it was made under (a Graph delta
+/// link made under a `$filter` is; IMAP `CHANGEDSINCE`, Gmail history and
+/// JMAP state are not, so a widening lists only the band it lacks).
 pub fn sync<'local>(
     env: &mut Env<'local>,
     driver: &JObject<'local>,
     collection: &str,
     full: bool,
     content: bool,
+    since: &str,
+    scope_bound: bool,
 ) -> Result<Value, BridgeError> {
+    let scope = match since.is_empty() {
+        true => PimdirScope::unbounded(),
+        false => PimdirScope::since(since),
+    };
     let opts = PimdirSyncOptions {
         push: true,
         rights: PimdirPushRights {
@@ -66,9 +79,11 @@ pub fn sync<'local>(
             ..PimdirPushRights::all()
         },
         full,
+        scope,
         ..Default::default()
     };
-    let report = Driver::new(env, driver).run(PimdirSync::new(collection, opts))?;
+    let coroutine = PimdirSync::new(collection, opts).scope_bound(scope_bound);
+    let report = Driver::new(env, driver).run(coroutine)?;
 
     Ok(json!({
         "pulled": report.pulled,
@@ -76,6 +91,7 @@ pub fn sync<'local>(
         "conflicts": report.conflicts,
         "rejected": report.rejected,
         "refreshed": report.refreshed,
+        "waiting": report.waiting,
     }))
 }
 
@@ -190,11 +206,10 @@ fn yield_json(yielded: &PimdirYield) -> String {
             "op": "write",
             "writes": ops.iter().map(WriteOpJson::from).collect::<Vec<_>>(),
         }),
-        PimdirYield::WantsEnumerate { collection, cursor } => json!({
-            "op": "enumerate",
-            "collection": collection.as_str(),
-            "cursor": cursor.as_ref().map(checkpoint_str).filter(|c| !c.is_empty()),
-        }),
+        PimdirYield::WantsEnumerate {
+            collection,
+            request,
+        } => enumerate_json(collection.as_str(), request),
         PimdirYield::WantsFetch {
             collection,
             handles,
@@ -248,6 +263,23 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                     .checkpoint
                     .filter(|token| !token.is_empty())
                     .map(|token| PimdirCheckpoint(token.into_bytes())),
+                coverage: loaded.coverage.map(|coverage| PimdirCoverage {
+                    scope: coverage.scope.into(),
+                    at: coverage.at,
+                }),
+                round: loaded.round.map(|round| PimdirRound {
+                    scope: round.scope.into(),
+                    cursor: round
+                        .cursor
+                        .filter(|cursor| !cursor.is_empty())
+                        .map(|cursor| PimdirCursor(cursor.into_bytes())),
+                    checkpoint: round
+                        .checkpoint
+                        .filter(|token| !token.is_empty())
+                        .map(|token| PimdirCheckpoint(token.into_bytes())),
+                    started_at: round.started_at,
+                }),
+                unstamped: loaded.unstamped.into_iter().map(PimdirHandle).collect(),
             })
         }
         PimdirYield::WantsLookupObject(_) => {
@@ -262,20 +294,7 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
         PimdirYield::WantsWrite(_) => PimdirArg::Write,
         PimdirYield::WantsEnumerate { .. } => {
             let snapshot: SnapshotJson = parse(reply)?;
-            PimdirArg::Enumerate(PimdirRemoteSnapshot {
-                items: snapshot
-                    .items
-                    .into_iter()
-                    .map(|item| PimdirRemoteItem {
-                        handle: PimdirHandle(item.handle),
-                        flags: PimdirFlags::from_iter(item.flags),
-                        revision: item.revision,
-                    })
-                    .collect(),
-                vanished: snapshot.vanished.into_iter().map(PimdirHandle).collect(),
-                complete: snapshot.complete,
-                checkpoint: PimdirCheckpoint(snapshot.checkpoint.unwrap_or_default().into_bytes()),
-            })
+            PimdirArg::Enumerate(snapshot.into())
         }
         PimdirYield::WantsFetch { .. } => {
             let fetched: FetchedJson = parse(reply)?;
@@ -345,6 +364,43 @@ fn scope_json(scope: &PimdirLoadScope) -> Value {
             "links": links.iter().map(PimdirLinkId::as_str).collect::<Vec<_>>(),
         }),
     }
+}
+
+/// The `enumerate` yield on the JSON wire.
+///
+/// `listing` says what is asked: a `delta` from the checkpoint, or a
+/// `round` over the scope from its first page (no `cursor`) or resumed
+/// from one, `band` when it lists only the band a coverage lacks. `scope`
+/// bounds a mail listing on the `Date` header, its absent bounds open.
+/// `cursor` repeats a delta's checkpoint at the top level, for a connector
+/// that only ever answers one complete page (DAV, Google, Graph contacts):
+/// absent, it lists the whole collection.
+fn enumerate_json(collection: &str, request: &PimdirEnumerate) -> Value {
+    let listing = match &request.listing {
+        PimdirListing::Delta(checkpoint) => json!({
+            "kind": "delta",
+            "checkpoint": checkpoint_str(checkpoint),
+        }),
+        PimdirListing::Round { cursor, band } => json!({
+            "kind": "round",
+            "cursor": cursor.as_ref().map(cursor_str),
+            "band": band,
+        }),
+    };
+
+    json!({
+        "op": "enumerate",
+        "collection": collection,
+        "cursor": request.checkpoint().map(checkpoint_str).filter(|c| !c.is_empty()),
+        "listing": listing,
+        "scope": ScopeJson::from(&request.scope),
+    })
+}
+
+/// A resume cursor is opaque bytes too, written by this app's own
+/// connectors as text.
+fn cursor_str(cursor: &PimdirCursor) -> String {
+    String::from_utf8_lossy(&cursor.0).into_owned()
 }
 
 /// Checkpoints are opaque bytes to the engine; every token this app
@@ -527,10 +583,14 @@ impl From<&PimdirOrigin> for OriginJson {
 }
 
 /// The detail level on the JSON wire.
+///
+/// `probed` is what an earlier store wrote for a row no listing had named
+/// yet; nothing writes it now and it reads as `meta` (STORAGE §13), the
+/// row's summary restated by the next listing that carries it.
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 enum LevelJson {
-    Probed,
+    #[serde(alias = "probed")]
     Meta,
     Full,
 }
@@ -538,7 +598,6 @@ enum LevelJson {
 impl From<LevelJson> for PimdirLevel {
     fn from(wire: LevelJson) -> Self {
         match wire {
-            LevelJson::Probed => Self::Probed,
             LevelJson::Meta => Self::Meta,
             LevelJson::Full => Self::Full,
         }
@@ -548,7 +607,6 @@ impl From<LevelJson> for PimdirLevel {
 impl From<PimdirLevel> for LevelJson {
     fn from(level: PimdirLevel) -> Self {
         match level {
-            PimdirLevel::Probed => Self::Probed,
             PimdirLevel::Meta => Self::Meta,
             PimdirLevel::Full => Self::Full,
         }
@@ -614,6 +672,36 @@ enum WriteOpJson {
         collection: String,
         checkpoint: String,
     },
+    /// Opens a round over a scope (SYNC §5), drawing its id.
+    OpenRound {
+        collection: String,
+        scope: ScopeJson,
+    },
+    /// Stamps the bindings of the handles a page listed with the open
+    /// round's id, after the batch's upserts.
+    Stamp {
+        collection: String,
+        handles: Vec<String>,
+    },
+    /// Lands a page's resume cursor, and the checkpoint it carried.
+    SetRoundCursor {
+        collection: String,
+        cursor: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        checkpoint: Option<String>,
+    },
+    /// Closes the open round: its coverage, and the checkpoint it lands.
+    CloseRound {
+        collection: String,
+        coverage: ScopeJson,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        checkpoint: Option<String>,
+    },
+    /// Restates a narrower coverage beside a delta's checkpoint.
+    SetCoverage {
+        collection: String,
+        scope: ScopeJson,
+    },
 }
 
 impl From<&PimdirWriteOp> for WriteOpJson {
@@ -648,6 +736,39 @@ impl From<&PimdirWriteOp> for WriteOpJson {
             } => Self::SetCheckpoint {
                 collection: collection.as_str().into(),
                 checkpoint: checkpoint_str(checkpoint),
+            },
+            PimdirWriteOp::OpenRound { collection, scope } => Self::OpenRound {
+                collection: collection.as_str().into(),
+                scope: scope.into(),
+            },
+            PimdirWriteOp::Stamp {
+                collection,
+                handles,
+            } => Self::Stamp {
+                collection: collection.as_str().into(),
+                handles: handles.iter().map(|h| h.as_str().into()).collect(),
+            },
+            PimdirWriteOp::SetRoundCursor {
+                collection,
+                cursor,
+                checkpoint,
+            } => Self::SetRoundCursor {
+                collection: collection.as_str().into(),
+                cursor: cursor_str(cursor),
+                checkpoint: checkpoint.as_ref().map(checkpoint_str),
+            },
+            PimdirWriteOp::CloseRound {
+                collection,
+                coverage,
+                checkpoint,
+            } => Self::CloseRound {
+                collection: collection.as_str().into(),
+                coverage: coverage.into(),
+                checkpoint: checkpoint.as_ref().map(checkpoint_str),
+            },
+            PimdirWriteOp::SetCoverage { collection, scope } => Self::SetCoverage {
+                collection: collection.as_str().into(),
+                scope: scope.into(),
             },
         }
     }
@@ -868,7 +989,7 @@ impl From<MutationJson> for PimdirMutation {
     }
 }
 
-/// Reply to a `load` yield.
+/// Reply to a `load` yield: the placements and the source's sync state.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LoadedJson {
@@ -876,6 +997,65 @@ struct LoadedJson {
     placements: Vec<PlacementJson>,
     #[serde(default)]
     checkpoint: Option<String>,
+    /// What the source's last closed round covered, absent before one closed.
+    #[serde(default)]
+    coverage: Option<CoverageJson>,
+    /// The source's round under way, absent when none is open.
+    #[serde(default)]
+    round: Option<RoundJson>,
+    /// On a whole-collection load while a round is open: the based
+    /// bindings it has not stamped, in scope or undated.
+    #[serde(default)]
+    unstamped: Vec<String>,
+}
+
+/// A scope `[since, until)` on the mail `Date` on the JSON wire, both
+/// directions; an absent bound is open.
+#[derive(Deserialize, Serialize)]
+struct ScopeJson {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    since: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    until: Option<String>,
+}
+
+impl From<ScopeJson> for PimdirScope {
+    fn from(wire: ScopeJson) -> Self {
+        Self {
+            since: wire.since,
+            until: wire.until,
+        }
+    }
+}
+
+impl From<&PimdirScope> for ScopeJson {
+    fn from(scope: &PimdirScope) -> Self {
+        Self {
+            since: scope.since.clone(),
+            until: scope.until.clone(),
+        }
+    }
+}
+
+/// A source's coverage on the JSON wire (Java to engine).
+#[derive(Deserialize)]
+struct CoverageJson {
+    #[serde(flatten)]
+    scope: ScopeJson,
+    at: String,
+}
+
+/// A source's open round on the JSON wire (Java to engine).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RoundJson {
+    #[serde(flatten)]
+    scope: ScopeJson,
+    #[serde(default)]
+    cursor: Option<String>,
+    #[serde(default)]
+    checkpoint: Option<String>,
+    started_at: String,
 }
 
 /// Reply to a `lookup` yield.
@@ -902,20 +1082,69 @@ impl From<ObjectJson> for PimdirObject {
     }
 }
 
-/// Reply to an `enumerate` yield.
+/// Reply to an `enumerate` yield: one page, or the source refusing the
+/// resume cursor it was handed.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SnapshotJson {
+    /// The source refused the resume cursor (or a delta's checkpoint),
+    /// so the engine restarts the round (SYNC §5).
+    #[serde(default)]
+    cursor_rejected: bool,
     #[serde(default)]
     items: Vec<RemoteItemJson>,
     #[serde(default)]
     vanished: Vec<String>,
+    #[serde(default)]
     complete: bool,
+    /// Whether the page closes its listing; a page carrying no resume
+    /// cursor closes it whatever it says.
+    #[serde(default = "closing")]
+    last: bool,
+    /// Where the next page of the round resumes, on every page but the
+    /// last.
+    #[serde(default)]
+    cursor: Option<String>,
     #[serde(default)]
     checkpoint: Option<String>,
 }
 
-/// One enumerated member on the JSON wire.
+/// A page closes its listing unless it says otherwise, which is what
+/// every connector that does not page answers.
+fn closing() -> bool {
+    true
+}
+
+impl From<SnapshotJson> for PimdirEnumerated {
+    fn from(wire: SnapshotJson) -> Self {
+        if wire.cursor_rejected {
+            return Self::CursorRejected;
+        }
+
+        let cursor = wire
+            .cursor
+            .filter(|cursor| !cursor.is_empty())
+            .map(|cursor| PimdirCursor(cursor.into_bytes()));
+        Self::Page(PimdirRemoteSnapshot {
+            items: wire.items.into_iter().map(PimdirRemoteItem::from).collect(),
+            vanished: wire.vanished.into_iter().map(PimdirHandle).collect(),
+            complete: wire.complete,
+            last: wire.last || cursor.is_none(),
+            cursor,
+            checkpoint: wire
+                .checkpoint
+                .filter(|token| !token.is_empty())
+                .map(|token| PimdirCheckpoint(token.into_bytes())),
+        })
+    }
+}
+
+/// One listed member on the JSON wire, named by its meta (SYNC §4).
+///
+/// The link id is the identity the connector read, falling back to the
+/// handle, which is the identity of every member whose kind names it by
+/// its resource (mail here, calendar resources). A member carrying its
+/// body (a DAV listing that read it) carries the hash with it.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RemoteItemJson {
@@ -924,6 +1153,40 @@ struct RemoteItemJson {
     flags: Vec<String>,
     #[serde(default)]
     revision: Option<String>,
+    #[serde(default)]
+    link_id: Option<String>,
+    #[serde(default)]
+    summary: Option<SummaryJson>,
+    #[serde(default)]
+    sort_key: String,
+    #[serde(default)]
+    hash: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+}
+
+impl From<RemoteItemJson> for PimdirRemoteItem {
+    fn from(wire: RemoteItemJson) -> Self {
+        let body = match (wire.hash, wire.body) {
+            (Some(hash), Some(body)) => Some(PimdirFetchedBody::Inline {
+                hash: PimdirHash(hash),
+                bytes: body.into_bytes(),
+            }),
+            _ => None,
+        };
+
+        Self {
+            meta: PimdirRemoteMeta {
+                link_id: PimdirLinkId(wire.link_id.unwrap_or_else(|| wire.handle.clone())),
+                summary: wire.summary.map(Into::into),
+                sort_key: wire.sort_key.into(),
+                body,
+            },
+            handle: PimdirHandle(wire.handle),
+            flags: PimdirFlags::from_iter(wire.flags),
+            revision: wire.revision,
+        }
+    }
 }
 
 /// Reply to a `fetch` yield.
@@ -972,4 +1235,91 @@ struct PushResultJson {
     assigned: Option<String>,
     #[serde(default)]
     revision: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use io_pimdir::{
+        collection::{PimdirCheckpoint, PimdirCollectionId, PimdirCursor, PimdirScope},
+        remote::{PimdirEnumerate, PimdirEnumerated, PimdirListing},
+    };
+    use serde_json::{Value, from_str};
+
+    use super::{SnapshotJson, enumerate_json};
+
+    fn page(json: &str) -> PimdirEnumerated {
+        from_str::<SnapshotJson>(json).unwrap().into()
+    }
+
+    #[test]
+    fn a_refused_cursor_reads_as_one() {
+        assert_eq!(
+            page(r#"{"cursorRejected": true}"#),
+            PimdirEnumerated::CursorRejected
+        );
+    }
+
+    #[test]
+    fn a_page_with_a_cursor_is_not_the_last() {
+        let PimdirEnumerated::Page(snapshot) = page(
+            r#"{"items": [{"handle": "9", "linkId": "9", "sortKey": "2026-10-07T08:00:00Z"}],
+                "complete": true, "last": false, "cursor": "7:9", "checkpoint": "7:42"}"#,
+        ) else {
+            panic!("a page");
+        };
+        assert!(!snapshot.last);
+        assert_eq!(snapshot.cursor, Some(PimdirCursor(b"7:9".to_vec())));
+        assert_eq!(
+            snapshot.checkpoint,
+            Some(PimdirCheckpoint(b"7:42".to_vec()))
+        );
+        assert_eq!(snapshot.items[0].meta.link_id.as_str(), "9");
+        assert_eq!(snapshot.items[0].meta.sort_key.0, "2026-10-07T08:00:00Z");
+    }
+
+    #[test]
+    fn a_connector_that_does_not_page_answers_one_closing_page() {
+        // What the DAV, Google and Graph contacts drivers answer, unchanged:
+        // no `last`, no cursor, a link id falling back to the handle.
+        let PimdirEnumerated::Page(snapshot) =
+            page(r#"{"items": [{"handle": "a.ics"}], "complete": true}"#)
+        else {
+            panic!("a page");
+        };
+        assert!(snapshot.last);
+        assert_eq!(snapshot.items[0].meta.link_id.as_str(), "a.ics");
+        assert_eq!(snapshot.items[0].meta.body, None);
+    }
+
+    #[test]
+    fn the_yield_carries_the_listing_and_the_scope() {
+        let collection = PimdirCollectionId::from("acct/INBOX");
+        let round = enumerate_json(
+            collection.as_str(),
+            &PimdirEnumerate {
+                listing: PimdirListing::Round {
+                    cursor: Some(PimdirCursor(b"7:9".to_vec())),
+                    band: false,
+                },
+                scope: PimdirScope::since("2026-04-01T00:00:00Z"),
+            },
+        );
+        assert_eq!(round["listing"]["kind"], "round");
+        assert_eq!(round["listing"]["cursor"], "7:9");
+        assert_eq!(round["scope"]["since"], "2026-04-01T00:00:00Z");
+        assert_eq!(round["cursor"], Value::Null, "no checkpoint on a round");
+
+        let delta = enumerate_json(
+            collection.as_str(),
+            &PimdirEnumerate {
+                listing: PimdirListing::Delta(PimdirCheckpoint(b"7:42".to_vec())),
+                scope: PimdirScope::unbounded(),
+            },
+        );
+        assert_eq!(delta["listing"]["kind"], "delta");
+        assert_eq!(
+            delta["cursor"], "7:42",
+            "the checkpoint for a one-page connector"
+        );
+    }
 }

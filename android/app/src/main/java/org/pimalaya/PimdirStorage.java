@@ -166,9 +166,19 @@ final class PimdirStorage {
         JSONArray placements = new JSONArray();
         reply.put("placements", placements);
 
-        String checkpoint = checkpointOf(db, stored, source);
-        if (checkpoint != null) {
-            reply.put("checkpoint", checkpoint);
+        boolean roundOpen = syncState(db, stored, source, reply);
+        String kind = scope == null ? "all" : scope.optString("kind", "all");
+        if (roundOpen && "all".equals(kind)) {
+            reply.put("unstamped", unstamped(db, stored, source));
+        }
+
+        // NOTE: a handle scope naming none asks for the sync state alone,
+        // which is what a sync reads before it lists (SYNC §5); answering it
+        // with the whole collection would read a 100k-message mailbox to
+        // learn its checkpoint.
+        JSONArray named = scope == null ? null : scope.optJSONArray("handles");
+        if ("handles".equals(kind) && (named == null || named.length() == 0)) {
+            return reply;
         }
 
         List<String> args = new ArrayList<>(List.of(source, stored));
@@ -200,67 +210,95 @@ final class PimdirStorage {
                 placements.put(placementOf(collection, cursor));
             }
         }
-
-        for (JSONObject probe : probes(db, stored, source, scope)) {
-            placements.put(probe);
-        }
         return reply;
     }
 
     /**
-     * The source's unnamed handles, as probed placements beside the named ones
-     * (SYNC.md §3).
+     * The source's sync state of a collection, written into a load reply:
+     * its checkpoint, the coverage the last closed round left (SYNC §5,
+     * STORAGE §4.3) and the round under way. Answers whether a round is
+     * open.
      *
-     * <p>A probe is a handle an enumeration reported and no fetch has resolved
-     * an identity for yet. It is not an item: the store keys those by link id,
-     * and filing a probe under its handle would mint an item the next fetch has
-     * to un-mint, which is what puts two bindings on one handle. So it lives in
-     * its own table until a fetch names it, and rides back here so the merge
-     * sees the member and the sync knows a create must wait.
-     *
-     * <p>A {@code links} scope reads no probe: a probe has no link id, so no
-     * such scope can name one.
+     * <p>Read through the canonical {@code load_checkpoint} and
+     * {@code load_round}, so the columns stay the crate's.
      */
-    private List<JSONObject> probes(
-            SQLiteDatabase db, String collection, String source, JSONObject scope)
+    private static boolean syncState(
+            SQLiteDatabase db, String collection, String source, JSONObject reply)
             throws JSONException {
-        JSONArray handles = scope == null ? null : scope.optJSONArray("handles");
-        if (scope != null && "links".equals(scope.optString("kind", "all"))) {
-            return List.of();
-        }
+        Map<String, Object> key = new HashMap<>();
+        key.put("collection", collection);
+        key.put("source", source);
 
-        Map<String, Object> values = new HashMap<>();
-        values.put("collection", collection);
-        values.put("source", source);
-        boolean narrowed = handles != null && handles.length() > 0
-                && handles.length() <= SCOPE_MAX;
-        if (narrowed) {
-            values.put("handles", handles.toString());
-        }
-        PimdirSql.Bound bound =
-                PimdirSql.bind(narrowed ? "LOAD_PROBES_BY_HANDLE" : "LOAD_PROBES", values);
-
-        List<JSONObject> probed = new ArrayList<>();
-        try (Cursor cursor = db.rawQuery(bound.sql, stringsOf(bound.args))) {
-            while (cursor.moveToNext()) {
-                JSONObject placement = new JSONObject();
-                placement.put("collection", engineCollectionOf(collection, source));
-                placement.put("handle", cursor.getString(0));
-                placement.put("level", "probed");
-                placement.put("sortKey", "");
-                placement.put("status", "clean");
-                if (!cursor.isNull(1)) {
-                    placement.put("flags", arrayOf(cursor.getString(1)));
+        PimdirSql.Bound checkpoint = PimdirSql.bind("LOAD_CHECKPOINT", key);
+        try (Cursor cursor = db.rawQuery(checkpoint.sql, stringsOf(checkpoint.args))) {
+            if (cursor.moveToFirst()) {
+                String token = textOf(cursor, 0);
+                if (token != null) {
+                    reply.put("checkpoint", token);
                 }
-                probed.add(placement);
+                // NOTE: covered_at NULL is never complete, and then the
+                // coverage carries no bound.
+                if (!cursor.isNull(3)) {
+                    JSONObject coverage = new JSONObject();
+                    coverage.putOpt("since", cursor.isNull(1) ? null : cursor.getString(1));
+                    coverage.putOpt("until", cursor.isNull(2) ? null : cursor.getString(2));
+                    coverage.put("at", cursor.getString(3));
+                    reply.put("coverage", coverage);
+                }
             }
         }
-        return probed;
+
+        PimdirSql.Bound round = PimdirSql.bind("LOAD_ROUND", key);
+        try (Cursor cursor = db.rawQuery(round.sql, stringsOf(round.args))) {
+            if (!cursor.moveToFirst() || cursor.isNull(1)) {
+                return false;
+            }
+            JSONObject open = new JSONObject();
+            open.put("startedAt", cursor.getString(1));
+            open.putOpt("since", cursor.isNull(2) ? null : cursor.getString(2));
+            open.putOpt("until", cursor.isNull(3) ? null : cursor.getString(3));
+            open.putOpt("cursor", textOf(cursor, 4));
+            open.putOpt("checkpoint", textOf(cursor, 5));
+            reply.put("round", open);
+            return true;
+        }
     }
 
-    /** The engine collection id a stored collection carries for one source. */
-    private static String engineCollectionOf(String collection, String source) {
-        return PHONE.equals(source) ? phoneCollection(collection) : collection;
+    /**
+     * The based bindings of the source the open round has not stamped and
+     * whose item's date is in its scope or unknown: what the round's last
+     * page finds absent unless it lists them (SYNC §5).
+     */
+    private static JSONArray unstamped(SQLiteDatabase db, String collection, String source) {
+        Map<String, Object> key = new HashMap<>();
+        key.put("collection", collection);
+        key.put("source", source);
+        PimdirSql.Bound bound = PimdirSql.bind("LIST_UNSTAMPED_BINDINGS", key);
+
+        JSONArray handles = new JSONArray();
+        try (Cursor cursor = db.rawQuery(bound.sql, stringsOf(bound.args))) {
+            while (cursor.moveToNext()) {
+                handles.put(cursor.getString(0));
+            }
+        }
+        return handles;
+    }
+
+    /**
+     * An opaque token column (a checkpoint, a resume cursor) as the text
+     * every connector here writes it as, or null when empty or unset.
+     *
+     * <p>BLOB in the schema, which is what the tables being STRICT makes
+     * the store hold, and text on the wire.
+     */
+    private static String textOf(Cursor cursor, int column) {
+        if (cursor.isNull(column)) {
+            return null;
+        }
+        byte[] bytes = cursor.getType(column) == Cursor.FIELD_TYPE_BLOB
+                ? cursor.getBlob(column)
+                : cursor.getString(column).getBytes(StandardCharsets.UTF_8);
+        return bytes.length == 0 ? null : new String(bytes, StandardCharsets.UTF_8);
     }
 
     /** A bound statement's arguments as the strings {@code rawQuery} takes. */
@@ -561,6 +599,7 @@ final class PimdirStorage {
         try {
             Map<String, byte[]> bodies = new HashMap<>();
             List<JSONObject> drops = new ArrayList<>();
+            List<JSONObject> stamps = new ArrayList<>();
             Set<String> upserted = new HashSet<>();
             JSONArray effects = new JSONArray();
             Set<String> superseded = supersededHandles(writes);
@@ -588,6 +627,22 @@ final class PimdirStorage {
                     case "setCheckpoint":
                         setCheckpoint(db, op);
                         break;
+                    case "openRound":
+                        ensureCollection(db, collectionOf(op.getString("collection")));
+                        roundOp(db, "OPEN_ROUND", op, op.optJSONObject("scope"));
+                        break;
+                    case "stamp":
+                        stamps.add(op);
+                        break;
+                    case "setRoundCursor":
+                        roundOp(db, "SET_ROUND_CURSOR", op, null);
+                        break;
+                    case "closeRound":
+                        roundOp(db, "CLOSE_ROUND", op, op.optJSONObject("coverage"));
+                        break;
+                    case "setCoverage":
+                        roundOp(db, "SET_COVERAGE", op, op.optJSONObject("scope"));
+                        break;
                     default:
                         throw new JSONException("Unknown write op " + op.getString("op"));
                 }
@@ -611,6 +666,12 @@ final class PimdirStorage {
                 if (deleted) {
                     effects.put(effect(collection, handle, "removed"));
                 }
+            }
+
+            // NOTE: after the upserts, so a binding the batch named is stamped
+            // too (SYNC §5): the round's last page drops what no page stamped.
+            for (JSONObject stamp : stamps) {
+                stamp(db, stamp);
             }
 
             collectGarbage(db);
@@ -683,7 +744,7 @@ final class PimdirStorage {
         String object = placement.isNull("object") ? null : placement.optString("object", null);
         JSONObject summary = placement.optJSONObject("summary");
         String sortKey = placement.optString("sortKey", "");
-        int level = levelValue(placement.optString("level", "probed"));
+        int level = levelValue(placement.optString("level", "meta"));
         // NOTE: absent means nobody has read the markers, which the column says
         // as NULL. Storing "[]" for it would turn a never-read set into an
         // authoritative "carries none" and clear whatever the other side knew.
@@ -695,11 +756,14 @@ final class PimdirStorage {
         // remove and an edit after it still beats the delete.
         boolean tombstone = "tombstone".equals(placement.optString("status", "clean"));
 
+        // NOTE: nothing reaches the store unnamed (SYNC §10): a listing names
+        // every member it carries, so an upsert naming no identity on a
+        // handle no binding holds is a driver bug, refused rather than
+        // filed under a key the next listing would have to un-mint.
         if (linkId == null) {
-            upsertProbe(db, collection, source, handle, flags);
-            return null;
+            throw new PimalayaException(
+                    "Unnamed placement " + collection + "/" + handle + " on " + source);
         }
-        deleteProbe(db, collection, source, handle);
 
         // The handle named another identity until now: a resource replaced in
         // place, or a spine whose fetch resolved what its enumeration could
@@ -853,9 +917,6 @@ final class PimdirStorage {
             SQLiteDatabase db, String engineCollection, String handle, boolean deleted) {
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
-        // A handle the source no longer holds is no longer probed either,
-        // whichever of the two the store was carrying it as.
-        deleteProbe(db, collection, source, handle);
 
         String linkId = linkOf(db, collection, source, handle);
         if (linkId == null) {
@@ -889,12 +950,61 @@ final class PimdirStorage {
         }
     }
 
-    private void setCheckpoint(SQLiteDatabase db, JSONObject op) throws JSONException {
-        String collection = collectionOf(op.getString("collection"));
-        String source = sourceOf(op.getString("collection"));
+    /**
+     * One round op of SYNC §5 through its canonical statement: the source's
+     * round opened, its cursor landed, closed with its coverage, or the
+     * coverage restated. {@code scope} is the op's scope or coverage, its
+     * absent bounds open; the cursor and the checkpoint are bound as the
+     * BLOBs the schema keeps them as.
+     */
+    private static void roundOp(SQLiteDatabase db, String statement, JSONObject op,
+            JSONObject scope) throws JSONException {
+        String engine = op.getString("collection");
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collectionOf(engine));
+        values.put("source", sourceOf(engine));
+        if (scope != null) {
+            values.put("since", scope.isNull("since") ? null : scope.optString("since", null));
+            values.put("until", scope.isNull("until") ? null : scope.optString("until", null));
+        }
+        values.put("cursor", blobOf(op, "cursor"));
+        values.put("checkpoint", blobOf(op, "checkpoint"));
+
+        PimdirSql.Bound bound = PimdirSql.bind(statement, values);
+        db.execSQL(bound.sql, bound.args);
+    }
+
+    /** Stamps the bindings a page listed with the open round's id. */
+    private static void stamp(SQLiteDatabase db, JSONObject op) throws JSONException {
+        String engine = op.getString("collection");
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collectionOf(engine));
+        values.put("source", sourceOf(engine));
+        values.put("handles", op.getJSONArray("handles").toString());
+
+        PimdirSql.Bound bound = PimdirSql.bind("STAMP_BINDINGS", values);
+        db.execSQL(bound.sql, bound.args);
+    }
+
+    /** An opaque token field of a write op as the BLOB it is stored as. */
+    private static byte[] blobOf(JSONObject op, String field) {
+        if (op.isNull(field) || !op.has(field)) {
+            return null;
+        }
+        return op.optString(field, "").getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** The collection row a source's sync state hangs off, created when missing. */
+    private static void ensureCollection(SQLiteDatabase db, String collection) {
         db.execSQL(PimdirSql.of("ENSURE_COLLECTION").replace(":collection", "?")
                         .replace(":account", "NULL"),
                 new Object[] {collection, collection});
+    }
+
+    private void setCheckpoint(SQLiteDatabase db, JSONObject op) throws JSONException {
+        String collection = collectionOf(op.getString("collection"));
+        String source = sourceOf(op.getString("collection"));
+        ensureCollection(db, collection);
         // NOTE: the column is BLOB and the tables are STRICT, so a TEXT bind is
         // refused outright rather than coerced. A checkpoint is opaque to the
         // store anyway (a QRESYNC state, a JMAP state string, a DAV sync-token),
@@ -1054,36 +1164,49 @@ final class PimdirStorage {
                 handles.add(
                         cursor.isNull(1) ? provisionalOf(cursor.getString(0)) : cursor.getString(1));
             }
-
-            // A probe is the definition of below full: a handle the
-            // enumeration reported and nothing has read an identity, let alone
-            // a body, for. It holds no item row, so the join above cannot see
-            // it, and leaving it out is leaving every freshly enumerated
-            // member unfetched forever.
-            handles.addAll(probedHandles(engineCollection));
             return handles;
         }
     }
 
     /**
-     * The handles of one collection the enumeration reported and no upgrade
-     * has named yet: they hold no item row, so no listing shows them.
+     * What this source holds of some handles: for each one it binds, the
+     * link id it is filed under and the revision last agreed on (null for
+     * an immutable member). A handle it binds nothing under is absent.
+     *
+     * <p>What naming a listing takes (SYNC §4): a bound member whose
+     * revision has not moved is named by what the store already holds, and
+     * only a new or changed one needs its body read to be named.
      */
-    List<String> probedHandles(String engineCollection) {
+    Map<String, String[]> bound(String engineCollection, List<String> handles) {
         SQLiteDatabase db = store.getReadableDatabase();
+        String collection = collectionOf(engineCollection);
+        String source = sourceOf(engineCollection);
 
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT handle FROM probes WHERE collection = ? AND source = ?",
-                        new String[] {
-                            collectionOf(engineCollection), sourceOf(engineCollection)
-                        })) {
-            List<String> handles = new ArrayList<>(cursor.getCount());
-            while (cursor.moveToNext()) {
-                handles.add(cursor.getString(0));
+        Map<String, String[]> bound = new HashMap<>();
+        for (int from = 0; from < handles.size(); from += SCOPE_MAX) {
+            List<String> chunk = handles.subList(from, Math.min(handles.size(), from + SCOPE_MAX));
+            StringBuilder marks = new StringBuilder();
+            List<String> args = new ArrayList<>(List.of(collection, source));
+            for (String handle : chunk) {
+                marks.append(marks.length() == 0 ? "?" : ",?");
+                args.add(handle);
             }
-            return handles;
+            try (Cursor cursor =
+                    db.rawQuery(
+                            "SELECT handle, link_id, base_revision FROM bindings"
+                                    + " WHERE collection = ? AND source = ? AND handle IN ("
+                                    + marks + ")",
+                            args.toArray(new String[0]))) {
+                while (cursor.moveToNext()) {
+                    bound.put(
+                            cursor.getString(0),
+                            new String[] {
+                                cursor.getString(1), cursor.isNull(2) ? null : cursor.getString(2)
+                            });
+                }
+            }
         }
+        return bound;
     }
 
     /**
@@ -1157,8 +1280,8 @@ final class PimdirStorage {
     // ---- the quiet path ---------------------------------------------------
 
     /**
-     * Whether the source has anything to reconcile: a handle it reported and
-     * nothing has named, an unresolved conflict, an item it still holds that
+     * Whether the source has anything to reconcile: an unresolved conflict,
+     * an item it still holds that
      * the store has retired, or one whose body has moved past the base it last
      * agreed on.
      *
@@ -1174,9 +1297,7 @@ final class PimdirStorage {
         String source = sourceOf(engineCollection);
         try (Cursor cursor =
                 db.rawQuery(
-                        "SELECT EXISTS (SELECT 1 FROM probes"
-                                + " WHERE collection = ? AND source = ?)"
-                                + " OR EXISTS (SELECT 1 FROM items i"
+                        "SELECT EXISTS (SELECT 1 FROM items i"
                                 + " LEFT JOIN bindings b ON b.collection = i.collection"
                                 + " AND b.link_id = i.link_id AND b.source = ?"
                                 + " WHERE i.collection = ?"
@@ -1187,7 +1308,7 @@ final class PimdirStorage {
                                 + " AND i.object_hash IS NOT NULL"
                                 + " AND (b.base_object IS NULL"
                                 + " OR b.base_object <> i.object_hash))))",
-                        new String[] {collection, source, source, collection})) {
+                        new String[] {source, collection})) {
             return cursor.moveToFirst() && cursor.getInt(0) == 1;
         }
     }
@@ -1315,44 +1436,6 @@ final class PimdirStorage {
         }
     }
 
-    private String checkpointOf(SQLiteDatabase db, String collection, String source) {
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT checkpoint FROM sources WHERE collection = ? AND source = ?",
-                        new String[] {collection, source})) {
-            if (cursor.moveToFirst() && !cursor.isNull(0)) {
-                byte[] checkpoint = cursor.getBlob(0);
-                return checkpoint.length == 0
-                        ? null
-                        : new String(checkpoint, StandardCharsets.UTF_8);
-            }
-        }
-        return null;
-    }
-
-    /** Records a handle the source reported and nothing has named yet. */
-    private static void upsertProbe(
-            SQLiteDatabase db, String collection, String source, String handle, String flags) {
-        Map<String, Object> values = new HashMap<>();
-        values.put("collection", collection);
-        values.put("source", source);
-        values.put("handle", handle);
-        values.put("flags", flags);
-        PimdirSql.Bound bound = PimdirSql.bind("UPSERT_PROBE", values);
-        db.execSQL(bound.sql, bound.args);
-    }
-
-    /** Forgets a probe: the handle is named, dropped or superseded. */
-    private static void deleteProbe(
-            SQLiteDatabase db, String collection, String source, String handle) {
-        Map<String, Object> values = new HashMap<>();
-        values.put("collection", collection);
-        values.put("source", source);
-        values.put("handle", handle);
-        PimdirSql.Bound bound = PimdirSql.bind("DELETE_PROBE", values);
-        db.execSQL(bound.sql, bound.args);
-    }
-
     /** Moves the refcount by the difference this placement made, never globally. */
     private void adjustRefcount(SQLiteDatabase db, String before, String after) {
         if (sameObject(before, after)) {
@@ -1422,26 +1505,16 @@ final class PimdirStorage {
         return effect;
     }
 
-    /** The detail ladder as the schema stores it: 0 probed, 1 meta, 2 full. */
+    /**
+     * The detail ladder as the schema stores it: 1 meta, 2 full. 0 is what an
+     * earlier draft wrote for a probed row; nothing writes it now and it reads
+     * as meta (STORAGE §13).
+     */
     private static int levelValue(String name) {
-        switch (name) {
-            case "meta":
-                return 1;
-            case "full":
-                return 2;
-            default:
-                return 0;
-        }
+        return "full".equals(name) ? 2 : 1;
     }
 
     private static String levelName(int value) {
-        switch (value) {
-            case 1:
-                return "meta";
-            case 2:
-                return "full";
-            default:
-                return "probed";
-        }
+        return value == 2 ? "full" : "meta";
     }
 }

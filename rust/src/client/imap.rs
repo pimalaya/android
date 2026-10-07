@@ -23,6 +23,7 @@ use io_imap::{
         fetch::{ImapMessageFetch, ImapMessageFetchOptions},
         greeting::{ImapGreetingGet, ImapGreetingGetOptions},
         list::ImapMailboxList,
+        search::{ImapMessageSearch, ImapMessageSearchOptions},
         select::{ImapMailboxSelect, ImapMailboxSelectOptions},
         store::{ImapMessageStoreOptions, ImapMessageStoreSilent},
     },
@@ -34,27 +35,50 @@ use io_imap::{
     },
     types::{
         IntoStatic,
-        body::{Body, BodyStructure, Disposition},
         command::SelectParameter,
-        core::{Atom, IString, Vec1},
+        core::{AString, Atom, Vec1},
+        datetime::NaiveDate,
         extensions::enable::CapabilityEnable,
-        fetch::{MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName},
+        fetch::{MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName, Section},
         flag::{Flag, FlagFetch, FlagNameAttribute, StoreType},
         mailbox::{ListMailbox, Mailbox},
         response::Capability,
+        search::SearchKey,
         sequence::SequenceSet,
     },
+};
+use io_pimdir::summary::{
+    PimdirSummary,
+    mail::{PimdirMailSummary, derive_meta},
 };
 use url::Url;
 
 use crate::{
-    client::{Client, url_user},
-    mail,
-    types::{BridgeError, Credentials, Mailbox as MailboxEntry, Message},
+    client::{
+        Client,
+        listing::{IMAP_PAGE, Listing, MailPage, MailRequest, Named, SENT_MARGIN_DAYS, Scope},
+        url_user,
+    },
+    types::{BridgeError, Credentials, Mailbox as MailboxEntry},
 };
 
 /// io-imap's own fragmentizer ceiling, 100 MiB per message.
 const MAX_MESSAGE_SIZE: u32 = 100 * 1024 * 1024;
+
+/// The header fields a listing reads off every message: what Annex A's
+/// summary and addresses are derived from, `Content-Type` for the
+/// attachment mark read without the body.
+const HEADER_FIELDS: [&str; 9] = [
+    "DATE",
+    "FROM",
+    "TO",
+    "CC",
+    "BCC",
+    "SUBJECT",
+    "MESSAGE-ID",
+    "IN-REPLY-TO",
+    "CONTENT-TYPE",
+];
 
 /// Everything about an IMAP session that outlives one native call.
 ///
@@ -89,6 +113,10 @@ pub struct ImapState {
     /// happened; a read and a write select the mailbox differently, so
     /// which of the two it was is recorded with it.
     selected: Option<(String, Access)>,
+    /// The UIDs the last `UID SEARCH` found in a scope, newest first,
+    /// keyed by the mailbox, its UIDVALIDITY and the scope: a round's
+    /// pages walk them down without searching again.
+    searched: Option<((String, u32, String), Vec<u32>)>,
 }
 
 /// How a mailbox was opened, since the two are not interchangeable.
@@ -108,6 +136,7 @@ impl ImapState {
             url: url.to_string(),
             capabilities: Vec::new(),
             selected: None,
+            searched: None,
         }
     }
 }
@@ -252,63 +281,199 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
             .collect())
     }
 
-    /// EXAMINE a mailbox, then FETCH the envelope spine of its most
-    /// recent `limit` messages.
+    /// One page of a mailbox's listing (pimdir SYNC §4, §5), every member
+    /// named by the header fields Annex A reads.
     ///
-    /// EXAMINE rather than SELECT: the list is read-only and must not
-    /// clear anyone's `\Recent`. The window is taken off the end of the
-    /// sequence set, since a merged inbox wants the newest mail and
-    /// fetching a 200000-message mailbox whole is not an option.
+    /// A delta is a QRESYNC `SELECT` from the `(UIDVALIDITY,
+    /// HIGHESTMODSEQ)` checkpoint: the server streams the messages whose
+    /// markers moved and the UIDs that went, and the ones that moved are
+    /// read for their headers in the same pass. A server without QRESYNC,
+    /// or a checkpoint the handle space has outgrown, gets a round's first
+    /// page instead, which the engine takes as the round it is.
     ///
-    /// Incrementally where the server and the cursor allow it: a
-    /// `(UIDVALIDITY, HIGHESTMODSEQ)` pair against a QRESYNC server is a
-    /// `SELECT (QRESYNC ..)`, and the server streams the messages whose
-    /// flags moved and the UIDs that went. Anything else is a full round
-    /// over the window, which is what a first pass, a rebuilt handle
-    /// space and a server without the extension all get.
-    pub fn enumerate(
+    /// A round lists the scope newest first, 500 UIDs a page: the UIDs
+    /// `UID SEARCH` finds in the scope (`SENTSINCE` a day below its floor,
+    /// `SENTBEFORE` a day above its ceiling, `ALL` when it has neither),
+    /// read once per session, then each page's headers by `UID FETCH`.
+    /// The cursor is the lowest UID a page reached under its UIDVALIDITY,
+    /// so a round cut off resumes below it, and one whose UIDVALIDITY
+    /// moved is refused for the engine to restart. The checkpoint is taken
+    /// at the first page's EXAMINE, so what moves during the round is the
+    /// next delta's.
+    pub fn list_page(
+        &mut self,
+        mailbox: &str,
+        request: &MailRequest,
+    ) -> Result<MailPage, BridgeError> {
+        match &request.listing {
+            Listing::Delta { checkpoint } => {
+                if let Some((validity, modseq)) = decode_cursor(checkpoint)
+                    && modseq > 0
+                    && self.supports_qresync()
+                    && let Some(validity) = NonZeroU32::new(validity)
+                    && let Some(delta) = self.select_qresync(mailbox, validity, modseq)?
+                {
+                    let mut items = Vec::with_capacity(delta.changed.len());
+                    for chunk in delta.changed.chunks(IMAP_PAGE) {
+                        items.extend(self.fetch_named(mailbox, chunk, &request.scope)?);
+                    }
+                    return Ok(MailPage::delta(items, delta.vanished, delta.checkpoint));
+                }
+                self.round_page(mailbox, None, &request.scope, false)
+            }
+            Listing::Round { cursor, band } => {
+                self.round_page(mailbox, cursor.as_deref(), &request.scope, *band)
+            }
+        }
+    }
+
+    /// One page of a round over `scope`, below `cursor` when resumed.
+    fn round_page(
         &mut self,
         mailbox: &str,
         cursor: Option<&str>,
-        limit: u32,
-    ) -> Result<Enumeration, BridgeError> {
-        if let Some((validity, modseq)) = cursor.and_then(decode_cursor)
-            && modseq > 0
-            && self.supports_qresync()
-            && let Some(validity) = NonZeroU32::new(validity)
-            && let Some(delta) = self.select_qresync(mailbox, validity, modseq)?
-        {
-            return Ok(delta);
-        }
-
-        // NOTE: always examined, cache or no cache: what this needs from
-        // the command is how many messages the mailbox holds, which is
-        // the one thing a skipped select cannot tell it.
+        scope: &Scope,
+        band: bool,
+    ) -> Result<MailPage, BridgeError> {
+        // NOTE: examined on every page, cache or no cache: the UIDVALIDITY
+        // is what says whether the cursor still names these UIDs.
         let data = self.examine(mailbox)?;
-        let checkpoint = encode_cursor(
-            data.uid_validity.map(NonZeroU32::get).unwrap_or(0),
-            data.highest_mod_seq.unwrap_or(0),
-        );
+        let validity = data.uid_validity.map(NonZeroU32::get).unwrap_or(0);
 
-        let exists = data.exists.unwrap_or(0);
-        if exists == 0 {
-            return Ok(Enumeration {
-                items: Vec::new(),
-                vanished: Vec::new(),
-                complete: true,
-                checkpoint,
-            });
+        let below = match cursor {
+            None => None,
+            Some(cursor) => match decode_cursor(cursor) {
+                Some((held, uid)) if held == validity => Some(uid as u32),
+                _ => return Ok(MailPage::rejected()),
+            },
+        };
+
+        let uids = match data.exists.unwrap_or(0) {
+            0 => Vec::new(),
+            _ => self.scoped_uids(mailbox, validity, scope)?,
+        };
+        let mut remaining = uids
+            .iter()
+            .copied()
+            .filter(|uid| below.is_none_or(|below| *uid < below));
+        let page: Vec<u32> = remaining.by_ref().take(IMAP_PAGE).collect();
+        let more = remaining.next().is_some();
+
+        let items = self.fetch_named(mailbox, &page, scope)?;
+        let next = match (more, page.last()) {
+            (true, Some(lowest)) => Some(encode_cursor(validity, u64::from(*lowest))),
+            _ => None,
+        };
+        // NOTE: up front, on the first page: a band round keeps the
+        // checkpoint it has and hands none.
+        let checkpoint = (cursor.is_none() && !band)
+            .then(|| encode_cursor(validity, data.highest_mod_seq.unwrap_or(0)));
+
+        Ok(MailPage::round(items, next, checkpoint))
+    }
+
+    /// The UIDs of the scope, newest first, searched once per session.
+    fn scoped_uids(
+        &mut self,
+        mailbox: &str,
+        validity: u32,
+        scope: &Scope,
+    ) -> Result<Vec<u32>, BridgeError> {
+        let key = (mailbox.to_string(), validity, scope.key());
+        if let Some((held, uids)) = &self.state.searched
+            && *held == key
+        {
+            return Ok(uids.clone());
         }
 
-        let first = exists.saturating_sub(limit).max(1);
-        let items = self.fetch_spine(&format!("{first}:{exists}"), false)?;
+        let mut criteria = Vec::new();
+        if let Some(since) = scope.received_since(SENT_MARGIN_DAYS) {
+            criteria.push(SearchKey::SentSince(imap_date(since)?));
+        }
+        if let Some(until) = scope.received_until(SENT_MARGIN_DAYS) {
+            criteria.push(SearchKey::SentBefore(imap_date(until)?));
+        }
+        if criteria.is_empty() {
+            criteria.push(SearchKey::All);
+        }
+        let criteria = Vec1::try_from(criteria).expect("one criterion at least");
 
-        Ok(Enumeration {
+        let mut uids: Vec<u32> = self
+            .run(ImapMessageSearch::new(
+                criteria,
+                ImapMessageSearchOptions { uid: true },
+            ))?
+            .into_iter()
+            .map(NonZeroU32::get)
+            .collect();
+        uids.sort_unstable_by(|a, b| b.cmp(a));
+        uids.dedup();
+
+        self.state.searched = Some((key, uids.clone()));
+        Ok(uids)
+    }
+
+    /// The named members behind some UIDs of the open mailbox: their
+    /// markers, their size and the header fields Annex A reads, the
+    /// attachment mark from the top-level `Content-Type`. No
+    /// `BODYSTRUCTURE`, by far the heaviest item of a bulk fetch: the mark
+    /// is corrected from the parts when the message is opened. A member
+    /// whose `Date` falls out of the scope is left out.
+    fn fetch_named(
+        &mut self,
+        mailbox: &str,
+        uids: &[u32],
+        scope: &Scope,
+    ) -> Result<Vec<Named>, BridgeError> {
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !self.opened(mailbox) {
+            self.examine(mailbox)?;
+        }
+
+        let set = uids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let sequence_set: SequenceSet = set
+            .as_str()
+            .try_into()
+            .map_err(|_| format!("Invalid sequence set `{set}`"))?;
+        let fields = HEADER_FIELDS
+            .iter()
+            .map(|field| AString::try_from(*field).expect("a header name is an IMAP atom"))
+            .collect::<Vec<_>>();
+        let items = MacroOrMessageDataItemNames::MessageDataItemNames(vec![
+            MessageDataItemName::Uid,
+            MessageDataItemName::Flags,
+            MessageDataItemName::Rfc822Size,
+            MessageDataItemName::BodyExt {
+                section: Some(Section::HeaderFields(
+                    None,
+                    Vec1::try_from(fields).expect("header fields are not none"),
+                )),
+                partial: None,
+                peek: true,
+            },
+        ]);
+
+        let fetched = self.run(ImapMessageFetch::new(
+            sequence_set,
             items,
-            vanished: Vec::new(),
-            complete: true,
-            checkpoint,
-        })
+            ImapMessageFetchOptions {
+                uid: true,
+                ..Default::default()
+            },
+        ))?;
+
+        Ok(fetched
+            .into_values()
+            .filter_map(|items| named(items.into_inner()))
+            .filter(|(_, summary)| scope.contains(summary.date.as_deref()))
+            .map(|(named, _)| named)
+            .collect())
     }
 
     /// A QRESYNC `SELECT (QRESYNC (uidvalidity modseq))`, or [`None`]
@@ -319,7 +484,7 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         mailbox: &str,
         validity: NonZeroU32,
         modseq: u64,
-    ) -> Result<Option<Enumeration>, BridgeError> {
+    ) -> Result<Option<Delta>, BridgeError> {
         let Some(mod_sequence_value) = NonZeroU64::new(modseq) else {
             return Ok(None);
         };
@@ -363,93 +528,19 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
             return Ok(None);
         }
 
-        Ok(Some(Enumeration {
-            items: data
+        Ok(Some(Delta {
+            changed: data
                 .changed
                 .iter()
-                .filter_map(|fetch| spine_entry(&fetch.items.clone().into_inner()))
+                .filter_map(|fetch| uid_of(&fetch.items.clone().into_inner()))
                 .collect(),
             vanished: data
                 .vanished_earlier
                 .iter()
                 .map(|uid| uid.get().to_string())
                 .collect(),
-            complete: false,
             checkpoint: encode_cursor(validity_now, data.highest_mod_seq.unwrap_or(modseq)),
         }))
-    }
-
-    /// The envelopes of the named UIDs, and of nothing else.
-    ///
-    /// What the engine's fetch yield asks for, rather than a window: a
-    /// pass that found one new message reads one envelope. `BODYSTRUCTURE`
-    /// rides along because IMAP has no attachment flag, unlike JMAP's
-    /// `hasAttachment`, and it is affordable here for the same reason the
-    /// fetch is: it is asked for a handful of messages rather than for
-    /// every message of every mailbox, every pass.
-    pub fn fetch_envelopes(
-        &mut self,
-        mailbox: &str,
-        uids: &[&str],
-    ) -> Result<Vec<Message>, BridgeError> {
-        if uids.is_empty() {
-            return Ok(Vec::new());
-        }
-        if !self.opened(mailbox) {
-            self.examine(mailbox)?;
-        }
-
-        let set = uids.join(",");
-        let items = MacroOrMessageDataItemNames::MessageDataItemNames(vec![
-            MessageDataItemName::Uid,
-            MessageDataItemName::Envelope,
-            MessageDataItemName::Flags,
-            MessageDataItemName::BodyStructure,
-        ]);
-        let sequence_set: SequenceSet = set
-            .as_str()
-            .try_into()
-            .map_err(|_| format!("Invalid sequence set `{set}`"))?;
-
-        let fetched = self.run(ImapMessageFetch::new(
-            sequence_set,
-            items,
-            ImapMessageFetchOptions {
-                uid: true,
-                ..Default::default()
-            },
-        ))?;
-
-        Ok(fetched
-            .into_values()
-            .map(|items| message(mailbox, items.into_inner()))
-            .collect())
-    }
-
-    /// A UID-and-flags spine over one sequence set: what an enumerate
-    /// needs and nothing more.
-    fn fetch_spine(&mut self, set: &str, uid: bool) -> Result<Vec<SpineEntry>, BridgeError> {
-        let sequence_set: SequenceSet = set
-            .try_into()
-            .map_err(|_| format!("Invalid sequence set `{set}`"))?;
-        let items = MacroOrMessageDataItemNames::MessageDataItemNames(vec![
-            MessageDataItemName::Uid,
-            MessageDataItemName::Flags,
-        ]);
-
-        let fetched = self.run(ImapMessageFetch::new(
-            sequence_set,
-            items,
-            ImapMessageFetchOptions {
-                uid,
-                ..Default::default()
-            },
-        ))?;
-
-        Ok(fetched
-            .into_values()
-            .filter_map(|items| spine_entry(&items.into_inner()))
-            .collect())
     }
 }
 
@@ -705,161 +796,68 @@ fn uids(uid: &str) -> Result<SequenceSet, BridgeError> {
         .map_err(|_| BridgeError::from(format!("Invalid message id `{uid}`")))
 }
 
-/// One FETCH response's data items to the JNI-facing shape.
-fn message(mailbox: &str, items: Vec<MessageDataItem<'static>>) -> Message {
-    let mut uid: u32 = 0;
-    let mut subject = String::new();
-    let mut from = String::new();
-    let mut from_address = String::new();
-    let mut date = String::new();
-    let mut seen = false;
-    let mut answered = false;
-    let mut flagged = false;
-    let mut has_attachment = false;
+/// One FETCH response's items as the member they name, with the
+/// summary its header fields derive; [`None`] when it carried no UID,
+/// which is nothing this can address.
+fn named(items: Vec<MessageDataItem<'static>>) -> Option<(Named, PimdirMailSummary)> {
+    let mut uid = None;
+    let mut flags = Vec::new();
+    let mut size = None;
+    let mut header = Vec::new();
 
     for item in items {
         match item {
-            MessageDataItem::Uid(value) => uid = value.get(),
-            MessageDataItem::Flags(flags) => {
-                seen = flags.contains(&FlagFetch::Flag(Flag::Seen));
-                answered = flags.contains(&FlagFetch::Flag(Flag::Answered));
-                flagged = flags.contains(&FlagFetch::Flag(Flag::Flagged));
-            }
-            MessageDataItem::BodyStructure(structure) => {
-                has_attachment = attaches(&structure);
-            }
-            MessageDataItem::Envelope(envelope) => {
-                if let Some(value) = envelope.subject.into_option() {
-                    // NOTE: the ENVELOPE is the header text itself, so what
-                    // arrives here is what was written on the wire. A list
-                    // drawing it raw shows the encoded words a reader
-                    // expects to have been decoded for it.
-                    subject = mail::decode_header(&String::from_utf8_lossy(value.as_ref()));
-                }
-                if let Some(value) = envelope.date.into_option() {
-                    date = String::from_utf8_lossy(value.as_ref()).into_owned();
-                }
-                if let Some(address) = envelope.from.first() {
-                    from = display_name(address);
-                    from_address = mailbox_address(address);
+            MessageDataItem::Uid(value) => uid = Some(value.get()),
+            MessageDataItem::Flags(fetched) => flags = flag_names(&fetched),
+            MessageDataItem::Rfc822Size(value) => size = Some(u64::from(value)),
+            MessageDataItem::BodyExt { data, .. } => {
+                if let Some(bytes) = data.0 {
+                    header = bytes.into_inner().into_owned();
                 }
             }
             _ => {}
         }
     }
 
-    Message {
-        mailbox: mailbox.to_string(),
-        id: uid.to_string(),
-        subject,
-        from,
-        from_address,
-        date,
-        seen,
-        answered,
-        flagged,
-        has_attachment,
-    }
-}
-
-/// An envelope address's display name, empty when it carries none.
-fn display_name(address: &io_imap::types::envelope::Address) -> String {
-    let Some(name) = address.name.clone().into_option() else {
-        return String::new();
+    let derivation = derive_meta(&header, size, None);
+    let Some(PimdirSummary::Mail(summary)) = derivation.summary else {
+        return None;
     };
-
-    // Decoded on the same terms as the subject: a sender writing their
-    // own name in their own script reaches the envelope as encoded words,
-    // and a row is where that name is read.
-    let name = mail::decode_header(&String::from_utf8_lossy(name.as_ref()));
-    match name.trim().is_empty() {
-        true => String::new(),
-        false => name,
-    }
+    Some((
+        Named::new(uid?.to_string(), flags, summary.clone()),
+        summary,
+    ))
 }
 
-/// An envelope address's `local@host`, empty when it carries neither.
-fn mailbox_address(address: &io_imap::types::envelope::Address) -> String {
-    let local = address
-        .mailbox
-        .clone()
-        .into_option()
-        .map(|raw| String::from_utf8_lossy(raw.as_ref()).into_owned())
-        .unwrap_or_default();
-    let host = address
-        .host
-        .clone()
-        .into_option()
-        .map(|raw| String::from_utf8_lossy(raw.as_ref()).into_owned())
-        .unwrap_or_default();
-
-    match host.is_empty() {
-        true => local,
-        false => format!("{local}@{host}"),
-    }
-}
-
-/// Whether any part of a MIME tree is something to detach.
-///
-/// The disposition (RFC 2183) decides when the sender stated one: an
-/// inline image is a part a listing must not flag, because what the
-/// paperclip promises is something to detach and not something to
-/// render. **When no disposition was stated at all**, a part that names
-/// a file counts, which is the case this used to miss: `Content-Type:
-/// application/pdf; name="invoice.pdf"` with no `Content-Disposition`
-/// is a perfectly ordinary attachment, and mail in the wild is full of
-/// them.
-fn attaches(structure: &BodyStructure) -> bool {
-    match structure {
-        BodyStructure::Single {
-            body,
-            extension_data,
-        } => {
-            let disposition = extension_data
-                .as_ref()
-                .and_then(|data| data.tail.as_ref())
-                .and_then(kind_of);
-
-            match disposition {
-                Some(kind) => kind.eq_ignore_ascii_case("attachment"),
-                None => names_a_file(body),
-            }
-        }
-        BodyStructure::Multi {
-            bodies,
-            extension_data,
-            ..
-        } => {
-            let own = extension_data
-                .as_ref()
-                .and_then(|data| data.tail.as_ref())
-                .and_then(kind_of)
-                .is_some_and(|kind| kind.eq_ignore_ascii_case("attachment"));
-            own || bodies.as_ref().iter().any(attaches)
-        }
-    }
-}
-
-/// A `Content-Disposition`'s type, when the part carries one.
-fn kind_of(disposition: &Disposition) -> Option<String> {
-    disposition
-        .disposition
-        .as_ref()
-        .map(|(kind, _)| text_of(kind))
-}
-
-/// Whether a part's `Content-Type` carries a non-empty `name`, the
-/// pre-RFC-2183 way of saying a part is a file.
-fn names_a_file(body: &Body) -> bool {
-    body.basic
-        .parameter_list
+/// The markers of a FETCH response, as the store spells them.
+fn flag_names(fetched: &[FlagFetch<'static>]) -> Vec<String> {
+    fetched
         .iter()
-        .any(|(key, value)| text_of(key).eq_ignore_ascii_case("name") && !text_of(value).is_empty())
+        .filter_map(|flag| match flag {
+            FlagFetch::Flag(flag) => Some(flag.to_string()),
+            _ => None,
+        })
+        .collect()
 }
 
-/// An `IString`'s bytes as text, however the server encoded them.
-fn text_of(value: &IString) -> String {
-    String::from_utf8_lossy(&value.clone().into_inner()).into_owned()
+/// The UID of a FETCH response, when it carried one.
+fn uid_of(items: &[MessageDataItem<'static>]) -> Option<u32> {
+    items.iter().find_map(|item| match item {
+        MessageDataItem::Uid(uid) => Some(uid.get()),
+        _ => None,
+    })
+}
+
+/// A day as `SENTSINCE` and `SENTBEFORE` compare it.
+fn imap_date(instant: jiff::Timestamp) -> Result<NaiveDate, BridgeError> {
+    let date = instant.to_zoned(jiff::tz::TimeZone::UTC).date();
+    chrono::NaiveDate::from_ymd_opt(
+        i32::from(date.year()),
+        date.month() as u32,
+        date.day() as u32,
+    )
+    .and_then(|date| NaiveDate::try_from(date).ok())
+    .ok_or_else(|| BridgeError::from(format!("No IMAP date for {instant}")))
 }
 
 /// Reads one message whole: connect, EXAMINE its mailbox and fetch it,
@@ -924,110 +922,14 @@ fn role_of(attributes: &[FlagNameAttribute<'static>]) -> String {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use io_imap::types::{
-        body::{BasicFields, Body, BodyStructure, Disposition, SinglePartExtensionData},
-        core::{IString, NString},
-    };
-
-    use super::attaches;
-
-    fn text(value: &str) -> IString<'static> {
-        value.to_string().try_into().expect("printable ASCII")
-    }
-
-    /// One leaf part: what it names itself, and what it says it is for.
-    fn part(name: Option<&str>, disposition: Option<&str>) -> BodyStructure<'static> {
-        BodyStructure::Single {
-            body: Body {
-                basic: BasicFields {
-                    parameter_list: name
-                        .map(|name| vec![(text("name"), text(name))])
-                        .unwrap_or_default(),
-                    id: NString(None),
-                    description: NString(None),
-                    content_transfer_encoding: text("base64"),
-                    size: 42,
-                },
-                specific: io_imap::types::body::SpecificFields::Basic {
-                    r#type: text("application"),
-                    subtype: text("pdf"),
-                },
-            },
-            extension_data: Some(SinglePartExtensionData {
-                md5: NString(None),
-                tail: disposition.map(|kind| Disposition {
-                    disposition: Some((text(kind), Vec::new())),
-                    tail: None,
-                }),
-            }),
-        }
-    }
-
-    #[test]
-    fn a_named_part_with_no_disposition_is_an_attachment() {
-        // The case the paperclip used to miss: plenty of senders write
-        // `Content-Type: application/pdf; name="invoice.pdf"` and no
-        // `Content-Disposition` at all.
-        assert!(attaches(&part(Some("invoice.pdf"), None)));
-        assert!(!attaches(&part(None, None)));
-    }
-
-    #[test]
-    fn a_stated_disposition_decides_on_its_own() {
-        // An inline image names a file too, and flagging it would
-        // promise something to detach where there is only something to
-        // render.
-        assert!(!attaches(&part(Some("logo.png"), Some("inline"))));
-        assert!(attaches(&part(None, Some("attachment"))));
-        assert!(attaches(&part(Some("invoice.pdf"), Some("ATTACHMENT"))));
-    }
-}
-
-/// One enumerated mailbox: what moved, what went, and where the next
-/// round resumes.
-pub struct Enumeration {
-    pub items: Vec<SpineEntry>,
-    /// UIDs the server reported expunged since the cursor.
-    pub vanished: Vec<String>,
-    /// True when the round listed the whole window rather than a delta,
-    /// so the caller may retire what it did not mention.
-    pub complete: bool,
-    /// The `(UIDVALIDITY, HIGHESTMODSEQ)` pair the next round resumes
-    /// from, opaque to everyone above.
-    pub checkpoint: String,
-}
-
-/// One member of an enumerated mailbox: its UID and its markers.
-pub struct SpineEntry {
-    pub id: String,
-    pub flags: Vec<String>,
-}
-
-/// One FETCH response as the spine entry it stands for; [`None`] when it
-/// carried no UID, which is nothing this can address.
-fn spine_entry(items: &[MessageDataItem<'static>]) -> Option<SpineEntry> {
-    let mut id = None;
-    let mut flags = Vec::new();
-
-    for item in items {
-        match item {
-            MessageDataItem::Uid(uid) => id = Some(uid.get().to_string()),
-            MessageDataItem::Flags(fetched) => {
-                flags = fetched
-                    .iter()
-                    .filter_map(|flag| match flag {
-                        FlagFetch::Flag(flag) => Some(flag.to_string()),
-                        _ => None,
-                    })
-                    .collect();
-            }
-            _ => {}
-        }
-    }
-
-    Some(SpineEntry { id: id?, flags })
+/// What a QRESYNC `SELECT` reported moved since the checkpoint.
+struct Delta {
+    /// The UIDs whose markers moved, or that arrived.
+    changed: Vec<u32>,
+    /// The UIDs the server reported expunged.
+    vanished: Vec<String>,
+    /// The `(UIDVALIDITY, HIGHESTMODSEQ)` pair the next delta lists from.
+    checkpoint: String,
 }
 
 /// The cursor a mailbox resumes from, as the two numbers it is.
@@ -1045,4 +947,52 @@ fn decode_cursor(cursor: &str) -> Option<(u32, u64)> {
     let (validity, modseq) = cursor.split_once(':')?;
 
     Some((validity.parse().ok()?, modseq.parse().ok()?))
+}
+
+#[cfg(test)]
+mod tests {
+    use core::num::NonZeroU32;
+
+    use io_imap::types::{
+        core::NString,
+        fetch::{MessageDataItem, Section},
+        flag::{Flag, FlagFetch},
+    };
+
+    use super::named;
+
+    #[test]
+    fn a_fetched_header_block_names_the_member() {
+        let header = b"Date: Wed, 07 Oct 2026 10:00:00 +0200\r\n\
+From: =?UTF-8?Q?Ren=C3=A9?= <Rene@Example.org>\r\n\
+Subject: Hello\r\n\
+Message-ID: <m1@example.org>\r\n\
+Content-Type: multipart/mixed; boundary=x\r\n\r\n"
+            .to_vec();
+        let items = vec![
+            MessageDataItem::Uid(NonZeroU32::new(42).unwrap()),
+            MessageDataItem::Flags(vec![FlagFetch::Flag(Flag::Seen)]),
+            MessageDataItem::Rfc822Size(1234),
+            MessageDataItem::BodyExt {
+                section: Some(Section::Header(None)),
+                origin: None,
+                data: NString::try_from(header).unwrap(),
+            },
+        ];
+
+        let (named, summary) = named(items).expect("a UID names a member");
+        assert_eq!(named.handle, "42");
+        assert_eq!(named.link_id, "42", "the UID is the identity, as ever");
+        assert_eq!(named.flags, vec![String::from("\\Seen")]);
+        assert_eq!(named.sort_key, "2026-10-07T08:00:00Z");
+        assert_eq!(summary.subject, "Hello");
+        assert_eq!(summary.sender.as_deref(), Some("rene@example.org"));
+        assert_eq!(summary.sender_name.as_deref(), Some("René"));
+        assert_eq!(summary.size, Some(1234));
+        assert_eq!(
+            summary.attachment,
+            Some(true),
+            "multipart/mixed, without the body"
+        );
+    }
 }

@@ -2,17 +2,22 @@ package org.pimalaya;
 
 import android.content.Context;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteCursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteQuery;
 import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.PimdirSql;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiPredicate;
 
 /**
  * The mail side of the pimdir store: mailboxes as collections of kind
@@ -30,9 +35,14 @@ import java.util.Map;
  * not collide. A calendar or an address book uses its URL instead, which is
  * already unique; a mailbox name is not.
  *
- * <p>The merged list is one descending scan of {@code sort_key} across every
- * mail collection. That is the column's whole purpose: the ordering is written
- * once, at sync time, so a listing never parses a date.
+ * <p>The merged list is one descending scan of {@code sort_key} across the
+ * mail collections a filter lets through, read a page at a time around the
+ * scroll position and sized by a count ({@link Query}): io-pimdir's canonical
+ * readers ({@code count_mail}, {@code count_mail_by_day}, {@code count_unread},
+ * {@code list_mail_page_filtered}, {@code search_mail}) run here over
+ * Android's SQLite, the statements crossing the bridge rather than being
+ * transcribed. The ordering is written once, at sync time, so a listing never
+ * parses a date.
  *
  * <p>The items themselves are written by {@link MailEngine} and never here: a
  * mailbox is reconciled rather than replaced, which is what lets a staged
@@ -56,6 +66,7 @@ final class MailStore {
     private static final String TRASH_PREFS = "mail-trash";
 
     private final PimdirItems items;
+    private final PimdirDb store;
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
     private final PimdirQueue queue;
@@ -63,6 +74,7 @@ final class MailStore {
 
     MailStore(Context context, PimdirDb store) {
         this.items = new PimdirItems(store);
+        this.store = store;
         this.collections = new PimdirCollections(store, context);
         this.accounts = new PimdirAccount(context);
         this.queue = new PimdirQueue(store, accounts);
@@ -126,6 +138,7 @@ final class MailStore {
                 .edit()
                 .remove(accountEmail)
                 .apply();
+        MailScope.forget(context, accounts.idOf(accountEmail));
     }
 
     /**
@@ -194,6 +207,16 @@ final class MailStore {
         final String fromAddress;
 
         final long stamp;
+
+        /**
+         * The row's place in the merged order, {@code (sortKey, seq)} with
+         * the collection: what the next page is read after. Empty and 0 on a
+         * message waiting to go out, which is no item.
+         */
+        final String sortKey;
+
+        final long seq;
+
         final boolean seen;
         final boolean answered;
         final boolean flagged;
@@ -267,6 +290,44 @@ final class MailStore {
             this.objectHash = objectHash;
             this.failed = failed;
             this.pending = queued != 0;
+            this.sortKey = "";
+            this.seq = 0;
+        }
+
+        /** One synced message, as a page of the merged list reads it. */
+        StoredMessage(
+                String accountEmail,
+                String collection,
+                String mailbox,
+                String id,
+                String subject,
+                String fromName,
+                String fromAddress,
+                String sortKey,
+                long seq,
+                String flags,
+                boolean hasAttachment) {
+            this.accountEmail = accountEmail;
+            this.collection = collection;
+            this.mailbox = mailbox;
+            this.id = id;
+            this.subject = subject;
+            this.fromName = fromName;
+            this.fromAddress = fromAddress;
+            this.sortKey = sortKey == null ? "" : sortKey;
+            this.seq = seq;
+            // NOTE: from the key rather than the summary's date, since the
+            // key is what the row was ordered by: a label disagreeing with
+            // the order it appears in reads as a bug.
+            this.stamp = PimdirSummary.stampOf(this.sortKey);
+            this.seen = has(flags, MailEngine.SEEN);
+            this.answered = has(flags, MailEngine.ANSWERED);
+            this.flagged = has(flags, MailEngine.FLAGGED);
+            this.hasAttachment = hasAttachment;
+            this.queued = 0;
+            this.objectHash = null;
+            this.failed = false;
+            this.pending = false;
         }
 
         /** The sender as a row shows them: the name, else the address. */
@@ -287,7 +348,7 @@ final class MailStore {
      */
     List<StoredMessage> loadMerged(int limit) {
         List<StoredMessage> messages = new ArrayList<>(outgoing());
-        messages.addAll(synced(limit));
+        messages.addAll(page(query((account, mailbox) -> true, false, false, ""), null, 0, limit));
         return messages;
     }
 
@@ -297,7 +358,7 @@ final class MailStore {
      * <p>Parked rows among them: a refused message is still a message the
      * sender wrote, and the row it shows says so rather than disappearing.
      */
-    private List<StoredMessage> outgoing() {
+    List<StoredMessage> outgoing() {
         List<PimdirQueue.Action> actions = new ArrayList<>(queue.pending());
         actions.addAll(queue.parked());
 
@@ -440,58 +501,442 @@ final class MailStore {
         return thread;
     }
 
-    /** Every synced message, newest first. */
-    private List<StoredMessage> synced(int limit) {
+    // ---- the merged list's reads -----------------------------------------
+
+    /**
+     * What the merged list shows: the mail collections a filter lets
+     * through, the two chips, and the words searched for in the sender and
+     * the subject. Every read below answers under it, so the count that
+     * sizes the list, the per-day counts that place its headers and the
+     * pages it loads agree.
+     */
+    static final class Query {
+        /** The collection ids, as the JSON array the readers bind. */
+        final String collections;
+
+        /** How many collections it covers; none answers nothing. */
+        final int size;
+
+        /** 1 read only, 0 unread only, null either (the unread chip). */
+        final Integer seen;
+
+        /** 1 with an attachment only, null either (the attachment chip). */
+        final Integer attachment;
+
+        /** The {@code LIKE} pattern searched, null when nothing is. */
+        final String pattern;
+
+        Query(List<String> collections, Integer seen, Integer attachment, String pattern) {
+            this.collections = new JSONArray(collections).toString();
+            this.size = collections.size();
+            this.seen = seen;
+            this.attachment = attachment;
+            this.pattern = pattern;
+        }
+
+        /** The same query narrowed to unread mail, for the unread line. */
+        Query unread() {
+            return new Query(this, 0);
+        }
+
+        private Query(Query query, Integer seen) {
+            this.collections = query.collections;
+            this.size = query.size;
+            this.seen = seen;
+            this.attachment = query.attachment;
+            this.pattern = query.pattern;
+        }
+
+        /** The canonical statement's values, with a page's cursor and size. */
+        Map<String, Object> values(StoredMessage after, long limit) {
+            Map<String, Object> values = new HashMap<>();
+            values.put("collections", collections);
+            values.put("seen", seen);
+            values.put("attachment", attachment);
+            values.put("pattern", pattern);
+            values.put("after_key", after == null ? null : after.sortKey);
+            values.put("after_seq", after == null ? null : after.seq);
+            values.put("after_collection", after == null ? null : after.collection);
+            values.put("limit", limit);
+            return values;
+        }
+    }
+
+    /**
+     * The query a list asks for: the mail collections {@code accepts} lets
+     * through by account and mailbox name, the chips, and the words
+     * searched for (empty for none).
+     */
+    Query query(
+            BiPredicate<String, String> accepts,
+            boolean unreadOnly,
+            boolean attachmentsOnly,
+            String words) {
+        List<String> ids = new ArrayList<>();
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+            if (accepts.test(stored.accountEmail, stored.name)) {
+                ids.add(stored.id);
+            }
+        }
+        String trimmed = words == null ? "" : words.trim();
+        return new Query(
+                ids,
+                unreadOnly ? 0 : null,
+                attachmentsOnly ? 1 : null,
+                trimmed.isEmpty() ? null : likePattern(trimmed));
+    }
+
+    /**
+     * The {@code LIKE} pattern {@code search_mail} matches: the words as
+     * typed, {@code %} around them, a literal {@code %}, {@code _} or
+     * {@code \} escaped with {@code \}, as io-pimdir's own reader builds it
+     * ({@code reader::like_pattern}).
+     */
+    static String likePattern(String words) {
+        StringBuilder pattern = new StringBuilder("%");
+        for (char character : words.trim().toCharArray()) {
+            if (character == '%' || character == '_' || character == '\\') {
+                pattern.append('\\');
+            }
+            pattern.append(character);
+        }
+        return pattern.append('%').toString();
+    }
+
+    /**
+     * How many stored messages the query lets through: what sizes the list.
+     *
+     * <p>{@code count_mail} where nothing is searched; a search counts the
+     * rows {@code search_mail} would page through, the statement read as a
+     * subquery rather than restated, there being no count of its own.
+     */
+    long count(Query query) {
+        if (query.size == 0) {
+            return 0;
+        }
+        PimdirSql.Bound bound = query.pattern == null
+                ? PimdirSql.bind("COUNT_MAIL", query.values(null, -1))
+                : wrapped("SELECT count(*) FROM (", "SEARCH_MAIL", ")", query);
+        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+            return cursor.moveToFirst() ? cursor.getLong(0) : 0;
+        }
+    }
+
+    /** One day of the merged list and how many messages fall on it. */
+    static final class Day {
+        /** The day, {@code YYYY-MM-DD} on the reader's wall clock; null for undated mail. */
+        final String day;
+
+        final long count;
+
+        Day(String day, long count) {
+            this.day = day;
+            this.count = count;
+        }
+    }
+
+    /**
+     * How many messages of the query fall on each day, newest day first and
+     * undated mail last: what places the list's day headers without loading
+     * a row.
+     *
+     * <p>{@code shift} is the SQLite modifier moving a UTC instant to the
+     * reader's wall clock ({@code '+120 minutes'}). A search is grouped over
+     * {@code search_mail} read as a subquery, by the same day expression
+     * {@code count_mail_by_day} groups by.
+     */
+    List<Day> countByDay(Query query, String shift) {
+        List<Day> days = new ArrayList<>();
+        if (query.size == 0) {
+            return days;
+        }
+        PimdirSql.Bound bound;
+        if (query.pattern == null) {
+            Map<String, Object> values = query.values(null, -1);
+            values.put("shift", shift);
+            bound = PimdirSql.bind("COUNT_MAIL_BY_DAY", values);
+        } else {
+            PimdirSql.Bound search = wrapped("", "SEARCH_MAIL", "", query);
+            Object[] args = new Object[search.args.length + 1];
+            args[0] = shift;
+            System.arraycopy(search.args, 0, args, 1, search.args.length);
+            bound = new PimdirSql.Bound(
+                    "SELECT date(nullif(sort_key, ''), coalesce(?, '+0 minutes')) AS day,"
+                            + " count(*) FROM (" + search.sql + ")"
+                            + " GROUP BY day ORDER BY day DESC",
+                    args);
+        }
+        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+            while (cursor.moveToNext()) {
+                days.add(new Day(cursor.isNull(0) ? null : cursor.getString(0), cursor.getLong(1)));
+            }
+        }
+        return days;
+    }
+
+    /**
+     * The unread mail of each of the query's collections, chips and search
+     * aside: what the badge counts, over every stored message.
+     */
+    long unread(Query query) {
+        if (query.size == 0) {
+            return 0;
+        }
+        Map<String, Object> values = new HashMap<>();
+        values.put("collections", query.collections);
+        values.put("attachment", null);
+        PimdirSql.Bound bound = PimdirSql.bind("COUNT_UNREAD", values);
+        long unread = 0;
+        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+            while (cursor.moveToNext()) {
+                unread += cursor.getLong(1);
+            }
+        }
+        return unread;
+    }
+
+    /**
+     * One page of the query, newest first: after {@code after} when given
+     * (the keyset, what a scroll reads next), else from {@code offset} rows
+     * in (what a fling lands on).
+     *
+     * <p>The keyset is {@code list_mail_page_filtered}'s and
+     * {@code search_mail}'s own; an offset reads the same statement as a
+     * subquery, which costs the rows it skips and is taken only where no
+     * neighbouring page is loaded to read after.
+     */
+    List<StoredMessage> page(Query query, StoredMessage after, long offset, int limit) {
+        List<StoredMessage> messages = new ArrayList<>(limit);
+        if (query.size == 0 || limit <= 0) {
+            return messages;
+        }
+        String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
+        PimdirSql.Bound bound;
+        if (after != null || offset <= 0) {
+            bound = PimdirSql.bind(statement, query.values(after, limit));
+        } else {
+            PimdirSql.Bound inner = wrapped("", statement, "", query);
+            Object[] args = new Object[inner.args.length + 2];
+            System.arraycopy(inner.args, 0, args, 0, inner.args.length);
+            args[inner.args.length] = limit;
+            args[inner.args.length + 1] = offset;
+            bound = new PimdirSql.Bound(
+                    "SELECT * FROM (" + inner.sql + ") LIMIT ? OFFSET ?", args);
+        }
+
+        Map<String, PimdirCollections.Stored> mailboxes = mailboxes();
+        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+            while (cursor.moveToNext()) {
+                PimdirCollections.Stored mailbox = mailboxes.get(cursor.getString(0));
+                if (mailbox == null) {
+                    continue;
+                }
+                messages.add(
+                        new StoredMessage(
+                                mailbox.accountEmail,
+                                cursor.getString(0),
+                                mailbox.name,
+                                cursor.getString(2),
+                                cursor.isNull(9) ? "" : cursor.getString(9),
+                                cursor.isNull(11) ? "" : cursor.getString(11),
+                                cursor.isNull(10) ? "" : cursor.getString(10),
+                                cursor.isNull(5) ? "" : cursor.getString(5),
+                                cursor.getLong(1),
+                                cursor.isNull(3) ? null : cursor.getString(3),
+                                !cursor.isNull(14) && cursor.getInt(14) == 1));
+            }
+        }
+        return messages;
+    }
+
+    /** Every message of the query, for a selection made of all of it. */
+    List<StoredMessage> all(Query query) {
+        List<StoredMessage> messages = new ArrayList<>();
+        StoredMessage after = null;
+        while (true) {
+            List<StoredMessage> page = page(query, after, 0, 500);
+            messages.addAll(page);
+            if (page.size() < 500) {
+                return messages;
+            }
+            after = page.get(page.size() - 1);
+        }
+    }
+
+    /** The mail collections, by id, for the account and name a row shows. */
+    private Map<String, PimdirCollections.Stored> mailboxes() {
         Map<String, PimdirCollections.Stored> mailboxes = new LinkedHashMap<>();
         for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
             mailboxes.put(stored.id, stored);
         }
+        return mailboxes;
+    }
 
-        List<StoredMessage> messages = new ArrayList<>();
-        try (Cursor cursor =
-                items.readable()
-                        .rawQuery(
-                                "SELECT i.collection, i.link_id, i.flags, i.sort_key,"
-                                        + " s.subject, s.sender_name, s.sender, s.attachment"
-                                        + " FROM items i"
-                                        + " JOIN collections c ON c.id = i.collection"
-                                        + " LEFT JOIN mail_summary s ON s.collection = i.collection"
-                                        + " AND s.link_id = i.link_id"
-                                        + " WHERE c.kind = ? AND i.deleted = 0"
-                                        + " AND i.retained_at IS NULL"
-                                        + " ORDER BY i.sort_key DESC LIMIT ?",
-                                new String[] {PimdirSummary.MAIL, String.valueOf(limit)})) {
-            while (cursor.moveToNext()) {
-                String collection = cursor.getString(0);
-                PimdirCollections.Stored mailbox = mailboxes.get(collection);
-                if (mailbox == null) {
-                    continue;
-                }
-                String flags = cursor.isNull(2) ? null : cursor.getString(2);
-                messages.add(
-                        new StoredMessage(
-                                mailbox.accountEmail,
-                                collection,
-                                mailbox.name,
-                                cursor.getString(1),
-                                cursor.isNull(4) ? "" : cursor.getString(4),
-                                cursor.isNull(5) ? "" : cursor.getString(5),
-                                cursor.isNull(6) ? "" : cursor.getString(6),
-                                // NOTE: from the key rather than the summary's
-                                // date, since the key is what the row was
-                                // ordered by: a label disagreeing with the
-                                // order it appears in reads as a bug.
-                                PimdirSummary.stampOf(cursor.getString(3)),
-                                has(flags, MailEngine.SEEN),
-                                has(flags, MailEngine.ANSWERED),
-                                has(flags, MailEngine.FLAGGED),
-                                !cursor.isNull(7) && cursor.getInt(7) == 1,
-                                0,
-                                null,
-                                false));
+    /**
+     * A canonical statement read whole, between a prefix and a suffix: no
+     * cursor, no limit ({@code -1}), its values bound in place.
+     */
+    private static PimdirSql.Bound wrapped(
+            String prefix, String statement, String suffix, Query query) {
+        PimdirSql.Bound inner = PimdirSql.bind(statement, query.values(null, -1));
+        return new PimdirSql.Bound(prefix + inner.sql + suffix, inner.args);
+    }
+
+    /**
+     * Runs a read binding each value as its own type.
+     *
+     * <p>{@code rawQuery} binds every argument as text, and the readers
+     * compare a chip against an expression with no column affinity
+     * ({@code :seen = EXISTS (...)}), where the text {@code '1'} is never the
+     * integer {@code 1}: the unread chip would match nothing.
+     */
+    static Cursor typed(SQLiteDatabase db, String sql, Object[] args) {
+        return db.rawQueryWithFactory(
+                (database, driver, table, query) -> {
+                    bind(query, args);
+                    return new SQLiteCursor(driver, table, query);
+                },
+                sql,
+                null,
+                null);
+    }
+
+    private static void bind(SQLiteQuery query, Object[] args) {
+        for (int index = 0; index < args.length; index++) {
+            Object value = args[index];
+            int position = index + 1;
+            if (value == null) {
+                query.bindNull(position);
+            } else if (value instanceof Number) {
+                query.bindLong(position, ((Number) value).longValue());
+            } else if (value instanceof Boolean) {
+                query.bindLong(position, ((Boolean) value) ? 1 : 0);
+            } else if (value instanceof byte[]) {
+                query.bindBlob(position, (byte[]) value);
+            } else {
+                query.bindString(position, value.toString());
             }
         }
-        return messages;
+    }
+
+    /**
+     * Corrects one message's attachment mark from the walk of its parts,
+     * once its body is in (pimdir STORAGE Annex A.1): the listing read it
+     * off the top-level {@code Content-Type} alone.
+     */
+    void markAttachment(String collection, String linkId, boolean attachment) {
+        items.writable()
+                .execSQL(
+                        "UPDATE mail_summary SET attachment = ? WHERE collection = ?"
+                                + " AND link_id = ? AND attachment IS NOT ?",
+                        new Object[] {attachment ? 1 : 0, collection, linkId, attachment ? 1 : 0});
+    }
+
+    /** What a mailbox's last complete listing covered (pimdir STORAGE section 4.3). */
+    static final class Coverage {
+        /** The floor on the {@code Date} header, null for all mail. */
+        final String since;
+
+        /** When the listing closed; null while none ever has. */
+        final String at;
+
+        /** Whether a listing is under way, its first pass filling in. */
+        final boolean filling;
+
+        Coverage(String since, String at, boolean filling) {
+            this.since = since;
+            this.at = at;
+            this.filling = filling;
+        }
+    }
+
+    /**
+     * What one mailbox's server source covers: the scope of its last complete
+     * listing, and whether one is under way. What says "mail since" of an
+     * account, or that a search over it is not exhaustive yet.
+     */
+    Coverage coverage(String collection) {
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collection);
+        PimdirSql.Bound bound = PimdirSql.bind("LIST_COVERAGE", values);
+        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+            while (cursor.moveToNext()) {
+                if (!PimdirStorage.SERVER.equals(cursor.getString(0))) {
+                    continue;
+                }
+                return new Coverage(
+                        cursor.isNull(1) ? null : cursor.getString(1),
+                        cursor.isNull(3) ? null : cursor.getString(3),
+                        !cursor.isNull(4));
+            }
+        }
+        return new Coverage(null, null, false);
+    }
+
+    /** How many months of mail an account keeps, 0 for all of it. */
+    int monthsOf(String accountEmail) {
+        return MailScope.months(context, accounts.idOf(accountEmail));
+    }
+
+    /**
+     * Bounds an account's mail to its last {@code months} months, 0 for all
+     * of it, answering how many stored messages the change collected.
+     *
+     * <p>A wider bound collects nothing: the next sync lists the band it now
+     * lacks. A narrower one collects what falls below its floor, since no
+     * sync deletes what lies outside its scope (pimdir SYNC section 5): the
+     * messages stay on the server, and a later widening lists them again.
+     */
+    int bound(String accountEmail, int months) {
+        String account = accounts.idOf(accountEmail);
+        int held = MailScope.months(context, account);
+        MailScope.set(context, account, months);
+
+        boolean narrower = months > 0 && (held == 0 || months < held);
+        if (!narrower) {
+            return 0;
+        }
+        return collectBefore(
+                accountEmail,
+                MailScope.since(months, java.time.LocalDate.now(java.time.ZoneOffset.UTC)));
+    }
+
+    /**
+     * The owner's collection of one account's mail below a date (pimdir
+     * STORAGE section 11.3): every message dated before {@code before} that
+     * owes nothing to any server, removed with its bindings, summary and
+     * body, its mailboxes keeping it on the server. What a narrowed bound
+     * frees; a later widening relists and refetches them. Answers how many
+     * went.
+     */
+    int collectBefore(String accountEmail, String before) {
+        int collected = 0;
+        SQLiteDatabase db = items.writable();
+        db.beginTransaction();
+        try {
+            for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+                if (!stored.accountEmail.equals(accountEmail)) {
+                    continue;
+                }
+                Map<String, Object> values = new HashMap<>();
+                values.put("collection", stored.id);
+                values.put("before", before);
+                PimdirSql.Bound bound = PimdirSql.bind("COLLECT_BEFORE", values);
+                try (Cursor cursor = typed(db, bound.sql, bound.args)) {
+                    while (cursor.moveToNext()) {
+                        collected++;
+                    }
+                }
+            }
+            // NOTE: the cascade drops pins no statement returns, so the
+            // counts are recomputed before the collector reads them.
+            db.execSQL(PimdirSql.split(PimdirSql.of("RECOMPUTE_REFCOUNTS"))[0]);
+            items.collectGarbage(db);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        return collected;
     }
 
     /**

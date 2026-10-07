@@ -401,85 +401,23 @@ public class PimalayaClient {
     }
 
     /**
-     * One mailbox's spine from the cursor the last pass stored: which
-     * messages moved and which went, and no envelopes.
+     * One page of a mailbox's listing, the engine's {@code enumerate}
+     * yield answered: the reply as the engine reads it, every member
+     * named by the summary the listing read (pimdir SYNC section 4).
      *
-     * <p>An empty cursor is a full round over the newest {@code limit}
-     * messages, which is what a first pass and a server without QRESYNC
-     * both get; with one, the server streams the delta and the round says
-     * so, so nothing it did not mention is retired.
+     * <p>Passed through rather than parsed into a model of its own: the
+     * shape is the engine's wire, the driver hands it straight back, and
+     * a Java copy of it would be the duplicated schema the boundary
+     * notes warn about.
      */
-    public MailRound enumerateMailbox(
-            MailSession session, String mailbox, String cursor, int limit) {
-        JSONObject reply =
-                object(
-                        on(
-                                session,
-                                open ->
-                                        Native.enumerateMailbox(
-                                                open.transport(),
-                                                open.handle(),
-                                                mailbox,
-                                                cursor == null ? "" : cursor,
-                                                limit)));
-
-        JSONArray listed = reply.optJSONArray("items");
-        List<MailRef> items = new ArrayList<>(listed == null ? 0 : listed.length());
-        for (int index = 0; listed != null && index < listed.length(); index++) {
-            JSONObject item = object(listed, index);
-            items.add(new MailRef(string(item, "id"), strings(item.optJSONArray("flags"))));
-        }
-
-        return new MailRound(
-                items,
-                strings(reply.optJSONArray("vanished")),
-                reply.optBoolean("complete"),
-                reply.optString("checkpoint"));
-    }
-
-    /** The envelope spine of the named messages, and of no others. */
-    public List<Message> fetchEnvelopes(MailSession session, String mailbox, List<String> ids) {
-        if (ids.isEmpty()) {
-            return List.of();
-        }
-        String named = new JSONArray(ids).toString();
-        JSONArray reply =
-                array(
-                        on(
-                                session,
-                                open ->
-                                        Native.fetchEnvelopes(
-                                                open.transport(),
-                                                open.handle(),
-                                                mailbox,
-                                                named)));
-
-        List<Message> messages = new ArrayList<>(reply.length());
-        for (int index = 0; index < reply.length(); index++) {
-            JSONObject message = object(reply, index);
-            messages.add(
-                    new Message(
-                            string(message, "mailbox"),
-                            string(message, "id"),
-                            string(message, "subject"),
-                            string(message, "from"),
-                            string(message, "fromAddress"),
-                            string(message, "date"),
-                            message.optBoolean("seen"),
-                            message.optBoolean("answered"),
-                            message.optBoolean("flagged"),
-                            message.optBoolean("hasAttachment")));
-        }
-        return messages;
-    }
-
-    /** The strings of a JSON array, empty when there is none. */
-    private static List<String> strings(JSONArray values) {
-        List<String> strings = new ArrayList<>(values == null ? 0 : values.length());
-        for (int index = 0; values != null && index < values.length(); index++) {
-            strings.add(values.optString(index));
-        }
-        return strings;
+    public JSONObject enumerateMailbox(MailSession session, String mailbox, JSONObject request) {
+        String asked = request.toString();
+        return object(
+                on(
+                        session,
+                        open ->
+                                Native.enumerateMailbox(
+                                        open.transport(), open.handle(), mailbox, asked)));
     }
 
     /**
@@ -537,7 +475,8 @@ public class PimalayaClient {
                 reply.optString("date"),
                 reply.optString("kind"),
                 reply.optString("body"),
-                attachments);
+                attachments,
+                reply.optBoolean("attachmentMark"));
     }
 
     /**
@@ -1030,16 +969,25 @@ public class PimalayaClient {
      * {@code {pulled, pushed, conflicts, rejected, refreshed}}.
      */
     public JSONObject offlineSync(OfflineDriver driver, String collection, boolean full) {
-        return object(Native.offlineSync(driver, collection, full, true));
+        return object(Native.offlineSync(driver, collection, full, true, "", true));
     }
 
     /**
      * The same for a collection whose bodies never change, mail: only
      * flags and membership are pushed, so a body a read stored is never
      * mistaken for an edit.
+     *
+     * <p>{@code since} is the account's bound, the floor of the scope on
+     * the {@code Date} header (RFC 3339 {@code Z}), null for all mail;
+     * {@code scopeBound} whether the backend's checkpoint is bound to the
+     * scope it was made under (a Graph delta link is, an IMAP modseq, a
+     * Gmail history id and a JMAP state are not).
      */
-    public JSONObject offlineSyncImmutable(OfflineDriver driver, String collection) {
-        return object(Native.offlineSync(driver, collection, false, false));
+    public JSONObject offlineSyncImmutable(
+            OfflineDriver driver, String collection, String since, boolean scopeBound) {
+        return object(
+                Native.offlineSync(
+                        driver, collection, false, false, since == null ? "" : since, scopeBound));
     }
 
     /**
@@ -1050,17 +998,6 @@ public class PimalayaClient {
     public JSONObject offlineUpgrade(OfflineDriver driver, String collection, List<String> handles) {
         return object(
                 Native.offlineUpgrade(driver, collection, new JSONArray(handles).toString(), true));
-    }
-
-    /**
-     * Raises the given handles to the meta detail tier through the
-     * io-offline engine: each is named and summarised, and no body is
-     * read. Returns the upgrade report {@code {upgraded, fetched, deduped}}.
-     */
-    public JSONObject offlineUpgradeMeta(
-            OfflineDriver driver, String collection, List<String> handles) {
-        return object(
-                Native.offlineUpgrade(driver, collection, new JSONArray(handles).toString(), false));
     }
 
     /**
@@ -1273,6 +1210,15 @@ public class PimalayaClient {
     }
 
     /** Parses an array reply, surfacing the bridge's {@code error} field. */
+    /** The strings of a JSON array, empty when there is none. */
+    private static List<String> strings(JSONArray values) {
+        List<String> strings = new ArrayList<>(values == null ? 0 : values.length());
+        for (int index = 0; values != null && index < values.length(); index++) {
+            strings.add(values.optString(index));
+        }
+        return strings;
+    }
+
     private static JSONArray array(String json) {
         String trimmed = json.trim();
 
