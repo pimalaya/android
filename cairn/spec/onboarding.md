@@ -50,18 +50,18 @@ The standard setup SHALL connect a domain with the best-ranked discovered config
 - THEN the flow offers the advanced setup instead
 
 ### Requirement: A connected account is synchronised before the app shows it
-Finishing the connection flow SHALL synchronise every domain the account covers in one pass, behind the flow's own loader, and SHALL land on the list of the first domain it covers. The user SHALL NOT have to refresh a domain to see what was just connected.
+Finishing the connection flow SHALL land on the list of the first domain the account covers, mail first, and each domain the account covers SHALL owe its first sync to the first time its tab is reached: that tab SHALL sync that domain alone, behind the modal dialog, before showing it. A first sync that failed SHALL stay owed, tried again on the next visit. The user SHALL NOT have to refresh a domain to see what was just connected.
 
 #### Scenario: An account covering three domains
 - GIVEN a connection flow that connected mail, contacts and calendars
 - WHEN it finishes
-- THEN all three are fetched in one pass
-- AND the app lands on the mail list holding the messages that pass fetched
+- THEN the app lands on the mail list, whose dialog syncs the newest chunk of each mailbox and nothing else
+- AND the contacts and the calendars sync, each behind its dialog, the first time their tab is opened
 
 #### Scenario: One domain fails
-- GIVEN a pass whose calendar listing fails
-- WHEN it finishes
-- THEN the domains that succeeded are shown, and the failure is reported once
+- GIVEN a first calendar sync that fails
+- WHEN the calendar tab is opened again
+- THEN its first sync runs again, the domains that succeeded untouched
 
 ### Requirement: The setup names sending in the words of the setup it is in
 The connection flow SHALL offer where mail is submitted as part of connecting mail, and SHALL name it the way the chosen setup names everything else. The standard setup SHALL offer one switch reading *send mail*, carrying no protocol, on when the discovery run turned up an endpoint this client can drive and off and unswitchable when it did not, naming the setup that can connect it. The advanced setup SHALL list, under a switched-on mail section, one row per discovered submission configuration, a row for none, and manual entry. Implicit TLS and STARTTLS are both driven. Submission SHALL sign in with the credential the mail connection signed in with, and the flow SHALL NOT prompt a second time.

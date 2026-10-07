@@ -394,3 +394,16 @@ The store SHALL keep, per collection and source, the round under way (its scope,
 - GIVEN a round whose first page landed
 - WHEN the collection is loaded
 - THEN the round, its cursor and its scope come back with it
+
+### Requirement: A load carries each message's date
+A store load SHALL carry each mail placement's `Date` beside its state, which the bridge SHALL hand the engine as a summary holding the date alone and SHALL NOT write back: a write handing it back unchanged SHALL carry no summary, leaving the stored row alone. The engine reads it to tell a placement in a round's scope from one outside it (SYNC section 5).
+
+#### Scenario: A band listed in one page
+- GIVEN a mailbox listed down to Tuesday
+- WHEN a widening lists the week before in one page
+- THEN the messages above Tuesday stay, none found absent from a band they are not in
+
+#### Scenario: A marker staged on a listed message
+- GIVEN a message listed with its subject and sender
+- WHEN a marker is staged on it and the next sync pushes it
+- THEN its subject and sender are still stored

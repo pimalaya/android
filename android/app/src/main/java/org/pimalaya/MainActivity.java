@@ -173,7 +173,16 @@ public class MainActivity extends Activity {
      * subscribes through {@link #observeSync}, and {@link #setSyncing}
      * pushes the flag to all of them at once.
      */
-    private boolean syncing;
+    private volatile boolean syncing;
+
+    /** Whether the activity is in the foreground: the background fill runs only then. */
+    private volatile boolean foreground;
+
+    /** Whether a step of the background fill is queued or running. */
+    private volatile boolean filling;
+
+    /** The fill's open connections, by account; touched on the io thread only. */
+    private final Map<String, MailSession> fillSessions = new HashMap<>();
 
     private final List<java.util.function.Consumer<Boolean>> syncObservers = new ArrayList<>();
 
@@ -677,6 +686,20 @@ public class MainActivity extends Activity {
                 && authFlipper.getDisplayedChild() == STEP_CONFIG) {
             onboarding.resetConfigContinue();
         }
+
+        // NOTE: the background fill stops when the app leaves the
+        // foreground and picks up where its floors reached on return.
+        foreground = true;
+        if (mailList != null) {
+            mailList.retryOlder();
+        }
+        fillMail();
+    }
+
+    @Override
+    protected void onPause() {
+        foreground = false;
+        super.onPause();
     }
 
     private void setUpHomePanel() {
@@ -1168,7 +1191,10 @@ public class MainActivity extends Activity {
                                 reportMail(pass);
                                 if (pass.failure != null) {
                                     showError(pass.failure, R.string.sync_failed);
+                                } else {
+                                    mailList.retryOlder();
                                 }
+                                fillMail();
                             });
                 });
     }
@@ -1378,7 +1404,10 @@ public class MainActivity extends Activity {
             List<Mailbox> mailboxes = engine.mailboxes();
             mail.replaceMailboxes(account.email, mailboxes);
 
-            for (Mailbox mailbox : mailboxes) {
+            // NOTE: the inbox first, then the sent mail, rather than in the
+            // order the server lists them: a first pass lists one chunk of
+            // each, and the inbox is what the list has to show first.
+            for (Mailbox mailbox : MailEngine.ordered(mailboxes)) {
                 // NOTE: a pass scoped to the filter skips what it hides. The
                 // roster above is still read, so the filter keeps offering it.
                 if (scope != null && !scope.accepts(account.email, mailbox.name)) {
@@ -1482,66 +1511,291 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * The first sync of a freshly connected account: every domain it covers,
-     * in one pass behind the connection flow's own loader, landing on the
-     * list of the first of them.
+     * A freshly connected account: each domain it covers owes its first sync,
+     * and the flow lands on the first of them, whose tab runs it.
      *
-     * <p>Every domain, because the flow connects an account and not a domain.
-     * The contacts alone used to be synced here, so an address that had just
-     * connected mail and calendars landed on three empty lists and waited for
-     * the user to find the refresh of each, which reads as a setup that did
-     * not work rather than as one that only did a third of itself.
+     * <p>One domain at a time, each the first time its tab is reached, rather
+     * than all of them behind one dialog: a first sync of every mailbox's
+     * whole metadata, then every book, then every calendar, kept the user
+     * waiting on what they had not asked to see yet. The landing tab, mail
+     * when the account has it, syncs the newest chunk of every mailbox, the
+     * inbox first; the rest of the mail fills in behind it
+     * ({@link #fillMail}), and contacts and calendars sync when their tab is
+     * opened ({@link #firstSyncIfOwed}).
      */
     void syncConnected(AccountEntry account) {
-        // The first domain the pass reaches, in the order below.
-        syncDomain =
-                account.covers(PimDomain.CONTACTS)
-                        ? R.string.contacts_title
-                        : account.covers(PimDomain.MAIL)
-                                ? R.string.mail_title
-                                : R.string.calendar_title;
+        for (PimDomain domain : PimDomain.values()) {
+            if (account.covers(domain)) {
+                FirstSync.owe(this, account.email, domain);
+            }
+        }
+        main.post(() -> goDomain(landingPanel(account)));
+    }
+
+    /** The domain a list panel shows, null for any other screen. */
+    private static PimDomain domainOf(int panel) {
+        switch (panel) {
+            case PANEL_MAIL:
+                return PimDomain.MAIL;
+            case PANEL_CONTACTS:
+                return PimDomain.CONTACTS;
+            case PANEL_CALENDAR:
+                return PimDomain.CALENDAR;
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * Runs the first sync a domain's tab owes, the first time it is reached
+     * after an account was connected: that domain alone, behind the modal
+     * dialog. Nothing when no account owes it, or while a sync runs.
+     */
+    private void firstSyncIfOwed(int panel) {
+        PimDomain domain = domainOf(panel);
+        if (domain == null || screen != panel || syncing || isFinishing()) {
+            return;
+        }
+        List<AccountEntry> owing = new ArrayList<>();
+        for (String email : FirstSync.owing(this, domain)) {
+            for (AccountEntry account : accountsFor(domain)) {
+                if (account.email.equals(email)) {
+                    owing.add(account);
+                }
+            }
+        }
+        if (owing.isEmpty()) {
+            return;
+        }
+
+        switch (domain) {
+            case MAIL:
+                firstMail(owing);
+                break;
+            case CONTACTS:
+                firstContacts(owing);
+                break;
+            case CALENDAR:
+                firstCalendars(owing);
+                break;
+        }
+    }
+
+    /**
+     * The mail tab's first sync: every owing account's mailboxes, a chunk of
+     * the newest {@link MailEngine#FIRST_CHUNK} each, the inbox first. The
+     * dialog waits for those chunks alone; the background fill takes the
+     * rest once it closes.
+     */
+    private void firstMail(List<AccountEntry> owing) {
+        syncDomain = R.string.mail_title;
         setSyncing(true);
         io.execute(
                 () -> {
-                    // NOTE: the contacts pass is the whole store's, every
-                    // subscribed book of every account. It is the sync the
-                    // engine offers, and the books this run just subscribed
-                    // are among them.
-                    SyncRunner.Outcome contacts =
-                            account.covers(PimDomain.CONTACTS) ? runner.syncRemote() : null;
-
+                    syncTitle(R.string.mail_title);
                     Exception failure = null;
-                    if (account.covers(PimDomain.MAIL)) {
-                        syncTitle(R.string.mail_title);
+                    for (AccountEntry account : owing) {
+                        Exception error;
                         try (MailSession session = openMail(account)) {
-                            failure = fetchMail(account, session, null);
-                        } catch (Exception error) {
+                            error = fetchMail(account, session, null);
+                        } catch (Exception opened) {
+                            error = opened;
+                        }
+                        if (error == null) {
+                            FirstSync.paid(this, account.email, PimDomain.MAIL);
+                        } else if (failure == null) {
                             failure = error;
                         }
                     }
-                    if (account.covers(PimDomain.CALENDAR)) {
-                        syncTitle(R.string.calendar_title);
-                        Exception error = fetchCalendars(account, null);
-                        if (failure == null) {
-                            failure = error;
-                        }
-                    }
-
                     Exception outcome = failure;
                     postAlive(
                             () -> {
                                 setSyncing(false);
                                 mailList.reload();
-                                calendarList.reload();
-                                goDomain(landingPanel(account));
-                                if (contacts != null) {
-                                    reportSync(contacts);
+                                if (outcome != null) {
+                                    showError(outcome, R.string.sync_failed);
                                 }
-                                if (outcome != null
-                                        && (contacts == null || contacts.failure == null)) {
+                                fillMail();
+                            });
+                });
+    }
+
+    /**
+     * The contacts tab's first sync: the remote pass over every subscribed
+     * book, the books the owing accounts just subscribed among them.
+     */
+    private void firstContacts(List<AccountEntry> owing) {
+        syncDomain = R.string.contacts_title;
+        setSyncing(true);
+        io.execute(
+                () -> {
+                    SyncRunner.Outcome outcome = runner.syncRemote();
+                    if (outcome.failure == null) {
+                        for (AccountEntry account : owing) {
+                            FirstSync.paid(this, account.email, PimDomain.CONTACTS);
+                        }
+                    }
+                    postAlive(
+                            () -> {
+                                setSyncing(false);
+                                reloadContacts();
+                                reportSync(outcome);
+                            });
+                });
+    }
+
+    /** The calendar tab's first sync: every owing account's calendars. */
+    private void firstCalendars(List<AccountEntry> owing) {
+        syncDomain = R.string.calendar_title;
+        setSyncing(true);
+        io.execute(
+                () -> {
+                    syncTitle(R.string.calendar_title);
+                    Exception failure = null;
+                    for (AccountEntry account : owing) {
+                        Exception error = fetchCalendars(account, null);
+                        if (error == null) {
+                            FirstSync.paid(this, account.email, PimDomain.CALENDAR);
+                        } else if (failure == null) {
+                            failure = error;
+                        }
+                    }
+                    Exception outcome = failure;
+                    postAlive(
+                            () -> {
+                                setSyncing(false);
+                                calendarList.reload();
+                                if (outcome != null) {
                                     showError(outcome, R.string.sync_failed);
                                 }
                             });
+                });
+    }
+
+    /**
+     * Starts the background fill when it is allowed and not running: every
+     * mailbox widened a chunk of {@link MailEngine#FILL_CHUNK} messages at a
+     * time toward its account's bound, the inbox and the sent mail first, no
+     * dialog, each page landing in the list as a pass's do.
+     *
+     * <p>One chunk per task on the io thread, so a pull or a widening the
+     * user asks for waits one chunk at most. It stops when the app leaves the
+     * foreground, the network is metered or gone, another sync runs, or a
+     * chunk fails, and nothing is kept but the floors the store covers: the
+     * next start, on return or after a pass, resumes from them.
+     */
+    void fillMail() {
+        if (filling || !fillAllowed()) {
+            return;
+        }
+        filling = true;
+        io.execute(this::fillStep);
+    }
+
+    /** One chunk of the background fill, on the io thread, and the next queued. */
+    private void fillStep() {
+        MailFill.Step step =
+                MailFill.step(
+                        new MailFill.Host() {
+                            @Override
+                            public boolean allowed() {
+                                return fillAllowed();
+                            }
+
+                            @Override
+                            public List<MailStore.Edge> edges() {
+                                return mail.edges();
+                            }
+
+                            @Override
+                            public void widen(MailStore.Edge edge) throws Exception {
+                                widenOne(edge, MailEngine.FILL_CHUNK);
+                            }
+                        });
+        Log.d("pimalaya", "mail fill: " + step);
+        if (step == MailFill.Step.AGAIN) {
+            io.execute(this::fillStep);
+            return;
+        }
+        for (MailSession session : fillSessions.values()) {
+            session.close();
+        }
+        fillSessions.clear();
+        filling = false;
+    }
+
+    /**
+     * Widens one mailbox by one chunk on the io thread, on a connection the
+     * fill keeps open for its account between chunks.
+     */
+    private void widenOne(MailStore.Edge edge, int count) throws Exception {
+        AccountEntry account = null;
+        for (AccountEntry candidate : accountsFor(PimDomain.MAIL)) {
+            if (candidate.email.equals(edge.accountEmail)) {
+                account = candidate;
+            }
+        }
+        if (account == null) {
+            return;
+        }
+        MailSession session = fillSessions.get(account.email);
+        if (session == null) {
+            session = openMail(account);
+            fillSessions.put(account.email, session);
+        }
+        new MailEngine(pimdir, client, session, accountIdOf(account.email))
+                .widen(edge.collection, count);
+    }
+
+    /**
+     * Whether the background fill may run now: the app in the foreground, no
+     * other sync, and a network that is there and not metered.
+     */
+    private boolean fillAllowed() {
+        if (!foreground || syncing) {
+            return false;
+        }
+        android.net.ConnectivityManager connectivity =
+                getSystemService(android.net.ConnectivityManager.class);
+        return connectivity != null
+                && connectivity.getActiveNetwork() != null
+                && !connectivity.isActiveNetworkMetered();
+    }
+
+    /** Whether a network is there at all, for a widening the user scrolled to. */
+    boolean online() {
+        android.net.ConnectivityManager connectivity =
+                getSystemService(android.net.ConnectivityManager.class);
+        return connectivity != null && connectivity.getActiveNetwork() != null;
+    }
+
+    /**
+     * Widens the mailboxes a scroll reached the end of: every shown mailbox
+     * whose floor limits the list, by one chunk of
+     * {@link MailEngine#FIRST_CHUNK} each, on the io thread, then tells
+     * {@code done} on the main thread whether it went through.
+     */
+    void widenMail(java.util.function.Predicate<String> shown, java.util.function.Consumer<Boolean> done) {
+        io.execute(
+                () -> {
+                    boolean widened = true;
+                    for (MailStore.Edge edge : MailFill.limiting(mail.edges(), shown)) {
+                        try {
+                            widenOne(edge, MailEngine.FIRST_CHUNK);
+                        } catch (Exception error) {
+                            Log.w("pimalaya", "older mail failed: " + edge.collection, error);
+                            widened = false;
+                            break;
+                        }
+                    }
+                    if (!filling) {
+                        for (MailSession session : fillSessions.values()) {
+                            session.close();
+                        }
+                        fillSessions.clear();
+                    }
+                    boolean outcome = widened;
+                    postAlive(() -> done.accept(outcome));
                 });
     }
 
@@ -1621,6 +1875,7 @@ public class MainActivity extends Activity {
                                 calendarList.reload();
                                 reportSync(outcome);
                                 reportMail(sent);
+                                fillMail();
                                 // NOTE: one error dialog, the contacts one first.
                                 if (other != null && outcome.failure == null) {
                                     showError(other, R.string.sync_failed);
@@ -2852,6 +3107,10 @@ public class MainActivity extends Activity {
      * (the contacts screen delegates to its selection/search state).
      */
     void applyChrome(int panel) {
+        // NOTE: posted, so the tab is drawn before its first sync's dialog
+        // goes up over it.
+        main.post(() -> firstSyncIfOwed(panel));
+
         android.widget.ImageButton fab = findViewById(R.id.fab);
 
         // Every screen change resets the shared FAB to its plain enabled

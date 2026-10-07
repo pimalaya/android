@@ -100,32 +100,131 @@ abstract class PimdirEngine implements OfflineDriver {
         step(Progress.STAGE_DOWNLOAD, count);
     }
 
+    /**
+     * Where a pass's time goes: the debug log's numbers, page by page, and
+     * what a test reads to tell the bridge's share from the store's.
+     */
+    static final class Clock {
+        /** Nanoseconds in the remote's own call: the network and the connector. */
+        long remote;
+
+        /** Nanoseconds turning yields and replies into and out of JSON on this side. */
+        long json;
+
+        /** Nanoseconds in the engine between a reply and its next yield, its parse included. */
+        long engine;
+
+        /** Nanoseconds the store spent on loads and writes. */
+        long store;
+
+        /** Members the pages listed. */
+        int listed;
+
+        /** Pages listed. */
+        int pages;
+
+        void add(Clock other) {
+            remote += other.remote;
+            json += other.json;
+            engine += other.engine;
+            store += other.store;
+            listed += other.listed;
+            pages += other.pages;
+        }
+
+        @Override
+        public String toString() {
+            return listed + " listed in " + pages + " pages: remote " + remote / 1_000_000
+                    + " ms, json " + json / 1_000_000 + " ms, engine " + engine / 1_000_000
+                    + " ms, store " + store / 1_000_000 + " ms";
+        }
+    }
+
+    /** The pass's clock, every page landed so far folded in. */
+    final Clock clock = new Clock();
+
+    /** The page under way, logged and folded into {@link #clock} at its write. */
+    private Clock page = new Clock();
+
+    /** When the last reply went back to the engine; 0 before the first. */
+    private long returned;
+
+    /**
+     * Counts a remote call toward the page under way, for a driver timing
+     * its network apart from reading what came back.
+     */
+    protected void remote(long nanos) {
+        page.remote += nanos;
+    }
+
+    /** Counts the members one listed page carried toward the page under way. */
+    protected void listed(int count) {
+        page.listed += count;
+        page.pages += 1;
+    }
+
     @Override
     public String serve(String yieldJson) {
+        long started = System.nanoTime();
+        if (returned != 0) {
+            page.engine += started - returned;
+        }
         try {
             JSONObject yielded = new JSONObject(yieldJson);
-            switch (yielded.getString("op")) {
-                case "load":
-                    return offline.loadCollection(
+            String op = yielded.getString("op");
+            long parsed = System.nanoTime();
+            page.json += parsed - started;
+            String reply;
+            switch (op) {
+                case "load": {
+                    JSONObject loaded =
+                            offline.loadCollection(
                                     yielded.getString("collection"),
-                                    yielded.optJSONObject("scope"))
-                            .toString();
+                                    yielded.optJSONObject("scope"));
+                    long read = System.nanoTime();
+                    page.store += read - parsed;
+                    reply = loaded.toString();
+                    page.json += System.nanoTime() - read;
+                    break;
+                }
                 case "lookup":
-                    return offline.lookupObjects(yielded.getJSONArray("links")).toString();
+                    reply = offline.lookupObjects(yielded.getJSONArray("links")).toString();
+                    break;
                 case "write":
                     applied(offline.applyWrites(yielded.getJSONArray("writes")));
-                    return "{}";
-                case "enumerate":
-                    return named(yielded, enumerate(yielded)).toString();
+                    page.store += System.nanoTime() - parsed;
+                    reply = "{}";
+                    if (page.pages > 0) {
+                        Log.d("pimalaya", "page " + page);
+                        clock.add(page);
+                        page = new Clock();
+                    }
+                    break;
+                case "enumerate": {
+                    long remoteBefore = page.remote;
+                    JSONObject listed = named(yielded, enumerate(yielded));
+                    long done = System.nanoTime();
+                    // NOTE: what of the call was not the remote's own was this
+                    // side reading the reply.
+                    page.json += (done - parsed) - (page.remote - remoteBefore);
+                    reply = listed.toString();
+                    page.json += System.nanoTime() - done;
+                    break;
+                }
                 case "fetch":
-                    return fetch(yielded).toString();
+                    reply = fetch(yielded).toString();
+                    break;
                 case "push":
-                    return push(yielded).toString();
+                    reply = push(yielded).toString();
+                    break;
                 default:
-                    return error("Unsupported engine yield " + yielded.getString("op"));
+                    reply = error("Unsupported engine yield " + op);
             }
+            returned = System.nanoTime();
+            return reply;
         } catch (Exception failure) {
             Log.w("pimalaya", "offline driver failed", failure);
+            returned = System.nanoTime();
             return error(failure);
         }
     }

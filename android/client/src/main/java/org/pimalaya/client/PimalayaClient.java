@@ -411,13 +411,40 @@ public class PimalayaClient {
      * notes warn about.
      */
     public JSONObject enumerateMailbox(MailSession session, String mailbox, JSONObject request) {
+        return object(enumerateMailboxRaw(session, mailbox, request));
+    }
+
+    /**
+     * The same page as the string the bridge answered, for a caller timing
+     * the network apart from reading the reply.
+     */
+    public String enumerateMailboxRaw(MailSession session, String mailbox, JSONObject request) {
         String asked = request.toString();
-        return object(
-                on(
-                        session,
-                        open ->
-                                Native.enumerateMailbox(
-                                        open.transport(), open.handle(), mailbox, asked)));
+        return on(
+                session,
+                open -> Native.enumerateMailbox(open.transport(), open.handle(), mailbox, asked));
+    }
+
+    /**
+     * The floor of a mailbox's next chunk (a number of messages, never a
+     * span of time): the oldest {@code Date} among its {@code count} newest
+     * messages dated before {@code before}, null for no ceiling. Null when
+     * fewer than {@code count} dated messages lie below the ceiling: the
+     * mailbox is whole below it.
+     */
+    public String mailFloor(MailSession session, String mailbox, String before, int count) {
+        JSONObject reply =
+                object(
+                        on(
+                                session,
+                                open ->
+                                        Native.mailFloor(
+                                                open.transport(),
+                                                open.handle(),
+                                                mailbox,
+                                                before == null ? "" : before,
+                                                count)));
+        return reply.isNull("floor") ? null : reply.optString("floor", null);
     }
 
     /**
@@ -1185,6 +1212,11 @@ public class PimalayaClient {
      * field along with the HTTP status riding it, when the failure
      * was an HTTP round.
      */
+    /** A bridge reply read whole, a failure it carries thrown. */
+    public static JSONObject reply(String json) {
+        return object(json);
+    }
+
     static JSONObject object(String json) {
         JSONObject reply = read(json);
         String error = reply.optString("error");

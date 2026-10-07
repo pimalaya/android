@@ -101,10 +101,42 @@ public final class PimdirSql {
      * colon.
      */
     public static Bound bind(String name, Map<String, Object> values) {
+        Rewritten rewritten = rewritten(name);
+        Object[] args = new Object[rewritten.names.length];
+        for (int index = 0; index < args.length; index++) {
+            args[index] = values.get(rewritten.names[index]);
+        }
+        return new Bound(rewritten.sql, args);
+    }
+
+    /** A statement rewritten to positional parameters, and the name each one draws. */
+    private static final class Rewritten {
+        final String sql;
+        final String[] names;
+
+        Rewritten(String sql, String[] names) {
+            this.sql = sql;
+            this.names = names;
+        }
+    }
+
+    /** The rewritten statements, by name: a sync binds the same few thousands of times. */
+    private static final Map<String, Rewritten> rewrites = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * One statement's rewrite, done once: its first statement taken
+     * comment-free, each {@code :name} outside a string literal turned into
+     * {@code ?}, in the order they occur.
+     */
+    private static Rewritten rewritten(String name) {
+        Rewritten held = rewrites.get(name);
+        if (held != null) {
+            return held;
+        }
         String[] statements = split(of(name));
         String sql = statements.length == 0 ? "" : statements[0];
         StringBuilder rewritten = new StringBuilder(sql.length());
-        List<Object> args = new ArrayList<>();
+        List<String> names = new ArrayList<>();
         boolean inString = false;
 
         for (int index = 0; index < sql.length(); index++) {
@@ -118,7 +150,7 @@ public final class PimdirSql {
                 while (end < sql.length() && isNameChar(sql.charAt(end))) {
                     end++;
                 }
-                args.add(values.get(sql.substring(index + 1, end)));
+                names.add(sql.substring(index + 1, end));
                 rewritten.append('?');
                 index = end - 1;
                 continue;
@@ -127,7 +159,9 @@ public final class PimdirSql {
             rewritten.append(current);
         }
 
-        return new Bound(rewritten.toString(), args.toArray());
+        Rewritten made = new Rewritten(rewritten.toString(), names.toArray(new String[0]));
+        rewrites.put(name, made);
+        return made;
     }
 
     /** A statement with its arguments, as {@code execSQL} and friends take them. */

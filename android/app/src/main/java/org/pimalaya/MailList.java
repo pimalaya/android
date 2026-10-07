@@ -217,9 +217,13 @@ final class MailList {
 
         reads.execute(
                 () -> {
-                    MailStore.Query listed =
+                    MailStore.Query wanted =
                             store.query(filter::accepts, unread, attachments, words);
                     MailStore.Query everything = store.query(filter::accepts, false, false, "");
+                    // NOTE: a search covers every stored message; the list
+                    // reaches down to the floor its mailboxes share alone.
+                    String floor = words.trim().isEmpty() ? store.floorOf(wanted) : null;
+                    MailStore.Query listed = wanted.reaching(floor);
 
                     List<MailStore.StoredMessage> outbox = new ArrayList<>();
                     for (MailStore.StoredMessage message : store.outgoing()) {
@@ -235,6 +239,7 @@ final class MailList {
                     long shownUnread = store.count(listed.unread());
                     long badge = store.unread(everything);
                     Layout next = Layout.of(host, outbox, outboxLabel, undated, days, shownUnread);
+                    next.limited = floor != null;
 
                     // NOTE: the pages around where the list stands, read
                     // before the swap, so the rows on screen stay drawn.
@@ -281,7 +286,64 @@ final class MailList {
                                 R.plurals.mail_meta_unread, unread, unread, rows)
                         : resources.getQuantityString(R.plurals.mail_meta, rows, rows));
         host.findViewById(R.id.mail_empty)
-                .setVisibility(rows == 0 ? View.VISIBLE : View.GONE);
+                .setVisibility(rows == 0 && !layout.limited ? View.VISIBLE : View.GONE);
+    }
+
+    // ---- older mail -------------------------------------------------------
+
+    /** Whether the mailboxes' next chunks are being listed for the list's end. */
+    private boolean widening;
+
+    /** Whether older mail could not be listed (no network, or it failed): no retry until asked. */
+    private boolean stalled;
+
+    /**
+     * Lets the list's end try for older mail again: after a pass went through,
+     * or on return to the app.
+     */
+    void retryOlder() {
+        if (stalled) {
+            stalled = false;
+            adapter.notifyDataSetChanged();
+        }
+    }
+
+    /**
+     * The list's end was reached while its floor holds older mail back: the
+     * next chunk of every shown mailbox whose floor is the limiting one, then
+     * the list read again, reaching down to whichever floor limits it next.
+     */
+    private void older() {
+        if (widening || stalled || currentQuery == null) {
+            return;
+        }
+        if (!host.online()) {
+            stalled = true;
+            host.main.post(adapter::notifyDataSetChanged);
+            return;
+        }
+        widening = true;
+        host.widenMail(
+                currentQuery::holds,
+                widened -> {
+                    widening = false;
+                    stalled = !widened;
+                    reload();
+                });
+    }
+
+    /** The list's last row while older mail is held back: loading, or why not. */
+    private View more(View recycled, ViewGroup parent) {
+        View view = recycled;
+        if (view == null) {
+            view = LayoutInflater.from(host).inflate(R.layout.item_mail_more, parent, false);
+        }
+        older();
+        view.findViewById(R.id.mail_more_progress)
+                .setVisibility(stalled ? View.GONE : View.VISIBLE);
+        ((TextView) view.findViewById(R.id.mail_more_label))
+                .setText(stalled ? R.string.mail_more_offline : R.string.mail_more_loading);
+        return view;
     }
 
     /**
@@ -323,6 +385,9 @@ final class MailList {
 
         /** Each section's header position. */
         int[] headerAt = new int[0];
+
+        /** Whether a floor holds older mail back, the list ending on a row saying so. */
+        boolean limited;
 
         int size;
 
@@ -541,7 +606,12 @@ final class MailList {
     private final class Adapter extends BaseAdapter {
         @Override
         public int getCount() {
-            return layout.size;
+            return layout.size + (layout.limited ? 1 : 0);
+        }
+
+        /** Whether a position is the row past the last message. */
+        private boolean isMore(int position) {
+            return layout.limited && position == layout.size;
         }
 
         @Override
@@ -556,21 +626,27 @@ final class MailList {
 
         @Override
         public int getViewTypeCount() {
-            return 2;
+            return 3;
         }
 
         @Override
         public int getItemViewType(int position) {
+            if (isMore(position)) {
+                return 2;
+            }
             return layout.isHeader(position) ? 1 : 0;
         }
 
         @Override
         public boolean isEnabled(int position) {
-            return !layout.isHeader(position);
+            return !isMore(position) && !layout.isHeader(position);
         }
 
         @Override
         public View getView(int position, View recycled, ViewGroup parent) {
+            if (isMore(position)) {
+                return more(recycled, parent);
+            }
             if (layout.isHeader(position)) {
                 View view = recycled;
                 if (view == null) {

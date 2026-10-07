@@ -44,7 +44,7 @@ import java.util.Map;
  * write, so the top of the list shows while the rest fills in, and a pass
  * cut off resumes where its last page landed.
  */
-final class MailEngine extends PimdirEngine {
+class MailEngine extends PimdirEngine {
     /** The IMAP {@code \Seen} flag, as the store's JSON array spells it. */
     static final String SEEN = "\\Seen";
 
@@ -71,6 +71,15 @@ final class MailEngine extends PimdirEngine {
      * it never sees them.
      */
     private static final String[] WRITABLE = {SEEN, ANSWERED, FLAGGED, DELETED};
+
+    /**
+     * Messages a mailbox's first pass lists, and a scroll past the list's
+     * floor widens a mailbox by: a number of messages, never a span of time.
+     */
+    static final int FIRST_CHUNK = 50;
+
+    /** Messages one step of the background fill widens a mailbox by. */
+    static final int FILL_CHUNK = 500;
 
     /**
      * Told after every write a mail driver's pass lands, so a list showing
@@ -126,12 +135,127 @@ final class MailEngine extends PimdirEngine {
      */
     void sync(String collection) {
         step(Progress.STAGE_SERVER, 0);
-        String since = MailScope.sinceOf(pimdir.context(), accountId);
+        list(collection, scopeOf(collection));
+    }
+
+    /**
+     * Widens one mailbox by its next chunk: the {@code count} newest messages
+     * dated below its floor, the oldest {@code Date} among them its new
+     * floor, within the account's bound. A chunk is a number of messages,
+     * never a span of time. Answers whether there was anything to widen: a
+     * mailbox listed whole within the bound has nothing.
+     *
+     * <p>A mailbox never listed lists its first chunk instead, and a round
+     * under way resumes rather than opening another.
+     *
+     * <p>Where the backend's checkpoint is bound to no scope (IMAP, Gmail,
+     * JMAP), the wider scope lists only the band below the old floor. A Graph
+     * delta link made under a filter is bound to it, so the wider scope is
+     * listed whole again: pimdir keeps one checkpoint per source, and a band
+     * listed apart from it would leave the delta blind to what the band holds.
+     */
+    boolean widen(String collection, int count) {
+        String bound = bound();
+        MailStore.Coverage coverage = mail().coverage(collection);
+        if (coverage.filling || coverage.at == null) {
+            sync(collection);
+            return true;
+        }
+        if (!MailScope.limits(coverage.since, bound)) {
+            return false;
+        }
+        step(Progress.STAGE_SERVER, 0);
+        String floor = floor(collection, coverage.since, count);
+        list(collection, MailScope.clamp(floor, bound));
+        return true;
+    }
+
+    /**
+     * The floor one pass lists a mailbox from, within the account's bound:
+     * where its round under way lists from, else what its last closed round
+     * covered, so a pass after the first is a delta; and for a mailbox never
+     * listed, its first chunk, the {@link #FIRST_CHUNK} newest messages.
+     */
+    private String scopeOf(String collection) {
+        String bound = bound();
+        MailStore.Coverage coverage = mail().coverage(collection);
+        if (coverage.filling) {
+            return MailScope.clamp(coverage.roundSince, bound);
+        }
+        if (coverage.at != null) {
+            return MailScope.clamp(coverage.since, bound);
+        }
+        String floor = floor(collection, null, FIRST_CHUNK);
+        return MailScope.clamp(floor, bound);
+    }
+
+    /**
+     * The floor of a mailbox's next chunk: the oldest {@code Date} among its
+     * {@code count} newest messages dated before {@code before} (null for no
+     * ceiling), null when fewer lie below it and the mailbox is whole there.
+     */
+    String floor(String collection, String before, int count) {
+        return client.mailFloor(session, mailboxOf(collection), before, count);
+    }
+
+    /** Runs the engine's round or delta over a mailbox from {@code since}. */
+    private void list(String collection, String since) {
         boolean scopeBound = session != null && PimalayaClient.isGraph(session.account());
         Log.d(
                 "pimalaya",
                 "mail sync " + collection + " since " + since + ": "
-                        + client.offlineSyncImmutable(this, collection, since, scopeBound));
+                        + client.offlineSyncImmutable(this, collection, since, scopeBound)
+                        + ", the pass so far " + clock);
+    }
+
+    /** The floor of the account's bound today, null for all of its mail. */
+    private String bound() {
+        return MailScope.sinceOf(pimdir.context(), accountId);
+    }
+
+    /** The account's mail store, for the coverage a pass starts from. */
+    private MailStore mail() {
+        if (mail == null) {
+            mail = new MailStore(pimdir.context(), pimdir);
+        }
+        return mail;
+    }
+
+    private MailStore mail;
+
+    /**
+     * The order a pass takes an account's mailboxes in: the inbox, the sent
+     * mail, the drafts, every other by name, the junk and the trash last. The
+     * first dialog waits on the inbox before anything else, and every pass
+     * after it lands the inbox first.
+     */
+    static List<Mailbox> ordered(List<Mailbox> mailboxes) {
+        List<Mailbox> ordered = new ArrayList<>(mailboxes);
+        ordered.sort(
+                java.util.Comparator.comparingInt((Mailbox mailbox) -> rank(mailbox.role))
+                        .thenComparing(mailbox -> mailbox.name, String.CASE_INSENSITIVE_ORDER));
+        return ordered;
+    }
+
+    /** Where a role sorts in a pass: lower first. */
+    static int rank(String role) {
+        if (role == null) {
+            return 3;
+        }
+        switch (role) {
+            case "inbox":
+                return 0;
+            case "sent":
+                return 1;
+            case "drafts":
+                return 2;
+            case "junk":
+                return 4;
+            case "trash":
+                return 5;
+            default:
+                return 3;
+        }
     }
 
     /** The mailbox behind a collection id, which is what IMAP names it by. */
@@ -152,7 +276,10 @@ final class MailEngine extends PimdirEngine {
         JSONObject scope = yielded.optJSONObject("scope");
         request.put("scope", scope == null ? new JSONObject() : scope);
 
-        JSONObject page = client.enumerateMailbox(session, mailboxOf(collection), request);
+        long started = System.nanoTime();
+        String raw = client.enumerateMailboxRaw(session, mailboxOf(collection), request);
+        remote(System.nanoTime() - started);
+        JSONObject page = PimalayaClient.reply(raw);
 
         listed.clear();
         JSONArray items = page.optJSONArray("items");
@@ -160,6 +287,7 @@ final class MailEngine extends PimdirEngine {
             JSONObject item = items.getJSONObject(index);
             listed.put(item.getString("handle"), item);
         }
+        listed(items == null ? 0 : items.length());
         step(Progress.STAGE_DOWNLOAD, items == null ? 0 : items.length());
         return page;
     }

@@ -35,6 +35,7 @@ use io_pimdir::{
         PimdirPushOutcome, PimdirPushResult, PimdirRemoteItem, PimdirRemoteMeta,
         PimdirRemoteSnapshot, PimdirTier,
     },
+    summary::{PimdirSummary, mail::PimdirMailSummary},
     sync::{PimdirPushRights, PimdirSync, PimdirSyncOptions},
     upgrade::PimdirUpgrade,
 };
@@ -139,11 +140,80 @@ pub fn mutate<'local>(
 struct Driver<'a, 'local> {
     env: &'a mut Env<'local>,
     driver: &'a JObject<'local>,
+    dated: Dated,
+}
+
+/// The summaries a load made up from a message's date alone, by collection
+/// and handle.
+///
+/// The store's load carries a mail placement's `Date` and not its whole
+/// summary, which is all the engine reads of it there: whether a placement
+/// lies in a round's scope (SYNC §5). Such a summary is no summary, so a
+/// write handing it back unchanged is sent with none, which leaves the
+/// stored row alone; one the engine replaced with what a listing read goes
+/// out as it is.
+#[derive(Default)]
+struct Dated(BTreeMap<(String, String), PimdirSummary>);
+
+impl Dated {
+    /// Records the date-only summaries a load reply carried.
+    fn record(&mut self, arg: &PimdirArg) {
+        let PimdirArg::Load(loaded) = arg else {
+            return;
+        };
+        for placement in &loaded.placements {
+            if let Some(summary @ PimdirSummary::Mail(mail)) = &placement.summary
+                && *mail
+                    == (PimdirMailSummary {
+                        date: mail.date.clone(),
+                        ..Default::default()
+                    })
+            {
+                let key = (
+                    placement.collection.as_str().to_string(),
+                    placement.handle.as_str().to_string(),
+                );
+                self.0.insert(key, summary.clone());
+            }
+        }
+    }
+
+    /// The yield with every date-only summary it would write back taken out.
+    fn strip(&self, yielded: PimdirYield) -> PimdirYield {
+        let PimdirYield::WantsWrite(ops) = yielded else {
+            return yielded;
+        };
+        if self.0.is_empty() {
+            return PimdirYield::WantsWrite(ops);
+        }
+        let ops = ops
+            .into_iter()
+            .map(|op| match op {
+                PimdirWriteOp::UpsertPlacement(mut placement) => {
+                    let key = (
+                        placement.collection.as_str().to_string(),
+                        placement.handle.as_str().to_string(),
+                    );
+                    if placement.summary.is_some() && self.0.get(&key) == placement.summary.as_ref()
+                    {
+                        placement.summary = None;
+                    }
+                    PimdirWriteOp::UpsertPlacement(placement)
+                }
+                other => other,
+            })
+            .collect();
+        PimdirYield::WantsWrite(ops)
+    }
 }
 
 impl<'a, 'local> Driver<'a, 'local> {
     fn new(env: &'a mut Env<'local>, driver: &'a JObject<'local>) -> Self {
-        Self { env, driver }
+        Self {
+            env,
+            driver,
+            dated: Dated::default(),
+        }
     }
 
     /// Runs an offline coroutine to completion, servicing every yield
@@ -160,8 +230,11 @@ impl<'a, 'local> Driver<'a, 'local> {
                 PimdirCoroutineState::Complete(Ok(value)) => return Ok(value),
                 PimdirCoroutineState::Complete(Err(err)) => return Err(err.to_string().into()),
                 PimdirCoroutineState::Yielded(yielded) => {
+                    let yielded = self.dated.strip(yielded);
                     let reply = self.upcall(&yield_json(&yielded))?;
-                    arg = Some(parse_arg(&yielded, &reply)?);
+                    let parsed = parse_arg(&yielded, &reply)?;
+                    self.dated.record(&parsed);
+                    arg = Some(parsed);
                 }
             }
         }
@@ -460,17 +533,33 @@ struct PlacementJson {
     base: Option<BaseJson>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     origin: Option<OriginJson>,
+    /// A message's `Date` (Annex A.1), on a load that carries no summary:
+    /// what the engine reads to tell a placement in a round's scope from one
+    /// outside it (SYNC §5). Read only, never written.
+    #[serde(default, skip_serializing)]
+    date: Option<String>,
 }
 
 impl From<PlacementJson> for PimdirPlacement {
     fn from(wire: PlacementJson) -> Self {
+        // NOTE: a dated load carries the date alone, as a summary holding it
+        // and nothing else, which the driver never writes back
+        // ([`Driver::dated`]).
+        let summary = match (wire.summary, wire.date.filter(|date| !date.is_empty())) {
+            (Some(summary), _) => Some(summary.into()),
+            (None, Some(date)) => Some(PimdirSummary::Mail(PimdirMailSummary {
+                date: Some(date),
+                ..Default::default()
+            })),
+            (None, None) => None,
+        };
         Self {
             collection: wire.collection.into(),
             handle: PimdirHandle(wire.handle),
             link_id: wire.link_id.map(PimdirLinkId),
             object: wire.object.map(PimdirHash),
             level: wire.level.into(),
-            summary: wire.summary.map(Into::into),
+            summary,
             sort_key: wire.sort_key.into(),
             flags: flags_from(wire.flags),
             status: wire.status.into(),
@@ -501,6 +590,7 @@ impl From<&PimdirPlacement> for PlacementJson {
                 .map(|hash| hash.as_str().into()),
             base: placement.base.as_ref().map(BaseJson::from),
             origin: placement.origin.as_ref().map(OriginJson::from),
+            date: None,
         }
     }
 }

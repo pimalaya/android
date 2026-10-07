@@ -56,7 +56,9 @@ use url::Url;
 use crate::{
     client::{
         Client,
-        listing::{IMAP_PAGE, Listing, MailPage, MailRequest, Named, SENT_MARGIN_DAYS, Scope},
+        listing::{
+            Floor, IMAP_PAGE, Listing, MailPage, MailRequest, Named, SENT_MARGIN_DAYS, Scope,
+        },
         url_user,
     },
     types::{BridgeError, Credentials, Mailbox as MailboxEntry},
@@ -372,6 +374,33 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         Ok(MailPage::round(items, next, checkpoint))
     }
 
+    /// Takes the newest messages below the floor's ceiling until its chunk
+    /// is full: the UIDs `UID SEARCH` finds below it (`SENTBEFORE` a day
+    /// above it, `ALL` without one), read for their headers a chunk at a
+    /// time, newest first, until the chunk is full or the mailbox runs out.
+    pub fn floor(&mut self, mailbox: &str, floor: &mut Floor) -> Result<(), BridgeError> {
+        let data = self.examine(mailbox)?;
+        if data.exists.unwrap_or(0) == 0 {
+            return Ok(());
+        }
+        let validity = data.uid_validity.map(NonZeroU32::get).unwrap_or(0);
+        let scope = floor.scope().clone();
+        let uids = self.scoped_uids(mailbox, validity, &scope)?;
+
+        for chunk in uids.chunks(floor.count().min(IMAP_PAGE)) {
+            let mut listed = self.fetch_listed(mailbox, chunk)?;
+            listed.sort_by_key(|(named, _)| {
+                core::cmp::Reverse(named.handle.parse::<u32>().unwrap_or(0))
+            });
+            for (_, summary) in listed {
+                if floor.take(summary.date.as_deref()) {
+                    return Ok(());
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The UIDs of the scope, newest first, searched once per session.
     fn scoped_uids(
         &mut self,
@@ -425,6 +454,21 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         uids: &[u32],
         scope: &Scope,
     ) -> Result<Vec<Named>, BridgeError> {
+        Ok(self
+            .fetch_listed(mailbox, uids)?
+            .into_iter()
+            .filter(|(_, summary)| scope.contains(summary.date.as_deref()))
+            .map(|(named, _)| named)
+            .collect())
+    }
+
+    /// The members behind some UIDs of the open mailbox, each with the
+    /// summary it was named by, whatever its date.
+    fn fetch_listed(
+        &mut self,
+        mailbox: &str,
+        uids: &[u32],
+    ) -> Result<Vec<(Named, PimdirMailSummary)>, BridgeError> {
         if uids.is_empty() {
             return Ok(Vec::new());
         }
@@ -471,8 +515,6 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         Ok(fetched
             .into_values()
             .filter_map(|items| named(items.into_inner()))
-            .filter(|(_, summary)| scope.contains(summary.date.as_deref()))
-            .map(|(named, _)| named)
             .collect())
     }
 
@@ -902,24 +944,40 @@ pub fn list_mailboxes(
         .list()?
         .into_iter()
         .map(|(name, attributes)| MailboxEntry {
-            role: role_of(&attributes),
+            role: role_of(&name, &attributes),
             name,
         })
         .collect())
 }
 
-/// The role a mailbox's RFC 6154 attributes give it, of the one a write
-/// needs, empty where they give it another.
-fn role_of(attributes: &[FlagNameAttribute<'static>]) -> String {
-    let trash = attributes
-        .iter()
-        .any(|held| held.to_string().eq_ignore_ascii_case("\\Trash"));
-
-    if trash {
-        String::from("trash")
-    } else {
-        String::new()
+/// The role a mailbox's RFC 6154 attributes give it, in pimdir's role
+/// vocabulary (the attribute lowercased), `inbox` for the mailbox RFC 3501
+/// names `INBOX` whatever its case, empty where it carries none.
+fn role_of(name: &str, attributes: &[FlagNameAttribute<'static>]) -> String {
+    if name.eq_ignore_ascii_case("INBOX") {
+        return String::from("inbox");
     }
+    const ROLES: [&str; 8] = [
+        "trash",
+        "sent",
+        "drafts",
+        "junk",
+        "archive",
+        "all",
+        "flagged",
+        "important",
+    ];
+    attributes
+        .iter()
+        .find_map(|held| {
+            let held = held.to_string();
+            let named = held.strip_prefix('\\')?.to_string();
+            ROLES
+                .iter()
+                .find(|role| role.eq_ignore_ascii_case(&named))
+                .map(|role| String::from(*role))
+        })
+        .unwrap_or_default()
 }
 
 /// What a QRESYNC `SELECT` reported moved since the checkpoint.

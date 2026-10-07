@@ -51,6 +51,8 @@
     </plurals>
     <string name="mail_search">Rechercher dans les e-mails</string>
     <string name="date_unknown">Sans date</string>
+    <string name="mail_more_loading">Chargement des e-mails plus anciens</string>
+    <string name="mail_more_offline">Les e-mails plus anciens demandent le réseau</string>
     <string name="mail_chip_unread">Non lus</string>
     <string name="mail_chip_attachments">Pièces jointes</string>
     <string name="message_reply">Répondre</string>

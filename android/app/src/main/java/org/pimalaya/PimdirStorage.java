@@ -2,6 +2,8 @@ package org.pimalaya;
 
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteDoneException;
+import android.database.sqlite.SQLiteStatement;
 import android.util.Log;
 
 import org.json.JSONArray;
@@ -189,11 +191,13 @@ final class PimdirStorage {
                         "SELECT i.link_id, i.flags, i.object_hash, i.sort_key, i.level,"
                                 + " b.handle, b.base_flags, b.base_object, b.base_revision,"
                                 + " b.base_present, b.conflicted, b.conflict_revision,"
-                                + " b.conflict_object, i.deleted, i.conflicted, c.kind"
+                                + " b.conflict_object, i.deleted, i.conflicted, c.kind, s.date"
                                 + " FROM items i"
                                 + " JOIN collections c ON c.id = i.collection"
                                 + " LEFT JOIN bindings b ON b.collection = i.collection"
                                 + " AND b.link_id = i.link_id AND b.source = ?"
+                                + " LEFT JOIN mail_summary s ON s.collection = i.collection"
+                                + " AND s.link_id = i.link_id"
                                 + " WHERE i.collection = ?"
                                 + " AND i.retained_at IS NULL" + narrowed,
                         args.toArray(new String[0]))) {
@@ -391,6 +395,14 @@ final class PimdirStorage {
         }
 
         placement.put("status", statusOf(cursor));
+        // NOTE: a message's date and not its summary: what the engine reads
+        // to tell a placement in a round's scope from one outside it (SYNC
+        // section 5). Without it a round opened and closed by one page would
+        // find every message it did not list absent, the ones above a
+        // widening's band among them.
+        if (cursor.getColumnCount() > 16 && !cursor.isNull(16)) {
+            placement.put("date", cursor.getString(16));
+        }
         if (!cursor.isNull(11)) {
             placement.put("conflictRevision", cursor.getString(11));
         }
@@ -596,6 +608,7 @@ final class PimdirStorage {
     JSONArray applyWrites(JSONArray writes) throws JSONException {
         SQLiteDatabase db = store.getWritableDatabase();
         db.beginTransaction();
+        compiled = new HashMap<>();
         try {
             Map<String, byte[]> bodies = new HashMap<>();
             List<JSONObject> drops = new ArrayList<>();
@@ -679,6 +692,10 @@ final class PimdirStorage {
             return effects;
         } finally {
             db.endTransaction();
+            for (SQLiteStatement statement : compiled.values()) {
+                statement.close();
+            }
+            compiled = null;
         }
     }
 
@@ -773,17 +790,16 @@ final class PimdirStorage {
             applyDrop(db, engineCollection, handle, true);
         }
 
-        String previousObject = null;
-        boolean exists = false;
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT object_hash FROM items WHERE collection = ? AND link_id = ?",
-                        new String[] {collection, linkId})) {
-            if (cursor.moveToFirst()) {
-                exists = true;
-                previousObject = cursor.isNull(0) ? null : cursor.getString(0);
-            }
-        }
+        // NOTE: an empty hash for a row holding none, so a missing row and a
+        // bodiless one read apart.
+        String held =
+                one(
+                        db,
+                        "SELECT ifnull(object_hash, '') FROM items WHERE collection = ?"
+                                + " AND link_id = ?",
+                        collection, linkId);
+        boolean exists = held != null;
+        String previousObject = held == null || held.isEmpty() ? null : held;
 
         if (!exists) {
             db.execSQL(
@@ -822,8 +838,8 @@ final class PimdirStorage {
 
         // On the same terms as the sort key: a write carrying no summary keeps
         // the stored row, which is what a flag push and a pulled deletion do.
-        PimdirSummary.write(db, collection, linkId, summary);
-        writeBinding(db, collection, source, linkId, handle, placement, superseded);
+        PimdirSummary.write(db, collection, linkId, summary, !exists);
+        writeBinding(db, collection, source, linkId, handle, placement, superseded, !exists);
         adjustRefcount(db, previousObject, object);
 
         if (!exists) {
@@ -845,7 +861,8 @@ final class PimdirStorage {
      * superseding the old handle in the same write.
      */
     private void writeBinding(SQLiteDatabase db, String collection, String source, String linkId,
-            String handle, JSONObject placement, Set<String> superseded) throws JSONException {
+            String handle, JSONObject placement, Set<String> superseded, boolean fresh)
+            throws JSONException {
         JSONObject base = placement.optJSONObject("base");
         String baseFlags = base == null || base.optJSONArray("flags") == null
                 ? null
@@ -864,7 +881,9 @@ final class PimdirStorage {
                 ? null
                 : placement.optString("conflictObject", null);
 
-        String bound = handleOf(db, collection, linkId, source);
+        // NOTE: an item this write created has no binding yet, a binding
+        // cascading with its item, so there is nothing to read back.
+        String bound = fresh ? null : handleOf(db, collection, linkId, source);
         if (bound != null && !bound.equals(handle)
                 && !superseded.contains(collection + "\n" + source + "\n" + bound)) {
             throw new PimalayaException(
@@ -878,8 +897,9 @@ final class PimdirStorage {
         // still names, which is not a leak but a dangling reference: the foreign
         // key refuses it, and a store that got past it would have lost what the
         // next three-way merge diffs against.
-        String previousBase = baseObjectOf(db, collection, linkId, source);
-        String previousConflict = conflictObjectOf(db, collection, linkId, source);
+        String previousBase = fresh ? null : baseObjectOf(db, collection, linkId, source);
+        String previousConflict =
+                fresh ? null : conflictObjectOf(db, collection, linkId, source);
 
         db.execSQL(
                 "INSERT INTO bindings(collection, link_id, source, handle, base_flags,"
@@ -1374,25 +1394,21 @@ final class PimdirStorage {
     /** The body one source last agreed on, null when it agreed on none. */
     private String baseObjectOf(
             SQLiteDatabase db, String collection, String linkId, String source) {
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT base_object FROM bindings WHERE collection = ?"
-                                + " AND link_id = ? AND source = ?",
-                        new String[] {collection, linkId, source})) {
-            return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : null;
-        }
+        return one(
+                db,
+                "SELECT base_object FROM bindings WHERE collection = ? AND link_id = ?"
+                        + " AND source = ?",
+                collection, linkId, source);
     }
 
     /** The diverging body this source's binding is waiting on, or null. */
     private String conflictObjectOf(
             SQLiteDatabase db, String collection, String linkId, String source) {
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT conflict_object FROM bindings WHERE collection = ?"
-                                + " AND link_id = ? AND source = ?",
-                        new String[] {collection, linkId, source})) {
-            return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : null;
-        }
+        return one(
+                db,
+                "SELECT conflict_object FROM bindings WHERE collection = ? AND link_id = ?"
+                        + " AND source = ?",
+                collection, linkId, source);
     }
 
 
@@ -1401,38 +1417,72 @@ final class PimdirStorage {
      * drawn from the store-wide counter the first time one is inserted.
      */
     private long nextSeq(SQLiteDatabase db, String linkId) {
-        try (Cursor cursor =
-                db.rawQuery("SELECT seq FROM items WHERE link_id = ? LIMIT 1",
-                        new String[] {linkId})) {
-            if (cursor.moveToFirst()) {
-                return cursor.getLong(0);
-            }
+        String held = one(db, "SELECT seq FROM items WHERE link_id = ? LIMIT 1", linkId);
+        if (held != null) {
+            return Long.parseLong(held);
         }
-        try (Cursor cursor =
-                db.rawQuery("UPDATE store_meta SET next_seq = next_seq + 1 WHERE id = 1"
-                        + " RETURNING next_seq - 1", null)) {
-            return cursor.moveToFirst() ? cursor.getLong(0) : 1;
-        }
+        String drawn =
+                one(db, "UPDATE store_meta SET next_seq = next_seq + 1 WHERE id = 1"
+                        + " RETURNING next_seq - 1");
+        return drawn == null ? 1 : Long.parseLong(drawn);
     }
 
     /** The handle this source already binds the item under, or null. */
     private String handleOf(SQLiteDatabase db, String collection, String linkId, String source) {
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT handle FROM bindings WHERE collection = ? AND link_id = ?"
-                                + " AND source = ?",
-                        new String[] {collection, linkId, source})) {
-            return cursor.moveToFirst() ? cursor.getString(0) : null;
-        }
+        return one(
+                db,
+                "SELECT handle FROM bindings WHERE collection = ? AND link_id = ? AND source = ?",
+                collection, linkId, source);
     }
 
     private String linkOf(SQLiteDatabase db, String collection, String source, String handle) {
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT link_id FROM bindings WHERE collection = ? AND source = ?"
-                                + " AND handle = ? LIMIT 1",
-                        new String[] {collection, source, handle})) {
-            return cursor.moveToFirst() ? cursor.getString(0) : null;
+        return one(
+                db,
+                "SELECT link_id FROM bindings WHERE collection = ? AND source = ?"
+                        + " AND handle = ? LIMIT 1",
+                collection, source, handle);
+    }
+
+    /**
+     * The compiled single-value reads of the write batch under way, by
+     * statement; null outside one.
+     */
+    private Map<String, SQLiteStatement> compiled;
+
+    /**
+     * The first column of the first row a read answers, null for no row or a
+     * NULL value.
+     *
+     * <p>A compiled statement rather than a cursor: a page of mail runs half a
+     * dozen of these per message, and a cursor fills a window for each one.
+     * Within a write batch each statement is compiled once and rebound.
+     */
+    private String one(SQLiteDatabase db, String sql, String... args) {
+        SQLiteStatement statement = compiled == null ? null : compiled.get(sql);
+        boolean kept = statement != null;
+        if (statement == null) {
+            statement = db.compileStatement(sql);
+            if (compiled != null) {
+                compiled.put(sql, statement);
+                kept = true;
+            }
+        }
+        try {
+            statement.clearBindings();
+            for (int index = 0; index < args.length; index++) {
+                if (args[index] == null) {
+                    statement.bindNull(index + 1);
+                } else {
+                    statement.bindString(index + 1, args[index]);
+                }
+            }
+            return statement.simpleQueryForString();
+        } catch (SQLiteDoneException none) {
+            return null;
+        } finally {
+            if (!kept) {
+                statement.close();
+            }
         }
     }
 

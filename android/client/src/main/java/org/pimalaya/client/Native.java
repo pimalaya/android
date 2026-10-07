@@ -243,6 +243,16 @@ final class Native {
             Transport transport, long session, String mailbox, String request);
 
     /**
+     * The floor of a mailbox's next chunk: the oldest {@code Date} among its
+     * {@code count} newest messages dated before {@code before} (RFC 3339
+     * {@code Z}, empty for no ceiling). Returns {@code {floor, dated}},
+     * {@code floor} null when fewer than {@code count} dated messages lie
+     * below the ceiling.
+     */
+    static native String mailFloor(
+            Transport transport, long session, String mailbox, String before, int count);
+
+    /**
      * Connects to the account's mail server and authenticates, answering
      * {@code {handle}}, the bridge session the other mail verbs run on.
      *

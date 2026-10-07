@@ -61,6 +61,18 @@ final class PimdirSummary {
      * column list that the next spec revision could leave stale.
      */
     static void write(SQLiteDatabase db, String collection, String linkId, JSONObject summary) {
+        write(db, collection, linkId, summary, false);
+    }
+
+    /**
+     * The summary of an item the same write just created when {@code fresh}:
+     * it has no addresses to replace, and its insert drew the change stamp
+     * already, so the two statements that exist for a moved summary are left
+     * out. A page of new mail runs this once per message.
+     */
+    static void write(
+            SQLiteDatabase db, String collection, String linkId, JSONObject summary,
+            boolean fresh) {
         if (summary == null) {
             return;
         }
@@ -85,7 +97,10 @@ final class PimdirSummary {
         }
 
         exec(db, "UPSERT_" + kind.toUpperCase(Locale.ROOT) + "_SUMMARY", values);
-        writeAddresses(db, collection, linkId, addresses);
+        writeAddresses(db, collection, linkId, addresses, fresh);
+        if (fresh) {
+            return;
+        }
 
         // The change stamp is drawn by triggers on the item row, which cannot
         // see these tables (§4.5), so a summary that moved on its own asks for
@@ -104,11 +119,13 @@ final class PimdirSummary {
      * yields the whole list, and diffing a handful of rows buys nothing.
      */
     private static void writeAddresses(
-            SQLiteDatabase db, String collection, String linkId, JSONArray addresses) {
+            SQLiteDatabase db, String collection, String linkId, JSONArray addresses, boolean fresh) {
         Map<String, Object> scope = new LinkedHashMap<>();
         scope.put("collection", collection);
         scope.put("link_id", linkId);
-        exec(db, "REPLACE_ADDRESSES", scope);
+        if (!fresh) {
+            exec(db, "REPLACE_ADDRESSES", scope);
+        }
 
         for (int index = 0; addresses != null && index < addresses.length(); index++) {
             JSONObject address = addresses.optJSONObject(index);

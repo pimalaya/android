@@ -14,6 +14,7 @@ import org.pimalaya.client.PimdirSql;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +63,12 @@ final class MailStore {
      */
     private static final String OUTBOX = "\u0001outbox";
 
+    /** The mail roles pimdir's schema takes (STORAGE section 14). */
+    private static final java.util.Set<String> ROLES =
+            java.util.Set.of(
+                    "inbox", "sent", "drafts", "trash", "junk", "archive", "all", "flagged",
+                    "important");
+
     /** Where each account's trash mailbox is remembered, by address. */
     private static final String TRASH_PREFS = "mail-trash";
 
@@ -103,6 +110,19 @@ final class MailStore {
                 MailEngine.collectionsOf(accountEmail, account, mailboxes);
 
         collections.replace(accountEmail, PimdirSummary.MAIL, listed);
+
+        // NOTE: what the source states and nothing guessed (pimdir STORAGE
+        // section 14): a mailbox that says nothing any more loses its role,
+        // and a role moving to another mailbox leaves the first in the same
+        // statement.
+        SQLiteDatabase db = store.getWritableDatabase();
+        for (Mailbox mailbox : mailboxes) {
+            Map<String, Object> values = new HashMap<>();
+            values.put("collection", PimdirAccount.collectionId(account, mailbox.name));
+            values.put("role", ROLES.contains(mailbox.role) ? mailbox.role : null);
+            PimdirSql.Bound bound = PimdirSql.bind("SET_COLLECTION_ROLE", values);
+            db.execSQL(bound.sql, bound.args);
+        }
 
         String trash = "";
         for (Mailbox mailbox : mailboxes) {
@@ -526,25 +546,48 @@ final class MailStore {
         /** The {@code LIKE} pattern searched, null when nothing is. */
         final String pattern;
 
+        /**
+         * How far down the list reaches, on the sort key (the {@code Date}),
+         * null for all of it: the most recent floor of the mailboxes it
+         * shows ({@link #floorOf}).
+         */
+        final String floor;
+
+        private final java.util.Set<String> held;
+
         Query(List<String> collections, Integer seen, Integer attachment, String pattern) {
             this.collections = new JSONArray(collections).toString();
             this.size = collections.size();
             this.seen = seen;
             this.attachment = attachment;
             this.pattern = pattern;
+            this.floor = null;
+            this.held = new HashSet<>(collections);
         }
 
         /** The same query narrowed to unread mail, for the unread line. */
         Query unread() {
-            return new Query(this, 0);
+            return new Query(this, 0, floor);
         }
 
-        private Query(Query query, Integer seen) {
+        /** The same query reaching down to {@code floor} alone, null for all of it. */
+        Query reaching(String floor) {
+            return new Query(this, seen, floor);
+        }
+
+        private Query(Query query, Integer seen, String floor) {
             this.collections = query.collections;
             this.size = query.size;
             this.seen = seen;
             this.attachment = query.attachment;
             this.pattern = query.pattern;
+            this.floor = floor;
+            this.held = query.held;
+        }
+
+        /** Whether the query lets a collection through. */
+        boolean holds(String collection) {
+            return held.contains(collection);
         }
 
         /** The canonical statement's values, with a page's cursor and size. */
@@ -614,9 +657,9 @@ final class MailStore {
         if (query.size == 0) {
             return 0;
         }
-        PimdirSql.Bound bound = query.pattern == null
+        PimdirSql.Bound bound = query.pattern == null && query.floor == null
                 ? PimdirSql.bind("COUNT_MAIL", query.values(null, -1))
-                : wrapped("SELECT count(*) FROM (", "SEARCH_MAIL", ")", query);
+                : around("SELECT count(*) FROM (", listed(query), ")");
         try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
             return cursor.moveToFirst() ? cursor.getLong(0) : 0;
         }
@@ -651,12 +694,12 @@ final class MailStore {
             return days;
         }
         PimdirSql.Bound bound;
-        if (query.pattern == null) {
+        if (query.pattern == null && query.floor == null) {
             Map<String, Object> values = query.values(null, -1);
             values.put("shift", shift);
             bound = PimdirSql.bind("COUNT_MAIL_BY_DAY", values);
         } else {
-            PimdirSql.Bound search = wrapped("", "SEARCH_MAIL", "", query);
+            PimdirSql.Bound search = listed(query);
             Object[] args = new Object[search.args.length + 1];
             args[0] = shift;
             System.arraycopy(search.args, 0, args, 1, search.args.length);
@@ -713,9 +756,9 @@ final class MailStore {
         String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
         PimdirSql.Bound bound;
         if (after != null || offset <= 0) {
-            bound = PimdirSql.bind(statement, query.values(after, limit));
+            bound = reaching(PimdirSql.bind(statement, query.values(after, limit)), query.floor);
         } else {
-            PimdirSql.Bound inner = wrapped("", statement, "", query);
+            PimdirSql.Bound inner = listed(query);
             Object[] args = new Object[inner.args.length + 2];
             System.arraycopy(inner.args, 0, args, 0, inner.args.length);
             args[inner.args.length] = limit;
@@ -770,6 +813,42 @@ final class MailStore {
             mailboxes.put(stored.id, stored);
         }
         return mailboxes;
+    }
+
+    /**
+     * Every row a query lets through, newest first, as one statement: the
+     * page or search statement read whole, cut at the query's floor.
+     */
+    private static PimdirSql.Bound listed(Query query) {
+        String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
+        return reaching(wrapped("", statement, "", query), query.floor);
+    }
+
+    /**
+     * A newest-first read cut at a floor on the sort key, null for none.
+     *
+     * <p>Around the canonical statement rather than inside it: the cut keeps
+     * the rows at or above the floor, which in a newest-first read are a
+     * prefix, so a page read under its own limit and then cut is still the
+     * page, only shorter at the floor. The order is restated, a subquery's
+     * own being no promise.
+     */
+    private static PimdirSql.Bound reaching(PimdirSql.Bound inner, String floor) {
+        if (floor == null) {
+            return inner;
+        }
+        Object[] args = new Object[inner.args.length + 1];
+        System.arraycopy(inner.args, 0, args, 0, inner.args.length);
+        args[inner.args.length] = floor;
+        return new PimdirSql.Bound(
+                "SELECT * FROM (" + inner.sql + ") WHERE sort_key >= ?"
+                        + " ORDER BY sort_key DESC, seq DESC, collection DESC",
+                args);
+    }
+
+    /** A bound statement between a prefix and a suffix. */
+    private static PimdirSql.Bound around(String prefix, PimdirSql.Bound inner, String suffix) {
+        return new PimdirSql.Bound(prefix + inner.sql + suffix, inner.args);
     }
 
     /**
@@ -843,10 +922,35 @@ final class MailStore {
         /** Whether a listing is under way, its first pass filling in. */
         final boolean filling;
 
-        Coverage(String since, String at, boolean filling) {
+        /**
+         * The floor the listing under way lists from, null for all mail or
+         * none under way: a widening's band, or a first pass's chunk.
+         */
+        final String roundSince;
+
+        Coverage(String since, String at, boolean filling, String roundSince) {
             this.since = since;
             this.at = at;
             this.filling = filling;
+            this.roundSince = roundSince;
+        }
+
+        /**
+         * How far down the list may show this mailbox, null where nothing
+         * limits it: the floor of what it covers when that floor is above
+         * the account's bound, the floor of its first pass while that pass
+         * is still filling in, nothing for a mailbox never listed.
+         */
+        String limit(String bound) {
+            String floor;
+            if (at != null) {
+                floor = since;
+            } else if (filling) {
+                floor = roundSince;
+            } else {
+                return null;
+            }
+            return MailScope.limits(floor, bound) ? floor : null;
         }
     }
 
@@ -867,10 +971,96 @@ final class MailStore {
                 return new Coverage(
                         cursor.isNull(1) ? null : cursor.getString(1),
                         cursor.isNull(3) ? null : cursor.getString(3),
-                        !cursor.isNull(4));
+                        !cursor.isNull(4),
+                        cursor.isNull(5) ? null : cursor.getString(5));
             }
         }
-        return new Coverage(null, null, false);
+        return new Coverage(null, null, false, null);
+    }
+
+    /**
+     * How far down the merged list may show the collections of a query: the
+     * most recent of their floors, every older message of one mailbox
+     * waiting on the others' chunks to reach it, null when none limits it.
+     */
+    String floorOf(Query query) {
+        String limit = null;
+        for (Edge edge : edges()) {
+            if (query.holds(edge.collection)
+                    && edge.limit != null
+                    && (limit == null || edge.limit.compareTo(limit) > 0)) {
+                limit = edge.limit;
+            }
+        }
+        return limit;
+    }
+
+    /** One mailbox, and how far down its chunks have reached. */
+    static final class Edge {
+        final String accountEmail;
+        final String mailbox;
+        final String collection;
+
+        /** What the source says the mailbox is for (pimdir's role), or null. */
+        final String role;
+
+        /** Whether a round ever listed it, closed or under way. */
+        final boolean listed;
+
+        /** The floor the list stops at for it, null where it limits nothing. */
+        final String limit;
+
+        Edge(
+                String accountEmail,
+                String mailbox,
+                String collection,
+                String role,
+                boolean listed,
+                String limit) {
+            this.accountEmail = accountEmail;
+            this.mailbox = mailbox;
+            this.collection = collection;
+            this.role = role;
+            this.listed = listed;
+            this.limit = limit;
+        }
+    }
+
+    /** Every mailbox of every account and how far its chunks have reached. */
+    List<Edge> edges() {
+        Map<String, String> roles = roles();
+        Map<String, String> bounds = new HashMap<>();
+        List<Edge> edges = new ArrayList<>();
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+            String bound =
+                    bounds.computeIfAbsent(
+                            stored.accountEmail,
+                            email -> MailScope.sinceOf(context, accounts.idOf(email)));
+            Coverage coverage = coverage(stored.id);
+            edges.add(
+                    new Edge(
+                            stored.accountEmail,
+                            stored.name,
+                            stored.id,
+                            roles.get(stored.id),
+                            coverage.at != null || coverage.filling,
+                            coverage.limit(bound)));
+        }
+        return edges;
+    }
+
+    /** The role every mail collection carries, by collection id. */
+    Map<String, String> roles() {
+        Map<String, String> roles = new HashMap<>();
+        String sql = PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0];
+        try (Cursor cursor = typed(items.readable(), sql, new Object[0])) {
+            while (cursor.moveToNext()) {
+                if (!cursor.isNull(9)) {
+                    roles.put(cursor.getString(0), cursor.getString(9));
+                }
+            }
+        }
+        return roles;
     }
 
     /** How many months of mail an account keeps, 0 for all of it. */

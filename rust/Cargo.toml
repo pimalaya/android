@@ -23,7 +23,7 @@ io-jmap = { version = "0.4", default-features = false }
 io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "00ef069234d1a97335ea174f918491b703f39238", default-features = false, features = ["ical", "vcard"] }
 io-oauth = { version = "0.3", default-features = false }
 io-pim-discovery = { version = "0.9", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
-io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "35a1c3f1c8102be7664f5e89db562d68f2333687", default-features = false }
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "f9b13f8836e1161af80b1b1457032ea49b747461", default-features = false }
 io-smtp = { version = "0.5", default-features = false }
 io-webdav = { version = "0.5", default-features = false }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
