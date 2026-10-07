@@ -28,8 +28,8 @@ import java.util.Map;
  * <p>Rows are <em>occurrences</em>, not stored events: a weekly meeting
  * is one row per week inside the window. Expansion runs through the
  * bridge (ical-rs, RFC 5545 complete) at load time rather than at sync
- * time, because what an event renders as depends on the window being
- * shown, and the window moves while the stored object does not.
+ * time, because what an event renders as depends on the week being
+ * shown, and the week moves while the stored object does not.
  *
  * <p>Everything here is civil time. The window bounds, the stamps the
  * bridge returns and the comparisons between them are all wall-clock,
@@ -37,9 +37,6 @@ import java.util.Map;
  * defines recurrence.
  */
 final class CalendarList {
-    /** How far ahead the agenda reaches, in days. */
-    private static final int WINDOW_DAYS = 120;
-
     /** Seconds in a day, the threshold a length is told in days past. */
     private static final long DAY = 86400;
 
@@ -55,7 +52,7 @@ final class CalendarList {
 
     /**
      * The day the week card narrows the agenda to, as a civil `YYYYMMDD`
-     * stamp; null for everything ahead.
+     * stamp; null for the whole shown week.
      */
     private String selectedDay;
 
@@ -124,16 +121,14 @@ final class CalendarList {
 
     /**
      * Rebuilds the agenda off the stored objects, expanding each into
-     * the window and dropping what the merged filter hides.
+     * the shown week and dropping what the merged filter hides.
      */
     void reload() {
-        String today = today();
-        String shown = shownWeek(today);
-        // NOTE: from the earlier of this week's and the shown week's first
-        // day, so any day the card offers has its entries expanded, and on
-        // to whichever ends later of the window ahead and the shown week.
-        String from = min(firstOfWeek(today), shown);
-        String until = max(plusDays(today, WINDOW_DAYS), plusDays(shown, 7));
+        // NOTE: the shown week alone: the agenda never lists past it, and
+        // a picked day is always one of its seven, since moving the week
+        // clears the pick.
+        String from = shownWeek(today());
+        String until = plusDays(from, 7);
 
         Map<String, EventStore.StoredCalendar> byCollection = new HashMap<>();
         for (EventStore.StoredCalendar calendar : store.loadCalendars()) {
@@ -167,25 +162,15 @@ final class CalendarList {
 
     /**
      * Lays out what the week card lets through: the day picked in it,
-     * or with none picked everything from today on while the card shows
-     * this week, and the week it shows otherwise.
+     * or with none picked the seven days of the week it shows, this
+     * week included.
      */
     private void render() {
         String today = today();
         String first = shownWeek(today);
-        String end = plusDays(first, 7);
         List<Row> shown = new ArrayList<>();
         for (Row row : rows) {
-            String day = dayOf(row);
-            boolean kept;
-            if (selectedDay != null) {
-                kept = day.equals(selectedDay);
-            } else if (weekOffset == 0) {
-                kept = day.compareTo(today) >= 0;
-            } else {
-                kept = day.compareTo(first) >= 0 && day.compareTo(end) < 0;
-            }
-            if (kept) {
+            if (kept(dayOf(row), selectedDay, first)) {
                 shown.add(row);
             }
         }
@@ -198,6 +183,17 @@ final class CalendarList {
         week(today);
         host.findViewById(R.id.calendar_empty)
                 .setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
+    }
+
+    /**
+     * Whether the agenda lists a civil day: the picked day alone when
+     * there is one, else the seven days from the shown week's first.
+     */
+    static boolean kept(String day, String selectedDay, String weekFirst) {
+        if (selectedDay != null) {
+            return day.equals(selectedDay);
+        }
+        return day.compareTo(weekFirst) >= 0 && day.compareTo(plusDays(weekFirst, 7)) < 0;
     }
 
     /** The civil day an occurrence starts on. */
@@ -323,16 +319,8 @@ final class CalendarList {
         list.setSelection(0);
     }
 
-    private static String min(String left, String right) {
-        return left.compareTo(right) <= 0 ? left : right;
-    }
-
-    private static String max(String left, String right) {
-        return left.compareTo(right) >= 0 ? left : right;
-    }
-
     /** The first day of the week a day falls in, by the device's locale. */
-    private static String firstOfWeek(String day) {
+    static String firstOfWeek(String day) {
         java.util.Calendar moment = calendarOf(day);
         int back =
                 (moment.get(java.util.Calendar.DAY_OF_WEEK) - moment.getFirstDayOfWeek() + 7) % 7;
