@@ -36,3 +36,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 - Fixed a message with no date vanishing from the phone when older mail was loaded: a band of older mail is listed by date, which never returns an undated message, so its absence there no longer reads as a deletion.
+- Fixed the merged mail list slowing down as the store grew: a page over several mailboxes sorted every stored message of them before showing fifty, and now walks one index kept in that order, so a page of a fifty-thousand-message store reads in a fraction of a millisecond. An existing store gains the index the next time the app opens it.

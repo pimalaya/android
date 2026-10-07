@@ -13,11 +13,14 @@ import android.database.sqlite.SQLiteDatabase;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.PimdirSql;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * The pimdir store on Android's own SQLite: the schema, its invariants, and the
@@ -257,6 +260,40 @@ public class PimdirDbTest {
             assertEquals(3, cursor.getInt(0));
             assertEquals(0, cursor.getInt(1));
         }
+    }
+
+    @Test
+    public void aMergedPageWalksTheGlobalOrderOnAnOlderStore() {
+        // A store written before pimdir 22f1f2c holds no global order: a page
+        // over several mailboxes read every item of the set and sorted it. The
+        // reconcile adds the index on open, and the canonical page statement,
+        // whose collection test is kept off items_by_seq, walks it.
+        db.execSQL("DROP INDEX items_by_sort_global");
+        seed("acct/INBOX", "acct", "message/rfc822", "<a@x>", 1);
+        seed("acct/Archive", "acct", "message/rfc822", "<b@x>", 2);
+        store.close();
+
+        store = new PimdirDb(RuntimeEnvironment.getApplication());
+        db = store.getWritableDatabase();
+
+        assertEquals("the global order is added on open", "collection",
+                indexColumns("items_by_sort_global"));
+
+        Map<String, Object> values = new HashMap<>();
+        values.put("collections", "[\"acct/INBOX\",\"acct/Archive\"]");
+        values.put("limit", 50);
+        PimdirSql.Bound page = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
+        StringBuilder plan = new StringBuilder();
+        try (Cursor cursor =
+                MailStore.typed(db, "EXPLAIN QUERY PLAN " + page.sql, page.args)) {
+            while (cursor.moveToNext()) {
+                plan.append(cursor.getString(3)).append('\n');
+            }
+        }
+        assertTrue("the page walks the global order:\n" + plan,
+                plan.toString().contains("items_by_sort_global"));
+        assertFalse("the page sorts nothing:\n" + plan,
+                plan.toString().contains("TEMP B-TREE FOR ORDER BY"));
     }
 
     /** The statement an object was created with, as sqlite_master keeps it. */
