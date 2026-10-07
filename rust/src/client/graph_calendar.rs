@@ -8,6 +8,15 @@
 //! listing reports removals by absence. A series is one entry, read with
 //! the exceptions of its own date range.
 //!
+//! An entry is read by `$batch`, 20 requests a call: the events first,
+//! then the first page of each series' instances over each of its
+//! windows. One request an event and one more per window of a series was
+//! what a first sync waited on, about 190 a hundred events on the owner's
+//! test tenant; a request the batch could not serve (throttled inside it,
+//! say) is sent again on its own, where the transport rides out the
+//! throttling. An event gone by the time it is read is left out, as a
+//! `calendar-multiget` leaves out a resource it no longer finds.
+//!
 //! Graph has no conditional write for events, so the revision an edit was
 //! staged against is checked against the server's right before the write,
 //! and a moved event answers 412 like a CalDAV server would. Only the
@@ -19,6 +28,9 @@ use io_http::rfc6750::bearer::HttpAuthBearer;
 use io_msgraph::{
     coroutine::*,
     v1::{
+        rest::batch::{
+            MSGRAPH_BATCH_MAX_REQUESTS, MsgraphBatch, MsgraphBatchRequest, MsgraphBatchResponse,
+        },
         rest::users::{
             calendars::list::{
                 MsgraphCalendarsList, MsgraphCalendarsListParams, MsgraphCalendarsListResponse,
@@ -34,10 +46,11 @@ use io_msgraph::{
                 update::MsgraphEventUpdate,
             },
         },
-        send::{MsgraphSend, MsgraphSendError, MsgraphSendOutput},
+        send::{MSGRAPH_API_BASE, MsgraphSend, MsgraphSendError, MsgraphSendOutput},
     },
 };
 use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
+use url::Url;
 
 use crate::{
     client::{Client, graph::parse_graph_url},
@@ -131,26 +144,19 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 
     /// The iCalendar objects of the named events, each at its master's
-    /// `changeKey`.
+    /// `changeKey`, read by `$batch` ([`read_entries`]).
     pub fn read_graph_events(
         &mut self,
         token: &str,
         ids: &[&str],
     ) -> Result<Vec<Event>, BridgeError> {
-        let auth = HttpAuthBearer::new(token);
-        let mut events = Vec::with_capacity(ids.len());
+        let mut reads = GraphCalls {
+            client: self,
+            auth: HttpAuthBearer::new(token),
+        };
+        let today = Timestamp::now().to_zoned(TimeZone::UTC).date();
 
-        for id in ids {
-            let (master, exceptions) = self.graph_series(&auth, id)?;
-            let exceptions: Vec<&MsgraphEvent> = exceptions.iter().collect();
-            events.push(Event {
-                id: master.id.clone(),
-                etag: master.change_key.clone(),
-                ical: master.to_ical_series(&exceptions),
-            });
-        }
-
-        Ok(events)
+        read_entries(&mut reads, ids, today)
     }
 
     /// Creates an event from an iCalendar object in a calendar, answering
@@ -331,6 +337,235 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 }
 
+/// The three requests an entry read sends, apart so the read can run over
+/// a fake: a `$batch`, one event on its own, one page of a listing.
+pub(super) trait GraphReads {
+    /// Sends one `$batch` of at most [`MSGRAPH_BATCH_MAX_REQUESTS`].
+    fn batch(
+        &mut self,
+        requests: &[MsgraphBatchRequest],
+    ) -> Result<Vec<MsgraphBatchResponse>, BridgeError>;
+
+    /// Reads one event, everything the projection reads.
+    fn event(&mut self, id: &str) -> Result<MsgraphEvent, BridgeError>;
+
+    /// Reads one page of a listing from its absolute URL.
+    fn page(&mut self, url: &str) -> Result<MsgraphEventsListResponse, BridgeError>;
+}
+
+/// The reads of one native call, over its transport.
+struct GraphCalls<'c, 'a, 'local> {
+    client: &'c mut Client<'a, 'local>,
+    auth: HttpAuthBearer,
+}
+
+impl GraphReads for GraphCalls<'_, '_, '_> {
+    fn batch(
+        &mut self,
+        requests: &[MsgraphBatchRequest],
+    ) -> Result<Vec<MsgraphBatchResponse>, BridgeError> {
+        let coroutine = MsgraphBatch::new(&self.auth, requests).map_err(|err| err.to_string())?;
+        Ok(self.client.run_msgraph(coroutine)?.responses)
+    }
+
+    fn event(&mut self, id: &str) -> Result<MsgraphEvent, BridgeError> {
+        self.client.graph_event(&self.auth, id)
+    }
+
+    fn page(&mut self, url: &str) -> Result<MsgraphEventsListResponse, BridgeError> {
+        let url = parse_graph_url(url)?;
+        self.client
+            .run_msgraph(MsgraphSend::<MsgraphEventsListResponse>::get(
+                &self.auth, url,
+            ))
+    }
+}
+
+/// The address one event is read at: the read [`MsgraphEventGet`] sends.
+fn event_url(id: &str) -> Result<Url, BridgeError> {
+    let mut url = graph_url(&format!("me/events/{id}"))?;
+    url.query_pairs_mut()
+        .append_pair("$select", MSGRAPH_EVENT_ICAL_SELECT)
+        .append_pair("$expand", MSGRAPH_EVENT_STASH_EXPAND);
+    Ok(url)
+}
+
+/// The address of a series' instances over one window: the first page
+/// [`MsgraphEventInstances`] asks for.
+fn instances_url(id: &str, start: &str, end: &str) -> Result<Url, BridgeError> {
+    let mut url = graph_url(&format!("me/events/{id}/instances"))?;
+    url.query_pairs_mut()
+        .append_pair("startDateTime", start)
+        .append_pair("endDateTime", end)
+        .append_pair("$top", &PAGE_SIZE.to_string())
+        // NOTE: an exception needs its originalStart for its
+        // RECURRENCE-ID, which the default listing leaves out.
+        .append_pair("$select", MSGRAPH_EVENT_ICAL_SELECT);
+    Ok(url)
+}
+
+fn graph_url(path: &str) -> Result<Url, BridgeError> {
+    Url::parse(MSGRAPH_API_BASE)
+        .and_then(|base| base.join(path))
+        .map_err(|err| err.to_string().into())
+}
+
+/// An address as a batch names it, relative to the API version.
+fn relative(url: &Url) -> String {
+    let base = MSGRAPH_API_BASE.trim_end_matches('/');
+    url.as_str()
+        .strip_prefix(base)
+        .unwrap_or(url.as_str())
+        .to_owned()
+}
+
+/// Sends `urls` as GETs, 20 to a `$batch`, and answers each one's reply in
+/// the order given: its body, or [`None`] for a reply the batch could not
+/// serve, which the caller sends again on its own.
+fn batched<R: GraphReads>(
+    reads: &mut R,
+    urls: &[Url],
+) -> Result<Vec<Option<MsgraphBatchResponse>>, BridgeError> {
+    let mut replies: Vec<Option<MsgraphBatchResponse>> = Vec::with_capacity(urls.len());
+    replies.resize_with(urls.len(), || None);
+
+    for (chunk, urls) in urls.chunks(MSGRAPH_BATCH_MAX_REQUESTS).enumerate() {
+        let requests: Vec<MsgraphBatchRequest> = urls
+            .iter()
+            .enumerate()
+            .map(|(index, url)| MsgraphBatchRequest {
+                id: index.to_string(),
+                method: String::from("GET"),
+                url: relative(url),
+                ..Default::default()
+            })
+            .collect();
+        for reply in reads.batch(&requests)? {
+            let Some(index) = reply.id.parse::<usize>().ok().filter(|i| *i < urls.len()) else {
+                continue;
+            };
+            replies[chunk * MSGRAPH_BATCH_MAX_REQUESTS + index] = Some(reply);
+        }
+    }
+
+    Ok(replies)
+}
+
+/// Reads the named entries: each event, and the exceptions of each series
+/// over its windows ([`series_windows`]), every request riding a
+/// `$batch`; a reply the batch could not serve is sent again on its own.
+///
+/// An event Graph no longer holds (404 on the event or on its instances) is
+/// left out; any other failure fails the read.
+pub(super) fn read_entries<R: GraphReads>(
+    reads: &mut R,
+    ids: &[&str],
+    today: Date,
+) -> Result<Vec<Event>, BridgeError> {
+    let urls = ids
+        .iter()
+        .map(|id| event_url(id))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut masters: Vec<Option<MsgraphEvent>> = Vec::with_capacity(ids.len());
+    for (index, reply) in batched(reads, &urls)?.into_iter().enumerate() {
+        let read = match reply {
+            Some(reply) if reply.status == 404 => None,
+            Some(reply) if (200..300).contains(&reply.status) => {
+                match reply.parse::<MsgraphEvent>() {
+                    Ok(event) => Some(event),
+                    Err(_) => alone(reads.event(ids[index]))?,
+                }
+            }
+            _ => alone(reads.event(ids[index]))?,
+        };
+        masters.push(read);
+    }
+
+    // NOTE: one job per window of every series, kept in window order, so
+    // the exceptions are gathered as the one-by-one read gathered them.
+    let mut jobs: Vec<(usize, Url)> = Vec::new();
+    for (index, master) in masters.iter().enumerate() {
+        let Some(master) = master else { continue };
+        if master.event_type != Some(MsgraphEventType::SeriesMaster) {
+            continue;
+        }
+        let Some(windows) = series_windows(master, today) else {
+            log::warn!(
+                "series {} has no readable range, its exceptions are skipped",
+                ids[index]
+            );
+            continue;
+        };
+        for (start, end) in windows {
+            jobs.push((index, instances_url(ids[index], &start, &end)?));
+        }
+    }
+
+    let urls: Vec<Url> = jobs.iter().map(|(_, url)| url.clone()).collect();
+    let mut instances: Vec<Vec<MsgraphEvent>> = Vec::with_capacity(ids.len());
+    instances.resize_with(ids.len(), Vec::new);
+    let mut gone = vec![false; ids.len()];
+    for ((index, url), reply) in jobs.iter().zip(batched(reads, &urls)?) {
+        if gone[*index] {
+            continue;
+        }
+        let page = match reply {
+            Some(reply) if reply.status == 404 => None,
+            Some(reply) if (200..300).contains(&reply.status) => {
+                match reply.parse::<MsgraphEventsListResponse>() {
+                    Ok(page) => Some(page),
+                    Err(_) => alone(reads.page(url.as_str()))?,
+                }
+            }
+            _ => alone(reads.page(url.as_str()))?,
+        };
+        let Some(mut page) = page else {
+            gone[*index] = true;
+            continue;
+        };
+        loop {
+            instances[*index].extend(page.value);
+            let Some(next) = page.next_link else {
+                break;
+            };
+            page = reads.page(&next)?;
+        }
+    }
+
+    let mut events = Vec::with_capacity(ids.len());
+    for (index, (master, instances)) in masters.into_iter().zip(instances).enumerate() {
+        let Some(master) = master else { continue };
+        if gone[index] {
+            continue;
+        }
+        let exceptions = unique(
+            instances
+                .into_iter()
+                .filter(|event| event.event_type == Some(MsgraphEventType::Exception))
+                .collect(),
+        )?;
+        let exceptions: Vec<&MsgraphEvent> = exceptions.iter().collect();
+        events.push(Event {
+            id: master.id.clone(),
+            etag: master.change_key.clone(),
+            ical: master.to_ical_series(&exceptions),
+        });
+    }
+
+    Ok(events)
+}
+
+/// A read sent on its own, a 404 answering [`None`]: what Graph no longer
+/// holds is left out.
+fn alone<T>(read: Result<T, BridgeError>) -> Result<Option<T>, BridgeError> {
+    match read {
+        Ok(value) => Ok(Some(value)),
+        Err(err) if err.status == Some(404) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
 /// Drops the events a page boundary repeated, Graph overlapping
 /// consecutive `nextLink` pages; one id read at two revisions is an
 /// error.
@@ -413,6 +648,10 @@ fn check_revision(
         _ => Ok(()),
     }
 }
+
+#[cfg(test)]
+#[path = "graph_calendar_tests.rs"]
+mod batch_tests;
 
 #[cfg(test)]
 mod tests {

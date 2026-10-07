@@ -87,20 +87,22 @@ impl<'a, 'local> Client<'a, 'local> {
 
     /// Enumerates a calendar's lone events and series masters, in full,
     /// each named by its Google id at its folded revision.
+    ///
+    /// Whole: the listing reads every event and every changed or cancelled
+    /// instance anyway, which is all [`Self::read_gcal_events`] reads an
+    /// entry from, so each entry's body is built here rather than read
+    /// again, two requests a series and one a lone event.
     pub fn list_gcal_events(
         &mut self,
         token: &str,
         calendar: &str,
-    ) -> Result<Vec<EventRef>, BridgeError> {
+    ) -> Result<Vec<Event>, BridgeError> {
         let auth = HttpAuthBearer::new(token);
         let events = self.gcal_events(&auth, calendar, None)?;
 
         Ok(entries(events)
             .into_iter()
-            .map(|(master, instances)| EventRef {
-                etag: revision(&master, &instances),
-                id: master.id.unwrap_or_default(),
-            })
+            .map(|(master, instances)| entry(master, &instances))
             .collect())
     }
 
@@ -117,12 +119,9 @@ impl<'a, 'local> Client<'a, 'local> {
 
         for id in ids {
             let (master, instances) = self.gcal_series(&auth, calendar, id)?;
-            let overrides: Vec<&GcalEvent> = instances.iter().collect();
-            events.push(Event {
-                id: id.to_string(),
-                etag: revision(&master, &instances),
-                ical: master.to_ical_series(&overrides),
-            });
+            let mut event = entry(master, &instances);
+            event.id = id.to_string();
+            events.push(event);
         }
 
         Ok(events)
@@ -324,6 +323,17 @@ fn entries(events: Vec<GcalEvent>) -> Vec<(GcalEvent, Vec<GcalEvent>)> {
         .collect()
 }
 
+/// One entry as the store keeps it: the master and its instances as one
+/// iCalendar object, at the folded revision.
+fn entry(master: GcalEvent, instances: &[GcalEvent]) -> Event {
+    let overrides: Vec<&GcalEvent> = instances.iter().collect();
+    Event {
+        etag: revision(&master, instances),
+        ical: master.to_ical_series(&overrides),
+        id: master.id.unwrap_or_default(),
+    }
+}
+
 /// An entry's revision: the master's ETag alone, or folded with its
 /// instances' when the series has any.
 fn revision(master: &GcalEvent, instances: &[GcalEvent]) -> Option<String> {
@@ -430,6 +440,33 @@ mod tests {
             .collect();
 
         assert_eq!(grouped, [("lone".into(), 0), ("m".into(), 1)]);
+    }
+
+    #[test]
+    fn a_listing_names_each_entry_with_its_body() {
+        let instance = event("m_1", "\"2\"", Some("m"));
+        let listed = vec![
+            instance.clone(),
+            event("m", "\"1\"", None),
+            event("lone", "\"1\"", None),
+        ];
+
+        let read: Vec<Event> = entries(listed)
+            .into_iter()
+            .map(|(master, instances)| entry(master, &instances))
+            .collect();
+
+        assert_eq!(read[0].id, "lone");
+        assert_eq!(read[0].etag.as_deref(), Some("\"1\""));
+        assert_eq!(read[1].id, "m");
+        assert_eq!(
+            read[1].etag,
+            revision(&event("m", "\"1\"", None), &[instance])
+        );
+        assert!(
+            read.iter()
+                .all(|entry| entry.ical.contains("BEGIN:VCALENDAR"))
+        );
     }
 
     #[test]

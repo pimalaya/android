@@ -232,12 +232,21 @@ pub struct CardDelta {
 /// The calendar twin of [`CardDelta`], and the same shape for the same
 /// reason: an enumerate answers which members moved, and the bodies are
 /// read afterwards for the ones the merge asks about.
+///
+/// Except where the listing had to read them anyway: Google's and JMAP's
+/// complete rounds list every event whole, so they hand the bodies over in
+/// [`Self::bodies`] rather than have each one read a second time.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventDelta {
     /// Resource names created or updated since the cursor, with their
     /// ETags; no body, which is the point.
     pub changed: Vec<EventRef>,
+    /// The bodies the round already held, by the same names and at the
+    /// same revisions as [`Self::changed`]; empty where it listed names
+    /// alone (CalDAV, Graph).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub bodies: Vec<Event>,
     /// Resource names removed since the cursor.
     pub vanished: Vec<String>,
     /// The next cursor, when the backend issued one.

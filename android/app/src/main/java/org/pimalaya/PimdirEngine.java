@@ -294,6 +294,10 @@ abstract class PimdirEngine implements OfflineDriver {
      * names it; it replaces the probe the store used to keep and the
      * upgrade that named it after the fact. A member whose body cannot be
      * read any more (gone between the listing and the read) is left out.
+     *
+     * <p>A member the listing already carried whole (a body, read with the
+     * round) is named from it and not read again; one bound at its
+     * revision drops what the listing carried, as if it had carried nothing.
      */
     private JSONObject named(JSONObject yielded, JSONObject page) throws JSONException {
         JSONArray items = page.optJSONArray("items");
@@ -306,7 +310,10 @@ abstract class PimdirEngine implements OfflineDriver {
         for (int index = 0; index < items.length(); index++) {
             handles.add(items.getJSONObject(index).getString("handle"));
         }
-        java.util.Map<String, String[]> bound = offline.bound(collection, handles);
+        java.util.Map<String, String[]> bound;
+        synchronized (STORE) {
+            bound = offline.bound(collection, handles);
+        }
 
         List<String> unread = new ArrayList<>();
         for (int index = 0; index < items.length(); index++) {
@@ -314,8 +321,12 @@ abstract class PimdirEngine implements OfflineDriver {
             String[] held = bound.get(item.getString("handle"));
             String revision = item.isNull("revision") ? null : item.optString("revision", null);
             if (held != null && java.util.Objects.equals(held[1], revision)) {
+                for (String field : new String[] {"summary", "sortKey", "hash", "body"}) {
+                    item.remove(field);
+                }
                 item.put("linkId", held[0]);
-            } else {
+            } else if (!item.has("body")) {
+                item.remove("linkId");
                 unread.add(item.getString("handle"));
             }
         }
