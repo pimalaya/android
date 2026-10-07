@@ -426,6 +426,24 @@ public class PimalayaClient {
     }
 
     /**
+     * The messages a listing named by id and markers alone (a Graph delta),
+     * each read with its summary: the items as a listing names them, a
+     * message gone since it was listed left out.
+     */
+    public JSONArray nameMessages(MailSession session, String mailbox, List<String> handles) {
+        String asked = new JSONArray(handles).toString();
+        JSONObject reply =
+                object(
+                        on(
+                                session,
+                                open ->
+                                        Native.nameMessages(
+                                                open.transport(), open.handle(), mailbox, asked)));
+        JSONArray items = reply.optJSONArray("items");
+        return items == null ? new JSONArray() : items;
+    }
+
+    /**
      * The floor of a mailbox's next chunk (a number of messages, never a
      * span of time): the oldest {@code Date} among its {@code count} newest
      * messages dated before {@code before}, null for no ceiling. Null when

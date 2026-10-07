@@ -2,51 +2,60 @@
 //! the MIME Graph keeps of them, the Graph half of what `syncMail` does
 //! over IMAP and JMAP.
 //!
-//! A folder is listed by its message delta, which answers newest first
-//! (by reception) and ends with the delta link the next pass resumes
-//! from: a round is that delta's pages, 1,000 messages each, every member
-//! named by the summary `$select` reads, and every pass after it one
-//! request. A message is read as its RFC 5322 source, so the store and the
-//! parser stay the ones the other backends use.
+//! A folder has one message delta link, made with no filter: its first
+//! pass names every message of the folder by id (1,000 a page), and every
+//! delta after it reports a change whatever the message's date, so it
+//! serves any scope and a widening relists nothing. Mail itself is listed
+//! by band: a first chunk, a scroll widening and the fill list only the
+//! band they lack by the plain `/messages` list on `sentDateTime`, every
+//! member named by the summary `$select`. A message is read as its RFC
+//! 5322 source, so the store and the parser stay the ones the other
+//! backends use.
 
 use io_http::rfc6750::bearer::HttpAuthBearer;
 use io_msgraph::v1::{
-    rest::users::{
-        mail_folders::{
-            MsgraphMailFolder,
-            child_folders::MsgraphMailChildFoldersList,
-            get::MsgraphMailFolderGet,
-            list::{
-                MsgraphMailFoldersList, MsgraphMailFoldersListParams,
-                MsgraphMailFoldersListResponse,
+    rest::{
+        batch::{MSGRAPH_BATCH_MAX_REQUESTS, MsgraphBatch, MsgraphBatchRequest},
+        users::{
+            mail_folders::{
+                MsgraphMailFolder,
+                child_folders::MsgraphMailChildFoldersList,
+                get::MsgraphMailFolderGet,
+                list::{
+                    MsgraphMailFoldersList, MsgraphMailFoldersListParams,
+                    MsgraphMailFoldersListResponse,
+                },
             },
+            messages::{
+                MsgraphFlagStatus, MsgraphFollowupFlag, MsgraphMessage, MsgraphRecipient,
+                delta::{
+                    MsgraphMessageDelta, MsgraphMessagesDelta, MsgraphMessagesDeltaParams,
+                    MsgraphMessagesDeltaResponse,
+                },
+                get_raw::MsgraphMessageGetRaw,
+                list::{
+                    MsgraphMessagesList, MsgraphMessagesListParams, MsgraphMessagesListResponse,
+                },
+                r#move::MsgraphMessageMove,
+                update::MsgraphMessageUpdate,
+            },
+            send_mail::MsgraphMailSendMime,
         },
-        messages::{
-            MsgraphFlagStatus, MsgraphFollowupFlag, MsgraphMessage, MsgraphRecipient,
-            delta::{MsgraphMessagesDelta, MsgraphMessagesDeltaParams},
-            get_raw::MsgraphMessageGetRaw,
-            list::{MsgraphMessagesList, MsgraphMessagesListParams, MsgraphMessagesListResponse},
-            r#move::MsgraphMessageMove,
-            update::MsgraphMessageUpdate,
-        },
-        send_mail::MsgraphMailSendMime,
     },
-    send::MsgraphSend,
+    send::{MSGRAPH_API_BASE, MsgraphSend},
 };
 
 use io_pimdir::summary::{
     PimdirAddress,
     mail::{PimdirMailSummary, decode},
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     client::{
         Client,
         graph::parse_graph_url,
-        listing::{
-            Floor, GRAPH_PAGE, Listing, MailPage, MailRequest, Named, RECEIVED_MARGIN_DAYS, Scope,
-            flags, utc,
-        },
+        listing::{Floor, GRAPH_PAGE, Listing, MailPage, MailRequest, Named, Scope, flags, utc},
     },
     types::{BridgeError, Mailbox},
 };
@@ -63,12 +72,12 @@ const WELL_KNOWN: [(&str, &str); 4] = [
     ("junkemail", "junk"),
 ];
 
-/// The `$select` of a folder's message delta: what Annex A's summary and
-/// addresses read, and the markers.
+/// The `$select` of a band's `/messages` page and of a message read by
+/// id: what Annex A's summary and addresses read, and the markers.
 ///
 /// The date is `sentDateTime`, Graph's name for the `Date` header, which
 /// is what pimdir STORAGE Annex A.1 stores and sorts mail by; the
-/// reception time is no part of a summary, and only narrows the listing.
+/// reception time is no part of a summary.
 const MESSAGE_SELECT: &str = "id,subject,from,toRecipients,ccRecipients,sentDateTime,isRead,\
 flag,hasAttachments,internetMessageId";
 
@@ -173,87 +182,37 @@ impl<'a, 'local> Client<'a, 'local> {
         }
     }
 
-    /// One page of a folder's listing (pimdir SYNC §4, §5).
-    ///
-    /// A round is the folder's message delta, filtered on the reception
-    /// date two days below the scope's floor, 1,000 messages a page with
-    /// the summary `$select`; the next link is the resume cursor and the
-    /// delta link, on the last page, the checkpoint. A delta follows the
-    /// checkpoint's link to its new delta link as one page. An expired
-    /// link (410) is refused for the engine to restart, which opens a
-    /// round where a delta was asked. A member whose `Date` falls out of
-    /// the scope is left out; a removal applies whatever the date.
+    /// One page of a folder's listing (pimdir SYNC §4, §5), over the live
+    /// Graph ([`list_folder`]).
     pub fn list_graph_page(
         &mut self,
         token: &str,
         folder_id: &str,
         request: &MailRequest,
     ) -> Result<MailPage, BridgeError> {
-        let auth = HttpAuthBearer::new(token);
-        let scope = &request.scope;
-
-        let (link, delta) = match &request.listing {
-            Listing::Delta { checkpoint } => (Some(checkpoint.as_str()), true),
-            Listing::Round { cursor, .. } => (cursor.as_deref(), false),
+        let mut folder = LiveFolder {
+            client: self,
+            auth: HttpAuthBearer::new(token),
+            folder: folder_id,
         };
+        list_folder(&mut folder, request)
+    }
 
-        let mut items = Vec::new();
-        let mut vanished = Vec::new();
-        let mut next = link.map(String::from);
-        loop {
-            let coroutine = match next.as_deref() {
-                Some(link) => MsgraphMessagesDelta::from_link(&auth, link)
-                    .map_err(|err| err.to_string())?
-                    .max_page_size(GRAPH_PAGE),
-                None => {
-                    let filter = scope.received_since(RECEIVED_MARGIN_DAYS).map(|since| {
-                        format!(
-                            "receivedDateTime ge {}",
-                            since.strftime("%Y-%m-%dT%H:%M:%SZ")
-                        )
-                    });
-                    let params = MsgraphMessagesDeltaParams {
-                        select: Some(MESSAGE_SELECT),
-                        filter: filter.as_deref(),
-                        max_page_size: Some(GRAPH_PAGE),
-                    };
-                    MsgraphMessagesDelta::with_params(&auth, "me", Some(folder_id), &params)
-                        .map_err(|err| err.to_string())?
-                }
-            };
-            let page = match self.run_msgraph(coroutine) {
-                Ok(page) => page,
-                Err(err) if err.status == Some(410) && next.is_some() => {
-                    return Ok(MailPage::rejected());
-                }
-                Err(err) => return Err(err),
-            };
-
-            for row in page.value {
-                if row.removed.is_some() {
-                    vanished.push(row.message.id);
-                } else {
-                    named(row.message, scope, &mut items);
-                }
-            }
-
-            match (page.next_link, page.delta_link) {
-                // NOTE: a delta is one page however many Graph cuts it
-                // into; a round lands each of Graph's pages as its own.
-                (Some(link), _) if delta => next = Some(link),
-                (Some(link), _) => {
-                    let mut page = MailPage::round(items, Some(link), None);
-                    page.vanished = vanished;
-                    return Ok(page);
-                }
-                (None, Some(link)) if delta => return Ok(MailPage::delta(items, vanished, link)),
-                (None, link) => {
-                    let mut page = MailPage::round(items, None, link);
-                    page.vanished = vanished;
-                    return Ok(page);
-                }
-            }
-        }
+    /// Names the messages a delta listed by id alone, as the summary
+    /// `$select` reads them ([`name_messages`]); a message gone since the
+    /// delta is left out.
+    pub fn name_graph_messages(
+        &mut self,
+        token: &str,
+        folder_id: &str,
+        ids: &[String],
+    ) -> Result<Vec<Named>, BridgeError> {
+        let mut folder = LiveFolder {
+            client: self,
+            auth: HttpAuthBearer::new(token),
+            folder: folder_id,
+        };
+        name_messages(&mut folder, ids)
     }
 
     /// Takes a folder's newest messages below the floor's ceiling until its
@@ -370,6 +329,467 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 }
 
+/// What a delta link is kept under as a checkpoint: a link made with no
+/// filter, which reports a change whatever the message's date.
+///
+/// A checkpoint without it is a link made under a reception filter
+/// (before the delta was unfiltered), bound to that filter: it is refused,
+/// and the round it opens makes the unfiltered one.
+const DELTA_CHECKPOINT: &str = "graph-delta:";
+
+/// What a round's cursor starts with while it lists a band by
+/// `/messages`, the rest the band's [`Ceiling`] as JSON.
+const BAND_CURSOR: &str = "band:";
+
+/// What a round's cursor starts with while it walks the unfiltered
+/// delta's first pass, the rest Graph's next link.
+const DELTA_CURSOR: &str = "delta:";
+
+/// The `$select` of the unfiltered delta: the markers, and the `Date`
+/// that tells a member in scope from one out of it, which is all a
+/// change needs where the store already names the message. The delta
+/// link keeps it: every later delta answers with these alone.
+const DELTA_SELECT: &str = "id,sentDateTime,isRead,flag";
+
+/// The Graph requests a folder's listing is made of: one page of the
+/// plain `/messages` list over a band of `sentDateTime`, one page of the
+/// folder's unfiltered message delta, and the summaries of messages read
+/// by id. The listing ([`list_folder`]) is one piece of logic over them,
+/// the live Graph or a fake one.
+pub(crate) trait GraphFolder {
+    /// The newest messages of the band first, `top` at most, with the
+    /// summary `$select`; `more` when Graph holds more past them.
+    fn messages(&mut self, band: &Band, top: u32) -> Result<MessagesPage, BridgeError>;
+
+    /// One page of the unfiltered delta: its first, or the one `link`
+    /// names (a next link or a delta link). [`None`] when Graph expired
+    /// the link (410).
+    fn delta(
+        &mut self,
+        link: Option<&str>,
+    ) -> Result<Option<MsgraphMessagesDeltaResponse>, BridgeError>;
+
+    /// The messages of `ids` read with the summary `$select`, those gone
+    /// left out.
+    fn read(&mut self, ids: &[String]) -> Result<Vec<MsgraphMessage>, BridgeError>;
+}
+
+/// One page of the plain `/messages` list.
+pub(crate) struct MessagesPage {
+    pub value: Vec<MsgraphMessage>,
+    pub more: bool,
+}
+
+/// A band of `sentDateTime`, Graph's name for the `Date` header, which it
+/// filters on exactly: from `since` on, below `until` (or up to it,
+/// `inclusive`, for a page resuming among messages of the same second).
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct Band {
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub inclusive: bool,
+    /// How many messages the page skips (`$skip`), 0 for none.
+    pub skip: u32,
+}
+
+impl Band {
+    /// The `$filter` of the band, [`None`] for an open one.
+    pub fn filter(&self) -> Option<String> {
+        let since = self
+            .since
+            .as_deref()
+            .map(|since| format!("sentDateTime ge {since}"));
+        let until = self.until.as_deref().map(|until| match self.inclusive {
+            true => format!("sentDateTime le {until}"),
+            false => format!("sentDateTime lt {until}"),
+        });
+        match (since, until) {
+            (Some(since), Some(until)) => Some(format!("{since} and {until}")),
+            (since, until) => since.or(until),
+        }
+    }
+}
+
+/// Where a band's listing resumes: below the oldest `Date` the pages
+/// before reached, that second included so messages of it a page cut off
+/// are not lost, the ones already listed at it named in `seen`.
+///
+/// Not Graph's next link: that one pages by `$skip`, and a message
+/// removed from the pages before shifts the rest up by one, so the first
+/// of the next page would never be listed.
+#[derive(Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+struct Ceiling {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    until: Option<String>,
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    inclusive: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    seen: Vec<String>,
+    /// How many of that second's messages a page skips, past a page of
+    /// them all listed already.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    skip: u32,
+}
+
+fn is_zero(skip: &u32) -> bool {
+    *skip == 0
+}
+
+/// One page of a folder's listing (pimdir SYNC §4, §5).
+///
+/// The folder has one delta link, made with no filter, so it reports a
+/// change to any message whatever its date and serves every scope: the
+/// connector is bound to none (`scope_bound` false), and a widening lists
+/// the band it lacks alone.
+///
+/// - A delta follows the checkpoint's link to its new delta link, as one
+///   page: a removal applies whatever the date, a change to a message
+///   dated out of the scope is dropped, and one in scope is listed by id
+///   and markers alone, for the caller to name ([`name_messages`]) when
+///   the store binds it not. An expired link (410), or one made under a
+///   filter before, is refused for the engine to open a round.
+/// - A round over a scope the store does not cover yet (a mailbox's first
+///   chunk), and every band round, lists the band by `/messages`
+///   ([`band_page`]), each page named by the summary `$select`, and hands
+///   no checkpoint: the first chunk lands without waiting on the delta.
+/// - A round over a scope the store covers (`covered`: the round a pass
+///   opens once the first chunk has landed and no delta link exists yet,
+///   or after a refused one) walks the delta's first pass ([`delta_page`]):
+///   every message of the folder by id, the ones in scope listed, a page
+///   a round page, the last carrying the delta link as the checkpoint. It
+///   is what the folder holds as it ends, so what changed or went since
+///   the band was listed is read there: a member it does not list is
+///   absent from the scope.
+pub(crate) fn list_folder<G: GraphFolder>(
+    graph: &mut G,
+    request: &MailRequest,
+) -> Result<MailPage, BridgeError> {
+    let scope = &request.scope;
+
+    match &request.listing {
+        Listing::Delta { checkpoint } => {
+            let Some(link) = checkpoint.strip_prefix(DELTA_CHECKPOINT) else {
+                return Ok(MailPage::rejected());
+            };
+            let mut items = Vec::new();
+            let mut vanished = Vec::new();
+            let mut next = link.to_string();
+            loop {
+                let Some(page) = graph.delta(Some(&next))? else {
+                    return Ok(MailPage::rejected());
+                };
+                changes(page.value, scope, &mut items, &mut vanished);
+                // NOTE: a delta is one page however many Graph cuts it
+                // into.
+                match (page.next_link, page.delta_link) {
+                    (Some(link), _) => next = link,
+                    (None, Some(link)) => {
+                        let checkpoint = format!("{DELTA_CHECKPOINT}{link}");
+                        return Ok(MailPage::delta(items, vanished, checkpoint));
+                    }
+                    (None, None) => return Err("Graph delta page with no link".into()),
+                }
+            }
+        }
+        Listing::Round { cursor: None, band } if !band && request.covered => {
+            delta_page(graph, None, scope)
+        }
+        Listing::Round { cursor: None, .. } => {
+            let ceiling = Ceiling {
+                until: scope.until.clone(),
+                ..Default::default()
+            };
+            band_page(graph, scope, ceiling)
+        }
+        Listing::Round {
+            cursor: Some(cursor),
+            ..
+        } => {
+            if let Some(link) = cursor.strip_prefix(DELTA_CURSOR) {
+                return delta_page(graph, Some(link), scope);
+            }
+            match cursor
+                .strip_prefix(BAND_CURSOR)
+                .and_then(|ceiling| serde_json::from_str::<Ceiling>(ceiling).ok())
+            {
+                Some(ceiling) => band_page(graph, scope, ceiling),
+                // NOTE: a cursor from before (a filtered delta's next
+                // link) restarts the round.
+                None => Ok(MailPage::rejected()),
+            }
+        }
+    }
+}
+
+/// One page of a band listed by `/messages`, newest `Date` first, below
+/// the ceiling; the next page resumes below the oldest `Date` it reached.
+/// No checkpoint: a band round keeps the one the source has, and a first
+/// chunk lands before any delta link exists.
+fn band_page<G: GraphFolder>(
+    graph: &mut G,
+    scope: &Scope,
+    ceiling: Ceiling,
+) -> Result<MailPage, BridgeError> {
+    let band = Band {
+        since: scope.since.clone(),
+        until: ceiling.until.clone(),
+        inclusive: ceiling.inclusive,
+        skip: ceiling.skip,
+    };
+    let page = graph.messages(&band, GRAPH_PAGE)?;
+
+    let mut items = Vec::with_capacity(page.value.len());
+    let mut fresh = 0;
+    let mut oldest: Option<String> = None;
+    let mut at_oldest: Vec<String> = Vec::new();
+    for message in page.value {
+        if ceiling.seen.contains(&message.id) {
+            continue;
+        }
+        fresh += 1;
+        if let Some(date) = message.sent_date_time.as_deref().and_then(utc) {
+            match oldest.as_deref().map(|oldest| date.as_str().cmp(oldest)) {
+                None | Some(core::cmp::Ordering::Less) => {
+                    oldest = Some(date);
+                    at_oldest = vec![message.id.clone()];
+                }
+                Some(core::cmp::Ordering::Equal) => at_oldest.push(message.id.clone()),
+                Some(core::cmp::Ordering::Greater) => (),
+            }
+        }
+        named(message, scope, &mut items);
+    }
+
+    if !page.more {
+        return Ok(MailPage::round(items, None, None));
+    }
+    let next = match oldest {
+        Some(oldest) if fresh > 0 => {
+            // NOTE: the ones listed at that second on the pages before
+            // stay listed, when the ceiling did not move.
+            let mut seen = at_oldest;
+            if ceiling.inclusive && ceiling.until.as_deref() == Some(oldest.as_str()) {
+                seen.extend(ceiling.seen);
+            }
+            Ceiling {
+                until: Some(oldest),
+                inclusive: true,
+                seen,
+                skip: 0,
+            }
+        }
+        // NOTE: a whole page of one second's messages listed already: that
+        // second holds more than a page, so the next page skips the ones
+        // listed, the one place a band pages by `$skip`.
+        _ if ceiling.inclusive && fresh == 0 && ceiling.skip == 0 => Ceiling {
+            skip: ceiling.seen.len() as u32,
+            ..ceiling
+        },
+        // NOTE: Graph did not answer that second's messages in the same
+        // order twice; the band goes on below it, and the delta's first
+        // pass names what this misses.
+        _ if ceiling.inclusive && fresh == 0 => Ceiling {
+            until: ceiling.until,
+            ..Default::default()
+        },
+        // NOTE: a page of undated messages alone, which no ceiling
+        // resumes below; the delta's first pass names the rest.
+        _ => return Ok(MailPage::round(items, None, None)),
+    };
+    let cursor = serde_json::to_string(&next).map_err(|err| err.to_string())?;
+    Ok(MailPage::round(
+        items,
+        Some(format!("{BAND_CURSOR}{cursor}")),
+        None,
+    ))
+}
+
+/// One page of the unfiltered delta's first pass, as a round page: the
+/// members in scope listed by id and markers, the next link the cursor,
+/// the delta link on the last page the checkpoint. A next link Graph
+/// expired restarts the round.
+fn delta_page<G: GraphFolder>(
+    graph: &mut G,
+    link: Option<&str>,
+    scope: &Scope,
+) -> Result<MailPage, BridgeError> {
+    let Some(page) = graph.delta(link)? else {
+        if link.is_some() {
+            return Ok(MailPage::rejected());
+        }
+        return Err("Graph refused a new message delta".into());
+    };
+
+    let mut items = Vec::new();
+    let mut vanished = Vec::new();
+    changes(page.value, scope, &mut items, &mut vanished);
+    let mut reply = match (page.next_link, page.delta_link) {
+        (Some(next), _) => MailPage::round(items, Some(format!("{DELTA_CURSOR}{next}")), None),
+        (None, Some(link)) => {
+            MailPage::round(items, None, Some(format!("{DELTA_CHECKPOINT}{link}")))
+        }
+        (None, None) => return Err("Graph delta page with no link".into()),
+    };
+    reply.vanished = vanished;
+    Ok(reply)
+}
+
+/// What one delta page says of the folder: a removal goes whatever the
+/// date, a message dated out of the scope is dropped, and one in scope
+/// is listed by id and markers alone.
+fn changes(
+    rows: Vec<MsgraphMessageDelta>,
+    scope: &Scope,
+    items: &mut Vec<Named>,
+    vanished: &mut Vec<String>,
+) {
+    for row in rows {
+        if row.removed.is_some() {
+            vanished.push(row.message.id);
+            continue;
+        }
+        let date = row.message.sent_date_time.as_deref().and_then(utc);
+        if !scope.contains(date.as_deref()) {
+            continue;
+        }
+        let marks = marks(&row.message);
+        items.push(Named::unnamed(row.message.id, marks));
+    }
+}
+
+/// The messages of `ids` named by the summary `$select` reads, those gone
+/// since they were listed left out.
+pub(crate) fn name_messages<G: GraphFolder>(
+    graph: &mut G,
+    ids: &[String],
+) -> Result<Vec<Named>, BridgeError> {
+    let read = graph.read(ids)?;
+    let mut items = Vec::with_capacity(read.len());
+    for message in read {
+        named(message, &Scope::default(), &mut items);
+    }
+    Ok(items)
+}
+
+/// The live Graph of one folder.
+struct LiveFolder<'c, 'a, 'local> {
+    client: &'c mut Client<'a, 'local>,
+    auth: HttpAuthBearer,
+    folder: &'c str,
+}
+
+impl GraphFolder for LiveFolder<'_, '_, '_> {
+    fn messages(&mut self, band: &Band, top: u32) -> Result<MessagesPage, BridgeError> {
+        let filter = band.filter();
+        let params = MsgraphMessagesListParams {
+            top: Some(top),
+            skip: (band.skip > 0).then_some(band.skip),
+            select: Some(MESSAGE_SELECT),
+            filter: filter.as_deref(),
+            orderby: Some("sentDateTime desc"),
+            ..Default::default()
+        };
+        let coroutine = MsgraphMessagesList::new(&self.auth, "me", Some(self.folder), &params)
+            .map_err(|err| err.to_string())?;
+        let page = self.client.run_msgraph(coroutine)?;
+        Ok(MessagesPage {
+            more: page.next_link.is_some(),
+            value: page.value,
+        })
+    }
+
+    fn delta(
+        &mut self,
+        link: Option<&str>,
+    ) -> Result<Option<MsgraphMessagesDeltaResponse>, BridgeError> {
+        let coroutine = match link {
+            Some(link) => MsgraphMessagesDelta::from_link(&self.auth, link)
+                .map_err(|err| err.to_string())?
+                .max_page_size(GRAPH_PAGE),
+            None => {
+                let params = MsgraphMessagesDeltaParams {
+                    select: Some(DELTA_SELECT),
+                    filter: None,
+                    max_page_size: Some(GRAPH_PAGE),
+                };
+                MsgraphMessagesDelta::with_params(&self.auth, "me", Some(self.folder), &params)
+                    .map_err(|err| err.to_string())?
+            }
+        };
+        match self.client.run_msgraph(coroutine) {
+            Ok(page) => Ok(Some(page)),
+            Err(err) if err.status == Some(410) && link.is_some() => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// `$batch` calls of 20 GETs; a GET the batch could not serve
+    /// (throttled inside it, say) is sent again on its own, where the
+    /// transport rides out the throttling.
+    fn read(&mut self, ids: &[String]) -> Result<Vec<MsgraphMessage>, BridgeError> {
+        let mut read = Vec::with_capacity(ids.len());
+        let mut again = Vec::new();
+        for chunk in ids.chunks(MSGRAPH_BATCH_MAX_REQUESTS) {
+            let requests: Vec<MsgraphBatchRequest> = chunk
+                .iter()
+                .enumerate()
+                .map(|(index, id)| MsgraphBatchRequest {
+                    id: index.to_string(),
+                    method: String::from("GET"),
+                    url: format!("/me/messages/{id}?$select={MESSAGE_SELECT}"),
+                    ..Default::default()
+                })
+                .collect();
+            let coroutine =
+                MsgraphBatch::new(&self.auth, &requests).map_err(|err| err.to_string())?;
+            let replies = self.client.run_msgraph(coroutine)?;
+            for reply in replies.responses {
+                let Some(id) = reply
+                    .id
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|index| chunk.get(index))
+                else {
+                    continue;
+                };
+                match reply.status {
+                    404 => (),
+                    200..300 => match reply.parse::<MsgraphMessage>() {
+                        Ok(message) => read.push(message),
+                        Err(_) => again.push(id.clone()),
+                    },
+                    _ => again.push(id.clone()),
+                }
+            }
+        }
+
+        for id in again {
+            let url = parse_graph_url(&format!(
+                "{MSGRAPH_API_BASE}me/messages/{id}?$select={MESSAGE_SELECT}"
+            ))?;
+            match self
+                .client
+                .run_msgraph(MsgraphSend::<MsgraphMessage>::get(&self.auth, url))
+            {
+                Ok(message) => read.push(message),
+                Err(err) if err.status == Some(404) => (),
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(read)
+    }
+}
+
+/// The markers of one Graph message, named the IMAP way.
+fn marks(message: &MsgraphMessage) -> Vec<String> {
+    let flagged = message
+        .flag
+        .as_ref()
+        .and_then(|flag| flag.flag_status.as_ref())
+        .is_some_and(|status| *status == MsgraphFlagStatus::Flagged);
+    flags(message.is_read.unwrap_or(false), false, flagged)
+}
+
 /// One Graph message, named by the summary its `$select` read, when its
 /// `Date` falls in the scope.
 fn named(message: MsgraphMessage, scope: &Scope, items: &mut Vec<Named>) {
@@ -377,12 +797,7 @@ fn named(message: MsgraphMessage, scope: &Scope, items: &mut Vec<Named>) {
     if !scope.contains(summary.date.as_deref()) {
         return;
     }
-    let flagged = message
-        .flag
-        .and_then(|flag| flag.flag_status)
-        .is_some_and(|status| status == MsgraphFlagStatus::Flagged);
-    let flags = flags(message.is_read.unwrap_or(false), false, flagged);
-
+    let flags = marks(&message);
     items.push(Named::new(message.id, flags, summary));
 }
 
@@ -435,6 +850,10 @@ fn address(recipient: &MsgraphRecipient) -> Option<PimdirAddress> {
         .map(String::from);
     Some(PimdirAddress { address, name })
 }
+
+#[cfg(test)]
+#[path = "graph_mail_tests.rs"]
+mod sync_tests;
 
 #[cfg(test)]
 mod tests {

@@ -121,11 +121,9 @@ class MailEngine extends PimdirEngine {
      * staged.
      *
      * <p>Within the account's bound: the scope's floor on the {@code Date}
-     * header, or none. Whether the backend's checkpoint is bound to the
-     * scope it was made under decides what a widened bound lists: a Graph
-     * delta link made under a filter relists the wider scope, an IMAP
-     * modseq, a Gmail history id or a JMAP state lists only the band it
-     * lacks.
+     * header, or none. No backend's checkpoint is bound to a scope (an IMAP
+     * modseq, a Gmail history id, a JMAP state, a Graph delta link made with
+     * no filter), so a widened bound lists only the band it lacks.
      *
      * <p>No hydrate after it, unlike a calendar: a mailbox is a list of
      * summaries and a message rises off it by being opened, so a placement
@@ -148,11 +146,9 @@ class MailEngine extends PimdirEngine {
      * <p>A mailbox never listed lists its first chunk instead, and a round
      * under way resumes rather than opening another.
      *
-     * <p>Where the backend's checkpoint is bound to no scope (IMAP, Gmail,
-     * JMAP), the wider scope lists only the band below the old floor. A Graph
-     * delta link made under a filter is bound to it, so the wider scope is
-     * listed whole again: pimdir keeps one checkpoint per source, and a band
-     * listed apart from it would leave the delta blind to what the band holds.
+     * <p>The wider scope lists only the band below the old floor, on every
+     * backend: no checkpoint is bound to a scope, a Graph delta link being
+     * made with no filter, so it reports what changes in the band too.
      */
     boolean widen(String collection, int count) {
         String bound = bound();
@@ -198,13 +194,16 @@ class MailEngine extends PimdirEngine {
         return client.mailFloor(session, mailboxOf(collection), before, count);
     }
 
-    /** Runs the engine's round or delta over a mailbox from {@code since}. */
+    /**
+     * Runs the engine's round or delta over a mailbox from {@code since}. No
+     * backend's checkpoint is bound to the scope it was made under, so a
+     * widening is a band round.
+     */
     private void list(String collection, String since) {
-        boolean scopeBound = session != null && PimalayaClient.isGraph(session.account());
         Log.d(
                 "pimalaya",
                 "mail sync " + collection + " since " + since + ": "
-                        + client.offlineSyncImmutable(this, collection, since, scopeBound)
+                        + client.offlineSyncImmutable(this, collection, since, false)
                         + ", the pass so far " + clock);
     }
 
@@ -275,11 +274,13 @@ class MailEngine extends PimdirEngine {
         request.put("listing", yielded.getJSONObject("listing"));
         JSONObject scope = yielded.optJSONObject("scope");
         request.put("scope", scope == null ? new JSONObject() : scope);
+        request.put("covered", covered(collection, scope));
 
         long started = System.nanoTime();
         String raw = client.enumerateMailboxRaw(session, mailboxOf(collection), request);
-        remote(System.nanoTime() - started);
         JSONObject page = PimalayaClient.reply(raw);
+        nameUnnamed(collection, page);
+        remote(System.nanoTime() - started);
 
         listed.clear();
         JSONArray items = page.optJSONArray("items");
@@ -290,6 +291,82 @@ class MailEngine extends PimdirEngine {
         listed(items == null ? 0 : items.length());
         step(Progress.STAGE_DOWNLOAD, items == null ? 0 : items.length());
         return page;
+    }
+
+    /**
+     * Whether the store's coverage of a mailbox already holds a scope: a
+     * round over it then lists what changed, where a first chunk lists its
+     * band. Graph tells the two apart by it: its first chunk lands by
+     * {@code /messages} without waiting on a delta link, and the round a
+     * later pass opens over the covered scope makes that link.
+     */
+    boolean covered(String collection, JSONObject scope) {
+        MailStore.Coverage coverage = mail().coverage(collection);
+        if (coverage.at == null) {
+            return false;
+        }
+        if (coverage.since == null) {
+            return true;
+        }
+        String since = scope == null || scope.isNull("since") ? null : scope.optString("since", null);
+        return since != null && since.compareTo(coverage.since) >= 0;
+    }
+
+    /**
+     * Names the members a page listed by id and markers alone (a Graph
+     * delta), so nothing reaches the store unnamed (pimdir SYNC section 4):
+     * one the store binds keeps the summary it holds, every other one is
+     * read with its summary ({@link #read}), and one gone since it was
+     * listed is left out.
+     */
+    void nameUnnamed(String collection, JSONObject page) throws JSONException {
+        JSONArray items = page.optJSONArray("items");
+        List<String> unnamed = new ArrayList<>();
+        for (int index = 0; items != null && index < items.length(); index++) {
+            JSONObject item = items.getJSONObject(index);
+            if (!item.has("summary")) {
+                unnamed.add(item.getString("handle"));
+            }
+        }
+        if (unnamed.isEmpty()) {
+            return;
+        }
+
+        Map<String, String[]> bound = offline.bound(collection, unnamed);
+        List<String> unbound = new ArrayList<>();
+        for (String handle : unnamed) {
+            if (!bound.containsKey(handle)) {
+                unbound.add(handle);
+            }
+        }
+        Map<String, JSONObject> read = new HashMap<>();
+        if (!unbound.isEmpty()) {
+            JSONArray named = read(collection, unbound);
+            for (int index = 0; index < named.length(); index++) {
+                JSONObject item = named.getJSONObject(index);
+                read.put(item.getString("handle"), item);
+            }
+        }
+
+        JSONArray kept = new JSONArray();
+        for (int index = 0; index < items.length(); index++) {
+            JSONObject item = items.getJSONObject(index);
+            String handle = item.getString("handle");
+            if (item.has("summary")) {
+                kept.put(item);
+            } else if (bound.containsKey(handle)) {
+                item.put("linkId", bound.get(handle)[0]);
+                kept.put(item);
+            } else if (read.containsKey(handle)) {
+                kept.put(read.get(handle));
+            }
+        }
+        page.put("items", kept);
+    }
+
+    /** The messages of a mailbox read by id with their summary, as listed. */
+    protected JSONArray read(String collection, List<String> handles) {
+        return client.nameMessages(session, mailboxOf(collection), handles);
     }
 
     @Override

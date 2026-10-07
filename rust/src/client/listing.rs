@@ -24,8 +24,9 @@ use crate::summary::SummaryJson;
 /// fields are under 1 KB a message, half a megabyte a response.
 pub const IMAP_PAGE: usize = 500;
 
-/// Messages per Graph message delta page (`Prefer: odata.maxpagesize`),
-/// honoured with the summary `$select`.
+/// Messages per Graph page: a message delta page (`Prefer:
+/// odata.maxpagesize`, a ceiling Graph may cut shorter) and a band's
+/// `/messages` page (`$top`, at most 1,000).
 pub const GRAPH_PAGE: u32 = 1000;
 
 /// Message ids per Gmail `messages.list`, each read for its metadata
@@ -51,6 +52,12 @@ pub struct MailRequest {
     pub listing: Listing,
     #[serde(default)]
     pub scope: Scope,
+    /// Whether the store's coverage holds the scope already: a round
+    /// over it lists what changed rather than what a first pass lists.
+    /// Only Graph reads it, to tell a mailbox's first chunk (listed by
+    /// band) from the round that makes its delta link.
+    #[serde(default)]
+    pub covered: bool,
 }
 
 /// What is listed: a delta from the checkpoint, or a round over the
@@ -298,13 +305,19 @@ impl MailPage {
 /// The link id is the handle: a message's UID within its mailbox, or the
 /// provider's message id, is what this store has always filed it under,
 /// and what a reader opens and a push addresses it by.
+///
+/// A member listed by id and markers alone carries no summary (a Graph
+/// delta): the store keeps the one it holds where it binds the message,
+/// and the driver names the others before the page reaches the engine.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Named {
     pub handle: String,
     pub flags: Vec<String>,
     pub link_id: String,
-    pub summary: SummaryJson,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<SummaryJson>,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub sort_key: String,
 }
 
@@ -316,8 +329,20 @@ impl Named {
             link_id: handle.clone(),
             handle,
             flags,
-            summary: SummaryJson::from(&PimdirSummary::Mail(summary)),
+            summary: Some(SummaryJson::from(&PimdirSummary::Mail(summary))),
             sort_key,
+        }
+    }
+
+    /// A message listed by id and markers alone, to be named by its
+    /// summary where the store does not bind it yet.
+    pub fn unnamed(handle: String, flags: Vec<String>) -> Self {
+        Self {
+            link_id: handle.clone(),
+            handle,
+            flags,
+            summary: None,
+            sort_key: String::new(),
         }
     }
 }

@@ -233,14 +233,26 @@ final class Native {
     /**
      * One page of a mailbox's listing, the engine's {@code enumerate}
      * yield answered (pimdir SYNC sections 4 and 5). {@code request} is
-     * the yield's {@code {listing, scope}} as the engine wrote it. Returns
-     * the reply the engine reads: {@code {items, vanished, complete, last,
+     * the yield's {@code {listing, scope}} as the engine wrote it, and
+     * {@code covered} when the store's coverage holds the scope. Returns the
+     * reply the engine reads: {@code {items, vanished, complete, last,
      * cursor?, checkpoint?}}, every item {@code {handle, flags, linkId,
-     * summary, sortKey}} named by its meta, or {@code {cursorRejected:
-     * true}} when the source refused the resume cursor.
+     * summary, sortKey}} named by its meta but a Graph delta's, listed by
+     * {@code {handle, flags, linkId}} alone for the caller to name where the
+     * store binds it not ({@link #nameMessages}), or {@code
+     * {cursorRejected: true}} when the source refused the resume cursor.
      */
     static native String enumerateMailbox(
             Transport transport, long session, String mailbox, String request);
+
+    /**
+     * The messages a listing named by id and markers alone (a Graph delta),
+     * each read with its summary. {@code handles} is a JSON array of ids;
+     * returns {@code {items}}, every item named as a listed one is, a
+     * message gone since it was listed left out.
+     */
+    static native String nameMessages(
+            Transport transport, long session, String mailbox, String handles);
 
     /**
      * The floor of a mailbox's next chunk: the oldest {@code Date} among its
