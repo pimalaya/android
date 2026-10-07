@@ -16,17 +16,20 @@ use jni::{
     errors::{Error, LogErrorAndDefault},
     objects::{JByteArray, JClass, JObject, JString},
 };
-use serde::Serialize;
 use serde_json::{from_str, json, to_string};
 
 use crate::{
-    client::{self, Client, gmail::GmailEnvelope},
+    client::{
+        self, Client,
+        gmail::GmailEnvelope,
+        listing::{Listing, MailPage, MailRequest},
+    },
     ffi::{
         error_json, parse_url, read_string,
         session::{self, MailSession},
     },
     mail::{self, Draft},
-    types::{BridgeError, Mailbox, Message},
+    types::{BridgeError, Mailbox},
 };
 
 /// `Native.openMailSession`: connects to the account's mail server and
@@ -99,9 +102,15 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listMailboxes<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// `Native.enumerateMailbox`: one mailbox's spine from the cursor the
-/// last pass stored, as `{items, vanished, complete, checkpoint}`, each
-/// item `{id, flags}` and no envelope.
+/// `Native.enumerateMailbox`: one page of a mailbox's listing, the
+/// engine's `enumerate` yield answered (pimdir SYNC §4, §5).
+///
+/// `request` is the yield as the engine wrote it, `{listing, scope}`: a
+/// delta from the checkpoint, or a round over the scope from its first
+/// page or resumed from a cursor. The answer is the reply the engine
+/// reads, `{items, vanished, complete, last, cursor?, checkpoint?}` with
+/// every item `{handle, flags, linkId, summary, sortKey}` named by its
+/// meta, or `{cursorRejected: true}` when the source refused the cursor.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_enumerateMailbox<'local>(
     mut env: EnvUnowned<'local>,
@@ -109,43 +118,15 @@ pub extern "system" fn Java_org_pimalaya_client_Native_enumerateMailbox<'local>(
     transport: JObject<'local>,
     handle: i64,
     mailbox: JString<'local>,
-    cursor: JString<'local>,
-    limit: i32,
+    request: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let mailbox = read_string(env, &mailbox);
-        let cursor = read_string(env, &cursor);
-        let limit = limit.max(1) as u32;
+        let request = read_string(env, &request);
 
         let mut client = Client::new(env, &transport);
-        let json = match enumerate(&mut client, handle, &mailbox, &cursor, limit) {
-            Ok(round) => to_string(&round).unwrap_or_else(|err| error_json(err.to_string())),
-            Err(err) => error_json(err),
-        };
-
-        Ok(env.new_string(json)?.into())
-    })
-    .resolve::<LogErrorAndDefault>()
-}
-
-/// `Native.fetchEnvelopes`: the envelope spine of the named messages,
-/// and of no others. Returns a JSON array of message objects.
-#[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_fetchEnvelopes<'local>(
-    mut env: EnvUnowned<'local>,
-    _class: JClass<'local>,
-    transport: JObject<'local>,
-    handle: i64,
-    mailbox: JString<'local>,
-    ids: JString<'local>,
-) -> JObject<'local> {
-    env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let mailbox = read_string(env, &mailbox);
-        let ids = read_string(env, &ids);
-
-        let mut client = Client::new(env, &transport);
-        let json = match fetch_envelopes(&mut client, handle, &mailbox, &ids) {
-            Ok(messages) => to_string(&messages).unwrap_or_else(|err| error_json(err.to_string())),
+        let json = match enumerate(&mut client, handle, &mailbox, &request) {
+            Ok(page) => to_string(&page).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -264,118 +245,101 @@ fn list_mailboxes(client: &mut Client<'_, '_>, handle: i64) -> Result<Vec<Mailbo
     Ok(roster)
 }
 
-/// One mailbox's spine with whichever backend the session speaks.
+/// One page of a mailbox's listing with whichever backend the session
+/// speaks.
 fn enumerate(
     client: &mut Client<'_, '_>,
     handle: i64,
     mailbox: &str,
-    cursor: &str,
-    limit: u32,
-) -> Result<EnumerationJson, BridgeError> {
+    request: &str,
+) -> Result<MailPage, BridgeError> {
+    let request: MailRequest =
+        from_str(request).map_err(|err| format!("Invalid listing request: {err}"))?;
     let session = unsafe { session::borrow(handle) }?;
-    let cursor = Some(cursor).filter(|value| !value.is_empty());
 
     if session.is_imap() {
-        let round = session.imap(client)?.enumerate(mailbox, cursor, limit)?;
-        return Ok(round.into());
+        return session.imap(client)?.list_page(mailbox, &request);
     }
 
     let Some(id) = session.listing().ids.get(mailbox).cloned() else {
         return Err(format!("No mailbox named `{mailbox}`").into());
     };
     if session.is_gmail() {
-        return enumerate_gmail(client, session, &id, cursor, limit);
+        return list_gmail(client, session, &id, &request);
     }
-    let messages = if session.is_jmap() {
+    if session.is_jmap() {
         let url = session.jmap_url()?;
-        client.query_jmap_mailbox(&url, &session.credentials(), &id, mailbox, limit)?
-    } else {
-        client.query_graph_mailbox(session.credentials().password, &id, mailbox, limit)?
-    };
-
-    // Kept for the fetch that follows: with no incremental round wired
-    // the round already read what the fetch would ask for, and asking
-    // twice would be the avoidable half of a whole round.
-    let listed = &mut session.listing().listed;
-    listed.clear();
-    let mut items = Vec::with_capacity(messages.len());
-    for message in messages {
-        items.push(SpineJson {
-            id: message.id.clone(),
-            flags: flags_of(&message),
-        });
-        listed.insert(message.id.clone(), message);
+        return client.list_jmap_page(&url, &session.credentials(), &id, &request);
     }
 
-    Ok(EnumerationJson {
-        items,
-        vanished: Vec::new(),
-        complete: true,
-        checkpoint: String::new(),
-    })
+    client.list_graph_page(session.credentials().password, &id, &request)
 }
 
-/// One Gmail label's spine: the history replayed from the cursor when
-/// Gmail still holds it, the label's newest `limit` messages otherwise.
+/// One page of a Gmail label's listing.
 ///
-/// A message the history names is re-read, and is an item if it still
-/// carries the label and gone from this mailbox if it does not. The
-/// checkpoint of a full round is taken before the listing, so what moves
-/// during it is replayed by the next round rather than missed.
-fn enumerate_gmail(
+/// A delta replays the history from the checkpoint: a message it names
+/// is read again, and is a member while it still carries the label, gone
+/// from this mailbox otherwise; history Gmail no longer holds is refused
+/// for the engine to open a round. A round lists the label's ids a page
+/// at a time, the page token its cursor, each id read for its metadata,
+/// the `historyId` taken before the first page its checkpoint, so what
+/// moves during the round is replayed by the next delta rather than
+/// missed.
+fn list_gmail(
     client: &mut Client<'_, '_>,
     session: &mut MailSession,
     label: &str,
-    cursor: Option<&str>,
-    limit: u32,
-) -> Result<EnumerationJson, BridgeError> {
+    request: &MailRequest,
+) -> Result<MailPage, BridgeError> {
     let token = session.credentials().password.to_string();
+    let scope = &request.scope;
 
-    if let Some(start) = cursor
-        && let Some((touched, next)) = client.gmail_history(&token, start)?
-    {
-        let mut items = Vec::new();
-        let mut vanished = Vec::new();
-        for id in touched {
-            match gmail_envelope(client, session, &token, &id)? {
-                Some(envelope) if envelope.labels.iter().any(|filed| filed == label) => {
-                    items.push(SpineJson {
-                        flags: flags_of(&envelope.message),
-                        id,
-                    });
+    let (cursor, band) = match &request.listing {
+        Listing::Delta { checkpoint } => {
+            let Some((touched, next)) = client.gmail_history(&token, checkpoint)? else {
+                return Ok(MailPage::rejected());
+            };
+
+            let mut items = Vec::new();
+            let mut vanished = Vec::new();
+            for id in touched {
+                match gmail_envelope(client, session, &token, &id)? {
+                    Some(envelope) if envelope.labels.iter().any(|filed| filed == label) => {
+                        items.extend(envelope.named(&id, scope));
+                    }
+                    _ => vanished.push(id),
                 }
-                _ => vanished.push(id),
             }
+            return Ok(MailPage::delta(items, vanished, next));
         }
+        Listing::Round { cursor, band } => (cursor.as_deref(), *band),
+    };
 
-        return Ok(EnumerationJson {
-            items,
-            vanished,
-            complete: false,
-            checkpoint: next,
-        });
+    let checkpoint = match (cursor, band) {
+        (None, false) => Some(client.gmail_history_id(&token)?),
+        _ => None,
+    };
+    let listed = match client.list_gmail_page(&token, label, scope, cursor) {
+        Ok(listed) => listed,
+        // NOTE: a page token Gmail no longer honours restarts the round,
+        // which relists and refetches nothing already named.
+        Err(err) if cursor.is_some() && err.status == Some(400) => {
+            return Ok(MailPage::rejected());
+        }
+        Err(err) => return Err(err),
+    };
+
+    let mut items = Vec::with_capacity(listed.ids.len());
+    for id in &listed.ids {
+        if let Some(envelope) = gmail_envelope(client, session, &token, id)? {
+            items.extend(envelope.named(id, scope));
+        }
     }
 
-    let checkpoint = client.gmail_history_id(&token)?;
-    let mut items = Vec::new();
-    for id in client.list_gmail_label(&token, label, limit)? {
-        if let Some(envelope) = gmail_envelope(client, session, &token, &id)? {
-            items.push(SpineJson {
-                flags: flags_of(&envelope.message),
-                id,
-            });
-        }
-    }
-
-    Ok(EnumerationJson {
-        items,
-        vanished: Vec::new(),
-        complete: true,
-        checkpoint,
-    })
+    Ok(MailPage::round(items, listed.next, checkpoint))
 }
 
-/// One Gmail message's labels and envelope, read once per pass.
+/// One Gmail message's labels and summary, read once per pass.
 ///
 /// The session lasts one pass, so what it holds was read during it: a
 /// message two labels list, or two mailboxes' histories replay, costs
@@ -398,93 +362,6 @@ fn gmail_envelope(
             .insert(id.to_string(), envelope.clone());
     }
     Ok(envelope)
-}
-
-/// The named messages' envelopes with whichever backend the session
-/// speaks.
-fn fetch_envelopes(
-    client: &mut Client<'_, '_>,
-    handle: i64,
-    mailbox: &str,
-    ids: &str,
-) -> Result<Vec<Message>, BridgeError> {
-    let ids: Vec<String> = from_str(ids).map_err(|err| format!("Invalid id list: {err}"))?;
-    let session = unsafe { session::borrow(handle) }?;
-
-    if session.is_imap() {
-        let borrowed: Vec<&str> = ids.iter().map(String::as_str).collect();
-        return session.imap(client)?.fetch_envelopes(mailbox, &borrowed);
-    }
-
-    if session.is_gmail() {
-        let token = session.credentials().password.to_string();
-        let mut messages = Vec::with_capacity(ids.len());
-        for id in &ids {
-            if let Some(envelope) = gmail_envelope(client, session, &token, id)? {
-                let mut message = envelope.message;
-                message.mailbox = mailbox.to_string();
-                messages.push(message);
-            }
-        }
-        return Ok(messages);
-    }
-
-    let listed = &session.listing().listed;
-    Ok(ids
-        .iter()
-        .filter_map(|id| listed.get(id).cloned())
-        .collect())
-}
-
-/// The IMAP markers an HTTP backend's message carries, named the IMAP
-/// way.
-fn flags_of(message: &Message) -> Vec<String> {
-    let mut flags = Vec::new();
-    if message.seen {
-        flags.push(String::from("\\Seen"));
-    }
-    if message.answered {
-        flags.push(String::from("\\Answered"));
-    }
-    if message.flagged {
-        flags.push(String::from("\\Flagged"));
-    }
-    flags
-}
-
-/// One enumerated mailbox on the JSON wire.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct EnumerationJson {
-    items: Vec<SpineJson>,
-    vanished: Vec<String>,
-    complete: bool,
-    checkpoint: String,
-}
-
-/// One member of an enumerated mailbox on the JSON wire.
-#[derive(Serialize)]
-struct SpineJson {
-    id: String,
-    flags: Vec<String>,
-}
-
-impl From<client::imap::Enumeration> for EnumerationJson {
-    fn from(round: client::imap::Enumeration) -> Self {
-        Self {
-            items: round
-                .items
-                .into_iter()
-                .map(|entry| SpineJson {
-                    id: entry.id,
-                    flags: entry.flags,
-                })
-                .collect(),
-            vanished: round.vanished,
-            complete: round.complete,
-            checkpoint: round.checkpoint,
-        }
-    }
 }
 
 /// `Native.setMessageFlag`: adds or removes one marker (`\Seen`,

@@ -138,7 +138,7 @@ public final class PimdirSql {
         /** The values, in the order the statement's parameters occur. */
         public final Object[] args;
 
-        Bound(String sql, Object[] args) {
+        public Bound(String sql, Object[] args) {
             this.sql = sql;
             this.args = args;
         }

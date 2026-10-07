@@ -6,14 +6,13 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.MailSession;
-import org.pimalaya.client.MailRef;
-import org.pimalaya.client.MailRound;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.Message;
 import org.pimalaya.client.PimalayaClient;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The mail half of the engine: one driver per account, servicing the
@@ -23,22 +22,27 @@ import java.util.List;
  * account. IMAP is a session and JMAP is one session resource, so both
  * backends list every mailbox inside one login, where a WebDAV
  * collection is one request each. The engine, on the other hand,
- * reconciles one collection at a time. The two meet in {@link #walk}: one
- * account-wide walk primes a cache, and every mailbox's enumerate and
- * meta fetch is answered out of it. It is the same shape the contacts
- * driver uses for the account-level backends, and it is what keeps a sync
- * at one connection per account rather than one per mailbox.
+ * reconciles one collection at a time. The two meet in the session: one
+ * connection per account answers every mailbox's listing in turn, which is
+ * what keeps a sync at one connection per account rather than one per
+ * mailbox.
  *
  * <p>The session it walks and writes on is the caller's, opened once
  * for the pass and closed with it, so the three markers a reader moved
  * go out on the connection the walk already had rather than on three of
  * their own.
  *
- * <p>A meta fetch costs nothing for the second reason mail is unusual: a
- * message's handle <em>is</em> its link id, and the summary a listing
- * renders comes off the envelope the walk already read. Only the body
- * needs the network, which is why opening a message is the one read that
- * still reaches for one.
+ * <p>A listing names every message it carries (pimdir SYNC section 4): a
+ * message's handle <em>is</em> its link id, and its summary comes off the
+ * header fields the listing read, so a new message lands listed in the page
+ * that found it, with no probe and no upgrade after it. Only the body needs
+ * the network, which is why opening a message is the one read that still
+ * reaches for one.
+ *
+ * <p>A mailbox is listed whole, within the account's bound ({@link
+ * MailScope}), newest first and a page at a time: each page lands in its own
+ * write, so the top of the list shows while the rest fills in, and a pass
+ * cut off resumes where its last page landed.
  */
 final class MailEngine extends PimdirEngine {
     /** The IMAP {@code \Seen} flag, as the store's JSON array spells it. */
@@ -68,8 +72,12 @@ final class MailEngine extends PimdirEngine {
      */
     private static final String[] WRITABLE = {SEEN, ANSWERED, FLAGGED, DELETED};
 
-    /** How many messages a full round takes off the end of a mailbox. */
-    private static final int PER_MAILBOX = 50;
+    /**
+     * Told after every write a mail driver's pass lands, so a list showing
+     * the store redraws as the pages of a first pass land; null when
+     * nothing is listening. Called on the sync thread.
+     */
+    static volatile Runnable onWrite;
 
     /** The account's live connection; null on a driver that only stages,
      *  whose mutations reach no server. */
@@ -78,8 +86,18 @@ final class MailEngine extends PimdirEngine {
     /** What the account's collection ids are namespaced under. */
     private final String accountId;
 
+    /** The store, for the account's bound kept beside it. */
+    private final PimdirDb pimdir;
+
+    /**
+     * The members the last listed page named, by handle: what a meta fetch
+     * reads back, since a listing already read everything one would.
+     */
+    private final Map<String, JSONObject> listed = new HashMap<>();
+
     MailEngine(PimdirDb pimdir, PimalayaClient client, MailSession session, String accountId) {
         super(pimdir, client);
+        this.pimdir = pimdir;
         this.session = session;
         this.accountId = accountId;
     }
@@ -90,28 +108,30 @@ final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Reconciles one mailbox with the walk: pull, then push what is staged.
+     * Reconciles one mailbox with its server: list, then push what is
+     * staged.
      *
-     * <p>No hydrate after it, unlike a calendar: a mailbox is a spine and
-     * a message rises off it by being opened, so a placement below full is
-     * the ordinary state of one rather than something to repair. A probe
-     * is not: the sync files a new message as an unnamed handle with no
-     * summary, which no listing shows, so a meta upgrade names it off its
-     * envelope.
+     * <p>Within the account's bound: the scope's floor on the {@code Date}
+     * header, or none. Whether the backend's checkpoint is bound to the
+     * scope it was made under decides what a widened bound lists: a Graph
+     * delta link made under a filter relists the wider scope, an IMAP
+     * modseq, a Gmail history id or a JMAP state lists only the band it
+     * lacks.
+     *
+     * <p>No hydrate after it, unlike a calendar: a mailbox is a list of
+     * summaries and a message rises off it by being opened, so a placement
+     * below full is the ordinary state of one rather than something to
+     * repair. And no upgrade either: every message a listing carries arrives
+     * named.
      */
     void sync(String collection) {
         step(Progress.STAGE_SERVER, 0);
+        String since = MailScope.sinceOf(pimdir.context(), accountId);
+        boolean scopeBound = session != null && PimalayaClient.isGraph(session.account());
         Log.d(
                 "pimalaya",
-                "mail sync " + collection + ": " + client.offlineSyncImmutable(this, collection));
-
-        List<String> probed = offline.probedHandles(collection);
-        if (!probed.isEmpty()) {
-            Log.d(
-                    "pimalaya",
-                    "name " + collection + " (" + probed.size() + " probed): "
-                            + client.offlineUpgradeMeta(this, collection, probed));
-        }
+                "mail sync " + collection + " since " + since + ": "
+                        + client.offlineSyncImmutable(this, collection, since, scopeBound));
     }
 
     /** The mailbox behind a collection id, which is what IMAP names it by. */
@@ -119,84 +139,67 @@ final class MailEngine extends PimdirEngine {
         return PimdirAccount.nameOf(accountId, collection);
     }
 
+    /**
+     * One page of a mailbox's listing, straight from the backend: the
+     * engine's request in, its reply out, every member named by the header
+     * fields the listing read.
+     */
     @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
-        String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");
-        MailRound round =
-                client.enumerateMailbox(session, mailboxOf(collection), cursor, PER_MAILBOX);
+        JSONObject request = new JSONObject();
+        request.put("listing", yielded.getJSONObject("listing"));
+        JSONObject scope = yielded.optJSONObject("scope");
+        request.put("scope", scope == null ? new JSONObject() : scope);
 
-        JSONArray items = new JSONArray();
-        for (MailRef message : round.items) {
-            JSONObject item = new JSONObject();
-            item.put("handle", message.id);
-            item.put("flags", new JSONArray(message.flags));
-            items.put(item);
-        }
+        JSONObject page = client.enumerateMailbox(session, mailboxOf(collection), request);
 
-        JSONObject reply = new JSONObject();
-        reply.put("items", items);
-        reply.put("vanished", new JSONArray(round.vanished));
-        // NOTE: a complete round is a claim worth being careful about: it
-        // covers the window this store holds and not the mailbox, so
-        // everything older than the window reads as vanished and is
-        // dropped. That is what the mirror has always held, and saying
-        // otherwise would leave rows nothing can refresh. A QRESYNC round
-        // is a delta and says so, so it retires only what the server
-        // reported gone.
-        reply.put("complete", round.complete);
-        if (!round.checkpoint.isEmpty()) {
-            reply.put("checkpoint", round.checkpoint);
+        listed.clear();
+        JSONArray items = page.optJSONArray("items");
+        for (int index = 0; items != null && index < items.length(); index++) {
+            JSONObject item = items.getJSONObject(index);
+            listed.put(item.getString("handle"), item);
         }
-        return reply;
+        step(Progress.STAGE_DOWNLOAD, items == null ? 0 : items.length());
+        return page;
+    }
+
+    @Override
+    protected boolean listingsNamed() {
+        return true;
     }
 
     /**
-     * The envelopes of the named messages, with no body whichever tier is
-     * asked.
+     * The named members of the last page, whichever tier is asked.
      *
-     * <p>Those and no others: a pass that found one new message reads one
-     * envelope, where the spine used to arrive as a window of every
-     * mailbox whether or not anything in it moved.
-     *
-     * <p>A body is a different question, and the reader's: it fetches the
-     * bytes and stores them ({@link MailStore#saveSource}), one message at
-     * a time and only ever one someone asked for. Answering one here would
-     * be an entire mailbox of downloads to reconcile a spine, and a
-     * message crossing a wire that carries text where a message is bytes.
+     * <p>A sync never asks: a listing names everything it carries. A meta
+     * upgrade revisiting a claim reads back what the last page named, and a
+     * body is the reader's to fetch ({@link MailStore#saveSource}), one
+     * message at a time and only one someone opened; answering one here
+     * would be an entire mailbox of downloads to reconcile a listing.
      */
     @Override
     protected JSONObject fetch(JSONObject yielded) throws JSONException {
-        String collection = yielded.getString("collection");
-        String mailbox = mailboxOf(collection);
-        List<String> handles = stringsOf(yielded.getJSONArray("handles"));
-
         JSONArray items = new JSONArray();
-        for (Message message : client.fetchEnvelopes(session, mailbox, handles)) {
-            JSONObject item = new JSONObject();
-            item.put("handle", message.id);
-            // The handle is the identity: an IMAP UID names the message
-            // within its mailbox and a JMAP Email id across the account,
-            // which is exactly what a link id has to do.
-            item.put("linkId", message.id);
-            item.put(
-                    "summary",
-                    PimdirSummary.mail(
-                            null,
-                            message.subject,
-                            message.from,
-                            message.fromAddress,
-                            null,
-                            message.date,
-                            0,
-                            message.hasAttachment));
-            item.put("sortKey", PimdirSummary.mailSortKey(message.date));
-            items.put(item);
+        for (String handle : stringsOf(yielded.getJSONArray("handles"))) {
+            JSONObject item = listed.get(handle);
+            if (item != null) {
+                items.put(item);
+            }
         }
 
         JSONObject reply = new JSONObject();
         reply.put("items", items);
         return reply;
+    }
+
+    /** Tells a listening list that a write landed, page by page. */
+    @Override
+    protected void applied(JSONArray effects) {
+        Runnable listener = onWrite;
+        if (listener != null && effects.length() > 0) {
+            listener.run();
+        }
     }
 
     @Override

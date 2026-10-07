@@ -2,6 +2,7 @@ package org.pimalaya;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -199,7 +200,7 @@ public class MailEngineTest {
                                                 .put(result(change.getString("handle"), true, null, null)));
                     }
                 };
-        new PimalayaClient().offlineSyncImmutable(remote, collection);
+        new PimalayaClient().offlineSyncImmutable(remote, collection, null, false);
 
         assertEquals(List.of("setFlags"), pushed);
     }
@@ -237,5 +238,114 @@ public class MailEngineTest {
         assertTrue("it says of itself that it has not gone yet", row.pending);
         assertEquals("Hi", row.subject);
         assertEquals(store.outboxOf(EMAIL), row.collection);
+    }
+
+    /** One named member of a listed page, as a mail connector answers it. */
+    private static JSONObject named(String handle, String date) throws JSONException {
+        return new JSONObject()
+                .put("handle", handle)
+                .put("flags", new JSONArray())
+                .put("linkId", handle)
+                .put(
+                        "summary",
+                        PimdirSummary.mail(
+                                null, "Subject " + handle, "", "a@example.org", null, date, 0,
+                                false))
+                .put("sortKey", PimdirSummary.mailSortKey(date));
+    }
+
+    /**
+     * A mailbox listed in pages lands each page as it comes, and a pass cut
+     * off between two pages resumes from the cursor the last landed page
+     * left rather than from the top (pimdir SYNC section 5).
+     */
+    @Test
+    public void aRoundLandsPageByPageAndResumesWhereItStopped() throws Exception {
+        String since = "2026-01-01T00:00:00Z";
+        List<JSONObject> asked = new ArrayList<>();
+        boolean[] cut = {true};
+        PimdirEngine remote =
+                new PimdirEngine(pimdir, new PimalayaClient()) {
+                    @Override
+                    protected boolean listingsNamed() {
+                        return true;
+                    }
+
+                    @Override
+                    protected JSONObject enumerate(JSONObject yielded) throws JSONException {
+                        asked.add(yielded);
+                        JSONObject listing = yielded.getJSONObject("listing");
+                        if ("delta".equals(listing.getString("kind"))) {
+                            return new JSONObject()
+                                    .put("items", new JSONArray())
+                                    .put("vanished", new JSONArray())
+                                    .put("complete", false)
+                                    .put("checkpoint", "cp-2");
+                        }
+                        if (listing.isNull("cursor")) {
+                            return new JSONObject()
+                                    .put(
+                                            "items",
+                                            new JSONArray()
+                                                    .put(named("101", "2026-10-07T08:00:00Z"))
+                                                    .put(named("100", "2026-10-06T08:00:00Z")))
+                                    .put("vanished", new JSONArray())
+                                    .put("complete", true)
+                                    .put("last", false)
+                                    .put("cursor", "7:100")
+                                    .put("checkpoint", "cp-1");
+                        }
+                        if (cut[0]) {
+                            cut[0] = false;
+                            throw new IllegalStateException("the connection dropped");
+                        }
+                        return new JSONObject()
+                                .put(
+                                        "items",
+                                        new JSONArray().put(named("99", "2026-02-01T08:00:00Z")))
+                                .put("vanished", new JSONArray())
+                                .put("complete", true)
+                                .put("last", true);
+                    }
+
+                    @Override
+                    protected JSONObject fetch(JSONObject yielded) {
+                        return new JSONObject();
+                    }
+
+                    @Override
+                    protected JSONObject push(JSONObject yielded) throws JSONException {
+                        return new JSONObject().put("results", new JSONArray());
+                    }
+                };
+
+        try {
+            new PimalayaClient().offlineSyncImmutable(remote, collection, since, false);
+            throw new AssertionError("the pass reports the cut");
+        } catch (org.pimalaya.client.PimalayaException cut2) {
+            assertTrue(cut2.getMessage().contains("dropped"));
+        }
+        assertEquals(
+                "the first page landed before the cut", "Subject 101",
+                scalar("SELECT subject FROM mail_summary WHERE link_id = ?", "101"));
+        assertEquals("2026-01-01T00:00:00Z", asked.get(0).getJSONObject("scope").getString("since"));
+        assertTrue("a first pass is filling in", store.coverage(collection).filling);
+        assertNull("and covers nothing yet", store.coverage(collection).at);
+
+        new PimalayaClient().offlineSyncImmutable(remote, collection, since, false);
+        JSONObject resumed = asked.get(asked.size() - 1).getJSONObject("listing");
+        assertEquals("resumed, not restarted", "7:100", resumed.getString("cursor"));
+        assertEquals("1", scalar("SELECT count(*) FROM items WHERE link_id = '99'"));
+        // NOTE: the message the setup filed was in scope and listed by no
+        // page of the round, so its close retires it.
+        assertEquals("1", scalar("SELECT deleted FROM items WHERE link_id = '42'"));
+
+        new PimalayaClient().offlineSyncImmutable(remote, collection, since, false);
+        JSONObject delta = asked.get(asked.size() - 1).getJSONObject("listing");
+        assertEquals("a closed round leaves a delta", "delta", delta.getString("kind"));
+        assertEquals("the checkpoint taken up front", "cp-1", delta.getString("checkpoint"));
+        MailStore.Coverage coverage = store.coverage(collection);
+        assertEquals("mail since the bound", since, coverage.since);
+        assertTrue("and complete", coverage.at != null && !coverage.filling);
     }
 }

@@ -29,6 +29,7 @@ mod graph_calendar;
 mod graph_mail;
 pub(crate) mod imap;
 mod jmap;
+pub(crate) mod listing;
 pub(crate) mod smtp;
 mod sync_collection;
 mod throttle;

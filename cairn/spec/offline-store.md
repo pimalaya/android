@@ -74,24 +74,6 @@ The store SHALL record what a reader lists an item from in its kind's summary ta
 - WHEN a write carries none
 - THEN the stored summary is kept, on the same terms as the sort key
 
-### Requirement: An unnamed handle is a probe
-A placement carrying no link id SHALL be recorded as a probe of its source, never as an item keyed by its handle, and SHALL be loaded back as a probed placement. A named placement SHALL forget the probe its handle held, and a handle bound to another link id SHALL have that binding retired first: a handle names one item per source.
-
-#### Scenario: An enumeration reports a member
-- GIVEN a collection whose enumeration yields handles and no identities
-- WHEN the store writes them
-- THEN each is a probe, no item is keyed by a handle, and the next load offers them as probed placements
-
-#### Scenario: A fetch names a probed handle
-- GIVEN a probed handle
-- WHEN the upgrade resolves its identity and upserts the placement
-- THEN the probe is forgotten and the handle is bound exactly once
-
-#### Scenario: A resource replaced in place
-- GIVEN a handle bound to one link id
-- WHEN an upsert of the same handle carries another
-- THEN the binding it held is retired and the handle binds the new identity alone
-
 ### Requirement: A placement no source binds is offered under its provisional handle
 The store SHALL hand out `U+0001` followed by the link id as the handle of a placement the source does not bind (SYNC §2), and SHALL resolve that handle back to the identity it spells. A push SHALL name the resource by that identity, never by the provisional handle.
 
@@ -391,3 +373,24 @@ A list with nothing to show SHALL centre its empty state in the space its header
 - GIVEN a day with no entry picked in the week card
 - WHEN the agenda renders
 - THEN the empty state sits under the week card, not behind it
+
+### Requirement: Nothing reaches the store unnamed
+Every member a listing carries SHALL arrive named (pimdir SYNC section 4). A DAV, Google or Graph contacts or calendar listing that answers handles and revisions SHALL be named before it reaches the engine: a member the source already binds at an unchanged revision by the link id the store holds, any other by its body, read 64 at a time and carried in the listing. A write naming no identity on a handle no binding holds SHALL be refused, and a handle bound to another link id SHALL have that binding retired first: a handle names one item per source.
+
+#### Scenario: A new card on a CardDAV book
+- GIVEN a book whose listing reports a card the store has never seen
+- WHEN it is synced
+- THEN the card lands named, with its body, in the same pass
+
+#### Scenario: A resource replaced in place
+- GIVEN a handle bound to one link id
+- WHEN an upsert of the same handle carries another
+- THEN the binding it held is retired and the handle binds the new identity alone
+
+### Requirement: A round lands page by page
+The store SHALL keep, per collection and source, the round under way (its scope, its resume cursor, the checkpoint a page handed) and the coverage the last closed round left, read and written through io-pimdir's canonical statements; it SHALL stamp every binding a page lists with the round's id, and hand the engine, while a round is open, the bindings no page stamped whose date is in its scope or unknown.
+
+#### Scenario: A round cut off
+- GIVEN a round whose first page landed
+- WHEN the collection is loaded
+- THEN the round, its cursor and its scope come back with it

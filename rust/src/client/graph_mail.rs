@@ -2,10 +2,12 @@
 //! the MIME Graph keeps of them, the Graph half of what `syncMail` does
 //! over IMAP and JMAP.
 //!
-//! Shaped like the JMAP side: a folder answers its newest messages whole
-//! every pass, since the message delta is not wired, and a message is
-//! read as its RFC 5322 source so the store and the parser stay the ones
-//! the other backends use.
+//! A folder is listed by its message delta, which answers newest first
+//! (by reception) and ends with the delta link the next pass resumes
+//! from: a round is that delta's pages, 1,000 messages each, every member
+//! named by the summary `$select` reads, and every pass after it one
+//! request. A message is read as its RFC 5322 source, so the store and the
+//! parser stay the ones the other backends use.
 
 use io_http::rfc6750::bearer::HttpAuthBearer;
 use io_msgraph::v1::{
@@ -20,9 +22,9 @@ use io_msgraph::v1::{
             },
         },
         messages::{
-            MsgraphFlagStatus, MsgraphFollowupFlag, MsgraphMessage,
+            MsgraphFlagStatus, MsgraphFollowupFlag, MsgraphMessage, MsgraphRecipient,
+            delta::{MsgraphMessagesDelta, MsgraphMessagesDeltaParams},
             get_raw::MsgraphMessageGetRaw,
-            list::{MsgraphMessagesList, MsgraphMessagesListParams},
             r#move::MsgraphMessageMove,
             update::MsgraphMessageUpdate,
         },
@@ -31,24 +33,34 @@ use io_msgraph::v1::{
     send::MsgraphSend,
 };
 
+use io_pimdir::summary::{
+    PimdirAddress,
+    mail::{PimdirMailSummary, decode},
+};
+
 use crate::{
-    client::{Client, graph::parse_graph_url},
-    types::{BridgeError, Mailbox, Message},
+    client::{
+        Client,
+        graph::parse_graph_url,
+        listing::{
+            GRAPH_PAGE, Listing, MailPage, MailRequest, Named, RECEIVED_MARGIN_DAYS, Scope, flags,
+            utc,
+        },
+    },
+    types::{BridgeError, Mailbox},
 };
 
 /// The well-known name Graph gives the trash (`Deleted Items`).
 const TRASH: &str = "deleteditems";
 
-/// The `$select` of a folder listing: the envelope spine and markers.
+/// The `$select` of a folder's message delta: what Annex A's summary and
+/// addresses read, and the markers.
 ///
 /// The date is `sentDateTime`, Graph's name for the `Date` header, which
 /// is what pimdir STORAGE Annex A.1 stores and sorts mail by; the
-/// reception time is no part of a summary.
-const MESSAGE_SELECT: &str = "id,subject,from,sentDateTime,isRead,flag,hasAttachments";
-
-/// The order of a folder listing: newest by the same date the store
-/// sorts on, so the window is the newest messages the list shows.
-const MESSAGE_ORDER: &str = "sentDateTime desc";
+/// reception time is no part of a summary, and only narrows the listing.
+const MESSAGE_SELECT: &str = "id,subject,from,toRecipients,ccRecipients,sentDateTime,isRead,\
+flag,hasAttachments,internetMessageId";
 
 impl<'a, 'local> Client<'a, 'local> {
     /// Reads the inbox's folder, so a session that cannot authenticate
@@ -137,31 +149,87 @@ impl<'a, 'local> Client<'a, 'local> {
         }
     }
 
-    /// One folder's newest `limit` messages, whole.
-    pub fn query_graph_mailbox(
+    /// One page of a folder's listing (pimdir SYNC §4, §5).
+    ///
+    /// A round is the folder's message delta, filtered on the reception
+    /// date two days below the scope's floor, 1,000 messages a page with
+    /// the summary `$select`; the next link is the resume cursor and the
+    /// delta link, on the last page, the checkpoint. A delta follows the
+    /// checkpoint's link to its new delta link as one page. An expired
+    /// link (410) is refused for the engine to restart, which opens a
+    /// round where a delta was asked. A member whose `Date` falls out of
+    /// the scope is left out; a removal applies whatever the date.
+    pub fn list_graph_page(
         &mut self,
         token: &str,
         folder_id: &str,
-        mailbox_path: &str,
-        limit: u32,
-    ) -> Result<Vec<Message>, BridgeError> {
+        request: &MailRequest,
+    ) -> Result<MailPage, BridgeError> {
         let auth = HttpAuthBearer::new(token);
-        let params = MsgraphMessagesListParams {
-            top: Some(limit),
-            select: Some(MESSAGE_SELECT),
-            orderby: Some(MESSAGE_ORDER),
-            ..Default::default()
+        let scope = &request.scope;
+
+        let (link, delta) = match &request.listing {
+            Listing::Delta { checkpoint } => (Some(checkpoint.as_str()), true),
+            Listing::Round { cursor, .. } => (cursor.as_deref(), false),
         };
 
-        let coroutine = MsgraphMessagesList::new(&auth, "me", Some(folder_id), &params)
-            .map_err(|err| err.to_string())?;
-        let page = self.run_msgraph(coroutine)?;
+        let mut items = Vec::new();
+        let mut vanished = Vec::new();
+        let mut next = link.map(String::from);
+        loop {
+            let coroutine = match next.as_deref() {
+                Some(link) => MsgraphMessagesDelta::from_link(&auth, link)
+                    .map_err(|err| err.to_string())?
+                    .max_page_size(GRAPH_PAGE),
+                None => {
+                    let filter = scope.received_since(RECEIVED_MARGIN_DAYS).map(|since| {
+                        format!(
+                            "receivedDateTime ge {}",
+                            since.strftime("%Y-%m-%dT%H:%M:%SZ")
+                        )
+                    });
+                    let params = MsgraphMessagesDeltaParams {
+                        select: Some(MESSAGE_SELECT),
+                        filter: filter.as_deref(),
+                        max_page_size: Some(GRAPH_PAGE),
+                    };
+                    MsgraphMessagesDelta::with_params(&auth, "me", Some(folder_id), &params)
+                        .map_err(|err| err.to_string())?
+                }
+            };
+            let page = match self.run_msgraph(coroutine) {
+                Ok(page) => page,
+                Err(err) if err.status == Some(410) && next.is_some() => {
+                    return Ok(MailPage::rejected());
+                }
+                Err(err) => return Err(err),
+            };
 
-        Ok(page
-            .value
-            .into_iter()
-            .map(|message| graph_message(mailbox_path, message))
-            .collect())
+            for row in page.value {
+                if row.removed.is_some() {
+                    vanished.push(row.message.id);
+                } else {
+                    named(row.message, scope, &mut items);
+                }
+            }
+
+            match (page.next_link, page.delta_link) {
+                // NOTE: a delta is one page however many Graph cuts it
+                // into; a round lands each of Graph's pages as its own.
+                (Some(link), _) if delta => next = Some(link),
+                (Some(link), _) => {
+                    let mut page = MailPage::round(items, Some(link), None);
+                    page.vanished = vanished;
+                    return Ok(page);
+                }
+                (None, Some(link)) if delta => return Ok(MailPage::delta(items, vanished, link)),
+                (None, link) => {
+                    let mut page = MailPage::round(items, None, link);
+                    page.vanished = vanished;
+                    return Ok(page);
+                }
+            }
+        }
     }
 
     /// Reads one message whole, as the RFC 5322 bytes Graph serves.
@@ -235,41 +303,79 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 }
 
-/// One Graph message to the JNI-facing shape.
-fn graph_message(mailbox: &str, message: MsgraphMessage) -> Message {
-    let sender = message.from.map(|from| from.email_address);
-    let from = sender
-        .as_ref()
-        .and_then(|sender| sender.name.clone())
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or_default();
-    let from_address = sender.and_then(|sender| sender.address).unwrap_or_default();
+/// One Graph message, named by the summary its `$select` read, when its
+/// `Date` falls in the scope.
+fn named(message: MsgraphMessage, scope: &Scope, items: &mut Vec<Named>) {
+    let summary = graph_summary(&message);
+    if !scope.contains(summary.date.as_deref()) {
+        return;
+    }
     let flagged = message
         .flag
         .and_then(|flag| flag.flag_status)
         .is_some_and(|status| status == MsgraphFlagStatus::Flagged);
+    let flags = flags(message.is_read.unwrap_or(false), false, flagged);
 
-    Message {
-        mailbox: mailbox.to_string(),
-        id: message.id,
-        subject: message.subject.unwrap_or_default(),
+    items.push(Named::new(message.id, flags, summary));
+}
+
+/// The Annex A summary of one Graph message, read off its `$select`.
+///
+/// The date is the `Date` header (`sentDateTime`), never the reception;
+/// the attachment mark is Graph's own `hasAttachments`.
+fn graph_summary(message: &MsgraphMessage) -> PimdirMailSummary {
+    let from: Vec<PimdirAddress> = message.from.iter().filter_map(address).collect();
+    let first = from.first().cloned();
+
+    PimdirMailSummary {
+        message_id: message
+            .internet_message_id
+            .as_deref()
+            .map(|id| {
+                id.trim()
+                    .trim_start_matches('<')
+                    .trim_end_matches('>')
+                    .to_string()
+            })
+            .filter(|id| !id.is_empty()),
+        in_reply_to: Vec::new(),
+        subject: message.subject.as_deref().map(decode).unwrap_or_default(),
+        sender: first.as_ref().map(|address| address.address.clone()),
+        sender_name: first.and_then(|address| address.name),
+        date: message.sent_date_time.as_deref().and_then(utc),
+        size: None,
+        attachment: message.has_attachments,
         from,
-        from_address,
-        // NOTE: Annex A.1 leaves the date `NULL` when there is none, which
-        // the wire carries as an empty string, as for the other backends.
-        date: message.sent_date_time.unwrap_or_default(),
-        seen: message.is_read.unwrap_or(false),
-        answered: false,
-        flagged,
-        has_attachment: message.has_attachments.unwrap_or(false),
+        to: message.to_recipients.iter().filter_map(address).collect(),
+        cc: message.cc_recipients.iter().filter_map(address).collect(),
+        bcc: Vec::new(),
     }
+}
+
+/// One Graph recipient as Annex A.6 stores an address.
+fn address(recipient: &MsgraphRecipient) -> Option<PimdirAddress> {
+    let address = recipient.email_address.address.as_deref()?;
+    let address = PimdirAddress::canonical(address);
+    if address.is_empty() {
+        return None;
+    }
+    let name = recipient
+        .email_address
+        .name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(String::from);
+    Some(PimdirAddress { address, name })
 }
 
 #[cfg(test)]
 mod tests {
-    use io_msgraph::v1::rest::users::messages::MsgraphMessage;
+    use io_msgraph::v1::rest::users::messages::{
+        MsgraphEmailAddress, MsgraphMessage, MsgraphRecipient,
+    };
 
-    use super::graph_message;
+    use super::graph_summary;
 
     #[test]
     fn the_date_is_the_sent_date_not_the_reception() {
@@ -279,7 +385,10 @@ mod tests {
             received_date_time: Some("2026-10-07T08:05:00Z".into()),
             ..Default::default()
         };
-        assert_eq!(graph_message("INBOX", message).date, "2026-10-07T08:00:00Z");
+        assert_eq!(
+            graph_summary(&message).date.as_deref(),
+            Some("2026-10-07T08:00:00Z")
+        );
 
         // A message with no `Date` has none, rather than the reception
         // time standing in for it (Annex A.1: `NULL`).
@@ -288,6 +397,32 @@ mod tests {
             received_date_time: Some("2026-10-07T08:05:00Z".into()),
             ..Default::default()
         };
-        assert_eq!(graph_message("INBOX", undated).date, "");
+        assert_eq!(graph_summary(&undated).date, None);
+    }
+
+    #[test]
+    fn the_summary_reads_the_select() {
+        let recipient = |name: &str, address: &str| MsgraphRecipient {
+            email_address: MsgraphEmailAddress {
+                name: Some(name.into()),
+                address: Some(address.into()),
+            },
+        };
+        let message = MsgraphMessage {
+            id: "m1".into(),
+            subject: Some("Hello".into()),
+            from: Some(recipient("Ana", "Ana@Example.org")),
+            to_recipients: vec![recipient("Bo", "bo@example.org")],
+            internet_message_id: Some("<m1@example.org>".into()),
+            has_attachments: Some(true),
+            ..Default::default()
+        };
+
+        let summary = graph_summary(&message);
+        assert_eq!(summary.message_id.as_deref(), Some("m1@example.org"));
+        assert_eq!(summary.sender.as_deref(), Some("ana@example.org"));
+        assert_eq!(summary.sender_name.as_deref(), Some("Ana"));
+        assert_eq!(summary.to.len(), 1);
+        assert_eq!(summary.attachment, Some(true));
     }
 }

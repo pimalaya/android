@@ -618,12 +618,12 @@ public class PimdirStorageTest {
                         .getString("handle"));
     }
 
-    /** An upsert of a handle the enumeration reported and no fetch has named. */
-    private JSONObject probe(String handle) throws Exception {
+    /** An upsert of a handle no listing named and no binding holds. */
+    private JSONObject unnamed(String handle) throws Exception {
         JSONObject placement = new JSONObject();
         placement.put("collection", "acct/Contacts");
         placement.put("handle", handle);
-        placement.put("level", "probed");
+        placement.put("level", "meta");
         placement.put("status", "clean");
 
         JSONObject op = new JSONObject();
@@ -633,62 +633,121 @@ public class PimdirStorageTest {
     }
 
     @Test
-    public void anUnnamedHandleIsProbedRatherThanFiledAsAnItem() throws Exception {
-        storage.applyWrites(batch(probe("p.vcf")));
-
-        // An enumeration yields handles and no identities, and an item is keyed
-        // by its link id: filing the handle as one would mint an item the next
-        // fetch has to un-mint. So it waits in probes, and rides back to the
-        // merge as a probed placement.
+    public void nothingReachesTheStoreUnnamed() throws Exception {
+        // Every member a listing carries arrives named (SYNC §4), so an upsert
+        // naming no identity on a handle nothing binds is refused, the batch
+        // with it, rather than filed under a key the next listing un-mints.
+        try {
+            storage.applyWrites(batch(unnamed("p.vcf")));
+            throw new AssertionError("an unnamed placement is refused");
+        } catch (PimalayaException refused) {
+            assertTrue(refused.getMessage().contains("Unnamed"));
+        }
         assertEquals(0, scalar("SELECT count(*) FROM items"));
         assertEquals(0, scalar("SELECT count(*) FROM bindings"));
-        assertEquals(1, scalar("SELECT count(*) FROM probes WHERE handle = 'p.vcf'"));
-
-        JSONObject placement =
-                storage.loadCollection("acct/Contacts", null)
-                        .getJSONArray("placements")
-                        .getJSONObject(0);
-        assertEquals("p.vcf", placement.getString("handle"));
-        assertEquals("probed", placement.getString("level"));
-        assertFalse(placement.has("linkId"));
     }
 
     @Test
-    public void naminAProbedHandleBindsItOnceRatherThanTwice() throws Exception {
-        // The sequence a first sync runs: the enumeration probes the members,
-        // then the upgrade fetches their bodies and resolves each identity. The
-        // handle is one member of one source throughout, so it must end up
-        // bound once, whatever it was carried as in between.
-        storage.applyWrites(batch(probe("q.vcf")));
+    public void aBoundHandleNeedsNoNameToBeRewritten() throws Exception {
         storage.applyWrites(
-                batch(storeObject("ba20", "body"), upsert("q.vcf", "uid-q", "ba20", "quinn")));
+                batch(storeObject("ba20", "body"), synced("q.vcf", "uid-q", "ba20", "quinn")));
 
-        assertEquals(0, scalar("SELECT count(*) FROM probes"));
+        // A flag push or a pulled deletion restates the placement by handle:
+        // the binding it holds names it.
+        storage.applyWrites(batch(unnamed("q.vcf")));
+
         assertEquals(1, scalar("SELECT count(*) FROM items"));
         assertEquals(1, scalar("SELECT count(*) FROM bindings WHERE handle = 'q.vcf'"));
-        assertEquals(
-                "uid-q",
-                storage.loadCollection("acct/Contacts", null)
-                        .getJSONArray("placements")
-                        .getJSONObject(0)
-                        .getString("linkId"));
+        assertEquals("uid-q", stringOf("SELECT link_id FROM bindings WHERE handle = 'q.vcf'"));
+    }
+
+    /** A round op on the collection, as the engine writes it. */
+    private JSONObject round(String op, String since) throws Exception {
+        JSONObject write = new JSONObject();
+        write.put("op", op);
+        write.put("collection", "acct/Contacts");
+        JSONObject scope = new JSONObject();
+        if (since != null) {
+            scope.put("since", since);
+        }
+        write.put("closeRound".equals(op) ? "coverage" : "scope", scope);
+        return write;
     }
 
     @Test
-    public void aProbedHandleIsWhatTheHydratePassAsksFor() throws Exception {
-        storage.applyWrites(batch(probe("h1.vcf"), probe("h2.vcf")));
-
-        // A probe holds no item row, so the pass that raises placements to
-        // their body cannot find it by joining items. Leaving it out is
-        // leaving every freshly enumerated member unfetched for good, which is
-        // an address book that syncs and stays empty.
-        assertEquals(List.of("h1.vcf", "h2.vcf"), storage.handlesBelowFull("acct/Contacts"));
-        assertTrue("and the quiet path does not skip it",
-                storage.pending("acct/Contacts"));
-
+    public void aRoundLandsPageByPageAndClosesIntoACoverage() throws Exception {
+        // The first page: the round opens, its members land and are stamped,
+        // and its resume cursor lands with them, the checkpoint taken up
+        // front beside it (SYNC §5).
+        JSONObject cursor = new JSONObject();
+        cursor.put("op", "setRoundCursor");
+        cursor.put("collection", "acct/Contacts");
+        cursor.put("cursor", "7:500");
+        cursor.put("checkpoint", "7:42");
+        JSONObject stamp = new JSONObject();
+        stamp.put("op", "stamp");
+        stamp.put("collection", "acct/Contacts");
+        stamp.put("handles", new JSONArray().put("a.vcf"));
         storage.applyWrites(
-                batch(storeObject("ba24", "body"), upsert("h1.vcf", "uid-h1", "ba24", "hana")));
-        assertEquals(List.of("h2.vcf"), storage.handlesBelowFull("acct/Contacts"));
+                batch(
+                        round("openRound", "2026-04-01T00:00:00Z"),
+                        storeObject("ca01", "one"),
+                        synced("a.vcf", "uid-a", "ca01", "alice"),
+                        cursor,
+                        stamp));
+
+        JSONObject loaded = storage.loadCollection("acct/Contacts", null);
+        JSONObject open = loaded.getJSONObject("round");
+        assertEquals("2026-04-01T00:00:00Z", open.getString("since"));
+        assertEquals("7:500", open.getString("cursor"));
+        assertEquals("7:42", open.getString("checkpoint"));
+        assertFalse("no round closed yet, so no coverage", loaded.has("coverage"));
+        assertEquals(
+                "the stamped member is no absence", 0, loaded.getJSONArray("unstamped").length());
+
+        // A member the store held from before the round and the round never
+        // listed is what its last page finds absent.
+        storage.applyWrites(
+                batch(storeObject("ca02", "two"), synced("b.vcf", "uid-b", "ca02", "bob")));
+        assertEquals(
+                "b.vcf",
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("unstamped")
+                        .getString(0));
+
+        storage.applyWrites(batch(round("closeRound", "2026-04-01T00:00:00Z")));
+        JSONObject closed = storage.loadCollection("acct/Contacts", null);
+        assertFalse(closed.has("round"));
+        assertEquals("7:42", closed.getString("checkpoint"));
+        assertEquals("2026-04-01T00:00:00Z", closed.getJSONObject("coverage").getString("since"));
+        assertTrue(closed.getJSONObject("coverage").has("at"));
+    }
+
+    @Test
+    public void aLoadNamingNoHandleReadsTheSyncStateAlone() throws Exception {
+        storage.applyWrites(
+                batch(storeObject("ca03", "one"), synced("a.vcf", "uid-a", "ca03", "alice")));
+
+        JSONObject scope = new JSONObject();
+        scope.put("kind", "handles");
+        scope.put("handles", new JSONArray());
+        JSONObject loaded = storage.loadCollection("acct/Contacts", scope);
+
+        // What a sync reads before it lists: a 100k-message mailbox read
+        // whole to learn its checkpoint would be the first page's whole cost.
+        assertEquals(0, loaded.getJSONArray("placements").length());
+    }
+
+    @Test
+    public void aListedMemberIsNamedByWhatTheStoreHolds() throws Exception {
+        storage.applyWrites(
+                batch(storeObject("ba24", "body"), synced("h1.vcf", "uid-h1", "ba24", "hana")));
+
+        java.util.Map<String, String[]> bound =
+                storage.bound("acct/Contacts", List.of("h1.vcf", "h2.vcf"));
+        assertEquals(1, bound.size());
+        assertEquals("uid-h1", bound.get("h1.vcf")[0]);
+        assertEquals("rev-uid-h1", bound.get("h1.vcf")[1]);
     }
 
     @Test

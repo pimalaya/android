@@ -17,8 +17,11 @@ use crate::{
 /// through the io-pimdir engine, servicing every engine yield via the
 /// given `OfflineDriver`. With `full` the checkpoint is ignored and the
 /// whole remote is enumerated, and without `content` no body is pushed.
+/// `since` bounds a mail collection's scope on the `Date` header (RFC
+/// 3339 `Z`, empty for none) and `scope_bound` says whether the
+/// connector's checkpoint is bound to the scope it was made under.
 /// Returns the sync report
-/// `{"pulled", "pushed", "conflicts", "rejected", "refreshed"}`.
+/// `{"pulled", "pushed", "conflicts", "rejected", "refreshed", "waiting"}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
     mut env: EnvUnowned<'local>,
@@ -27,11 +30,22 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
     collection: JString<'local>,
     full: jboolean,
     content: jboolean,
+    since: JString<'local>,
+    scope_bound: jboolean,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let collection = read_string(env, &collection);
+        let since = read_string(env, &since);
 
-        let json = match offline::sync(env, &driver, &collection, full, content) {
+        let json = match offline::sync(
+            env,
+            &driver,
+            &collection,
+            full,
+            content,
+            &since,
+            scope_bound,
+        ) {
             Ok(report) => report.to_string(),
             Err(err) => error_json(err),
         };

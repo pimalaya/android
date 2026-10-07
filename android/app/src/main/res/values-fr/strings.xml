@@ -143,6 +143,14 @@
     <string name="account_enable">Activer ce compte</string>
     <string name="account_send">Envoyer les e-mails via %1$s</string>
     <string name="account_send_none">aucun serveur</string>
+    <string-array name="mail_scopes">
+        <item>Synchroniser tous les e-mails</item>
+        <item>Synchroniser le dernier mois</item>
+        <item>Synchroniser les 3 derniers mois</item>
+        <item>Synchroniser les 6 derniers mois</item>
+        <item>Synchroniser la dernière année</item>
+        <item>Synchroniser les 2 dernières années</item>
+    </string-array>
     <string name="account_advanced">Activer les paramètres avancés par carnet d\'adresses</string>
     <string name="book_enable">Activer ce carnet d\'adresses</string>
     <string name="book_remote_sync">Synchroniser à distance</string>

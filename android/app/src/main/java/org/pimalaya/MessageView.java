@@ -171,6 +171,12 @@ final class MessageView {
                             host.mail.saveSource(message.collection, message.id, source);
                         }
                         loaded = host.client.parseMessage(source);
+                        if (!message.pending) {
+                            // NOTE: the listing marked the attachment off the
+                            // top-level type alone; the parts are in now.
+                            host.mail.markAttachment(
+                                    message.collection, message.id, loaded.attachmentMark);
+                        }
                     } catch (Exception error) {
                         Log.w("pimalaya", "message fetch failed: " + message.id, error);
                         failure = error;

@@ -105,6 +105,15 @@
     <string name="account_enable">Enable this account</string>
     <string name="account_send">Send mail through %1$s</string>
     <string name="account_send_none">no server</string>
+    <!-- The account's mail bound: what a sync lists and what the store keeps. -->
+    <string-array name="mail_scopes">
+        <item>Sync all mail</item>
+        <item>Sync the last month</item>
+        <item>Sync the last 3 months</item>
+        <item>Sync the last 6 months</item>
+        <item>Sync the last year</item>
+        <item>Sync the last 2 years</item>
+    </string-array>
     <string name="account_advanced">Enable advanced settings per addressbook</string>
     <string name="book_enable">Enable this addressbook</string>
     <string name="book_remote_sync">Sync remotely</string>
