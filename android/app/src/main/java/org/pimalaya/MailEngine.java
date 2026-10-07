@@ -278,6 +278,11 @@ class MailEngine extends PimdirEngine {
      * fields the listing read.
      */
     @Override
+    protected PimDomain domain() {
+        return PimDomain.MAIL;
+    }
+
+    @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
         JSONObject request = new JSONObject();

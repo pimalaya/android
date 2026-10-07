@@ -184,11 +184,32 @@
     <string name="sync_local_requested">Synchronisation locale planifiée</string>
     <string name="sync_overlay_preparing">Préparation de la synchronisation</string>
     <string name="sync_step_server">Recherche des changements sur le serveur</string>
-    <string name="sync_step_download">Téléchargement de %1$d contact(s)</string>
-    <string name="sync_step_upload">Envoi de %1$d changement(s) au serveur</string>
+    <!-- A counted step names what the domain being synced holds. -->
+    <plurals name="sync_step_download_mail">
+        <item quantity="one">Téléchargement de %1$d message</item>
+        <item quantity="other">Téléchargement de %1$d messages</item>
+    </plurals>
+    <plurals name="sync_step_download_events">
+        <item quantity="one">Téléchargement de %1$d événement</item>
+        <item quantity="other">Téléchargement de %1$d événements</item>
+    </plurals>
+    <plurals name="sync_step_download_contacts">
+        <item quantity="one">Téléchargement de %1$d contact</item>
+        <item quantity="other">Téléchargement de %1$d contacts</item>
+    </plurals>
+    <plurals name="sync_step_upload">
+        <item quantity="one">Envoi de %1$d changement au serveur</item>
+        <item quantity="other">Envoi de %1$d changements au serveur</item>
+    </plurals>
     <string name="sync_step_phone">Rapprochement avec les contacts du téléphone</string>
-    <string name="sync_step_project">Écriture de %1$d contact(s) sur le téléphone</string>
-    <string name="sync_step_resolve">Résolution de %1$d conflit(s)</string>
+    <plurals name="sync_step_project">
+        <item quantity="one">Écriture de %1$d contact sur le téléphone</item>
+        <item quantity="other">Écriture de %1$d contacts sur le téléphone</item>
+    </plurals>
+    <plurals name="sync_step_resolve">
+        <item quantity="one">Résolution de %1$d conflit</item>
+        <item quantity="other">Résolution de %1$d conflits</item>
+    </plurals>
     <string name="sync_step_mailboxes">Boîtes synchronisées : %1$d sur %2$d</string>
     <string name="notif_channel_sync">Synchronisation en arrière-plan</string>
     <string name="notif_conflicts_sub">Conflits détectés ; ouvrez l\'application pour les résoudre</string>

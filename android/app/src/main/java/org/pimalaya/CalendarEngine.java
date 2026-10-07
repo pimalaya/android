@@ -89,6 +89,11 @@ final class CalendarEngine extends PimdirEngine {
     }
 
     @Override
+    protected PimDomain domain() {
+        return PimDomain.CALENDAR;
+    }
+
+    @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
         String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");

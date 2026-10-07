@@ -393,6 +393,11 @@ final class OfflineEngine extends PimdirEngine {
      * falls back to an initial round.
      */
     @Override
+    protected PimDomain domain() {
+        return PimDomain.CONTACTS;
+    }
+
+    @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String url = yielded.getString("collection");
         if (CardStore.isPhoneCollection(url)) {

@@ -91,6 +91,11 @@ public class MailBridgeClockTest {
 
         PimdirEngine remote =
                 new PimdirEngine(pimdir, new PimalayaClient()) {
+                    @Override
+                    protected PimDomain domain() {
+                        return PimDomain.MAIL;
+                    }
+
                     int next;
 
                     @Override

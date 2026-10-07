@@ -986,8 +986,8 @@ public class MainActivity extends Activity {
     private SyncRunner.Observer syncObserver() {
         return new SyncRunner.Observer() {
             @Override
-            public void step(int stage, int count) {
-                syncStep(stage, count);
+            public void step(PimDomain domain, int stage, int count) {
+                syncStep(domain, stage, count);
             }
 
             @Override
@@ -1061,32 +1061,16 @@ public class MainActivity extends Activity {
                 });
     }
 
-    /** Sets the loader's step line from an engine stage (any thread). */
-    private void syncStep(int stage, int count) {
-        String text;
-        switch (stage) {
-            case PimdirEngine.Progress.STAGE_SERVER:
-                text = getString(R.string.sync_step_server);
-                break;
-            case PimdirEngine.Progress.STAGE_DOWNLOAD:
-                text = getString(R.string.sync_step_download, count);
-                break;
-            case PimdirEngine.Progress.STAGE_UPLOAD:
-                text = getString(R.string.sync_step_upload, count);
-                break;
-            case PimdirEngine.Progress.STAGE_PHONE:
-                text = getString(R.string.sync_step_phone);
-                break;
-            case PimdirEngine.Progress.STAGE_PROJECT:
-                text = getString(R.string.sync_step_project, count);
-                break;
-            case PimdirEngine.Progress.STAGE_RESOLVE:
-                text = getString(R.string.sync_step_resolve, count);
-                break;
-            default:
-                return;
+    /**
+     * Sets the loader's step line from an engine stage of a domain (any
+     * thread), in that domain's words: events while the agenda syncs,
+     * messages while the mail does.
+     */
+    private void syncStep(PimDomain domain, int stage, int count) {
+        String text = SyncSteps.text(getResources(), domain, stage, count);
+        if (text != null) {
+            syncDetail(text);
         }
-        syncDetail(text);
     }
 
     /**
@@ -1412,7 +1396,7 @@ public class MainActivity extends Activity {
             // NOTE: the step at once. Listing the mailboxes is a round trip,
             // and a dialog over a blank line for the length of one reads as
             // a dialog that has not started.
-            syncStep(PimdirEngine.Progress.STAGE_SERVER, 0);
+            syncStep(PimDomain.MAIL, PimdirEngine.Progress.STAGE_SERVER, 0);
 
             List<Mailbox> mailboxes =
                     new MailEngine(pimdir, client, session, accountId).mailboxes();
@@ -1473,7 +1457,7 @@ public class MainActivity extends Activity {
                 // NOTE: as the mail pass does, and for the same reason: the
                 // calendar listing is a discovery walk, and it is the
                 // slowest round trip of the pass.
-                syncStep(PimdirEngine.Progress.STAGE_SERVER, 0);
+                syncStep(PimDomain.CALENDAR, PimdirEngine.Progress.STAGE_SERVER, 0);
                 events.replaceCalendars(
                         account.email,
                         session.call(server -> client.listCalendars(transport, server)));

@@ -144,11 +144,32 @@
     <string name="sync_local_requested">Local sync scheduled</string>
     <string name="sync_overlay_preparing">Preparing synchronization</string>
     <string name="sync_step_server">Checking the server for changes</string>
-    <string name="sync_step_download">Downloading %1$d contact(s)</string>
-    <string name="sync_step_upload">Sending %1$d change(s) to the server</string>
+    <!-- A counted step names what the domain being synced holds. -->
+    <plurals name="sync_step_download_mail">
+        <item quantity="one">Downloading %1$d message</item>
+        <item quantity="other">Downloading %1$d messages</item>
+    </plurals>
+    <plurals name="sync_step_download_events">
+        <item quantity="one">Downloading %1$d event</item>
+        <item quantity="other">Downloading %1$d events</item>
+    </plurals>
+    <plurals name="sync_step_download_contacts">
+        <item quantity="one">Downloading %1$d contact</item>
+        <item quantity="other">Downloading %1$d contacts</item>
+    </plurals>
+    <plurals name="sync_step_upload">
+        <item quantity="one">Sending %1$d change to the server</item>
+        <item quantity="other">Sending %1$d changes to the server</item>
+    </plurals>
     <string name="sync_step_phone">Reconciling with the phone contacts</string>
-    <string name="sync_step_project">Writing %1$d contact(s) to the phone</string>
-    <string name="sync_step_resolve">Resolving %1$d conflict(s)</string>
+    <plurals name="sync_step_project">
+        <item quantity="one">Writing %1$d contact to the phone</item>
+        <item quantity="other">Writing %1$d contacts to the phone</item>
+    </plurals>
+    <plurals name="sync_step_resolve">
+        <item quantity="one">Resolving %1$d conflict</item>
+        <item quantity="other">Resolving %1$d conflicts</item>
+    </plurals>
     <string name="sync_step_mailboxes">Mailboxes synced: %1$d of %2$d</string>
     <string name="notif_channel_sync">Background sync</string>
     <string name="notif_conflicts_sub">Conflicts found; open the app to resolve them</string>
