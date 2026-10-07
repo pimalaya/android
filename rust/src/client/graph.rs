@@ -1,5 +1,13 @@
 //! Microsoft Graph operations: contact folders and contacts as
 //! addressbooks and cards, plus the $batch push and the delta sync round.
+//!
+//! A delta row carries no body (a delta query cannot `$expand` the stash
+//! property), so an incremental round reads what changed by id: 20 to a
+//! `$batch` ([`read_cards`]), the request line the single read sends. A
+//! request the batch could not serve (throttled inside it, say) is sent
+//! again on its own, where the transport rides out the throttling, and a
+//! contact gone since the delta is left out, as an `addressbook-multiget`
+//! leaves out a resource it no longer finds.
 
 use std::collections::BTreeMap;
 
@@ -7,6 +15,9 @@ use io_http::rfc6750::bearer::HttpAuthBearer;
 use io_msgraph::{
     coroutine::*,
     v1::{
+        rest::batch::{
+            MSGRAPH_BATCH_MAX_REQUESTS, MsgraphBatch, MsgraphBatchRequest, MsgraphBatchResponse,
+        },
         rest::users::{
             contact_folders::list::{MsgraphContactFoldersList, MsgraphContactFoldersListResponse},
             contacts::{
@@ -163,6 +174,21 @@ impl<'a, 'local> Client<'a, 'local> {
         let coroutine = MsgraphContactGet::new(&auth, "me", id, Some(MSGRAPH_CONTACT_STASH_EXPAND))
             .map_err(|err| err.to_string())?;
         Ok(graph_card(self.run_msgraph(coroutine)?))
+    }
+
+    /// Reads the named Graph contacts, each projected onto a vCard
+    /// document, 20 to a `$batch` ([`read_cards`]); a contact Graph no
+    /// longer holds is left out.
+    pub fn read_graph_cards(
+        &mut self,
+        token: &str,
+        ids: &[&str],
+    ) -> Result<Vec<Card>, BridgeError> {
+        let mut reads = GraphCardCalls {
+            client: self,
+            auth: HttpAuthBearer::new(token),
+        };
+        read_cards(&mut reads, ids)
     }
 
     /// Updates the Graph contact `id` from the vCard. With a base
@@ -478,6 +504,146 @@ pub(super) fn parse_graph_url(raw: &str) -> Result<Url, BridgeError> {
     Url::parse(raw).map_err(|err| format!("Invalid Graph page URL `{raw}`: {err}").into())
 }
 
+/// The two requests a batched card read sends, apart so the read can run
+/// over a fake: a `$batch`, and one contact on its own.
+pub(super) trait GraphCardReads {
+    /// Sends one `$batch` of at most [`MSGRAPH_BATCH_MAX_REQUESTS`].
+    fn batch(
+        &mut self,
+        requests: &[MsgraphBatchRequest],
+    ) -> Result<Vec<MsgraphBatchResponse>, BridgeError>;
+
+    /// Reads one contact, its stash expanded: [`Client::read_graph_card`].
+    fn contact(&mut self, id: &str) -> Result<MsgraphContact, BridgeError>;
+}
+
+/// The card reads of one native call, over its transport.
+struct GraphCardCalls<'c, 'a, 'local> {
+    client: &'c mut Client<'a, 'local>,
+    auth: HttpAuthBearer,
+}
+
+impl GraphCardReads for GraphCardCalls<'_, '_, '_> {
+    fn batch(
+        &mut self,
+        requests: &[MsgraphBatchRequest],
+    ) -> Result<Vec<MsgraphBatchResponse>, BridgeError> {
+        let coroutine = MsgraphBatch::new(&self.auth, requests).map_err(|err| err.to_string())?;
+        Ok(self.client.run_msgraph(coroutine)?.responses)
+    }
+
+    fn contact(&mut self, id: &str) -> Result<MsgraphContact, BridgeError> {
+        let coroutine =
+            MsgraphContactGet::new(&self.auth, "me", id, Some(MSGRAPH_CONTACT_STASH_EXPAND))
+                .map_err(|err| err.to_string())?;
+        self.client.run_msgraph(coroutine)
+    }
+}
+
+/// The address one contact is read at: the read [`MsgraphContactGet`]
+/// sends, its stash expanded.
+fn contact_url(id: &str) -> Result<Url, BridgeError> {
+    let mut url = graph_url(&format!("me/contacts/{id}"))?;
+    url.query_pairs_mut()
+        .append_pair("$expand", MSGRAPH_CONTACT_STASH_EXPAND);
+    Ok(url)
+}
+
+/// Reads the named contacts, every request riding a `$batch`, in the
+/// order given; a reply the batch could not serve is sent again on its
+/// own. A contact Graph no longer holds (404) is left out; any other
+/// failure fails the read.
+pub(super) fn read_cards<R: GraphCardReads>(
+    reads: &mut R,
+    ids: &[&str],
+) -> Result<Vec<Card>, BridgeError> {
+    let urls = ids
+        .iter()
+        .map(|id| contact_url(id))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let replies = batched(|requests| reads.batch(requests), &urls)?;
+    let mut cards = Vec::with_capacity(ids.len());
+    for (id, reply) in ids.iter().zip(replies) {
+        let contact = match reply {
+            Some(reply) if reply.status == 404 => None,
+            Some(reply) if (200..300).contains(&reply.status) => {
+                match reply.parse::<MsgraphContact>() {
+                    Ok(contact) => Some(contact),
+                    Err(_) => alone(reads.contact(id))?,
+                }
+            }
+            _ => alone(reads.contact(id))?,
+        };
+        if let Some(contact) = contact {
+            cards.push(graph_card(contact));
+        }
+    }
+
+    Ok(cards)
+}
+
+/// An address under the Graph API version.
+pub(super) fn graph_url(path: &str) -> Result<Url, BridgeError> {
+    Url::parse(MSGRAPH_API_BASE)
+        .and_then(|base| base.join(path))
+        .map_err(|err| err.to_string().into())
+}
+
+/// An address as a batch names it, relative to the API version.
+pub(super) fn relative(url: &Url) -> String {
+    let base = MSGRAPH_API_BASE.trim_end_matches('/');
+    url.as_str()
+        .strip_prefix(base)
+        .unwrap_or(url.as_str())
+        .to_owned()
+}
+
+/// Sends `urls` as GETs, 20 to a `$batch` through `send`, and answers each
+/// one's reply in the order given: its body, or [`None`] for a reply the
+/// batch could not serve, which the caller sends again on its own.
+pub(super) fn batched<F>(
+    mut send: F,
+    urls: &[Url],
+) -> Result<Vec<Option<MsgraphBatchResponse>>, BridgeError>
+where
+    F: FnMut(&[MsgraphBatchRequest]) -> Result<Vec<MsgraphBatchResponse>, BridgeError>,
+{
+    let mut replies: Vec<Option<MsgraphBatchResponse>> = Vec::with_capacity(urls.len());
+    replies.resize_with(urls.len(), || None);
+
+    for (chunk, urls) in urls.chunks(MSGRAPH_BATCH_MAX_REQUESTS).enumerate() {
+        let requests: Vec<MsgraphBatchRequest> = urls
+            .iter()
+            .enumerate()
+            .map(|(index, url)| MsgraphBatchRequest {
+                id: index.to_string(),
+                method: String::from("GET"),
+                url: relative(url),
+                ..Default::default()
+            })
+            .collect();
+        for reply in send(&requests)? {
+            let Some(index) = reply.id.parse::<usize>().ok().filter(|i| *i < urls.len()) else {
+                continue;
+            };
+            replies[chunk * MSGRAPH_BATCH_MAX_REQUESTS + index] = Some(reply);
+        }
+    }
+
+    Ok(replies)
+}
+
+/// A read sent on its own, a 404 answering [`None`]: what Graph no longer
+/// holds is left out.
+pub(super) fn alone<T>(read: Result<T, BridgeError>) -> Result<Option<T>, BridgeError> {
+    match read {
+        Ok(value) => Ok(Some(value)),
+        Err(err) if err.status == Some(404) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
 /// The Graph JSON batching envelope (`POST $batch`).
 #[derive(Serialize)]
 struct GraphBatch {
@@ -521,3 +687,7 @@ struct GraphBatchReply {
     #[serde(default)]
     body: Option<Value>,
 }
+
+#[cfg(test)]
+#[path = "graph_tests.rs"]
+mod read_tests;

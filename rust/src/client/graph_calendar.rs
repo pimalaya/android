@@ -28,9 +28,7 @@ use io_http::rfc6750::bearer::HttpAuthBearer;
 use io_msgraph::{
     coroutine::*,
     v1::{
-        rest::batch::{
-            MSGRAPH_BATCH_MAX_REQUESTS, MsgraphBatch, MsgraphBatchRequest, MsgraphBatchResponse,
-        },
+        rest::batch::{MsgraphBatch, MsgraphBatchRequest, MsgraphBatchResponse},
         rest::users::{
             calendars::list::{
                 MsgraphCalendarsList, MsgraphCalendarsListParams, MsgraphCalendarsListResponse,
@@ -46,14 +44,17 @@ use io_msgraph::{
                 update::MsgraphEventUpdate,
             },
         },
-        send::{MSGRAPH_API_BASE, MsgraphSend, MsgraphSendError, MsgraphSendOutput},
+        send::{MsgraphSend, MsgraphSendError, MsgraphSendOutput},
     },
 };
 use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
 use url::Url;
 
 use crate::{
-    client::{Client, graph::parse_graph_url},
+    client::{
+        Client,
+        graph::{alone, batched, graph_url, parse_graph_url},
+    },
     types::{BridgeError, Calendar, Event, EventRef},
 };
 
@@ -340,7 +341,8 @@ impl<'a, 'local> Client<'a, 'local> {
 /// The three requests an entry read sends, apart so the read can run over
 /// a fake: a `$batch`, one event on its own, one page of a listing.
 pub(super) trait GraphReads {
-    /// Sends one `$batch` of at most [`MSGRAPH_BATCH_MAX_REQUESTS`].
+    /// Sends one `$batch` of at most
+    /// [`MSGRAPH_BATCH_MAX_REQUESTS`](io_msgraph::v1::rest::batch::MSGRAPH_BATCH_MAX_REQUESTS).
     fn batch(
         &mut self,
         requests: &[MsgraphBatchRequest],
@@ -404,53 +406,6 @@ fn instances_url(id: &str, start: &str, end: &str) -> Result<Url, BridgeError> {
     Ok(url)
 }
 
-fn graph_url(path: &str) -> Result<Url, BridgeError> {
-    Url::parse(MSGRAPH_API_BASE)
-        .and_then(|base| base.join(path))
-        .map_err(|err| err.to_string().into())
-}
-
-/// An address as a batch names it, relative to the API version.
-fn relative(url: &Url) -> String {
-    let base = MSGRAPH_API_BASE.trim_end_matches('/');
-    url.as_str()
-        .strip_prefix(base)
-        .unwrap_or(url.as_str())
-        .to_owned()
-}
-
-/// Sends `urls` as GETs, 20 to a `$batch`, and answers each one's reply in
-/// the order given: its body, or [`None`] for a reply the batch could not
-/// serve, which the caller sends again on its own.
-fn batched<R: GraphReads>(
-    reads: &mut R,
-    urls: &[Url],
-) -> Result<Vec<Option<MsgraphBatchResponse>>, BridgeError> {
-    let mut replies: Vec<Option<MsgraphBatchResponse>> = Vec::with_capacity(urls.len());
-    replies.resize_with(urls.len(), || None);
-
-    for (chunk, urls) in urls.chunks(MSGRAPH_BATCH_MAX_REQUESTS).enumerate() {
-        let requests: Vec<MsgraphBatchRequest> = urls
-            .iter()
-            .enumerate()
-            .map(|(index, url)| MsgraphBatchRequest {
-                id: index.to_string(),
-                method: String::from("GET"),
-                url: relative(url),
-                ..Default::default()
-            })
-            .collect();
-        for reply in reads.batch(&requests)? {
-            let Some(index) = reply.id.parse::<usize>().ok().filter(|i| *i < urls.len()) else {
-                continue;
-            };
-            replies[chunk * MSGRAPH_BATCH_MAX_REQUESTS + index] = Some(reply);
-        }
-    }
-
-    Ok(replies)
-}
-
 /// Reads the named entries: each event, and the exceptions of each series
 /// over its windows ([`series_windows`]), every request riding a
 /// `$batch`; a reply the batch could not serve is sent again on its own.
@@ -468,7 +423,10 @@ pub(super) fn read_entries<R: GraphReads>(
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut masters: Vec<Option<MsgraphEvent>> = Vec::with_capacity(ids.len());
-    for (index, reply) in batched(reads, &urls)?.into_iter().enumerate() {
+    for (index, reply) in batched(|requests| reads.batch(requests), &urls)?
+        .into_iter()
+        .enumerate()
+    {
         let read = match reply {
             Some(reply) if reply.status == 404 => None,
             Some(reply) if (200..300).contains(&reply.status) => {
@@ -506,7 +464,10 @@ pub(super) fn read_entries<R: GraphReads>(
     let mut instances: Vec<Vec<MsgraphEvent>> = Vec::with_capacity(ids.len());
     instances.resize_with(ids.len(), Vec::new);
     let mut gone = vec![false; ids.len()];
-    for ((index, url), reply) in jobs.iter().zip(batched(reads, &urls)?) {
+    for ((index, url), reply) in jobs
+        .iter()
+        .zip(batched(|requests| reads.batch(requests), &urls)?)
+    {
         if gone[*index] {
             continue;
         }
@@ -554,16 +515,6 @@ pub(super) fn read_entries<R: GraphReads>(
     }
 
     Ok(events)
-}
-
-/// A read sent on its own, a 404 answering [`None`]: what Graph no longer
-/// holds is left out.
-fn alone<T>(read: Result<T, BridgeError>) -> Result<Option<T>, BridgeError> {
-    match read {
-        Ok(value) => Ok(Some(value)),
-        Err(err) if err.status == Some(404) => Ok(None),
-        Err(err) => Err(err),
-    }
 }
 
 /// Drops the events a page boundary repeated, Graph overlapping

@@ -1015,6 +1015,17 @@ public class PimalayaClient {
     }
 
     /**
+     * Reads the named Graph contacts, 20 to a {@code $batch}: one request
+     * where {@link #readCard} sent one a contact. A contact Graph no
+     * longer holds is left out of the list, as a multiget leaves out a
+     * resource it no longer finds. Graph only.
+     */
+    public List<Card> readGraphCards(Transport transport, Account account, List<String> ids) {
+        return cards(
+                Native.readGraphCards(transport, account.password, new JSONArray(ids).toString()));
+    }
+
+    /**
      * Reconciles a collection with its remote through the io-offline
      * engine, the driver servicing every storage and remote yield;
      * with {@code full} the checkpoint is ignored and the whole remote

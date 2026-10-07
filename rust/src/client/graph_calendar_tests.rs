@@ -9,9 +9,11 @@
 use std::collections::BTreeMap;
 
 use io_msgraph::coroutine::{MsgraphCoroutine, MsgraphCoroutineState, MsgraphYield};
+use io_msgraph::v1::rest::batch::MSGRAPH_BATCH_MAX_REQUESTS;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::client::graph::relative;
 
 /// A Graph calendar, and what was asked of it.
 #[derive(Default)]

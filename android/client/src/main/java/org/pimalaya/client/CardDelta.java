@@ -22,7 +22,7 @@ public final class CardDelta {
     /** True when the round listed the complete member set. */
     public final boolean complete;
 
-    CardDelta(List<Card> changed, List<String> vanished, String token, boolean complete) {
+    public CardDelta(List<Card> changed, List<String> vanished, String token, boolean complete) {
         this.changed = changed;
         this.vanished = vanished;
         this.token = token;

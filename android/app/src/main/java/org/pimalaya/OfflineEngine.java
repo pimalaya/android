@@ -405,7 +405,10 @@ final class OfflineEngine extends PimdirEngine {
         }
         String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");
 
+        long asked = System.nanoTime();
         CardDelta delta = client.syncCards(primary, account, url, cursor);
+        remote(System.nanoTime() - asked);
+        listed(delta.changed.size());
 
         for (Card card : delta.changed) {
             if (!card.vcard.isEmpty()) {
@@ -415,12 +418,15 @@ final class OfflineEngine extends PimdirEngine {
 
         // NOTE: Graph delta rows carry no body, so a complete round primes
         // the body cache with one full listing. The delta link predates the
-        // listing; anything changed between re-lists on the next round.
+        // listing; anything changed between re-lists on the next round. An
+        // incremental round reads what changed 20 to a $batch (fetchGraph).
         if (isGraph() && delta.complete && !delta.changed.isEmpty()) {
             Map<String, Card> byHandle = new HashMap<>();
+            long listing = System.nanoTime();
             for (Card card : client.listCards(primary, account, url)) {
                 byHandle.put(card.uri, card);
             }
+            remote(System.nanoTime() - listing);
             graphCards.put(url, byHandle);
         }
 
@@ -521,15 +527,7 @@ final class OfflineEngine extends PimdirEngine {
                 items.put(fetchedItem(url, handle, card));
             }
         } else if (isGraph()) {
-            Map<String, Card> cached = graphCards.get(url);
-            for (int index = 0; index < handles.length(); index++) {
-                String handle = handles.getString(index);
-                Card card = cached == null ? null : cached.get(handle);
-                if (card == null) {
-                    card = client.readCard(primary, account, url, handle);
-                }
-                items.put(fetchedItem(url, handle, card));
-            }
+            fetchGraph(url, handles, items);
         } else {
             // NOTE: CardDAV multiget in chunks, matched back by resource
             // name.
@@ -549,6 +547,58 @@ final class OfflineEngine extends PimdirEngine {
         JSONObject reply = new JSONObject();
         reply.put("items", items);
         return reply;
+    }
+
+    /**
+     * The Graph bodies of a fetch: the complete round's listing first,
+     * then everything it does not hold in one batched read, 20 contacts
+     * to a {@code $batch}, where it used to be one request a contact (a
+     * bulk change elsewhere, an import or a merge, names hundreds at
+     * once). A contact gone since the delta is left out of the reply, as
+     * a multiget leaves out a resource it no longer finds.
+     */
+    private void fetchGraph(String url, JSONArray handles, JSONArray items)
+            throws JSONException {
+        Map<String, Card> cached = graphCards.get(url);
+        List<String> missing = new ArrayList<>();
+        for (int index = 0; index < handles.length(); index++) {
+            String handle = handles.getString(index);
+            if (cached == null || !cached.containsKey(handle)) {
+                missing.add(handle);
+            }
+        }
+
+        Map<String, Card> read = new HashMap<>();
+        long took = 0;
+        if (!missing.isEmpty()) {
+            long asked = System.nanoTime();
+            for (Card card : client.readGraphCards(primary, account, missing)) {
+                read.put(card.uri, card);
+            }
+            took = System.nanoTime() - asked;
+            remote(took);
+        }
+
+        int gone = 0;
+        for (int index = 0; index < handles.length(); index++) {
+            String handle = handles.getString(index);
+            Card card = cached == null ? null : cached.get(handle);
+            if (card == null) {
+                card = read.get(handle);
+            }
+            if (card == null) {
+                gone++;
+                continue;
+            }
+            items.put(fetchedItem(url, handle, card));
+        }
+
+        Log.d(
+                "pimalaya",
+                "graph fetch " + url + ": " + handles.length() + " asked, "
+                        + (handles.length() - missing.size()) + " from the listing, "
+                        + missing.size() + " read in " + (missing.size() + 19) / 20
+                        + " batches, remote " + took / 1_000_000 + " ms, " + gone + " gone");
     }
 
     /**
