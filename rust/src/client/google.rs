@@ -213,7 +213,10 @@ impl<'a, 'local> Client<'a, 'local> {
                 .map_err(|err| err.to_string())?;
             let page = match self.run_google(coroutine) {
                 Ok(page) => page,
-                Err(err) if err.message.contains("EXPIRED_SYNC_TOKEN") => return Ok(None),
+                Err(err) if sync_token.is_some() && sync_token_expired(&err) => {
+                    log::info!("people sync token expired, listing in full");
+                    return Ok(None);
+                }
                 Err(err) => return Err(err),
             };
 
@@ -560,5 +563,57 @@ fn google_card(person: GpeoplePerson) -> Card {
         etag: (!person.etag.is_empty()).then_some(person.etag),
         vcard,
         books,
+    }
+}
+
+/// Whether People refused a sync token as expired: a 410, or a 400
+/// whose message says the sync token expired (People's own words:
+/// `Sync token is expired. Clear local cache and retry call without
+/// the sync token.`). Tokens expire seven days after the full listing
+/// that issued them, and the round then starts over without one, as
+/// neverest's `is_expired` does.
+///
+/// TODO: match `GpeopleSendError::is_sync_token_expired` (the 400's
+/// `EXPIRED_SYNC_TOKEN` reason) once io-gpeople keeps Google's error
+/// reasons, rather than the message text.
+fn sync_token_expired(err: &BridgeError) -> bool {
+    let message = err.message.to_ascii_lowercase();
+    match err.status {
+        Some(410) => true,
+        Some(400) => {
+            message.contains("expired_sync_token")
+                || (message.contains("sync token") && message.contains("expired"))
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn error(status: u16, message: &str) -> BridgeError {
+        BridgeError {
+            message: format!("People API returned HTTP {status}: {message}"),
+            status: Some(status),
+        }
+    }
+
+    #[test]
+    fn an_expired_people_sync_token_is_told_apart() {
+        assert!(sync_token_expired(&error(
+            400,
+            "Sync token is expired. Clear local cache and retry call without the sync token."
+        )));
+        assert!(sync_token_expired(&error(410, "Gone")));
+
+        assert!(!sync_token_expired(&error(
+            400,
+            "Invalid personFields mask"
+        )));
+        assert!(!sync_token_expired(&error(403, "Sync token is expired")));
+        assert!(!sync_token_expired(&BridgeError::from(
+            "Sync token is expired"
+        )));
     }
 }

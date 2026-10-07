@@ -36,7 +36,8 @@ In order; 1, 2 and 5-A1 are small and can land first, together.
 - [ ] Tests: batched read equals single reads; partial throttling; request counts
 
 ## 5. Audit items
-- [ ] A1: People expired token (410, or 400 "Sync token is expired") falls back to a full round; optionally io-gpeople keeps `status` and `details[].reason`
+- [x] A1: People expired token (410, or 400 "Sync token is expired") falls back to a full round; optionally io-gpeople keeps `status` and `details[].reason` (io-gpeople commit f54c67b, unreleased)
+- [ ] A1 follow-up: once io-gpeople is released, bump it and match `GpeopleSendError::is_sync_token_expired` in `sync_google_cards` instead of the message text (TODO in rust/src/client/google.rs)
 - [ ] B6: People pages of 1,000; account delta read once per pass, projected per group
 - [ ] B2: Google Calendar with `syncToken`, series folding, 410 fallback
 
