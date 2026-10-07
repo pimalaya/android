@@ -6,11 +6,11 @@ status: current
 
 # Mail
 
-Mail is a list of summaries: a pass connects to an account once and lists each of its mailboxes on that session, storing every message as an item with its summary and sort key and no body, which is what pimdir's detail ladder calls the meta level. The merged list is one descending scan of the sort key across the mail collections the filter lets through, read a page at a time around the scroll position and sized by a count, so a listing never parses a date and never holds the whole store.
+Mail is a list of summaries: a pass connects to an account on a few sessions and lists its mailboxes on them side by side, storing every message as an item with its summary and sort key and no body, which is what pimdir's detail ladder calls the meta level. The merged list is one descending scan of the sort key across the mail collections the filter lets through, read a page at a time around the scroll position and sized by a count, so a listing never parses a date and never holds the whole store.
 
 A message rises off that rung by being opened: what the open fetched is filed as the item's object, so the item reaches full and every read after it, offline included, is a read of the store.
 
-Every mailbox runs io-pimdir's sync, on the session the pass opened, from its floor: its first pass lists its 50 newest messages, the floor being the oldest `Date` among them, and the end of the list and a background fill widen it a chunk of messages at a time toward the account's bound, all of its mail or the last N months on the `Date` header. One LIST names the mailboxes and each is listed in turn, the inbox first. A mailbox carrying a `(UIDVALIDITY, HIGHESTMODSEQ)` checkpoint on a QRESYNC server is selected with the QRESYNC parameter, the server streams what moved and what went, and the messages that moved are read for their header fields in the same pass. Anything else is a round: the UIDs `UID SEARCH` finds in the scope, newest first, read 500 at a time by `UID FETCH` for their markers, their size and the header fields pimdir STORAGE Annex A derives a summary from, `Content-Type` among them and no `BODYSTRUCTURE`. The connection ENABLEs CONDSTORE and QRESYNC once when it opens, which RFC 7162 section 3.1 requires before the parameter may be used at all. Every message a page lists arrives named, so it is listed the moment its page lands: there is no probe and no upgrade after the sync. Each page is one write with the round's resume cursor, so a pass cut off resumes below its last page, and only the round's last page retires what it found absent, within the bound; mail outside the bound is never deleted by a sync, only by narrowing the bound.
+Every mailbox runs io-pimdir's sync, on a session of the pass's pool, from its floor: its first pass lists its 50 newest messages, the floor being the oldest `Date` among them, and the end of the list and a background fill widen it a chunk of messages at a time toward the account's bound, all of its mail or the last N months on the `Date` header. One LIST names the mailboxes and a few are listed at once, each on its own session, the inbox begun first. A mailbox carrying a `(UIDVALIDITY, HIGHESTMODSEQ)` checkpoint on a QRESYNC server is selected with the QRESYNC parameter, the server streams what moved and what went, and the messages that moved are read for their header fields in the same pass. Anything else is a round: the UIDs `UID SEARCH` finds in the scope, newest first, read 500 at a time by `UID FETCH` for their markers, their size and the header fields pimdir STORAGE Annex A derives a summary from, `Content-Type` among them and no `BODYSTRUCTURE`. The connection ENABLEs CONDSTORE and QRESYNC once when it opens, which RFC 7162 section 3.1 requires before the parameter may be used at all. Every message a page lists arrives named, so it is listed the moment its page lands: there is no probe and no upgrade after the sync. Each page is one write with the round's resume cursor, so a pass cut off resumes below its last page, and only the round's last page retires what it found absent, within the bound; mail outside the bound is never deleted by a sync, only by narrowing the bound.
 
 Four backends answer, told apart by the account's base URL: an IMAP session behind an `imaps://` URL, the RFC 8621 verbs behind the `jmap://` marker, Microsoft Graph behind the `msgraph://` one, the Gmail API behind `google://`. A Graph mailbox is a mail folder named by its path, its mail listed by band with `/messages` filtered on `sentDateTime`, 1,000 messages a page with the summary `$select`, and its changes followed by one message delta link made with no filter, whose first pass names the folder's messages by id once, made by the pass after the first chunk. A JMAP mailbox is an `Email/query` sorted by `receivedAt`, 500 a page capped by the server's `maxObjectsInGet`, then `Email/changes` from the state read before its first page. A Gmail mailbox is a label filing mail, its name already a path, listed 100 ids a page narrowed by `after:`, each read for its metadata under the account's pacing, and every round after replays the history from the `historyId` taken before its first page, reading again only the messages that moved. Graph, Gmail and JMAP address a mailbox by the id their roster names, and a session reads the roster the first time it addresses a mailbox it holds no id for, whatever opened it: a pass, a widening, a step of the fill, or a session reopened after its connection died.
 
@@ -432,8 +432,16 @@ The merged list SHALL show no message older than the most recent floor among the
 - THEN the last row says older mail could not be loaded, not that it needs the network
 - AND a tap on it asks again
 
+### Requirement: A pass takes the inbox first
+Every mail pass SHALL take an account's mailboxes in the order of the role each source states: the inbox, the sent mail, the drafts, every other by name, the junk and the trash last, the workers of a pool beginning them in that order. The roles SHALL be stored as pimdir's collection roles (STORAGE section 14): RFC 6154 attributes and `INBOX` on IMAP, RFC 8621 roles, Gmail's system labels, Graph's well-known folders.
+
+#### Scenario: A Graph account
+- GIVEN Graph listing *Sent Items*, *Projets* and *Inbox* in that order
+- WHEN the account is synced
+- THEN *Inbox* is begun first and *Sent Items* second
+
 ### Requirement: Older mail fills in behind
-After a mail tab's first sync, and on every return to the app or pass after it, every mailbox SHALL widen 500 messages at a time toward its account's bound, with no dialog, the inbox and the sent mail first, a mailbox never listed before one that only lacks older mail, and among them the one holding the most recent floor. The fill SHALL run only while the app is in the foreground, on a network that is not metered, and while no other sync runs; it SHALL stop on an error, and SHALL resume from the floors the store covers.
+After a mail tab's first sync, and on every return to the app or pass after it, every mailbox SHALL widen 500 messages at a time toward its account's bound, with no dialog, the inbox and the sent mail first, a mailbox never listed before one that only lacks older mail, and among them the one holding the most recent floor; a step SHALL widen the next mailboxes in that order side by side, as many of an account as its pool runs. The fill SHALL run only while the app is in the foreground, on a network that is not metered, and while no other sync runs; it SHALL stop on an error, and SHALL resume from the floors the store covers.
 
 #### Scenario: Leaving the app
 - GIVEN a fill under way
@@ -445,18 +453,33 @@ After a mail tab's first sync, and on every return to the app or pass after it, 
 - WHEN the first dialog closes
 - THEN only the first chunks are stored, until an unmetered network is back
 
-### Requirement: A pass takes the inbox first
-Every mail pass SHALL take an account's mailboxes in the order of the role each source states: the inbox, the sent mail, the drafts, every other by name, the junk and the trash last. The roles SHALL be stored as pimdir's collection roles (STORAGE section 14): RFC 6154 attributes and `INBOX` on IMAP, RFC 8621 roles, Gmail's system labels, Graph's well-known folders.
-
-#### Scenario: A Graph account
-- GIVEN Graph listing *Sent Items*, *Projets* and *Inbox* in that order
-- WHEN the account is synced
-- THEN *Inbox* is synced first and *Sent Items* second
-
 ### Requirement: Each page's time is logged
-A mail pass SHALL log, page by page, how many messages a page listed and the time spent on the network, on the JSON this side reads and writes, in the engine, and in the store's loads and writes.
+A mail pass SHALL log, page by page, how many messages a page listed and the time spent on the network, on the JSON this side reads and writes, in the engine, and in the store's loads and writes; and, for each account's run, its wall time against the network time summed over its mailboxes.
 
 #### Scenario: A first round
 - GIVEN a debug build
 - WHEN a mailbox's page lands
 - THEN the log names its count and the four times
+
+#### Scenario: A pass's gain
+- GIVEN a debug build
+- WHEN an account's mailboxes have all landed
+- THEN the log names how many ran on how many sessions, the wall time and the network time summed
+
+### Requirement: An account's mailboxes sync side by side
+A mail pass, the first-sync dialog, the scroll widening and the background fill SHALL run an account's mailboxes concurrently on a pool of sessions, four for Graph and JMAP, three for IMAP, two for Gmail, each worker on a session of its own that no other worker uses while it runs, the workers taking the mailboxes in the pass's order. Every storage load, lookup and write SHALL be answered by one writer at a time, so only the network overlaps. A mailbox that fails SHALL leave the others running, the pass reporting the first failure. The first-sync dialog SHALL close once every mailbox's first chunk has landed, saying how many of the account's mailboxes have.
+
+#### Scenario: A first sync of twelve mailboxes on Graph
+- GIVEN a Graph account of twelve mailboxes never listed
+- WHEN its first sync runs
+- THEN four mailboxes are listed at once, the inbox begun first, and the dialog closes once all twelve chunks have landed
+
+#### Scenario: One mailbox refused
+- GIVEN a pass over five mailboxes, one of which the server refuses
+- WHEN the pass runs
+- THEN the other four are stored, and the pass reports the refusal
+
+#### Scenario: Two pages landing together
+- GIVEN two mailboxes whose pages arrive at the same moment
+- WHEN both are written
+- THEN one write lands whole before the other begins
