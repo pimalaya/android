@@ -1,8 +1,11 @@
 package org.pimalaya;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Predicate;
+import java.util.function.ToIntFunction;
 
 /**
  * Which mailboxes widen next, a chunk at a time: what a scroll past the
@@ -86,6 +89,28 @@ final class MailFill {
         return "inbox".equals(role) || "sent".equals(role);
     }
 
+    /**
+     * The mailboxes one step of the fill widens side by side: the next ones
+     * in the fill's order ({@link #next}), as many of an account as it runs
+     * sessions at once ({@code room}). Empty once every mailbox is whole.
+     */
+    static List<MailStore.Edge> batch(
+            List<MailStore.Edge> edges, ToIntFunction<String> room) {
+        List<MailStore.Edge> left = new ArrayList<>(edges);
+        List<MailStore.Edge> picked = new ArrayList<>();
+        Map<String, Integer> taken = new HashMap<>();
+        MailStore.Edge edge;
+        while ((edge = next(left)) != null) {
+            left.remove(edge);
+            int used = taken.getOrDefault(edge.accountEmail, 0);
+            if (used < room.applyAsInt(edge.accountEmail)) {
+                picked.add(edge);
+                taken.put(edge.accountEmail, used + 1);
+            }
+        }
+        return picked;
+    }
+
     /** What a fill step reaches for, so the step itself can be tested. */
     interface Host {
         /** Whether the fill may go on: foreground, unmetered, nothing else syncing. */
@@ -96,11 +121,38 @@ final class MailFill {
 
         /** Widens one mailbox by one fill chunk, on the calling thread. */
         void widen(MailStore.Edge edge) throws Exception;
+
+        /** How many of an account's mailboxes one step widens side by side. */
+        default int room(String accountEmail) {
+            return 1;
+        }
+
+        /**
+         * Widens a step's mailboxes by one fill chunk each, blocking until
+         * all of them are done: every one is tried, and the first failure is
+         * thrown once they are.
+         */
+        default void widen(List<MailStore.Edge> edges) throws Exception {
+            Exception failure = null;
+            for (MailStore.Edge edge : edges) {
+                try {
+                    widen(edge);
+                } catch (Exception error) {
+                    android.util.Log.w("pimalaya", "mail fill stopped: " + edge.collection, error);
+                    if (failure == null) {
+                        failure = error;
+                    }
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
+        }
     }
 
     /** Why a fill step stopped, or that another should follow. */
     enum Step {
-        /** One chunk landed; another step follows while allowed. */
+        /** One chunk of each mailbox the step took landed; another step follows while allowed. */
         AGAIN,
         /** Not allowed now (background, metered, another sync): resumed later. */
         PAUSED,
@@ -111,23 +163,22 @@ final class MailFill {
     }
 
     /**
-     * One step of the background fill: the next mailbox widened by one
-     * chunk, when the fill is still allowed. Nothing is held between steps
-     * but what the store covers, so a fill stopped anywhere resumes from
-     * the floors it reached.
+     * One step of the background fill: the next mailboxes widened by one
+     * chunk each, side by side ({@link #batch}), when the fill is still
+     * allowed. Nothing is held between steps but what the store covers, so a
+     * fill stopped anywhere resumes from the floors it reached.
      */
     static Step step(Host host) {
         if (!host.allowed()) {
             return Step.PAUSED;
         }
-        MailStore.Edge edge = next(host.edges());
-        if (edge == null) {
+        List<MailStore.Edge> edges = batch(host.edges(), host::room);
+        if (edges.isEmpty()) {
             return Step.DONE;
         }
         try {
-            host.widen(edge);
+            host.widen(edges);
         } catch (Exception failure) {
-            android.util.Log.w("pimalaya", "mail fill stopped: " + edge.collection, failure);
             return Step.FAILED;
         }
         return Step.AGAIN;

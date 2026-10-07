@@ -181,8 +181,8 @@ public class MainActivity extends Activity {
     /** Whether a step of the background fill is queued or running. */
     private volatile boolean filling;
 
-    /** The fill's open connections, by account; touched on the io thread only. */
-    private final Map<String, MailSession> fillSessions = new HashMap<>();
+    /** The fill's and the scroll's session pools, by account; touched on the io thread only. */
+    private final Map<String, MailPool<MailSession>> fillPools = new HashMap<>();
 
     private final List<java.util.function.Consumer<Boolean>> syncObservers = new ArrayList<>();
 
@@ -1086,6 +1086,20 @@ public class MainActivity extends Activity {
             default:
                 return;
         }
+        syncDetail(text);
+    }
+
+    /**
+     * Sets the loader's step line to a count of a whole (any thread): how
+     * many of an account's mailboxes have landed, where they land side by
+     * side and no one engine's step says how far the pass is.
+     */
+    private void syncProgress(int string, int done, int total) {
+        syncDetail(getString(string, done, total));
+    }
+
+    /** Sets the loader's step line (any thread). */
+    private void syncDetail(String text) {
         main.post(
                 () -> {
                     if (syncDialog != null) {
@@ -1380,28 +1394,28 @@ public class MainActivity extends Activity {
      *
      * <p>One walk, then one engine pass per mailbox off it: the walk is
      * what authenticates and what says which mailboxes there are, and
-     * every mailbox's reconcile reads its spine out of the same cache. So
-     * the account is still connected to once, as it was when a refresh
-     * replaced the whole mirror, and what a pass now does instead of
-     * replacing is reconcile, which is what lets a staged marker or a
-     * staged delete survive it.
+     * what a pass does instead of replacing is reconcile, which is what
+     * lets a staged marker or a staged delete survive it.
      *
-     * <p>The session is the caller's, opened for the pass and closed with
-     * it, so the walk and every write the reconcile pushes share one
-     * connection.
+     * <p>The mailboxes then run side by side on the account's pool
+     * ({@link MailPool}), in the pass's order, the inbox first: the wait is
+     * the network's, mailbox after mailbox, and a few sessions wait on a few
+     * mailboxes at once. The caller's session is the pool's first, so the
+     * walk, the drain before it and the first worker share one connection.
+     * One mailbox failing leaves the others running; the first failure is
+     * what the pass reports.
      */
     private Exception fetchMail(AccountEntry account, MailSession session, MergedFilter scope) {
+        String accountId = accountIdOf(account.email);
+        List<String> collections = new ArrayList<>();
         try {
-            MailEngine engine =
-                    new MailEngine(pimdir, client, session, accountIdOf(account.email));
-            engine.progress = this::syncStep;
-
             // NOTE: the step at once. Listing the mailboxes is a round trip,
             // and a dialog over a blank line for the length of one reads as
             // a dialog that has not started.
             syncStep(PimdirEngine.Progress.STAGE_SERVER, 0);
 
-            List<Mailbox> mailboxes = engine.mailboxes();
+            List<Mailbox> mailboxes =
+                    new MailEngine(pimdir, client, session, accountId).mailboxes();
             mail.replaceMailboxes(account.email, mailboxes);
 
             // NOTE: the inbox first, then the sent mail, rather than in the
@@ -1413,14 +1427,35 @@ public class MainActivity extends Activity {
                 if (scope != null && !scope.accepts(account.email, mailbox.name)) {
                     continue;
                 }
-                engine.sync(mail.collectionOf(account.email, mailbox.name));
+                collections.add(mail.collectionOf(account.email, mailbox.name));
             }
-            SyncStamps.mark(this, account.email);
-            return null;
         } catch (Exception error) {
             Log.w("pimalaya", "mail sync failed: " + account.email, error);
             return error;
         }
+
+        MailPool.Outcome outcome;
+        try (MailPool<MailSession> pool =
+                new MailPool<>(
+                        MailPool.sizeOf(account.server(PimDomain.MAIL)),
+                        session,
+                        () -> openMail(account))) {
+            outcome =
+                    pool.run(
+                            account.email,
+                            collections,
+                            worker -> new MailEngine(pimdir, client, worker, accountId),
+                            MailEngine::sync,
+                            (done, total) ->
+                                    syncProgress(R.string.sync_step_mailboxes, done, total));
+        }
+        for (MailPool.Failure failure : outcome.failures) {
+            Log.w("pimalaya", "mail sync failed: " + failure.collection, failure.error);
+        }
+        if (outcome.failure() == null) {
+            SyncStamps.mark(this, account.email);
+        }
+        return outcome.failure();
     }
 
     /**
@@ -1692,7 +1727,7 @@ public class MainActivity extends Activity {
         io.execute(this::fillStep);
     }
 
-    /** One chunk of the background fill, on the io thread, and the next queued. */
+    /** One step of the background fill, on the io thread, and the next queued. */
     private void fillStep() {
         MailFill.Step step =
                 MailFill.step(
@@ -1708,8 +1743,25 @@ public class MainActivity extends Activity {
                             }
 
                             @Override
+                            public int room(String accountEmail) {
+                                AccountEntry account = mailAccount(accountEmail);
+                                return account == null
+                                        ? 1
+                                        : MailPool.sizeOf(account.server(PimDomain.MAIL));
+                            }
+
+                            @Override
                             public void widen(MailStore.Edge edge) throws Exception {
-                                widenOne(edge, MailEngine.FILL_CHUNK);
+                                widen(List.of(edge));
+                            }
+
+                            @Override
+                            public void widen(List<MailStore.Edge> edges) throws Exception {
+                                Exception failure =
+                                        widenAll(edges, MailEngine.FILL_CHUNK, "mail fill stopped: ");
+                                if (failure != null) {
+                                    throw failure;
+                                }
                             }
                         });
         Log.d("pimalaya", "mail fill: " + step);
@@ -1717,34 +1769,79 @@ public class MainActivity extends Activity {
             io.execute(this::fillStep);
             return;
         }
-        for (MailSession session : fillSessions.values()) {
-            session.close();
-        }
-        fillSessions.clear();
+        closeFillPools();
         filling = false;
     }
 
-    /**
-     * Widens one mailbox by one chunk on the io thread, on a connection the
-     * fill keeps open for its account between chunks.
-     */
-    private void widenOne(MailStore.Edge edge, int count) throws Exception {
-        AccountEntry account = null;
+    /** The mail account of an address, null when it is gone. */
+    private AccountEntry mailAccount(String email) {
         for (AccountEntry candidate : accountsFor(PimDomain.MAIL)) {
-            if (candidate.email.equals(edge.accountEmail)) {
-                account = candidate;
+            if (candidate.email.equals(email)) {
+                return candidate;
             }
         }
-        if (account == null) {
-            return;
+        return null;
+    }
+
+    /**
+     * Widens mailboxes by one chunk each, on the io thread: each account's
+     * on its pool ({@link MailPool}), side by side and in the order given,
+     * every account at once, on connections the fill keeps open between its
+     * steps. Answers the first failure, every one logged under
+     * {@code failed}; one mailbox failing leaves the others going.
+     */
+    private Exception widenAll(List<MailStore.Edge> edges, int count, String failed) {
+        Map<String, List<String>> byAccount = new java.util.LinkedHashMap<>();
+        for (MailStore.Edge edge : edges) {
+            byAccount.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>())
+                    .add(edge.collection);
         }
-        MailSession session = fillSessions.get(account.email);
-        if (session == null) {
-            session = openMail(account);
-            fillSessions.put(account.email, session);
+
+        List<java.util.concurrent.Callable<MailPool.Outcome>> runs = new ArrayList<>();
+        for (Map.Entry<String, List<String>> entry : byAccount.entrySet()) {
+            AccountEntry account = mailAccount(entry.getKey());
+            if (account == null) {
+                continue;
+            }
+            MailPool<MailSession> pool = fillPools.get(account.email);
+            if (pool == null) {
+                pool =
+                        new MailPool<>(
+                                MailPool.sizeOf(account.server(PimDomain.MAIL)),
+                                null,
+                                () -> openMail(account));
+                fillPools.put(account.email, pool);
+            }
+            MailPool<MailSession> held = pool;
+            String accountId = accountIdOf(account.email);
+            runs.add(
+                    () ->
+                            held.run(
+                                    account.email,
+                                    entry.getValue(),
+                                    session -> new MailEngine(pimdir, client, session, accountId),
+                                    (engine, collection) -> engine.widen(collection, count),
+                                    null));
         }
-        new MailEngine(pimdir, client, session, accountIdOf(account.email))
-                .widen(edge.collection, count);
+
+        Exception first = null;
+        for (MailPool.Outcome outcome : MailPool.together(runs)) {
+            for (MailPool.Failure failure : outcome.failures) {
+                Log.w("pimalaya", failed + failure.collection, failure.error);
+            }
+            if (first == null) {
+                first = outcome.failure();
+            }
+        }
+        return first;
+    }
+
+    /** Closes the connections the fill and the scroll kept; on the io thread. */
+    private void closeFillPools() {
+        for (MailPool<MailSession> pool : fillPools.values()) {
+            pool.close();
+        }
+        fillPools.clear();
     }
 
     /**
@@ -1772,29 +1869,22 @@ public class MainActivity extends Activity {
     /**
      * Widens the mailboxes a scroll reached the end of: every shown mailbox
      * whose floor limits the list, by one chunk of
-     * {@link MailEngine#FIRST_CHUNK} each, on the io thread, then tells
-     * {@code done} on the main thread whether it went through.
+     * {@link MailEngine#FIRST_CHUNK} each, side by side, on the io thread,
+     * then tells {@code done} on the main thread whether every one went
+     * through.
      */
     void widenMail(java.util.function.Predicate<String> shown, java.util.function.Consumer<Boolean> done) {
         io.execute(
                 () -> {
-                    boolean widened = true;
-                    for (MailStore.Edge edge : MailFill.limiting(mail.edges(), shown)) {
-                        try {
-                            widenOne(edge, MailEngine.FIRST_CHUNK);
-                        } catch (Exception error) {
-                            Log.w("pimalaya", "older mail failed: " + edge.collection, error);
-                            widened = false;
-                            break;
-                        }
-                    }
+                    Exception failure =
+                            widenAll(
+                                    MailFill.limiting(mail.edges(), shown),
+                                    MailEngine.FIRST_CHUNK,
+                                    "older mail failed: ");
                     if (!filling) {
-                        for (MailSession session : fillSessions.values()) {
-                            session.close();
-                        }
-                        fillSessions.clear();
+                        closeFillPools();
                     }
-                    boolean outcome = widened;
+                    boolean outcome = failure == null;
                     postAlive(() -> done.accept(outcome));
                 });
     }

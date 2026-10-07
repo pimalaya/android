@@ -149,6 +149,7 @@
     <string name="sync_step_phone">Reconciling with the phone contacts</string>
     <string name="sync_step_project">Writing %1$d contact(s) to the phone</string>
     <string name="sync_step_resolve">Resolving %1$d conflict(s)</string>
+    <string name="sync_step_mailboxes">Mailboxes synced: %1$d of %2$d</string>
     <string name="notif_channel_sync">Background sync</string>
     <string name="notif_conflicts_sub">Conflicts found; open the app to resolve them</string>
 

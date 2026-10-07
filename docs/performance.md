@@ -55,3 +55,7 @@ Modelled, not measured on a device. A Graph mailbox of `n` messages, the account
 - **An expired link (410)**: the link-making round again, `ceil(n / 1000)` id pages, and no band relisted.
 
 The cost moved from summaries relisted on every widening to one pass of ids over the whole folder, paid once per link: on a 50,000-message folder about 50 to 100 small requests behind the first dialog, against about 2.5 million summaries listed to fill it by the old filtered link.
+
+## Mailboxes side by side (parallel-mailboxes, 2026-10-07)
+
+The owner's device, the first-sync dialog of a Microsoft 365 account (12 mailboxes, 326 messages): remote 6.8 s, one mailbox after another (60 to 400 ms each, 3.7 s for *Deleted Items*), JSON 84 ms, engine 35 ms, store 185 ms. An account's mailboxes now run on a pool of sessions (Graph and JMAP 4, IMAP 3, Gmail 2), the store kept to one writer, so the dialog should take about the longest mailbox, or the remote total over the pool size where that is longer: about 3.7 s here, *Deleted Items* alone, where it was 6.8 s. Each run logs `mail pass <account>: N mailboxes on K sessions in W ms, remote summed R ms`, the line to compare on a device. On the build host (`MailPoolTest`, 120 ms a request, two requests a mailbox): 12 mailboxes in about 0.9 s on 4 sessions against 2.9 s in a row.

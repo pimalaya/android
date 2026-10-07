@@ -35,6 +35,17 @@ abstract class PimdirEngine implements OfflineDriver {
     protected final PimalayaClient client;
 
     /**
+     * The store's one writer: every storage yield of every driver (a load,
+     * a lookup, a write) is answered holding it.
+     *
+     * <p>A pass runs an account's mailboxes side by side ({@link MailPool}),
+     * each on its own engine and session, and only their network is meant
+     * to overlap: one SQLite writer, a page's write landing whole before the
+     * next one starts, as when the mailboxes ran one after another.
+     */
+    static final Object STORE = new Object();
+
+    /**
      * Observes a pass's coarse steps for a progress display; steps fire on
      * the sync thread. Null when the pass runs headless.
      *
@@ -157,6 +168,11 @@ abstract class PimdirEngine implements OfflineDriver {
         page.remote += nanos;
     }
 
+    /** Nanoseconds this driver has spent on the network so far, the page under way included. */
+    long remoteSoFar() {
+        return clock.remote + page.remote;
+    }
+
     /** Counts the members one listed page carried toward the page under way. */
     protected void listed(int count) {
         page.listed += count;
@@ -177,22 +193,31 @@ abstract class PimdirEngine implements OfflineDriver {
             String reply;
             switch (op) {
                 case "load": {
-                    JSONObject loaded =
-                            offline.loadCollection(
-                                    yielded.getString("collection"),
-                                    yielded.optJSONObject("scope"));
+                    JSONObject loaded;
+                    synchronized (STORE) {
+                        long began = System.nanoTime();
+                        loaded =
+                                offline.loadCollection(
+                                        yielded.getString("collection"),
+                                        yielded.optJSONObject("scope"));
+                        page.store += System.nanoTime() - began;
+                    }
                     long read = System.nanoTime();
-                    page.store += read - parsed;
                     reply = loaded.toString();
                     page.json += System.nanoTime() - read;
                     break;
                 }
                 case "lookup":
-                    reply = offline.lookupObjects(yielded.getJSONArray("links")).toString();
+                    synchronized (STORE) {
+                        reply = offline.lookupObjects(yielded.getJSONArray("links")).toString();
+                    }
                     break;
                 case "write":
-                    applied(offline.applyWrites(yielded.getJSONArray("writes")));
-                    page.store += System.nanoTime() - parsed;
+                    synchronized (STORE) {
+                        long began = System.nanoTime();
+                        applied(offline.applyWrites(yielded.getJSONArray("writes")));
+                        page.store += System.nanoTime() - began;
+                    }
                     reply = "{}";
                     if (page.pages > 0) {
                         Log.d("pimalaya", "page " + page);

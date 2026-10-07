@@ -15,22 +15,22 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The mail half of the engine: one driver per account, servicing the
- * remote yields of every mailbox it holds.
+ * The mail half of the engine: one driver per session, servicing the
+ * remote yields of the mailboxes run on it.
  *
- * <p>What shapes it is that mail authenticates once for the whole
- * account. IMAP is a session and JMAP is one session resource, so both
- * backends list every mailbox inside one login, where a WebDAV
- * collection is one request each. The engine, on the other hand,
- * reconciles one collection at a time. The two meet in the session: one
- * connection per account answers every mailbox's listing in turn, which is
- * what keeps a sync at one connection per account rather than one per
- * mailbox.
+ * <p>What shapes it is that mail authenticates once per session. IMAP is a
+ * session and JMAP is one session resource, so both backends list many
+ * mailboxes inside one login, where a WebDAV collection is one request
+ * each. The engine, on the other hand, reconciles one collection at a time.
+ * The two meet in the session: a pass runs an account's mailboxes on a few
+ * sessions side by side ({@link MailPool}), each answering the listings of
+ * the mailboxes its worker takes in turn, so a sync costs a handful of
+ * connections per account rather than one per mailbox, and waits on the
+ * network for a few mailboxes at once rather than one after another.
  *
- * <p>The session it walks and writes on is the caller's, opened once
- * for the pass and closed with it, so the three markers a reader moved
- * go out on the connection the walk already had rather than on three of
- * their own.
+ * <p>The session it walks and writes on is the caller's, opened for the
+ * pass and closed with it, so the three markers a reader moved go out on
+ * the connection the walk already had rather than on three of their own.
  *
  * <p>A listing names every message it carries (pimdir SYNC section 4): a
  * message's handle <em>is</em> its link id, and its summary comes off the
@@ -161,7 +161,7 @@ class MailEngine extends PimdirEngine {
             return false;
         }
         step(Progress.STAGE_SERVER, 0);
-        String floor = floor(collection, coverage.since, count);
+        String floor = timedFloor(collection, coverage.since, count);
         list(collection, MailScope.clamp(floor, bound));
         return true;
     }
@@ -181,7 +181,7 @@ class MailEngine extends PimdirEngine {
         if (coverage.at != null) {
             return MailScope.clamp(coverage.since, bound);
         }
-        String floor = floor(collection, null, FIRST_CHUNK);
+        String floor = timedFloor(collection, null, FIRST_CHUNK);
         return MailScope.clamp(floor, bound);
     }
 
@@ -192,6 +192,16 @@ class MailEngine extends PimdirEngine {
      */
     String floor(String collection, String before, int count) {
         return client.mailFloor(session, mailboxOf(collection), before, count);
+    }
+
+    /** {@link #floor}, its time counted as the network's toward the first page. */
+    private String timedFloor(String collection, String before, int count) {
+        long started = System.nanoTime();
+        try {
+            return floor(collection, before, count);
+        } finally {
+            remote(System.nanoTime() - started);
+        }
     }
 
     /**

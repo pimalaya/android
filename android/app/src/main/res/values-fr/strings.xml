@@ -189,6 +189,7 @@
     <string name="sync_step_phone">Rapprochement avec les contacts du téléphone</string>
     <string name="sync_step_project">Écriture de %1$d contact(s) sur le téléphone</string>
     <string name="sync_step_resolve">Résolution de %1$d conflit(s)</string>
+    <string name="sync_step_mailboxes">Boîtes synchronisées : %1$d sur %2$d</string>
     <string name="notif_channel_sync">Synchronisation en arrière-plan</string>
     <string name="notif_conflicts_sub">Conflits détectés ; ouvrez l\'application pour les résoudre</string>
 
