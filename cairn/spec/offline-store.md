@@ -388,12 +388,17 @@ Every member a listing carries SHALL arrive named (pimdir SYNC section 4). A DAV
 - THEN the binding it held is retired and the handle binds the new identity alone
 
 ### Requirement: A round lands page by page
-The store SHALL keep, per collection and source, the round under way (its scope, its resume cursor, the checkpoint a page handed) and the coverage the last closed round left, read and written through io-pimdir's canonical statements; it SHALL stamp every binding a page lists with the round's id, and hand the engine, while a round is open, the bindings no page stamped whose date is in its scope or unknown.
+The store SHALL keep, per collection and source, the round under way (its scope, whether it lists only the band its coverage lacks, its resume cursor, the checkpoint a page handed) and the coverage the last closed round left, read and written through io-pimdir's canonical statements; it SHALL stamp every binding a page lists with the round's id, and hand the engine, while a round is open, the bindings no page stamped whose date is in its scope, or unknown on a round over its whole scope. A band round lists by a date filter that never returns an undated member, so its absence there SHALL NOT be read as a deletion. A store written before rounds recorded their kind SHALL gain the column on open, its open round reading as one over its whole scope.
 
 #### Scenario: A round cut off
 - GIVEN a round whose first page landed
 - WHEN the collection is loaded
-- THEN the round, its cursor and its scope come back with it
+- THEN the round, its cursor, its scope and its kind come back with it
+
+#### Scenario: An undated message across a widening
+- GIVEN a message with no date the store binds
+- WHEN a widening lists the band below the coverage
+- THEN the message stays, and only a round over the whole scope or a delta can find it gone
 
 ### Requirement: A load carries each message's date
 A store load SHALL carry each mail placement's `Date` beside its state, which the bridge SHALL hand the engine as a summary holding the date alone and SHALL NOT write back: a write handing it back unchanged SHALL carry no summary, leaving the stored row alone. The engine reads it to tell a placement in a round's scope from one outside it (SYNC section 5).
