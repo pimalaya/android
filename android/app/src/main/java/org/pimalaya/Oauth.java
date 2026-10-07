@@ -35,7 +35,7 @@ final class Oauth {
      * The Pimalaya Entra app registration (a public client: no secret,
      * PKCE only, like the Google one).
      */
-    static final String MICROSOFT_CLIENT_ID = "d535213d-eead-44ce-9564-eecddc194428";
+    static final String MICROSOFT_CLIENT_ID = "ba9b19e1-973e-4d7c-aed9-848bd2fee385";
 
     /** Custom scheme, mirrored by the manifest intent-filter. */
     static final String MICROSOFT_REDIRECT_URI = "pimalaya://oauth2redirect";
