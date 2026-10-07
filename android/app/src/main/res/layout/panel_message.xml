@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The message reader: the subject with its star, where the message
-     is filed, a sender card, then the message itself filling what is
-     left. Marking unread and deleting sit in the bar (message_actions).
+     is filed under it, a sender card, then the message itself filling
+     what is left, over reply and forward. Marking unread and deleting
+     sit in the bar (message_actions).
 
      Everything above the body comes from the list row, which already
      knew the subject, the sender and the date, so it is drawn at once
@@ -56,80 +57,83 @@
              one thing a merged list cannot leave implicit. -->
         <TextView
             android:id="@+id/message_view_mailbox"
-            android:layout_width="wrap_content"
-            android:layout_height="26dp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:layout_marginStart="4dp"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/badge_background"
-            android:drawableStart="@drawable/ic_folder_open"
-            android:drawablePadding="6dp"
-            android:drawableTint="?android:attr/textColorSecondary"
+            android:layout_marginTop="4dp"
             android:ellipsize="end"
-            android:gravity="center_vertical"
             android:maxLines="1"
-            android:paddingStart="8dp"
-            android:paddingEnd="10dp"
             android:textColor="?android:attr/textColorSecondary"
-            android:textSize="13sp" />
+            android:textSize="14sp" />
 
-        <LinearLayout
+        <!-- The meta card: one line per fact, never wrapped, the card
+             scrolling sideways when an address runs past it. -->
+        <HorizontalScrollView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:background="@drawable/card_background"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:padding="14dp">
-
-            <!-- The same disc the row carried, keyed by the same
-                 address, so opening a message keeps the mark the eye
-                 was following. -->
-            <TextView
-                android:id="@+id/message_view_avatar"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:layout_marginEnd="12dp"
-                android:gravity="center"
-                android:textColor="#ffffff"
-                android:textSize="17sp" />
+            android:fillViewport="true"
+            android:scrollbars="none">
 
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="14dp">
 
+                <!-- The same disc the row carried, keyed by the same
+                     address, so opening a message keeps the mark the eye
+                     was following. -->
                 <TextView
-                    android:id="@+id/message_view_from"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:ellipsize="end"
-                    android:maxLines="1"
-                    android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
+                    android:id="@+id/message_view_avatar"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_marginEnd="12dp"
+                    android:gravity="center"
+                    android:textColor="#ffffff"
+                    android:textSize="17sp" />
 
-                <TextView
-                    android:id="@+id/message_view_recipients"
-                    android:layout_width="match_parent"
+                <LinearLayout
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="14sp" />
+                    android:orientation="vertical">
 
-                <!-- The exact date and how long ago, together: the
-                     exact one answers "when", the relative one answers
-                     "how long have I been sitting on this", and a
-                     reader opening a message usually wants both. -->
-                <TextView
-                    android:id="@+id/message_view_date"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="13sp" />
+                    <TextView
+                        android:id="@+id/message_view_from"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:singleLine="true"
+                        android:textColor="?android:attr/textColorPrimary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/message_view_recipients"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:singleLine="true"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="14sp" />
+
+                    <!-- The exact date and how long ago, together: the
+                         exact one answers "when", the relative one answers
+                         "how long have I been sitting on this", and a
+                         reader opening a message usually wants both. -->
+                    <TextView
+                        android:id="@+id/message_view_date"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:singleLine="true"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="13sp" />
+
+                </LinearLayout>
 
             </LinearLayout>
 
-        </LinearLayout>
+        </HorizontalScrollView>
 
         <!-- One badge per attachment, wrapping onto as many lines as it
              takes: what a message carries is part of what it is, and a
@@ -172,5 +176,52 @@
         android:padding="48dp"
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="16sp" />
+
+    <!-- What a reader does next: reply to everyone on the message, or
+         forward it, one accent pill and one tonal. -->
+    <LinearLayout
+        android:id="@+id/message_view_replies"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingTop="12dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="12dp">
+
+        <TextView
+            android:id="@+id/message_view_reply"
+            android:layout_width="0dp"
+            android:layout_height="50dp"
+            android:layout_marginEnd="12dp"
+            android:layout_weight="1"
+            android:background="@drawable/button_pill"
+            android:drawableStart="@drawable/ic_reply"
+            android:drawablePadding="8dp"
+            android:gravity="center"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:text="@string/message_reply"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/message_view_forward"
+            android:layout_width="0dp"
+            android:layout_height="50dp"
+            android:layout_weight="1"
+            android:background="@drawable/button_tonal"
+            android:drawableStart="@drawable/ic_forward"
+            android:drawablePadding="8dp"
+            android:drawableTint="?android:attr/textColorPrimary"
+            android:gravity="center"
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:text="@string/message_forward"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
 
 </LinearLayout>

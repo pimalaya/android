@@ -7,4 +7,8 @@
     <color name="divider_light">#E0E0E0</color>
     <color name="surface">#EEEEEE</color>
 
+    <!-- A starred message's star: the one fixed hue, since a yellow
+         star is what marks importance whatever the theme's accent. -->
+    <color name="star">#F2BE3C</color>
+
 </resources>

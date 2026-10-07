@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One recipient in the composer: a pill in the surface tone. -->
+<!-- One recipient in the composer: a pill in the faint tone, which shows
+     on the card's surface where the surface tone itself would not. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <solid android:color="@color/surface" />
+    <solid android:color="@color/faint" />
     <corners android:radius="16dp" />
 </shape>

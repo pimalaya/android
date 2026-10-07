@@ -143,6 +143,14 @@ final class SyncRunner {
      * the outcome instead.
      */
     Outcome syncRemote() {
+        return syncRemote(null);
+    }
+
+    /**
+     * The remote run narrowed to what a filter lets through: the books of
+     * the accounts and collections it shows, everything with null.
+     */
+    Outcome syncRemote(MergedFilter scope) {
         Outcome outcome = new Outcome();
 
         // NOTE: self-heal an account whose addressbooks a schema rebuild
@@ -179,6 +187,9 @@ final class SyncRunner {
 
         Map<String, List<BookEntry>> byAccount = new LinkedHashMap<>();
         for (BookEntry entry : base.loadSubscribedAddressbooks()) {
+            if (scope != null && !scope.accepts(entry.accountEmail, entry.book.id)) {
+                continue;
+            }
             byAccount
                     .computeIfAbsent(entry.accountEmail, email -> new ArrayList<>())
                     .add(entry);
@@ -196,10 +207,12 @@ final class SyncRunner {
             AccountCredential contacts = entry.credential(PimDomain.CONTACTS);
             try {
                 syncAccount(entry.server(PimDomain.CONTACTS), group.getValue(), outcome);
+                SyncStamps.mark(context, entry.email);
             } catch (Exception error) {
                 if (expiredToken(error) && contacts.renewable()) {
                     try {
                         syncAccount(refresh(entry), group.getValue(), outcome);
+                        SyncStamps.mark(context, entry.email);
                         continue;
                     } catch (Exception retryError) {
                         error = retryError;

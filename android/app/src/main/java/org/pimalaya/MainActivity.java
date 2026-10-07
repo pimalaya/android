@@ -235,6 +235,27 @@ public class MainActivity extends Activity {
         setUpContactPanel();
         setUpHomePanel();
 
+        // The selection's close and select-all buttons serve whichever
+        // list is selecting.
+        findViewById(R.id.selection_close)
+                .setOnClickListener(
+                        view -> {
+                            if (screen == PANEL_MAIL) {
+                                mailList.exitSelection();
+                            } else {
+                                contactsList.exitSelection();
+                            }
+                        });
+        findViewById(R.id.selection_all)
+                .setOnClickListener(
+                        view -> {
+                            if (screen == PANEL_MAIL) {
+                                mailList.toggleSelectAll();
+                            } else {
+                                contactsList.toggleSelectAll();
+                            }
+                        });
+
         setUpFab(R.id.fab);
         findViewById(R.id.fab).setOnClickListener(view -> onFabClick());
         findViewById(R.id.fab_extended).setOnClickListener(view -> onFabClick());
@@ -514,6 +535,10 @@ public class MainActivity extends Activity {
             contactsList.exitSelection();
             return;
         }
+        if (screen == PANEL_MAIL && mailList.isSelectionMode()) {
+            mailList.exitSelection();
+            return;
+        }
 
         Screen entry = screens.get(screen);
         if (entry != null && entry.systemBack != null) {
@@ -721,11 +746,15 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Rebuilds the drawer: the mailboxes, then one row per connected
-     * account (the local book stays hidden), the email with a trailing
-     * chevron. Tapping an account opens its settings screen:
-     * activation, cadence, the per-addressbook advanced switches and
-     * deletion, so the drawer itself stays a plain list.
+     * Rebuilds the drawer: one card per connected account (the local book
+     * stays hidden), saying what it covers, and whether it takes part and
+     * when it last synced. Tapping a card opens its
+     * settings screen: activation, cadence, the per-addressbook advanced
+     * switches and deletion, so the drawer itself stays a plain list.
+     *
+     * <p>No mailboxes: the lists are one merged view over every
+     * collection, which the filter narrows, so a drawer entry opening
+     * one collection would be a second way of looking at the same thing.
      */
     void reloadHome() {
         // With no real account the drawer shows an empty state, and its
@@ -733,139 +762,160 @@ public class MainActivity extends Activity {
         boolean hasAccount = hasRealAccount();
         findViewById(R.id.drawer_sync).setVisibility(hasAccount ? View.VISIBLE : View.GONE);
         findViewById(R.id.drawer_empty).setVisibility(hasAccount ? View.GONE : View.VISIBLE);
-        findViewById(R.id.drawer_accounts_title)
-                .setVisibility(hasAccount ? View.VISIBLE : View.GONE);
-
-        // Every mailbox name across the accounts, one row each: the mail
-        // list's merged view narrowed to that name, whichever account
-        // holds it. All of them first, the list's default.
-        List<String> names = mail.loadMailboxes();
-        LinearLayout mailboxes = findViewById(R.id.drawer_mailboxes);
-        mailboxes.removeAllViews();
-        findViewById(R.id.drawer_mailboxes_title)
-                .setVisibility(names.isEmpty() ? View.GONE : View.VISIBLE);
-        if (!names.isEmpty()) {
-            mailboxes.addView(
-                    mailboxRow(
-                            R.drawable.ic_domain_mail,
-                            getString(R.string.mail_all),
-                            mailList.mailbox() == null,
-                            null));
-            for (String name : names) {
-                mailboxes.addView(
-                        mailboxRow(
-                                R.drawable.ic_folder_open,
-                                name,
-                                name.equals(mailList.mailbox()),
-                                name));
-            }
-        }
 
         LinearLayout container = findViewById(R.id.home_container);
         container.removeAllViews();
-
-        java.util.Set<String> emails = new java.util.LinkedHashSet<>();
-        for (BookEntry entry : base.loadAllAddressbooks()) {
-            if (!LocalBook.is(entry.accountEmail)) {
-                emails.add(entry.accountEmail);
+        for (AccountEntry account : store.loadAll()) {
+            if (!LocalBook.is(account.email)) {
+                container.addView(accountCard(account));
             }
-        }
-
-        for (String email : emails) {
-            android.widget.ImageView glyph = new android.widget.ImageView(this);
-            glyph.setImageResource(R.drawable.ic_account);
-            glyph.setImageTintList(
-                    android.content.res.ColorStateList.valueOf(
-                            resolveColor(android.R.attr.textColorPrimary)));
-            LinearLayout.LayoutParams glyphParams =
-                    new LinearLayout.LayoutParams(
-                            dimen(R.dimen.item_icon), dimen(R.dimen.item_icon));
-            glyphParams.setMarginEnd(dimen(R.dimen.item_gap));
-
-            TextView label = new TextView(this);
-            label.setText(email);
-            itemText(label);
-            label.setTextColor(resolveColor(android.R.attr.textColorPrimary));
-            label.setSingleLine(true);
-            label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            label.setLayoutParams(
-                    new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-            android.widget.ImageView chevron = new android.widget.ImageView(this);
-            chevron.setImageResource(R.drawable.ic_chevron_right);
-            chevron.setImageTintList(
-                    android.content.res.ColorStateList.valueOf(
-                            resolveColor(android.R.attr.textColorSecondary)));
-            LinearLayout.LayoutParams chevronParams =
-                    new LinearLayout.LayoutParams(
-                            dimen(R.dimen.item_icon), dimen(R.dimen.item_icon));
-
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setMinimumHeight(dimen(R.dimen.item_height));
-            row.setPadding(
-                    dimen(R.dimen.drawer_item_padding), 0, dimen(R.dimen.drawer_item_padding), 0);
-            row.setBackgroundResource(resolveAttr(android.R.attr.selectableItemBackground));
-            row.addView(glyph, glyphParams);
-            row.addView(label);
-            row.addView(chevron, chevronParams);
-            row.setOnClickListener(view -> openAccountSettings(email));
-            container.addView(row);
         }
     }
 
     /**
-     * One drawer mailbox row, the one the mail list shows on an accent
-     * pill inset from the drawer's edges.
+     * One drawer account card: the disc, the address, what it covers,
+     * and the pill saying whether it takes part and when it last synced.
      */
-    private View mailboxRow(int icon, String label, boolean selected, String mailbox) {
-        int color = selected ? accentContrast() : resolveColor(android.R.attr.textColorPrimary);
+    private View accountCard(AccountEntry account) {
+        String email = account.email;
 
-        android.widget.ImageView glyph = new android.widget.ImageView(this);
-        glyph.setImageResource(icon);
-        glyph.setImageTintList(ColorStateList.valueOf(color));
-        LinearLayout.LayoutParams glyphParams =
-                new LinearLayout.LayoutParams(dimen(R.dimen.item_icon), dimen(R.dimen.item_icon));
-        glyphParams.setMarginEnd(dimen(R.dimen.item_gap));
+        TextView avatar = new TextView(this);
+        avatar.setText(Avatar.letter(email));
+        avatar.setBackground(Avatar.circle(this, email));
+        avatar.setGravity(Gravity.CENTER);
+        avatar.setTextColor(android.graphics.Color.WHITE);
+        avatar.setTextSize(18);
 
-        TextView text = new TextView(this);
-        text.setText(label);
-        itemText(text);
-        text.setTextColor(color);
-        text.setSingleLine(true);
-        text.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        TextView address = new TextView(this);
+        address.setText(email);
+        address.setTextColor(resolveColor(android.R.attr.textColorPrimary));
+        address.setTextSize(16);
+        address.setTypeface(null, android.graphics.Typeface.BOLD);
+        address.setSingleLine(true);
+        address.setEllipsize(android.text.TextUtils.TruncateAt.END);
 
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(dimen(R.dimen.item_height));
-        row.setPadding(dimen(R.dimen.drawer_item_inner), 0, dimen(R.dimen.drawer_item_inner), 0);
-        row.setBackgroundResource(selected ? R.drawable.domain_selected : R.drawable.domain_item);
-        row.addView(glyph, glyphParams);
-        row.addView(text);
-        row.setOnClickListener(view -> openMailbox(mailbox));
+        List<String> covered = new ArrayList<>();
+        for (PimDomain domain : PimDomain.values()) {
+            if (account.covers(domain)) {
+                covered.add(getString(domain.label));
+            }
+        }
+        TextView domains = new TextView(this);
+        domains.setText(android.text.TextUtils.join(" · ", covered));
+        domains.setTextColor(resolveColor(android.R.attr.textColorSecondary));
+        domains.setTextSize(14);
+        domains.setSingleLine(true);
+        domains.setEllipsize(android.text.TextUtils.TruncateAt.END);
 
-        LinearLayout.LayoutParams params =
+        LinearLayout text = new LinearLayout(this);
+        text.setOrientation(LinearLayout.VERTICAL);
+        text.addView(address);
+        text.addView(domains);
+
+        LinearLayout identity = new LinearLayout(this);
+        identity.setOrientation(LinearLayout.HORIZONTAL);
+        identity.setGravity(Gravity.CENTER_VERTICAL);
+        identity.addView(avatar, new LinearLayout.LayoutParams(dp(46), dp(46)));
+        LinearLayout.LayoutParams textParams =
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        textParams.setMarginStart(dp(12));
+        identity.addView(text, textParams);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.drawer_card);
+        card.setPadding(dp(14), dp(14), dp(14), dp(14));
+        card.addView(identity);
+        LinearLayout.LayoutParams pillParams =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT, dp(30));
+        pillParams.topMargin = dp(12);
+        card.addView(syncPill(accountEnabled(email), SyncStamps.at(this, email)), pillParams);
+        card.setOnClickListener(view -> openAccountSettings(email));
+
+        LinearLayout.LayoutParams cardParams =
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.setMarginStart(dimen(R.dimen.drawer_item_inset));
-        params.setMarginEnd(dimen(R.dimen.drawer_item_inset));
-        row.setLayoutParams(params);
-        return row;
+        cardParams.bottomMargin = dp(8);
+        card.setLayoutParams(cardParams);
+        return card;
     }
 
-    /** Narrows the mail list to one mailbox (all of them with null) and shows it. */
-    private void openMailbox(String mailbox) {
-        drawer.closeDrawer(Gravity.START);
-        mailList.showMailbox(mailbox);
-        ((android.widget.ListView) findViewById(R.id.mail_list)).setSelection(0);
-        if (screen == PANEL_MAIL) {
-            showDomainTitle(PANEL_MAIL);
+    /**
+     * The pill saying where an account stands: deactivated in the plain
+     * tone, else when it last synced on an accent tint, or that it never
+     * has in the plain tone.
+     */
+    private View syncPill(boolean enabled, long stamp) {
+        boolean synced = enabled && stamp > 0;
+        int color =
+                synced
+                        ? resolveColor(android.R.attr.colorAccent)
+                        : resolveColor(android.R.attr.textColorSecondary);
+
+        android.widget.ImageView glyph = new android.widget.ImageView(this);
+        glyph.setImageResource(R.drawable.ic_sync);
+        glyph.setImageTintList(ColorStateList.valueOf(color));
+
+        TextView label = new TextView(this);
+        if (!enabled) {
+            label.setText(R.string.drawer_deactivated);
+        } else if (synced) {
+            label.setText(
+                    getString(
+                            R.string.drawer_synced,
+                            android.text.format.DateUtils.getRelativeTimeSpanString(
+                                    stamp,
+                                    System.currentTimeMillis(),
+                                    android.text.format.DateUtils.MINUTE_IN_MILLIS)));
         } else {
-            switchDomain(PANEL_MAIL);
+            label.setText(R.string.drawer_never_synced);
         }
+        label.setTextColor(color);
+        label.setTextSize(13);
+        label.setTypeface(null, android.graphics.Typeface.BOLD);
+        label.setSingleLine(true);
+
+        android.graphics.drawable.GradientDrawable tint =
+                new android.graphics.drawable.GradientDrawable();
+        tint.setCornerRadius(dp(15));
+        tint.setColor((color & 0x00ffffff) | 0x24000000);
+
+        LinearLayout pill = new LinearLayout(this);
+        pill.setOrientation(LinearLayout.HORIZONTAL);
+        pill.setGravity(Gravity.CENTER_VERTICAL);
+        pill.setPadding(dp(8), 0, dp(12), 0);
+        pill.setBackground(tint);
+        pill.addView(glyph, new LinearLayout.LayoutParams(dp(16), dp(16)));
+        LinearLayout.LayoutParams labelParams =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        labelParams.setMarginStart(dp(8));
+        pill.addView(label, labelParams);
+        return pill;
+    }
+
+    /**
+     * Whether an account takes part: the filter does not hide it, and
+     * when it holds addressbooks, at least one of them is on, which is
+     * what its settings' Activate switch says.
+     */
+    private boolean accountEnabled(String email) {
+        if (!filter.showsAccount(email)) {
+            return false;
+        }
+        boolean hasBook = false;
+        for (BookEntry entry : base.loadAllAddressbooks()) {
+            if (entry.accountEmail.equals(email)) {
+                hasBook = true;
+                if (entry.subscribed) {
+                    return true;
+                }
+            }
+        }
+        return !hasBook;
     }
 
     /**
@@ -1095,8 +1145,8 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Refetches every mail account's mail: the newest messages of every
-     * mailbox, into the merged list.
+     * The mail list's pull: the mail of the accounts and mailboxes the
+     * filter shows, into the merged list.
      *
      * <p>The endpoint is the one the account was connected with, which is what
      * the mail domain of the connection flow exists to establish. It used to be
@@ -1110,7 +1160,7 @@ public class MainActivity extends Activity {
         setSyncing(true);
         io.execute(
                 () -> {
-                    MailPass pass = mailPass();
+                    MailPass pass = mailPass(filter);
                     postAlive(
                             () -> {
                                 setSyncing(false);
@@ -1129,11 +1179,17 @@ public class MainActivity extends Activity {
         int sent;
     }
 
-    /** Every mail account's outbox drained and mailboxes synced, on the calling thread. */
-    private MailPass mailPass() {
+    /**
+     * Every mail account's outbox drained and mailboxes synced, on the
+     * calling thread: those the scope shows, every one with null.
+     */
+    private MailPass mailPass(MergedFilter scope) {
         syncTitle(R.string.mail_title);
         MailPass pass = new MailPass();
         for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
+            if (scope != null && !scope.showsAccount(account.email)) {
+                continue;
+            }
             // One connection for the account's whole pass: the drain, the
             // walk and every marker the reader moved go out on it rather
             // than on one apiece.
@@ -1150,7 +1206,7 @@ public class MainActivity extends Activity {
                     }
                 }
 
-                Exception error = fetchMail(account, session);
+                Exception error = fetchMail(account, session, scope);
                 if (pass.failure == null) {
                     pass.failure = error;
                 }
@@ -1245,7 +1301,7 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Refetches every account's calendars and their events.
+     * The agenda's pull: the calendars the filter shows, and their events.
      *
      * <p>Read-only and whole-collection: CalDAV's ctag and sync-token
      * rounds are what an incremental pass would use, and neither is
@@ -1257,7 +1313,7 @@ public class MainActivity extends Activity {
         setSyncing(true);
         io.execute(
                 () -> {
-                    Exception failure = calendarPass();
+                    Exception failure = calendarPass(filter);
                     postAlive(
                             () -> {
                                 setSyncing(false);
@@ -1269,8 +1325,11 @@ public class MainActivity extends Activity {
                 });
     }
 
-    /** Every calendar account synced, on the calling thread. Answers the first failure. */
-    private Exception calendarPass() {
+    /**
+     * Every calendar account synced, on the calling thread: those the
+     * scope shows, every one with null. Answers the first failure.
+     */
+    private Exception calendarPass(MergedFilter scope) {
         syncTitle(R.string.calendar_title);
         Exception failure = null;
         // NOTE: the calendar accounts, rather than the contacts accounts that
@@ -1278,7 +1337,10 @@ public class MainActivity extends Activity {
         // calendar account the app had before the connection flow could make
         // one, and it walked a CardDAV home looking for calendars.
         for (AccountEntry account : accountsFor(PimDomain.CALENDAR)) {
-            Exception error = fetchCalendars(account);
+            if (scope != null && !scope.showsAccount(account.email)) {
+                continue;
+            }
+            Exception error = fetchCalendars(account, scope);
             if (failure == null) {
                 failure = error;
             }
@@ -1302,7 +1364,7 @@ public class MainActivity extends Activity {
      * it, so the walk and every write the reconcile pushes share one
      * connection.
      */
-    private Exception fetchMail(AccountEntry account, MailSession session) {
+    private Exception fetchMail(AccountEntry account, MailSession session, MergedFilter scope) {
         try {
             MailEngine engine =
                     new MailEngine(pimdir, client, session, accountIdOf(account.email));
@@ -1317,13 +1379,14 @@ public class MainActivity extends Activity {
             mail.replaceMailboxes(account.email, mailboxes);
 
             for (Mailbox mailbox : mailboxes) {
-                // NOTE: what the filter hides is not synced either. The roster
-                // above still is, so the filter keeps offering it.
-                if (!filter.accepts(account.email, mailbox.name)) {
+                // NOTE: a pass scoped to the filter skips what it hides. The
+                // roster above is still read, so the filter keeps offering it.
+                if (scope != null && !scope.accepts(account.email, mailbox.name)) {
                     continue;
                 }
                 engine.sync(mail.collectionOf(account.email, mailbox.name));
             }
+            SyncStamps.mark(this, account.email);
             return null;
         } catch (Exception error) {
             Log.w("pimalaya", "mail sync failed: " + account.email, error);
@@ -1336,7 +1399,7 @@ public class MainActivity extends Activity {
      * thread. Answers what went wrong, or null; a calendar whose pass
      * fails leaves the ones beside it alone.
      */
-    private Exception fetchCalendars(AccountEntry account) {
+    private Exception fetchCalendars(AccountEntry account, MergedFilter scope) {
         // NOTE: one session for the whole account, so the listing and every
         // event round after it share the token a refresh may have replaced
         // part-way, and one transport under it, so they share its socket.
@@ -1360,6 +1423,9 @@ public class MainActivity extends Activity {
                 if (!calendar.accountEmail.equals(account.email)) {
                     continue;
                 }
+                if (scope != null && !scope.accepts(account.email, calendar.id)) {
+                    continue;
+                }
                 try {
                     session.call(
                             server -> {
@@ -1380,6 +1446,9 @@ public class MainActivity extends Activity {
                         failure = error;
                     }
                 }
+            }
+            if (failure == null) {
+                SyncStamps.mark(this, account.email);
             }
             return failure;
         }
@@ -1445,14 +1514,14 @@ public class MainActivity extends Activity {
                     if (account.covers(PimDomain.MAIL)) {
                         syncTitle(R.string.mail_title);
                         try (MailSession session = openMail(account)) {
-                            failure = fetchMail(account, session);
+                            failure = fetchMail(account, session, null);
                         } catch (Exception error) {
                             failure = error;
                         }
                     }
                     if (account.covers(PimDomain.CALENDAR)) {
                         syncTitle(R.string.calendar_title);
-                        Exception error = fetchCalendars(account);
+                        Exception error = fetchCalendars(account, null);
                         if (failure == null) {
                             failure = error;
                         }
@@ -1485,8 +1554,41 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * The contacts list's pull: the addressbooks the filter shows,
+     * reconciled with their servers, then the phone's own pass. The
+     * drawer's sync is the one that takes every domain and everything.
+     */
+    void syncContacts() {
+        if (!phoneSyncedBooks().isEmpty() && !ensureContactsPermission(this::syncContacts)) {
+            return;
+        }
+
+        syncDomain = R.string.contacts_title;
+        setSyncing(true);
+        io.execute(
+                () -> {
+                    SyncRunner.Outcome outcome = runner.syncRemote(filter);
+                    OfflineEngine.Report report = new OfflineEngine.Report();
+                    Exception failure = runner.syncLocal(report);
+                    outcome.absorb(report);
+                    outcome.local |= !runner.phoneSyncedBooks().isEmpty();
+                    if (outcome.failure == null) {
+                        outcome.failure = failure;
+                    }
+                    postAlive(
+                            () -> {
+                                setSyncing(false);
+                                reloadContacts();
+                                reportSync(outcome);
+                            });
+                });
+    }
+
+    /**
      * Syncs every domain in turn, contacts then mail then calendars, the
-     * dialog naming each as it goes.
+     * dialog naming each as it goes: the drawer's sync, which takes every
+     * account and collection whatever the filter hides, where a list's
+     * pull takes its own domain within the filter.
      */
     void syncAll() {
         // NOTE: only the phone passes need the contacts permission;
@@ -1508,8 +1610,8 @@ public class MainActivity extends Activity {
                         outcome.failure = failure;
                     }
 
-                    MailPass sent = mailPass();
-                    Exception calendars = calendarPass();
+                    MailPass sent = mailPass(null);
+                    Exception calendars = calendarPass(null);
                     Exception other = sent.failure != null ? sent.failure : calendars;
                     postAlive(
                             () -> {
@@ -2148,7 +2250,7 @@ public class MainActivity extends Activity {
      * The list chrome for one domain: the burger onto the drawer, the
      * domain's name (once its large title scrolls away), the filter
      * every list shares, and the bottom navigation with this domain on
-     * its accent pill. The domain's own actions come after, from its
+     * its indicator. The domain's own actions come after, from its
      * screen.
      */
     private void showDomainBar(int panel) {
@@ -2156,13 +2258,14 @@ public class MainActivity extends Activity {
             boolean selected = target == panel;
             LinearLayout item = findViewById(Domains.buttonOf(target));
             android.widget.FrameLayout indicator = (android.widget.FrameLayout) item.getChildAt(0);
-            indicator.setBackgroundResource(selected ? R.drawable.domain_selected : 0);
+            indicator.setBackgroundResource(selected ? R.drawable.nav_indicator : 0);
             ((android.widget.ImageView) indicator.getChildAt(0))
                     .setImageTintList(
                             ColorStateList.valueOf(
-                                    selected
-                                            ? accentContrast()
-                                            : ui.resolveColor(android.R.attr.textColorSecondary)));
+                                    ui.resolveColor(
+                                            selected
+                                                    ? android.R.attr.textColorPrimary
+                                                    : android.R.attr.textColorSecondary)));
             TextView label = (TextView) item.getChildAt(1);
             label.setTextColor(
                     ui.resolveColor(
@@ -2191,10 +2294,7 @@ public class MainActivity extends Activity {
      */
     void showDomainTitle(int panel) {
         TextView title = findViewById(R.id.bar_title);
-        title.setText(
-                panel == PANEL_MAIL && mailList.mailbox() != null
-                        ? mailList.mailbox()
-                        : getString(Domains.titleOf(panel)));
+        title.setText(Domains.titleOf(panel));
         title.setVisibility(View.VISIBLE);
         title.animate().cancel();
         title.setAlpha(headerOf(panel).scrolled() ? 1f : 0f);
@@ -2202,7 +2302,8 @@ public class MainActivity extends Activity {
 
     /** Fades the bar's title in or out as a large title leaves or returns. */
     void showBarTitle(boolean shown) {
-        if (screen == PANEL_CONTACTS && contactsList.isSelectionMode()) {
+        if (screen == PANEL_CONTACTS && contactsList.isSelectionMode()
+                || screen == PANEL_MAIL && mailList.isSelectionMode()) {
             return;
         }
         findViewById(R.id.bar_title).animate().alpha(shown ? 1f : 0f).setDuration(150);
@@ -2217,24 +2318,92 @@ public class MainActivity extends Activity {
     }
 
     /** Raises the extended FAB as a list screen's add button. */
-    private void listFab(int label) {
+    private void listFab(int label, int icon) {
         ((TextView) findViewById(R.id.fab_extended_label)).setText(label);
-        findViewById(R.id.fab_extended).setContentDescription(getString(label));
-        findViewById(R.id.fab_extended).setVisibility(View.VISIBLE);
+        ((android.widget.ImageView) findViewById(R.id.fab_extended_icon)).setImageResource(icon);
+        View fab = findViewById(R.id.fab_extended);
+        fab.setContentDescription(getString(label));
+        fab.setVisibility(View.VISIBLE);
         findViewById(R.id.fab).setVisibility(View.GONE);
-        foldFab(false);
+
+        // NOTE: unfolded at once, a new screen's button saying what it
+        // adds before the list is scrolled.
+        if (fabFold != null) {
+            fabFold.cancel();
+        }
+        fabFolded = false;
+        View text = findViewById(R.id.fab_extended_label);
+        text.setVisibility(View.VISIBLE);
+        text.setAlpha(1f);
+        android.view.ViewGroup.LayoutParams params = fab.getLayoutParams();
+        params.width = android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
+        fab.setLayoutParams(params);
     }
 
-    /** Folds the extended FAB to its glyph, or unfolds its label. */
+    /** Whether the extended FAB stands folded to its glyph. */
+    private boolean fabFolded;
+
+    /** The running fold, cancelled by the next one. */
+    private android.animation.ValueAnimator fabFold;
+
+    /**
+     * Folds the extended FAB to its square glyph, or unfolds its label:
+     * the width animates between the two while the label fades, so the
+     * button itself shrinks rather than only losing its text.
+     */
     void foldFab(boolean folded) {
-        View label = findViewById(R.id.fab_extended_label);
-        int visibility = folded ? View.GONE : View.VISIBLE;
-        if (label.getVisibility() == visibility) {
+        if (folded == fabFolded) {
             return;
         }
-        android.transition.TransitionManager.beginDelayedTransition(
-                (android.view.ViewGroup) findViewById(R.id.fab_extended).getParent());
-        label.setVisibility(visibility);
+        fabFolded = folded;
+        View fab = findViewById(R.id.fab_extended);
+        View label = findViewById(R.id.fab_extended_label);
+        if (fabFold != null) {
+            fabFold.cancel();
+        }
+
+        // NOTE: measured with the label in, which is the unfolded width
+        // whatever the button stands at now.
+        label.setVisibility(View.VISIBLE);
+        fab.measure(
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                View.MeasureSpec.makeMeasureSpec(dimen(R.dimen.fab), View.MeasureSpec.EXACTLY));
+        int unfolded = fab.getMeasuredWidth();
+        int square = dimen(R.dimen.fab);
+        int from = fab.getWidth() > 0 ? fab.getWidth() : folded ? unfolded : square;
+
+        android.view.ViewGroup.LayoutParams params = fab.getLayoutParams();
+        fabFold = android.animation.ValueAnimator.ofInt(from, folded ? square : unfolded);
+        fabFold.setDuration(220);
+        fabFold.setInterpolator(new android.view.animation.DecelerateInterpolator());
+        fabFold.addUpdateListener(
+                animation -> {
+                    params.width = (int) animation.getAnimatedValue();
+                    fab.setLayoutParams(params);
+                });
+        fabFold.addListener(
+                new android.animation.AnimatorListenerAdapter() {
+                    private boolean cancelled;
+
+                    @Override
+                    public void onAnimationCancel(android.animation.Animator animation) {
+                        cancelled = true;
+                    }
+
+                    @Override
+                    public void onAnimationEnd(android.animation.Animator animation) {
+                        if (cancelled) {
+                            return;
+                        }
+                        label.setVisibility(folded ? View.GONE : View.VISIBLE);
+                        params.width =
+                                folded ? square : android.view.ViewGroup.LayoutParams.WRAP_CONTENT;
+                        fab.setLayoutParams(params);
+                    }
+                });
+        label.animate().cancel();
+        label.animate().alpha(folded ? 0f : 1f).setDuration(folded ? 120 : 220);
+        fabFold.start();
     }
 
     /** The mail item's unread count, hidden at zero. */
@@ -2507,7 +2676,7 @@ public class MainActivity extends Activity {
         Screen contacts = new Screen();
         contacts.chrome =
                 () -> {
-                    listFab(R.string.contacts_new_short);
+                    listFab(R.string.contacts_new_short, R.drawable.ic_person_add);
                     showDomainBar(PANEL_CONTACTS);
                     // NOTE: after the domain bar, which a running
                     // selection then takes over.
@@ -2530,8 +2699,10 @@ public class MainActivity extends Activity {
         Screen mailScreen = new Screen();
         mailScreen.chrome =
                 () -> {
-                    listFab(R.string.compose_new);
+                    listFab(R.string.compose_new, R.drawable.ic_pencil);
                     showDomainBar(PANEL_MAIL);
+                    // NOTE: reload re-applies a running selection over
+                    // the domain bar.
                     mailList.reload();
                 };
         mailScreen.fab = () -> compose.open();
@@ -2540,7 +2711,7 @@ public class MainActivity extends Activity {
         Screen calendar = new Screen();
         calendar.chrome =
                 () -> {
-                    listFab(R.string.event_new);
+                    listFab(R.string.event_new, R.drawable.ic_add);
                     showDomainBar(PANEL_CALENDAR);
                     // The window the agenda covers starts at today, so it
                     // is rebuilt on arrival rather than cached across days.
@@ -2709,10 +2880,13 @@ public class MainActivity extends Activity {
                         R.id.contacts_birthdays,
                         R.id.contacts_duplicates,
                         R.id.contacts_transfer,
-                        R.id.contacts_close,
+                        R.id.selection_close,
                         R.id.contacts_merge,
                         R.id.contacts_delete,
-                        R.id.contacts_select_all_slot,
+                        R.id.selection_all_slot,
+                        R.id.mail_select_seen,
+                        R.id.mail_select_flag,
+                        R.id.mail_select_delete,
                         R.id.contact_advanced,
                         R.id.contact_books,
                         R.id.contact_add_field,
@@ -2746,11 +2920,6 @@ public class MainActivity extends Activity {
         if (entry != null) {
             entry.barBack.run();
         }
-    }
-
-    /** Resolves a theme attribute to its referenced resource id. */
-    private int resolveAttr(int attr) {
-        return ui.resolveAttr(attr);
     }
 
     /** Resolves a theme colour attribute to an ARGB int. */
@@ -2827,13 +2996,6 @@ public class MainActivity extends Activity {
         return getResources().getDimensionPixelSize(resId);
     }
 
-    /** Applies the shared item text size (scales with the font setting). */
-    private void itemText(TextView view) {
-        view.setTextSize(
-                android.util.TypedValue.COMPLEX_UNIT_PX,
-                getResources().getDimension(R.dimen.item_text));
-    }
-
     /**
      * Draws under the system bars (edge-to-edge is enforced for apps
      * targeting API 35) and pushes the chrome back in with the bar
@@ -2894,12 +3056,13 @@ public class MainActivity extends Activity {
         findViewById(R.id.fab_extended).setLayoutParams(extended);
         // The drawer's fixed bottom band takes the inset; the list above
         // it needs none.
-        padBottom(R.id.drawer_actions, 0, bottom);
+        padBottom(R.id.drawer_actions, 8, bottom);
         padBottom(R.id.config_container, 88, bottom);
         padBottom(R.id.books_container, 88, bottom);
         padBottom(R.id.advanced_container, 24, bottom);
         padBottom(R.id.source_input, 16, bottom);
         padBottom(R.id.email_row, 16, bottom);
+        padBottom(R.id.message_view_replies, 12, bottom);
     }
 
     private void padTop(int id, int top) {

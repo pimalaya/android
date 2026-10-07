@@ -106,6 +106,12 @@ final class CardSections<T> {
         return view;
     }
 
+    /** Whether a row is the first of its card, which no hairline tops. */
+    boolean opensCard(int position) {
+        int shape = shapes.get(position);
+        return shape == R.drawable.row_card_top || shape == R.drawable.row_card_single;
+    }
+
     /** Rounds a row's card for its place in the section. */
     void shape(View row, int position) {
         row.findViewById(R.id.row_card).setBackgroundResource(shapes.get(position));

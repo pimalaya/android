@@ -114,6 +114,12 @@ public final class RecipientField extends ViewGroup {
         input.setText("");
     }
 
+    /** Replaces the field's recipients with the comma separated addresses. */
+    void set(String addresses) {
+        clear();
+        commit(addresses);
+    }
+
     /** Turns every address in the text into a chip, leaving the input empty. */
     private void commit(String text) {
         for (String address : text.split("[,; ]+")) {

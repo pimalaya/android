@@ -259,6 +259,14 @@ The drawer's sync SHALL reconcile contacts, then mail, then calendars, and SHALL
 - WHEN the drawer's sync runs
 - THEN the flag is pushed to the server
 
+### Requirement: A list's pull syncs what it shows
+Pulling a list down SHALL sync that list's domain alone, and within it only the accounts and collections the filter shows; the contacts pull SHALL also run the phone's pass. The drawer's sync SHALL take every domain, every account and every collection, whatever the filter hides.
+
+#### Scenario: Pulling the agenda
+- GIVEN two calendar accounts, one hidden by the filter
+- WHEN the agenda is pulled down
+- THEN only the shown account's calendars are synced, and no mail or contact is
+
 ### Requirement: The filter offers what it can hide
 The filter's account axis SHALL list the accounts covering the domain on screen, and SHALL NOT list the on-device account, whose one address book is on the collection axis.
 
@@ -268,20 +276,25 @@ The filter's account axis SHALL list the accounts covering the domain on screen,
 - THEN the account is not listed
 
 ### Requirement: The bottom bar switches domains
-A bottom navigation bar SHALL switch between mail, contacts and calendars, in that order, the one on screen on an accent pill, mail carrying the count of unread messages among those listed. It SHALL show on the three lists only. The drawer SHALL open on a title bar, a closing cross beside the app's name, then the mailboxes, all of them first and the one the mail list shows on an accent pill, then the account rows and the footer of actions. A list screen's bar SHALL carry the burger and SHALL NOT carry the domain buttons.
+A bottom navigation bar SHALL switch between mail, contacts and calendars, in that order, the one on screen on a neutral indicator, mail carrying the count of unread messages among those listed. It SHALL show on the three lists only. The drawer SHALL open on the app's name beside a closing cross, then one card per account naming its address and the domains it covers, with a pill saying Deactivated when the account does not take part and otherwise when it last synced, then, fixed at the bottom, a line and the actions. Pressing a card SHALL open that account's settings. The drawer SHALL NOT list mailboxes. A list screen's bar SHALL carry the burger and SHALL NOT carry the domain buttons.
 
 #### Scenario: Switching to the calendars
 - GIVEN the mail list
 - WHEN the calendars item of the bottom bar is pressed
-- THEN the agenda is swapped in with no slide, the calendars item on the accent pill
+- THEN the agenda is swapped in with no slide, the calendars item on the indicator
+
+#### Scenario: An account the filter hides
+- GIVEN an account hidden by the filter
+- WHEN the drawer opens
+- THEN its card's pill says Deactivated
 
 ### Requirement: A list opens on a large title
-Every list screen SHALL open on a large title naming what it shows over a supporting line counting it, scrolling with the rows. The bar SHALL carry the same title only once the large one has scrolled out of sight. The list's add button SHALL be an extended one, its label folding away while the list scrolls down and coming back when it scrolls up.
+Every list screen SHALL open on a large title naming what it shows over a supporting line counting it, scrolling with the rows. The bar SHALL carry the same title only once the large one has scrolled out of sight. The list's add button SHALL be an extended one, a pencil on mail, a person-plus on contacts and a plus on the agenda, shrinking to its square glyph while the list scrolls down and growing its label back when it scrolls up.
 
 #### Scenario: Scrolling the mail list
 - GIVEN the mail list at its top
 - WHEN it is scrolled past its large title
-- THEN the bar shows the title, and the add button folds to its glyph
+- THEN the bar shows the title, and the add button shrinks to its glyph
 
 ### Requirement: A list groups its rows into cards
 Every list screen SHALL group its rows into rounded cards under a section header: mail by the day a message arrived, contacts by their letter with conflicts first under a header of their own, the agenda by the day an entry starts. Pressing a contacts letter header SHALL select that section, or clear it when it is all selected.
@@ -346,3 +359,35 @@ An item staged for removal SHALL be kept, marked, and SHALL be loaded back to th
 - GIVEN a staged removal
 - WHEN the item is written again
 - THEN the row is revived rather than left marked
+
+### Requirement: An item's page groups its sections into cards
+The contact editor and the entry page SHALL draw each section as one rounded card holding its label, its add action and its rows.
+
+#### Scenario: A contact with two phones
+- GIVEN a contact with two phone numbers
+- WHEN its editor opens
+- THEN the phones label and both numbers sit in one card
+
+### Requirement: The contacts list selects like mail
+A long press on a contact SHALL start a selection, its disc turning into a check, with no checkbox on the row.
+
+#### Scenario: Selecting a contact
+- GIVEN the contacts list
+- WHEN a contact is long pressed
+- THEN its disc shows a check and the bar shows the count
+
+### Requirement: The three lists share one row
+A contact row and an agenda row SHALL take the mail row's shape: a disc, then three lines, a hairline parting the rows of a card. A contact row SHALL lead with the name, then the phone or else the email, then its addressbook and account, naming a card an account holds before one on the device. An agenda row SHALL lead with the entry ended by when it starts, then the kind of entry by name and how long it runs, then its calendar and account.
+
+#### Scenario: A contact on two cards
+- GIVEN a contact held in the on-device book and in an account's addressbook
+- WHEN the contacts list is shown
+- THEN its row names that addressbook and that account
+
+### Requirement: An empty list says so below its header
+A list with nothing to show SHALL centre its empty state in the space its header leaves below it, clear of the search, the chips and the week card.
+
+#### Scenario: An empty day
+- GIVEN a day with no entry picked in the week card
+- WHEN the agenda renders
+- THEN the empty state sits under the week card, not behind it

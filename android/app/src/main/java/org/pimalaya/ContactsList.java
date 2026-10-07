@@ -58,7 +58,7 @@ final class ContactsList {
         refresh.setOnRefreshListener(
                 () -> {
                     refresh.setRefreshing(false);
-                    host.syncAll();
+                    host.syncContacts();
                 });
 
         host.findViewById(R.id.contacts_birthdays)
@@ -71,12 +71,10 @@ final class ContactsList {
         host.findViewById(R.id.contacts_merge).setOnClickListener(view -> mergeSelected());
         host.findViewById(R.id.contacts_delete)
                 .setOnClickListener(view -> confirmDeleteSelected());
-        host.findViewById(R.id.contacts_close).setOnClickListener(view -> exitSelection());
-        host.findViewById(R.id.contacts_select_all)
-                .setOnClickListener(view -> toggleSelectAll());
 
         ListView list = host.findViewById(R.id.contacts_list);
         header = new ListHeader(host, list, MainActivity.PANEL_CONTACTS);
+        header.empty(host.findViewById(R.id.contacts_empty));
         header.search(
                 R.string.contacts_search,
                 query -> {
@@ -256,6 +254,8 @@ final class ContactsList {
                             ? convertView
                             : host.getLayoutInflater().inflate(R.layout.item_contact, parent, false);
             sections.shape(row, position);
+            row.findViewById(R.id.contact_divider)
+                    .setVisibility(sections.opensCard(position) ? View.GONE : View.VISIBLE);
 
             Group group = sections.row(position);
             Entry entry = group.primary();
@@ -264,6 +264,12 @@ final class ContactsList {
             TextView avatar = row.findViewById(R.id.contact_avatar);
             avatar.setText(Avatar.letter(name));
             avatar.setBackground(Avatar.circle(host, entry.card != null ? entry.card.vcard : name));
+            boolean checked = selectedKeys.contains(group.key);
+            avatar.setVisibility(checked ? View.INVISIBLE : View.VISIBLE);
+            android.widget.ImageView check = row.findViewById(R.id.contact_check);
+            check.setVisibility(checked ? View.VISIBLE : View.GONE);
+            check.setImageTintList(
+                    android.content.res.ColorStateList.valueOf(host.accentContrast()));
 
             ((TextView) row.findViewById(R.id.contact_name)).setText(name);
 
@@ -287,19 +293,16 @@ final class ContactsList {
             links.setVisibility(cards > 1 ? View.VISIBLE : View.GONE);
             links.setText(String.valueOf(cards));
 
-            // The trailing slot: the selection checkbox, or outside
-            // selection the warning flag for a conflict or divergence.
-            boolean isFlagged = group.conflicted() || diverged(group);
-            CheckBox check = row.findViewById(R.id.contact_check);
-            check.setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-            check.setChecked(selectedKeys.contains(group.key));
+            ((TextView) row.findViewById(R.id.contact_origin)).setText(originOf(group));
+
+            // The warning flag for a conflict or divergence, ending the
+            // name's line.
             android.widget.ImageView danger = row.findViewById(R.id.contact_diverged);
             danger.setImageTintList(
                     android.content.res.ColorStateList.valueOf(
                             host.ui.resolveColor(android.R.attr.colorError)));
-            danger.setVisibility(!selectionMode && isFlagged ? View.VISIBLE : View.GONE);
-            row.findViewById(R.id.contact_end_slot)
-                    .setVisibility(selectionMode || isFlagged ? View.VISIBLE : View.GONE);
+            danger.setVisibility(
+                    group.conflicted() || diverged(group) ? View.VISIBLE : View.GONE);
 
             // A contact living only in the hidden local book (attached to
             // no addressbook) shows muted.
@@ -307,6 +310,23 @@ final class ContactsList {
 
             return row;
         }
+    }
+
+    /**
+     * Where a contact lives: its addressbook, then its account, the way
+     * a mail row names its mailbox and account. A contact on several
+     * cards names the first one held by an account, the on-device book
+     * being where cards wait rather than where they belong.
+     */
+    private String originOf(Group group) {
+        for (Entry entry : group.replicas) {
+            if (!LocalBook.is(entry.accountEmail)) {
+                return entry.book.name + " · " + entry.accountEmail;
+            }
+        }
+        String book = group.primary().book.name;
+        String device = host.getString(R.string.local_account);
+        return book == null || book.isEmpty() ? device : book + " · " + device;
     }
 
     /** True when every replica of the group is in the hidden local book. */
@@ -372,7 +392,7 @@ final class ContactsList {
     }
 
     /** Selects every contact, or clears them when all are already selected. */
-    private void toggleSelectAll() {
+    void toggleSelectAll() {
         boolean all = allSelected();
         selectedKeys.clear();
         if (!all) {
@@ -472,7 +492,7 @@ final class ContactsList {
         showActions(navigating);
         host.findViewById(R.id.bar_filter)
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
-        host.findViewById(R.id.contacts_close)
+        host.findViewById(R.id.selection_close)
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         // Merging needs at least two physical cards.
         host.findViewById(R.id.contacts_merge)
@@ -483,9 +503,9 @@ final class ContactsList {
         host.findViewById(R.id.contacts_delete)
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         // The select-all box, checked when every contact is selected.
-        host.findViewById(R.id.contacts_select_all_slot)
+        host.findViewById(R.id.selection_all_slot)
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-        ((CheckBox) host.findViewById(R.id.contacts_select_all))
+        ((CheckBox) host.findViewById(R.id.selection_all))
                 .setChecked(selectionMode && allSelected());
         host.findViewById(R.id.fab_extended)
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);

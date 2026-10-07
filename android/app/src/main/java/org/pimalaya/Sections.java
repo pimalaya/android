@@ -2,6 +2,7 @@ package org.pimalaya;
 
 import android.app.Activity;
 import android.content.res.ColorStateList;
+import android.graphics.Typeface;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -12,9 +13,9 @@ import android.widget.TextView;
 import java.util.List;
 
 /**
- * The settings-style page the app shows one item on: a scroll of
- * sections, each an accent header over full-bleed rows of a title and a
- * diminished subtitle, separated by a line in the app bar tone.
+ * The page the app shows one item on: a scroll of sections, each one
+ * rounded card holding its small label and its rows, a title over a
+ * diminished subtitle.
  *
  * <p>One builder rather than one per screen, because a contact, an
  * event and a to-do are the same page with different sections: what
@@ -32,7 +33,7 @@ final class Sections {
     final int accentColor;
 
     private final int labelColor;
-    private final int surfaceColor;
+    private final int dividerColor;
 
     Sections(Activity activity, LinearLayout container) {
         this.activity = activity;
@@ -40,7 +41,7 @@ final class Sections {
         this.ui = new Ui(activity);
         this.accentColor = ui.resolveColor(android.R.attr.colorAccent);
         this.labelColor = ui.resolveColor(android.R.attr.textColorSecondary);
-        this.surfaceColor = activity.getColor(R.color.surface);
+        this.dividerColor = activity.getColor(R.color.divider_light);
     }
 
     /** Empties the page, before a render fills it again. */
@@ -49,34 +50,27 @@ final class Sections {
     }
 
     /**
-     * Adds a section: its icon and accent label, an optional
-     * right-aligned action, then its items. An empty section vanishes
-     * unless the caller keeps it.
+     * Adds a section as one card: its icon and label, an optional
+     * right-aligned action on the label's line, then its items. An empty
+     * section vanishes unless the caller keeps it, as a card of its
+     * label alone.
      */
     void section(int title, int icon, List<View> items, View action, boolean keepEmpty) {
         if (items.isEmpty() && !keepEmpty) {
             return;
         }
 
-        // NOTE: the line sits flush; the previous section's last item (or
-        // an item-less header, below) already pads 12dp, so a margin here
-        // would double the gap.
-        if (container.getChildCount() > 0) {
-            View line = new View(activity);
-            line.setBackgroundColor(surfaceColor);
-            container.addView(
-                    line,
-                    new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1)));
-        }
-
         ImageView iconView = new ImageView(activity);
         iconView.setImageResource(icon);
-        iconView.setImageTintList(ColorStateList.valueOf(accentColor));
+        iconView.setImageTintList(ColorStateList.valueOf(labelColor));
 
         TextView label = new TextView(activity);
         label.setText(title);
-        label.setTextColor(accentColor);
+        label.setTextColor(labelColor);
         label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        label.setTypeface(null, Typeface.BOLD);
+        label.setAllCaps(true);
+        label.setLetterSpacing(0.02f);
         LinearLayout.LayoutParams labelParams =
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         labelParams.setMarginStart(dp(8));
@@ -84,21 +78,43 @@ final class Sections {
         LinearLayout header = new LinearLayout(activity);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(
-                dp(16),
-                container.getChildCount() <= 1 ? dp(16) : dp(10),
-                dp(10),
-                items.isEmpty() ? dp(12) : dp(0));
-        header.addView(iconView, new LinearLayout.LayoutParams(dp(18), dp(18)));
+        header.setPadding(dp(16), dp(6), dp(6), items.isEmpty() ? dp(6) : 0);
+        header.setMinimumHeight(dp(44));
+        header.addView(iconView, new LinearLayout.LayoutParams(dp(16), dp(16)));
         header.addView(label, labelParams);
         if (action != null) {
             header.addView(action);
         }
-        container.addView(header);
 
-        for (View item : items) {
-            container.addView(item);
+        // NOTE: the card clips to its outline, so a row's ripple rounds
+        // with the corners it sits in.
+        LinearLayout card = new LinearLayout(activity);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.card_group);
+        card.setClipToOutline(true);
+        card.addView(header);
+        for (int index = 0; index < items.size(); index++) {
+            if (index > 0) {
+                View line = new View(activity);
+                line.setBackgroundColor(dividerColor);
+                LinearLayout.LayoutParams lineParams =
+                        new LinearLayout.LayoutParams(
+                                LinearLayout.LayoutParams.MATCH_PARENT, 1);
+                lineParams.setMarginStart(dp(16));
+                card.addView(line, lineParams);
+            }
+            card.addView(items.get(index));
         }
+
+        int gutter = activity.getResources().getDimensionPixelSize(R.dimen.card_gutter);
+        LinearLayout.LayoutParams cardParams =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        cardParams.setMarginStart(gutter);
+        cardParams.setMarginEnd(gutter);
+        cardParams.topMargin = container.getChildCount() == 0 ? dp(8) : gutter;
+        container.addView(card, cardParams);
     }
 
     /**

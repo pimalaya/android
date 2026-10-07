@@ -19,25 +19,33 @@ Four backends answer, told apart by the account's base URL: an IMAP session behi
 The reader can write three things back, all of them into the store: the markers, whether the message has been read, and where it is filed. A fourth thing, a message of their own, does not go into the store at all: it is an action on the store's queue, pimdir's write door for what a process wants done somewhere else, with a mail submission as the standard's own worked example. The outbox is that queue read back.
 
 ### Requirement: A row's trailing marks sit on the line they describe
-A message row SHALL lead with a dot while unread, end the sender's line with the time, the subject's line with a star toggling the important marker, and the mailbox-and-account line with the replied mark, each aligned with the line it belongs to rather than stacked in a column beside all three. An attachment SHALL add a chip under the three lines.
+A message row SHALL lead the sender's line with the replied mark and end it with the time and, while unread, a dot; end the subject's line with its marks read from the edge inwards (a paperclip while it carries an attachment, a star shown only while it is important), the dot above centred on the paperclip's column; and name the mailbox and account on the third line. The star SHALL be a mark, filled in yellow whatever the theme's accent, not a button. A hairline SHALL part the rows of one card.
 
 #### Scenario: A row with a long subject
 - GIVEN a subject wider than the row
 - WHEN it is drawn
-- THEN it ellipsizes and the star keeps its place at the end of that same line
+- THEN it ellipsizes and its marks keep their place at the end of that same line
 
 #### Scenario: A row with markers
-- GIVEN a message that was replied to and marked important
+- GIVEN an unread message that was replied to, marked important and carrying an attachment
 - WHEN it is drawn
-- THEN its star is filled in the accent at the end of the subject's line, and the replied mark ends the mailbox and account line
+- THEN the sender's line opens with the replied mark and ends with the time and the dot, and the subject's line ends with the yellow star and the paperclip under that dot
 
 ### Requirement: The mail list narrows what it shows
-The mail list SHALL offer a search over the sender and the subject, an unread chip and an attachments chip, and SHALL narrow to one mailbox picked in the drawer. None of these SHALL change what syncs, which the filter alone decides.
+The mail list SHALL be one page over every mailbox the filter lets through, and SHALL offer a search over the sender and the subject, an unread chip and an attachments chip. None of these SHALL change what syncs, which the filter alone decides.
 
-#### Scenario: A mailbox from the drawer
-- GIVEN mail in two accounts' INBOX and Archive
-- WHEN Archive is picked in the drawer
-- THEN the list shows both accounts' Archive under the title Archive
+#### Scenario: Unread only
+- GIVEN read and unread mail in two accounts
+- WHEN the unread chip is on
+- THEN the list shows both accounts' unread messages and nothing else
+
+### Requirement: The mail list selects
+A long press on a message SHALL start a selection holding it, and while one runs a tap SHALL add or remove a message rather than open it. The bar SHALL then carry the count, read or unread, star or unstar, delete after asking, and select-all, each over the whole selection, a toggle going the way that changes something. Back SHALL clear the selection.
+
+#### Scenario: Starring three messages
+- GIVEN three messages, one of them starred
+- WHEN they are selected and the bar's star is pressed
+- THEN all three are starred
 
 ### Requirement: An extension is enabled before it is used
 A connection SHALL ENABLE CONDSTORE and QRESYNC when it opens, where the server advertises them, RFC 7162 section 3.1 requiring it before a SELECT may carry the QRESYNC parameter. A refused ENABLE SHALL forget the capability rather than fail the connection, and a QRESYNC select the server refuses anyway SHALL fall back to a full round.
@@ -71,11 +79,11 @@ A subject and a sender's name read off an IMAP `ENVELOPE` SHALL have their RFC 2
 - THEN it is stored as it came, rather than emptied
 
 ### Requirement: A sync skips what the filter hides
-A mail pass SHALL list every account's mailboxes and SHALL NOT reconcile a mailbox the filter hides, by its account or by its name.
+A mail pull SHALL list the shown accounts' mailboxes and SHALL NOT reconcile a mailbox the filter hides, by its account or by its name. The drawer's sync SHALL reconcile every mailbox.
 
 #### Scenario: A hidden mailbox
 - GIVEN a mailbox unchecked in the filter
-- WHEN mail is synced
+- WHEN the mail list is pulled down
 - THEN the mailbox is still offered by the filter, and nothing in it is read or pushed
 
 ### Requirement: A mail sync pushes no body
@@ -172,7 +180,7 @@ The account SHALL also record the mailbox the server marks `\Trash` (RFC 6154), 
 - THEN that mailbox is recorded, and read back with no network to ask
 
 ### Requirement: A message is composed to RFC 5322
-The app SHALL compose a message from the composer's fields: `Date`, `Message-ID`, `From`, `To`, `Cc`, `Bcc`, `Subject`, and a `text/plain; charset=utf-8` body. Header lines SHALL fold at 78 columns, a header value carrying anything outside US-ASCII SHALL be encoded as RFC 2047 words, and the body SHALL be quoted-printable with no line past 76. Composing SHALL reach no server: it is a function of the fields alone.
+The app SHALL compose a message from the composer's fields: `Date`, `Message-ID`, `From`, `To`, `Cc`, `Bcc`, `Subject`, a reply's `In-Reply-To` and `References`, and a `text/plain; charset=utf-8` body. Header lines SHALL fold at 78 columns, `References` one msg-id per line, a header value carrying anything outside US-ASCII SHALL be encoded as RFC 2047 words, and the body SHALL be quoted-printable with no line past 76. Composing SHALL reach no server: it is a function of the fields alone.
 
 #### Scenario: A subject in two scripts
 - GIVEN a subject mixing ASCII words and accented ones
@@ -184,6 +192,14 @@ The app SHALL compose a message from the composer's fields: `Date`, `Message-ID`
 - GIVEN a draft naming a blind copy
 - WHEN it is composed
 - THEN the message carries it in a `Bcc` header, which RFC 5322 section 3.6.3 provides for a message prepared for sending
+
+### Requirement: The reader replies and forwards
+The reader SHALL offer Reply and Forward under the message. Reply SHALL answer everyone on it: the sender, and every other address in its `To` and `Cc`, the account's own left out; a message the account sent itself answers its recipients. The reply SHALL be sent from the message's account, carry the subject behind one `Re:`, quote the text under a line naming who wrote it and when, and carry `In-Reply-To` and `References` built from the `Message-ID` and `In-Reply-To` the store keeps for the message. Once queued, it SHALL mark the parent `\Answered` where the backend keeps that marker. Forward SHALL open on no recipient, the subject behind one `Fwd:`, and the message's headers over its text; the attachments stay behind.
+
+#### Scenario: Replying to a message with a copy
+- GIVEN a message from Ada to the account and Bob, copying Carol
+- WHEN Reply is pressed
+- THEN the composer goes to Ada and Bob, copies Carol, and the account's own address is on neither line
 
 ### Requirement: A message is sent through an outbox
 Submitting SHALL compose the message on the device and stage it as one action on the store's queue: the app's own `submit` kind, a versioned payload naming the sender and what a listing draws, and the composed message written to the blob directory and pinned by the enqueue, all in the one transaction the standard prescribes for a producer. The payload carries the subject and the date because a waiting message is not an item and has no summary row beside it, and parsing a message to draw a list is what the sort key exists to avoid.

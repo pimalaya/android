@@ -10,22 +10,11 @@
     <dimen name="fab_margin">16dp</dimen>
     <dimen name="fab_elevation">6dp</dimen>
 
-    <!-- Shared list-item metrics: one source of truth for a tappable row's
-         height, side padding, leading icon size, icon-to-text gap and text
-         size. Reusable everywhere; wired to the drawer rows for now. -->
+    <!-- Shared list-item metrics: a tappable row's height, side padding
+         and leading icon size, for the filter sheet and the nav glyphs. -->
     <dimen name="item_height">48dp</dimen>
     <dimen name="item_padding">16dp</dimen>
     <dimen name="item_icon">24dp</dimen>
-    <dimen name="item_gap">16dp</dimen>
-    <dimen name="item_text">16sp</dimen>
-
-    <!-- The drawer's rows, after the M3 navigation drawer: the domain
-         pill inset from the drawer's edges, then the padding inside it.
-         Every other drawer row pads their sum, so all the icons line up
-         on one column. -->
-    <dimen name="drawer_item_inset">12dp</dimen>
-    <dimen name="drawer_item_inner">16dp</dimen>
-    <dimen name="drawer_item_padding">28dp</dimen>
 
     <!-- A row's trailing glyph (replied, an entry's kind): sized off
          the line it ends rather than the 24dp icon grid. -->

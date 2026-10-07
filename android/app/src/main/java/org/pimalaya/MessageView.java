@@ -64,6 +64,9 @@ final class MessageView {
 
     private boolean flagged;
 
+    /** The open message as read, what a reply and a forward quote; null until it loads. */
+    private MessageBody loaded;
+
     MessageView(MainActivity host) {
         this.host = host;
     }
@@ -71,6 +74,7 @@ final class MessageView {
     /** Opens the reader on one row, then fetches what it does not hold. */
     void open(MailStore.StoredMessage message) {
         current = message;
+        loaded = null;
         seen = message.seen;
         flagged = message.flagged;
 
@@ -219,14 +223,138 @@ final class MessageView {
         flag.setVisibility(pending ? View.GONE : View.VISIBLE);
         flag.setContentDescription(
                 host.getString(flagged ? R.string.message_unflag : R.string.message_flag));
-        flag.setColorFilter(
-                host.ui.resolveColor(
-                        flagged
-                                ? android.R.attr.colorAccent
-                                : android.R.attr.textColorSecondary));
+        starOf(host, flag, flagged);
         flag.setOnClickListener(view -> write(MailEngine.FLAGGED, !flagged));
 
         host.findViewById(R.id.message_view_delete).setOnClickListener(view -> confirmDelete());
+
+        // A message still waiting to go out has nothing to answer yet.
+        host.findViewById(R.id.message_view_replies)
+                .setVisibility(pending ? View.GONE : View.VISIBLE);
+        TextView reply = host.findViewById(R.id.message_view_reply);
+        reply.setTextColor(host.accentContrast());
+        reply.setCompoundDrawableTintList(
+                android.content.res.ColorStateList.valueOf(host.accentContrast()));
+        reply.setOnClickListener(view -> host.compose.open(reply(current, loaded)));
+        host.findViewById(R.id.message_view_forward)
+                .setOnClickListener(view -> host.compose.open(forward(current, loaded)));
+    }
+
+    /**
+     * A reply to everyone on the message: the sender, and every other
+     * address it went to, the account's own left out. A message the
+     * account sent itself answers its recipients instead, which is who a
+     * follow-up goes to. The quote and the people beyond the sender wait
+     * for the body; before it loads, the reply goes to the sender alone.
+     */
+    private MessageCompose.Prefill reply(MailStore.StoredMessage message, MessageBody body) {
+        String self = message.accountEmail.toLowerCase();
+        java.util.Set<String> to = new java.util.LinkedHashSet<>();
+        java.util.Set<String> cc = new java.util.LinkedHashSet<>();
+        boolean own = message.fromAddress.equalsIgnoreCase(self);
+        if (!own && !message.fromAddress.isEmpty()) {
+            to.add(message.fromAddress);
+        }
+        if (body != null) {
+            for (String address : addressesOf(body.to)) {
+                if (!address.equalsIgnoreCase(self)) {
+                    to.add(address);
+                }
+            }
+            for (String address : addressesOf(body.cc)) {
+                if (!address.equalsIgnoreCase(self) && !to.contains(address)) {
+                    cc.add(address);
+                }
+            }
+        }
+
+        MessageCompose.Prefill prefill = new MessageCompose.Prefill();
+        prefill.from = message.accountEmail;
+        prefill.to = String.join(", ", to);
+        prefill.cc = String.join(", ", cc);
+        prefill.subject = prefixed("Re:", message.subject);
+        prefill.parent = message;
+        List<String> thread = host.mail.threadOf(message.collection, message.id);
+        if (!thread.isEmpty()) {
+            prefill.inReplyTo = thread.get(thread.size() - 1);
+            prefill.references = String.join(" ", thread);
+        }
+        if (body != null) {
+            prefill.body =
+                    "\n\n"
+                            + host.getString(
+                                    R.string.compose_quote_intro, when(message), sender(message))
+                            + "\n"
+                            + quoted(plain(body));
+        }
+        return prefill;
+    }
+
+    /**
+     * A forward: nobody to send to yet, the subject marked, and the
+     * message's headers over its text. The attachments stay behind, the
+     * composer writing plain text only.
+     */
+    private MessageCompose.Prefill forward(MailStore.StoredMessage message, MessageBody body) {
+        MessageCompose.Prefill prefill = new MessageCompose.Prefill();
+        prefill.from = message.accountEmail;
+        prefill.subject = prefixed("Fwd:", message.subject);
+        StringBuilder text = new StringBuilder("\n\n");
+        text.append(host.getString(R.string.compose_forward_intro)).append('\n');
+        text.append("From: ").append(sender(message)).append('\n');
+        text.append("Date: ").append(when(message)).append('\n');
+        text.append("Subject: ").append(message.subject).append('\n');
+        if (body != null) {
+            text.append("To: ").append(body.to).append('\n');
+            if (!body.cc.isEmpty()) {
+                text.append("Cc: ").append(body.cc).append('\n');
+            }
+            text.append('\n').append(plain(body));
+        }
+        prefill.body = text.toString();
+        return prefill;
+    }
+
+    /** A subject carrying a prefix once, however many rounds it went. */
+    private static String prefixed(String prefix, String subject) {
+        return subject.regionMatches(true, 0, prefix, 0, prefix.length())
+                ? subject
+                : prefix + " " + subject;
+    }
+
+    /** The bare addresses a header value names, display names dropped. */
+    private static List<String> addressesOf(String header) {
+        List<String> addresses = new ArrayList<>();
+        java.util.regex.Matcher matcher =
+                java.util.regex.Pattern.compile("[^\\s<>,;\"]+@[^\\s<>,;\"]+").matcher(header);
+        while (matcher.find()) {
+            addresses.add(matcher.group());
+        }
+        return addresses;
+    }
+
+    /** The message's text, an HTML body read down to what it says. */
+    private static String plain(MessageBody body) {
+        if (MessageBody.HTML.equals(body.kind)) {
+            return android.text.Html.fromHtml(body.body, android.text.Html.FROM_HTML_MODE_COMPACT)
+                    .toString()
+                    .trim();
+        }
+        return body.body.trim();
+    }
+
+    /** Every line marked as quoted, the way RFC 3676 section 4.5 reads it. */
+    private static String quoted(String text) {
+        StringBuilder quote = new StringBuilder();
+        for (String line : text.split("\n", -1)) {
+            quote.append(line.startsWith(">") ? ">" : "> ").append(line).append('\n');
+        }
+        return quote.toString();
+    }
+
+    /** When the message was sent, as a quote's intro says it. */
+    private String when(MailStore.StoredMessage message) {
+        return message.stamp > 0 ? Dates.full(host, message.stamp) : "";
     }
 
     /** Stages one marker on the open message, then redraws the buttons. */
@@ -260,21 +388,35 @@ final class MessageView {
      * thing either waits for is a disk write.
      */
     void stageFlag(MailStore.StoredMessage message, String flag, boolean add, Runnable done) {
+        stageFlag(List.of(message), flag, add, done);
+    }
+
+    /** Stages one marker on every message, the list's selection's toggles. */
+    void stageFlag(
+            List<MailStore.StoredMessage> messages, String flag, boolean add, Runnable done) {
         host.io.execute(
                 () -> {
                     Exception failure = null;
-                    try {
-                        host.mailEngine(message.accountEmail)
-                                .mutateFlags(
-                                        message.collection,
-                                        message.id,
-                                        MailEngine.withFlag(
-                                                host.mail.flagsOf(message.collection, message.id),
-                                                flag,
-                                                add));
-                    } catch (Exception error) {
-                        Log.w("pimalaya", "message flag failed: " + message.id, error);
-                        failure = error;
+                    for (MailStore.StoredMessage message : messages) {
+                        if (message.pending) {
+                            continue;
+                        }
+                        try {
+                            host.mailEngine(message.accountEmail)
+                                    .mutateFlags(
+                                            message.collection,
+                                            message.id,
+                                            MailEngine.withFlag(
+                                                    host.mail.flagsOf(
+                                                            message.collection, message.id),
+                                                    flag,
+                                                    add));
+                        } catch (Exception error) {
+                            Log.w("pimalaya", "message flag failed: " + message.id, error);
+                            if (failure == null) {
+                                failure = error;
+                            }
+                        }
                     }
 
                     Exception error = failure;
@@ -289,71 +431,114 @@ final class MessageView {
                 });
     }
 
+    /** Draws a star toggle: filled in the star's yellow when on, outlined when off. */
+    static void starOf(MainActivity host, ImageView star, boolean on) {
+        star.setImageResource(on ? R.drawable.ic_star_filled : R.drawable.ic_star);
+        star.setColorFilter(
+                on
+                        ? host.getColor(R.color.star)
+                        : host.ui.resolveColor(android.R.attr.textColorSecondary));
+    }
+
     /** Asks before deleting: the reader is one tap from losing a message. */
     private void confirmDelete() {
+        MailStore.StoredMessage message = current;
         new AlertDialog.Builder(host)
                 .setMessage(R.string.message_delete_confirm)
-                .setPositiveButton(R.string.message_delete, (dialog, which) -> delete())
+                .setPositiveButton(
+                        R.string.message_delete,
+                        (dialog, which) ->
+                                stageDelete(
+                                        List.of(message),
+                                        () -> {
+                                            if (current == message) {
+                                                host.showBack(MainActivity.PANEL_MAIL);
+                                            }
+                                        }))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
 
     /**
-     * Stages the open message's deletion, then leaves.
+     * Stages the messages' deletion, then reloads the list and runs
+     * {@code done}; the reader's delete and the list's selection both
+     * come here.
      *
-     * <p>What is staged depends on where the message would go, which the
-     * account remembers from its last walk: an account with a trash gets a
-     * removal, and the row leaves the list at once because that is where
-     * the message is headed. An account with none, or a message already in
-     * the trash, gets a `\Deleted` marker instead, and the row stays in the
-     * list saying so, because that is all a server with nowhere to put it
-     * can do.
+     * <p>What is staged depends on where a message would go, which its
+     * account remembers from its last walk: an account with a trash gets
+     * a removal, and the row leaves the list at once because that is
+     * where the message is headed. An account with none, or a message
+     * already in the trash, gets a `\Deleted` marker instead, and the row
+     * stays in the list saying so, because that is all a server with
+     * nowhere to put it can do.
      *
      * <p>Unless that server is a JMAP one, which RFC 8621 gives no keyword
      * to mark it with (section 4.1.1 names three and this is not one of
      * them). Refused here rather than staged, because a change nothing
      * could ever carry out would sit in the store failing once per sync.
      */
-    private void delete() {
-        MailStore.StoredMessage message = current;
-        String trash = host.mail.trashOf(message.accountEmail);
-        boolean moves = !trash.isEmpty() && !trash.equals(message.mailbox);
-
-        AccountEntry account = accountOf(message.accountEmail);
-        if (!moves
-                && !message.pending
-                && account != null
-                && PimalayaClient.isJmap(account.server(PimDomain.MAIL))) {
+    void stageDelete(List<MailStore.StoredMessage> messages, Runnable done) {
+        List<MailStore.StoredMessage> staged = new ArrayList<>();
+        List<Boolean> moving = new ArrayList<>();
+        boolean refused = false;
+        String lastTrash = "";
+        for (MailStore.StoredMessage message : messages) {
+            String trash = host.mail.trashOf(message.accountEmail);
+            boolean moves = !trash.isEmpty() && !trash.equals(message.mailbox);
+            AccountEntry account = accountOf(message.accountEmail);
+            if (!moves
+                    && !message.pending
+                    && account != null
+                    && PimalayaClient.isJmap(account.server(PimDomain.MAIL))) {
+                refused = true;
+                continue;
+            }
+            staged.add(message);
+            moving.add(moves);
+            if (moves) {
+                lastTrash = trash;
+            }
+        }
+        if (refused) {
             host.toast(host.getString(R.string.message_delete_no_trash));
+        }
+        if (staged.isEmpty()) {
             return;
         }
 
+        String trash = lastTrash;
         host.io.execute(
                 () -> {
                     Exception failure = null;
-                    try {
-                        if (message.pending) {
-                            // Never sent, so there is nothing to move and
-                            // nowhere to tell: withdrawing the action is
-                            // the delete, and it releases the body with it.
-                            host.mail.acknowledge(message.queued);
-                        } else if (moves) {
-                            host.mailEngine(message.accountEmail)
-                                    .mutateRemove(message.collection, message.id);
-                        } else {
-                            host.mailEngine(message.accountEmail)
-                                    .mutateFlags(
-                                            message.collection,
-                                            message.id,
-                                            MailEngine.withFlag(
-                                                    host.mail.flagsOf(
-                                                            message.collection, message.id),
-                                                    MailEngine.DELETED,
-                                                    true));
+                    for (int index = 0; index < staged.size(); index++) {
+                        MailStore.StoredMessage message = staged.get(index);
+                        try {
+                            if (message.pending) {
+                                // Never sent, so there is nothing to move
+                                // and nowhere to tell: withdrawing the
+                                // action is the delete, and it releases the
+                                // body with it.
+                                host.mail.acknowledge(message.queued);
+                            } else if (moving.get(index)) {
+                                host.mailEngine(message.accountEmail)
+                                        .mutateRemove(message.collection, message.id);
+                            } else {
+                                host.mailEngine(message.accountEmail)
+                                        .mutateFlags(
+                                                message.collection,
+                                                message.id,
+                                                MailEngine.withFlag(
+                                                        host.mail.flagsOf(
+                                                                message.collection, message.id),
+                                                        MailEngine.DELETED,
+                                                        true));
+                            }
+                        } catch (Exception error) {
+                            Log.w("pimalaya", "message delete failed: " + message.id, error);
+                            if (failure == null) {
+                                failure = error;
+                            }
                         }
-                    } catch (Exception error) {
-                        Log.w("pimalaya", "message delete failed: " + message.id, error);
-                        failure = error;
                     }
 
                     Exception error = failure;
@@ -363,18 +548,23 @@ final class MessageView {
                                     host.showError(error, R.string.message_write_failed);
                                     return;
                                 }
-                                if (!message.pending) {
+                                if (staged.size() > 1) {
                                     host.toast(
-                                            moves
+                                            host.getResources()
+                                                    .getQuantityString(
+                                                            R.plurals.messages_deleted,
+                                                            staged.size(),
+                                                            staged.size()));
+                                } else if (!staged.get(0).pending) {
+                                    host.toast(
+                                            moving.get(0)
                                                     ? host.getString(
                                                             R.string.message_deleted, trash)
                                                     : host.getString(
                                                             R.string.message_deleted_in_place));
                                 }
                                 host.mailList.reload();
-                                if (current == message) {
-                                    host.showBack(MainActivity.PANEL_MAIL);
-                                }
+                                done.run();
                             });
                 });
     }
@@ -391,6 +581,7 @@ final class MessageView {
 
     /** Fills the header in from the fetch, then shows the body. */
     private void render(MessageBody message) {
+        loaded = message;
         if (!message.to.isEmpty()) {
             TextView recipients = host.findViewById(R.id.message_view_recipients);
             recipients.setText(recipients(message));

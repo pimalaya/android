@@ -406,6 +406,40 @@ final class MailStore {
         }
     }
 
+    /**
+     * The `References` a reply to one message carries, oldest first and
+     * ending with that message's own `Message-ID`, each in angle brackets;
+     * empty when the store holds no identifier for it.
+     *
+     * <p>The parent's `In-Reply-To` stands in for its own `References`,
+     * which the summary does not keep: RFC 5322 section 3.6.4 allows it
+     * where the parent names a single parent of its own, and a reply
+     * threads under its parent either way.
+     */
+    List<String> threadOf(String collection, String linkId) {
+        List<String> thread = new ArrayList<>();
+        try (Cursor cursor =
+                items.readable()
+                        .rawQuery(
+                                "SELECT message_id, in_reply_to FROM mail_summary"
+                                        + " WHERE collection = ? AND link_id = ?",
+                                new String[] {collection, linkId})) {
+            if (!cursor.moveToNext() || cursor.isNull(0)) {
+                return thread;
+            }
+            try {
+                JSONArray before = new JSONArray(cursor.getString(1));
+                for (int index = 0; index < before.length(); index++) {
+                    thread.add("<" + before.getString(index) + ">");
+                }
+            } catch (JSONException error) {
+                Log.w("pimalaya", "unreadable in_reply_to: " + linkId, error);
+            }
+            thread.add("<" + cursor.getString(0) + ">");
+        }
+        return thread;
+    }
+
     /** Every synced message, newest first. */
     private List<StoredMessage> synced(int limit) {
         Map<String, PimdirCollections.Stored> mailboxes = new LinkedHashMap<>();

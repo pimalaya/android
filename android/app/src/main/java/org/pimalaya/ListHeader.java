@@ -61,6 +61,28 @@ final class ListHeader {
                 });
     }
 
+    /**
+     * Keeps a list's empty state centred in what this header leaves below
+     * it, rather than in the whole screen where the header would cover it.
+     */
+    void empty(View empty) {
+        view.addOnLayoutChangeListener(
+                (v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
+                    int below = Math.max(0, bottom);
+                    if (empty.getPaddingTop() != below) {
+                        // NOTE: posted, a layout pass not being the place
+                        // to request another.
+                        empty.post(
+                                () ->
+                                        empty.setPadding(
+                                                empty.getPaddingLeft(),
+                                                below,
+                                                empty.getPaddingRight(),
+                                                empty.getPaddingBottom()));
+                    }
+                });
+    }
+
     /** The row a click landed on, net of this header. */
     int rowAt(int position) {
         return position - list.getHeaderViewsCount();
@@ -121,9 +143,14 @@ final class ListHeader {
         return view.findViewById(R.id.header_chips);
     }
 
-    /** The day strip, shown, for the caller to fill. */
-    LinearLayout days() {
-        view.findViewById(R.id.header_days_scroll).setVisibility(View.VISIBLE);
+    /**
+     * The week's card, shown under its month line and its number, for the
+     * caller to fill; the arrows and the number are the caller's to wire.
+     */
+    LinearLayout week(CharSequence month, CharSequence number) {
+        view.findViewById(R.id.header_week).setVisibility(View.VISIBLE);
+        ((TextView) view.findViewById(R.id.header_month)).setText(month);
+        ((TextView) view.findViewById(R.id.header_week_number)).setText(number);
         return view.findViewById(R.id.header_days);
     }
 

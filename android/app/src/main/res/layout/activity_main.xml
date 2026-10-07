@@ -70,9 +70,9 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- Contacts selection mode: cancel the selection. -->
+        <!-- A selection, of contacts or mail: cancel it. -->
         <ImageButton
-            android:id="@+id/contacts_close"
+            android:id="@+id/selection_close"
             android:layout_width="@dimen/app_bar_button"
             android:layout_height="@dimen/app_bar_button"
             android:background="@drawable/ripple_circle"
@@ -165,17 +165,49 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- Contacts selection mode: select or clear every contact. The
+        <!-- Mail selection mode: read or unread, star or unstar, and
+             delete, over every selected message. -->
+        <ImageButton
+            android:id="@+id/mail_select_seen"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/message_mark_read"
+            android:src="@drawable/ic_check"
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
+
+        <ImageButton
+            android:id="@+id/mail_select_flag"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/message_flag"
+            android:src="@drawable/ic_star"
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
+
+        <ImageButton
+            android:id="@+id/mail_select_delete"
+            android:layout_width="@dimen/app_bar_button"
+            android:layout_height="@dimen/app_bar_button"
+            android:background="@drawable/ripple_circle"
+            android:contentDescription="@string/message_delete"
+            android:src="@drawable/ic_delete_bar"
+            android:tint="?android:attr/textColorPrimary"
+            android:visibility="gone" />
+
+        <!-- A selection, of contacts or mail: select or clear every row. The
              box is centred in an app-bar-button-wide slot, exactly like
              the per-row checkboxes (contact_end_slot). -->
         <FrameLayout
-            android:id="@+id/contacts_select_all_slot"
+            android:id="@+id/selection_all_slot"
             android:layout_width="@dimen/app_bar_button"
             android:layout_height="@dimen/app_bar_button"
             android:visibility="gone">
 
             <CheckBox
-                android:id="@+id/contacts_select_all"
+                android:id="@+id/selection_all"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="center"
@@ -350,7 +382,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="16dp"
                     android:layout_gravity="top|end"
-                    android:layout_marginEnd="6dp"
+                    android:layout_marginEnd="14dp"
                     android:background="@drawable/count_badge"
                     android:gravity="center"
                     android:minWidth="16dp"
@@ -521,10 +553,10 @@
 
     </FrameLayout>
 
-    <!-- The drawer: a title bar, the mailboxes, the plain account
-         rows (reloadHome fills home_container; each row opens the
-         account's settings screen) and a fixed footer of actions. Width
-         caps at 320dp per the drawer spec. -->
+    <!-- The drawer: the app's name, one card per account (reloadHome
+         fills home_container; each card opens the account's settings),
+         scrolling over a line and the actions fixed at the bottom. Width caps at 320dp per the drawer
+         spec. -->
     <LinearLayout
         android:id="@+id/drawer_panel"
         android:layout_width="320dp"
@@ -534,9 +566,8 @@
         android:elevation="16dp"
         android:orientation="vertical">
 
-        <!-- Title bar: a closing cross then the app's name, in the
-             shared nav-icon-first bar shape, as tall as the app bar so
-             their bottoms line up. -->
+        <!-- Title bar: the app's name, then a tonal cross closing the
+             drawer, as tall as the app bar so their bottoms line up. -->
         <LinearLayout
             android:id="@+id/drawer_header"
             android:layout_width="match_parent"
@@ -545,219 +576,238 @@
             android:gravity="center_vertical"
             android:minHeight="@dimen/app_bar_height"
             android:orientation="horizontal"
-            android:paddingStart="@dimen/app_bar_padding"
-            android:paddingEnd="@dimen/app_bar_padding">
-
-            <ImageButton
-                android:id="@+id/drawer_close"
-                android:layout_width="@dimen/app_bar_button"
-                android:layout_height="@dimen/app_bar_button"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/drawer_close"
-                android:src="@drawable/ic_close"
-                android:tint="?android:attr/textColorPrimary" />
+            android:paddingStart="20dp"
+            android:paddingEnd="12dp">
 
             <TextView
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:paddingStart="@dimen/app_bar_title_padding"
-                android:paddingEnd="@dimen/app_bar_title_padding"
                 android:text="@string/app_name"
-                android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
-                android:textColor="?android:attr/textColorPrimary" />
+                android:textColor="?android:attr/textColorPrimary"
+                android:textSize="24sp"
+                android:textStyle="bold" />
+
+            <ImageButton
+                android:id="@+id/drawer_close"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="@drawable/button_tonal"
+                android:contentDescription="@string/drawer_close"
+                android:src="@drawable/ic_close"
+                android:tint="?android:attr/textColorPrimary" />
 
         </LinearLayout>
 
-        <FrameLayout
+        <ScrollView
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1">
 
-            <!-- The mailboxes, each narrowing the mail list to itself,
-                 then the accounts, each opening its settings. Both are
-                 filled by reloadHome. -->
-            <ScrollView
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="match_parent">
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="12dp"
+                android:paddingTop="16dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="4dp">
 
                 <LinearLayout
+                    android:id="@+id/home_container"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <!-- The drawer's empty state, shown when no real account
+                     is configured: an icon and a title. Adding an account
+                     is the first action below. -->
+                <LinearLayout
+                    android:id="@+id/drawer_empty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_horizontal"
                     android:orientation="vertical"
-                    android:paddingTop="8dp"
-                    android:paddingBottom="8dp">
+                    android:paddingTop="32dp"
+                    android:paddingBottom="24dp"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:layout_width="96dp"
+                        android:layout_height="96dp"
+                        android:alpha="0.25"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_no_account"
+                        android:tint="?android:attr/textColorSecondary" />
 
                     <TextView
-                        android:id="@+id/drawer_mailboxes_title"
-                        style="@style/SectionHeader"
-                        android:layout_width="match_parent"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:paddingStart="@dimen/drawer_item_padding"
-                        android:text="@string/drawer_mailboxes" />
-
-                    <LinearLayout
-                        android:id="@+id/drawer_mailboxes"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical" />
-
-                    <TextView
-                        android:id="@+id/drawer_accounts_title"
-                        style="@style/SectionHeader"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:paddingStart="@dimen/drawer_item_padding"
-                        android:text="@string/drawer_accounts" />
-
-                    <LinearLayout
-                        android:id="@+id/home_container"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical" />
+                        android:layout_marginTop="8dp"
+                        android:alpha="0.25"
+                        android:gravity="center"
+                        android:text="@string/no_account"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="18sp" />
 
                 </LinearLayout>
 
-            </ScrollView>
-
-            <!-- The drawer's empty state, shown when no real account is
-                 configured: an icon and a title. Adding an account lives
-                 in the footer's Add row. -->
-            <LinearLayout
-                android:id="@+id/drawer_empty"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:gravity="center_horizontal"
-                android:orientation="vertical"
-                android:paddingStart="32dp"
-                android:paddingEnd="32dp"
-                android:visibility="gone">
-
-                <ImageView
-                    android:layout_width="96dp"
-                    android:layout_height="96dp"
-                    android:alpha="0.25"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_no_account"
-                    android:tint="?android:attr/textColorSecondary" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:alpha="0.25"
-                    android:gravity="center"
-                    android:text="@string/no_account"
-                    android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="18sp" />
-
             </LinearLayout>
 
-        </FrameLayout>
+        </ScrollView>
 
-        <!-- Bottom actions behind the same divider as the domain rows: add
-             account, then sync, then About (its dialog carries the app
-             version). -->
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
+            android:layout_marginStart="22dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginEnd="22dp"
+            android:layout_marginBottom="8dp"
             android:background="@color/divider_light" />
 
+        <!-- The actions, fixed under the scrolling cards: add an
+             account, sync, then About (its dialog carries the app
+             version). -->
         <LinearLayout
             android:id="@+id/drawer_actions"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:orientation="vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp">
 
             <LinearLayout
                 android:id="@+id/drawer_add"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="?android:attr/selectableItemBackground"
+                android:layout_height="50dp"
+                android:background="@drawable/drawer_row"
                 android:clickable="true"
                 android:focusable="true"
                 android:gravity="center_vertical"
-                android:minHeight="@dimen/item_height"
                 android:orientation="horizontal"
-                android:paddingStart="@dimen/drawer_item_padding"
-                android:paddingEnd="@dimen/drawer_item_padding">
+                android:paddingStart="10dp"
+                android:paddingEnd="14dp">
 
-                <ImageView
-                    android:layout_width="@dimen/item_icon"
-                    android:layout_height="@dimen/item_icon"
-                    android:layout_marginEnd="@dimen/item_gap"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_add"
-                    android:tint="?android:attr/textColorPrimary" />
+                <FrameLayout
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="@drawable/drawer_tile">
+
+                    <ImageView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_gravity="center"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_account_add"
+                        android:tint="?android:attr/textColorPrimary" />
+
+                </FrameLayout>
 
                 <TextView
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
                     android:text="@string/add_account"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="@dimen/item_text" />
+                    android:textSize="15sp" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_chevron_right"
+                    android:tint="?android:attr/textColorSecondary" />
 
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/drawer_sync"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="?android:attr/selectableItemBackground"
+                android:layout_height="50dp"
+                android:background="@drawable/drawer_row"
                 android:clickable="true"
                 android:focusable="true"
                 android:gravity="center_vertical"
-                android:minHeight="@dimen/item_height"
                 android:orientation="horizontal"
-                android:paddingStart="@dimen/drawer_item_padding"
-                android:paddingEnd="@dimen/drawer_item_padding">
+                android:paddingStart="10dp"
+                android:paddingEnd="14dp">
 
-                <ImageView
-                    android:layout_width="@dimen/item_icon"
-                    android:layout_height="@dimen/item_icon"
-                    android:layout_marginEnd="@dimen/item_gap"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_sync"
-                    android:tint="?android:attr/textColorPrimary" />
+                <FrameLayout
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="@drawable/drawer_tile">
+
+                    <ImageView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_gravity="center"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_sync"
+                        android:tint="?android:attr/textColorPrimary" />
+
+                </FrameLayout>
 
                 <TextView
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
                     android:text="@string/sync_accounts"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="@dimen/item_text" />
+                    android:textSize="15sp" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_chevron_right"
+                    android:tint="?android:attr/textColorSecondary" />
 
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/drawer_about"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="?android:attr/selectableItemBackground"
+                android:layout_height="50dp"
+                android:background="@drawable/drawer_row"
                 android:clickable="true"
                 android:focusable="true"
                 android:gravity="center_vertical"
-                android:minHeight="@dimen/item_height"
                 android:orientation="horizontal"
-                android:paddingStart="@dimen/drawer_item_padding"
-                android:paddingEnd="@dimen/drawer_item_padding">
+                android:paddingStart="10dp"
+                android:paddingEnd="14dp">
 
-                <ImageView
-                    android:layout_width="@dimen/item_icon"
-                    android:layout_height="@dimen/item_icon"
-                    android:layout_marginEnd="@dimen/item_gap"
-                    android:contentDescription="@null"
-                    android:src="@drawable/ic_info"
-                    android:tint="?android:attr/textColorPrimary" />
+                <FrameLayout
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="@drawable/drawer_tile">
+
+                    <ImageView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_gravity="center"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_info"
+                        android:tint="?android:attr/textColorPrimary" />
+
+                </FrameLayout>
 
                 <TextView
-                    android:layout_width="wrap_content"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
                     android:text="@string/about"
                     android:textColor="?android:attr/textColorPrimary"
-                    android:textSize="@dimen/item_text" />
+                    android:textSize="15sp" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_chevron_right"
+                    android:tint="?android:attr/textColorSecondary" />
 
             </LinearLayout>
 

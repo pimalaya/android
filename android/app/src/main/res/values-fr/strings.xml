@@ -53,9 +53,25 @@
     <string name="date_unknown">Sans date</string>
     <string name="mail_chip_unread">Non lus</string>
     <string name="mail_chip_attachments">Pièces jointes</string>
-    <string name="mail_all">Toutes les boîtes</string>
-    <string name="drawer_mailboxes">Boîtes aux lettres</string>
-    <string name="drawer_accounts">Comptes</string>
+    <string name="message_reply">Répondre</string>
+    <string name="message_forward">Transférer</string>
+    <string name="compose_quote_intro">Le %1$s, %2$s a écrit :</string>
+    <string name="compose_forward_intro">---------- Message transféré ----------</string>
+    <string name="week_number">Sem. %d</string>
+    <string name="week_previous">Semaine précédente</string>
+    <string name="week_next">Semaine suivante</string>
+    <string name="drawer_synced">Synchronisé %s</string>
+    <string name="drawer_never_synced">Jamais synchronisé</string>
+    <string name="drawer_deactivated">Désactivé</string>
+    <string name="selected">Sélectionné</string>
+    <plurals name="messages_deleted">
+        <item quantity="one">%d message supprimé</item>
+        <item quantity="other">%d messages supprimés</item>
+    </plurals>
+    <plurals name="messages_delete_confirm">
+        <item quantity="one">Supprimer ce message ?</item>
+        <item quantity="other">Supprimer ces %d messages ?</item>
+    </plurals>
     <string name="contacts_conflicts">À vérifier</string>
     <string name="contacts_new_short">Nouveau contact</string>
     <string name="message_attachment_chip">Pièce jointe</string>

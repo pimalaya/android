@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The selected bottom navigation item's pill, behind its glyph. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/faint" />
+    <corners android:radius="1000dp" />
+</shape>

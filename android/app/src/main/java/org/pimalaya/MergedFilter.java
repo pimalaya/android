@@ -35,6 +35,11 @@ final class MergedFilter {
         return !hiddenAccounts.contains(account) && !hiddenCollections.contains(collection);
     }
 
+    /** Whether the account takes part at all, whatever its collections. */
+    boolean showsAccount(String account) {
+        return !hiddenAccounts.contains(account);
+    }
+
     /** Whether anything is hidden, which the bar icon reflects. */
     boolean isActive() {
         return !hiddenAccounts.isEmpty() || !hiddenCollections.isEmpty();

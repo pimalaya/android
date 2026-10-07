@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A drawer domain row: a ripple bounded to the pill the selected row
-     fills (domain_selected), so pressing any row previews its shape. -->
+<!-- A drawer action row: a ripple bounded to its rounded rectangle. -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="?android:attr/colorControlHighlight">
     <item android:id="@android:id/mask">
         <shape>
             <solid android:color="@android:color/white" />
-            <corners android:radius="24dp" />
+            <corners android:radius="16dp" />
         </shape>
     </item>
 </ripple>

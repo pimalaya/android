@@ -9,6 +9,7 @@ import android.widget.TextView;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.PimalayaClient;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -49,15 +50,47 @@ final class MessageCompose {
     /** Which account the message is sent from; null while none is open. */
     private AccountEntry account;
 
+    /** What the composer opened on, so leaving untouched asks nothing. */
+    private Prefill opened;
+
+    /**
+     * What the composer opens filled with: blank for a new message, the
+     * parent's people, subject and quote for a reply or a forward.
+     */
+    static final class Prefill {
+        /** The account to send from, when the message has one; null to ask. */
+        String from;
+
+        String to = "";
+        String cc = "";
+        String subject = "";
+        String body = "";
+
+        /** The parent's `Message-ID`, in brackets; empty outside a reply. */
+        String inReplyTo = "";
+
+        /** The thread the reply continues, space separated; empty outside a reply. */
+        String references = "";
+
+        /** The message replied to, marked answered once the reply is queued. */
+        MailStore.StoredMessage parent;
+    }
+
     MessageCompose(MainActivity host) {
         this.host = host;
     }
 
-    /**
-     * Opens the composer, asking which account to send from when there
-     * is more than one and taking it silently when there is one.
-     */
+    /** Opens the composer on a blank message. */
     void open() {
+        open(new Prefill());
+    }
+
+    /**
+     * Opens the composer filled in, on the account the prefill names when
+     * it can send, and otherwise asking which account to send from when
+     * there is more than one and taking it silently when there is one.
+     */
+    void open(Prefill prefill) {
         List<AccountEntry> accounts = new ArrayList<>();
         for (AccountEntry candidate : host.accountsFor(PimDomain.MAIL)) {
             // NOTE: an account with nowhere to submit is not offered
@@ -74,8 +107,14 @@ final class MessageCompose {
             host.toast(host.getString(R.string.compose_no_account));
             return;
         }
+        for (AccountEntry candidate : accounts) {
+            if (candidate.email.equals(prefill.from)) {
+                open(candidate, prefill);
+                return;
+            }
+        }
         if (accounts.size() == 1) {
-            open(accounts.get(0));
+            open(accounts.get(0), prefill);
             return;
         }
 
@@ -86,24 +125,27 @@ final class MessageCompose {
 
         new AlertDialog.Builder(host)
                 .setTitle(R.string.compose_from_title)
-                .setItems(labels, (dialog, which) -> open(accounts.get(which)))
+                .setItems(labels, (dialog, which) -> open(accounts.get(which), prefill))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
 
-    /** Opens the composer on one account, blank. */
-    private void open(AccountEntry account) {
+    /** Opens the composer on one account, filled with the prefill. */
+    private void open(AccountEntry account, Prefill prefill) {
         this.account = account;
+        this.opened = prefill;
 
         ((TextView) host.findViewById(R.id.compose_from)).setText(account.email);
-        for (int id : RECIPIENTS) {
-            ((RecipientField) host.findViewById(id)).clear();
-        }
-        for (int id : new int[] {R.id.compose_subject, R.id.compose_body}) {
-            ((EditText) host.findViewById(id)).setText("");
-        }
+        ((RecipientField) host.findViewById(R.id.compose_to)).set(prefill.to);
+        ((RecipientField) host.findViewById(R.id.compose_cc)).set(prefill.cc);
+        ((RecipientField) host.findViewById(R.id.compose_bcc)).clear();
+        ((EditText) host.findViewById(R.id.compose_subject)).setText(prefill.subject);
+        EditText body = host.findViewById(R.id.compose_body);
+        body.setText(prefill.body);
+        // NOTE: the caret above a quote, where a reply is written.
+        body.setSelection(0);
 
-        copies(false);
+        copies(!prefill.cc.isEmpty());
         host.findViewById(R.id.compose_copies).setOnClickListener(view -> copies(true));
         host.show(MainActivity.PANEL_COMPOSE);
     }
@@ -124,7 +166,7 @@ final class MessageCompose {
      * which is the mailbox the composer does not have yet.
      */
     void close() {
-        if (empty()) {
+        if (untouched()) {
             host.showBack(MainActivity.PANEL_MAIL);
             return;
         }
@@ -138,14 +180,25 @@ final class MessageCompose {
                 .show();
     }
 
-    /** Whether every field of the composer is still blank. */
-    private boolean empty() {
-        for (int id : RECIPIENTS) {
-            if (!recipients(id).isEmpty()) {
-                return false;
+    /** Whether every field still reads what the composer opened with. */
+    private boolean untouched() {
+        Prefill prefill = opened != null ? opened : new Prefill();
+        return recipients(R.id.compose_to).equals(normalized(prefill.to))
+                && recipients(R.id.compose_cc).equals(normalized(prefill.cc))
+                && recipients(R.id.compose_bcc).isEmpty()
+                && value(R.id.compose_subject).equals(prefill.subject.trim())
+                && value(R.id.compose_body).equals(prefill.body.trim());
+    }
+
+    /** Addresses as a recipient field reads them back once chipped. */
+    private static String normalized(String addresses) {
+        List<String> all = new ArrayList<>();
+        for (String address : addresses.split("[,; ]+")) {
+            if (!address.isEmpty()) {
+                all.add(address);
             }
         }
-        return value(R.id.compose_subject).isEmpty() && value(R.id.compose_body).isEmpty();
+        return String.join(", ", all);
     }
 
     /**
@@ -193,6 +246,8 @@ final class MessageCompose {
                             .put("body", value(R.id.compose_body))
                             .put("date", date)
                             .put("messageId", messageId)
+                            .put("inReplyTo", opened != null ? opened.inReplyTo : "")
+                            .put("references", opened != null ? opened.references : "")
                             .toString();
         } catch (JSONException error) {
             host.showError(error, R.string.compose_failed);
@@ -200,6 +255,15 @@ final class MessageCompose {
         }
 
         AccountEntry sender = account;
+        // NOTE: Graph and Gmail keep no answered marker, and one staged
+        // there would be refused on every sync.
+        Account server = account.server(PimDomain.MAIL);
+        MailStore.StoredMessage parent =
+                opened == null
+                                || PimalayaClient.isGraph(server)
+                                || PimalayaClient.isGoogle(server)
+                        ? null
+                        : opened.parent;
         host.setSending(true);
         host.io.execute(
                 () -> {
@@ -231,8 +295,19 @@ final class MessageCompose {
                                     return;
                                 }
                                 host.toast(host.getString(R.string.compose_queued));
-                                host.mailList.reload();
                                 host.showBack(MainActivity.PANEL_MAIL);
+                                // The parent is answered once the reply is
+                                // queued, the way the reply counts as sent:
+                                // both go out on the next sync.
+                                if (parent != null && !parent.pending) {
+                                    host.messageView.stageFlag(
+                                            parent,
+                                            MailEngine.ANSWERED,
+                                            true,
+                                            host.mailList::reload);
+                                } else {
+                                    host.mailList.reload();
+                                }
                             });
                 });
     }

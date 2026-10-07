@@ -217,9 +217,25 @@
     <string name="date_unknown">Undated</string>
     <string name="mail_chip_unread">Unread</string>
     <string name="mail_chip_attachments">Attachments</string>
-    <string name="mail_all">All mailboxes</string>
-    <string name="drawer_mailboxes">Mailboxes</string>
-    <string name="drawer_accounts">Accounts</string>
+    <string name="message_reply">Reply</string>
+    <string name="message_forward">Forward</string>
+    <string name="compose_quote_intro">On %1$s, %2$s wrote:</string>
+    <string name="compose_forward_intro">---------- Forwarded message ----------</string>
+    <string name="week_number">Week %d</string>
+    <string name="week_previous">Previous week</string>
+    <string name="week_next">Next week</string>
+    <string name="drawer_synced">Synced %s</string>
+    <string name="drawer_never_synced">Not synced yet</string>
+    <string name="drawer_deactivated">Deactivated</string>
+    <string name="selected">Selected</string>
+    <plurals name="messages_deleted">
+        <item quantity="one">Deleted one message</item>
+        <item quantity="other">Deleted %d messages</item>
+    </plurals>
+    <plurals name="messages_delete_confirm">
+        <item quantity="one">Delete this message?</item>
+        <item quantity="other">Delete these %d messages?</item>
+    </plurals>
     <string name="contacts_conflicts">To review</string>
     <string name="date_tomorrow">Tomorrow</string>
     <string name="contacts_new_short">New contact</string>

@@ -63,6 +63,14 @@ pub struct Draft {
     pub date: String,
     /// The `Message-ID` to stamp it with, angle brackets included.
     pub message_id: String,
+    /// The `Message-ID` of the message this replies to, angle brackets
+    /// included; empty when it replies to none.
+    #[serde(default)]
+    pub in_reply_to: String,
+    /// The thread this reply continues, oldest first, as space separated
+    /// msg-ids (RFC 5322 section 3.6.4); empty outside a reply.
+    #[serde(default)]
+    pub references: String,
 }
 
 /// One message about to be handed over: the bytes a server receives, and
@@ -104,6 +112,15 @@ pub fn compose(draft: &Draft) -> Result<Vec<u8>, BridgeError> {
     let mut headers = String::new();
     let _ = write!(headers, "Date: {}\r\n", draft.date);
     let _ = write!(headers, "Message-ID: {}\r\n", draft.message_id);
+    if !draft.in_reply_to.is_empty() {
+        let _ = write!(headers, "In-Reply-To: {}\r\n", draft.in_reply_to);
+    }
+    // NOTE: one msg-id per line, folded, so a long thread never runs a
+    // line past what section 2.1.1 allows.
+    let references: Vec<&str> = draft.references.split_whitespace().collect();
+    if !references.is_empty() {
+        let _ = write!(headers, "References: {}\r\n", references.join("\r\n "));
+    }
     headers.push_str(&header("From", &mailbox(&draft.from_name, &sender)));
     if !to.is_empty() {
         headers.push_str(&header("To", &to.join(", ")));
@@ -537,6 +554,8 @@ mod tests {
             body: "Hi there".into(),
             date: "Mon, 5 Jan 2026 09:00:00 +0000".into(),
             message_id: "<abc@pimalaya>".into(),
+            in_reply_to: String::new(),
+            references: String::new(),
         }
     }
 
@@ -580,6 +599,21 @@ mod tests {
         let composed = envelope(message.as_bytes()).unwrap();
         assert_eq!(composed.sender, "ada@example.org");
         assert_eq!(composed.recipients, ["bob@example.com"]);
+    }
+
+    #[test]
+    fn a_reply_names_its_parent_and_its_thread() {
+        let mut draft = draft();
+        draft.in_reply_to = "<parent@example.com>".into();
+        draft.references = "<root@example.com> <parent@example.com>".into();
+
+        let message = text(&draft);
+        assert!(message.contains("In-Reply-To: <parent@example.com>\r\n"));
+        assert_eq!(
+            header_of(&message, "References"),
+            "<root@example.com> <parent@example.com>"
+        );
+        assert!(!text(&self::draft()).contains("In-Reply-To"));
     }
 
     #[test]

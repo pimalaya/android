@@ -8,7 +8,6 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -24,7 +23,7 @@ import java.util.Map;
 /**
  * The calendar screen: one agenda merging every calendar of
  * every account, the same merged view the contacts list gives contacts,
- * grouped into one card per day under a strip of the coming days.
+ * grouped into one card per day under the week.
  *
  * <p>Rows are <em>occurrences</em>, not stored events: a weekly meeting
  * is one row per week inside the window. Expansion runs through the
@@ -44,9 +43,6 @@ final class CalendarList {
     /** Seconds in a day, the threshold a length is told in days past. */
     private static final long DAY = 86400;
 
-    /** How many days the strip over the agenda offers. */
-    private static final int STRIP_DAYS = 14;
-
     private final MainActivity host;
     private final EventStore store;
     private final Adapter adapter = new Adapter();
@@ -57,8 +53,14 @@ final class CalendarList {
 
     private ListHeader header;
 
-    /** The day the strip has selected, as a civil `YYYYMMDD` stamp. */
+    /**
+     * The day the week card narrows the agenda to, as a civil `YYYYMMDD`
+     * stamp; null for everything ahead.
+     */
     private String selectedDay;
+
+    /** How many weeks from this one the week card shows, negative before it. */
+    private int weekOffset;
 
     CalendarList(MainActivity host, EventStore store) {
         this.host = host;
@@ -92,6 +94,15 @@ final class CalendarList {
     void setUp() {
         ListView list = host.findViewById(R.id.calendar_list);
         header = new ListHeader(host, list, MainActivity.PANEL_CALENDAR);
+        header.empty(host.findViewById(R.id.calendar_empty));
+        header.view
+                .findViewById(R.id.header_week_previous)
+                .setOnClickListener(view -> moveWeek(weekOffset - 1));
+        header.view
+                .findViewById(R.id.header_week_next)
+                .setOnClickListener(view -> moveWeek(weekOffset + 1));
+        // The week's number brings the card back to this week.
+        header.view.findViewById(R.id.header_week_number).setOnClickListener(view -> moveWeek(0));
         list.setAdapter(adapter);
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
@@ -116,8 +127,13 @@ final class CalendarList {
      * the window and dropping what the merged filter hides.
      */
     void reload() {
-        String from = today();
-        String until = plusDays(from, WINDOW_DAYS);
+        String today = today();
+        String shown = shownWeek(today);
+        // NOTE: from the earlier of this week's and the shown week's first
+        // day, so any day the card offers has its entries expanded, and on
+        // to whichever ends later of the window ahead and the shown week.
+        String from = min(firstOfWeek(today), shown);
+        String until = max(plusDays(today, WINDOW_DAYS), plusDays(shown, 7));
 
         Map<String, EventStore.StoredCalendar> byCollection = new HashMap<>();
         for (EventStore.StoredCalendar calendar : store.loadCalendars()) {
@@ -146,15 +162,42 @@ final class CalendarList {
         }
 
         rows.sort((left, right) -> left.occurrence.start.compareTo(right.occurrence.start));
+        render();
+    }
 
-        sections.fill(rows, row -> dayLabel(dayOf(row)));
+    /**
+     * Lays out what the week card lets through: the day picked in it,
+     * or with none picked everything from today on while the card shows
+     * this week, and the week it shows otherwise.
+     */
+    private void render() {
+        String today = today();
+        String first = shownWeek(today);
+        String end = plusDays(first, 7);
+        List<Row> shown = new ArrayList<>();
+        for (Row row : rows) {
+            String day = dayOf(row);
+            boolean kept;
+            if (selectedDay != null) {
+                kept = day.equals(selectedDay);
+            } else if (weekOffset == 0) {
+                kept = day.compareTo(today) >= 0;
+            } else {
+                kept = day.compareTo(first) >= 0 && day.compareTo(end) < 0;
+            }
+            if (kept) {
+                shown.add(row);
+            }
+        }
+
+        sections.fill(shown, row -> dayLabel(dayOf(row)));
         adapter.notifyDataSetChanged();
         header.meta(
                 host.getResources()
-                        .getQuantityString(R.plurals.calendar_meta, rows.size(), rows.size()));
-        strip(from);
+                        .getQuantityString(R.plurals.calendar_meta, shown.size(), shown.size()));
+        week(today);
         host.findViewById(R.id.calendar_empty)
-                .setVisibility(rows.isEmpty() ? View.VISIBLE : View.GONE);
+                .setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
     }
 
     /** The civil day an occurrence starts on. */
@@ -185,70 +228,138 @@ final class CalendarList {
     }
 
     /**
-     * Fills the strip of the coming days, each a weekday over its number,
-     * the selected one on the accent. Pressing one scrolls the agenda to
-     * the first entry on or after it.
+     * Fills the week card: the shown week's seven days, each a weekday
+     * over its number, under the month and year and the week's number.
+     * Today takes the accent, and a day pressed takes a filled disc and
+     * narrows the agenda to itself, pressing it again widening it back.
      */
-    private void strip(String from) {
-        if (selectedDay == null || selectedDay.compareTo(from) < 0) {
-            selectedDay = from;
-        }
+    private void week(String today) {
+        String first = shownWeek(today);
+        // NOTE: the week's Thursday names its month and its number, which
+        // is how ISO 8601 assigns a week straddling two of either.
+        String middle = plusDays(first, 3);
+        java.util.Calendar thursday = calendarOf(middle);
+        thursday.setMinimalDaysInFirstWeek(4);
 
-        LinearLayout days = header.days();
+        LinearLayout days =
+                header.week(
+                        monthOf(stampOf(middle)),
+                        host.getString(
+                                R.string.week_number,
+                                thursday.get(java.util.Calendar.WEEK_OF_YEAR)));
         days.removeAllViews();
-        for (int offset = 0; offset < STRIP_DAYS; offset++) {
-            String day = plusDays(from, offset);
+        int accent = host.ui.resolveColor(android.R.attr.colorAccent);
+        int primary = host.ui.resolveColor(android.R.attr.textColorPrimary);
+        int secondary = host.ui.resolveColor(android.R.attr.textColorSecondary);
+        for (int offset = 0; offset < 7; offset++) {
+            String day = plusDays(first, offset);
             long stamp = stampOf(day);
+            boolean isToday = day.equals(today);
             boolean selected = day.equals(selectedDay);
-            int color =
-                    selected
-                            ? host.accentContrast()
-                            : host.ui.resolveColor(android.R.attr.textColorPrimary);
 
             TextView weekday = new TextView(host);
             weekday.setText(DateFormat.format("EEE", new Date(stamp)));
             weekday.setTextSize(12);
-            weekday.setTextColor(color);
-            weekday.setAlpha(selected ? 1f : 0.7f);
+            weekday.setTypeface(null, android.graphics.Typeface.BOLD);
+            weekday.setTextColor(isToday ? accent : secondary);
+            weekday.setGravity(android.view.Gravity.CENTER);
 
             TextView number = new TextView(host);
             number.setText(DateFormat.format("d", new Date(stamp)));
             number.setTextSize(17);
             number.setTypeface(null, android.graphics.Typeface.BOLD);
-            number.setTextColor(color);
+            number.setGravity(android.view.Gravity.CENTER);
+            if (selected) {
+                android.graphics.drawable.GradientDrawable disc =
+                        new android.graphics.drawable.GradientDrawable();
+                disc.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+                disc.setColor(isToday ? accent : primary);
+                number.setBackground(disc);
+                number.setTextColor(
+                        isToday
+                                ? host.accentContrast()
+                                : host.ui.resolveColor(android.R.attr.colorBackground));
+            } else {
+                number.setTextColor(isToday ? accent : primary);
+            }
+            LinearLayout.LayoutParams numberParams =
+                    new LinearLayout.LayoutParams(host.dp(38), host.dp(38));
+            numberParams.topMargin = host.dp(8);
 
             LinearLayout cell = new LinearLayout(host);
             cell.setOrientation(LinearLayout.VERTICAL);
-            cell.setGravity(android.view.Gravity.CENTER);
-            cell.setBackgroundResource(
-                    selected ? R.drawable.button_pill : R.drawable.button_tonal);
-            cell.addView(weekday);
-            cell.addView(number);
+            cell.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+            cell.addView(
+                    weekday,
+                    new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT));
+            cell.addView(number, numberParams);
             cell.setOnClickListener(
                     view -> {
-                        selectedDay = day;
-                        strip(from);
-                        scrollTo(day);
+                        selectedDay = selected ? null : day;
+                        render();
+                        ListView list = host.findViewById(R.id.calendar_list);
+                        list.setSelection(0);
                     });
 
-            LinearLayout.LayoutParams params =
-                    new LinearLayout.LayoutParams(host.dp(48), host.dp(60));
-            params.setMarginEnd(host.dp(6));
-            days.addView(cell, params);
+            days.addView(
+                    cell,
+                    new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         }
     }
 
-    /** Scrolls the agenda to the first card on or after a day. */
-    private void scrollTo(String day) {
+    /** The first day of the week the card shows. */
+    private String shownWeek(String today) {
+        return plusDays(firstOfWeek(today), 7 * weekOffset);
+    }
+
+    /** Moves the card by whole weeks, back to this one with zero. */
+    private void moveWeek(int offset) {
+        weekOffset = offset;
+        selectedDay = null;
+        reload();
         ListView list = host.findViewById(R.id.calendar_list);
-        for (Row row : rows) {
-            if (dayOf(row).compareTo(day) >= 0) {
-                int position = sections.positionOf(dayLabel(dayOf(row)));
-                list.setSelectionFromTop(list.getHeaderViewsCount() + position, host.dp(8));
-                return;
-            }
+        list.setSelection(0);
+    }
+
+    private static String min(String left, String right) {
+        return left.compareTo(right) <= 0 ? left : right;
+    }
+
+    private static String max(String left, String right) {
+        return left.compareTo(right) >= 0 ? left : right;
+    }
+
+    /** The first day of the week a day falls in, by the device's locale. */
+    private static String firstOfWeek(String day) {
+        java.util.Calendar moment = calendarOf(day);
+        int back =
+                (moment.get(java.util.Calendar.DAY_OF_WEEK) - moment.getFirstDayOfWeek() + 7) % 7;
+        return plusDays(day, -back);
+    }
+
+    /** The month in full, then its year in a lighter tone. */
+    private CharSequence monthOf(long stamp) {
+        String month = DateFormat.format("LLLL", new Date(stamp)).toString();
+        if (!month.isEmpty()) {
+            month = month.substring(0, 1).toUpperCase() + month.substring(1);
         }
-        list.setSelection(list.getCount() - 1);
+        android.text.SpannableStringBuilder text = new android.text.SpannableStringBuilder(month);
+        text.setSpan(
+                new android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                0,
+                month.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        int start = text.length();
+        text.append(' ').append(DateFormat.format("yyyy", new Date(stamp)));
+        text.setSpan(
+                new android.text.style.ForegroundColorSpan(
+                        host.ui.resolveColor(android.R.attr.textColorSecondary)),
+                start,
+                text.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return text;
     }
 
     ListHeader header() {
@@ -275,11 +386,7 @@ final class CalendarList {
     }
 
     private static String plusDays(String stamp, int days) {
-        java.util.Calendar moment = java.util.Calendar.getInstance();
-        moment.set(
-                Integer.parseInt(stamp.substring(0, 4)),
-                Integer.parseInt(stamp.substring(4, 6)) - 1,
-                Integer.parseInt(stamp.substring(6, 8)));
+        java.util.Calendar moment = calendarOf(stamp);
         moment.add(java.util.Calendar.DAY_OF_MONTH, days);
         return String.format(
                 java.util.Locale.US,
@@ -287,6 +394,17 @@ final class CalendarList {
                 moment.get(java.util.Calendar.YEAR),
                 moment.get(java.util.Calendar.MONTH) + 1,
                 moment.get(java.util.Calendar.DAY_OF_MONTH));
+    }
+
+    /** A civil `YYYYMMDD` stamp as a calendar in the device's zone and locale. */
+    private static java.util.Calendar calendarOf(String stamp) {
+        java.util.Calendar moment = java.util.Calendar.getInstance();
+        moment.clear();
+        moment.set(
+                Integer.parseInt(stamp.substring(0, 4)),
+                Integer.parseInt(stamp.substring(4, 6)) - 1,
+                Integer.parseInt(stamp.substring(6, 8)));
+        return moment;
     }
 
     /**
@@ -429,6 +547,8 @@ final class CalendarList {
                 view = LayoutInflater.from(host).inflate(R.layout.item_event, parent, false);
             }
             sections.shape(view, position);
+            view.findViewById(R.id.event_divider)
+                    .setVisibility(sections.opensCard(position) ? View.GONE : View.VISIBLE);
 
             Row row = sections.row(position);
             Occurrence occurrence = row.occurrence;
@@ -438,32 +558,27 @@ final class CalendarList {
                             occurrence.summary.isEmpty()
                                     ? host.getString(R.string.event_untitled)
                                     : occurrence.summary);
-
-            // How long it runs and which calendar it is in, the way a
-            // mail row says its mailbox and account: a merged agenda has
-            // to say where a row came from.
+            ((TextView) view.findViewById(R.id.event_start)).setText(startLabel(occurrence));
+            // What kind of entry it is, by name, then how long it runs.
+            String kind = host.getString(componentName(occurrence.component));
             String duration = durationLabel(host, occurrence);
-            ((TextView) view.findViewById(R.id.event_origin))
-                    .setText(
-                            duration.isEmpty()
-                                    ? row.calendar.name
-                                    : duration + " · " + row.calendar.name);
+            ((TextView) view.findViewById(R.id.event_kind))
+                    .setText(duration.isEmpty() ? kind : kind + " · " + duration);
 
-            ((TextView) view.findViewById(R.id.event_countdown))
-                    .setText(startLabel(occurrence));
+            // Which calendar and account it is in, the way a mail row says
+            // its mailbox and account: a merged agenda has to say where a
+            // row came from.
+            ((TextView) view.findViewById(R.id.event_origin))
+                    .setText(row.calendar.name + " · " + row.calendar.accountEmail);
 
             // The disc stands for the calendar, initial and colour both,
             // the way the mail row's disc stands for its sender; the
             // colour is keyed by the calendar's id, so renaming one
-            // keeps the colour the eye learned. What kind of entry it is
-            // ends the title's line instead.
+            // keeps the colour the eye learned.
             TextView avatar = view.findViewById(R.id.event_avatar);
             avatar.setText(Avatar.letter(row.calendar.name));
-            avatar.setBackground(Avatar.disc(host, Avatar.colorOf(row.calendar.color, row.calendar.id)));
-
-            ImageView component = view.findViewById(R.id.event_component);
-            component.setImageResource(glyphOf(occurrence.component));
-            component.setContentDescription(host.getString(componentName(occurrence.component)));
+            avatar.setBackground(
+                    Avatar.disc(host, Avatar.colorOf(row.calendar.color, row.calendar.id)));
 
             return view;
         }

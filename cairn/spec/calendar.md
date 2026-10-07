@@ -107,10 +107,16 @@ A calendar connection behind the `google://` marker SHALL list the user's calend
 - WHEN the calendar syncs
 - THEN the entry is read again, the moved occurrence with it
 
-### Requirement: The agenda offers the coming days
-The agenda's header SHALL carry a strip of the next fourteen days, and pressing one SHALL scroll the agenda to the first entry on or after it.
+### Requirement: The agenda offers the week
+The agenda's header SHALL carry the month and year of the shown week, its number and arrows to the weeks either side, over one card of that week's seven days, today in the accent. Pressing the number SHALL bring the card back to this week. Pressing a day SHALL narrow the agenda to that day, the day on a filled disc, and pressing it again SHALL widen it back: to every entry from today on while the card shows this week, and to the shown week otherwise.
 
-#### Scenario: Jumping to Friday
-- GIVEN entries on Wednesday and Saturday
-- WHEN Friday is pressed in the strip
-- THEN the agenda scrolls to Saturday's card
+#### Scenario: Only Friday
+- GIVEN entries on Wednesday, Friday and Saturday, today being Tuesday
+- WHEN Friday is pressed in the week
+- THEN the agenda shows Friday's entries alone
+- AND pressing Friday again shows all three days
+
+#### Scenario: Next week
+- GIVEN this week's card
+- WHEN the next arrow is pressed
+- THEN the card shows next week's days and number, and the agenda that week's entries alone

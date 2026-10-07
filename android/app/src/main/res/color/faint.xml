@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A faint tone over any surface: the text colour at low alpha, light
+     grey on a dark theme and dark grey on a light one. The bottom
+     navigation's indicator, and a recipient chip on the composer's card. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:alpha="0.14" android:color="?android:attr/textColorPrimary" />
+</selector>
