@@ -613,6 +613,15 @@ final class Native {
             String uris);
 
     /**
+     * Reads the Graph contacts named by id (a JSON string array), 20 to
+     * a {@code $batch}, the request line of {@link #readCard}; a request
+     * the batch could not serve is sent again on its own and a contact
+     * Graph no longer holds is left out. Graph only. Returns a JSON array
+     * of {@code {id, uri, etag, vcard}}.
+     */
+    static native String readGraphCards(Transport transport, String token, String ids);
+
+    /**
      * Adds and removes the card's addressbook memberships on an
      * account-level backend (JSON string arrays of book ids), the
      * backend dispatched from the base URL; returns {@code {}}.

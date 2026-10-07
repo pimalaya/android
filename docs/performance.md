@@ -76,3 +76,15 @@ On the build host (`CalendarPoolTest`, 20 ms a request, the real calendar driver
 Expected on the device, unmeasured: the owner's three calendars in about 2 to 7 requests each (the 23-event calendar, if all series, 7: its listing, two batches of events and four of windows), side by side, so the pass should take about one calendar's 7 round trips where it took 190 in a row. A `$batch` round trip costs more than a single `GET` (Graph serves its inner requests side by side, bounded per mailbox), so a gain of about 4 to 6 times (22 s to 4 or 5 s) is the cautious reading; each run's `calendar pass` line and the per-page lines are the numbers to compare.
 
 Things to look at once there are numbers: a `$batch` inner request throttled (429) is read again alone, where the transport waits as long as Graph asks, so a heavily throttled tenant falls back towards the old request count; `named` asks 64 a time, so a large first pass sends one short batch of 4 per 64 events.
+
+## Graph contacts read 20 to a batch (graph-contact-reads, 2026-10-07)
+
+Found by reading the code, not measured on a device. A Graph contacts delta row carries an id and a `changeKey` and no body (a delta query cannot `$expand` the stash property the vCard projection reads), so a pass reads the body of every contact it does not hold at its revision. A complete round primes those bodies with one full listing (`/contacts`, 100 a page, stash expanded); an incremental round read each changed contact with its own `GET /me/contacts/{id}`, one after another.
+
+The cost model, a Graph book of which `c` contacts changed since the last pass:
+
+- **Before**: one delta request, then `c` requests in a row.
+- **After**: one delta request, then `ceil(c / 20)` `$batch` calls, one more for each read of 64 the engine splits (`named` asks 64 at a time, four batches of 20, 20, 20 and 4): 120 changed contacts in 7 batches where they were 120 requests.
+- **A complete round**: unchanged, the listing in `ceil(n / 100)` pages, and only a contact created between the delta and the listing read, now in a batch.
+
+Each Graph fetch logs `graph fetch <book>: N asked, H from the listing, M read in B batches, remote T ms, G gone`, and contact pages now log the per-page clock line (network, JSON, engine, store), so a bulk change shows on a device. As with calendars, an inner request throttled (429) is read again alone, the transport waiting as long as Graph asks, so a heavily throttled tenant falls back towards one request a contact. The listing's `$top=100` stays: Graph documents no larger contacts page with an extended-property `$expand`, and nothing here measured one.
