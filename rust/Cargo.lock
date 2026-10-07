@@ -586,9 +586,9 @@ dependencies = [
 
 [[package]]
 name = "io-gmail"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76991fe82eed84da4d85fb04c392fe0d93cad5ca1419c25faedb9d9a42a8a20b"
+checksum = "9395ae6abe2e10289147290316e62226bedbd20a6b29fd6d9ae903d1483344c0"
 dependencies = [
  "base64 0.23.1",
  "io-http",
@@ -601,9 +601,9 @@ dependencies = [
 
 [[package]]
 name = "io-gpeople"
-version = "0.4.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c98997024af2d20e26ed3ca7e819f5f22dc18ff440b13bbd09a10ea9d2c3e565"
+checksum = "cfdcb1fd99f34eba6f6c4246fc7b1d7bdfa6ac0c32f1a574a819b8aca799b6cd"
 dependencies = [
  "base64 0.23.1",
  "io-http",
