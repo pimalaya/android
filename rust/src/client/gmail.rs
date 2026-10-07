@@ -124,7 +124,14 @@ impl<'a, 'local> Client<'a, 'local> {
                         || label.id.starts_with("CATEGORY_"))
             })
             .map(|label| {
-                let role = if label.id == TRASH { "trash" } else { "" };
+                let role = match label.id.as_str() {
+                    "INBOX" => "inbox",
+                    "SENT" => "sent",
+                    "DRAFT" => "drafts",
+                    "SPAM" => "junk",
+                    TRASH => "trash",
+                    _ => "",
+                };
                 let mailbox = Mailbox {
                     name: label.name,
                     role: role.into(),

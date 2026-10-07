@@ -224,6 +224,8 @@
     </plurals>
     <string name="mail_search">Search mail</string>
     <string name="date_unknown">Undated</string>
+    <string name="mail_more_loading">Loading older mail</string>
+    <string name="mail_more_offline">Older mail needs the network</string>
     <string name="mail_chip_unread">Unread</string>
     <string name="mail_chip_attachments">Attachments</string>
     <string name="message_reply">Reply</string>

@@ -10,7 +10,7 @@ Mail is a list of summaries: a pass connects to an account once and lists each o
 
 A message rises off that rung by being opened: what the open fetched is filed as the item's object, so the item reaches full and every read after it, offline included, is a read of the store.
 
-Every mailbox runs io-pimdir's sync, on the session the pass opened, within the account's bound: all of its mail, or the last N months on the `Date` header. One LIST names the mailboxes and each is listed in turn. A mailbox carrying a `(UIDVALIDITY, HIGHESTMODSEQ)` checkpoint on a QRESYNC server is selected with the QRESYNC parameter, the server streams what moved and what went, and the messages that moved are read for their header fields in the same pass. Anything else is a round: the UIDs `UID SEARCH` finds in the scope, newest first, read 500 at a time by `UID FETCH` for their markers, their size and the header fields pimdir STORAGE Annex A derives a summary from, `Content-Type` among them and no `BODYSTRUCTURE`. The connection ENABLEs CONDSTORE and QRESYNC once when it opens, which RFC 7162 section 3.1 requires before the parameter may be used at all. Every message a page lists arrives named, so it is listed the moment its page lands: there is no probe and no upgrade after the sync. Each page is one write with the round's resume cursor, so a pass cut off resumes below its last page, and only the round's last page retires what it found absent, within the bound; mail outside the bound is never deleted by a sync, only by narrowing the bound.
+Every mailbox runs io-pimdir's sync, on the session the pass opened, from its floor: its first pass lists its 50 newest messages, the floor being the oldest `Date` among them, and the end of the list and a background fill widen it a chunk of messages at a time toward the account's bound, all of its mail or the last N months on the `Date` header. One LIST names the mailboxes and each is listed in turn, the inbox first. A mailbox carrying a `(UIDVALIDITY, HIGHESTMODSEQ)` checkpoint on a QRESYNC server is selected with the QRESYNC parameter, the server streams what moved and what went, and the messages that moved are read for their header fields in the same pass. Anything else is a round: the UIDs `UID SEARCH` finds in the scope, newest first, read 500 at a time by `UID FETCH` for their markers, their size and the header fields pimdir STORAGE Annex A derives a summary from, `Content-Type` among them and no `BODYSTRUCTURE`. The connection ENABLEs CONDSTORE and QRESYNC once when it opens, which RFC 7162 section 3.1 requires before the parameter may be used at all. Every message a page lists arrives named, so it is listed the moment its page lands: there is no probe and no upgrade after the sync. Each page is one write with the round's resume cursor, so a pass cut off resumes below its last page, and only the round's last page retires what it found absent, within the bound; mail outside the bound is never deleted by a sync, only by narrowing the bound.
 
 Four backends answer, told apart by the account's base URL: an IMAP session behind an `imaps://` URL, the RFC 8621 verbs behind the `jmap://` marker, Microsoft Graph behind the `msgraph://` one, the Gmail API behind `google://`. A Graph mailbox is a mail folder named by its path, listed by its message delta filtered on the reception date two days below the bound, 1,000 messages a page with the summary `$select`, ending with the delta link every pass after it resumes from. A JMAP mailbox is an `Email/query` sorted by `receivedAt`, 500 a page capped by the server's `maxObjectsInGet`, then `Email/changes` from the state read before its first page. A Gmail mailbox is a label filing mail, its name already a path, listed 100 ids a page narrowed by `after:`, each read for its metadata under the account's pacing, and every round after replays the history from the `historyId` taken before its first page, reading again only the messages that moved.
 
@@ -310,26 +310,26 @@ Gmail API requests SHALL be paced near 40 a second across every worker of the pr
 - THEN their requests together go out at about 40 a second
 
 ### Requirement: A mailbox is stored whole
-A mail round SHALL list every message of a mailbox within the account's bound, newest first in the source's own recency order, a page at a time (500 UIDs per IMAP `UID FETCH`, 1,000 per Graph message delta page, 100 ids per Gmail `messages.list`, 500 per JMAP `Email/query` capped by the server's `maxObjectsInGet`), each page landing in one write. Every message a page lists SHALL arrive named by the summary and sort key of pimdir STORAGE Annex A read in the listing itself, with no body: IMAP from `FLAGS`, `RFC822.SIZE` and the header fields Annex A reads, `Content-Type` among them and no `BODYSTRUCTURE`; Graph from the summary `$select`; Gmail from its metadata read; JMAP from `Email/get`'s summary properties. An interrupted round SHALL resume from the cursor its last landed page left, and a cursor the source refuses SHALL restart the round. A round's last page SHALL retire only what it found absent within the bound; mail outside the bound SHALL never be deleted by a sync.
+A mail round SHALL list every message of a mailbox within its scope (its floor, within the account's bound), newest first in the source's own recency order, a page at a time (500 UIDs per IMAP `UID FETCH`, 1,000 per Graph message delta page, 100 ids per Gmail `messages.list`, 500 per JMAP `Email/query` capped by the server's `maxObjectsInGet`), each page landing in one write. Every message a page lists SHALL arrive named by the summary and sort key of pimdir STORAGE Annex A read in the listing itself, with no body: IMAP from `FLAGS`, `RFC822.SIZE` and the header fields Annex A reads, `Content-Type` among them and no `BODYSTRUCTURE`; Graph from the summary `$select`; Gmail from its metadata read; JMAP from `Email/get`'s summary properties. An interrupted round SHALL resume from the cursor its last landed page left, and a cursor the source refuses SHALL restart the round. A round's last page SHALL retire only what it found absent within its scope; mail outside it SHALL never be deleted by a sync. The chunks and the fill (A mailbox is listed a chunk at a time, Older mail fills in behind) SHALL bring a mailbox whole within the account's bound.
 
 #### Scenario: A first pass over a large mailbox
 - GIVEN a mailbox of 100k messages and an empty store
 - WHEN it is synced
-- THEN the newest messages are listed once the first page lands, before the pass ends
-- AND once it ends, every message is listed with its subject, sender and date
+- THEN its newest chunk is listed with its subject, sender and date before the dialog closes
+- AND the rest is listed behind it, a chunk at a time
 
 #### Scenario: An interrupted first pass
-- GIVEN a first pass cut off after its first page
+- GIVEN a round cut off after its first page
 - WHEN the mailbox is synced again
 - THEN it resumes below the last landed page rather than from the top
 
 #### Scenario: A bounded account
 - GIVEN an account bounded to the last 6 months
-- WHEN it is synced
+- WHEN it is synced and filled
 - THEN older messages are neither fetched nor listed, and none already stored is deleted
 
 ### Requirement: An account bounds its mail
-An account's settings SHALL offer to sync all of its mail or the last 1, 3, 6, 12 or 24 months, the floor being the first day of the month that many months back, on the `Date` header (a message with no usable date in every scope). A provider's received-date filter SHALL only narrow a listing, two days below the floor (IMAP `SENTSINCE` one day below). Widening the bound SHALL have the next sync list what it now lacks: the band below the old floor where the backend's checkpoint is not bound to a scope (IMAP, Gmail, JMAP), the whole wider scope where it is (Graph). Narrowing it SHALL collect the stored messages dated below the new floor that owe nothing to the server, their mailboxes keeping them there.
+An account's settings SHALL offer to sync all of its mail or the last 1, 3, 6, 12 or 24 months, the floor being the first day of the month that many months back, on the `Date` header (a message with no usable date in every scope). A mailbox's floor SHALL never go below the bound: a chunk reaching past it stops at it, and a mailbox whose floor is the bound is whole. A provider's received-date filter SHALL only narrow a listing, two days below the floor (IMAP `SENTSINCE` one day below). Widening the bound SHALL have the fill carry on below the old floor, chunk by chunk. Narrowing it SHALL collect the stored messages dated below the new floor that owe nothing to the server, their mailboxes keeping them there.
 
 #### Scenario: Narrowing to a year
 - GIVEN an account syncing all of its mail
@@ -339,14 +339,14 @@ An account's settings SHALL offer to sync all of its mail or the last 1, 3, 6, 1
 
 #### Scenario: Widening again
 - GIVEN that account
-- WHEN its bound is set back to all mail and it is synced
-- THEN the older messages are listed again
+- WHEN its bound is set back to all mail and the app stays open on an unmetered network
+- THEN the older messages are listed again, a chunk at a time
 
 ### Requirement: The mail list loads lazily
-The mail list SHALL hold only the rows near the scroll position, read a page at a time from the store and the far pages evicted, sized by a count of what the filter, the chips and the search let through, with a placeholder row while a page loads. It SHALL place its day headers from one count per day, without loading rows. The messages waiting to go out SHALL stay on top, outside the paged query. Search, the chips and the unread badge SHALL be conditions of the store's query and cover every stored message. A list showing the store SHALL redraw as a pass's pages land.
+The mail list SHALL hold only the rows near the scroll position, read a page at a time from the store and the far pages evicted, sized by a count of what the filter, the chips, the search and the list's floor let through, with a placeholder row while a page loads. It SHALL place its day headers from one count per day, without loading rows. The messages waiting to go out SHALL stay on top, outside the paged query. Search, the chips and the unread badge SHALL be conditions of the store's query, search and the badge covering every stored message. A list showing the store SHALL redraw as a pass's pages land.
 
 #### Scenario: Scrolling to old mail
-- GIVEN 100k stored messages
+- GIVEN 100k stored messages in one mailbox listed whole
 - WHEN the list is flung to its end
 - THEN the oldest message is shown, and memory holds a bounded number of rows
 
@@ -370,3 +370,63 @@ A listing SHALL mark a message as carrying an attachment from the source's own f
 - GIVEN a `multipart/mixed` message carrying no attachment, listed with a paperclip
 - WHEN it is opened
 - THEN its row loses the paperclip
+
+### Requirement: A mailbox is listed a chunk at a time
+A mailbox's first pass SHALL list its newest messages alone: the scope's floor SHALL be the oldest `Date` among the 50 newest the source names (the last 50 UIDs `UID SEARCH` finds, Graph's `$top` ordered by `sentDateTime`, Gmail's `messages.list`, JMAP's `Email/query` by `receivedAt`), or no floor when it holds fewer, within the account's bound. A chunk SHALL be a number of messages, never a span of time, and the floor SHALL be all that is kept of it: the coverage of the round that listed it. A pass after the first SHALL list from that coverage, or from the round under way, so it is a delta. Widening a mailbox SHALL take the next chunk below its floor, the oldest `Date` among the newest messages dated before it, and list the band it lacks where the backend's checkpoint is bound to no scope (IMAP, Gmail, JMAP), the whole wider scope where it is (Graph).
+
+#### Scenario: A first pass over a large mailbox
+- GIVEN a mailbox of 3,000 messages never listed
+- WHEN it is synced
+- THEN its 50 newest are listed, and its floor is the oldest `Date` among them
+
+#### Scenario: A small mailbox
+- GIVEN a mailbox of 20 messages
+- WHEN it is synced the first time
+- THEN all of them are listed, and nothing is left below its floor
+
+#### Scenario: Widening
+- GIVEN a mailbox listed down to its 50th newest message
+- WHEN it is widened
+- THEN the next 50 below the floor are listed, the band alone on IMAP, Gmail and JMAP
+
+### Requirement: The merged list reaches down to its mailboxes' floor
+The merged list SHALL show no message older than the most recent floor among the mailboxes it shows, so no mailbox's older mail is listed while another's of the same days is not stored yet; a search SHALL still cover every stored message. While a floor holds mail back, the list SHALL end on a row that, once reached, widens by one chunk each shown mailbox holding that floor and reads the list again, or says older mail needs the network when there is none.
+
+#### Scenario: Two mailboxes at different depths
+- GIVEN an inbox listed down to Tuesday and a sent mailbox down to the week before
+- WHEN the list is scrolled to its end
+- THEN it ends at Tuesday, and the inbox's next chunk is listed
+
+#### Scenario: Offline
+- GIVEN no network
+- WHEN the list's end is reached while a floor holds mail back
+- THEN the last row says older mail needs the network, and nothing is asked for
+
+### Requirement: Older mail fills in behind
+After a mail tab's first sync, and on every return to the app or pass after it, every mailbox SHALL widen 500 messages at a time toward its account's bound, with no dialog, the inbox and the sent mail first, a mailbox never listed before one that only lacks older mail, and among them the one holding the most recent floor. The fill SHALL run only while the app is in the foreground, on a network that is not metered, and while no other sync runs; it SHALL stop on an error, and SHALL resume from the floors the store covers.
+
+#### Scenario: Leaving the app
+- GIVEN a fill under way
+- WHEN the app goes to the background
+- THEN no further chunk is listed, and the next return resumes below the floors reached
+
+#### Scenario: A metered network
+- GIVEN a phone on mobile data
+- WHEN the first dialog closes
+- THEN only the first chunks are stored, until an unmetered network is back
+
+### Requirement: A pass takes the inbox first
+Every mail pass SHALL take an account's mailboxes in the order of the role each source states: the inbox, the sent mail, the drafts, every other by name, the junk and the trash last. The roles SHALL be stored as pimdir's collection roles (STORAGE section 14): RFC 6154 attributes and `INBOX` on IMAP, RFC 8621 roles, Gmail's system labels, Graph's well-known folders.
+
+#### Scenario: A Graph account
+- GIVEN Graph listing *Sent Items*, *Projets* and *Inbox* in that order
+- WHEN the account is synced
+- THEN *Inbox* is synced first and *Sent Items* second
+
+### Requirement: Each page's time is logged
+A mail pass SHALL log, page by page, how many messages a page listed and the time spent on the network, on the JSON this side reads and writes, in the engine, and in the store's loads and writes.
+
+#### Scenario: A first round
+- GIVEN a debug build
+- WHEN a mailbox's page lands
+- THEN the log names its count and the four times

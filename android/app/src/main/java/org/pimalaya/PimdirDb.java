@@ -145,6 +145,10 @@ final class PimdirDb extends SQLiteOpenHelper {
         // them: bindings cascade with their item, items with their collection.
         db.setForeignKeyConstraintsEnabled(true);
         db.enableWriteAheadLogging();
+        // NOTE: a page of mail runs a dozen statements per message, the
+        // canonical ones and the store's own, and more than the default 25
+        // distinct ones per pass: a cache that small recompiles them by turns.
+        db.setMaxSqlCacheSize(SQLiteDatabase.MAX_SQL_CACHE_SIZE);
     }
 
     @Override

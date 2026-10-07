@@ -25,6 +25,7 @@ use io_msgraph::v1::{
             MsgraphFlagStatus, MsgraphFollowupFlag, MsgraphMessage, MsgraphRecipient,
             delta::{MsgraphMessagesDelta, MsgraphMessagesDeltaParams},
             get_raw::MsgraphMessageGetRaw,
+            list::{MsgraphMessagesList, MsgraphMessagesListParams, MsgraphMessagesListResponse},
             r#move::MsgraphMessageMove,
             update::MsgraphMessageUpdate,
         },
@@ -43,8 +44,8 @@ use crate::{
         Client,
         graph::parse_graph_url,
         listing::{
-            GRAPH_PAGE, Listing, MailPage, MailRequest, Named, RECEIVED_MARGIN_DAYS, Scope, flags,
-            utc,
+            Floor, GRAPH_PAGE, Listing, MailPage, MailRequest, Named, RECEIVED_MARGIN_DAYS, Scope,
+            flags, utc,
         },
     },
     types::{BridgeError, Mailbox},
@@ -52,6 +53,15 @@ use crate::{
 
 /// The well-known name Graph gives the trash (`Deleted Items`).
 const TRASH: &str = "deleteditems";
+
+/// The other well-known folders a pass is ordered by, with the role each
+/// is in pimdir's vocabulary.
+const WELL_KNOWN: [(&str, &str); 4] = [
+    ("inbox", "inbox"),
+    ("sentitems", "sent"),
+    ("drafts", "drafts"),
+    ("junkemail", "junk"),
+];
 
 /// The `$select` of a folder's message delta: what Annex A's summary and
 /// addresses read, and the markers.
@@ -77,8 +87,11 @@ impl<'a, 'local> Client<'a, 'local> {
     /// being the folder's path, its ancestors' names and its own joined
     /// by `/`, the way IMAP hands the app a hierarchical name.
     ///
-    /// Graph v1.0 tells no folder's role, so the trash is asked for by
-    /// its well-known name and recognised by id.
+    /// Graph v1.0 tells no folder's role, so each role is asked for by its
+    /// well-known name and recognised by id: the trash, which a delete
+    /// needs, and the inbox, the sent items, the drafts and the junk, which
+    /// order a pass. Only the trash is required; a well-known folder the
+    /// mailbox does not answer for leaves its role unsaid.
     pub fn list_graph_mailboxes(
         &mut self,
         token: &str,
@@ -87,7 +100,15 @@ impl<'a, 'local> Client<'a, 'local> {
 
         let coroutine =
             MsgraphMailFolderGet::new(&auth, "me", TRASH).map_err(|err| err.to_string())?;
-        let trash = self.run_msgraph(coroutine)?.id;
+        let mut roles = vec![(self.run_msgraph(coroutine)?.id, "trash")];
+        for (known, role) in WELL_KNOWN {
+            let coroutine =
+                MsgraphMailFolderGet::new(&auth, "me", known).map_err(|err| err.to_string())?;
+            match self.run_msgraph(coroutine) {
+                Ok(folder) => roles.push((folder.id, role)),
+                Err(err) => log::debug!("no well-known folder {known}: {err}"),
+            }
+        }
 
         let params = MsgraphMailFoldersListParams {
             top: Some(100),
@@ -114,7 +135,10 @@ impl<'a, 'local> Client<'a, 'local> {
                 }
             }
 
-            let role = if folder.id == trash { "trash" } else { "" };
+            let role = roles
+                .iter()
+                .find(|(id, _)| *id == folder.id)
+                .map_or("", |(_, role)| *role);
             mailboxes.push((
                 folder.id,
                 Mailbox {
@@ -229,6 +253,49 @@ impl<'a, 'local> Client<'a, 'local> {
                     return Ok(page);
                 }
             }
+        }
+    }
+
+    /// Takes a folder's newest messages below the floor's ceiling until its
+    /// chunk is full: a plain listing ordered by `sentDateTime` (the `Date`
+    /// header, which Graph filters on exactly), filtered below the ceiling,
+    /// `sentDateTime` alone selected, as many a page as the chunk asks for.
+    pub fn graph_floor(
+        &mut self,
+        token: &str,
+        folder_id: &str,
+        floor: &mut Floor,
+    ) -> Result<(), BridgeError> {
+        let auth = HttpAuthBearer::new(token);
+        let filter = floor
+            .scope()
+            .until
+            .as_deref()
+            .map(|until| format!("sentDateTime lt {until}"));
+        let top = floor.count().min(GRAPH_PAGE as usize) as u32;
+        let params = MsgraphMessagesListParams {
+            top: Some(top),
+            select: Some("id,sentDateTime"),
+            filter: filter.as_deref(),
+            orderby: Some("sentDateTime desc"),
+            ..Default::default()
+        };
+
+        let coroutine = MsgraphMessagesList::new(&auth, "me", Some(folder_id), &params)
+            .map_err(|err| err.to_string())?;
+        let mut page = self.run_msgraph(coroutine)?;
+        loop {
+            for message in &page.value {
+                let date = message.sent_date_time.as_deref().and_then(utc);
+                if floor.take(date.as_deref()) {
+                    return Ok(());
+                }
+            }
+            let Some(next) = page.next_link.take() else {
+                return Ok(());
+            };
+            let url = parse_graph_url(&next)?;
+            page = self.run_msgraph(MsgraphSend::<MsgraphMessagesListResponse>::get(&auth, url))?;
         }
     }
 

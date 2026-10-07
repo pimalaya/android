@@ -145,12 +145,14 @@ pub struct Mailbox {
     /// The name a collection is keyed by, hierarchical where the backend
     /// nests.
     pub name: String,
-    /// `trash` where the server marks the mailbox with the RFC 6154
-    /// attribute of that name, empty where it marks it another or none.
+    /// What the source says the mailbox is for, in pimdir's role
+    /// vocabulary (`inbox`, `sent`, `drafts`, `junk`, `trash`, ...): RFC
+    /// 6154 attributes, RFC 8621 roles, Gmail's system labels, Graph's
+    /// well-known folders; empty where it says nothing.
     ///
-    /// The one role a write needs: which mailbox a delete moves into. It
-    /// is read once per sync and stored, because a delete has to decide
-    /// between a move and a marker with no network to ask.
+    /// The trash is what a delete moves into, read once per sync and stored
+    /// because a delete has to decide between a move and a marker with no
+    /// network to ask; the others order a pass, the inbox first.
     pub role: String,
 }
 

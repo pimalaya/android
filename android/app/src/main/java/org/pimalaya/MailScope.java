@@ -54,6 +54,31 @@ final class MailScope {
     }
 
     /**
+     * What a pass lists a mailbox from: the later of its floor (where its
+     * chunks have reached) and the account's bound, null when neither is
+     * set. Both are RFC 3339 instants in UTC written alike, so they compare
+     * as text.
+     */
+    static String clamp(String floor, String bound) {
+        if (floor == null) {
+            return bound;
+        }
+        if (bound == null) {
+            return floor;
+        }
+        return floor.compareTo(bound) >= 0 ? floor : bound;
+    }
+
+    /**
+     * Whether a mailbox's floor still has mail below it that the account
+     * keeps: a floor above the bound, or any floor under no bound. A
+     * mailbox listed whole within its bound limits nothing.
+     */
+    static boolean limits(String floor, String bound) {
+        return floor != null && (bound == null || floor.compareTo(bound) > 0);
+    }
+
+    /**
      * The floor of an {@code months} bound on {@code today}, as the RFC 3339
      * instant Annex A writes a date in: the first day of the month that many
      * months back, at midnight UTC, or null for no bound.

@@ -26,3 +26,22 @@ Things to look at once there are numbers:
 - A server without QRESYNC answers every pass with a round, so every pass relists the scope's headers; a CONDSTORE-only delta (`CHANGEDSINCE` plus a UID search for expunges) would spare it.
 - Gmail reads metadata one request per message (io-gmail has no batch endpoint): about 40 a second, so an unbounded 100k-message account takes about 40 minutes of metadata on its first pass, the newest first.
 - A list page read from an offset (a fling far from any loaded page) reads the canonical statement as a subquery and pays for the rows it skips.
+
+## Where a first round's time goes (short-first-sync, 2026-10-07)
+
+The owner's device log (Microsoft 365 test account, about 1 GB, 3,748 messages in 12 mailboxes) had the first mail pass at 65 s, of which Graph's network share was about 20 s at 1,000 a page. The rest is the bridge and the store, so every mail page now logs where its time goes (`PimdirEngine.Clock`, `D/pimalaya: page ...`): the remote call (network and connector), the JSON this side reads and writes, the engine between a reply and its next yield (the Rust parse of the page and the merge included), and the store's loads and writes.
+
+`MailBridgeClockTest` replays a first round of 4,000 named messages in four pages of 1,000 through the real bridge and the real store, the pages read from the string the native call returns, so the clock covers everything but the network. On the build host (Robolectric's SQLite, the bridge built in release; three runs each):
+
+| | JSON (Java) | engine (Rust, JNI) | store (Java SQLite) | total |
+|---|---|---|---|---|
+| before | 60 ms | 153 ms | 1,220 ms | 1,435 ms |
+| after | 55 to 63 ms | 182 to 203 ms | 987 to 1,006 ms | 1,250 ms |
+
+The store dominates, about 85% of the non-network time; the JSON crossing is under 5% and the engine about 10%. Rust writing the page into the store directly is not open on Android, where the store is the platform's SQLite behind Java and the bridge compiles no SQLite of its own (the smallest-binary choice behind `PimdirSql`), so the cut went into the writes: a new message no longer reads back a binding it cannot have (its item did not exist, and a binding cascades with its item), replaces addresses it has none of, or restamps an item its own insert stamped; the single-value reads of a write batch are compiled statements rebound per message rather than a cursor each; the canonical statements' `:name` rewrite is done once per statement rather than per bind; the connection's statement cache holds 100 rather than 25. Per new message the write went from about 13 statements to 7 plus one per address.
+
+The engine went up by 30 ms: the store's load now carries each message's date (see the log entry), which the bridge turns into date-only summaries it never writes back.
+
+Unmeasured on a device: the cursor windows the compiled reads save are an ART cost the host does not reproduce, so the device should gain more than the host's 18%. The bigger saving is the first pass itself: 50 messages a mailbox where it was all of them.
+
+Graph widening cost (modelled, not measured): a Graph delta link made under a `receivedDateTime` filter is bound to it (`scope_bound`), and pimdir keeps one checkpoint per source, so a widening relists the whole wider scope rather than the band. A mailbox of `n` messages filled 500 at a time lists about `n²/1000` messages in all (an inbox of 2,000: 500 + 1,000 + 1,500 + 2,000 = 5,000, about six pages where one round would take two). A plain `/messages` listing of the band (`$filter=sentDateTime ge … and sentDateTime lt …`) would cost the band alone, but the delta link would stay blind to what the band holds (changes and removals below its filter), so it is not done: it needs pimdir to keep a checkpoint per band, or to let a connector refresh its checkpoint's filter in place.

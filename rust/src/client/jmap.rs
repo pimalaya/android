@@ -55,8 +55,8 @@ use crate::{
         Client,
         convert::{coroutine_error, rejected, required},
         listing::{
-            JMAP_PAGE, Listing, MailPage, MailRequest, Named, RECEIVED_MARGIN_DAYS, Scope, flags,
-            utc,
+            Floor, JMAP_PAGE, Listing, MailPage, MailRequest, Named, RECEIVED_MARGIN_DAYS, Scope,
+            flags, utc,
         },
     },
     jmap,
@@ -642,6 +642,59 @@ impl<'a, 'local> Client<'a, 'local> {
         ))
     }
 
+    /// Takes a mailbox's newest emails below the floor's ceiling until its
+    /// chunk is full: `Email/query` sorted by `receivedAt`, narrowed two
+    /// days above the ceiling, each email's `sentAt` (the `Date` header)
+    /// taken a page at a time, as many a page as the chunk asks for.
+    pub fn jmap_floor(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        mailbox_id: &str,
+        floor: &mut Floor,
+    ) -> Result<(), BridgeError> {
+        let auth = jmap_auth(credentials);
+        let session = self.jmap_session(session_url, &auth)?;
+        let api_url = session.api_url.clone();
+        let limit = (floor.count() as u64)
+            .min(max_objects_in_get(&session))
+            .max(1);
+        let mut position = 0;
+
+        loop {
+            let filter = JmapEmailFilter {
+                in_mailbox: Some(mailbox_id.to_string()),
+                before: floor
+                    .scope()
+                    .received_until(RECEIVED_MARGIN_DAYS)
+                    .map(|until| until.strftime("%Y-%m-%dT%H:%M:%SZ").to_string()),
+                ..Default::default()
+            };
+            let opts = JmapEmailQueryOptions {
+                filter: Some(JmapFilter::Condition(filter)),
+                sort: Some(vec![JmapEmailComparator::received_at_desc()]),
+                position: Some(position),
+                limit: Some(limit),
+                properties: Some(vec![JmapEmailProperty::Id, JmapEmailProperty::SentAt]),
+            };
+            let coroutine =
+                JmapEmailQuery::new(&session, &auth, opts).map_err(|err| err.to_string())?;
+            let out = self.run_jmap(&api_url, coroutine)?;
+
+            let listed = out.emails.len() as u64;
+            for email in &out.emails {
+                let date = email.sent_at.as_deref().and_then(utc);
+                if floor.take(date.as_deref()) {
+                    return Ok(());
+                }
+            }
+            position = out.position + listed;
+            if listed == 0 || out.total.is_some_and(|total| position >= total) {
+                return Ok(());
+            }
+        }
+    }
+
     /// The account's `Email` state, what a delta lists from.
     fn jmap_email_state(
         &mut self,
@@ -781,8 +834,14 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(named
             .iter()
             .map(|(id, mailbox)| {
+                // NOTE: RFC 8621's roles are pimdir's vocabulary already.
                 let role = match mailbox.role {
+                    Some(JmapMailboxRole::Inbox) => "inbox",
+                    Some(JmapMailboxRole::Sent) => "sent",
+                    Some(JmapMailboxRole::Drafts) => "drafts",
+                    Some(JmapMailboxRole::Junk) => "junk",
                     Some(JmapMailboxRole::Trash) => "trash",
+                    Some(JmapMailboxRole::Archive) => "archive",
                     _ => "",
                 };
                 (id.clone(), mailbox_path(&named, mailbox), role.into())

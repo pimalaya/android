@@ -571,6 +571,7 @@ final class AccountSettings {
         // and left behind they would stay listed under an account the
         // filter no longer offers to hide.
         host.mail.forget(email);
+        FirstSync.forget(host, email);
         host.events.forget(email);
         host.accounts.removeIf(entry -> entry.email.equals(email));
         host.reloadHome();

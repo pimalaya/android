@@ -22,7 +22,7 @@ use crate::{
     client::{
         self, Client,
         gmail::GmailEnvelope,
-        listing::{Listing, MailPage, MailRequest},
+        listing::{Floor, Listing, MailPage, MailRequest},
     },
     ffi::{
         error_json, parse_url, read_string,
@@ -133,6 +133,85 @@ pub extern "system" fn Java_org_pimalaya_client_Native_enumerateMailbox<'local>(
         Ok(env.new_string(json)?.into())
     })
     .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.mailFloor`: the floor of a mailbox's next chunk, the oldest
+/// `Date` among its `count` newest messages dated before `before` (RFC
+/// 3339 `Z`, empty for no ceiling). Returns `{"floor", "dated"}`, `floor`
+/// null when fewer than `count` dated messages lie below the ceiling: the
+/// mailbox is whole below it.
+///
+/// A chunk is a number of messages, never a span of time: the floor is
+/// all the caller keeps, and it is the scope the next sync lists from.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_mailFloor<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    handle: i64,
+    mailbox: JString<'local>,
+    before: JString<'local>,
+    count: i32,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let mailbox = read_string(env, &mailbox);
+        let before = read_string(env, &before);
+
+        let mut client = Client::new(env, &transport);
+        let mut asked = Floor::new(Some(before.as_str()), count.max(1) as usize);
+        let json = match floor(&mut client, handle, &mailbox, &mut asked) {
+            Ok(()) => to_string(&asked.reply()).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// A chunk's floor with whichever backend the session speaks.
+fn floor(
+    client: &mut Client<'_, '_>,
+    handle: i64,
+    mailbox: &str,
+    floor: &mut Floor,
+) -> Result<(), BridgeError> {
+    let session = unsafe { session::borrow(handle) }?;
+    if session.is_imap() {
+        return session.imap(client)?.floor(mailbox, floor);
+    }
+
+    let Some(id) = session.listing().ids.get(mailbox).cloned() else {
+        return Err(format!("No mailbox named `{mailbox}`").into());
+    };
+    if session.is_jmap() {
+        let url = session.jmap_url()?;
+        return client.jmap_floor(&url, &session.credentials(), &id, floor);
+    }
+    if session.is_graph() {
+        return client.graph_floor(session.credentials().password, &id, floor);
+    }
+
+    // NOTE: Gmail lists ids alone, so each is read for its metadata; the
+    // session keeps what it read, and the round after this one reads none
+    // of them again.
+    let token = session.credentials().password.to_string();
+    let scope = floor.scope().clone();
+    let mut cursor: Option<String> = None;
+    loop {
+        let listed = client.list_gmail_page(&token, &id, &scope, cursor.as_deref())?;
+        for message in &listed.ids {
+            let date = gmail_envelope(client, session, &token, message)?
+                .and_then(|envelope| envelope.summary.date);
+            if floor.take(date.as_deref()) {
+                return Ok(());
+            }
+        }
+        match listed.next {
+            Some(next) => cursor = Some(next),
+            None => return Ok(()),
+        }
+    }
 }
 
 /// `Native.fetchMessageSource`: reads one message whole, as the RFC 5322
