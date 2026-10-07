@@ -286,10 +286,10 @@ impl<'a, 'local> Client<'a, 'local> {
                 GcalCoroutineState::Complete(Ok(output)) => return Ok(output.response),
                 GcalCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                 GcalCoroutineState::Yielded(GcalYield::WantsRead) => {
-                    arg = Some(self.read(GCAL_API_BASE)?);
+                    arg = Some(self.http_read(GCAL_API_BASE)?);
                 }
                 GcalCoroutineState::Yielded(GcalYield::WantsWrite(bytes)) => {
-                    self.write(GCAL_API_BASE, &bytes)?;
+                    self.http_write(GCAL_API_BASE, &bytes)?;
                     arg = None;
                 }
             }

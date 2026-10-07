@@ -521,10 +521,10 @@ impl<'a, 'local> Client<'a, 'local> {
                 GpeopleCoroutineState::Complete(Ok(output)) => return Ok(output.response),
                 GpeopleCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                 GpeopleCoroutineState::Yielded(GpeopleYield::WantsRead) => {
-                    arg = Some(self.read(GPEOPLE_API_BASE)?);
+                    arg = Some(self.http_read(GPEOPLE_API_BASE)?);
                 }
                 GpeopleCoroutineState::Yielded(GpeopleYield::WantsWrite(bytes)) => {
-                    self.write(GPEOPLE_API_BASE, &bytes)?;
+                    self.http_write(GPEOPLE_API_BASE, &bytes)?;
                     arg = None;
                 }
             }

@@ -40,7 +40,15 @@ use crate::{
 const TRASH: &str = "deleteditems";
 
 /// The `$select` of a folder listing: the envelope spine and markers.
-const MESSAGE_SELECT: &str = "id,subject,from,receivedDateTime,isRead,flag,hasAttachments";
+///
+/// The date is `sentDateTime`, Graph's name for the `Date` header, which
+/// is what pimdir STORAGE Annex A.1 stores and sorts mail by; the
+/// reception time is no part of a summary.
+const MESSAGE_SELECT: &str = "id,subject,from,sentDateTime,isRead,flag,hasAttachments";
+
+/// The order of a folder listing: newest by the same date the store
+/// sorts on, so the window is the newest messages the list shows.
+const MESSAGE_ORDER: &str = "sentDateTime desc";
 
 impl<'a, 'local> Client<'a, 'local> {
     /// Reads the inbox's folder, so a session that cannot authenticate
@@ -141,7 +149,7 @@ impl<'a, 'local> Client<'a, 'local> {
         let params = MsgraphMessagesListParams {
             top: Some(limit),
             select: Some(MESSAGE_SELECT),
-            orderby: Some("receivedDateTime desc"),
+            orderby: Some(MESSAGE_ORDER),
             ..Default::default()
         };
 
@@ -247,10 +255,39 @@ fn graph_message(mailbox: &str, message: MsgraphMessage) -> Message {
         subject: message.subject.unwrap_or_default(),
         from,
         from_address,
-        date: message.received_date_time.unwrap_or_default(),
+        // NOTE: Annex A.1 leaves the date `NULL` when there is none, which
+        // the wire carries as an empty string, as for the other backends.
+        date: message.sent_date_time.unwrap_or_default(),
         seen: message.is_read.unwrap_or(false),
         answered: false,
         flagged,
         has_attachment: message.has_attachments.unwrap_or(false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use io_msgraph::v1::rest::users::messages::MsgraphMessage;
+
+    use super::graph_message;
+
+    #[test]
+    fn the_date_is_the_sent_date_not_the_reception() {
+        let message = MsgraphMessage {
+            id: "m1".into(),
+            sent_date_time: Some("2026-10-07T08:00:00Z".into()),
+            received_date_time: Some("2026-10-07T08:05:00Z".into()),
+            ..Default::default()
+        };
+        assert_eq!(graph_message("INBOX", message).date, "2026-10-07T08:00:00Z");
+
+        // A message with no `Date` has none, rather than the reception
+        // time standing in for it (Annex A.1: `NULL`).
+        let undated = MsgraphMessage {
+            id: "m2".into(),
+            received_date_time: Some("2026-10-07T08:05:00Z".into()),
+            ..Default::default()
+        };
+        assert_eq!(graph_message("INBOX", undated).date, "");
     }
 }

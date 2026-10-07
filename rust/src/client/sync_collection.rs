@@ -119,11 +119,11 @@ impl Client<'_, '_> {
                 )) => return Ok(SyncRound::BadRequest(coroutine_error(&err))),
                 WebdavCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                 WebdavCoroutineState::Yielded(WebdavYield::WantsWrite(bytes)) => {
-                    self.write(target.as_str(), &bytes)?;
+                    self.http_write(target.as_str(), &bytes)?;
                     arg = None;
                 }
                 WebdavCoroutineState::Yielded(WebdavYield::WantsRead) => {
-                    arg = Some(self.read(target.as_str())?);
+                    arg = Some(self.http_read(target.as_str())?);
                 }
             }
         }
