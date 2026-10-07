@@ -724,6 +724,35 @@ public class PimdirStorageTest {
     }
 
     @Test
+    public void aBandRoundFindsNoUndatedMemberAbsent() throws Exception {
+        // A member with no date (a card holds none) bound from before.
+        storage.applyWrites(
+                batch(storeObject("ca04", "one"), synced("u.vcf", "uid-u", "ca04", "undated")));
+
+        // A band round lists by a date filter that never returns it, so its
+        // absence there proves nothing (SYNC §5); the round records its kind
+        // and the load hands it back for a resume.
+        JSONObject band = round("openRound", "2026-04-01T00:00:00Z");
+        band.put("band", true);
+        storage.applyWrites(batch(band));
+        JSONObject loaded = storage.loadCollection("acct/Contacts", null);
+        assertTrue(loaded.getJSONObject("round").getBoolean("band"));
+        assertEquals(
+                "an undated member is left to a whole-scope round",
+                0,
+                loaded.getJSONArray("unstamped").length());
+
+        storage.applyWrites(batch(round("closeRound", "2026-04-01T00:00:00Z")));
+        assertEquals("a closed round carries no kind", 0, scalar("SELECT round_band FROM sources"));
+
+        // A round over the whole scope does find it absent.
+        storage.applyWrites(batch(round("openRound", null)));
+        loaded = storage.loadCollection("acct/Contacts", null);
+        assertFalse(loaded.getJSONObject("round").getBoolean("band"));
+        assertEquals("u.vcf", loaded.getJSONArray("unstamped").getString(0));
+    }
+
+    @Test
     public void aLoadNamingNoHandleReadsTheSyncStateAlone() throws Exception {
         storage.applyWrites(
                 batch(storeObject("ca03", "one"), synced("a.vcf", "uid-a", "ca03", "alice")));

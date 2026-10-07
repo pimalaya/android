@@ -263,6 +263,9 @@ final class PimdirStorage {
             open.putOpt("until", cursor.isNull(3) ? null : cursor.getString(3));
             open.putOpt("cursor", textOf(cursor, 4));
             open.putOpt("checkpoint", textOf(cursor, 5));
+            // NOTE: the kind the round opened as, so the engine resumes a
+            // band round as one and restarts a round of the other kind.
+            open.put("band", cursor.getInt(6) != 0);
             reply.put("round", open);
             return true;
         }
@@ -270,8 +273,9 @@ final class PimdirStorage {
 
     /**
      * The based bindings of the source the open round has not stamped and
-     * whose item's date is in its scope or unknown: what the round's last
-     * page finds absent unless it lists them (SYNC §5).
+     * whose item's date is in its scope, or unknown on a round over its
+     * whole scope: what the round's last page finds absent unless it lists
+     * them (SYNC §5). A band round leaves an undated member be.
      */
     private static JSONArray unstamped(SQLiteDatabase db, String collection, String source) {
         Map<String, Object> key = new HashMap<>();
@@ -989,6 +993,9 @@ final class PimdirStorage {
         }
         values.put("cursor", blobOf(op, "cursor"));
         values.put("checkpoint", blobOf(op, "checkpoint"));
+        // NOTE: bound as the INTEGER the column is; a band round's absence
+        // infers no delete of an undated member (SYNC §5).
+        values.put("band", op.optBoolean("band", false) ? 1L : 0L);
 
         PimdirSql.Bound bound = PimdirSql.bind(statement, values);
         db.execSQL(bound.sql, bound.args);

@@ -32,3 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added a Google Play support prompt with one-time pay-what-you-want tiers; the FOSS builds ship free and ungated.
 - Added the packaging: a Nix flake pinning the toolchain and a release workflow assembling one signed APK per ABI plus a universal one.
 - Set the minimum supported Android version to 8.0 (API 26).
+
+### Fixed
+
+- Fixed a message with no date vanishing from the phone when older mail was loaded: a band of older mail is listed by date, which never returns an undated message, so its absence there no longer reads as a deletion.

@@ -709,14 +709,11 @@ fn a_link_or_cursor_from_before_is_refused() {
     );
 }
 
-// NOTE: on io-pimdir f9b13f8 a band round's last page infers the deletion
-// of every bound member it did not list whose date is unknown (no date is
-// in every scope), and a band listed by `sentDateTime` never lists an
-// undated message, so the widening drops it. io-pimdir is being fixed so a
-// band round infers no deletion of an undated member; this test pins that
-// and runs once the bridge moves to the fixed io-pimdir.
+// NOTE: a band listed by `sentDateTime` never lists an undated message, so
+// its absence from a band round proves nothing; the round infers no
+// deletion of it (io-pimdir ff28408, pimdir SYNC §5), and a delta or a
+// round over a whole scope still answers for it.
 #[test]
-#[ignore = "pending io-pimdir: a band round drops bound undated mail (f9b13f8)"]
 fn an_undated_message_survives_a_widening() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = store(dir.path());

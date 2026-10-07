@@ -233,6 +233,32 @@ public class PimdirDbTest {
                 sqlOf("items_count_purge").contains("purges + 1"));
     }
 
+    @Test
+    public void aRoundOpenedBeforeTheBandColumnReadsAsAWholeScopeRound() {
+        // A store written before rounds recorded their kind (pimdir
+        // 00535c1), with a round open in it: the column is added under the
+        // open round, which then reads as one over its whole scope.
+        db.execSQL("ALTER TABLE sources DROP COLUMN round_band");
+        db.execSQL("INSERT INTO collections(id, account, kind, name)"
+                + " VALUES('acct/INBOX', 'acct', 'message/rfc822', 'INBOX')");
+        db.execSQL("INSERT INTO sources(collection, source, round, round_since, round_started_at)"
+                + " VALUES('acct/INBOX', 'server', 3, '2026-04-01T00:00:00Z',"
+                + " '2026-10-07T08:00:00Z')");
+        store.close();
+
+        store = new PimdirDb(RuntimeEnvironment.getApplication());
+        db = store.getWritableDatabase();
+
+        assertTrue("the round's kind is added", hasColumn("sources", "round_band"));
+        try (Cursor cursor =
+                db.rawQuery("SELECT round, round_band FROM sources WHERE collection = 'acct/INBOX'",
+                        null)) {
+            assertTrue("the open round survives", cursor.moveToFirst());
+            assertEquals(3, cursor.getInt(0));
+            assertEquals(0, cursor.getInt(1));
+        }
+    }
+
     /** The statement an object was created with, as sqlite_master keeps it. */
     private String sqlOf(String name) {
         try (Cursor cursor =

@@ -351,6 +351,7 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                         .filter(|token| !token.is_empty())
                         .map(|token| PimdirCheckpoint(token.into_bytes())),
                     started_at: round.started_at,
+                    band: round.band,
                 }),
                 unstamped: loaded.unstamped.into_iter().map(PimdirHandle).collect(),
             })
@@ -766,6 +767,9 @@ enum WriteOpJson {
     OpenRound {
         collection: String,
         scope: ScopeJson,
+        /// Whether it lists only the band a coverage lacks, whose absence
+        /// infers no delete of an undated member (SYNC §5).
+        band: bool,
     },
     /// Stamps the bindings of the handles a page listed with the open
     /// round's id, after the batch's upserts.
@@ -827,9 +831,14 @@ impl From<&PimdirWriteOp> for WriteOpJson {
                 collection: collection.as_str().into(),
                 checkpoint: checkpoint_str(checkpoint),
             },
-            PimdirWriteOp::OpenRound { collection, scope } => Self::OpenRound {
+            PimdirWriteOp::OpenRound {
+                collection,
+                scope,
+                band,
+            } => Self::OpenRound {
                 collection: collection.as_str().into(),
                 scope: scope.into(),
+                band: *band,
             },
             PimdirWriteOp::Stamp {
                 collection,
@@ -1146,6 +1155,10 @@ struct RoundJson {
     #[serde(default)]
     checkpoint: Option<String>,
     started_at: String,
+    /// Whether the round lists only the band its coverage lacks, as it
+    /// opened (SYNC §5).
+    #[serde(default)]
+    band: bool,
 }
 
 /// Reply to a `lookup` yield.
@@ -1339,12 +1352,13 @@ pub(crate) fn enumerated(reply: &str) -> PimdirEnumerated {
 #[cfg(test)]
 mod tests {
     use io_pimdir::{
+        change::PimdirWriteOp,
         collection::{PimdirCheckpoint, PimdirCollectionId, PimdirCursor, PimdirScope},
         remote::{PimdirEnumerate, PimdirEnumerated, PimdirListing},
     };
     use serde_json::{Value, from_str};
 
-    use super::{SnapshotJson, enumerate_json};
+    use super::{RoundJson, SnapshotJson, WriteOpJson, enumerate_json};
 
     fn page(json: &str) -> PimdirEnumerated {
         from_str::<SnapshotJson>(json).unwrap().into()
@@ -1419,6 +1433,32 @@ mod tests {
         assert_eq!(
             delta["cursor"], "7:42",
             "the checkpoint for a one-page connector"
+        );
+    }
+
+    #[test]
+    fn a_band_round_keeps_its_kind_across_the_wire() {
+        // The store records the kind a round opened as (SYNC §5), so the
+        // op carries it to Java and the load carries it back.
+        let op = WriteOpJson::from(&PimdirWriteOp::OpenRound {
+            collection: PimdirCollectionId::from("acct/INBOX"),
+            scope: PimdirScope::since("2026-04-01T00:00:00Z"),
+            band: true,
+        });
+        let op = serde_json::to_value(op).unwrap();
+        assert_eq!(op["op"], "openRound");
+        assert_eq!(op["band"], true);
+
+        let round: RoundJson = from_str(
+            r#"{"since": "2026-04-01T00:00:00Z", "startedAt": "2026-10-07T08:00:00Z",
+                "band": true}"#,
+        )
+        .unwrap();
+        assert!(round.band);
+        let round: RoundJson = from_str(r#"{"startedAt": "2026-10-07T08:00:00Z"}"#).unwrap();
+        assert!(
+            !round.band,
+            "a round loaded with no kind lists its whole scope"
         );
     }
 }
