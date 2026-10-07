@@ -179,9 +179,7 @@ fn name_messages(
     if !session.is_graph() {
         return Err("Only a Graph listing names messages by id alone".into());
     }
-    let Some(id) = session.listing().ids.get(mailbox).cloned() else {
-        return Err(format!("No mailbox named `{mailbox}`").into());
-    };
+    let id = mailbox_id(client, session, mailbox)?;
     client.name_graph_messages(session.credentials().password, &id, &ids)
 }
 
@@ -231,9 +229,7 @@ fn floor(
         return session.imap(client)?.floor(mailbox, floor);
     }
 
-    let Some(id) = session.listing().ids.get(mailbox).cloned() else {
-        return Err(format!("No mailbox named `{mailbox}`").into());
-    };
+    let id = mailbox_id(client, session, mailbox)?;
     if session.is_jmap() {
         let url = session.jmap_url()?;
         return client.jmap_floor(&url, &session.credentials(), &id, floor);
@@ -352,26 +348,45 @@ fn read_source(
 /// answer comes from.
 fn list_mailboxes(client: &mut Client<'_, '_>, handle: i64) -> Result<Vec<Mailbox>, BridgeError> {
     let session = unsafe { session::borrow(handle) }?;
-    let listed = if session.is_jmap() {
-        let url = session.jmap_url()?;
-        client.list_jmap_mailbox_roster(&url, &session.credentials())?
-    } else if session.is_graph() {
-        client.list_graph_mailboxes(session.credentials().password)?
-    } else if session.is_gmail() {
-        client.list_gmail_mailboxes(session.credentials().password)?
-    } else {
+    if session.is_imap() {
         return client::imap::list_mailboxes(&mut session.imap(client)?);
-    };
-
-    let ids = &mut session.listing().ids;
-    ids.clear();
-    let mut roster = Vec::with_capacity(listed.len());
-    for (id, mailbox) in listed {
-        ids.insert(mailbox.name.clone(), id);
-        roster.push(mailbox);
     }
 
-    Ok(roster)
+    let listed = http_roster(client, session)?;
+    Ok(session.listing().remember(listed))
+}
+
+/// The roster of an HTTP session, each mailbox with the id it is
+/// addressed by.
+fn http_roster(
+    client: &mut Client<'_, '_>,
+    session: &MailSession,
+) -> Result<Vec<(String, Mailbox)>, BridgeError> {
+    if session.is_jmap() {
+        let url = session.jmap_url()?;
+        return client.list_jmap_mailbox_roster(&url, &session.credentials());
+    }
+    if session.is_graph() {
+        return client.list_graph_mailboxes(session.credentials().password);
+    }
+    client.list_gmail_mailboxes(session.credentials().password)
+}
+
+/// The id an HTTP session addresses a mailbox by, the roster read on
+/// demand when the session has not read it ([`session::MailListing::resolve`]),
+/// so no caller has to list the mailboxes before widening one.
+fn mailbox_id(
+    client: &mut Client<'_, '_>,
+    session: &mut MailSession,
+    mailbox: &str,
+) -> Result<String, BridgeError> {
+    // NOTE: the listing is lifted out while the roster is read, which
+    // needs the session's credentials, and put back whatever came of it,
+    // the Gmail envelopes it keeps with it.
+    let mut listing = std::mem::take(session.listing());
+    let id = listing.resolve(mailbox, || http_roster(client, session));
+    *session.listing() = listing;
+    id
 }
 
 /// One page of a mailbox's listing with whichever backend the session
@@ -390,9 +405,7 @@ fn enumerate(
         return session.imap(client)?.list_page(mailbox, &request);
     }
 
-    let Some(id) = session.listing().ids.get(mailbox).cloned() else {
-        return Err(format!("No mailbox named `{mailbox}`").into());
-    };
+    let id = mailbox_id(client, session, mailbox)?;
     if session.is_gmail() {
         return list_gmail(client, session, &id, &request);
     }

@@ -28,7 +28,7 @@ use crate::{
     account::{self, Backend},
     client::{self, Client, gmail::GmailEnvelope, imap::ImapState},
     ffi::parse_url,
-    types::{BridgeError, Credentials},
+    types::{BridgeError, Credentials, Mailbox},
 };
 
 /// One account's live mail connection, held across native calls.
@@ -61,6 +61,43 @@ enum MailKind {
 pub struct MailListing {
     pub ids: BTreeMap<String, String>,
     pub envelopes: BTreeMap<String, GmailEnvelope>,
+}
+
+impl MailListing {
+    /// Keeps the ids a roster named, by path, and answers the roster.
+    pub fn remember(&mut self, listed: Vec<(String, Mailbox)>) -> Vec<Mailbox> {
+        self.ids.clear();
+        let mut roster = Vec::with_capacity(listed.len());
+        for (id, mailbox) in listed {
+            self.ids.insert(mailbox.name.clone(), id);
+            roster.push(mailbox);
+        }
+        roster
+    }
+
+    /// The id of the mailbox named `mailbox`, reading the roster first
+    /// when this session holds no id for it.
+    ///
+    /// Every verb that addresses a mailbox by id comes through here, so a
+    /// session never has to have listed the mailboxes before using one: a
+    /// session opened to widen one mailbox, a fill worker's, or one
+    /// reopened after its connection died starts with no roster, and used
+    /// to refuse every mailbox it was asked for. A name the roster just
+    /// read does not hold is a mailbox that is not there (any more).
+    pub fn resolve(
+        &mut self,
+        mailbox: &str,
+        roster: impl FnOnce() -> Result<Vec<(String, Mailbox)>, BridgeError>,
+    ) -> Result<String, BridgeError> {
+        if let Some(id) = self.ids.get(mailbox) {
+            return Ok(id.clone());
+        }
+        self.remember(roster()?);
+        match self.ids.get(mailbox) {
+            Some(id) => Ok(id.clone()),
+            None => Err(format!("No mailbox named `{mailbox}`").into()),
+        }
+    }
 }
 
 impl MailSession {
@@ -210,6 +247,67 @@ mod tests {
         // is why the caller is one class.
         let refused = unsafe { borrow(0) };
         assert!(refused.is_err(), "a zero handle names no session");
+    }
+
+    fn roster(names: &[&str]) -> Vec<(String, Mailbox)> {
+        names
+            .iter()
+            .map(|name| {
+                (
+                    format!("id-{name}"),
+                    Mailbox {
+                        name: name.to_string(),
+                        role: String::new(),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_fresh_session_reads_the_roster_on_its_first_lookup() {
+        // A session opened to widen one mailbox, or by a fill worker, has
+        // never listed the mailboxes: the lookup reads the roster itself
+        // rather than refusing a mailbox that is there.
+        let mut listing = MailListing::default();
+        let mut listed = 0;
+        let id = listing.resolve("Archive", || {
+            listed += 1;
+            Ok(roster(&["Inbox", "Archive"]))
+        });
+        assert_eq!(id.unwrap(), "id-Archive");
+        assert_eq!(listed, 1);
+
+        let id = listing.resolve("Inbox", || {
+            listed += 1;
+            Ok(roster(&["Inbox", "Archive"]))
+        });
+        assert_eq!(id.unwrap(), "id-Inbox");
+        assert_eq!(listed, 1, "the roster read once serves every mailbox");
+    }
+
+    #[test]
+    fn a_mailbox_the_roster_does_not_hold_is_refused() {
+        let mut listing = MailListing::default();
+        listing.remember(roster(&["Inbox"]));
+        let refused = listing.resolve("Gone", || Ok(roster(&["Inbox"])));
+        assert_eq!(refused.unwrap_err().message, "No mailbox named `Gone`");
+    }
+
+    #[test]
+    fn a_mailbox_made_since_the_roster_is_found_by_reading_it_again() {
+        let mut listing = MailListing::default();
+        listing.remember(roster(&["Inbox"]));
+        let id = listing.resolve("Projets", || Ok(roster(&["Inbox", "Projets"])));
+        assert_eq!(id.unwrap(), "id-Projets");
+    }
+
+    #[test]
+    fn a_roster_that_fails_fails_the_lookup() {
+        let mut listing = MailListing::default();
+        let failed = listing.resolve("Inbox", || Err("offline".into()));
+        assert_eq!(failed.unwrap_err().message, "offline");
+        assert!(listing.ids.is_empty());
     }
 
     #[test]
