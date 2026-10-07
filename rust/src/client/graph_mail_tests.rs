@@ -36,7 +36,8 @@ use jiff::{SignedDuration, Timestamp};
 use super::{Band, GraphFolder, MessagesPage, list_folder, name_messages};
 use crate::{
     client::listing::{Floor, Listing, MailRequest, Named, Scope},
-    types::BridgeError,
+    ffi::session::MailListing,
+    types::{BridgeError, Mailbox},
 };
 
 const SOURCE: &str = "graph";
@@ -734,4 +735,68 @@ fn an_undated_message_survives_a_widening() {
         handles(dir.path()).contains("undated"),
         "a band listed by date says nothing of an undated message"
     );
+}
+
+// NOTE: the owner's device, a Microsoft 365 account: a session opened to
+// widen a mailbox, or by a step of the fill, had never read the roster, so
+// it knew no folder id and refused every mailbox ("No mailbox named
+// `Archive`"). The session reads the roster on its first lookup now.
+#[test]
+fn a_fresh_session_widens_and_fills_a_folder_it_never_listed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(dir.path());
+    let mut graph = FakeGraph::new(200);
+
+    // NOTE: the first chunk, on the pass's own session.
+    let mut floor = graph.floor(None, 50).unwrap();
+    sync(&mut store, &mut graph, dir.path(), Some(&floor)).unwrap();
+
+    let folders = || -> Result<Vec<(String, Mailbox)>, BridgeError> {
+        Ok(vec![
+            (
+                "AAMk-inbox".into(),
+                Mailbox {
+                    name: INBOX.into(),
+                    role: "inbox".into(),
+                },
+            ),
+            (
+                "AAMk-archive".into(),
+                Mailbox {
+                    name: "Archive".into(),
+                    role: String::new(),
+                },
+            ),
+        ])
+    };
+    let mut fresh = MailListing::default();
+    let mut rosters = 0;
+
+    // NOTE: a widening by a chunk of 50 on the fresh session.
+    let id = fresh.resolve(INBOX, || {
+        rosters += 1;
+        folders()
+    });
+    assert_eq!(id.unwrap(), "AAMk-inbox");
+    floor = graph.floor(Some(&floor), 50).unwrap();
+    sync(&mut store, &mut graph, dir.path(), Some(&floor)).unwrap();
+    assert_eq!(handles(dir.path()).len(), 100);
+
+    // NOTE: a fill step of 500 on the same session: the rest, the folder
+    // whole below its floor, and no second roster.
+    let id = fresh.resolve(INBOX, || {
+        rosters += 1;
+        folders()
+    });
+    assert_eq!(id.unwrap(), "AAMk-inbox");
+    assert_eq!(graph.floor(Some(&floor), 500), None);
+    sync(&mut store, &mut graph, dir.path(), None).unwrap();
+    assert_eq!(handles(dir.path()).len(), 200);
+
+    let archive = fresh.resolve("Archive", || {
+        rosters += 1;
+        folders()
+    });
+    assert_eq!(archive.unwrap(), "AAMk-archive");
+    assert_eq!(rosters, 1, "the roster is read once per session");
 }

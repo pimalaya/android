@@ -294,16 +294,34 @@ final class MailList {
     /** Whether the mailboxes' next chunks are being listed for the list's end. */
     private boolean widening;
 
-    /** Whether older mail could not be listed (no network, or it failed): no retry until asked. */
-    private boolean stalled;
+    /**
+     * Why older mail could not be listed, as the line the list's last row
+     * says ({@link #stallOf}); 0 while it can be tried. No retry until asked.
+     */
+    private int stalled;
+
+    /**
+     * What the list's last row says once a widening is over: nothing when it
+     * went through, that older mail needs the network only when there is
+     * none, and otherwise that it could not be loaded, with a tap to try
+     * again. A failure on a phone that is online is the server's or this
+     * app's, and blaming the network for it sends the reader looking for a
+     * signal they already have.
+     */
+    static int stallOf(boolean widened, boolean online) {
+        if (widened) {
+            return 0;
+        }
+        return online ? R.string.mail_more_failed : R.string.mail_more_offline;
+    }
 
     /**
      * Lets the list's end try for older mail again: after a pass went through,
-     * or on return to the app.
+     * on return to the app, or on a tap on the row that said it failed.
      */
     void retryOlder() {
-        if (stalled) {
-            stalled = false;
+        if (stalled != 0) {
+            stalled = 0;
             adapter.notifyDataSetChanged();
         }
     }
@@ -314,11 +332,11 @@ final class MailList {
      * the list read again, reaching down to whichever floor limits it next.
      */
     private void older() {
-        if (widening || stalled || currentQuery == null) {
+        if (widening || stalled != 0 || currentQuery == null) {
             return;
         }
         if (!host.online()) {
-            stalled = true;
+            stalled = stallOf(false, false);
             host.main.post(adapter::notifyDataSetChanged);
             return;
         }
@@ -327,7 +345,7 @@ final class MailList {
                 currentQuery::holds,
                 widened -> {
                     widening = false;
-                    stalled = !widened;
+                    stalled = stallOf(widened, host.online());
                     reload();
                 });
     }
@@ -340,9 +358,12 @@ final class MailList {
         }
         older();
         view.findViewById(R.id.mail_more_progress)
-                .setVisibility(stalled ? View.GONE : View.VISIBLE);
+                .setVisibility(stalled != 0 ? View.GONE : View.VISIBLE);
         ((TextView) view.findViewById(R.id.mail_more_label))
-                .setText(stalled ? R.string.mail_more_offline : R.string.mail_more_loading);
+                .setText(stalled != 0 ? stalled : R.string.mail_more_loading);
+        boolean retry = stalled == R.string.mail_more_failed;
+        view.setOnClickListener(retry ? tapped -> retryOlder() : null);
+        view.setClickable(retry);
         return view;
     }
 
