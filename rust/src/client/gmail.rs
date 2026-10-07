@@ -46,6 +46,20 @@ use crate::{
     types::{BridgeError, Mailbox},
 };
 
+/// The quota units each Gmail method costs, as Google documents them
+/// (Gmail API, "Usage limits"), which [`throttle::pace_gmail`] spends
+/// against the per-minute budget. A batch costs the sum of its calls.
+pub(crate) mod units {
+    pub(crate) const GET_PROFILE: u32 = 1;
+    pub(crate) const LABELS_LIST: u32 = 1;
+    pub(crate) const HISTORY_LIST: u32 = 2;
+    pub(crate) const MESSAGES_LIST: u32 = 5;
+    pub(crate) const MESSAGES_GET: u32 = 5;
+    pub(crate) const MESSAGES_MODIFY: u32 = 5;
+    pub(crate) const MESSAGES_TRASH: u32 = 5;
+    pub(crate) const MESSAGES_SEND: u32 = 100;
+}
+
 /// The label Gmail files deleted mail under.
 const TRASH: &str = "TRASH";
 
@@ -98,7 +112,7 @@ impl<'a, 'local> Client<'a, 'local> {
     pub fn gmail_history_id(&mut self, token: &str) -> Result<String, BridgeError> {
         let auth = HttpAuthBearer::new(token);
         let coroutine = GmailProfileGet::new(&auth, "me").map_err(|err| err.to_string())?;
-        let profile = self.run_gmail(coroutine)?;
+        let profile = self.run_gmail(units::GET_PROFILE, coroutine)?;
 
         profile
             .history_id
@@ -114,7 +128,7 @@ impl<'a, 'local> Client<'a, 'local> {
     ) -> Result<Vec<(String, Mailbox)>, BridgeError> {
         let auth = HttpAuthBearer::new(token);
         let coroutine = GmailLabelsList::new(&auth, "me").map_err(|err| err.to_string())?;
-        let labels = self.run_gmail(coroutine)?.labels;
+        let labels = self.run_gmail(units::LABELS_LIST, coroutine)?.labels;
 
         Ok(labels
             .into_iter()
@@ -172,7 +186,7 @@ impl<'a, 'local> Client<'a, 'local> {
 
         let coroutine =
             GmailMessagesList::new(&auth, "me", &params).map_err(|err| err.to_string())?;
-        let page = self.run_gmail(coroutine)?;
+        let page = self.run_gmail(units::MESSAGES_LIST, coroutine)?;
 
         Ok(GmailIds {
             ids: page
@@ -205,7 +219,7 @@ impl<'a, 'local> Client<'a, 'local> {
             };
             let coroutine =
                 GmailHistoryList::new(&auth, "me", &params).map_err(|err| err.to_string())?;
-            let page = match self.run_gmail(coroutine) {
+            let page = match self.run_gmail(units::HISTORY_LIST, coroutine) {
                 Ok(page) => page,
                 Err(err) if err.status == Some(404) => return Ok(None),
                 Err(err) => return Err(err),
@@ -251,7 +265,7 @@ impl<'a, 'local> Client<'a, 'local> {
             &ENVELOPE_HEADERS,
         )
         .map_err(|err| err.to_string())?;
-        match self.run_gmail(coroutine) {
+        match self.run_gmail(units::MESSAGES_GET, coroutine) {
             Ok(message) => Ok(Some(envelope(message))),
             Err(err) if err.status == Some(404) => Ok(None),
             Err(err) => Err(err),
@@ -263,7 +277,7 @@ impl<'a, 'local> Client<'a, 'local> {
         let auth = HttpAuthBearer::new(token);
         let coroutine = GmailMessageGet::new(&auth, "me", id, GmailMessageFormat::Raw, &[])
             .map_err(|err| err.to_string())?;
-        let message = self.run_gmail(coroutine)?;
+        let message = self.run_gmail(units::MESSAGES_GET, coroutine)?;
 
         let raw = message
             .raw
@@ -299,14 +313,14 @@ impl<'a, 'local> Client<'a, 'local> {
         let auth = HttpAuthBearer::new(token);
         let coroutine =
             GmailMessageModify::new(&auth, "me", id, add, remove).map_err(|err| err.to_string())?;
-        Ok(self.run_gmail(coroutine)?.label_ids)
+        Ok(self.run_gmail(units::MESSAGES_MODIFY, coroutine)?.label_ids)
     }
 
     /// Moves one message into the trash, naming the mailbox it landed in.
     pub fn delete_gmail_message(&mut self, token: &str, id: &str) -> Result<String, BridgeError> {
         let auth = HttpAuthBearer::new(token);
         let coroutine = GmailMessageTrash::new(&auth, "me", id).map_err(|err| err.to_string())?;
-        self.run_gmail(coroutine)?;
+        self.run_gmail(units::MESSAGES_TRASH, coroutine)?;
         Ok(TRASH.into())
     }
 
@@ -320,17 +334,18 @@ impl<'a, 'local> Client<'a, 'local> {
         };
         let coroutine =
             GmailMessageSend::new(&auth, "me", &message).map_err(|err| err.to_string())?;
-        self.run_gmail(coroutine)?;
+        self.run_gmail(units::MESSAGES_SEND, coroutine)?;
         Ok(())
     }
 
-    /// Runs one Gmail coroutine to completion over the transport, paced
-    /// under Gmail's per-user quota ([`throttle::pace_gmail`]).
-    fn run_gmail<C, T>(&mut self, mut coroutine: C) -> Result<T, BridgeError>
+    /// Runs one Gmail coroutine costing `units` quota units to completion
+    /// over the transport, paced under Gmail's per-user quota
+    /// ([`throttle::pace_gmail`]).
+    fn run_gmail<C, T>(&mut self, units: u32, mut coroutine: C) -> Result<T, BridgeError>
     where
         C: GmailCoroutine<Yield = GmailYield, Return = Result<GmailSendOutput<T>, GmailSendError>>,
     {
-        throttle::pace_gmail();
+        throttle::pace_gmail(units);
         let mut arg: Option<Vec<u8>> = None;
 
         loop {

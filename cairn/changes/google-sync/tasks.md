@@ -17,9 +17,9 @@ In order; 1, 2 and 5-A1 are small and can land first, together.
 - [ ] Test: the flow asks once for mail, calendar and contacts
 
 ## 2. Per-minute quota
-- [ ] Throttle recognises the per-minute quota 403 (`Quota exceeded for quota metric`, `Units per minute per user`) and 429; waits to the next minute without `Retry-After`, bounded
-- [ ] Pacing bucket gains a per-minute unit budget beside the per-second rate
-- [ ] Tests: a 403 quota answer waits then succeeds; the budget caps a long pass
+- [x] Throttle recognises the per-minute quota 403 (`Quota exceeded for quota metric`, `Units per minute per user`) and 429; waits to the next minute without `Retry-After`, bounded
+- [x] Pacing bucket gains a per-minute unit budget beside the per-second rate
+- [x] Tests: a 403 quota answer waits then succeeds; the budget caps a long pass
 
 ## 3. One account listing
 - [ ] Gmail listing without `labelIds`, `includeSpamTrash=true`, 500 a page, newest first, cursor = page token
