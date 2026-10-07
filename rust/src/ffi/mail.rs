@@ -22,7 +22,7 @@ use crate::{
     client::{
         self, Client,
         gmail::GmailEnvelope,
-        listing::{Floor, Listing, MailPage, MailRequest},
+        listing::{Floor, Listing, MailPage, MailRequest, Named},
     },
     ffi::{
         error_json, parse_url, read_string,
@@ -105,12 +105,15 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listMailboxes<'local>(
 /// `Native.enumerateMailbox`: one page of a mailbox's listing, the
 /// engine's `enumerate` yield answered (pimdir SYNC §4, §5).
 ///
-/// `request` is the yield as the engine wrote it, `{listing, scope}`: a
-/// delta from the checkpoint, or a round over the scope from its first
-/// page or resumed from a cursor. The answer is the reply the engine
-/// reads, `{items, vanished, complete, last, cursor?, checkpoint?}` with
-/// every item `{handle, flags, linkId, summary, sortKey}` named by its
-/// meta, or `{cursorRejected: true}` when the source refused the cursor.
+/// `request` is the yield as the engine wrote it, `{listing, scope}`, and
+/// `covered` when the store's coverage holds the scope: a delta from the
+/// checkpoint, or a round over the scope from its first page or resumed
+/// from a cursor. The answer is the reply the engine reads, `{items,
+/// vanished, complete, last, cursor?, checkpoint?}` with every item
+/// `{handle, flags, linkId, summary, sortKey}` named by its meta, but for
+/// a Graph delta's, listed by `{handle, flags, linkId}` alone for the
+/// caller to name (`nameMessages`) where the store binds it not; or
+/// `{cursorRejected: true}` when the source refused the cursor.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_enumerateMailbox<'local>(
     mut env: EnvUnowned<'local>,
@@ -133,6 +136,53 @@ pub extern "system" fn Java_org_pimalaya_client_Native_enumerateMailbox<'local>(
         Ok(env.new_string(json)?.into())
     })
     .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.nameMessages`: the messages a listing named by id and markers
+/// alone (a Graph delta), each read with its summary. `handles` is a JSON
+/// array of ids; the answer is `{items}`, every item named as a listed
+/// one is, a message gone since it was listed left out.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_nameMessages<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    handle: i64,
+    mailbox: JString<'local>,
+    handles: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let mailbox = read_string(env, &mailbox);
+        let handles = read_string(env, &handles);
+
+        let mut client = Client::new(env, &transport);
+        let json = match name_messages(&mut client, handle, &mailbox, &handles) {
+            Ok(items) => json!({ "items": items }).to_string(),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// Names messages listed by id alone; only Graph lists any.
+fn name_messages(
+    client: &mut Client<'_, '_>,
+    handle: i64,
+    mailbox: &str,
+    handles: &str,
+) -> Result<Vec<Named>, BridgeError> {
+    let ids: Vec<String> =
+        from_str(handles).map_err(|err| format!("Invalid message ids: {err}"))?;
+    let session = unsafe { session::borrow(handle) }?;
+    if !session.is_graph() {
+        return Err("Only a Graph listing names messages by id alone".into());
+    }
+    let Some(id) = session.listing().ids.get(mailbox).cloned() else {
+        return Err(format!("No mailbox named `{mailbox}`").into());
+    };
+    client.name_graph_messages(session.credentials().password, &id, &ids)
 }
 
 /// `Native.mailFloor`: the floor of a mailbox's next chunk, the oldest

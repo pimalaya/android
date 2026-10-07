@@ -1327,6 +1327,15 @@ struct PushResultJson {
     revision: Option<String>,
 }
 
+/// A connector's reply as the engine reads it, for a test driving the
+/// std engine over the JSON a connector answers.
+#[cfg(test)]
+pub(crate) fn enumerated(reply: &str) -> PimdirEnumerated {
+    serde_json::from_str::<SnapshotJson>(reply)
+        .expect("a page the engine reads")
+        .into()
+}
+
 #[cfg(test)]
 mod tests {
     use io_pimdir::{

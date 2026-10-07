@@ -38,3 +38,9 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 sha2 = { version = "0.11", default-features = false }
 url = { version = "2", default-features = false }
 vcard-rs = { version = "0.5", default-features = false, features = ["parser", "jscontact"] }
+
+[dev-dependencies]
+# NOTE: the std store, for the Graph listing's tests to run the real sync
+# engine and store over a fake Graph; the bridge itself compiles no SQLite.
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "f9b13f8836e1161af80b1b1457032ea49b747461", features = ["client", "vendored"] }
+tempfile = { version = "3", default-features = false }
