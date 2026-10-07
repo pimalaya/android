@@ -16,11 +16,11 @@ package org.pimalaya;
  */
 final class Oauth {
     static final String GOOGLE_CLIENT_ID =
-            "23028300025-v4ku58bh4himktfvu8l4u5dmfhoqfdqp.apps.googleusercontent.com";
+            "991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1.apps.googleusercontent.com";
 
     /** Reversed-client-id scheme, mirrored by the manifest intent-filter. */
     static final String GOOGLE_REDIRECT_URI =
-            "com.googleusercontent.apps.23028300025-v4ku58bh4himktfvu8l4u5dmfhoqfdqp:/oauth2redirect";
+            "com.googleusercontent.apps.991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1:/oauth2redirect";
 
     static final String GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
     static final String GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
