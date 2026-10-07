@@ -31,8 +31,10 @@ pub(crate) mod imap;
 mod jmap;
 pub(crate) mod smtp;
 mod sync_collection;
+mod throttle;
 
 use core::error::Error as StdError;
+use std::time::Duration;
 
 use io_webdav::{
     coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield},
@@ -47,23 +49,35 @@ use jni::{
 use percent_encoding::percent_decode_str;
 use url::Url;
 
-use crate::{client::convert::coroutine_error, types::BridgeError};
+use crate::{
+    client::{convert::coroutine_error, throttle::Exchange},
+    types::BridgeError,
+};
 
 /// Sent as the `User-Agent` on every WebDAV request; shared by the
 /// CardDAV verbs and the discovery walk.
 pub(crate) const USER_AGENT: &str = concat!("pimalaya-android/", env!("CARGO_PKG_VERSION"));
 
 /// One native call's CardDAV client: a mutable `Env` and the Java
-/// transport it upcalls for socket I/O.
+/// transport it upcalls for socket I/O. It also carries the HTTP request in
+/// flight and the time spent waiting on throttling servers
+/// ([`throttle`]), both per native call.
 pub struct Client<'a, 'local> {
     env: &'a mut Env<'local>,
     transport: &'a JObject<'local>,
+    exchange: Exchange,
+    waited: Duration,
 }
 
 impl<'a, 'local> Client<'a, 'local> {
     /// Wraps the JNI context for one native call.
     pub fn new(env: &'a mut Env<'local>, transport: &'a JObject<'local>) -> Self {
-        Self { env, transport }
+        Self {
+            env,
+            transport,
+            exchange: Exchange::default(),
+            waited: Duration::ZERO,
+        }
     }
 }
 
@@ -84,11 +98,11 @@ impl<'a, 'local> Client<'a, 'local> {
                 WebdavCoroutineState::Complete(Ok(value)) => return Ok(value),
                 WebdavCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                 WebdavCoroutineState::Yielded(WebdavYield::WantsWrite(bytes)) => {
-                    self.write(target.as_str(), &bytes)?;
+                    self.http_write(target.as_str(), &bytes)?;
                     arg = None;
                 }
                 WebdavCoroutineState::Yielded(WebdavYield::WantsRead) => {
-                    arg = Some(self.read(target.as_str())?);
+                    arg = Some(self.http_read(target.as_str())?);
                 }
             }
         }
@@ -118,11 +132,11 @@ impl<'a, 'local> Client<'a, 'local> {
                     WebdavCoroutineState::Complete(Ok(value)) => return Ok(value),
                     WebdavCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                     WebdavCoroutineState::Yielded(WebdavRedirectYield::WantsWrite(bytes)) => {
-                        self.write(target.as_str(), &bytes)?;
+                        self.http_write(target.as_str(), &bytes)?;
                         arg = None;
                     }
                     WebdavCoroutineState::Yielded(WebdavRedirectYield::WantsRead) => {
-                        arg = Some(self.read(target.as_str())?);
+                        arg = Some(self.http_read(target.as_str())?);
                     }
                     WebdavCoroutineState::Yielded(WebdavRedirectYield::WantsRedirect {
                         url,

@@ -646,11 +646,11 @@ impl<'a, 'local> Client<'a, 'local> {
                     JmapCoroutineState::Complete(Ok(out)) => return Ok(out.data),
                     JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                     JmapCoroutineState::Yielded(JmapRedirectYield::WantsWrite(bytes)) => {
-                        self.write(target.as_str(), &bytes)?;
+                        self.http_write(target.as_str(), &bytes)?;
                         arg = None;
                     }
                     JmapCoroutineState::Yielded(JmapRedirectYield::WantsRead) => {
-                        arg = Some(self.read(target.as_str())?);
+                        arg = Some(self.http_read(target.as_str())?);
                     }
                     JmapCoroutineState::Yielded(JmapRedirectYield::WantsRedirect {
                         url, ..
@@ -904,11 +904,11 @@ impl<'a, 'local> Client<'a, 'local> {
                     JmapCoroutineState::Complete(Ok(out)) => return Ok(out.session),
                     JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                     JmapCoroutineState::Yielded(JmapRedirectYield::WantsWrite(bytes)) => {
-                        self.write(target.as_str(), &bytes)?;
+                        self.http_write(target.as_str(), &bytes)?;
                         arg = None;
                     }
                     JmapCoroutineState::Yielded(JmapRedirectYield::WantsRead) => {
-                        arg = Some(self.read(target.as_str())?);
+                        arg = Some(self.http_read(target.as_str())?);
                     }
                     JmapCoroutineState::Yielded(JmapRedirectYield::WantsRedirect {
                         url, ..
@@ -935,10 +935,10 @@ impl<'a, 'local> Client<'a, 'local> {
                 JmapCoroutineState::Complete(Ok(value)) => return Ok(value),
                 JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                 JmapCoroutineState::Yielded(JmapYield::WantsRead) => {
-                    arg = Some(self.read(api_url.as_str())?);
+                    arg = Some(self.http_read(api_url.as_str())?);
                 }
                 JmapCoroutineState::Yielded(JmapYield::WantsWrite(bytes)) => {
-                    self.write(api_url.as_str(), &bytes)?;
+                    self.http_write(api_url.as_str(), &bytes)?;
                     arg = None;
                 }
             }
@@ -963,10 +963,10 @@ impl<'a, 'local> Client<'a, 'local> {
                 ))) => return Ok(None),
                 JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                 JmapCoroutineState::Yielded(JmapYield::WantsRead) => {
-                    arg = Some(self.read(api_url.as_str())?);
+                    arg = Some(self.http_read(api_url.as_str())?);
                 }
                 JmapCoroutineState::Yielded(JmapYield::WantsWrite(bytes)) => {
-                    self.write(api_url.as_str(), &bytes)?;
+                    self.http_write(api_url.as_str(), &bytes)?;
                     arg = None;
                 }
             }

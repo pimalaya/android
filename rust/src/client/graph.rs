@@ -413,10 +413,10 @@ impl<'a, 'local> Client<'a, 'local> {
                 MsgraphCoroutineState::Complete(Ok(output)) => return Ok(output.response),
                 MsgraphCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                 MsgraphCoroutineState::Yielded(MsgraphYield::WantsRead) => {
-                    arg = Some(self.read(MSGRAPH_API_BASE)?);
+                    arg = Some(self.http_read(MSGRAPH_API_BASE)?);
                 }
                 MsgraphCoroutineState::Yielded(MsgraphYield::WantsWrite(bytes)) => {
-                    self.write(MSGRAPH_API_BASE, &bytes)?;
+                    self.http_write(MSGRAPH_API_BASE, &bytes)?;
                     arg = None;
                 }
             }
@@ -449,10 +449,10 @@ impl<'a, 'local> Client<'a, 'local> {
                 }
                 MsgraphCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                 MsgraphCoroutineState::Yielded(MsgraphYield::WantsRead) => {
-                    arg = Some(self.read(MSGRAPH_API_BASE)?);
+                    arg = Some(self.http_read(MSGRAPH_API_BASE)?);
                 }
                 MsgraphCoroutineState::Yielded(MsgraphYield::WantsWrite(bytes)) => {
-                    self.write(MSGRAPH_API_BASE, &bytes)?;
+                    self.http_write(MSGRAPH_API_BASE, &bytes)?;
                     arg = None;
                 }
             }

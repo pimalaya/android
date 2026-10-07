@@ -31,7 +31,7 @@ use io_http::rfc6750::bearer::HttpAuthBearer;
 use jiff::Timestamp;
 
 use crate::{
-    client::{Client, convert::coroutine_error},
+    client::{Client, convert::coroutine_error, throttle},
     mail,
     types::{BridgeError, Mailbox, Message},
 };
@@ -263,11 +263,13 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(())
     }
 
-    /// Runs one Gmail coroutine to completion over the transport.
+    /// Runs one Gmail coroutine to completion over the transport, paced
+    /// under Gmail's per-user quota ([`throttle::pace_gmail`]).
     fn run_gmail<C, T>(&mut self, mut coroutine: C) -> Result<T, BridgeError>
     where
         C: GmailCoroutine<Yield = GmailYield, Return = Result<GmailSendOutput<T>, GmailSendError>>,
     {
+        throttle::pace_gmail();
         let mut arg: Option<Vec<u8>> = None;
 
         loop {
@@ -275,10 +277,10 @@ impl<'a, 'local> Client<'a, 'local> {
                 GmailCoroutineState::Complete(Ok(output)) => return Ok(output.response),
                 GmailCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                 GmailCoroutineState::Yielded(GmailYield::WantsRead) => {
-                    arg = Some(self.read(GMAIL_API_BASE)?);
+                    arg = Some(self.http_read(GMAIL_API_BASE)?);
                 }
                 GmailCoroutineState::Yielded(GmailYield::WantsWrite(bytes)) => {
-                    self.write(GMAIL_API_BASE, &bytes)?;
+                    self.http_write(GMAIL_API_BASE, &bytes)?;
                     arg = None;
                 }
             }
@@ -291,7 +293,7 @@ impl<'a, 'local> Client<'a, 'local> {
 /// The header values are what the sender wrote, encoded words included,
 /// so they go through the parser a stored message goes through rather
 /// than being taken as text. The date is Gmail's own reception time,
-/// as JMAP's and Graph's are.
+/// as JMAP's is.
 fn envelope(message: GmailMessage) -> GmailEnvelope {
     let payload = message.payload.unwrap_or_default();
 
