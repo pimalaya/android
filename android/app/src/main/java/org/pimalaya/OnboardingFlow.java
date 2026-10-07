@@ -1400,7 +1400,14 @@ final class OnboardingFlow {
         String scope = scopes.isEmpty() ? null : String.join(" ", scopes);
         // NOTE: Google and Microsoft register no client dynamically, so their
         // grants run with the app's own registration.
-        if (Oauth.GOOGLE_AUTH_ENDPOINT.equals(option.method.authorizationEndpoint)) {
+        if (Oauth.isGoogle(option.method.authorizationEndpoint)) {
+            // NOTE: a domain added onto an account Google already granted
+            // asks for the union, so the one new grant replaces the old one
+            // on every domain rather than living beside it.
+            AccountEntry existing = existingAccount(pendingEmail);
+            if (existing != null) {
+                scope = Oauth.union(existing.grantedScope(Oauth.GOOGLE_CLIENT_ID), scope);
+            }
             oauth.startGoogleOauth(pendingEmail, scope, option.baseUrl);
             return;
         }
@@ -1431,6 +1438,16 @@ final class OnboardingFlow {
                 null,
                 null,
                 null);
+    }
+
+    /** The account already stored for this address, or null. */
+    private AccountEntry existingAccount(String email) {
+        for (AccountEntry entry : host.accounts) {
+            if (entry.email.equals(email)) {
+                return entry;
+            }
+        }
+        return null;
     }
 
     /** The domains the in-flight grant covers, for the scopes to ask for. */
@@ -1465,44 +1482,13 @@ final class OnboardingFlow {
                 && left.authorizationEndpoint.equals(right.authorizationEndpoint);
     }
 
-    /**
-     * What one grant's token is for: the RFC 8707 resource it names, or else
-     * the APIs its scopes address.
-     *
-     * <p>Two options of one authorization server share a grant only when this
-     * agrees. Entra refuses one token for two APIs, so Microsoft mail (Outlook
-     * scopes) and calendars (Graph scopes) are two consents, a bare Graph
-     * scope (`Calendars.ReadWrite`) being Graph's. Google keeps its restricted
-     * mail scope on its own origin, so it gets a grant of its own too.
-     */
+    /** What one option's grant is for ({@link Oauth#audience}). */
     private static String audienceOf(SetupOption option) {
-        if (option.resource != null) {
-            return option.resource;
-        }
-        String scope = option.method == null ? null : option.method.scope;
-        if (scope == null) {
-            return "";
-        }
-
-        java.util.Set<String> apis = new java.util.TreeSet<>();
-        for (String part : scope.split("\\s+")) {
-            if (part.isEmpty() || OIDC_SCOPES.contains(part)) {
-                continue;
-            }
-            int scheme = part.indexOf("://");
-            if (scheme < 0) {
-                apis.add("https://graph.microsoft.com");
-                continue;
-            }
-            int path = part.indexOf('/', scheme + 3);
-            apis.add(path < 0 ? part : part.substring(0, path));
-        }
-        return String.join(" ", apis);
+        return option.method == null
+                ? Oauth.audience(null, option.resource, null)
+                : Oauth.audience(
+                        option.method.authorizationEndpoint, option.resource, option.method.scope);
     }
-
-    /** OpenID Connect scopes, which address no API. */
-    private static final java.util.Set<String> OIDC_SCOPES =
-            java.util.Set.of("offline_access", "openid", "profile", "email");
 
     /**
      * Asks for the one thing discovery would have produced for this domain: a
@@ -1609,6 +1595,7 @@ final class OnboardingFlow {
                                     null,
                                     null,
                                     null,
+                                    null,
                                     null);
                         })
                 .setNegativeButton(android.R.string.cancel, (dialog, which) -> abortAuthSteps())
@@ -1655,6 +1642,7 @@ final class OnboardingFlow {
                                     null,
                                     null,
                                     null,
+                                    null,
                                     null);
                         })
                 .setNegativeButton(android.R.string.cancel, (dialog, which) -> abortAuthSteps())
@@ -1665,10 +1653,10 @@ final class OnboardingFlow {
      * Verifies the account connects, then moves to the addressbook
      * selection. Nothing persists yet: the account and its books only
      * store when the selection confirms, so backing out of the flow
-     * before that leaves everything untouched. The last four parameters
-     * carry the refresh material of an OAuth account (all null for a
-     * password one), so expired access tokens can be refreshed on later
-     * syncs.
+     * before that leaves everything untouched. The last five parameters
+     * carry the refresh material of an OAuth account and the scopes it was
+     * granted (all null for a password one), so expired access tokens can
+     * be refreshed on later syncs and a later grant can ask for the union.
      */
     void connect(
             Account candidate,
@@ -1676,7 +1664,8 @@ final class OnboardingFlow {
             String refreshToken,
             String tokenEndpoint,
             String clientId,
-            String clientSecret) {
+            String clientSecret,
+            String scope) {
         connectedEmail = email;
 
         // NOTE: a browser grant covers every domain that chose the same
@@ -1693,7 +1682,8 @@ final class OnboardingFlow {
                                 refreshToken,
                                 tokenEndpoint,
                                 clientId,
-                                clientSecret);
+                                clientSecret,
+                                scope);
 
         if (!oauthGroup.isEmpty()) {
             for (java.util.Map.Entry<PimDomain, String> granted : oauthGroup.entrySet()) {
@@ -2000,6 +1990,22 @@ final class OnboardingFlow {
                             connected.connection(domain).baseUrl,
                             connected.connection(domain).submitUrl,
                             connected.credential(domain));
+        }
+
+        // NOTE: a grant that asked for the union (Google's incremental
+        // authorization) covers the domains an earlier grant of the same
+        // client signed in, so they move onto it and the old one is dropped:
+        // one refresh token for the account.
+        for (AccountCredential granted : connected.credentials().values()) {
+            for (PimDomain domain : merged.regrantable(granted)) {
+                merged =
+                        host.store.connect(
+                                merged.email,
+                                domain,
+                                merged.connection(domain).baseUrl,
+                                merged.connection(domain).submitUrl,
+                                granted);
+            }
         }
 
         AccountEntry stored = merged;

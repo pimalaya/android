@@ -198,6 +198,38 @@ mod tests {
         );
     }
 
+    /// One Google grant for mail, calendars and contacts: the three
+    /// scopes in one request, with incremental authorization on, so a
+    /// single browser round signs every domain in.
+    #[test]
+    fn authorize_url_asks_google_once_for_every_domain() {
+        let url = authorize_url(
+            "https://accounts.google.com/o/oauth2/v2/auth",
+            "123.apps.googleusercontent.com",
+            "com.googleusercontent.apps.123:/oauth2redirect",
+            "https://mail.google.com/ https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/contacts",
+            "stateABCDEF0123456789abcdef012345",
+            "verifierABCDEF0123456789abcdef0123456789ABCDEF0123456789abcdef01",
+            r#"{"access_type":"offline","prompt":"consent","include_granted_scopes":"true"}"#,
+        )
+        .unwrap();
+
+        let url = Url::parse(&url).unwrap();
+        let pairs: BTreeMap<String, String> = url.query_pairs().into_owned().collect();
+        let mut scopes: Vec<&str> = pairs["scope"].split(' ').collect();
+        scopes.sort();
+        assert_eq!(
+            scopes,
+            [
+                "https://mail.google.com/",
+                "https://www.googleapis.com/auth/calendar",
+                "https://www.googleapis.com/auth/contacts",
+            ]
+        );
+        assert_eq!(pairs["include_granted_scopes"], "true");
+        assert_eq!(pairs["access_type"], "offline");
+    }
+
     /// The fastmail-shaped success redirect on the RFC 8252
     /// single-slash private-use scheme (no authority), with the
     /// RFC 9207 iss parameter riding along, yields the code.

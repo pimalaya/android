@@ -96,6 +96,49 @@ final class AccountEntry {
     }
 
     /**
+     * Every scope this account's grants from one OAuth client hold, as one
+     * space-separated list, or null when none is recorded: what a new grant
+     * from that client asks for beside its own, so it can replace them.
+     */
+    String grantedScope(String clientId) {
+        java.util.List<String> scopes = new java.util.ArrayList<>();
+        for (AccountConnection connection : connections.values()) {
+            AccountCredential held = credentials.get(connection.credentialId);
+            if (held != null && held.renewable() && clientId.equals(held.clientId)) {
+                scopes.add(held.scope);
+            }
+        }
+        return Oauth.union(scopes.toArray(new String[0]));
+    }
+
+    /**
+     * The domains a new grant can take over: those signed in with another
+     * grant of the same client at the same token endpoint, every scope of
+     * which the new one holds. A domain whose grant's scopes were never
+     * recorded stays on it, since nothing says the new one covers it.
+     */
+    java.util.List<PimDomain> regrantable(AccountCredential granted) {
+        java.util.List<PimDomain> domains = new java.util.ArrayList<>();
+        if (!granted.renewable()) {
+            return domains;
+        }
+        for (Map.Entry<PimDomain, AccountConnection> entry : connections.entrySet()) {
+            AccountCredential held = credentials.get(entry.getValue().credentialId);
+            if (held != null
+                    && !held.id.equals(granted.id)
+                    && held.renewable()
+                    && held.clientId != null
+                    && held.clientId.equals(granted.clientId)
+                    && held.tokenEndpoint != null
+                    && held.tokenEndpoint.equals(granted.tokenEndpoint)
+                    && Oauth.covers(granted.scope, held.scope)) {
+                domains.add(entry.getKey());
+            }
+        }
+        return domains;
+    }
+
+    /**
      * The same account with one domain connected or reconnected, on the
      * given endpoint and credential. Naming a credential another domain
      * already uses is how one grant comes to cover several.
@@ -117,10 +160,16 @@ final class AccountEntry {
     AccountEntry with(
             PimDomain domain, String baseUrl, String submitUrl, AccountCredential credential) {
         Map<PimDomain, AccountConnection> merged = new EnumMap<>(connections);
-        merged.put(domain, new AccountConnection(baseUrl, credential.id, submitUrl));
+        AccountConnection replaced =
+                merged.put(domain, new AccountConnection(baseUrl, credential.id, submitUrl));
 
         Map<String, AccountCredential> held = new HashMap<>(credentials);
         held.put(credential.id, credential);
+        // NOTE: a domain moved onto another credential may leave its old one
+        // named by nothing, and a secret nothing can present is dropped.
+        if (replaced != null && !usedBy(merged, replaced.credentialId)) {
+            held.remove(replaced.credentialId);
+        }
 
         return new AccountEntry(email, merged, held);
     }

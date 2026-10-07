@@ -265,6 +265,9 @@ public class SecureStore {
             if (credential.clientSecret != null) {
                 object.put("clientSecret", credential.clientSecret);
             }
+            if (credential.scope != null) {
+                object.put("scope", credential.scope);
+            }
         }
         return object;
     }
@@ -336,6 +339,7 @@ public class SecureStore {
                 object.isNull("refreshToken") ? null : object.optString("refreshToken"),
                 object.isNull("tokenEndpoint") ? null : object.optString("tokenEndpoint"),
                 object.isNull("clientId") ? null : object.optString("clientId"),
-                object.isNull("clientSecret") ? null : object.optString("clientSecret"));
+                object.isNull("clientSecret") ? null : object.optString("clientSecret"),
+                object.isNull("scope") ? null : object.optString("scope"));
     }
 }

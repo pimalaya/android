@@ -26,8 +26,27 @@ public class AccountEntryTest {
 
     private static AccountCredential oauth(String refreshToken) {
         return AccountCredential.oauth(
-                "access", refreshToken, "https://accounts.example.org/token", "client-id", null);
+                "access",
+                refreshToken,
+                "https://accounts.example.org/token",
+                "client-id",
+                null,
+                null);
     }
+
+    private static AccountCredential google(String refreshToken, String scope) {
+        return AccountCredential.oauth(
+                "access",
+                refreshToken,
+                Oauth.GOOGLE_TOKEN_ENDPOINT,
+                Oauth.GOOGLE_CLIENT_ID,
+                null,
+                scope);
+    }
+
+    private static final String GMAIL = "https://mail.google.com/";
+    private static final String CALENDAR = "https://www.googleapis.com/auth/calendar";
+    private static final String CONTACTS = "https://www.googleapis.com/auth/contacts";
 
     @Test
     public void connectingASecondDomainKeepsTheFirst() {
@@ -158,5 +177,56 @@ public class AccountEntryTest {
         assertEquals("the calendar still signs in with it", 1, withoutMail.credentials().size());
 
         assertEquals(0, withoutMail.without(PimDomain.CALENDAR).credentials().size());
+    }
+
+    @Test
+    public void aGoogleGrantAddedLaterTakesOverTheDomainsItCovers() {
+        AccountEntry account =
+                AccountEntry.of(
+                        "jane@example.org",
+                        PimDomain.MAIL,
+                        "gmail://jane@example.org",
+                        google("mail-consent", GMAIL));
+
+        // A later grant asks for what the account already holds beside
+        // its own, so it can replace it.
+        assertEquals(GMAIL, account.grantedScope(Oauth.GOOGLE_CLIENT_ID));
+        assertEquals(
+                GMAIL + " " + CONTACTS,
+                Oauth.union(account.grantedScope(Oauth.GOOGLE_CLIENT_ID), CONTACTS));
+
+        AccountCredential union = google("union-consent", GMAIL + " " + CONTACTS);
+        AccountEntry connected = account.with(PimDomain.CONTACTS, "google://", union);
+        assertEquals(List.of(PimDomain.MAIL), connected.regrantable(union));
+
+        AccountEntry regranted =
+                connected.with(PimDomain.MAIL, "gmail://jane@example.org", union);
+        assertEquals("one refresh token for the account", 1, regranted.credentials().size());
+        assertEquals("union-consent", regranted.credential(PimDomain.MAIL).refreshToken);
+        assertTrue(regranted.regrantable(union).isEmpty());
+    }
+
+    @Test
+    public void aGrantMissingAScopeOrFromAnotherClientTakesNothingOver() {
+        AccountEntry account =
+                AccountEntry.of(
+                                "jane@example.org",
+                                PimDomain.MAIL,
+                                "gmail://jane@example.org",
+                                google("mail-consent", GMAIL))
+                        .with(PimDomain.CALENDAR, "https://dav.example.org/", oauth("dav"));
+
+        // The user unticked Gmail on the consent screen: mail keeps its grant.
+        assertTrue(account.regrantable(google("narrow", CALENDAR + " " + CONTACTS)).isEmpty());
+
+        // A grant whose scopes were never recorded is not assumed covered.
+        AccountEntry unrecorded =
+                AccountEntry.of(
+                        "jane@example.org",
+                        PimDomain.MAIL,
+                        "gmail://jane@example.org",
+                        google("old", null));
+        assertTrue(unrecorded.regrantable(google("new", GMAIL + " " + CONTACTS)).isEmpty());
+        assertEquals(null, unrecorded.grantedScope(Oauth.GOOGLE_CLIENT_ID));
     }
 }

@@ -73,6 +73,11 @@ public final class OauthSession {
         this.pkceVerifier = pkceVerifier;
     }
 
+    /** The scopes the authorization request asks for; empty when unknown. */
+    public String scope() {
+        return scope;
+    }
+
     /** The CSRF state of the authorization request, for persistence. */
     public String state() {
         return state;

@@ -17,9 +17,11 @@ import java.util.UUID;
  * keep in step.
  *
  * <p>Per consent and not per account, because one account can hold
- * several: Google issues its restricted Gmail scopes through a separate
- * grant from its contacts ones, so those are two credentials of one
- * identity, and renewing either must leave the other alone.
+ * several: Microsoft issues Outlook's scopes through a separate grant
+ * from Graph's, so those are two credentials of one identity, and
+ * renewing either must leave the other alone. Google issues one token
+ * for all of its APIs, so a Google account holds one: a domain added
+ * later asks for the union and its grant replaces the earlier one.
  */
 final class AccountCredential {
     /**
@@ -51,6 +53,13 @@ final class AccountCredential {
      */
     final String clientSecret;
 
+    /**
+     * The space-separated scopes the grant holds, as the token response
+     * named them; null for a password, or for a grant stored before the
+     * scopes were kept.
+     */
+    final String scope;
+
     AccountCredential(
             String id,
             String login,
@@ -58,7 +67,8 @@ final class AccountCredential {
             String refreshToken,
             String tokenEndpoint,
             String clientId,
-            String clientSecret) {
+            String clientSecret,
+            String scope) {
         this.id = id;
         this.login = login;
         this.secret = secret;
@@ -66,11 +76,12 @@ final class AccountCredential {
         this.tokenEndpoint = tokenEndpoint;
         this.clientId = clientId;
         this.clientSecret = clientSecret;
+        this.scope = scope;
     }
 
     /** A credential signed in with a login and a secret. */
     static AccountCredential password(String login, String secret) {
-        return new AccountCredential(newId(), login, secret, null, null, null, null);
+        return new AccountCredential(newId(), login, secret, null, null, null, null, null);
     }
 
     /** A credential a browser grant produced, renewable on its own. */
@@ -79,15 +90,30 @@ final class AccountCredential {
             String refreshToken,
             String tokenEndpoint,
             String clientId,
-            String clientSecret) {
+            String clientSecret,
+            String scope) {
         return new AccountCredential(
-                newId(), "", accessToken, refreshToken, tokenEndpoint, clientId, clientSecret);
+                newId(),
+                "",
+                accessToken,
+                refreshToken,
+                tokenEndpoint,
+                clientId,
+                clientSecret,
+                scope);
     }
 
     /** The same credential, renewed. Same id: it is the same consent. */
     AccountCredential withTokens(String accessToken, String refreshToken) {
         return new AccountCredential(
-                id, login, accessToken, refreshToken, tokenEndpoint, clientId, clientSecret);
+                id,
+                login,
+                accessToken,
+                refreshToken,
+                tokenEndpoint,
+                clientId,
+                clientSecret,
+                scope);
     }
 
     /** Whether this credential can be renewed without asking the user. */
