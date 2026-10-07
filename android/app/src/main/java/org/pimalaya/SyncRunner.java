@@ -30,8 +30,8 @@ final class SyncRunner {
      * every hook fires on the sync thread.
      */
     interface Observer {
-        /** An engine stage stepped (the loader's detail line). */
-        void step(int stage, int count);
+        /** An engine stage of a domain stepped (the loader's detail line). */
+        void step(PimDomain domain, int stage, int count);
 
         /** A token refresh re-persisted the account's credentials. */
         void accountRefreshed(AccountEntry updated);

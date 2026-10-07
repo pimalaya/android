@@ -173,6 +173,11 @@ public class MailEngineTest {
         PimdirEngine remote =
                 new PimdirEngine(pimdir, new PimalayaClient()) {
                     @Override
+                    protected PimDomain domain() {
+                        return PimDomain.MAIL;
+                    }
+
+                    @Override
                     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
                         JSONObject item =
                                 new JSONObject()
@@ -266,6 +271,11 @@ public class MailEngineTest {
         boolean[] cut = {true};
         PimdirEngine remote =
                 new PimdirEngine(pimdir, new PimalayaClient()) {
+                    @Override
+                    protected PimDomain domain() {
+                        return PimDomain.MAIL;
+                    }
+
                     @Override
                     protected boolean listingsNamed() {
                         return true;

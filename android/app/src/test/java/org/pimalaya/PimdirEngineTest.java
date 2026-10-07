@@ -59,6 +59,11 @@ public class PimdirEngineTest {
         }
 
         @Override
+        protected PimDomain domain() {
+            return PimDomain.CALENDAR;
+        }
+
+        @Override
         protected JSONObject enumerate(JSONObject yielded) throws JSONException {
             JSONArray listed = new JSONArray();
             for (Map.Entry<String, String[]> member : members.entrySet()) {

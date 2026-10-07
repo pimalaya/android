@@ -50,7 +50,9 @@ abstract class PimdirEngine implements OfflineDriver {
      * the sync thread. Null when the pass runs headless.
      *
      * <p>The first three are every domain's, the last three the contacts
-     * spoke's alone: only a book is reconciled against the phone.
+     * spoke's alone: only a book is reconciled against the phone. Each step
+     * carries the domain of the engine that took it, which names what the
+     * count counts ({@link SyncSteps}).
      */
     interface Progress {
         /** Exchanging the spine with the server. */
@@ -66,7 +68,7 @@ abstract class PimdirEngine implements OfflineDriver {
         /** Resolving `count` conflicts. */
         int STAGE_RESOLVE = 5;
 
-        void step(int stage, int count);
+        void step(PimDomain domain, int stage, int count);
     }
 
     /** The foreground pass's progress observer; null when headless. */
@@ -74,9 +76,12 @@ abstract class PimdirEngine implements OfflineDriver {
 
     protected void step(int stage, int count) {
         if (progress != null) {
-            progress.step(stage, count);
+            progress.step(domain(), stage, count);
         }
     }
+
+    /** The domain this driver syncs, which its progress steps are told in. */
+    protected abstract PimDomain domain();
 
     protected PimdirEngine(PimdirDb pimdir, PimalayaClient client) {
         this.offline = new PimdirStorage(pimdir);
