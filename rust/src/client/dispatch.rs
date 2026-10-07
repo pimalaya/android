@@ -487,18 +487,7 @@ impl Client<'_, '_> {
                 let calendar_id = account::jmap_collection_id(calendar_url);
                 let events = self.list_jmap_events(&session_url, credentials, calendar_id)?;
 
-                Ok(Some(EventDelta {
-                    changed: events
-                        .into_iter()
-                        .map(|event| EventRef {
-                            id: event.id,
-                            etag: event.etag,
-                        })
-                        .collect(),
-                    vanished: Vec::new(),
-                    token: None,
-                    complete: true,
-                }))
+                Ok(Some(listed(events)))
             }
             // NOTE: Graph's event delta runs over a time window only, and
             // an event leaving the window would read as deleted, so every
@@ -508,22 +497,19 @@ impl Client<'_, '_> {
                     credentials.password,
                     account::book_segment(base_url, calendar_url),
                 )?,
+                bodies: Vec::new(),
                 vanished: Vec::new(),
                 token: None,
                 complete: true,
             })),
             // NOTE: Google's sync token reports instances, and an instance
             // moving is its series moving, so every round is a complete
-            // listing folded into series, with no cursor.
-            Backend::Google => Ok(Some(EventDelta {
-                changed: self.list_gcal_events(
-                    credentials.password,
-                    account::book_segment(base_url, calendar_url),
-                )?,
-                vanished: Vec::new(),
-                token: None,
-                complete: true,
-            })),
+            // listing folded into series, with no cursor. The listing reads
+            // every event whole, so the bodies come with it.
+            Backend::Google => Ok(Some(listed(self.list_gcal_events(
+                credentials.password,
+                account::book_segment(base_url, calendar_url),
+            )?))),
             _ => {
                 let url = parse_url(calendar_url)?;
                 let delta = self.sync_caldav_events(&url, credentials, cursor)?;
@@ -589,8 +575,27 @@ fn into_event_delta(delta: WebdavSyncDelta) -> EventDelta {
 
     EventDelta {
         changed,
+        bodies: Vec::new(),
         vanished,
         token: delta.sync_token,
         complete: false,
+    }
+}
+
+/// A complete round that listed every event whole: their names and
+/// revisions, and the bodies with them.
+fn listed(events: Vec<Event>) -> EventDelta {
+    EventDelta {
+        changed: events
+            .iter()
+            .map(|event| EventRef {
+                id: event.id.clone(),
+                etag: event.etag.clone(),
+            })
+            .collect(),
+        bodies: events,
+        vanished: Vec::new(),
+        token: None,
+        complete: true,
     }
 }

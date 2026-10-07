@@ -1450,7 +1450,8 @@ public class MainActivity extends Activity {
     private Exception fetchCalendars(AccountEntry account, MergedFilter scope) {
         // NOTE: one session for the whole account, so the listing and every
         // event round after it share the token a refresh may have replaced
-        // part-way, and one transport under it, so they share its socket.
+        // part-way; the listing's transport is then the first calendar
+        // worker's.
         SyncRunner.Session session = runner.session(account, PimDomain.CALENDAR);
         try (Transport transport = new Transport()) {
             try {
@@ -1466,7 +1467,7 @@ public class MainActivity extends Activity {
                 return error;
             }
 
-            Exception failure = null;
+            List<String> calendars = new ArrayList<>();
             for (EventStore.StoredCalendar calendar : events.loadCalendars()) {
                 if (!calendar.accountEmail.equals(account.email)) {
                     continue;
@@ -1474,26 +1475,42 @@ public class MainActivity extends Activity {
                 if (scope != null && !scope.accepts(account.email, calendar.id)) {
                     continue;
                 }
-                try {
-                    session.call(
-                            server -> {
-                                CalendarEngine engine =
-                                        new CalendarEngine(
-                                                pimdir,
-                                                client,
-                                                transport,
-                                                server,
-                                                accountIdOf(account.email));
-                                engine.progress = this::syncStep;
-                                engine.sync(calendar.id);
-                                return null;
-                            });
-                } catch (Exception error) {
-                    Log.w("pimalaya", "calendar sync failed: " + calendar.url, error);
-                    if (failure == null) {
-                        failure = error;
-                    }
+                calendars.add(calendar.id);
+            }
+
+            // NOTE: the calendars side by side, as the mailboxes are, the
+            // listing's transport the first worker's: the wait was the
+            // network's, one calendar after another.
+            String accountId = accountIdOf(account.email);
+            Exception failure;
+            try (CalendarPool<Transport> pool =
+                    new CalendarPool<>(CalendarPool.SIZE, transport, Transport::new)) {
+                CalendarPool.Outcome outcome =
+                        pool.run(
+                                account.email,
+                                calendars,
+                                (worker, collection, remote) ->
+                                        session.call(
+                                                server -> {
+                                                    CalendarEngine engine =
+                                                            new CalendarEngine(
+                                                                    pimdir,
+                                                                    client,
+                                                                    worker,
+                                                                    server,
+                                                                    accountId);
+                                                    engine.progress = this::syncStep;
+                                                    try {
+                                                        engine.sync(collection);
+                                                    } finally {
+                                                        remote.addAndGet(engine.remoteSoFar());
+                                                    }
+                                                    return null;
+                                                }));
+                for (CalendarPool.Failure failed : outcome.failures) {
+                    Log.w("pimalaya", "calendar sync failed: " + failed.collection, failed.error);
                 }
+                failure = outcome.failure();
             }
             if (failure == null) {
                 SyncStamps.mark(this, account.email);

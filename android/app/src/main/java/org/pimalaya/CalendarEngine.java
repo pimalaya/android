@@ -25,8 +25,9 @@ import java.util.List;
  * it holds, because the only listing there was carried them all.
  *
  * <p>The transport it reads and writes on is the caller's, opened once
- * for the pass and closed with it, so every round of every calendar
- * shares one connection.
+ * for the pass and closed with it: an account's calendars run side by
+ * side ({@link CalendarPool}), each worker on a transport of its own that
+ * every round of its calendars shares.
  *
  * <p>Incremental listing is not wired: CalDAV's ctag and sync-token
  * rounds are what one would use, so every enumerate is a complete round
@@ -93,15 +94,28 @@ final class CalendarEngine extends PimdirEngine {
         return PimDomain.CALENDAR;
     }
 
+    /**
+     * The calendar's members, and the bodies of those the round already
+     * read whole (Google, JMAP), so naming them reads nothing more.
+     */
     @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
         String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");
+        long asked = System.nanoTime();
         EventDelta delta = client.syncEvents(transport, account, urlOf(collection), cursor);
+        remote(System.nanoTime() - asked);
+        listed(delta.changed.size());
+
+        java.util.Map<String, Event> bodies = new java.util.HashMap<>();
+        for (Event event : delta.bodies) {
+            bodies.put(event.id, event);
+        }
 
         JSONArray items = new JSONArray();
         for (EventRef event : delta.changed) {
-            JSONObject item = new JSONObject();
+            Event body = bodies.get(event.id);
+            JSONObject item = body != null ? entry(body) : new JSONObject();
             item.put("handle", event.id);
             if (event.etag != null) {
                 item.put("revision", event.etag);
@@ -131,30 +145,39 @@ final class CalendarEngine extends PimdirEngine {
         String collection = yielded.getString("collection");
         List<String> handles = stringsOf(yielded.getJSONArray("handles"));
 
+        long asked = System.nanoTime();
+        List<Event> read = client.multigetEvents(transport, account, urlOf(collection), handles);
+        remote(System.nanoTime() - asked);
+
         JSONArray items = new JSONArray();
-        for (Event event : client.multigetEvents(transport, account, urlOf(collection), handles)) {
-            JSONObject item = new JSONObject();
-            item.put("handle", event.id);
-            // The resource name is the identity: an entry is one object in
-            // one calendar, and the UID inside it is what names the series
-            // rather than the resource.
-            item.put("linkId", event.id);
-            item.put("hash", PimdirHash.of(event.ical));
-            item.put("body", event.ical);
-            // NOTE: no key and no summary. What an agenda row shows needs the
-            // recurrence expansion, which happens at render time against the
-            // window being shown, so there is nothing to write here that a
-            // listing could read.
-            item.put("sortKey", "");
-            if (event.etag != null) {
-                item.put("revision", event.etag);
-            }
-            items.put(item);
+        for (Event event : read) {
+            items.put(entry(event));
         }
 
         JSONObject reply = new JSONObject();
         reply.put("items", items);
         return reply;
+    }
+
+    /** One entry at its full tier, as a read or a whole listing hands it over. */
+    private static JSONObject entry(Event event) throws JSONException {
+        JSONObject item = new JSONObject();
+        item.put("handle", event.id);
+        // The resource name is the identity: an entry is one object in
+        // one calendar, and the UID inside it is what names the series
+        // rather than the resource.
+        item.put("linkId", event.id);
+        item.put("hash", PimdirHash.of(event.ical));
+        item.put("body", event.ical);
+        // NOTE: no key and no summary. What an agenda row shows needs the
+        // recurrence expansion, which happens at render time against the
+        // window being shown, so there is nothing to write here that a
+        // listing could read.
+        item.put("sortKey", "");
+        if (event.etag != null) {
+            item.put("revision", event.etag);
+        }
+        return item;
     }
 
     @Override

@@ -696,7 +696,8 @@ public class PimalayaClient {
      * <p>The bodies are {@link #multigetEvents}, for the events the merge
      * asks about. A round that carried them would be re-reading a whole
      * calendar to find out that nothing in it changed, which is what this
-     * replaced.
+     * replaced; only a round that lists every event whole anyway (Google,
+     * JMAP) hands them over, in {@link EventDelta#bodies}.
      */
     public EventDelta syncEvents(
             Transport transport, Account account, String calendarUrl, String cursor) {
@@ -719,6 +720,7 @@ public class PimalayaClient {
 
         return new EventDelta(
                 changed,
+                events(reply.optJSONArray("bodies")),
                 strings(reply.optJSONArray("vanished")),
                 optString(reply, "token"),
                 reply.optBoolean("complete"));
@@ -730,7 +732,7 @@ public class PimalayaClient {
         if (ids.isEmpty()) {
             return List.of();
         }
-        JSONArray reply =
+        return events(
                 array(
                         Native.multigetEvents(
                                 transport,
@@ -738,8 +740,14 @@ public class PimalayaClient {
                                 calendarUrl,
                                 account.login,
                                 account.password,
-                                new JSONArray(ids).toString()));
+                                new JSONArray(ids).toString())));
+    }
 
+    /** The events of a reply's array, none for a missing one. */
+    private static List<Event> events(JSONArray reply) {
+        if (reply == null) {
+            return List.of();
+        }
         List<Event> events = new ArrayList<>(reply.length());
         for (int index = 0; index < reply.length(); index++) {
             JSONObject event = object(reply, index);

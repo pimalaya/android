@@ -363,17 +363,35 @@ final class SyncRunner {
             this.domain = domain;
         }
 
+        /**
+         * Runs {@code call}, refreshing once on a 401. Callable from several
+         * threads at once (an account's calendars run side by side): the
+         * refresh is made once, by whichever call saw the token it replaces,
+         * and the others retry on the token it made, since a provider
+         * issuing a fresh refresh token on every use retires the old one.
+         */
         <T> T call(Call<T> call) throws Exception {
-            AccountCredential credential = account.credential(domain);
+            AccountEntry used = current();
             try {
-                return call.on(account.server(domain));
+                return call.on(used.server(domain));
             } catch (Exception error) {
-                if (!expiredToken(error) || !credential.renewable()) {
+                if (!expiredToken(error) || !used.credential(domain).renewable()) {
                     throw error;
                 }
-                account = refreshed(account, domain);
-                return call.on(account.server(domain));
+                return call.on(renewedSince(used).server(domain));
             }
+        }
+
+        private synchronized AccountEntry current() {
+            return account;
+        }
+
+        /** The account renewed past {@code used}, renewing it unless another call has. */
+        private synchronized AccountEntry renewedSince(AccountEntry used) {
+            if (account == used) {
+                account = refreshed(account, domain);
+            }
+            return account;
         }
     }
 
