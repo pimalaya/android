@@ -62,5 +62,88 @@ final class Oauth {
     static final String MICROSOFT_SCOPE =
             "https://graph.microsoft.com/Contacts.ReadWrite offline_access";
 
+    /** OpenID Connect scopes, which address no API. */
+    private static final java.util.Set<String> OIDC_SCOPES =
+            java.util.Set.of("offline_access", "openid", "profile", "email");
+
     private Oauth() {}
+
+    /** Whether a grant runs against Google's authorization server. */
+    static boolean isGoogle(String authorizationEndpoint) {
+        return GOOGLE_AUTH_ENDPOINT.equals(authorizationEndpoint);
+    }
+
+    /**
+     * What one grant's token is for: Google's whole set of APIs, else the
+     * RFC 8707 resource it names, else the APIs its scopes address.
+     *
+     * <p>Two options of one authorization server share a grant only when
+     * this agrees. Entra refuses one token for two APIs, so Microsoft mail
+     * over IMAP (Outlook scopes) and calendars (Graph scopes) are two
+     * consents, a bare Graph scope ({@code Calendars.ReadWrite}) being
+     * Graph's, while Graph mail and Graph calendars are one. Google issues
+     * one token for every API it serves, Gmail's restricted
+     * {@code https://mail.google.com/} included, so every Google scope is
+     * one audience and an address ticking mail, calendars and contacts is
+     * one consent.
+     */
+    static String audience(String authorizationEndpoint, String resource, String scope) {
+        if (isGoogle(authorizationEndpoint)) {
+            return GOOGLE_AUTH_ENDPOINT;
+        }
+        if (resource != null) {
+            return resource;
+        }
+        if (scope == null) {
+            return "";
+        }
+
+        java.util.Set<String> apis = new java.util.TreeSet<>();
+        for (String part : scopes(scope)) {
+            if (OIDC_SCOPES.contains(part)) {
+                continue;
+            }
+            int scheme = part.indexOf("://");
+            if (scheme < 0) {
+                apis.add("https://graph.microsoft.com");
+                continue;
+            }
+            int path = part.indexOf('/', scheme + 3);
+            apis.add(path < 0 ? part : part.substring(0, path));
+        }
+        return String.join(" ", apis);
+    }
+
+    /** The scopes of a space-separated list, in order, each once. */
+    static java.util.Set<String> scopes(String scope) {
+        java.util.Set<String> scopes = new java.util.LinkedHashSet<>();
+        if (scope == null) {
+            return scopes;
+        }
+        for (String part : scope.trim().split("\\s+")) {
+            if (!part.isEmpty()) {
+                scopes.add(part);
+            }
+        }
+        return scopes;
+    }
+
+    /** The union of space-separated scope lists, in order; null when empty. */
+    static String union(String... lists) {
+        java.util.Set<String> union = new java.util.LinkedHashSet<>();
+        for (String list : lists) {
+            union.addAll(scopes(list));
+        }
+        return union.isEmpty() ? null : String.join(" ", union);
+    }
+
+    /**
+     * Whether a grant of the {@code granted} scopes covers every one of
+     * the {@code wanted} ones. An unknown list on either side covers
+     * nothing: a grant whose reach was never recorded is not assumed.
+     */
+    static boolean covers(String granted, String wanted) {
+        java.util.Set<String> want = scopes(wanted);
+        return granted != null && !want.isEmpty() && scopes(granted).containsAll(want);
+    }
 }

@@ -39,7 +39,8 @@ final class OauthFlow {
                 String refreshToken,
                 String tokenEndpoint,
                 String clientId,
-                String clientSecret);
+                String clientSecret,
+                String scope);
     }
 
     /** Name of the preferences holding the in-flight OAuth grant. */
@@ -88,11 +89,14 @@ final class OauthFlow {
         pendingClientSecret = null;
 
         // NOTE: access_type=offline + prompt=consent make Google issue a
-        // refresh token; login_hint preselects the entered account.
+        // refresh token; include_granted_scopes keeps what the account
+        // granted the app before (incremental authorization), so the new
+        // token covers it too; login_hint preselects the entered account.
         JSONObject extras = new JSONObject();
         try {
             extras.put("access_type", "offline");
             extras.put("prompt", "consent");
+            extras.put("include_granted_scopes", "true");
             if (email.contains("@")) {
                 extras.put("login_hint", email);
             }
@@ -146,6 +150,19 @@ final class OauthFlow {
     }
 
     /**
+     * The scopes a redeemed grant holds: those the token response names
+     * (RFC 6749 section 5.1), else those the request asked for, else null
+     * when neither is known (a grant restored after the process died).
+     */
+    private static String grantedScope(OauthTokens tokens, OauthSession session) {
+        if (tokens.scope != null && !tokens.scope.isEmpty()) {
+            return tokens.scope;
+        }
+        String asked = session.scope();
+        return asked == null || asked.isEmpty() ? null : asked;
+    }
+
+    /**
      * Redeems the OAuth redirect for tokens and connects with them, the
      * access token standing in for the password (empty login, Bearer
      * auth). No-op unless a grant is in flight for this redirect,
@@ -192,7 +209,8 @@ final class OauthFlow {
                                                 tokens.refreshToken,
                                                 tokenEndpoint,
                                                 clientId,
-                                                clientSecret));
+                                                clientSecret,
+                                                grantedScope(tokens, session)));
                     } catch (Exception error) {
                         Log.w("pimalaya", "oauth redeem failed", error);
                         host.main.post(
@@ -576,7 +594,8 @@ final class OauthFlow {
                                                 tokens.refreshToken,
                                                 tokenEndpoint,
                                                 clientId,
-                                                secret));
+                                                secret,
+                                                grantedScope(tokens, session)));
                     } catch (Exception error) {
                         Log.w("pimalaya", "custom oauth failed", error);
                         host.main.post(

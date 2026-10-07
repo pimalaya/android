@@ -12,9 +12,9 @@ In order; 1, 2 and 5-A1 are small and can land first, together.
 - [ ] Check live on `google@pimalaya.org` whether `history.list` records carry `labelIds`
 
 ## 1. One consent
-- [ ] One authorization request with the union of the chosen domains' scopes; one refresh token stored for the account
-- [ ] A domain added later re-asks with the union (incremental authorization)
-- [ ] Test: the flow asks once for mail, calendar and contacts
+- [x] One authorization request with the union of the chosen domains' scopes; one refresh token stored for the account
+- [x] A domain added later re-asks with the union (incremental authorization)
+- [x] Test: the flow asks once for mail, calendar and contacts
 
 ## 2. Per-minute quota
 - [x] Throttle recognises the per-minute quota 403 (`Quota exceeded for quota metric`, `Units per minute per user`) and 429; waits to the next minute without `Retry-After`, bounded
