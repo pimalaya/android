@@ -280,8 +280,6 @@ final class DeletedItemsPage {
         switch (refusal) {
             case NOT_STORED:
                 return R.string.deleted_not_stored;
-            case UNREADABLE:
-                return R.string.deleted_unreadable;
             case PRESENT:
                 return R.string.deleted_present;
             default:

@@ -88,7 +88,6 @@
     <string name="deleted_at">Supprimé le %1$s</string>
     <string name="deleted_waiting">En attente du serveur</string>
     <string name="deleted_not_stored">Non conservé sur cet appareil</string>
-    <string name="deleted_unreadable">Ce message ne peut pas être restauré depuis cet appareil</string>
     <string name="deleted_present">Déjà présent à cet endroit</string>
     <string name="deleted_unsupported">La restauration de messages n\'est pas encore prise en charge pour ce compte</string>
     <string name="deleted_nowhere">Aucun endroit où le restaurer</string>

@@ -10,10 +10,6 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.PimdirSql;
 
-import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -257,8 +253,6 @@ final class DeletedItems {
         WAITING,
         /** The store holds its summary alone. */
         NOT_STORED,
-        /** Its body is not text the staging carries (a mail in a legacy 8-bit charset). */
-        UNREADABLE,
         /** The target holds the item already. */
         PRESENT
     }
@@ -293,10 +287,6 @@ final class DeletedItems {
         if (body == null) {
             throw new RefusedException(Refusal.NOT_STORED);
         }
-        String text = utf8(body);
-        if (text == null) {
-            throw new RefusedException(Refusal.UNREADABLE);
-        }
 
         JSONObject derived = PimdirSql.derive(row.kind, body);
         boolean home = target.equals(row.collection.id);
@@ -311,7 +301,7 @@ final class DeletedItems {
         engine.mutateAdd(
                 target,
                 linkId,
-                text,
+                body,
                 MailEngine.withFlag(flagsOf(row), MailEngine.DELETED, false),
                 derived.optJSONObject("summary"),
                 sortKey.isEmpty() ? row.sortKey : sortKey);
@@ -336,20 +326,6 @@ final class DeletedItems {
         } catch (JSONException error) {
             Log.w("pimalaya", "unreadable flags of " + row.linkId, error);
             return new JSONArray();
-        }
-    }
-
-    /** The body as text, null when it is not UTF-8. */
-    private static String utf8(byte[] body) {
-        try {
-            return StandardCharsets.UTF_8
-                    .newDecoder()
-                    .onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(ByteBuffer.wrap(body))
-                    .toString();
-        } catch (CharacterCodingException error) {
-            return null;
         }
     }
 

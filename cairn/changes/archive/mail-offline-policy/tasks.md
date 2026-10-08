@@ -10,4 +10,4 @@ change: mail-offline-policy
 - [x] Whole mailbox: bound to everything plus the body step
 - [x] Progress shown in the drawer's account pill
 - [x] Tests: the step raises only bodies within the bound; a metered network defers it
-- [ ] Land: spec mail.md, log, CHANGELOG
+- [x] Land: spec mail.md, log, CHANGELOG

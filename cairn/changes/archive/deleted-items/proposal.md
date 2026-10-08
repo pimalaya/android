@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: deleted-items
-status: draft
+status: landed
 created: 2026-10-08
 ---
 

@@ -243,7 +243,6 @@
     <string name="deleted_at">Deleted %1$s</string>
     <string name="deleted_waiting">Waiting for the server</string>
     <string name="deleted_not_stored">Not stored on this device</string>
-    <string name="deleted_unreadable">This message cannot be restored from this device</string>
     <string name="deleted_present">Already in that collection</string>
     <string name="deleted_unsupported">Restoring mail is not supported for this account yet</string>
     <string name="deleted_nowhere">Nowhere to restore it</string>

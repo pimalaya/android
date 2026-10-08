@@ -11,6 +11,7 @@ import org.pimalaya.client.PimalayaException;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 
 /**
@@ -473,6 +474,25 @@ abstract class PimdirEngine implements OfflineDriver {
         mutation.put("hash", PimdirHash.of(body));
         mutation.put("size", body.getBytes(StandardCharsets.UTF_8).length);
         mutation.put("body", body);
+        mutation.put("summary", summary);
+        mutation.put("sortKey", sortKey);
+        client.offlineMutate(this, collection, mutation);
+    }
+
+    /**
+     * {@link #mutateAdd(String, String, String, JSONArray, JSONObject, String)}
+     * for a body that may not be UTF-8 text (a message's 8-bit parts), which
+     * crosses in base64 so it is stored as the bytes it is.
+     */
+    void mutateAdd(String collection, String linkId, byte[] body, JSONArray flags,
+            JSONObject summary, String sortKey) throws JSONException {
+        JSONObject mutation = new JSONObject();
+        mutation.put("op", "add");
+        mutation.put("linkId", linkId);
+        mutation.put("flags", flags);
+        mutation.put("hash", PimdirHash.of(body));
+        mutation.put("size", body.length);
+        mutation.put("bodyBase64", Base64.getEncoder().encodeToString(body));
         mutation.put("summary", summary);
         mutation.put("sortKey", sortKey);
         client.offlineMutate(this, collection, mutation);
