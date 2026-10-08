@@ -716,6 +716,7 @@ final class MailList {
         view.findViewById(R.id.message_star).setVisibility(View.GONE);
         view.findViewById(R.id.message_attachment).setVisibility(View.GONE);
         view.findViewById(R.id.message_answered).setVisibility(View.GONE);
+        view.findViewById(R.id.message_unsynced).setVisibility(View.GONE);
     }
 
     /** One message's row. */
@@ -775,13 +776,24 @@ final class MailList {
         if (message.failed) {
             return host.getString(R.string.message_send_failed);
         }
-        return message.pending ? host.getString(R.string.message_pending) : message.mailbox;
+        if (message.pending) {
+            return host.getString(R.string.message_pending);
+        }
+        if (message.refused) {
+            return host.getString(R.string.row_refused) + " · " + message.mailbox;
+        }
+        // NOTE: deleted on a server expunging no single message, so still
+        // listed until something expunges the mailbox.
+        return message.deleted
+                ? message.mailbox + " · " + host.getString(R.string.message_marked_deleted)
+                : message.mailbox;
     }
 
     /**
      * The marks: the star of an important message, the paperclip of one
-     * carrying an attachment, and the replied mark. Shown only when they
-     * hold, so the subject's line ends in as few glyphs as it can.
+     * carrying an attachment, the replied mark, and the sync mark of a
+     * change the server has not taken yet. Shown only when they hold, so
+     * a line ends in as few glyphs as it can.
      */
     private void bindMarks(View view, MailStore.StoredMessage message) {
         view.findViewById(R.id.message_star)
@@ -790,6 +802,8 @@ final class MailList {
                 .setVisibility(message.hasAttachment ? View.VISIBLE : View.GONE);
         view.findViewById(R.id.message_answered)
                 .setVisibility(message.answered ? View.VISIBLE : View.GONE);
+        host.ui.syncMark(
+                view.findViewById(R.id.message_unsynced), message.unsynced, message.refused);
     }
 
     // ---- the selection ----------------------------------------------------

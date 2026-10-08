@@ -950,43 +950,56 @@ impl<'a, 'local> Client<'a, 'local> {
         self.run_email_set(&session, &auth, &api_url, args, id)
     }
 
-    /// Moves one message into the account's trash, naming the mailbox it
-    /// landed in.
-    ///
-    /// A replace rather than an add: RFC 8621 lets a message sit in
-    /// several mailboxes at once, so adding the trash to whatever it is
-    /// already in would file it as deleted and keep it in the inbox.
-    ///
-    /// An account naming no trash is an error rather than a fallback,
-    /// unlike the IMAP side's: RFC 8621 section 4.1.1 has no counterpart
-    /// to `\Deleted`, deletion there being a move or a destroy, so there
-    /// is nothing to mark the message with and leave it where it is.
-    pub fn delete_jmap_message(
+    /// Relocates one message from the mailbox `from` to the mailbox `to`
+    /// (mailbox ids), as [`relocation_args`] says.
+    pub fn relocate_jmap_message(
         &mut self,
         session_url: &Url,
         credentials: &Credentials,
         id: &str,
-    ) -> Result<String, BridgeError> {
+        from: &str,
+        to: &str,
+    ) -> Result<(), BridgeError> {
+        let args = relocation_args(id, from, to);
+        self.write_jmap_message(session_url, credentials, id, args)
+    }
+
+    /// Files one message in the mailbox `to` (a mailbox id) too.
+    pub fn copy_jmap_message(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        id: &str,
+        to: &str,
+    ) -> Result<(), BridgeError> {
+        let args = copy_args(id, to);
+        self.write_jmap_message(session_url, credentials, id, args)
+    }
+
+    /// Destroys one message for good.
+    pub fn destroy_jmap_message(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        id: &str,
+    ) -> Result<(), BridgeError> {
+        let args = destroy_args(id);
+        self.write_jmap_message(session_url, credentials, id, args)
+    }
+
+    /// Runs one message's `Email/set`.
+    fn write_jmap_message(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        id: &str,
+        args: JmapEmailSetArgs,
+    ) -> Result<(), BridgeError> {
         let auth = jmap_auth(credentials);
         let session = self.jmap_session(session_url, &auth)?;
         let api_url = session.api_url.clone();
 
-        let opts = JmapMailboxGetOptions::default();
-        let coroutine =
-            JmapMailboxGet::new(&session, &auth, opts).map_err(|err| err.to_string())?;
-        let mailboxes = self.run_jmap(&api_url, coroutine)?.mailboxes;
-
-        let (trash_id, trash_name) = mailboxes
-            .iter()
-            .find(|mailbox| mailbox.role == Some(JmapMailboxRole::Trash))
-            .and_then(|mailbox| mailbox.id.clone().map(|id| (id, mailbox.name.clone())))
-            .ok_or_else(|| BridgeError::from("The account names no trash mailbox"))?;
-
-        let mut args = JmapEmailSetArgs::default();
-        args.replace_mailbox_ids(id, BTreeMap::from([(trash_id, true)]));
-        self.run_email_set(&session, &auth, &api_url, args, id)?;
-
-        Ok(trash_name.unwrap_or_default())
+        self.run_email_set(&session, &auth, &api_url, args, id)
     }
 
     /// Runs one `Email/set` and reports the per-object refusal as the
@@ -1004,11 +1017,35 @@ impl<'a, 'local> Client<'a, 'local> {
         let coroutine = JmapEmailSet::new(session, auth, args).map_err(|err| err.to_string())?;
         let out = self.run_jmap(api_url, coroutine)?;
 
-        match out.not_updated.get(id) {
+        match out.not_updated.get(id).or(out.not_destroyed.get(id)) {
             Some(refused) => Err(format!("The server refused the change: {refused:?}").into()),
             None => Ok(()),
         }
     }
+}
+
+/// The `Email/set` relocating one message from the mailbox `from` to the
+/// mailbox `to`: the one membership traded for the other, any other
+/// mailbox holding it left alone (RFC 8621 section 4.1.1).
+fn relocation_args(id: &str, from: &str, to: &str) -> JmapEmailSetArgs {
+    let mut args = JmapEmailSetArgs::default();
+    args.add_to_mailbox(id, to).remove_from_mailbox(id, from);
+    args
+}
+
+/// The `Email/set` filing one message in the mailbox `to` too: the copy a
+/// membership is, one object with one id in both.
+fn copy_args(id: &str, to: &str) -> JmapEmailSetArgs {
+    let mut args = JmapEmailSetArgs::default();
+    args.add_to_mailbox(id, to);
+    args
+}
+
+/// The `Email/set` destroying one message for good.
+fn destroy_args(id: &str) -> JmapEmailSetArgs {
+    let mut args = JmapEmailSetArgs::default();
+    args.destroy(id);
+    args
 }
 
 /// The JMAP keyword an IMAP marker maps to (RFC 8621 section 4.1.1).
@@ -1443,7 +1480,9 @@ mod tests {
     use std::collections::BTreeMap;
     use url::Url;
 
-    use super::download_url;
+    use serde_json::{json, to_value};
+
+    use super::{copy_args, destroy_args, download_url, relocation_args};
 
     fn session(template: &str) -> JmapSession {
         JmapSession {
@@ -1487,5 +1526,32 @@ mod tests {
         let url = download_url(&session, "a/b c").unwrap();
 
         assert_eq!(url.as_str(), "https://api.example.com/d/u42/a%2Fb%20c");
+    }
+
+    #[test]
+    fn a_relocation_trades_one_membership_for_the_other() {
+        let args = to_value(relocation_args("m1", "inbox", "trash")).unwrap();
+
+        assert_eq!(
+            args,
+            json!({ "update": { "m1": { "mailboxIds/trash": true, "mailboxIds/inbox": null } } })
+        );
+    }
+
+    #[test]
+    fn a_copy_adds_a_membership() {
+        let args = to_value(copy_args("m1", "archive")).unwrap();
+
+        assert_eq!(
+            args,
+            json!({ "update": { "m1": { "mailboxIds/archive": true } } })
+        );
+    }
+
+    #[test]
+    fn a_delete_destroys() {
+        let args = to_value(destroy_args("m1")).unwrap();
+
+        assert_eq!(args, json!({ "destroy": ["m1"] }));
     }
 }

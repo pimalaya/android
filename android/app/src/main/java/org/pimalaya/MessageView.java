@@ -158,6 +158,7 @@ final class MessageView {
                                     host.getString(R.string.message_failed));
                         }
                         if (source == null) {
+                            String[] address = addressOf(message);
                             // NOTE: a connection of its own, opened and closed
                             // around this one read. A reader opening a message
                             // is not a pass, and holding one open for the time
@@ -166,7 +167,7 @@ final class MessageView {
                             try (MailSession session = host.openMail(account)) {
                                 source =
                                         host.client.fetchMessageSource(
-                                                session, message.mailbox, message.id);
+                                                session, address[0], address[1]);
                             }
                             host.mail.saveSource(message.collection, message.id, source);
                         }
@@ -408,15 +409,14 @@ final class MessageView {
                             continue;
                         }
                         try {
-                            host.mailEngine(message.accountEmail)
-                                    .mutateFlags(
-                                            message.collection,
-                                            message.id,
-                                            MailEngine.withFlag(
-                                                    host.mail.flagsOf(
-                                                            message.collection, message.id),
-                                                    flag,
-                                                    add));
+                            MailEngine engine = host.mailEngine(message.accountEmail);
+                            engine.mutateFlags(
+                                    message.collection,
+                                    engine.offline.handleFor(message.collection, message.id),
+                                    MailEngine.withFlag(
+                                            host.mail.flagsOf(message.collection, message.id),
+                                            flag,
+                                            add));
                         } catch (Exception error) {
                             Log.w("pimalaya", "message flag failed: " + message.id, error);
                             if (failure == null) {
@@ -470,29 +470,28 @@ final class MessageView {
      * {@code done}; the reader's delete and the list's selection both
      * come here.
      *
-     * <p>What is staged depends on where a message would go, which its
-     * account remembers from its last walk: an account with a trash gets
-     * a removal, and the row leaves the list at once because that is
-     * where the message is headed. An account with none, or a message
-     * already in the trash, gets a `\Deleted` marker instead, and the row
-     * stays in the list saying so, because that is all a server with
-     * nowhere to put it can do.
+     * <p>A delete is a pimdir mutation like any other action, so the list
+     * shows its outcome at once and the sync carries it out as staged. What
+     * is staged depends on where the message is, which its account
+     * remembers from its last walk: outside the trash, a move into it, the
+     * row leaving its mailbox and showing in the trash at once; in the
+     * trash, a removal, which the sync pushes as a delete for good. An
+     * account recording no trash gets a {@code \Deleted} marker in place,
+     * the row staying and saying so.
      *
-     * <p>Unless that server is a JMAP one, which RFC 8621 gives no keyword
-     * to mark it with (section 4.1.1 names three and this is not one of
-     * them). Refused here rather than staged, because a change nothing
+     * <p>Unless that account is a JMAP one, which RFC 8621 gives no keyword
+     * to mark a message with (section 4.1.1 names three and this is not one
+     * of them). Refused here rather than staged, because a change nothing
      * could ever carry out would sit in the store failing once per sync.
      */
     void stageDelete(List<MailStore.StoredMessage> messages, Runnable done) {
         List<MailStore.StoredMessage> staged = new ArrayList<>();
-        List<Boolean> moving = new ArrayList<>();
+        List<String> trashes = new ArrayList<>();
         boolean refused = false;
-        String lastTrash = "";
         for (MailStore.StoredMessage message : messages) {
             String trash = host.mail.trashOf(message.accountEmail);
-            boolean moves = !trash.isEmpty() && !trash.equals(message.mailbox);
             AccountEntry account = accountOf(message.accountEmail);
-            if (!moves
+            if (trash.isEmpty()
                     && !message.pending
                     && account != null
                     && PimalayaClient.isJmap(account.server(PimDomain.MAIL))) {
@@ -500,10 +499,7 @@ final class MessageView {
                 continue;
             }
             staged.add(message);
-            moving.add(moves);
-            if (moves) {
-                lastTrash = trash;
-            }
+            trashes.add(trash);
         }
         if (refused) {
             host.toast(host.getString(R.string.message_delete_no_trash));
@@ -512,33 +508,13 @@ final class MessageView {
             return;
         }
 
-        String trash = lastTrash;
         host.io.execute(
                 () -> {
                     Exception failure = null;
                     for (int index = 0; index < staged.size(); index++) {
                         MailStore.StoredMessage message = staged.get(index);
                         try {
-                            if (message.pending) {
-                                // Never sent, so there is nothing to move
-                                // and nowhere to tell: withdrawing the
-                                // action is the delete, and it releases the
-                                // body with it.
-                                host.mail.acknowledge(message.queued);
-                            } else if (moving.get(index)) {
-                                host.mailEngine(message.accountEmail)
-                                        .mutateRemove(message.collection, message.id);
-                            } else {
-                                host.mailEngine(message.accountEmail)
-                                        .mutateFlags(
-                                                message.collection,
-                                                message.id,
-                                                MailEngine.withFlag(
-                                                        host.mail.flagsOf(
-                                                                message.collection, message.id),
-                                                        MailEngine.DELETED,
-                                                        true));
-                            }
+                            stageDelete(message, trashes.get(index));
                         } catch (Exception error) {
                             Log.w("pimalaya", "message delete failed: " + message.id, error);
                             if (failure == null) {
@@ -562,17 +538,86 @@ final class MessageView {
                                                             staged.size(),
                                                             staged.size()));
                                 } else if (!staged.get(0).pending) {
-                                    host.toast(
-                                            moving.get(0)
-                                                    ? host.getString(
-                                                            R.string.message_deleted, trash)
-                                                    : host.getString(
-                                                            R.string.message_deleted_in_place));
+                                    host.toast(deletedOf(staged.get(0), trashes.get(0)));
                                 }
                                 host.mailList.reload();
                                 done.run();
                             });
                 });
+    }
+
+    /**
+     * Stages one message's deletion, on the io thread.
+     *
+     * <p>A message waiting to go out was never sent, so there is nothing to
+     * move and nowhere to tell: withdrawing the submission is the delete,
+     * and it releases the body with it, the sent copy staged beside it
+     * going too.
+     */
+    private void stageDelete(MailStore.StoredMessage message, String trash) throws Exception {
+        if (message.pending) {
+            host.mail.acknowledge(message.queued);
+            String sent = host.mail.sentOf(message.accountEmail);
+            if (sent != null) {
+                MailEngine engine = host.mailEngine(message.accountEmail);
+                if (engine.offline.isPendingCreate(sent, message.id)) {
+                    engine.mutateRemove(sent, PimdirStorage.provisionalOf(message.id));
+                }
+            }
+            return;
+        }
+
+        MailEngine engine = host.mailEngine(message.accountEmail);
+        String handle = engine.offline.handleFor(message.collection, message.id);
+        if (trash.isEmpty()) {
+            engine.mutateFlags(
+                    message.collection,
+                    handle,
+                    MailEngine.withFlag(
+                            host.mail.flagsOf(message.collection, message.id),
+                            MailEngine.DELETED,
+                            true));
+        } else if (trash.equals(message.mailbox)) {
+            engine.mutateRemove(message.collection, handle);
+        } else {
+            engine.mutateMove(
+                    message.collection,
+                    handle,
+                    host.mail.collectionOf(message.accountEmail, trash));
+        }
+    }
+
+    /** What deleting one message did, as its toast says. */
+    private String deletedOf(MailStore.StoredMessage message, String trash) {
+        if (trash.isEmpty()) {
+            return host.getString(R.string.message_deleted_in_place);
+        }
+        return trash.equals(message.mailbox)
+                ? host.getString(R.string.message_deleted_for_good)
+                : host.getString(R.string.message_deleted, trash);
+    }
+
+    /**
+     * Where the server holds a message, as {@code [mailbox, id]}: where it
+     * is listed, or for the target of a move not carried out yet, the
+     * mailbox it is moving from.
+     */
+    private String[] addressOf(MailStore.StoredMessage message) {
+        MailEngine engine = host.mailEngine(message.accountEmail);
+        String[] source = null;
+        synchronized (PimdirEngine.STORE) {
+            if (engine.offline.isPendingCreate(message.collection, message.id)) {
+                source = engine.offline.moveSourceOf(message.collection, message.id);
+            }
+        }
+        if (source == null) {
+            return new String[] {message.mailbox, message.id};
+        }
+        return new String[] {
+            PimdirAccount.nameOf(
+                    host.mail.accountIdOf(message.accountEmail), source[0]),
+            source[1]
+        };
     }
 
     /** The account the message came from, null when it is gone. */

@@ -294,6 +294,7 @@ final class ContactsList {
             links.setText(String.valueOf(cards));
 
             ((TextView) row.findViewById(R.id.contact_origin)).setText(originOf(group));
+            host.ui.syncMark(row.findViewById(R.id.contact_unsynced), group.unsynced(), false);
 
             // The warning flag for a conflict or divergence, ending the
             // name's line.

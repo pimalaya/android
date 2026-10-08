@@ -53,13 +53,10 @@ final class Accounts {
                 data.putString(DATA_URL, book.book.url);
                 manager.addAccountExplicitly(account, null, data);
 
-                // NOTE: only the default content-trigger state, seeded
-                // from the book's background sync choice; a later user
-                // choice in system settings is never reset by reconcile.
-                ContentResolver.setSyncAutomatically(
-                        account,
-                        ContactsContract.AUTHORITY,
-                        BackgroundSync.enabled(context, book.book.url));
+                // NOTE: only the default content-trigger state, off since
+                // sync is manual; a later user choice in system settings
+                // is never reset by reconcile.
+                ContentResolver.setSyncAutomatically(account, ContactsContract.AUTHORITY, false);
             }
 
             // NOTE: contacts apps only list accounts syncable for the

@@ -563,21 +563,23 @@ public class PimalayaClient {
     }
 
     /**
-     * Hands one stored message over, then files the copy the sender
-     * keeps, answering the mailbox it landed in or null when the account
-     * named no sent mailbox.
+     * Hands one stored message over.
+     *
+     * <p>The submission alone: the copy the sender keeps is a create staged
+     * in the sent mailbox when the message was queued, and the sync carries
+     * it out.
      *
      * @throws SubmissionRefused when the server refused the message for
      *     good, which is what parks it rather than queueing it again.
      */
-    public String submitMessage(MailSession session, byte[] source) {
+    public void submitMessage(MailSession session, byte[] source) {
         String submitUrl = session.account().submitUrl;
         // NOTE: run once, never retried, unlike every other verb on a
         // session. Sending is the one thing here that is not idempotent:
-        // a submission that was accepted and then failed to file its copy
-        // looks exactly like one that never went, and running it again
-        // would send the message twice. A failure leaves it queued
-        // instead, which is what the outbox is for.
+        // a submission that was accepted and then lost its answer looks
+        // exactly like one that never went, and running it again would
+        // send the message twice. A failure leaves it queued instead,
+        // which is what the outbox is for.
         String json =
                 Native.submitMessage(
                         session.transport(),
@@ -592,23 +594,48 @@ public class PimalayaClient {
                     ? new SubmissionRefused(error)
                     : new PimalayaException(error);
         }
-        return optString(reply, "mailbox");
+    }
+
+    /** Moves one message from {@code mailbox} into {@code target}. */
+    public void relocateMessage(MailSession session, String mailbox, String id, String target) {
+        object(
+                on(
+                        session,
+                        open ->
+                                Native.relocateMessage(
+                                        open.transport(), open.handle(), mailbox, id, target)));
     }
 
     /**
-     * Deletes one message into the account's trash, answering the
-     * mailbox it landed in, or null when the account named no trash and
-     * the message was marked deleted where it is instead.
+     * Copies one message from {@code mailbox} into {@code target} on the
+     * server. Run once: a copy that lost its answer and ran again would
+     * file a second one.
      */
-    public String deleteMessage(MailSession session, String mailbox, String id) {
-        JSONObject reply =
-                object(
-                        on(
-                                session,
-                                open ->
-                                        Native.deleteMessage(
-                                                open.transport(), open.handle(), mailbox, id)));
-        return optString(reply, "mailbox");
+    public void copyMessage(MailSession session, String mailbox, String id, String target) {
+        object(
+                Native.copyMessage(
+                        session.transport(), session.handle(), mailbox, id, target));
+    }
+
+    /**
+     * Deletes one message for good: on IMAP {@code \Deleted} then
+     * {@code UID EXPUNGE} with UIDPLUS, the marker alone otherwise.
+     */
+    public void destroyMessage(MailSession session, String mailbox, String id) {
+        object(
+                on(
+                        session,
+                        open -> Native.destroyMessage(open.transport(), open.handle(), mailbox, id)));
+    }
+
+    /**
+     * Appends one message to {@code mailbox} with {@code flags}. Run once,
+     * as a copy is. IMAP only.
+     */
+    public void appendMessage(MailSession session, String mailbox, byte[] source, JSONArray flags) {
+        object(
+                Native.appendMessage(
+                        session.transport(), session.handle(), mailbox, source, flags.toString()));
     }
 
     /**

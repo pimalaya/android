@@ -144,14 +144,16 @@ struct Driver<'a, 'local> {
 }
 
 /// The summaries a load made up from a message's date alone, by collection
-/// and handle.
+/// and handle, and by collection and link id.
 ///
 /// The store's load carries a mail placement's `Date` and not its whole
 /// summary, which is all the engine reads of it there: whether a placement
 /// lies in a round's scope (SYNC §5). Such a summary is no summary, so a
 /// write handing it back unchanged is sent with none, which leaves the
 /// stored row alone; one the engine replaced with what a listing read goes
-/// out as it is.
+/// out as it is. The same goes for a placement carrying it on: a create
+/// staged from it (its origin), or landed under another handle (its link
+/// id), whose store takes the summary it holds of the message instead.
 #[derive(Default)]
 struct Dated(BTreeMap<(String, String), PimdirSummary>);
 
@@ -169,10 +171,12 @@ impl Dated {
                         ..Default::default()
                     })
             {
-                let key = (
-                    placement.collection.as_str().to_string(),
-                    placement.handle.as_str().to_string(),
-                );
+                let collection = placement.collection.as_str().to_string();
+                if let Some(link) = &placement.link_id {
+                    let key = (collection.clone(), link_key(link.as_str()));
+                    self.0.insert(key, summary.clone());
+                }
+                let key = (collection, placement.handle.as_str().to_string());
                 self.0.insert(key, summary.clone());
             }
         }
@@ -190,12 +194,22 @@ impl Dated {
             .into_iter()
             .map(|op| match op {
                 PimdirWriteOp::UpsertPlacement(mut placement) => {
-                    let key = (
-                        placement.collection.as_str().to_string(),
-                        placement.handle.as_str().to_string(),
-                    );
-                    if placement.summary.is_some() && self.0.get(&key) == placement.summary.as_ref()
-                    {
+                    let collection = placement.collection.as_str().to_string();
+                    let mut keys =
+                        vec![(collection.clone(), placement.handle.as_str().to_string())];
+                    if let Some(link) = &placement.link_id {
+                        keys.push((collection, link_key(link.as_str())));
+                    }
+                    if let Some(origin) = &placement.origin {
+                        keys.push((
+                            origin.collection.as_str().to_string(),
+                            origin.handle.as_str().to_string(),
+                        ));
+                    }
+                    let dated = keys
+                        .iter()
+                        .any(|key| self.0.get(key) == placement.summary.as_ref());
+                    if placement.summary.is_some() && dated {
                         placement.summary = None;
                     }
                     PimdirWriteOp::UpsertPlacement(placement)
@@ -205,6 +219,12 @@ impl Dated {
             .collect();
         PimdirYield::WantsWrite(ops)
     }
+}
+
+/// A link id as a [`Dated`] key, apart from every handle: no handle is
+/// spelled with a leading `U+0002`.
+fn link_key(link: &str) -> String {
+    format!("\u{2}{link}")
 }
 
 impl<'a, 'local> Driver<'a, 'local> {
@@ -1011,6 +1031,16 @@ enum MutationJson {
     Remove {
         handle: String,
     },
+    /// A move into `target`: a create there, a tombstone here (SYNC §3).
+    Move {
+        handle: String,
+        target: String,
+    },
+    /// A copy into `target`, the source kept.
+    Copy {
+        handle: String,
+        target: String,
+    },
     Edit {
         handle: String,
         hash: String,
@@ -1048,6 +1078,14 @@ impl From<MutationJson> for PimdirMutation {
                 flags: PimdirFlags::from_iter(flags),
             },
             MutationJson::Remove { handle } => Self::Remove(PimdirHandle(handle)),
+            MutationJson::Move { handle, target } => Self::Move {
+                handle: PimdirHandle(handle),
+                target: target.into(),
+            },
+            MutationJson::Copy { handle, target } => Self::Copy {
+                handle: PimdirHandle(handle),
+                target: target.into(),
+            },
             MutationJson::Edit {
                 handle,
                 hash,
@@ -1354,11 +1392,39 @@ mod tests {
     use io_pimdir::{
         change::PimdirWriteOp,
         collection::{PimdirCheckpoint, PimdirCollectionId, PimdirCursor, PimdirScope},
+        mutate::PimdirMutation,
+        placement::PimdirHandle,
         remote::{PimdirEnumerate, PimdirEnumerated, PimdirListing},
     };
     use serde_json::{Value, from_str};
 
-    use super::{RoundJson, SnapshotJson, WriteOpJson, enumerate_json};
+    use super::{MutationJson, RoundJson, SnapshotJson, WriteOpJson, enumerate_json};
+
+    fn mutation(json: &str) -> PimdirMutation {
+        from_str::<MutationJson>(json).unwrap().into()
+    }
+
+    #[test]
+    fn a_move_names_its_target() {
+        assert_eq!(
+            mutation(r#"{"op": "move", "handle": "42", "target": "a/Trash"}"#),
+            PimdirMutation::Move {
+                handle: PimdirHandle("42".into()),
+                target: PimdirCollectionId("a/Trash".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn a_copy_names_its_target() {
+        assert_eq!(
+            mutation(r#"{"op": "copy", "handle": "42", "target": "a/Archive"}"#),
+            PimdirMutation::Copy {
+                handle: PimdirHandle("42".into()),
+                target: PimdirCollectionId("a/Archive".into()),
+            }
+        );
+    }
 
     fn page(json: &str) -> PimdirEnumerated {
         from_str::<SnapshotJson>(json).unwrap().into()

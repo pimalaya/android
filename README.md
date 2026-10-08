@@ -39,7 +39,6 @@
 - **Offline first**: every contact is stored locally and rendered instantly, with edits pushed on the next sync.
 - **Incremental sync**: each pass transfers only what changed, on every backend.
 - **Two-way phone sync**: mirror an addressbook into Android's own contacts, so any contacts app can read and edit it.
-- **Background sync**: keep each addressbook current on a schedule, from every fifteen minutes to once a day.
 - **Conservative conflict handling**: a three-way merge keeps both sides of a genuine clash for you to resolve by hand.
 - **Automatic setup**: type an email address or a bare domain and the server settings are discovered for you.
 - **Flexible authentication**: password, API token or OAuth 2.0, with shipped Google and Microsoft sign-in or your own; credentials are encrypted by the Android Keystore.

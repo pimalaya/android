@@ -4,9 +4,12 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.util.Log;
 
+import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.Cards;
+import org.pimalaya.client.PimalayaClient;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,10 +30,11 @@ import java.util.List;
  *       {@code object_hash} has moved past the {@code base_object} its server
  *       binding agreed on <em>is</em> a pending push, so a staged edit cannot
  *       drift out of sync with the flag that announces it
- *   <li>a staged create is an item with no binding at all, and a staged delete
- *       is {@code deleted = 1} on an item whose binding is still there: the
- *       binding is what says the server knows about it
-  *   <li>the summary is the standard's typed row ({@link PimdirSummary}) and the
+ *   <li>a staged create is an item no base of the server binding agreed on,
+ *       and a staged delete is {@code deleted = 1} on an item whose binding is
+ *       still there; creates, edits and deletes are pimdir mutations, staged
+ *       through the engine and never by direct row edits (SYNC §7)
+ *   <li>the summary is the standard's typed row ({@link PimdirSummary}) and the
  *       ordering it never had becomes {@code sort_key}
  * </ul>
  *
@@ -44,8 +48,16 @@ final class PimdirContacts {
 
     private final PimdirItems items;
 
+    /**
+     * A contacts driver that only stages: what a create, an edit and a
+     * delete go through, as pimdir mutations (SYNC §7), never as direct row
+     * edits.
+     */
+    private final OfflineEngine stager;
+
     PimdirContacts(PimdirDb store) {
         this.items = new PimdirItems(store);
+        this.stager = new OfflineEngine(null, store, new PimalayaClient(), null, null, null);
     }
 
     /** One displayable replica: the card plus its summary. */
@@ -74,7 +86,13 @@ final class PimdirContacts {
          *  so the divergence is the user's to settle. */
         final boolean conflicted;
 
-        Indexed(Card card, JSONObject index, boolean conflicted) {
+        /**
+         * True when the card holds a change its server has not taken: a
+         * create no push has carried out, or a body past the agreed one.
+         */
+        final boolean unsynced;
+
+        Indexed(Card card, JSONObject index, boolean conflicted, boolean unsynced) {
             this.card = card;
             this.name = index.optString("name");
             this.email = index.optString("email");
@@ -83,6 +101,7 @@ final class PimdirContacts {
             this.uid = index.optString("uid");
             this.hash = index.optString("hash");
             this.conflicted = conflicted;
+            this.unsynced = unsynced;
         }
     }
 
@@ -107,7 +126,8 @@ final class PimdirContacts {
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT i.link_id, i.object_hash, b.conflicted,"
-                                + " b.conflict_object, b.handle, b.base_revision"
+                                + " b.conflict_object, b.handle, b.base_revision,"
+                                + " b.base_present, b.base_object"
                                 + " FROM items i"
                                 + " LEFT JOIN bindings b ON b.collection = i.collection"
                                 + " AND b.link_id = i.link_id AND b.source = ?"
@@ -124,64 +144,76 @@ final class PimdirContacts {
                                 cursor.isNull(5) ? null : cursor.getString(5),
                                 items.body(cursor.getString(1)));
                 boolean conflicted = cursor.getInt(2) == 1 && !cursor.isNull(3);
-                cards.add(new Indexed(card, indexOf(card.vcard), conflicted));
+                boolean unsynced =
+                        cursor.isNull(4)
+                                || cursor.getInt(6) == 0
+                                || !cursor.getString(1).equals(cursor.getString(7));
+                cards.add(new Indexed(card, indexOf(card.vcard), conflicted, unsynced));
             }
             return cards;
         }
     }
 
     /**
-     * Stages a local create or edit; the next sync pushes it.
+     * Stages a local create or edit, a pimdir mutation; the next sync pushes
+     * it.
      *
-     * <p>The binding is deliberately untouched, because it is the base the push
-     * diffs against: what the server last confirmed does not change because the
-     * user typed something. The one exception is a conflicted card, where saving
-     * <em>is</em> the resolution: the remote revision observed at conflict time
-     * becomes the new base revision, so the resolving push is conditioned on the
-     * state the resolution was actually merged against.
+     * <p>A card the collection holds is an edit, which leaves the base alone:
+     * what the server last confirmed does not change because the user typed
+     * something. On a conflicted card saving <em>is</em> the resolution, the
+     * base adopting the remote state observed at conflict time, so the
+     * resolving push is conditioned on what it was merged against. Any other
+     * card is a create.
      */
     void save(String collection, Card card) {
         JSONObject index = indexOf(card.vcard);
-        SQLiteDatabase db = items.writable();
-
-        db.beginTransaction();
         try {
-            items.put(
-                    db,
-                    collection,
-                    new PimdirItems.Row(
-                            card.id,
-                            card.vcard,
-                            index.optJSONObject("summary"),
-                            index.optString("sortKey")));
-            resolveConflict(db, collection, card.id);
-            items.collectGarbage(db);
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
+            if (held(collection, card.id)) {
+                stager.mutateEdit(
+                        collection,
+                        stager.offline.handleFor(collection, card.id),
+                        card.vcard,
+                        index.optJSONObject("summary"),
+                        index.optString("sortKey"));
+            } else {
+                stager.mutateAdd(
+                        collection,
+                        card.id,
+                        card.vcard,
+                        new JSONArray(),
+                        index.optJSONObject("summary"),
+                        index.optString("sortKey"));
+            }
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
         }
     }
 
     /**
-     * Stages a local delete; the next sync pushes it. A card the server has
-     * never seen is dropped outright instead, since there is nothing to tell it
-     * about.
+     * Stages a local delete, a pimdir mutation; the next sync pushes it. A
+     * create no push carried out yet is withdrawn instead by the engine,
+     * there being nothing to tell the server about.
      */
     void stageDelete(String collection, String linkId) {
-        SQLiteDatabase db = items.writable();
-        db.beginTransaction();
+        if (!held(collection, linkId)) {
+            return;
+        }
         try {
-            if (bound(db, collection, linkId)) {
-                db.execSQL(
-                        "UPDATE items SET deleted = 1 WHERE collection = ? AND link_id = ?",
-                        new Object[] {collection, linkId});
-            } else {
-                items.remove(db, collection, linkId);
-                items.collectGarbage(db);
-            }
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
+            stager.mutateRemove(collection, stager.offline.handleFor(collection, linkId));
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
+    }
+
+    /** Whether the collection holds the card, staged removals included. */
+    private boolean held(String collection, String linkId) {
+        try (Cursor cursor =
+                items.readable()
+                        .rawQuery(
+                                "SELECT 1 FROM items WHERE collection = ? AND link_id = ?"
+                                        + " AND retained_at IS NULL",
+                                new String[] {collection, linkId})) {
+            return cursor.moveToFirst();
         }
     }
 
@@ -379,72 +411,6 @@ final class PimdirContacts {
                 });
         PimdirSummary.write(db, target, linkId, index.optJSONObject("summary"));
         items.adjustRefcount(db, null, object);
-    }
-
-    /**
-     * Turns a conflicted card's diverging state into the base its resolution
-     * pushes against, and releases the remote body the form no longer needs.
-     *
-     * <p>The whole remote state becomes the base, revision <em>and</em> body,
-     * not the revision alone: they were observed together, and a base adopting
-     * one while keeping the other contradicts itself. A resolution that keeps
-     * the remote body would then read as a pending push against a base holding
-     * the body it discarded, and one that adopts it would read as clean while
-     * the server still holds something else.
-     */
-    private void resolveConflict(SQLiteDatabase db, String collection, String linkId) {
-        String revision;
-        String diverging;
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT conflict_revision, conflict_object FROM bindings"
-                                + " WHERE collection = ? AND link_id = ? AND source = ?"
-                                + " AND conflicted = 1",
-                        new String[] {collection, linkId, SERVER})) {
-            if (!cursor.moveToFirst()) {
-                return;
-            }
-            revision = cursor.isNull(0) ? null : cursor.getString(0);
-            diverging = cursor.isNull(1) ? null : cursor.getString(1);
-        }
-
-        String base = baseObjectOf(db, collection, linkId);
-        db.execSQL(
-                "UPDATE bindings SET conflicted = 0, conflict_revision = NULL,"
-                        + " conflict_object = NULL,"
-                        + " base_revision = COALESCE(?, base_revision),"
-                        + " base_object = COALESCE(?, base_object)"
-                        + " WHERE collection = ? AND link_id = ? AND source = ?",
-                new Object[] {revision, diverging, collection, linkId, SERVER});
-
-        if (diverging != null) {
-            // NOTE: the diverging body moves from the conflict's pin to the
-            // base's, so it stays exactly as referenced as it was; what the
-            // move releases is the body it displaced.
-            items.adjustRefcount(db, base, null);
-        }
-    }
-
-    /** The body this source's binding last agreed on, or null. */
-    private static String baseObjectOf(SQLiteDatabase db, String collection, String linkId) {
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT base_object FROM bindings WHERE collection = ?"
-                                + " AND link_id = ? AND source = ?",
-                        new String[] {collection, linkId, SERVER})) {
-            return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : null;
-        }
-    }
-
-    /** Whether the server has ever confirmed this placement. */
-    private static boolean bound(SQLiteDatabase db, String collection, String linkId) {
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT 1 FROM bindings WHERE collection = ? AND link_id = ?"
-                                + " AND source = ?",
-                        new String[] {collection, linkId, SERVER})) {
-            return cursor.moveToFirst();
-        }
     }
 
     /** Whether the placement is neither staged for deletion nor retained. */

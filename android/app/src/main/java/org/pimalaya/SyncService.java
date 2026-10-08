@@ -22,8 +22,7 @@ import org.pimalaya.client.PimalayaClient;
  * contacts apps list the accounts and allow editing their raw contacts.
  * Serves only the syncs the OS schedules itself (the per-account "sync
  * now" and the upload syncs after edits on our raw contacts); in-app
- * actions run the same pass directly and background syncs go through
- * SyncWorker.
+ * actions run the same pass directly.
  */
 public class SyncService extends Service {
     private static final Object LOCK = new Object();

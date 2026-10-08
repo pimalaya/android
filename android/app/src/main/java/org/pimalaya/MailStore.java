@@ -81,10 +81,12 @@ final class MailStore {
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
     private final PimdirQueue queue;
+    private final PimdirStorage storage;
     private final Context context;
 
     MailStore(Context context, PimdirDb store) {
         this.items = new PimdirItems(store);
+        this.storage = new PimdirStorage(store);
         this.store = store;
         this.collections = new PimdirCollections(store, context);
         this.accounts = new PimdirAccount(context);
@@ -201,6 +203,46 @@ final class MailStore {
                 .getString(accountEmail, "");
     }
 
+    /**
+     * The collection one account files sent mail in, null when it marks
+     * none (RFC 6154 {@code \Sent}, JMAP's {@code sent} role).
+     */
+    String sentOf(String accountEmail) {
+        String prefix = PimdirAccount.collectionId(accounts.idOf(accountEmail), "");
+        for (Map.Entry<String, String> role : roles().entrySet()) {
+            if ("sent".equals(role.getValue()) && role.getKey().startsWith(prefix)) {
+                return role.getKey();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether a submission of the message is still waiting, or was refused
+     * and parked: the sent copy staged for it is not to be filed yet.
+     */
+    boolean submitting(String messageId) {
+        List<PimdirQueue.Action> actions = new ArrayList<>(queue.pending());
+        actions.addAll(queue.parked());
+        for (PimdirQueue.Action action : actions) {
+            if (PimdirQueue.SUBMIT.equals(action.kind)
+                    && messageId.equals(action.payload.optString("messageId"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The body the store holds of one message, null when it holds none. */
+    byte[] storedSource(String collection, String linkId) {
+        return items.objectBytes(collection, linkId);
+    }
+
+    /** The id one account's collections are namespaced under. */
+    String accountIdOf(String accountEmail) {
+        return accounts.idOf(accountEmail);
+    }
+
     /** Where one account's mailbox is stored. */
     String collectionOf(String accountEmail, String mailbox) {
         return PimdirAccount.collectionId(accounts.idOf(accountEmail), mailbox);
@@ -305,6 +347,22 @@ final class MailStore {
          */
         final boolean pending;
 
+        /**
+         * Whether the store holds a change of it the server has not taken
+         * yet: a move's target, a sent copy, a marker. Never a message
+         * waiting to go out, which says so on its own.
+         */
+        final boolean unsynced;
+
+        /** Whether the server refused that change for good. */
+        final boolean refused;
+
+        /**
+         * Whether it carries {@code \Deleted}: deleted where the server
+         * expunges no single message (no UIDPLUS), and so still listed.
+         */
+        final boolean deleted;
+
         StoredMessage(
                 String accountEmail,
                 String collection,
@@ -339,6 +397,9 @@ final class MailStore {
             this.pending = queued != 0;
             this.sortKey = "";
             this.seq = 0;
+            this.unsynced = false;
+            this.refused = false;
+            this.deleted = false;
         }
 
         /** One synced message, as a page of the merged list reads it. */
@@ -353,7 +414,9 @@ final class MailStore {
                 String sortKey,
                 long seq,
                 String flags,
-                boolean hasAttachment) {
+                boolean hasAttachment,
+                boolean unsynced,
+                boolean refused) {
             this.accountEmail = accountEmail;
             this.collection = collection;
             this.mailbox = mailbox;
@@ -375,6 +438,9 @@ final class MailStore {
             this.objectHash = null;
             this.failed = false;
             this.pending = false;
+            this.unsynced = unsynced;
+            this.refused = refused;
+            this.deleted = has(flags, MailEngine.DELETED);
         }
 
         /** The sender as a row shows them: the name, else the address. */
@@ -801,6 +867,7 @@ final class MailStore {
                 if (mailbox == null) {
                     continue;
                 }
+                boolean unsynced = storage.unsynced(cursor.getString(0), cursor.getString(2));
                 messages.add(
                         new StoredMessage(
                                 mailbox.accountEmail,
@@ -813,10 +880,17 @@ final class MailStore {
                                 cursor.isNull(5) ? "" : cursor.getString(5),
                                 cursor.getLong(1),
                                 cursor.isNull(3) ? null : cursor.getString(3),
-                                !cursor.isNull(14) && cursor.getInt(14) == 1));
+                                !cursor.isNull(14) && cursor.getInt(14) == 1,
+                                unsynced,
+                                unsynced && refused(cursor.getString(0), cursor.getString(2))));
             }
         }
         return messages;
+    }
+
+    /** Whether the server refused a change of one message for good. */
+    private boolean refused(String collection, String linkId) {
+        return Refusals.refused(context, collection, linkId);
     }
 
     /** Every message of the query, for a selection made of all of it. */

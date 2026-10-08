@@ -1,5 +1,6 @@
 package org.pimalaya;
 
+import android.content.ContentValues;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteDoneException;
@@ -81,10 +82,12 @@ final class PimdirStorage {
 
     private final PimdirDb store;
     private final PimdirBlobs blobs;
+    private final PimdirItems items;
 
     PimdirStorage(PimdirDb store) {
         this.store = store;
         this.blobs = new PimdirBlobs(store.blobs());
+        this.items = new PimdirItems(store);
     }
 
     // ---- the two spokes ---------------------------------------------------
@@ -398,7 +401,8 @@ final class PimdirStorage {
             placement.put("flags", arrayOf(cursor.getString(1)));
         }
 
-        placement.put("status", statusOf(cursor));
+        String status = statusOf(cursor);
+        placement.put("status", status);
         // NOTE: a message's date and not its summary: what the engine reads
         // to tell a placement in a round's scope from one outside it (SYNC
         // section 5). Without it a round opened and closed by one page would
@@ -414,27 +418,39 @@ final class PimdirStorage {
             placement.put("conflictObject", cursor.getString(12));
         }
 
-        if (!cursor.isNull(5)) {
-            if (hasBase(cursor)) {
-                JSONObject base = new JSONObject();
-                if (!cursor.isNull(6)) {
-                    base.put("flags", arrayOf(cursor.getString(6)));
-                }
-                if (!cursor.isNull(7)) {
-                    base.put("object", cursor.getString(7));
-                }
-                if (!cursor.isNull(8)) {
-                    base.put("revision", cursor.getString(8));
-                }
-                placement.put("base", base);
+        boolean bound = !cursor.isNull(5);
+        if (bound && hasBase(cursor)) {
+            JSONObject base = new JSONObject();
+            if (!cursor.isNull(6)) {
+                base.put("flags", arrayOf(cursor.getString(6)));
             }
-        } else {
-            // NOTE: no base means a pending create, and a pending create of an
-            // item another collection already holds on the same source is a
-            // membership addition rather than a second upload. Naming where it
-            // comes from is what lets the push adapter tell the two apart.
+            if (!cursor.isNull(7)) {
+                base.put("object", cursor.getString(7));
+            }
+            if (!cursor.isNull(8)) {
+                base.put("revision", cursor.getString(8));
+            }
+            placement.put("base", base);
+        } else if (!bound || "created".equals(status)) {
+            // NOTE: no base means a pending create, unbound or staged under
+            // its provisional handle, and a pending create of an item another
+            // collection already holds on the same source is a membership
+            // addition rather than a second upload. Naming where it comes
+            // from is what lets the push adapter tell the two apart.
             JSONObject origin = originOf(collection, linkId);
             if (origin != null) {
+                placement.put("origin", origin);
+            }
+        }
+        // NOTE: a staged move is a tombstone beside the pending create it
+        // derives its destination from (SYNC §3), so its removal pushes as a
+        // relocation. Mail only: no other kind is moved.
+        if ("tombstone".equals(status) && PimdirSummary.MAIL.equals(cursor.getString(15))) {
+            String destination = destinationOf(collection, linkId);
+            if (destination != null) {
+                JSONObject origin = new JSONObject();
+                origin.put("collection", destination);
+                origin.put("handle", handle);
                 placement.put("origin", origin);
             }
         }
@@ -618,6 +634,7 @@ final class PimdirStorage {
             List<JSONObject> drops = new ArrayList<>();
             List<JSONObject> stamps = new ArrayList<>();
             Set<String> upserted = new HashSet<>();
+            Set<String> links = new HashSet<>();
             JSONArray effects = new JSONArray();
             Set<String> superseded = supersededHandles(writes);
 
@@ -629,7 +646,7 @@ final class PimdirStorage {
                         break;
                     case "upsert": {
                         JSONObject placement = op.getJSONObject("placement");
-                        String kind = applyUpsert(db, placement, superseded);
+                        String kind = applyUpsert(db, placement, superseded, links);
                         if (kind != null) {
                             effects.put(effect(placement.getString("collection"),
                                     placement.getString("handle"), kind));
@@ -679,7 +696,20 @@ final class PimdirStorage {
                 // stays; reading either as a removal would retain what the same
                 // batch just renamed, and propagate a delete nobody asked for.
                 boolean deleted = "deleted".equals(drop.optString("reason", "deleted"));
+                String stored = collectionOf(collection);
+                // NOTE: a message is filed under the handle its listing names
+                // (applyUpsert), so a mail create whose provisional handle an
+                // accepted push or a landing supersedes is no item of its own:
+                // the arrival is, under its handle, whether this batch filed
+                // it or the next listing brings it.
+                String staged =
+                        !deleted && handle.startsWith(PROVISIONAL) && isMail(db, stored)
+                                ? linkOf(db, stored, sourceOf(collection), handle)
+                                : null;
                 applyDrop(db, collection, handle, deleted);
+                if (staged != null && !links.contains(stored + "\n" + staged)) {
+                    items.remove(db, stored, staged);
+                }
                 if (deleted) {
                     effects.put(effect(collection, handle, "removed"));
                 }
@@ -750,7 +780,8 @@ final class PimdirStorage {
      * {@code created}, {@code changed} when the body differs, or null for a
      * bookkeeping-only upsert (flags, bases).
      */
-    private String applyUpsert(SQLiteDatabase db, JSONObject placement, Set<String> superseded)
+    private String applyUpsert(
+            SQLiteDatabase db, JSONObject placement, Set<String> superseded, Set<String> links)
             throws JSONException {
         String engineCollection = placement.getString("collection");
         String collection = collectionOf(engineCollection);
@@ -762,6 +793,16 @@ final class PimdirStorage {
         // next fetch has to un-mint, leaving two bindings on one handle.
         String bound = linkOf(db, collection, source, handle);
         String linkId = placement.isNull("linkId") ? bound : placement.optString("linkId", bound);
+        // NOTE: a message is filed under its handle, the identity its
+        // listing names it by, so a create landed onto the handle its
+        // arrival is listed at takes that handle as its identity too; the
+        // item it was staged as goes with its provisional handle.
+        boolean mail = isMail(db, collection);
+        String staged = null;
+        if (mail && !handle.startsWith(PROVISIONAL) && linkId != null && !linkId.equals(handle)) {
+            staged = linkId;
+            linkId = handle;
+        }
         String object = placement.isNull("object") ? null : placement.optString("object", null);
         JSONObject summary = placement.optJSONObject("summary");
         String sortKey = placement.optString("sortKey", "");
@@ -842,7 +883,20 @@ final class PimdirStorage {
 
         // On the same terms as the sort key: a write carrying no summary keeps
         // the stored row, which is what a flag push and a pulled deletion do.
-        PimdirSummary.write(db, collection, linkId, summary, !exists);
+        // NOTE: a message created from another one (a landed create, a
+        // copy, a move's target) is that message: it takes the summary the
+        // store holds of it, the engine having carried none.
+        boolean carried =
+                mail
+                        && !exists
+                        && summary == null
+                        && carrySummary(
+                                db, collection, source, staged, placement.optJSONObject("origin"),
+                                linkId);
+        if (!carried) {
+            PimdirSummary.write(db, collection, linkId, summary, !exists);
+        }
+        links.add(collection + "\n" + linkId);
         writeBinding(db, collection, source, linkId, handle, placement, superseded, !exists);
         adjustRefcount(db, previousObject, object);
 
@@ -1350,6 +1404,346 @@ final class PimdirStorage {
                         new String[] {collectionOf(engineCollection)})) {
             return cursor.moveToFirst() ? cursor.getInt(0) : 0;
         }
+    }
+
+    // ---- staged moves and creates -----------------------------------------
+
+    /** The link id an engine handle names on this source, or null. */
+    String linkOfHandle(String engineCollection, String handle) {
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT link_id FROM bindings WHERE collection = ? AND source = ?"
+                                + " AND handle = ?",
+                        new String[] {
+                            collectionOf(engineCollection), sourceOf(engineCollection), handle
+                        })) {
+            return cursor.moveToFirst() ? cursor.getString(0) : nameOf(handle);
+        }
+    }
+
+    /**
+     * The handle the engine addresses an item by on this source: the one it
+     * binds, else the provisional handle its create waits under (SYNC §2).
+     */
+    String handleFor(String engineCollection, String linkId) {
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT handle FROM bindings WHERE collection = ? AND link_id = ?"
+                                + " AND source = ?",
+                        new String[] {
+                            collectionOf(engineCollection), linkId, sourceOf(engineCollection)
+                        })) {
+            return cursor.moveToFirst() ? cursor.getString(0) : provisionalOf(linkId);
+        }
+    }
+
+    /**
+     * The key a staged copy or move of {@code linkId} takes in a collection
+     * already holding that identity: {@code dup:}, the key, {@code #}, the
+     * provisional handle it would have taken (STORAGE §9).
+     */
+    static String mintedOf(String linkId) {
+        return "dup:" + linkId + "#" + provisionalOf(linkId);
+    }
+
+    /**
+     * The identities a pending create keyed {@code linkId} may be the copy
+     * of: its own key, and the key it was minted from when it is one.
+     */
+    private static List<String> identitiesOf(String linkId) {
+        List<String> identities = new ArrayList<>(List.of(linkId));
+        int length = linkId.length() - "dup:#".length() - PROVISIONAL.length();
+        if (linkId.startsWith("dup:") && length > 0 && length % 2 == 0) {
+            String key = linkId.substring(4, 4 + length / 2);
+            if (mintedOf(key).equals(linkId)) {
+                identities.add(key);
+            }
+        }
+        return identities;
+    }
+
+    /**
+     * Where a tombstone of {@code linkId} moves to: another collection this
+     * source holds a pending create of that identity in, under its own key
+     * or the one minted from it, or null.
+     */
+    private String destinationOf(String engineCollection, String linkId) {
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT i.collection FROM items i"
+                                + " JOIN bindings b ON b.collection = i.collection"
+                                + " AND b.link_id = i.link_id AND b.source = ?"
+                                + " WHERE i.link_id IN (?, ?) AND i.collection <> ?"
+                                + " AND i.deleted = 0 AND b.base_present = 0"
+                                + " ORDER BY i.collection LIMIT 1",
+                        new String[] {
+                            sourceOf(engineCollection),
+                            linkId,
+                            mintedOf(linkId),
+                            collectionOf(engineCollection)
+                        })) {
+            return cursor.moveToFirst() ? cursor.getString(0) : null;
+        }
+    }
+
+    /**
+     * The key of the pending create a move of {@code linkId} staged in
+     * {@code engineCollection}, its own or a minted one, or null.
+     */
+    String pendingCreateOf(String engineCollection, String linkId) {
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT i.link_id FROM items i"
+                                + " JOIN bindings b ON b.collection = i.collection"
+                                + " AND b.link_id = i.link_id AND b.source = ?"
+                                + " WHERE i.link_id IN (?, ?) AND i.collection = ?"
+                                + " AND i.deleted = 0 AND b.base_present = 0 LIMIT 1",
+                        new String[] {
+                            sourceOf(engineCollection),
+                            linkId,
+                            mintedOf(linkId),
+                            collectionOf(engineCollection)
+                        })) {
+            return cursor.moveToFirst() ? cursor.getString(0) : null;
+        }
+    }
+
+    /**
+     * The staged move a pending create keyed {@code linkId} is the target
+     * of, as the source's {@code [collection, handle]}: a tombstone of the
+     * same identity this source still binds in another collection. Null
+     * when the create is no move's.
+     */
+    String[] moveSourceOf(String engineCollection, String linkId) {
+        SQLiteDatabase db = store.getReadableDatabase();
+        List<String> identities = identitiesOf(linkId);
+        StringBuilder marks = new StringBuilder();
+        List<String> args = new ArrayList<>(List.of(sourceOf(engineCollection)));
+        for (String identity : identities) {
+            marks.append(marks.length() == 0 ? "?" : ",?");
+            args.add(identity);
+        }
+        args.add(collectionOf(engineCollection));
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT i.collection, b.handle FROM items i"
+                                + " JOIN bindings b ON b.collection = i.collection"
+                                + " AND b.link_id = i.link_id AND b.source = ?"
+                                + " WHERE i.link_id IN (" + marks + ") AND i.collection <> ?"
+                                + " AND i.deleted = 1 AND i.retained_at IS NULL"
+                                + " AND b.base_present = 1 LIMIT 1",
+                        args.toArray(new String[0]))) {
+            return cursor.moveToFirst()
+                    ? new String[] {cursor.getString(0), cursor.getString(1)}
+                    : null;
+        }
+    }
+
+    /**
+     * Whether {@code linkId} is still a pending create in the collection: a
+     * live item no base of this source has agreed on.
+     */
+    boolean isPendingCreate(String engineCollection, String linkId) {
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT 1 FROM items i"
+                                + " LEFT JOIN bindings b ON b.collection = i.collection"
+                                + " AND b.link_id = i.link_id AND b.source = ?"
+                                + " WHERE i.collection = ? AND i.link_id = ? AND i.deleted = 0"
+                                + " AND i.retained_at IS NULL"
+                                + " AND (b.link_id IS NULL OR b.base_present = 0)",
+                        new String[] {
+                            sourceOf(engineCollection), collectionOf(engineCollection), linkId
+                        })) {
+            return cursor.moveToFirst();
+        }
+    }
+
+    /**
+     * Withdraws a pending create outright, its row and body reference
+     * gone, as if it had never been staged: what a move's target holds once
+     * the source's relocation delivered it, the arrival coming under its
+     * own handle with the target's next listing. A row that is no pending
+     * create any more is left alone.
+     */
+    void withdrawCreate(String engineCollection, String linkId) {
+        if (!isPendingCreate(engineCollection, linkId)) {
+            return;
+        }
+        SQLiteDatabase db = store.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            items.remove(db, collectionOf(engineCollection), linkId);
+            collectGarbage(db);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /**
+     * The pending mail creates of a collection by the bare {@code Message-ID}
+     * they carry, the ones carrying none left out: what lands a staged copy
+     * on the arrival the provider filed itself (a sent message).
+     *
+     * <p>Read off the provisional handles alone, a range of the handle
+     * index, so a page of a large mailbox pays for its few creates rather
+     * than for the mailbox.
+     */
+    Map<String, String> pendingCreatesByMessageId(String engineCollection) {
+        SQLiteDatabase db = store.getReadableDatabase();
+        Map<String, String> creates = new HashMap<>();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT b.link_id, s.message_id FROM bindings b"
+                                + " JOIN items i ON i.collection = b.collection"
+                                + " AND i.link_id = b.link_id"
+                                + " JOIN mail_summary s ON s.collection = b.collection"
+                                + " AND s.link_id = b.link_id"
+                                + " WHERE b.collection = ? AND b.source = ?"
+                                + " AND b.handle >= ? AND b.handle < ?"
+                                + " AND b.base_present = 0 AND i.deleted = 0"
+                                + " AND s.message_id IS NOT NULL",
+                        new String[] {
+                            collectionOf(engineCollection),
+                            sourceOf(engineCollection),
+                            PROVISIONAL,
+                            String.valueOf((char) (PROVISIONAL.charAt(0) + 1))
+                        })) {
+            while (cursor.moveToNext()) {
+                creates.put(cursor.getString(1), cursor.getString(0));
+            }
+        }
+        return creates;
+    }
+
+    /**
+     * Whether an item owes the source a push: no base agreed on it yet (a
+     * create, a move's target), markers moved past the ones agreed, or a
+     * body past the agreed one where the kind is edited in place. False for
+     * an item the source does not know at all being no item of a synced
+     * collection.
+     */
+    boolean unsynced(String engineCollection, String linkId) {
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT i.flags, i.object_hash, b.link_id, b.base_present,"
+                                + " b.base_flags, b.base_object, c.kind"
+                                + " FROM items i"
+                                + " JOIN collections c ON c.id = i.collection"
+                                + " LEFT JOIN bindings b ON b.collection = i.collection"
+                                + " AND b.link_id = i.link_id AND b.source = ?"
+                                + " WHERE i.collection = ? AND i.link_id = ?",
+                        new String[] {
+                            sourceOf(engineCollection), collectionOf(engineCollection), linkId
+                        })) {
+            if (!cursor.moveToFirst()) {
+                return false;
+            }
+            if (cursor.isNull(2) || cursor.getInt(3) == 0) {
+                return true;
+            }
+            boolean flagsMoved =
+                    !cursor.isNull(0)
+                            && !cursor.isNull(4)
+                            && !sameFlags(cursor.getString(0), cursor.getString(4));
+            boolean bodyMoved =
+                    mutable(cursor.getString(6))
+                            && !cursor.isNull(1)
+                            && (cursor.isNull(5)
+                                    || !cursor.getString(1).equals(cursor.getString(5)));
+            return flagsMoved || bodyMoved;
+        }
+    }
+
+    /** Whether a stored collection holds mail, read within a write batch. */
+    private boolean isMail(SQLiteDatabase db, String collection) {
+        return PimdirSummary.MAIL.equals(
+                one(db, "SELECT kind FROM collections WHERE id = ?", collection));
+    }
+
+    /**
+     * Gives a fresh message the summary the store holds of the one it was
+     * created from: the item its create was staged as ({@code staged}),
+     * else its origin's. Answers whether one was there to take.
+     */
+    private boolean carrySummary(
+            SQLiteDatabase db,
+            String collection,
+            String source,
+            String staged,
+            JSONObject origin,
+            String linkId)
+            throws JSONException {
+        String fromCollection = collection;
+        String fromLink = staged;
+        if (fromLink == null && origin != null) {
+            fromCollection = collectionOf(origin.getString("collection"));
+            String handle = origin.getString("handle");
+            fromLink = linkOf(db, fromCollection, source, handle);
+            if (fromLink == null) {
+                fromLink = nameOf(handle);
+            }
+        }
+        if (fromLink == null) {
+            return false;
+        }
+        // NOTE: the tables Annex A.1 files a message's summary in, copied
+        // row for row whatever their columns.
+        boolean copied = copyRows(db, "mail_summary", fromCollection, fromLink, collection, linkId);
+        copyRows(db, "item_address", fromCollection, fromLink, collection, linkId);
+        return copied;
+    }
+
+    /** Copies one item's rows of a summary table onto another item. */
+    private static boolean copyRows(
+            SQLiteDatabase db,
+            String table,
+            String fromCollection,
+            String fromLink,
+            String toCollection,
+            String toLink) {
+        List<ContentValues> rows = new ArrayList<>();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT * FROM " + table + " WHERE collection = ? AND link_id = ?",
+                        new String[] {fromCollection, fromLink})) {
+            while (cursor.moveToNext()) {
+                ContentValues values = new ContentValues();
+                for (int column = 0; column < cursor.getColumnCount(); column++) {
+                    String name = cursor.getColumnName(column);
+                    switch (cursor.getType(column)) {
+                        case Cursor.FIELD_TYPE_NULL:
+                            values.putNull(name);
+                            break;
+                        case Cursor.FIELD_TYPE_INTEGER:
+                            values.put(name, cursor.getLong(column));
+                            break;
+                        case Cursor.FIELD_TYPE_FLOAT:
+                            values.put(name, cursor.getDouble(column));
+                            break;
+                        case Cursor.FIELD_TYPE_BLOB:
+                            values.put(name, cursor.getBlob(column));
+                            break;
+                        default:
+                            values.put(name, cursor.getString(column));
+                    }
+                }
+                values.put("collection", toCollection);
+                values.put("link_id", toLink);
+                rows.add(values);
+            }
+        }
+        for (ContentValues values : rows) {
+            db.insertWithOnConflict(table, null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        }
+        return !rows.isEmpty();
     }
 
     // ---- helpers ----------------------------------------------------------

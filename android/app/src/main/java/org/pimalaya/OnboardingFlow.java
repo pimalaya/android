@@ -2,8 +2,6 @@ package org.pimalaya;
 
 import android.Manifest;
 import android.app.AlertDialog;
-import android.content.pm.PackageManager;
-import android.os.Build;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
@@ -11,7 +9,6 @@ import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.Spinner;
 import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -101,9 +98,6 @@ final class OnboardingFlow {
     /** The books step's subscribe checkboxes. */
     private List<BookChoice> bookChoices = new ArrayList<>();
 
-    /** The books step's background-sync cadence, null when bookless. */
-    private Spinner booksInterval;
-
     OnboardingFlow(MainActivity host, OauthFlow oauth) {
         this.host = host;
         this.oauth = oauth;
@@ -181,8 +175,7 @@ final class OnboardingFlow {
     /**
      * Asks whether to set the account up the standard way (a switch per
      * domain, the password sign-in of the best configuration found for
-     * it, every addressbook, phone mirroring, background sync every 15
-     * minutes) or step by step, while the discovery already runs
+     * it, every addressbook, phone mirroring) or step by step, while the discovery already runs
      * behind; the flow proceeds once both the choice and the discovery
      * are in.
      */
@@ -1805,15 +1798,12 @@ final class OnboardingFlow {
      * checkbox per book, its name the label, subscribed by default.
      * Phone-contacts mirroring is turned on by default for every
      * subscribed book; the drawer's per-book settings let the user turn
-     * it off later. Below the list, one cadence dropdown seeds the
-     * background sync of every selected book (never by default). The
-     * checkbox box sits at the panel's 24dp inset, aligned with the
+     * it off later. The checkbox box sits at the panel's 24dp inset, aligned with the
      * title and paragraph above. Same chrome as the config panel.
      */
     private void openBooksSelection(String email, List<Addressbook> books) {
         connectedEmail = email;
         bookChoices = new ArrayList<>();
-        booksInterval = null;
 
         LinearLayout container = host.findViewById(R.id.books_container);
         container.removeAllViews();
@@ -1846,27 +1836,6 @@ final class OnboardingFlow {
             bookChoices.add(new BookChoice(book.url, subscribe));
         }
 
-        if (!books.isEmpty()) {
-            TextView cadence = new TextView(host);
-            cadence.setText(R.string.book_background_sync);
-            cadence.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
-            cadence.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-            LinearLayout.LayoutParams cadenceParams =
-                    new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT);
-            cadenceParams.topMargin = host.ui.dp(24);
-            container.addView(cadence, cadenceParams);
-
-            booksInterval = host.intervalSpinner();
-            LinearLayout.LayoutParams intervalParams =
-                    new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT);
-            intervalParams.topMargin = host.ui.dp(8);
-            container.addView(booksInterval, intervalParams);
-        }
-
         host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
         updateBooksContinue();
         host.showAuth(MainActivity.STEP_BOOKS);
@@ -1894,17 +1863,12 @@ final class OnboardingFlow {
                 subscribed.add(choice.url);
             }
         }
-        long minutes =
-                booksInterval == null
-                        ? 0
-                        : BackgroundSync.INTERVAL_MINUTES[booksInterval.getSelectedItemPosition()];
-        commitBooks(subscribed, minutes);
+        commitBooks(subscribed);
     }
 
     /**
      * The standard setup's commit, selection-free: every addressbook
-     * subscribed with phone mirroring and a 15-minute background sync,
-     * then the first sync straight to the contacts list.
+     * subscribed with phone mirroring, then the first sync straight to the contacts list.
      */
     private void confirmAllBooks(String email) {
         connectedEmail = email;
@@ -1912,18 +1876,17 @@ final class OnboardingFlow {
         for (Addressbook book : pendingBooks) {
             subscribed.add(book.url);
         }
-        commitBooks(subscribed, 15);
+        commitBooks(subscribed);
     }
 
     /**
      * The flow's real commit, shared by the books step's Continue and
      * the standard setup: persists the connected account and its
      * addressbooks, subscribes the given ones with phone mirroring on
-     * by default and the given background sync cadence, asks the
-     * permissions that setup needs (contacts, plus notifications when a
-     * cadence is on), then runs the account's first sync.
+     * by default, asks the contacts permission that setup needs, then runs
+     * the account's first sync.
      */
-    private void commitBooks(java.util.Set<String> subscribed, long minutes) {
+    private void commitBooks(java.util.Set<String> subscribed) {
         host.base.replaceAddressbooks(connectedEmail, pendingBooks);
         new PimdirCollections(host.pimdir, host)
                 .replace(
@@ -1934,28 +1897,15 @@ final class OnboardingFlow {
         for (Addressbook book : pendingBooks) {
             boolean on = subscribed.contains(book.url);
             host.base.setBookState(book.url, on, on, on);
-            BackgroundSync.setInterval(host, book.url, on ? minutes : 0);
         }
-        BackgroundSync.reconcile(host, host.base.loadAllAddressbooks());
 
-        // NOTE: ask up front in one grouped request; two
-        // requestPermissions calls would cancel each other. Contacts
-        // because subscribed books mirror into the Contacts app;
-        // notifications (Android 13+) for the background sync report.
-        List<String> permissions = new ArrayList<>();
+        // NOTE: subscribed books mirror into the Contacts app.
         if (!host.hasContactsPermission()) {
-            permissions.add(Manifest.permission.READ_CONTACTS);
-            permissions.add(Manifest.permission.WRITE_CONTACTS);
-        }
-        if (minutes > 0
-                && Build.VERSION.SDK_INT >= 33
-                && host.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS);
-        }
-        if (!permissions.isEmpty()) {
             host.requestPermissions(
-                    permissions.toArray(new String[0]), MainActivity.REQUEST_CONTACTS);
+                    new String[] {
+                        Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS
+                    },
+                    MainActivity.REQUEST_CONTACTS);
         }
 
         finishOnboarding();

@@ -158,16 +158,6 @@
     <string name="book_enable">Activer ce carnet d\'adresses</string>
     <string name="book_remote_sync">Synchroniser à distance</string>
     <string name="book_local_sync">Synchroniser localement</string>
-    <string name="book_background_sync">Synchroniser en arrière-plan</string>
-    <string-array name="background_sync_intervals">
-        <item>Désactiver la synchronisation en arrière-plan</item>
-        <item>Synchroniser toutes les 15 minutes</item>
-        <item>Synchroniser toutes les 30 minutes</item>
-        <item>Synchroniser toutes les heures</item>
-        <item>Synchroniser toutes les 4 heures</item>
-        <item>Synchroniser toutes les 12 heures</item>
-        <item>Synchroniser tous les jours</item>
-    </string-array>
     <string name="home_empty">Aucun compte pour l\'instant. Ajoutez-en un pour commencer.</string>
     <string name="delete_account_confirm">Voulez-vous vraiment retirer ce compte ? Ses contacts resteront sur cet appareil.</string>
 
@@ -211,8 +201,6 @@
         <item quantity="other">Résolution de %1$d conflits</item>
     </plurals>
     <string name="sync_step_mailboxes">Boîtes synchronisées : %1$d sur %2$d</string>
-    <string name="notif_channel_sync">Synchronisation en arrière-plan</string>
-    <string name="notif_conflicts_sub">Conflits détectés ; ouvrez l\'application pour les résoudre</string>
 
     <string name="contacts_sync">Synchroniser</string>
     <string name="birthdays_title">Prochain anniversaire</string>
@@ -416,6 +404,10 @@
     <string name="message_delete_confirm">Supprimer ce message ?</string>
     <string name="message_deleted">Déplacé vers %s</string>
     <string name="message_deleted_in_place">Marqué supprimé ; il reste où il est</string>
+    <string name="message_deleted_for_good">Supprimé définitivement</string>
+    <string name="message_marked_deleted">Marqué supprimé</string>
+    <string name="row_unsynced">En attente de synchronisation</string>
+    <string name="row_refused">Refusé par le serveur</string>
     <string name="message_write_failed">Impossible d\'enregistrer la modification</string>
     <string name="message_pending">En attente d\'envoi</string>
     <string name="mail_outbox">Boîte d\'envoi</string>

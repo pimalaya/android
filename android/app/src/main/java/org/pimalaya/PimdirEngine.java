@@ -34,6 +34,9 @@ abstract class PimdirEngine implements OfflineDriver {
 
     protected final PimalayaClient client;
 
+    /** The store, for the app's own records beside it ({@link Refusals}). */
+    private final PimdirDb db;
+
     /**
      * The store's one writer: every storage yield of every driver (a load,
      * a lookup, a write) is answered holding it.
@@ -86,6 +89,7 @@ abstract class PimdirEngine implements OfflineDriver {
     protected PimdirEngine(PimdirDb pimdir, PimalayaClient client) {
         this.offline = new PimdirStorage(pimdir);
         this.client = client;
+        this.db = pimdir;
     }
 
     /**
@@ -244,9 +248,12 @@ abstract class PimdirEngine implements OfflineDriver {
                 case "fetch":
                     reply = fetch(yielded).toString();
                     break;
-                case "push":
-                    reply = push(yielded).toString();
+                case "push": {
+                    JSONObject pushed = push(yielded);
+                    forgetRefusals(yielded.getString("collection"), pushed);
+                    reply = pushed.toString();
                     break;
+                }
                 default:
                     reply = error("Unsupported engine yield " + op);
             }
@@ -410,6 +417,31 @@ abstract class PimdirEngine implements OfflineDriver {
     }
 
     /**
+     * Stages a move into {@code target}: a pending create there and a
+     * tombstone here, both visible at once (SYNC §3). The next sync of
+     * either collection carries it out as a server move.
+     */
+    void mutateMove(String collection, String handle, String target) throws JSONException {
+        JSONObject mutation = new JSONObject();
+        mutation.put("op", "move");
+        mutation.put("handle", handle);
+        mutation.put("target", target);
+        client.offlineMutate(this, collection, mutation);
+    }
+
+    /**
+     * Stages a copy into {@code target}, the placement kept: a pending
+     * create there the next sync pushes as a server-side copy.
+     */
+    void mutateCopy(String collection, String handle, String target) throws JSONException {
+        JSONObject mutation = new JSONObject();
+        mutation.put("op", "copy");
+        mutation.put("handle", handle);
+        mutation.put("target", target);
+        client.offlineMutate(this, collection, mutation);
+    }
+
+    /**
      * Stages a content edit on one placement; editing a conflicted
      * placement resolves it.
      */
@@ -444,6 +476,37 @@ abstract class PimdirEngine implements OfflineDriver {
         mutation.put("summary", summary);
         mutation.put("sortKey", sortKey);
         client.offlineMutate(this, collection, mutation);
+    }
+
+    /**
+     * A change the remote refuses for good: rejected as any other is, and
+     * remembered against the item it stands on ({@link Refusals}) so its
+     * row says so. Not for a change that waits, which is rejected alone.
+     */
+    protected JSONObject refuse(String collection, String linkId, String handle)
+            throws JSONException {
+        if (linkId != null) {
+            Refusals.refuse(db.context(), collection, linkId);
+        }
+        return result(handle, false, null, null);
+    }
+
+    /** Forgets the refusal of every item a push carried out. */
+    private void forgetRefusals(String collection, JSONObject pushed) throws JSONException {
+        JSONArray results = pushed.optJSONArray("results");
+        for (int index = 0; results != null && index < results.length(); index++) {
+            JSONObject result = results.getJSONObject(index);
+            if (!result.optBoolean("accepted")) {
+                continue;
+            }
+            String linkId;
+            synchronized (STORE) {
+                linkId = offline.linkOfHandle(collection, result.getString("handle"));
+            }
+            if (linkId != null) {
+                Refusals.clear(db.context(), collection, linkId);
+            }
+        }
     }
 
     // ---- the wire shapes --------------------------------------------------

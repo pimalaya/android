@@ -6,11 +6,13 @@ import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -272,7 +274,7 @@ final class MessageCompose {
                         byte[] source = host.client.composeMessage(draft);
                         // The `Message-ID` is the identity, which is what
                         // the payload names it by: it is minted here and
-                        // stamped on the message, so the copy the drain
+                        // stamped on the message, so the copy the sync
                         // files in the sent mailbox comes back under the
                         // same name.
                         host.mail.queueSubmission(
@@ -281,6 +283,7 @@ final class MessageCompose {
                                 subject,
                                 PimdirSummary.mailSortKey(date),
                                 source);
+                        stageSentCopy(sender, messageId, subject, to, date, source);
                     } catch (Exception error) {
                         Log.w("pimalaya", "compose failed: " + sender.email, error);
                         failure = error;
@@ -310,6 +313,48 @@ final class MessageCompose {
                                 }
                             });
                 });
+    }
+
+    /**
+     * Stages the copy the sender keeps in the account's sent mailbox beside
+     * the submission, so it shows there at once. The sync carries it out:
+     * the provider filing sent mail itself (Gmail, Graph), its listing
+     * lands the copy by the `Message-ID`; elsewhere the copy is appended
+     * once the submission went (pimdir SYNC §5).
+     *
+     * <p>None for a JMAP account, which sends nothing yet, or one marking no
+     * sent mailbox.
+     */
+    private void stageSentCopy(
+            AccountEntry sender,
+            String messageId,
+            String subject,
+            String to,
+            String date,
+            byte[] source)
+            throws JSONException {
+        String sent = host.mail.sentOf(sender.email);
+        if (sent == null || PimalayaClient.isJmap(sender.server(PimDomain.MAIL))) {
+            return;
+        }
+        host.mailEngine(sender.email)
+                .mutateAdd(
+                        sent,
+                        PimdirSummary.bare(messageId),
+                        // NOTE: the composition is 7-bit (RFC 2047 words, a
+                        // quoted-printable body), so its text is its bytes.
+                        new String(source, StandardCharsets.UTF_8),
+                        new JSONArray().put(MailEngine.SEEN),
+                        PimdirSummary.mail(
+                                messageId,
+                                subject,
+                                null,
+                                sender.email,
+                                to.split(",")[0].trim(),
+                                date,
+                                source.length,
+                                false),
+                        PimdirSummary.mailSortKey(date));
     }
 
     private String value(int id) {

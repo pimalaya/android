@@ -21,7 +21,7 @@ One activity, one ViewFlipper, one panel per screen:
 
    *Sync remote* also runs the phone spoke: each book syncs phone, then server, then phone again, so a contacts-app edit reaches the server in one pass and the server round projects back in the same one.
 
-   Launch is offline first: the contacts screen renders instantly from the store. By default the app never syncs by itself; each addressbook can opt into scheduled background sync (the "Synchronize in background" cadence, set at the end of the connection flow or from the account's settings screen, account-wide or per book behind its Advanced fold), which runs the same three-pass book sync through one WorkManager periodic worker per book, the DAVx5 pattern; a book whose remote switch is off keeps its phone pass and skips the server exchange. A pass that did something posts a notification shaped like the in-app sync toast (pulled, pushed, merged, titled by the book); a pass with nothing to report posts nothing. Contacts in a pending both-sides-edited conflict sit each pass out (the engine parks them untouched, per item, while everything else keeps syncing) and ride the notification as a warning subtitle on every pass until the user resolves them in the app; enabling a cadence also turns on the Android account's content-triggered sync, so contacts-app edits upload into the hub as they happen.
+   Launch is offline first: the contacts screen renders instantly from the store. The app never syncs by itself: every sync is manual (background sync was removed before the first release, and returns with new-mail notifications).
 
 3. **Contacts** (list + editor panels). Lists the cards of every synced addressbook by FN. The editor is a tabbed form (name, contact, address, other, plus a read-only source tab showing the raw vCard) over the same neutral field model the phone projection uses: the form collects the model and the Rust bridge patches it onto the stored vCard through the vcard-rs CST, so every property the form does not manage (PHOTO, CATEGORIES, IMPP, X-*) survives untouched. Saving and deleting are offline first: they only stage the change in the base; the next sync pushes it.
 
@@ -86,5 +86,5 @@ Divergent edits on the same contact keep both sides (no silent loss), following 
 ## Out of scope for now
 
 - Multiple accounts (logins); multiple addressbooks per account are in.
-- Push sync (WebDAV-Push over UnifiedPush); periodic background sync is in, per addressbook, through WorkManager.
+- Push sync (WebDAV-Push over UnifiedPush) and periodic background sync.
 - The JMAP backend; the config screen already reserves its slot. OAuth accounts persist their refresh token and refresh expired access tokens transparently on sync (a 401 triggers one refresh-and-retry per addressbook).

@@ -16,13 +16,11 @@ import org.pimalaya.client.Transport;
 import org.pimalaya.client.OauthTokens;
 
 /**
- * The one sync path behind every entry point: the in-app sync and the
- * background worker both run their passes here, so the account lookup,
- * the addressbook self-heal and the refresh-once-and-retry dance exist
- * exactly once. The callers keep what is theirs alone: MainActivity the
+ * The one sync path behind the in-app sync: the account lookup, the
+ * addressbook self-heal and the refresh-once-and-retry dance exist
+ * exactly once. The caller keeps what is its alone: MainActivity the
  * loader dialog, the toasts and its in-memory account cache (fed by the
- * observer), SyncWorker the scheduling and the notification. Everything
- * blocks; callers run it off the main thread.
+ * observer). Everything blocks; callers run it off the main thread.
  */
 final class SyncRunner {
     /**
@@ -91,45 +89,6 @@ final class SyncRunner {
         this.store = store;
         this.client = client;
         this.observer = observer;
-    }
-
-    /**
-     * One book's full pass, the background worker's unit. The local
-     * book has no server, so its pass is the phone spoke alone; a
-     * server book runs the full three-spoke pass with its account's
-     * stored credentials, an expired OAuth access token refreshed and
-     * the book retried once.
-     */
-    OfflineEngine.Report syncBook(BookEntry book) throws Exception {
-        String url = book.book.url;
-
-        if (LocalBook.is(book.accountEmail)) {
-            OfflineEngine.Report report = new OfflineEngine.Report();
-            engine(null, null).syncPhone(url, report);
-            return report;
-        }
-
-        AccountEntry entry = entryFor(book.accountEmail);
-        if (entry == null) {
-            Log.w("pimalaya", "no stored account for " + book.accountEmail + ", skipping");
-            return new OfflineEngine.Report();
-        }
-
-        AccountCredential contacts = entry.credential(PimDomain.CONTACTS);
-        // NOTE: one connection for the book's whole pass, and another for
-        // the retry: a refreshed token is a new sign-in, so the session
-        // the refused one was on is not the session to keep using.
-        try (Transport primary = new Transport()) {
-            return engine(primary, entry.server(PimDomain.CONTACTS))
-                    .syncBook(url, book.remoteSynced);
-        } catch (Exception error) {
-            if (!expiredToken(error) || !contacts.renewable()) {
-                throw error;
-            }
-            try (Transport primary = new Transport()) {
-                return engine(primary, refresh(entry)).syncBook(url, book.remoteSynced);
-            }
-        }
     }
 
     /**

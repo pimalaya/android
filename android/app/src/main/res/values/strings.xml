@@ -118,16 +118,6 @@
     <string name="book_enable">Enable this addressbook</string>
     <string name="book_remote_sync">Sync remotely</string>
     <string name="book_local_sync">Sync locally</string>
-    <string name="book_background_sync">Sync in background</string>
-    <string-array name="background_sync_intervals">
-        <item>Disable background sync</item>
-        <item>Sync every 15 minutes</item>
-        <item>Sync every 30 minutes</item>
-        <item>Sync every hour</item>
-        <item>Sync every 4 hours</item>
-        <item>Sync every 12 hours</item>
-        <item>Sync every day</item>
-    </string-array>
     <string name="home_empty">No account yet. Add one to get started.</string>
     <string name="delete_account_confirm">Are you sure you want to remove this account? Its contacts will stay on this device.</string>
 
@@ -171,8 +161,6 @@
         <item quantity="other">Resolving %1$d conflicts</item>
     </plurals>
     <string name="sync_step_mailboxes">Mailboxes synced: %1$d of %2$d</string>
-    <string name="notif_channel_sync">Background sync</string>
-    <string name="notif_conflicts_sub">Conflicts found; open the app to resolve them</string>
 
     <string name="contacts_sync">Sync</string>
     <string name="birthdays_title">Next birthday</string>
@@ -337,6 +325,10 @@
     <string name="message_delete_confirm">Delete this message?</string>
     <string name="message_deleted">Moved to %s</string>
     <string name="message_deleted_in_place">Marked deleted; it stays where it is</string>
+    <string name="message_deleted_for_good">Deleted for good</string>
+    <string name="message_marked_deleted">Marked deleted</string>
+    <string name="row_unsynced">Waiting to sync</string>
+    <string name="row_refused">Refused by the server</string>
     <string name="message_write_failed">Could not write the change</string>
     <string name="message_pending">Waiting to be sent</string>
     <string name="mail_outbox">Outbox</string>

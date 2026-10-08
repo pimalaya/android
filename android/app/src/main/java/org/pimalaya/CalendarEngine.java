@@ -256,6 +256,12 @@ final class CalendarEngine extends PimdirEngine {
                 }
             }
             case "remove":
+                // NOTE: no calendar backend here relocates an entry, and a
+                // connector that cannot MUST refuse rather than delete
+                // (pimdir SYNC §4): the destination has not received it.
+                if (!change.isNull("to") && change.has("to")) {
+                    return refuse(collection, change.optString("linkId", null), handle);
+                }
                 try {
                     client.deleteEvent(transport, account, url, handle, ifMatch);
                 } catch (RuntimeException failure) {
