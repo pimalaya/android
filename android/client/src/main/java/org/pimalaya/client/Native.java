@@ -629,6 +629,14 @@ final class Native {
     static native String readGraphCards(Transport transport, String token, String ids);
 
     /**
+     * Reads the People contacts named by id (a JSON string array), 200 to
+     * a {@code people:batchGet}, the read of {@link #readCard}; a contact
+     * Google no longer holds is left out. Google only. Returns a JSON
+     * array of {@code {id, uri, etag, vcard, books}}.
+     */
+    static native String readGoogleCards(Transport transport, String token, String ids);
+
+    /**
      * Adds and removes the card's addressbook memberships on an
      * account-level backend (JSON string arrays of book ids), the
      * backend dispatched from the base URL; returns {@code {}}.

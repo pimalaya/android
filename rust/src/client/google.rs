@@ -1,6 +1,8 @@
 //! Google People operations: contact groups and connections as
-//! addressbooks and cards, the batch create and delete verbs, group
-//! membership edits and the sync-token round.
+//! addressbooks and cards, the batch create, read and delete verbs,
+//! group membership edits and the sync-token round.
+
+use std::collections::HashMap;
 
 use io_gpeople::{
     coroutine::{GpeopleCoroutine, GpeopleCoroutineState, GpeopleYield},
@@ -12,13 +14,17 @@ use io_gpeople::{
                 members::modify::GpeopleContactGroupMembersModify,
             },
             people::{
-                GpeoplePerson, GpeoplePersonField,
+                GpeoplePerson, GpeoplePersonField, GpeoplePersonResponse,
                 batch_create_contacts::GpeopleContactsBatchCreate,
                 batch_delete_contacts::GpeopleContactsBatchDelete,
-                connections::list::{GpeopleConnectionsList, GpeopleConnectionsListParams},
+                connections::list::{
+                    GpeopleConnectionsList, GpeopleConnectionsListParams,
+                    GpeopleConnectionsListResponse,
+                },
                 create_contact::GpeopleContactCreate,
                 delete_contact::GpeopleContactDelete,
                 get::GpeoplePersonGet,
+                get_batch_get::GpeoplePersonsBatchGet,
                 update_contact::GpeopleContactUpdate,
                 vcard::{GPEOPLE_PERSON_STASH_KEY, GPEOPLE_PERSON_VCARD_FIELDS},
             },
@@ -140,109 +146,45 @@ impl<'a, 'local> Client<'a, 'local> {
     /// projected onto a vCard document; the person id is the addressing
     /// key and the person etag the ETag.
     pub fn list_google_cards(&mut self, token: &str) -> Result<Vec<Card>, BridgeError> {
-        let auth = HttpAuthBearer::new(token);
-
-        let params = GpeopleConnectionsListParams {
-            page_size: Some(100),
-            ..Default::default()
+        let mut reads = PeopleCalls {
+            client: self,
+            auth: HttpAuthBearer::new(token),
         };
-        let coroutine = GpeopleConnectionsList::new(&auth, GPEOPLE_PERSON_VCARD_FIELDS, &params)
-            .map_err(|err| err.to_string())?;
-        let mut page = self.run_google(coroutine)?;
-
-        let mut cards = Vec::new();
-        loop {
-            cards.extend(page.connections.into_iter().map(google_card));
-
-            match page.next_page_token {
-                Some(next) => {
-                    let params = GpeopleConnectionsListParams {
-                        page_size: Some(100),
-                        page_token: Some(&next),
-                        ..Default::default()
-                    };
-                    let coroutine =
-                        GpeopleConnectionsList::new(&auth, GPEOPLE_PERSON_VCARD_FIELDS, &params)
-                            .map_err(|err| err.to_string())?;
-                    page = self.run_google(coroutine)?;
-                }
-                None => break,
-            }
-        }
-
-        Ok(cards)
+        list_cards(&mut reads)
     }
 
-    /// Lists the People contact changes since `sync_token` (deleted
-    /// persons ride flagged in the response); without a token, the
-    /// initial round lists every contact and requests the token to
-    /// delta from next time. Returns [`None`] when the server expired
-    /// the token, so the caller falls back to an initial round.
+    /// Lists the People contact changes since `cursor` (deleted persons
+    /// ride flagged in the response); without one, the initial round
+    /// lists every contact and requests the token to delta from next
+    /// time. Returns [`None`] when the cursor cannot be used, so the
+    /// caller falls back to an initial round: Google expired the token,
+    /// or it was issued for another request shape ([`SYNC_CHECKPOINT`]).
     pub fn sync_google_cards(
         &mut self,
         token: &str,
-        sync_token: Option<&str>,
+        cursor: Option<&str>,
     ) -> Result<Option<CardDelta>, BridgeError> {
-        let auth = HttpAuthBearer::new(token);
-
-        // NOTE: metadata carries the deleted marker; a sync token binds
-        // to its field mask, so every round asks the same one.
-        let fields: Vec<GpeoplePersonField> = GPEOPLE_PERSON_VCARD_FIELDS
-            .iter()
-            .copied()
-            .chain([GpeoplePersonField::Metadata])
-            .collect();
-
-        let mut delta = CardDelta {
-            changed: Vec::new(),
-            vanished: Vec::new(),
-            token: None,
-            complete: false,
+        let mut reads = PeopleCalls {
+            client: self,
+            auth: HttpAuthBearer::new(token),
         };
-        let mut page_token: Option<String> = None;
+        sync_cards(&mut reads, cursor)
+    }
 
-        loop {
-            let params = GpeopleConnectionsListParams {
-                page_size: Some(100),
-                page_token: page_token.as_deref(),
-                request_sync_token: true,
-                sync_token,
-                ..Default::default()
-            };
-            let coroutine = GpeopleConnectionsList::new(&auth, &fields, &params)
-                .map_err(|err| err.to_string())?;
-            let page = match self.run_google(coroutine) {
-                Ok(page) => page,
-                Err(err) if sync_token.is_some() && sync_token_expired(&err) => {
-                    log::info!("people sync token expired, listing in full");
-                    return Ok(None);
-                }
-                Err(err) => return Err(err),
-            };
-
-            for person in page.connections {
-                let deleted = person
-                    .metadata
-                    .as_ref()
-                    .and_then(|metadata| metadata.deleted)
-                    .unwrap_or(false);
-                if deleted {
-                    delta.vanished.push(person.id().to_string());
-                } else {
-                    delta.changed.push(google_card(person));
-                }
-            }
-
-            if page.next_sync_token.is_some() {
-                delta.token = page.next_sync_token;
-            }
-            match page.next_page_token {
-                Some(next) => page_token = Some(next),
-                None => break,
-            }
-        }
-
-        Ok(Some(delta))
+    /// Reads the named People contacts, each projected onto a vCard
+    /// document, [`GOOGLE_BATCH_GET_CHUNK`] to a `people:batchGet`
+    /// where [`Self::read_google_card`] sends one request a contact; a
+    /// contact Google no longer holds is left out.
+    pub fn read_google_cards(
+        &mut self,
+        token: &str,
+        ids: &[&str],
+    ) -> Result<Vec<Card>, BridgeError> {
+        let mut reads = PeopleCalls {
+            client: self,
+            auth: HttpAuthBearer::new(token),
+        };
+        read_cards(&mut reads, ids)
     }
 
     /// Creates the vCard as a People contact. The server names the
@@ -510,7 +452,24 @@ impl<'a, 'local> Client<'a, 'local> {
 impl<'a, 'local> Client<'a, 'local> {
     /// Runs a Google People coroutine to completion, routing every
     /// yield to the transport stream opened on the People API origin.
-    fn run_google<C, T>(&mut self, mut coroutine: C) -> Result<T, BridgeError>
+    fn run_google<C, T>(&mut self, coroutine: C) -> Result<T, BridgeError>
+    where
+        C: GpeopleCoroutine<
+                Yield = GpeopleYield,
+                Return = Result<GpeopleSendOutput<T>, GpeopleSendError>,
+            >,
+    {
+        self.try_google(coroutine)?
+            .map_err(|err| coroutine_error(&err))
+    }
+
+    /// [`Self::run_google`] keeping People's own error, so a caller can
+    /// tell its reasons apart (an expired sync token); the outer error
+    /// is the transport's.
+    fn try_google<C, T>(
+        &mut self,
+        mut coroutine: C,
+    ) -> Result<Result<T, GpeopleSendError>, BridgeError>
     where
         C: GpeopleCoroutine<
                 Yield = GpeopleYield,
@@ -521,8 +480,8 @@ impl<'a, 'local> Client<'a, 'local> {
 
         loop {
             match coroutine.resume(arg.as_deref()) {
-                GpeopleCoroutineState::Complete(Ok(output)) => return Ok(output.response),
-                GpeopleCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
+                GpeopleCoroutineState::Complete(Ok(output)) => return Ok(Ok(output.response)),
+                GpeopleCoroutineState::Complete(Err(err)) => return Ok(Err(err)),
                 GpeopleCoroutineState::Yielded(GpeopleYield::WantsRead) => {
                     arg = Some(self.http_read(GPEOPLE_API_BASE)?);
                 }
@@ -533,6 +492,217 @@ impl<'a, 'local> Client<'a, 'local> {
             }
         }
     }
+}
+
+/// How many persons one `people.connections.list` page carries, the
+/// API's ceiling.
+const PEOPLE_PAGE_SIZE: u32 = 1000;
+
+/// How many resource names one `people:batchGet` carries, the API's
+/// ceiling.
+const GOOGLE_BATCH_GET_CHUNK: usize = 200;
+
+/// What a People checkpoint starts with: the request shape its sync
+/// token was issued for.
+///
+/// Google binds a sync token to the listing that issued it, every other
+/// parameter having to match, the field mask among them. A token issued
+/// for another shape (the bare tokens of the 100-person pages before
+/// this one) is therefore never sent with this one: the round starts
+/// over in full instead. Bump it whenever [`sync_fields`] or
+/// [`PEOPLE_PAGE_SIZE`] change.
+const SYNC_CHECKPOINT: &str = "v2:";
+
+/// The field mask of a sync round: everything the vCard projection
+/// reads, so the listing carries each body whole, plus the metadata
+/// that flags a deleted person.
+fn sync_fields() -> Vec<GpeoplePersonField> {
+    GPEOPLE_PERSON_VCARD_FIELDS
+        .iter()
+        .copied()
+        .chain([GpeoplePersonField::Metadata])
+        .collect()
+}
+
+/// The two requests a People read sends, apart so the reads can run over
+/// a fake: a page of `people.connections.list`, and a `people:batchGet`.
+pub(super) trait PeopleReads {
+    /// Lists one page of connections; People's own error is kept, so an
+    /// expired sync token can be told apart.
+    fn connections(
+        &mut self,
+        fields: &[GpeoplePersonField],
+        params: &GpeopleConnectionsListParams,
+    ) -> Result<Result<GpeopleConnectionsListResponse, GpeopleSendError>, BridgeError>;
+
+    /// Reads at most [`GOOGLE_BATCH_GET_CHUNK`] persons by resource name,
+    /// everything the vCard projection reads.
+    fn batch_get(&mut self, names: &[String]) -> Result<Vec<GpeoplePersonResponse>, BridgeError>;
+}
+
+/// The People reads of one native call, over its transport.
+struct PeopleCalls<'c, 'a, 'local> {
+    client: &'c mut Client<'a, 'local>,
+    auth: HttpAuthBearer,
+}
+
+impl PeopleReads for PeopleCalls<'_, '_, '_> {
+    fn connections(
+        &mut self,
+        fields: &[GpeoplePersonField],
+        params: &GpeopleConnectionsListParams,
+    ) -> Result<Result<GpeopleConnectionsListResponse, GpeopleSendError>, BridgeError> {
+        let coroutine = GpeopleConnectionsList::new(&self.auth, fields, params)
+            .map_err(|err| err.to_string())?;
+        self.client.try_google(coroutine)
+    }
+
+    fn batch_get(&mut self, names: &[String]) -> Result<Vec<GpeoplePersonResponse>, BridgeError> {
+        let coroutine =
+            GpeoplePersonsBatchGet::new(&self.auth, names, GPEOPLE_PERSON_VCARD_FIELDS, &[])
+                .map_err(|err| err.to_string())?;
+        Ok(self.client.run_google(coroutine)?.responses)
+    }
+}
+
+/// Every contact of the account, [`PEOPLE_PAGE_SIZE`] to a page.
+pub(super) fn list_cards<R: PeopleReads>(reads: &mut R) -> Result<Vec<Card>, BridgeError> {
+    let mut cards = Vec::new();
+    let mut page_token: Option<String> = None;
+
+    loop {
+        let params = GpeopleConnectionsListParams {
+            page_size: Some(PEOPLE_PAGE_SIZE),
+            page_token: page_token.as_deref(),
+            ..Default::default()
+        };
+        let page = reads
+            .connections(GPEOPLE_PERSON_VCARD_FIELDS, &params)?
+            .map_err(|err| coroutine_error(&err))?;
+        cards.extend(page.connections.into_iter().map(google_card));
+
+        match page.next_page_token {
+            Some(next) => page_token = Some(next),
+            None => return Ok(cards),
+        }
+    }
+}
+
+/// One People sync round from `cursor`, [`PEOPLE_PAGE_SIZE`] to a page,
+/// each changed person carrying its whole body; [`None`] when the
+/// cursor cannot be used and the round has to start over without one.
+///
+/// The round is the account's, whatever book asks for it: People has one
+/// sync token for every contact, and the books are its contact groups,
+/// which the caller projects the round onto.
+pub(super) fn sync_cards<R: PeopleReads>(
+    reads: &mut R,
+    cursor: Option<&str>,
+) -> Result<Option<CardDelta>, BridgeError> {
+    let sync_token = match cursor {
+        None => None,
+        Some(cursor) => match cursor.strip_prefix(SYNC_CHECKPOINT) {
+            Some(token) => Some(token),
+            None => {
+                log::info!("people checkpoint issued for another listing, listing in full");
+                return Ok(None);
+            }
+        },
+    };
+
+    // NOTE: a sync token binds to its field mask, so every round asks the
+    // same one.
+    let fields = sync_fields();
+    let mut delta = CardDelta {
+        changed: Vec::new(),
+        vanished: Vec::new(),
+        token: None,
+        complete: false,
+    };
+    let mut page_token: Option<String> = None;
+
+    loop {
+        let params = GpeopleConnectionsListParams {
+            page_size: Some(PEOPLE_PAGE_SIZE),
+            page_token: page_token.as_deref(),
+            request_sync_token: true,
+            sync_token,
+            ..Default::default()
+        };
+        let page = match reads.connections(&fields, &params)? {
+            Ok(page) => page,
+            Err(err) if sync_token.is_some() && err.is_sync_token_expired() => {
+                log::info!("people sync token expired, listing in full");
+                return Ok(None);
+            }
+            Err(err) => return Err(coroutine_error(&err)),
+        };
+
+        for person in page.connections {
+            let deleted = person
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.deleted)
+                .unwrap_or(false);
+            if deleted {
+                delta.vanished.push(person.id().to_string());
+            } else {
+                delta.changed.push(google_card(person));
+            }
+        }
+
+        if let Some(next) = page.next_sync_token {
+            delta.token = Some(format!("{SYNC_CHECKPOINT}{next}"));
+        }
+        match page.next_page_token {
+            Some(next) => page_token = Some(next),
+            None => return Ok(Some(delta)),
+        }
+    }
+}
+
+/// Reads the named contacts, [`GOOGLE_BATCH_GET_CHUNK`] to a request, in
+/// the order given. A contact Google no longer holds (`NOT_FOUND`) is
+/// left out; any other failure of one contact fails the read.
+pub(super) fn read_cards<R: PeopleReads>(
+    reads: &mut R,
+    ids: &[&str],
+) -> Result<Vec<Card>, BridgeError> {
+    let names: Vec<String> = ids.iter().map(|id| format!("people/{id}")).collect();
+    let mut cards = Vec::with_capacity(ids.len());
+
+    for chunk in names.chunks(GOOGLE_BATCH_GET_CHUNK) {
+        let mut read: HashMap<String, GpeoplePerson> = HashMap::with_capacity(chunk.len());
+        for response in reads.batch_get(chunk)? {
+            let name = response.requested_resource_name.clone();
+            match response.person {
+                Some(person) => {
+                    let name = name.unwrap_or_else(|| person.resource_name.clone());
+                    read.insert(name, person);
+                }
+                // NOTE: google.rpc.Code 5 is NOT_FOUND.
+                None if response.http_status_code == Some(404)
+                    || response.status.as_ref().and_then(|status| status.code) == Some(5) => {}
+                None => {
+                    let message = response
+                        .status
+                        .and_then(|status| status.message)
+                        .unwrap_or_else(|| "no person and no reason".to_string());
+                    let name = name.unwrap_or_default();
+                    return Err(format!("People batch read of {name} failed: {message}").into());
+                }
+            }
+        }
+
+        cards.extend(
+            chunk
+                .iter()
+                .filter_map(|name| read.remove(name))
+                .map(google_card),
+        );
+    }
+
+    Ok(cards)
 }
 
 /// io-gpeople person to the JNI-facing card shape: the projected
@@ -566,54 +736,6 @@ fn google_card(person: GpeoplePerson) -> Card {
     }
 }
 
-/// Whether People refused a sync token as expired: a 410, or a 400
-/// whose message says the sync token expired (People's own words:
-/// `Sync token is expired. Clear local cache and retry call without
-/// the sync token.`). Tokens expire seven days after the full listing
-/// that issued them, and the round then starts over without one, as
-/// neverest's `is_expired` does.
-///
-/// TODO: match `GpeopleSendError::is_sync_token_expired` (the 400's
-/// `EXPIRED_SYNC_TOKEN` reason) once io-gpeople keeps Google's error
-/// reasons, rather than the message text.
-fn sync_token_expired(err: &BridgeError) -> bool {
-    let message = err.message.to_ascii_lowercase();
-    match err.status {
-        Some(410) => true,
-        Some(400) => {
-            message.contains("expired_sync_token")
-                || (message.contains("sync token") && message.contains("expired"))
-        }
-        _ => false,
-    }
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn error(status: u16, message: &str) -> BridgeError {
-        BridgeError {
-            message: format!("People API returned HTTP {status}: {message}"),
-            status: Some(status),
-        }
-    }
-
-    #[test]
-    fn an_expired_people_sync_token_is_told_apart() {
-        assert!(sync_token_expired(&error(
-            400,
-            "Sync token is expired. Clear local cache and retry call without the sync token."
-        )));
-        assert!(sync_token_expired(&error(410, "Gone")));
-
-        assert!(!sync_token_expired(&error(
-            400,
-            "Invalid personFields mask"
-        )));
-        assert!(!sync_token_expired(&error(403, "Sync token is expired")));
-        assert!(!sync_token_expired(&BridgeError::from(
-            "Sync token is expired"
-        )));
-    }
-}
+#[path = "google_tests.rs"]
+mod tests;

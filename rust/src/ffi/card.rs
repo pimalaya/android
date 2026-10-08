@@ -613,6 +613,40 @@ pub extern "system" fn Java_org_pimalaya_client_Native_readGraphCards<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
+/// `Native.readGoogleCards`: reads the People contacts named by id (a
+/// JSON string array), 200 to a `people:batchGet`, a contact Google no
+/// longer holds left out; Google only. Returns a JSON array of
+/// `{id, uri, etag, vcard, books}` objects.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_readGoogleCards<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    token: JString<'local>,
+    ids: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let token = read_string(env, &token);
+        let ids = read_string(env, &ids);
+
+        let json = match parse_strings(&ids) {
+            Err(err) => error_json(err),
+            Ok(ids) => {
+                let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+                match Client::new(env, &transport).read_google_cards(&token, &ids) {
+                    Ok(cards) => {
+                        to_string(&cards).unwrap_or_else(|err| error_json(err.to_string()))
+                    }
+                    Err(err) => error_json(err),
+                }
+            }
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
 /// `Native.updateCardBooks`: adds and removes the card's addressbook
 /// memberships on an account-level backend (JSON string arrays of book
 /// ids), the backend dispatched from the base URL. Returns `{}`.

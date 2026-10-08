@@ -89,6 +89,17 @@ final class OfflineEngine extends PimdirEngine {
      */
     private final Map<String, Card> deltaCards = new HashMap<>();
 
+    /**
+     * The account-wide deltas this pass read (JMAP, Google), by the cursor
+     * each was read from (null for a complete round): the account has one
+     * delta for every book, so a book whose checkpoint matches one already
+     * read projects it rather than listing the account again. Books
+     * synced together share a checkpoint, so a quiet pass over three
+     * Google groups reads People once rather than three times. Any push
+     * invalidates them, as it does {@link #deltaCards}.
+     */
+    private final Map<String, CardDelta> accountDeltas = new HashMap<>();
+
     /** Per-collection card cache of the Graph listing, by handle. */
     private final Map<String, Map<String, Card>> graphCards = new HashMap<>();
 
@@ -405,9 +416,16 @@ final class OfflineEngine extends PimdirEngine {
         }
         String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");
 
-        long asked = System.nanoTime();
-        CardDelta delta = client.syncCards(primary, account, url, cursor);
-        remote(System.nanoTime() - asked);
+        boolean accountLevel = PimalayaClient.isAccountLevel(account);
+        CardDelta delta = accountLevel ? accountDeltas.get(cursor) : null;
+        if (delta == null) {
+            long asked = System.nanoTime();
+            delta = client.syncCards(primary, account, url, cursor);
+            remote(System.nanoTime() - asked);
+            if (accountLevel) {
+                accountDeltas.put(cursor, delta);
+            }
+        }
         listed(delta.changed.size());
 
         for (Card card : delta.changed) {
@@ -430,7 +448,7 @@ final class OfflineEngine extends PimdirEngine {
             graphCards.put(url, byHandle);
         }
 
-        if (PimalayaClient.isAccountLevel(account)) {
+        if (accountLevel) {
             return accountSnapshot(url, delta);
         }
         return snapshot(url, delta.changed, delta.vanished, delta.complete, delta.token);
@@ -517,7 +535,9 @@ final class OfflineEngine extends PimdirEngine {
         }
 
         JSONArray items = new JSONArray();
-        if (PimalayaClient.isAccountLevel(account)) {
+        if (isGoogle()) {
+            fetchGoogle(url, handles, items);
+        } else if (PimalayaClient.isAccountLevel(account)) {
             for (int index = 0; index < handles.length(); index++) {
                 String handle = handles.getString(index);
                 Card card = deltaCards.get(handle);
@@ -547,6 +567,46 @@ final class OfflineEngine extends PimdirEngine {
         JSONObject reply = new JSONObject();
         reply.put("items", items);
         return reply;
+    }
+
+    /**
+     * The Google bodies of a fetch: what the pass's People round carried
+     * first (it lists every changed contact whole), then everything it
+     * does not hold in one batched read, 200 contacts to a {@code
+     * people:batchGet}, where it used to be one {@code people.get} a
+     * contact (a fetch after a push, which drops the round's bodies). A
+     * contact gone since the round is left out of the reply, as a
+     * multiget leaves out a resource it no longer finds.
+     */
+    private void fetchGoogle(String url, JSONArray handles, JSONArray items)
+            throws JSONException {
+        List<String> missing = new ArrayList<>();
+        for (int index = 0; index < handles.length(); index++) {
+            String handle = handles.getString(index);
+            if (!deltaCards.containsKey(handle)) {
+                missing.add(handle);
+            }
+        }
+
+        Map<String, Card> read = new HashMap<>();
+        if (!missing.isEmpty()) {
+            long asked = System.nanoTime();
+            for (Card card : client.readGoogleCards(primary, account, missing)) {
+                read.put(card.uri, card);
+            }
+            remote(System.nanoTime() - asked);
+        }
+
+        for (int index = 0; index < handles.length(); index++) {
+            String handle = handles.getString(index);
+            Card card = deltaCards.get(handle);
+            if (card == null) {
+                card = read.get(handle);
+            }
+            if (card != null) {
+                items.put(fetchedItem(url, handle, card));
+            }
+        }
     }
 
     /**
@@ -1166,6 +1226,7 @@ final class OfflineEngine extends PimdirEngine {
     /** Drops the pass caches after a push changed the remote. */
     private void invalidate(String url) {
         deltaCards.clear();
+        accountDeltas.clear();
         graphCards.remove(url);
     }
 

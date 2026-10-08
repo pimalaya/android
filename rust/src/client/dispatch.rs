@@ -503,13 +503,13 @@ impl Client<'_, '_> {
                 complete: true,
             })),
             // NOTE: Google's sync token reports instances, and an instance
-            // moving is its series moving, so every round is a complete
-            // listing folded into series, with no cursor. The listing reads
-            // every event whole, so the bodies come with it.
-            Backend::Google => Ok(Some(listed(self.list_gcal_events(
+            // moving is its series moving, so a changed instance reads its
+            // series again; every body comes with the round.
+            Backend::Google => self.sync_gcal_events(
                 credentials.password,
                 account::book_segment(base_url, calendar_url),
-            )?))),
+                cursor,
+            ),
             _ => {
                 let url = parse_url(calendar_url)?;
                 let delta = self.sync_caldav_events(&url, credentials, cursor)?;
