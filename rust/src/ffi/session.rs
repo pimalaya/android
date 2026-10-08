@@ -175,6 +175,15 @@ impl MailSession {
         matches!(self.kind, MailKind::Gmail(_))
     }
 
+    /// Whether a delete for good erases one message alone: every HTTP
+    /// backend does, an IMAP server only with UIDPLUS (RFC 4315).
+    pub fn expunges_one(&self) -> bool {
+        match &self.kind {
+            MailKind::Imap(state) => state.expunges_one(),
+            _ => true,
+        }
+    }
+
     /// What the run this session works for read of its Gmail account.
     pub fn gmail_run(&self) -> Arc<GmailRun> {
         Arc::clone(&self.gmail)

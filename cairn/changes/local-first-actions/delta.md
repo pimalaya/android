@@ -15,7 +15,7 @@ Every action a user takes on an item (create, edit, flag, move, copy, delete) SH
 - AND the next sync moves it on the server and the mark goes
 
 ### Requirement: A sent message is in Sent at once
-Sending SHALL stage the message into the account's Sent collection beside its submission, so Sent shows it before any sync. Where the provider files sent mail itself, its listing SHALL land the staged copy, matched on the `Message-ID`; elsewhere the staged copy's push SHALL be the append, made only once the submission went.
+Sending SHALL stage the message into the account's Sent collection beside its submission, so Sent shows it before any sync. Where the provider files sent mail itself, its listing SHALL land the staged copy, matched on the `Message-ID`; elsewhere the staged copy's push SHALL be the append, made only once the submission went. While the submission is in the outbox, a list showing the outbox SHALL list its outbox row alone, not the staged copy.
 
 #### Scenario: Sent offline
 - GIVEN a message sent with no network
@@ -27,7 +27,7 @@ Sending SHALL stage the message into the account's Sent collection beside its su
 ### Requirement: A message is deleted into the account's trash
 Deleting a message outside the trash SHALL stage a move into the mailbox the account records as its trash: the row SHALL leave its mailbox and show in the trash at once. The next sync SHALL relocate it with MOVE, or where the server implements no MOVE with COPY and `\Deleted`, then `UID EXPUNGE` where it announces `UIDPLUS`.
 
-Deleting a message in the trash SHALL stage a removal, pushed as a permanent delete: on IMAP `\Deleted` then `UID EXPUNGE` (RFC 4315) where the server announces `UIDPLUS`, the marker alone otherwise, the row then staying and saying so, since an expunge without `UIDPLUS` is mailbox-wide; on Graph `permanentDelete`; on Gmail `messages.delete`; on JMAP `Email/set` destroy. Where an IMAP account records no trash, a delete SHALL stage `\Deleted` in place as in the trash. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`.
+Deleting a message in the trash SHALL stage a removal, pushed as a permanent delete: on IMAP `\Deleted` then `UID EXPUNGE` (RFC 4315), where the account's last session announced `UIDPLUS`; on Graph `permanentDelete`; on Gmail `messages.delete`; on JMAP `Email/set` destroy. Where an IMAP account records no trash, or its server announced no `UIDPLUS` (an expunge without it is mailbox-wide), a delete SHALL stage `\Deleted` in place: the row stays, marked deleted, and the toast says so. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`.
 
 #### Scenario: An account with a trash
 - GIVEN an account recording a mailbox marked `\Trash`

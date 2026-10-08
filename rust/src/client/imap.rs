@@ -142,6 +142,11 @@ impl ImapState {
             searched: None,
         }
     }
+
+    /// Whether the server expunges one message alone ([`disposal`]).
+    pub fn expunges_one(&self) -> bool {
+        disposal(&self.capabilities) == Disposal::Expunge
+    }
 }
 
 /// One session bound to one native call: the state that outlives the

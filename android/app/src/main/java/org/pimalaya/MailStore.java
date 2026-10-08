@@ -76,6 +76,9 @@ final class MailStore {
     /** Which accounts are listed account-wide, by account id. */
     private static final String ACCOUNT_WIDE_PREFS = "mail-account-wide";
 
+    /** Which accounts' servers erase no single message (no UIDPLUS), by account id. */
+    private static final String MARKING_PREFS = "mail-marks-deleted";
+
     private final PimdirItems items;
     private final PimdirDb store;
     private final PimdirCollections collections;
@@ -166,6 +169,7 @@ final class MailStore {
                 .apply();
         MailScope.forget(context, accounts.idOf(accountEmail));
         markAccountWide(context, accounts.idOf(accountEmail), false);
+        markExpungesOne(context, accounts.idOf(accountEmail), true);
     }
 
     /**
@@ -188,6 +192,35 @@ final class MailStore {
     static boolean accountWide(Context context, String accountId) {
         return context.getSharedPreferences(ACCOUNT_WIDE_PREFS, Context.MODE_PRIVATE)
                 .getBoolean(accountId, false);
+    }
+
+    /**
+     * Remembers whether an account's server erases one message alone, as
+     * its last session said ({@code MailSession.expungesOne}).
+     *
+     * <p>Kept beside the trash for the same reason: what it decides is what
+     * a delete in the trash stages, which a delete with no network has to
+     * know.
+     */
+    static void markExpungesOne(Context context, String accountId, boolean expungesOne) {
+        SharedPreferences.Editor prefs =
+                context.getSharedPreferences(MARKING_PREFS, Context.MODE_PRIVATE).edit();
+        if (expungesOne) {
+            prefs.remove(accountId);
+        } else {
+            prefs.putBoolean(accountId, true);
+        }
+        prefs.apply();
+    }
+
+    /**
+     * Whether a delete in one account's trash erases the message, else only
+     * marks it {@code \Deleted} ({@link #markExpungesOne}). An account no
+     * session recorded yet reads as erasing, which most servers do.
+     */
+    boolean expungesOne(String accountEmail) {
+        return !context.getSharedPreferences(MARKING_PREFS, Context.MODE_PRIVATE)
+                .getBoolean(accounts.idOf(accountEmail), false);
     }
 
     /**
@@ -222,15 +255,20 @@ final class MailStore {
      * and parked: the sent copy staged for it is not to be filed yet.
      */
     boolean submitting(String messageId) {
-        List<PimdirQueue.Action> actions = new ArrayList<>(queue.pending());
-        actions.addAll(queue.parked());
-        for (PimdirQueue.Action action : actions) {
-            if (PimdirQueue.SUBMIT.equals(action.kind)
-                    && messageId.equals(action.payload.optString("messageId"))) {
+        for (PimdirQueue.Action action : submissions()) {
+            if (messageId.equals(action.payload.optString("messageId"))) {
                 return true;
             }
         }
         return false;
+    }
+
+    /** Every submission still in an outbox, waiting or parked. */
+    private List<PimdirQueue.Action> submissions() {
+        List<PimdirQueue.Action> actions = new ArrayList<>(queue.pending());
+        actions.addAll(queue.parked());
+        actions.removeIf(action -> !PimdirQueue.SUBMIT.equals(action.kind));
+        return actions;
     }
 
     /** The body the store holds of one message, null when it holds none. */
@@ -472,14 +510,9 @@ final class MailStore {
      * sender wrote, and the row it shows says so rather than disappearing.
      */
     List<StoredMessage> outgoing() {
-        List<PimdirQueue.Action> actions = new ArrayList<>(queue.pending());
-        actions.addAll(queue.parked());
-
         List<StoredMessage> messages = new ArrayList<>();
-        for (PimdirQueue.Action action : actions) {
-            if (PimdirQueue.SUBMIT.equals(action.kind)) {
-                messages.add(outgoing(action));
-            }
+        for (PimdirQueue.Action action : submissions()) {
+            messages.add(outgoing(action));
         }
         java.util.Collections.sort(messages, (left, right) -> Long.compare(right.queued, left.queued));
         return messages;
@@ -646,9 +679,20 @@ final class MailStore {
          */
         final String floor;
 
+        /**
+         * The rows it leaves out as {@code [collection, link_id]} pairs, a
+         * JSON array, null for none: the sent copies staged beside a
+         * submission still in an outbox, whose outbox row stands for them.
+         */
+        final String hidden;
+
+        /** How many rows {@link #hidden} names. */
+        final int hiding;
+
         private final java.util.Set<String> held;
 
-        Query(List<String> collections, Integer seen, Integer attachment, String pattern) {
+        Query(List<String> collections, Integer seen, Integer attachment, String pattern,
+                List<String[]> hidden) {
             this.collections = new JSONArray(collections).toString();
             this.size = collections.size();
             this.seen = seen;
@@ -656,6 +700,12 @@ final class MailStore {
             this.pattern = pattern;
             this.floor = null;
             this.held = new HashSet<>(collections);
+            JSONArray pairs = new JSONArray();
+            for (String[] pair : hidden) {
+                pairs.put(new JSONArray().put(pair[0]).put(pair[1]));
+            }
+            this.hidden = hidden.isEmpty() ? null : pairs.toString();
+            this.hiding = hidden.size();
         }
 
         /** The same query narrowed to unread mail, for the unread line. */
@@ -675,6 +725,8 @@ final class MailStore {
             this.attachment = query.attachment;
             this.pattern = query.pattern;
             this.floor = floor;
+            this.hidden = query.hidden;
+            this.hiding = query.hiding;
             this.held = query.held;
         }
 
@@ -714,12 +766,24 @@ final class MailStore {
                 ids.add(stored.id);
             }
         }
+        // NOTE: a submission's sent copy is filed under its Message-ID, the
+        // key the submission names, until a listing lands it. Hidden only
+        // where the outbox shows, whose row then stands for it.
+        List<String[]> hidden = new ArrayList<>();
+        for (PimdirQueue.Action action : submissions()) {
+            String from = action.payload.optString("from");
+            String sent = sentOf(from);
+            if (sent != null && ids.contains(sent) && accepts.test(from, outboxName())) {
+                hidden.add(new String[] {sent, action.payload.optString("messageId")});
+            }
+        }
         String trimmed = words == null ? "" : words.trim();
         return new Query(
                 ids,
                 unreadOnly ? 0 : null,
                 attachmentsOnly ? 1 : null,
-                trimmed.isEmpty() ? null : likePattern(trimmed));
+                trimmed.isEmpty() ? null : likePattern(trimmed),
+                hidden);
     }
 
     /**
@@ -750,7 +814,9 @@ final class MailStore {
         if (query.size == 0) {
             return 0;
         }
-        PimdirSql.Bound bound = query.pattern == null && query.floor == null
+        boolean canonical =
+                query.pattern == null && query.floor == null && query.hidden == null;
+        PimdirSql.Bound bound = canonical
                 ? PimdirSql.bind("COUNT_MAIL", query.values(null, -1))
                 : around("SELECT count(*) FROM (", listed(query), ")");
         try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
@@ -787,7 +853,7 @@ final class MailStore {
             return days;
         }
         PimdirSql.Bound bound;
-        if (query.pattern == null && query.floor == null) {
+        if (query.pattern == null && query.floor == null && query.hidden == null) {
             Map<String, Object> values = query.values(null, -1);
             values.put("shift", shift);
             bound = PimdirSql.bind("COUNT_MAIL_BY_DAY", values);
@@ -849,7 +915,11 @@ final class MailStore {
         String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
         PimdirSql.Bound bound;
         if (after != null || offset <= 0) {
-            bound = reaching(PimdirSql.bind(statement, query.values(after, limit)), query.floor);
+            // NOTE: read past the page by the rows it hides, so the page
+            // cut out of it is still a whole one.
+            PimdirSql.Bound read =
+                    PimdirSql.bind(statement, query.values(after, limit + query.hiding));
+            bound = reaching(hiding(read, query, limit), query.floor);
         } else {
             PimdirSql.Bound inner = listed(query);
             Object[] args = new Object[inner.args.length + 2];
@@ -922,7 +992,28 @@ final class MailStore {
      */
     private static PimdirSql.Bound listed(Query query) {
         String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
-        return reaching(wrapped("", statement, "", query), query.floor);
+        return reaching(hiding(wrapped("", statement, "", query), query, -1), query.floor);
+    }
+
+    /**
+     * A newest-first read with the query's hidden rows cut out, at most
+     * {@code limit} of what is left ({@code -1} for all); the read itself
+     * when it hides none. The order is restated, as {@link #reaching} does.
+     */
+    private static PimdirSql.Bound hiding(PimdirSql.Bound inner, Query query, long limit) {
+        if (query.hidden == null) {
+            return inner;
+        }
+        Object[] args = new Object[inner.args.length + 2];
+        System.arraycopy(inner.args, 0, args, 0, inner.args.length);
+        args[inner.args.length] = query.hidden;
+        args[inner.args.length + 1] = limit;
+        return new PimdirSql.Bound(
+                "SELECT * FROM (" + inner.sql + ") WHERE NOT EXISTS (SELECT 1 FROM json_each(?) h"
+                        + " WHERE json_extract(h.value, '$[0]') = collection"
+                        + " AND json_extract(h.value, '$[1]') = link_id)"
+                        + " ORDER BY sort_key DESC, seq DESC, collection DESC LIMIT ?",
+                args);
     }
 
     /**

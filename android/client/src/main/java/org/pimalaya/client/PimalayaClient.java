@@ -656,7 +656,11 @@ public class PimalayaClient {
                                     account.baseUrl,
                                     account.login,
                                     account.password));
-            return new MailSession(account, transport, MailSession.handleOf(reply));
+            return new MailSession(
+                    account,
+                    transport,
+                    MailSession.handleOf(reply),
+                    reply.optBoolean("expungesOne", true));
         } catch (RuntimeException failure) {
             transport.close();
             throw failure;
