@@ -21,7 +21,7 @@ Every domain an address connects through Google's authorization server SHALL be 
 - AND mail and contacts then name the new credential, the old one dropped
 
 ### Requirement: Gmail is one account listing
-A Gmail account SHALL be listed once per pass with `messages.list` without `labelIds`, `includeSpamTrash=true`, 500 ids a page, newest first, its cursor the page token. Each mail SHALL be read once, its metadata (`format=metadata`, the summary headers, `Content-Type`) naming its `labelIds`, through one envelope cache per account that every session shares and that each pass empties. The account SHALL hold one floor, its first sync taking the newest 50 of the account and the newest 50 of the inbox when the inbox is behind, scroll and the fill widening the one listing by count.
+A Gmail account SHALL be listed once per pass with `messages.list` without `labelIds`, `includeSpamTrash=true`, 500 ids a page, newest first, its cursor the page token. Each mail SHALL be read once, its metadata (`format=metadata`, the summary headers, `Content-Type`) naming its `labelIds`, through one envelope cache per account that every session shares and that each pass empties. The account SHALL hold one floor, its first sync taking the newest 50 of the account and the newest 50 of the inbox when the inbox is behind, scroll and the fill widening the one listing by count. A round below the account's newest chunk (the inbox ahead of it, or a cursor kept from before) SHALL list its label alone, and a mailbox at or below the account's latest floor SHALL widen below its own.
 
 #### Scenario: A mail under three labels
 - GIVEN a mail labelled `INBOX`, `IMPORTANT` and `Seed/Clients`

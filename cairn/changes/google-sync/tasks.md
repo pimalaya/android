@@ -22,18 +22,18 @@ In order; 1, 2 and 5-A1 are small and can land first, together.
 - [x] Tests: a 403 quota answer waits then succeeds; the budget caps a long pass
 
 ## 3. One account listing
-- [ ] Gmail listing without `labelIds`, `includeSpamTrash=true`, 500 a page, newest first, cursor = page token
-- [ ] One envelope cache per account, shared across sessions, emptied each pass
-- [ ] Placement of each mail in every mailbox its `labelIds` name; Trash/Spam take a mail out of its other mailboxes
-- [ ] One unfiltered history per account per pass, `maxResults=500`, `messagesDeleted` vanished directly
-- [ ] One floor per account; first sync = newest 50 of the account + newest 50 of the Inbox when behind; scroll and fill widen the account listing
-- [ ] `MailPool` for Gmail: listing on one session, metadata over the pool
-- [ ] Tests: a mail under three labels read once and placed three times; archive and label changes move placements; a trashed mail leaves its labels; request counts against today's per-label sync
+- [x] Gmail listing without `labelIds`, `includeSpamTrash=true`, 500 a page, newest first, cursor = page token
+- [x] One envelope cache per account, shared across sessions, emptied each pass
+- [x] Placement of each mail in every mailbox its `labelIds` name; Trash/Spam take a mail out of its other mailboxes
+- [x] One unfiltered history per account per pass, `maxResults=500`, `messagesDeleted` vanished directly
+- [x] One floor per account; first sync = newest 50 of the account + newest 50 of the Inbox when behind; scroll and fill widen the account listing
+- [x] `MailPool` for Gmail: listing on one session, metadata over the pool
+- [x] Tests: a mail under three labels read once and placed three times; archive and label changes move placements; a trashed mail leaves its labels; request counts against today's per-label sync
 
 ## 4. Batched metadata
-- [ ] io-gmail: batch coroutine (`/batch/gmail/v1`, multipart/mixed, 50 per batch), inner answers parsed per part
-- [ ] Bridge: metadata reads 50 per batch; inner 429/quota retried alone; 404 = gone
-- [ ] Tests: batched read equals single reads; partial throttling; request counts
+- [x] io-gmail: batch coroutine (`/batch/gmail/v1`, multipart/mixed, 50 per batch), inner answers parsed per part
+- [x] Bridge: metadata reads 50 per batch; inner 429/quota retried alone; 404 = gone
+- [x] Tests: batched read equals single reads; partial throttling; request counts
 
 ## 5. Audit items
 - [x] A1: People expired token (410, or 400 "Sync token is expired") falls back to a full round; optionally io-gpeople keeps `status` and `details[].reason` (io-gpeople commit f54c67b, unreleased)
