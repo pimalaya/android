@@ -107,6 +107,7 @@ final class AccountSettings {
 
         addSubmission(content, rowParams);
         addMailScope(content);
+        addMailOffline(content, rowParams);
 
         // The account switch: off, the account syncs nothing and the lists
         // and their filters leave it out. The books keep their own switches.
@@ -312,6 +313,12 @@ final class AccountSettings {
             }
         }
         scope.setSelection(shown);
+        // NOTE: a whole mailbox is all of it, which the offline setting says.
+        boolean whole =
+                MailOffline.policy(host, host.mail.accountIdOf(email))
+                        == MailOffline.Policy.WHOLE;
+        scope.setEnabled(!whole);
+        scope.setAlpha(whole ? 0.5f : 1f);
 
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(
@@ -340,6 +347,83 @@ final class AccountSettings {
                                 }
                                 host.postAlive(host.mailList::reload);
                             });
+                });
+
+        View line = new View(host);
+        line.setBackgroundColor(host.getColor(R.color.surface));
+        LinearLayout.LayoutParams lineParams =
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, host.dp(1));
+        lineParams.setMargins(0, host.dp(12), 0, host.dp(12));
+        content.addView(line, lineParams);
+    }
+
+    /**
+     * Which bodies this account downloads before they are opened, and
+     * whether on a metered network too ({@link MailOffline}).
+     *
+     * <p>Committed when picked, as the bound is. Whole mailbox sets the
+     * bound to all mail, which the scope above then shows and holds; the
+     * body step runs after each pass and fill step while the app is open,
+     * and a change here starts or replans it.
+     */
+    private void addMailOffline(LinearLayout content, LinearLayout.LayoutParams rowParams) {
+        AccountEntry account = host.accountFor(settingsEmail);
+        if (account == null || !account.covers(PimDomain.MAIL)) {
+            return;
+        }
+        String email = settingsEmail;
+        String accountId = host.mail.accountIdOf(email);
+
+        Spinner policy = new Spinner(host);
+        android.widget.ArrayAdapter<CharSequence> choices =
+                android.widget.ArrayAdapter.createFromResource(
+                        host, R.array.mail_offline_policies, R.layout.spinner_form_item);
+        choices.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        policy.setAdapter(choices);
+        policy.setPadding(0, 0, policy.getPaddingRight(), 0);
+        policy.setMinimumHeight(host.dp(48));
+        policy.setSelection(MailOffline.policy(host, accountId).ordinal());
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.setMarginStart(host.dp(16));
+        params.setMarginEnd(host.dp(4));
+        content.addView(policy, params);
+        onPicked(
+                policy,
+                position -> {
+                    MailOffline.Policy picked = MailOffline.Policy.values()[position];
+                    MailOffline.setPolicy(host, accountId, picked);
+                    if (picked != MailOffline.Policy.WHOLE) {
+                        renderAccountSettings();
+                        host.fillMail();
+                        return;
+                    }
+                    host.io.execute(
+                            () -> {
+                                try {
+                                    host.mail.bound(email, 0);
+                                } catch (Exception error) {
+                                    Log.w("pimalaya", "mail bound failed for " + email, error);
+                                }
+                                host.postAlive(
+                                        () -> {
+                                            renderAccountSettings();
+                                            host.mailList.reload();
+                                            host.fillMail();
+                                        });
+                            });
+                });
+
+        CheckBox metered = new CheckBox(host);
+        metered.setChecked(MailOffline.metered(host, accountId));
+        content.addView(optionRow(R.string.mail_offline_metered, metered), rowParams);
+        metered.setOnCheckedChangeListener(
+                (view, checked) -> {
+                    MailOffline.setMetered(host, accountId, checked);
+                    host.fillMail();
                 });
 
         View line = new View(host);

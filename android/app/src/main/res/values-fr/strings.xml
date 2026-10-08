@@ -67,6 +67,11 @@
     <string name="filter_close">Fermer le filtre</string>
     <string name="filter_default">Par défaut</string>
     <string name="filter_set_default">Définir par défaut</string>
+    <string name="filter_download">Télécharger</string>
+    <string name="filter_download_stop">Arrêter</string>
+    <string name="filter_downloaded">Gardée entière hors ligne</string>
+    <string name="filter_download_title">Télécharger cette boîte ?</string>
+    <string name="filter_download_message">Tous les messages de %1$s sont listés et téléchargés, au-delà de la période synchronisée du compte, sur un réseau non facturé à l\'usage sauf si le compte l\'autorise.</string>
     <string name="filter_reset">Réinitialiser</string>
 
     <!-- Deleted items -->
@@ -102,6 +107,10 @@
     <string name="week_previous">Semaine précédente</string>
     <string name="week_next">Semaine suivante</string>
     <string name="drawer_synced">Synchronisé %s</string>
+    <plurals name="drawer_downloading">
+        <item quantity="one">%1$d message à télécharger</item>
+        <item quantity="other">%1$d messages à télécharger</item>
+    </plurals>
     <string name="drawer_never_synced">Jamais synchronisé</string>
     <string name="drawer_deactivated">Désactivé</string>
     <string name="selected">Sélectionné</string>
@@ -192,6 +201,12 @@
         <item>Synchroniser la dernière année</item>
         <item>Synchroniser les 2 dernières années</item>
     </string-array>
+    <string-array name="mail_offline_policies">
+        <item>Télécharger les messages à l\'ouverture</item>
+        <item>Télécharger les messages en arrière-plan</item>
+        <item>Télécharger les boîtes entières (synchronisation complète)</item>
+    </string-array>
+    <string name="mail_offline_metered">Télécharger aussi les messages sur un réseau facturé à l\'usage</string>
     <string name="account_advanced">Activer les paramètres avancés par carnet d\'adresses</string>
     <string name="book_enable">Activer ce carnet d\'adresses</string>
     <string name="book_remote_sync">Synchroniser à distance</string>

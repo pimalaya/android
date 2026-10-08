@@ -12,7 +12,7 @@ Gathers the work agreed on 2026-10-08 toward a first public release, after a few
 | 2 | collection-filter-page | android | landed 2026-10-08 | yes |
 | 3 | background-sync | android | deferred; manual sync only | no |
 | 4 | deleted-items | android | draft | no |
-| 5 | mail-offline-policy | android | draft | no |
+| 5 | mail-offline-policy | android | implemented 2026-10-08; land left | no |
 | 6 | quiet-first-sync | android | draft, to discuss | yes (standard onboarding) |
 | later | remote search | pimdir + android | not opened | no |
 | later | real-time push | android + relay | not opened | no |

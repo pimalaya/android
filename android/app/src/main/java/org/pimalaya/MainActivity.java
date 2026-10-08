@@ -190,6 +190,18 @@ public class MainActivity extends Activity {
     /** The fill's and the scroll's session pools, by account; touched on the io thread only. */
     private final Map<String, MailPool<MailSession>> fillPools = new HashMap<>();
 
+    /** Whether the fill is done or failed for the loop under way; on the io thread. */
+    private boolean fillStopped;
+
+    /** The body step's plan for the loop under way, null outside one; on the io thread. */
+    private MailBodies.Run bodies;
+
+    /** Whether the body step plans again at its next step: a pass landed, a setting changed. */
+    private volatile boolean replanBodies;
+
+    /** Bodies left to download, by account, while the body step runs: the drawer pill's. */
+    private final Map<String, Integer> bodiesLeft = new java.util.concurrent.ConcurrentHashMap<>();
+
     private final List<java.util.function.Consumer<Boolean>> syncObservers = new ArrayList<>();
 
     /** The modal sync dialog, up while the syncing flag is (showSyncDialog). */
@@ -855,7 +867,10 @@ public class MainActivity extends Activity {
                         LinearLayout.LayoutParams.WRAP_CONTENT, dp(30));
         pillParams.topMargin = dp(12);
         card.addView(
-                syncPill(AccountActivation.enabled(this, email), SyncStamps.at(this, email)),
+                syncPill(
+                        AccountActivation.enabled(this, email),
+                        SyncStamps.at(this, email),
+                        bodiesLeft.get(email)),
                 pillParams);
         card.setOnClickListener(view -> openAccountSettings(email));
 
@@ -870,11 +885,13 @@ public class MainActivity extends Activity {
 
     /**
      * The pill saying where an account stands: deactivated in the plain
-     * tone, else when it last synced on an accent tint, or that it never
-     * has in the plain tone.
+     * tone, else how many bodies its offline setting still downloads
+     * ({@code left}, null outside the body step) or when it last synced on an
+     * accent tint, or that it never has in the plain tone.
      */
-    private View syncPill(boolean enabled, long stamp) {
-        boolean synced = enabled && stamp > 0;
+    private View syncPill(boolean enabled, long stamp, Integer left) {
+        boolean downloading = enabled && left != null && left > 0;
+        boolean synced = downloading || (enabled && stamp > 0);
         int color =
                 synced
                         ? resolveColor(android.R.attr.colorAccent)
@@ -887,6 +904,9 @@ public class MainActivity extends Activity {
         TextView label = new TextView(this);
         if (!enabled) {
             label.setText(R.string.drawer_deactivated);
+        } else if (downloading) {
+            label.setText(
+                    getResources().getQuantityString(R.plurals.drawer_downloading, left, left));
         } else if (synced) {
             label.setText(
                     getString(
@@ -1704,66 +1724,231 @@ public class MainActivity extends Activity {
      * foreground, the network is metered or gone, another sync runs, or a
      * chunk fails, and nothing is kept but the floors the store covers: the
      * next start, on return or after a pass, resumes from them.
+     *
+     * <p>Each step also downloads the bodies an account's offline setting
+     * asks for ({@link MailBodies}), on the network rule of its own: never
+     * periodic work, and nothing once the app leaves the foreground. A start
+     * while the loop runs replans them, which is how a pass or a changed
+     * setting reaches a loop under way.
      */
     void fillMail() {
-        if (filling || !fillAllowed()) {
+        replanBodies = true;
+        if (filling || !foreground || syncing || !online()) {
             return;
         }
         filling = true;
         io.execute(this::fillStep);
     }
 
-    /** One step of the background fill, on the io thread, and the next queued. */
+    /** One step of the background fill and the body step, on the io thread, and the next queued. */
     private void fillStep() {
-        MailFill.Step step =
-                MailFill.step(
-                        new MailFill.Host() {
-                            @Override
-                            public boolean allowed() {
-                                return fillAllowed();
-                            }
-
-                            @Override
-                            public List<MailStore.Edge> edges() {
-                                // NOTE: an account that is off syncs nothing, the
-                                // background fill included.
-                                List<MailStore.Edge> edges = mail.edges();
-                                edges.removeIf(
-                                        edge ->
-                                                !AccountActivation.enabled(
-                                                        MainActivity.this, edge.accountEmail));
-                                return edges;
-                            }
-
-                            @Override
-                            public int room(String accountEmail) {
-                                AccountEntry account = mailAccount(accountEmail);
-                                return account == null
-                                        ? 1
-                                        : MailPool.sizeOf(account.server(PimDomain.MAIL));
-                            }
-
-                            @Override
-                            public void widen(MailStore.Edge edge) throws Exception {
-                                widen(List.of(edge));
-                            }
-
-                            @Override
-                            public void widen(List<MailStore.Edge> edges) throws Exception {
-                                Exception failure =
-                                        widenAll(edges, MailEngine.FILL_CHUNK, "mail fill stopped: ");
-                                if (failure != null) {
-                                    throw failure;
-                                }
-                            }
-                        });
+        MailFill.Step step = fillStopped ? MailFill.Step.DONE : MailFill.step(fillHost());
         Log.d("pimalaya", "mail fill: " + step);
-        if (step == MailFill.Step.AGAIN) {
+        if (step == MailFill.Step.DONE || step == MailFill.Step.FAILED) {
+            fillStopped = true;
+        }
+
+        // NOTE: replanned when asked, and when the plan is spent while the
+        // fill still lists more; the plan is otherwise walked once a run.
+        if (bodies == null || replanBodies || (bodies.drained() && step == MailFill.Step.AGAIN)) {
+            replanBodies = false;
+            bodies = planBodies();
+        }
+        MailBodies.Step body = MailBodies.step(bodies, bodyHost());
+        Log.d("pimalaya", "mail bodies: " + body);
+
+        if (step == MailFill.Step.AGAIN || body == MailBodies.Step.AGAIN) {
             io.execute(this::fillStep);
             return;
         }
         closeFillPools();
+        bodies = null;
+        fillStopped = false;
         filling = false;
+        if (!bodiesLeft.isEmpty()) {
+            bodiesLeft.clear();
+            postAlive(this::refreshDrawer);
+        }
+    }
+
+    /** The fill step's reach: what it may do now, the mailboxes, the pools. */
+    private MailFill.Host fillHost() {
+        return new MailFill.Host() {
+            @Override
+            public boolean allowed() {
+                return fillAllowed();
+            }
+
+            @Override
+            public List<MailStore.Edge> edges() {
+                // NOTE: an account that is off syncs nothing, the
+                // background fill included.
+                List<MailStore.Edge> edges = mail.edges();
+                edges.removeIf(
+                        edge ->
+                                !AccountActivation.enabled(
+                                        MainActivity.this, edge.accountEmail));
+                return edges;
+            }
+
+            @Override
+            public int room(String accountEmail) {
+                AccountEntry account = mailAccount(accountEmail);
+                return account == null
+                        ? 1
+                        : MailPool.sizeOf(account.server(PimDomain.MAIL));
+            }
+
+            @Override
+            public void widen(MailStore.Edge edge) throws Exception {
+                widen(List.of(edge));
+            }
+
+            @Override
+            public void widen(List<MailStore.Edge> edges) throws Exception {
+                Exception failure =
+                        widenAll(edges, MailEngine.FILL_CHUNK, "mail fill stopped: ");
+                if (failure != null) {
+                    throw failure;
+                }
+            }
+        };
+    }
+
+    /**
+     * What the body step downloads this run, by account: every account that
+     * is on and whose setting downloads bodies, the mailboxes the mail list
+     * shows first, each newest first within its bound. Walked on the io
+     * thread.
+     */
+    private MailBodies.Run planBodies() {
+        MailBodies.Run run = new MailBodies.Run();
+        // NOTE: read afresh from what was kept, off the main thread.
+        MergedFilter shown = MergedFilter.of(this, PimDomain.MAIL);
+        for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
+            String email = account.email;
+            String id = accountIdOf(email);
+            if (!AccountActivation.enabled(this, email) || !MailOffline.downloadsAny(this, id)) {
+                continue;
+            }
+            List<String> first = new ArrayList<>();
+            List<String> then = new ArrayList<>();
+            for (PimdirCollections.Stored stored : mail.loadMailboxes(List.of(email))) {
+                if (MailOffline.downloads(this, id, stored.id)) {
+                    (shown.accepts(email, stored.id) ? first : then).add(stored.id);
+                }
+            }
+            java.util.function.Function<String, String> boundOf =
+                    collection -> MailScope.sinceOf(this, id, collection);
+            List<MailBodies.Row> wanted =
+                    new ArrayList<>(MailBodies.wanted(mail.bodyRows(first), boundOf));
+            wanted.addAll(MailBodies.wanted(mail.bodyRows(then), boundOf));
+            run.plan(email, wanted);
+            if (wanted.isEmpty()) {
+                bodiesLeft.remove(email);
+            } else {
+                bodiesLeft.put(email, wanted.size());
+            }
+        }
+        postAlive(this::refreshDrawer);
+        return run;
+    }
+
+    /** The body step's reach: the network rule, the pools, the progress. */
+    private MailBodies.Host bodyHost() {
+        return new MailBodies.Host() {
+            @Override
+            public boolean allowed(String accountEmail) {
+                return bodiesAllowed(accountEmail);
+            }
+
+            @Override
+            public void download(String accountEmail, List<MailBodies.Row> rows)
+                    throws Exception {
+                downloadBodies(accountEmail, rows);
+            }
+
+            @Override
+            public void progress(String accountEmail, int left) {
+                if (left > 0) {
+                    bodiesLeft.put(accountEmail, left);
+                } else {
+                    bodiesLeft.remove(accountEmail);
+                }
+                postAlive(MainActivity.this::refreshDrawer);
+            }
+        };
+    }
+
+    /**
+     * Whether an account's bodies may download now: the app in the
+     * foreground, no other sync, a network that is there, and unmetered
+     * unless the account allows a metered one.
+     */
+    private boolean bodiesAllowed(String accountEmail) {
+        if (!foreground || syncing || !AccountActivation.enabled(this, accountEmail)) {
+            return false;
+        }
+        android.net.ConnectivityManager connectivity =
+                getSystemService(android.net.ConnectivityManager.class);
+        return connectivity != null
+                && MailBodies.networkAllows(
+                        connectivity.getActiveNetwork() != null,
+                        connectivity.isActiveNetworkMetered(),
+                        MailOffline.metered(this, accountIdOf(accountEmail)));
+    }
+
+    /**
+     * Downloads some of an account's bodies on its fill pool, a mailbox's
+     * rows split across the pool's sessions, blocking until all are in. A
+     * failure closes the pool, so the next run opens fresh sessions (and
+     * renews an expired token on the way).
+     */
+    private void downloadBodies(String accountEmail, List<MailBodies.Row> rows) throws Exception {
+        AccountEntry account = mailAccount(accountEmail);
+        if (account == null) {
+            return;
+        }
+        MailPool<MailSession> pool = fillPool(account);
+
+        Map<String, List<MailBodies.Row>> byCollection = new java.util.LinkedHashMap<>();
+        for (MailBodies.Row row : rows) {
+            byCollection.computeIfAbsent(row.collection, collection -> new ArrayList<>()).add(row);
+        }
+        List<String> keys = new ArrayList<>();
+        Map<String, List<MailBodies.Row>> jobs = new HashMap<>();
+        for (List<MailBodies.Row> held : byCollection.values()) {
+            int slice = Math.max(1, (held.size() + pool.size() - 1) / pool.size());
+            for (int from = 0; from < held.size(); from += slice) {
+                String key = Integer.toString(keys.size());
+                keys.add(key);
+                jobs.put(key, held.subList(from, Math.min(held.size(), from + slice)));
+            }
+        }
+
+        String accountId = accountIdOf(account.email);
+        MailPool.Outcome outcome =
+                pool.run(
+                        "bodies " + account.email,
+                        keys,
+                        session -> new MailEngine(pimdir, client, session, accountId),
+                        (engine, key) -> {
+                            List<MailBodies.Row> job = jobs.get(key);
+                            engine.download(job.get(0).collection, job);
+                        },
+                        null);
+        if (outcome.failure() != null) {
+            fillPools.remove(account.email);
+            pool.close();
+            throw outcome.failure();
+        }
+    }
+
+    /** Redraws the drawer's account cards when it is open, for their pills. */
+    private void refreshDrawer() {
+        if (drawer != null && drawer.isDrawerOpen(Gravity.START)) {
+            reloadHome();
+        }
     }
 
     /** The mail account of an address, null when it is gone. */
@@ -1796,16 +1981,7 @@ public class MainActivity extends Activity {
             if (account == null) {
                 continue;
             }
-            MailPool<MailSession> pool = fillPools.get(account.email);
-            if (pool == null) {
-                pool =
-                        new MailPool<>(
-                                MailPool.sizeOf(account.server(PimDomain.MAIL)),
-                                null,
-                                () -> openMail(account));
-                fillPools.put(account.email, pool);
-            }
-            MailPool<MailSession> held = pool;
+            MailPool<MailSession> held = fillPool(account);
             String accountId = accountIdOf(account.email);
             runs.add(
                     () ->
@@ -1827,6 +2003,20 @@ public class MainActivity extends Activity {
             }
         }
         return first;
+    }
+
+    /** An account's pool for the fill, the scroll and the body step; on the io thread. */
+    private MailPool<MailSession> fillPool(AccountEntry account) {
+        MailPool<MailSession> pool = fillPools.get(account.email);
+        if (pool == null) {
+            pool =
+                    new MailPool<>(
+                            MailPool.sizeOf(account.server(PimDomain.MAIL)),
+                            null,
+                            () -> openMail(account));
+            fillPools.put(account.email, pool);
+        }
+        return pool;
     }
 
     /** Closes the connections the fill and the scroll kept; on the io thread. */

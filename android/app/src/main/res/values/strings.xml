@@ -114,6 +114,13 @@
         <item>Sync the last year</item>
         <item>Sync the last 2 years</item>
     </string-array>
+    <!-- Which bodies an account downloads before they are opened (MailOffline). -->
+    <string-array name="mail_offline_policies">
+        <item>Download messages when opened</item>
+        <item>Download messages in the background</item>
+        <item>Download whole mailboxes (full sync)</item>
+    </string-array>
+    <string name="mail_offline_metered">Download messages on metered networks too</string>
     <string name="account_advanced">Enable advanced settings per addressbook</string>
     <string name="book_enable">Enable this addressbook</string>
     <string name="book_remote_sync">Sync remotely</string>
@@ -214,6 +221,11 @@
     <string name="filter_close">Close the filter</string>
     <string name="filter_default">Default</string>
     <string name="filter_set_default">Set as default</string>
+    <string name="filter_download">Download</string>
+    <string name="filter_download_stop">Stop</string>
+    <string name="filter_downloaded">Kept whole offline</string>
+    <string name="filter_download_title">Download this mailbox?</string>
+    <string name="filter_download_message">Every message of %1$s is listed and downloaded, past the account\'s sync period, on unmetered networks unless the account allows metered ones.</string>
     <string name="contacts_transfer">Import or export</string>
     <string name="filter_reset">Reset</string>
 
@@ -282,6 +294,10 @@
     <string name="week_previous">Previous week</string>
     <string name="week_next">Next week</string>
     <string name="drawer_synced">Synced %s</string>
+    <plurals name="drawer_downloading">
+        <item quantity="one">%1$d message left to download</item>
+        <item quantity="other">%1$d messages left to download</item>
+    </plurals>
     <string name="drawer_never_synced">Not synced yet</string>
     <string name="drawer_deactivated">Deactivated</string>
     <string name="selected">Selected</string>

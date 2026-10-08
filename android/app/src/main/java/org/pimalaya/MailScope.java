@@ -48,9 +48,23 @@ final class MailScope {
         prefs(context).edit().remove(accountId).apply();
     }
 
-    /** The floor of an account's scope today, null for all mail. */
+    /**
+     * The floor of an account's scope today, null for all mail, which is
+     * also the scope of an account kept whole ({@link MailOffline}).
+     */
     static String sinceOf(Context context, String accountId) {
+        if (MailOffline.policy(context, accountId) == MailOffline.Policy.WHOLE) {
+            return null;
+        }
         return since(months(context, accountId), LocalDate.now(ZoneOffset.UTC));
+    }
+
+    /**
+     * The floor of one mailbox's scope today: its account's, or none for a
+     * mailbox kept whole ("Download this mailbox").
+     */
+    static String sinceOf(Context context, String accountId, String collection) {
+        return MailOffline.whole(context, collection) ? null : sinceOf(context, accountId);
     }
 
     /**

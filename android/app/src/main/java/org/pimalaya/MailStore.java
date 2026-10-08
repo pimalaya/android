@@ -168,6 +168,7 @@ final class MailStore {
                 .remove(accountEmail)
                 .apply();
         MailScope.forget(context, accounts.idOf(accountEmail));
+        MailOffline.forget(context, accounts.idOf(accountEmail));
         markAccountWide(context, accounts.idOf(accountEmail), false);
         markExpungesOne(context, accounts.idOf(accountEmail), true);
     }
@@ -958,6 +959,49 @@ final class MailStore {
         return messages;
     }
 
+    /**
+     * Every stored message of some mailboxes, newest first, with whether
+     * the store holds its body: what the body step plans from
+     * ({@link MailBodies}). Read a page of 500 at a time on
+     * {@code list_mail_page_filtered}'s keyset.
+     */
+    List<MailBodies.Row> bodyRows(List<String> ids) {
+        List<MailBodies.Row> rows = new ArrayList<>();
+        if (ids.isEmpty()) {
+            return rows;
+        }
+        Map<String, Object> values = new HashMap<>();
+        values.put("collections", new JSONArray(ids).toString());
+        values.put("seen", null);
+        values.put("attachment", null);
+        values.put("after_key", null);
+        values.put("after_seq", null);
+        values.put("after_collection", null);
+        values.put("limit", 500);
+        while (true) {
+            PimdirSql.Bound bound = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
+            int read = 0;
+            try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+                while (cursor.moveToNext()) {
+                    read++;
+                    String sortKey = cursor.isNull(5) ? "" : cursor.getString(5);
+                    rows.add(
+                            new MailBodies.Row(
+                                    cursor.getString(0),
+                                    cursor.getString(2),
+                                    sortKey,
+                                    !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL));
+                    values.put("after_key", sortKey);
+                    values.put("after_seq", cursor.getLong(1));
+                    values.put("after_collection", cursor.getString(0));
+                }
+            }
+            if (read < 500) {
+                return rows;
+            }
+        }
+    }
+
     /** Whether the server refused a change of one message for good. */
     private boolean refused(String collection, String linkId) {
         return Refusals.refused(context, collection, linkId);
@@ -1241,9 +1285,11 @@ final class MailStore {
         List<Edge> edges = new ArrayList<>();
         for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
             String bound =
-                    bounds.computeIfAbsent(
-                            stored.accountEmail,
-                            email -> MailScope.sinceOf(context, accounts.idOf(email)));
+                    MailOffline.whole(context, stored.id)
+                            ? null
+                            : bounds.computeIfAbsent(
+                                    stored.accountEmail,
+                                    email -> MailScope.sinceOf(context, accounts.idOf(email)));
             boolean accountWide =
                     wide.computeIfAbsent(
                             stored.accountEmail,
@@ -1318,7 +1364,9 @@ final class MailStore {
         db.beginTransaction();
         try {
             for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
-                if (!stored.accountEmail.equals(accountEmail)) {
+                // NOTE: a mailbox kept whole is past its account's bound.
+                if (!stored.accountEmail.equals(accountEmail)
+                        || MailOffline.whole(context, stored.id)) {
                     continue;
                 }
                 Map<String, Object> values = new HashMap<>();

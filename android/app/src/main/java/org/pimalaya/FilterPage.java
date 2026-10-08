@@ -23,7 +23,8 @@ import java.util.List;
  *
  * <p>On calendars and address books, the account's default collection says
  * so, and a writable one of an account whose source names no default offers
- * "Set as default" ({@link DefaultCollection}).
+ * "Set as default" ({@link DefaultCollection}). A mailbox offers "Download"
+ * instead, which keeps it whole offline ({@link MailOffline}).
  */
 final class FilterPage {
     /** One account and its collections, as the page lists them. */
@@ -114,6 +115,7 @@ final class FilterPage {
                                 filter.toggleAccount(account.email, ids);
                                 changed();
                             },
+                            0,
                             null));
 
             PimdirCollections.Stored fallback =
@@ -124,6 +126,11 @@ final class FilterPage {
             for (PimdirCollections.Stored collection : account.collections) {
                 boolean ticked = filter.ticked(account.email, collection.id);
                 boolean isDefault = fallback != null && fallback.id.equals(collection.id);
+                boolean whole = !defaults && MailOffline.whole(host, collection.id);
+                String detail =
+                        isDefault
+                                ? host.getString(R.string.filter_default)
+                                : whole ? host.getString(R.string.filter_downloaded) : null;
                 Runnable choose =
                         defaults
                                         && !isDefault
@@ -138,7 +145,7 @@ final class FilterPage {
                 content.addView(
                         row(
                                 collection.name,
-                                isDefault ? host.getString(R.string.filter_default) : null,
+                                detail,
                                 host.dp(24),
                                 ticked ? MergedFilter.Tick.ON : MergedFilter.Tick.OFF,
                                 false,
@@ -146,15 +153,45 @@ final class FilterPage {
                                     filter.toggleCollection(account.email, collection.id, ids);
                                     changed();
                                 },
-                                choose));
+                                defaults
+                                        ? R.string.filter_set_default
+                                        : whole ? R.string.filter_download_stop : R.string.filter_download,
+                                defaults ? choose : () -> download(collection, !whole)));
             }
         }
     }
 
     /**
+     * "Download this mailbox": keeps one mailbox whole, listed past its
+     * account's bound and every body downloaded by the body step
+     * ({@link MailBodies}), once confirmed. Stopping keeps what is stored
+     * until the bound is narrowed again.
+     */
+    private void download(PimdirCollections.Stored collection, boolean whole) {
+        if (!whole) {
+            MailOffline.setWhole(host, collection.id, false);
+            render();
+            return;
+        }
+        new android.app.AlertDialog.Builder(host)
+                .setTitle(R.string.filter_download_title)
+                .setMessage(host.getString(R.string.filter_download_message, collection.name))
+                .setPositiveButton(
+                        R.string.filter_download,
+                        (dialog, which) -> {
+                            MailOffline.setWhole(host, collection.id, true);
+                            render();
+                            host.fillMail();
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
      * One row: the checkbox at the start, the name beside it with an
      * optional line under it, indented by {@code indent} for a collection;
-     * {@code choose}, when given, is offered at the end as "Set as default".
+     * {@code action}, when given, is offered at the end under {@code actionLabel}:
+     * "Set as default", or a mailbox's "Download" and "Stop".
      */
     private View row(
             String label,
@@ -163,7 +200,8 @@ final class FilterPage {
             MergedFilter.Tick tick,
             boolean heading,
             Runnable toggle,
-            Runnable choose) {
+            int actionLabel,
+            Runnable action) {
         ImageView box = new ImageView(host);
         box.setImageResource(
                 tick == MergedFilter.Tick.ON
@@ -210,15 +248,15 @@ final class FilterPage {
         textParams.setMarginStart(host.dp(16));
         row.addView(text, textParams);
         row.setOnClickListener(view -> toggle.run());
-        if (choose != null) {
+        if (action != null) {
             TextView set = new TextView(host);
-            set.setText(R.string.filter_set_default);
+            set.setText(actionLabel);
             set.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
             set.setTextColor(host.resolveColor(android.R.attr.colorAccent));
             set.setGravity(Gravity.CENTER_VERTICAL);
             set.setMinHeight(host.dp(48));
             set.setPadding(host.dp(12), 0, 0, 0);
-            set.setOnClickListener(view -> choose.run());
+            set.setOnClickListener(view -> action.run());
             row.addView(set);
         }
         return row;
