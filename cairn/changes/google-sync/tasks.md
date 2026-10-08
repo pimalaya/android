@@ -43,4 +43,14 @@ In order; 1, 2 and 5-A1 are small and can land first, together.
 
 ## 6. Land
 - [ ] Measure on the device with the seeded account: first dialog, whole account, a quiet pass; compare with 2026-10-07 (SENT 64 in 11.2 s, INBOX 120 in 24.1 s, quota refusal)
+- [ ] Check live: the budget uses the documented 15,000 units/min (`GMAIL_UNITS_PER_MINUTE_DOCUMENTED` in throttle.rs) while the device was refused around 1,000 to 2,000
+- [ ] Check live: `gmail.googleapis.com/batch/gmail/v1` also answers (we use `www.googleapis.com`); a burst of batches (250 units each, one per-second slot) gets no inner part throttled
+- [ ] Check live: an iCalUID listing returns the master with its instances; `nextSyncToken` comes back on a full listing with only `showDeleted`
+- [ ] Check live: People rejects a token after a pageSize change or not; how `people:batchGet` reports a deleted contact; a quiet pass is one People request
 - [ ] Fold into cairn/spec/mail.md, calendar.md, carddav-sync.md, onboarding.md; log entry; CHANGELOG; docs/performance.md
+
+## Open doubts
+- Real inboxes are nearly always behind the account: one extra list request on a first sync.
+- The first sync lists the account twice (floor, then round); a fill run re-reads the first run's band. Cheap, left as is.
+- Mails under no label are read but placed nowhere.
+- Unticking a scope on Google's granular consent is not handled; grants stored before section 1 are never taken over.
