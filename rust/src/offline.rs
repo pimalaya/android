@@ -133,11 +133,7 @@ pub fn mutate<'local>(
 ) -> Result<(), BridgeError> {
     let mutation: MutationJson =
         from_str(mutation).map_err(|err| format!("Invalid mutation: {err}"))?;
-    let mutation = PimdirMutation::from(mutation);
-
-    let mut driver = Driver::new(env, driver);
-    driver.withdrawing = matches!(mutation, PimdirMutation::Remove(_));
-    driver.run(PimdirMutate::new(collection, mutation))
+    Driver::new(env, driver).run(PimdirMutate::new(collection, mutation.into()))
 }
 
 /// Upcall handle to the Java `OfflineDriver` servicing engine yields.
@@ -145,9 +141,6 @@ struct Driver<'a, 'local> {
     env: &'a mut Env<'local>,
     driver: &'a JObject<'local>,
     dated: Dated,
-    /// Whether a removal runs, whose tombstone of a pending create is
-    /// withdrawn ([`withdrawals`]).
-    withdrawing: bool,
 }
 
 /// The summaries a load made up from a message's date alone, by collection
@@ -240,7 +233,6 @@ impl<'a, 'local> Driver<'a, 'local> {
             env,
             driver,
             dated: Dated::default(),
-            withdrawing: false,
         }
     }
 
@@ -262,33 +254,10 @@ impl<'a, 'local> Driver<'a, 'local> {
                     let reply = self.upcall(&yield_json(&yielded))?;
                     let parsed = parse_arg(&yielded, &reply)?;
                     self.dated.record(&parsed);
-                    if self.withdrawing {
-                        self.withdraw(&yielded)?;
-                    }
                     arg = Some(parsed);
                 }
             }
         }
-    }
-
-    /// Writes the withdrawal of every pending create a removal's write
-    /// tombstoned, once that write landed.
-    ///
-    /// NOTE: a batch of its own, the store cancelling a drop that an
-    /// upsert of the same placement rides beside. A crash between the two
-    /// leaves the tombstone, which the next sync of a synced collection
-    /// drops.
-    fn withdraw(&mut self, yielded: &PimdirYield) -> Result<(), BridgeError> {
-        let drops = withdrawals(yielded);
-        if drops.is_empty() {
-            return Ok(());
-        }
-
-        let write = PimdirYield::WantsWrite(drops);
-        let reply = self.upcall(&yield_json(&write))?;
-        parse_arg(&write, &reply)?;
-
-        Ok(())
     }
 
     /// Upcalls `OfflineDriver.serve` with one yield envelope and
@@ -312,35 +281,6 @@ impl<'a, 'local> Driver<'a, 'local> {
 
         reply.try_to_string(self.env).map_err(|err| err.to_string())
     }
-}
-
-/// The drops withdrawing the pending creates a removal tombstoned.
-///
-/// SYNC §7: a `Remove` on a pending create withdraws it, the binding
-/// going and the item retained, there being nothing to tell the source.
-/// io-pimdir tombstones it instead, which only a sync drops, so a create
-/// removed where no sync runs (the on-device book) kept its provisional
-/// binding for good. A tombstone with no base is that create: removing
-/// anything a source agreed on keeps its base.
-fn withdrawals(yielded: &PimdirYield) -> Vec<PimdirWriteOp> {
-    let PimdirYield::WantsWrite(ops) = yielded else {
-        return Vec::new();
-    };
-
-    ops.iter()
-        .filter_map(|op| match op {
-            PimdirWriteOp::UpsertPlacement(placement)
-                if placement.status == PimdirStatus::Tombstone && placement.base.is_none() =>
-            {
-                Some(PimdirWriteOp::DropPlacement {
-                    collection: placement.collection.clone(),
-                    handle: placement.handle.clone(),
-                    reason: PimdirDropReason::Deleted,
-                })
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 /// Serializes one engine yield to its JSON envelope.
@@ -1450,20 +1390,15 @@ pub(crate) fn enumerated(reply: &str) -> PimdirEnumerated {
 #[cfg(test)]
 mod tests {
     use io_pimdir::{
-        change::{PimdirDropReason, PimdirWriteOp},
+        change::PimdirWriteOp,
         collection::{PimdirCheckpoint, PimdirCollectionId, PimdirCursor, PimdirScope},
-        coroutine::PimdirYield,
         mutate::PimdirMutation,
-        placement::{
-            PimdirBase, PimdirHandle, PimdirLevel, PimdirLinkId, PimdirPlacement, PimdirStatus,
-        },
+        placement::PimdirHandle,
         remote::{PimdirEnumerate, PimdirEnumerated, PimdirListing},
     };
     use serde_json::{Value, from_str};
 
-    use super::{
-        MutationJson, RoundJson, SnapshotJson, WriteOpJson, enumerate_json, flags_from, withdrawals,
-    };
+    use super::{MutationJson, RoundJson, SnapshotJson, WriteOpJson, enumerate_json};
 
     fn mutation(json: &str) -> PimdirMutation {
         from_str::<MutationJson>(json).unwrap().into()
@@ -1488,46 +1423,6 @@ mod tests {
                 handle: PimdirHandle("42".into()),
                 target: PimdirCollectionId("a/Archive".into()),
             }
-        );
-    }
-
-    fn tombstone(handle: &str, base: Option<PimdirBase>) -> PimdirWriteOp {
-        PimdirWriteOp::UpsertPlacement(PimdirPlacement {
-            collection: "book".into(),
-            handle: PimdirHandle(handle.into()),
-            link_id: Some(PimdirLinkId("u1".into())),
-            object: None,
-            level: PimdirLevel::Full,
-            summary: None,
-            sort_key: "".into(),
-            flags: flags_from(None),
-            status: PimdirStatus::Tombstone,
-            conflict_revision: None,
-            conflict_object: None,
-            base,
-            origin: None,
-        })
-    }
-
-    #[test]
-    fn a_removed_pending_create_is_withdrawn_and_an_agreed_item_is_not() {
-        let agreed = PimdirBase {
-            flags: flags_from(None),
-            revision: Some("etag".into()),
-            object: None,
-        };
-        let write = PimdirYield::WantsWrite(vec![
-            tombstone("\u{1}u1", None),
-            tombstone("c2.vcf", Some(agreed)),
-        ]);
-
-        assert_eq!(
-            withdrawals(&write),
-            vec![PimdirWriteOp::DropPlacement {
-                collection: "book".into(),
-                handle: PimdirHandle("\u{1}u1".into()),
-                reason: PimdirDropReason::Deleted,
-            }]
         );
     }
 

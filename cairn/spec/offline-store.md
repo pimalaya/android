@@ -100,6 +100,19 @@ A write resolving an existing `(collection, link_id, source)` binding to a diffe
 - WHEN the same batch upserts the link id under `v2.vcf`
 - THEN the binding is replaced and the item stays
 
+### Requirement: A write batch applies in order
+The store SHALL apply a write batch op by op in the order the engine wrote it (pimdir SYNC §10), as io-pimdir's own store does, and SHALL NOT hold drops back or cancel one against an upsert of the same handle. Only the stamps follow the batch's upserts, and an item's fate is settled from the whole batch: an item the batch created and left unbound is not stored, and a mail create a superseded drop released goes unless an upsert of the batch carried it on. An upsert naming no identity on a handle the batch dropped earlier continues the identity that handle held.
+
+#### Scenario: A withdrawn pending create
+- GIVEN a pending create with no base
+- WHEN a removal writes its tombstone then a drop of its handle in one batch
+- THEN the binding is gone and the item retained, with no second write
+
+#### Scenario: A drop then an upsert of one handle
+- GIVEN a bound item
+- WHEN one batch drops its handle then upserts it
+- THEN the item is present and bound
+
 ### Requirement: A rebuilt handle is not a removal
 The store SHALL read a `rekeyed` drop as this row going and the item staying, on the same terms as a `superseded` one.
 

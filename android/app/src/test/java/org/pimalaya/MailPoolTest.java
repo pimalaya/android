@@ -21,6 +21,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -61,6 +63,17 @@ public class MailPoolTest {
     /** The mailboxes in the order their listing began. */
     private final List<String> started = Collections.synchronizedList(new ArrayList<>());
 
+    /**
+     * When set, the listing of {@code first} holds its worker until the one of
+     * {@code last} has begun, and every other listing waits for the one of
+     * {@code first}: what a listing begins after is then the order the pool
+     * took the mailboxes in, never which worker won the store's lock first.
+     */
+    private volatile String first;
+    private volatile String last;
+    private final CountDownLatch firstBegun = new CountDownLatch(1);
+    private final CountDownLatch lastBegun = new CountDownLatch(1);
+
     @Before
     public void setUp() {
         context = RuntimeEnvironment.getApplication();
@@ -88,6 +101,18 @@ public class MailPoolTest {
         @Override
         public void close() {
             closed = true;
+        }
+    }
+
+    /**
+     * Waits for a gate, bounded: a pool taking the mailboxes out of order
+     * then fails the order it is checked on rather than hanging.
+     */
+    private static void await(CountDownLatch gate) {
+        try {
+            gate.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            throw new IllegalStateException(interrupted);
         }
     }
 
@@ -121,6 +146,17 @@ public class MailPoolTest {
         protected JSONObject enumerate(JSONObject yielded) throws JSONException {
             String collection = yielded.getString("collection");
             started.add(collection);
+            if (first != null) {
+                if (collection.equals(first)) {
+                    firstBegun.countDown();
+                    await(lastBegun);
+                } else {
+                    if (collection.equals(last)) {
+                        lastBegun.countDown();
+                    }
+                    await(firstBegun);
+                }
+            }
             // NOTE: timed as the real driver times its bridge call.
             long asked = System.nanoTime();
             try {
@@ -279,7 +315,13 @@ public class MailPoolTest {
         pass(collections, 1, new ArrayList<>(), null);
         assertEquals("one session takes them in the pass's order", collections, started);
 
+        // NOTE: a worker reaches its listing past the store's lock, which is
+        // not fair, so two workers may begin listings in another order than
+        // the pool took them. The inbox's worker is held until the junk
+        // begins, so the other one takes the rest one after another.
         started.clear();
+        first = inbox;
+        last = junk;
         pass(collections, 2, new ArrayList<>(), null);
         assertTrue(
                 "the inbox among the first two begun: " + started,

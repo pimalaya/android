@@ -194,6 +194,8 @@ public class MailMoveTest {
         JSONObject source = placements.getJSONObject(0);
         assertEquals("tombstone", source.getString("status"));
         assertEquals(trash, source.getJSONObject("origin").getString("collection"));
+        assertEquals("under the pending create's handle", PimdirStorage.provisionalOf("42"),
+                source.getJSONObject("origin").getString("handle"));
     }
 
     @Test
