@@ -70,7 +70,9 @@ final class EventStore {
                             accountEmail,
                             calendar.name,
                             calendar.description,
-                            calendar.color));
+                            calendar.color,
+                            calendar.role,
+                            calendar.writable));
         }
         collections.replace(accountEmail, PimdirSummary.CALENDAR, listed);
     }
@@ -93,12 +95,27 @@ final class EventStore {
         final String name;
         final String color;
 
-        StoredCalendar(String url, String accountEmail, String id, String name, String color) {
+        /** Whether its source names it the account's default calendar. */
+        final boolean isDefault;
+
+        /** Whether the user may write events into it. */
+        final boolean writable;
+
+        StoredCalendar(
+                String url,
+                String accountEmail,
+                String id,
+                String name,
+                String color,
+                boolean isDefault,
+                boolean writable) {
             this.url = url;
             this.accountEmail = accountEmail;
             this.id = id;
             this.name = name;
             this.color = color;
+            this.isDefault = isDefault;
+            this.writable = writable;
         }
     }
 
@@ -112,7 +129,9 @@ final class EventStore {
                             stored.accountEmail,
                             stored.id,
                             stored.name,
-                            stored.color));
+                            stored.color,
+                            stored.isDefault(),
+                            stored.writable));
         }
         return calendars;
     }

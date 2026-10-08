@@ -39,7 +39,7 @@ Every user action is a pimdir mutation, visible at once; the sync carries it out
 ## 2. collection-filter-page
 
 - Full page, accounts with tri-state checkboxes, their collections below; keyed by collection id, persisted. Checkboxes, not switches, to stay distinct from the drawer's sync on/off.
-- Mail role chips (Inbox, Sent, Drafts, Trash, Junk, Archive, All) replace the merge by mailbox name; Default chip for contacts and calendars.
+- Mail role chips (Inbox, Sent, Drafts, Trash, Junk, Archive; none on narrows nothing) replace the merge by mailbox name; Default chip for contacts and calendars. An account off in the drawer syncs nothing and leaves the filters; a tab's filter also scopes its pull.
 - Default collection: pimdir `default` role set from JMAP `isDefault`, Graph default calendar and contacts folder, Google primary and `myContacts`; fallback to the only writable collection, then the user's "Set as default" (app side). New contacts and events go there without asking.
 
 ## 3. background-sync (deferred)

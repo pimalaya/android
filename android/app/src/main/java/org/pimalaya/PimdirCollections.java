@@ -5,11 +5,15 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 
 import org.pimalaya.client.Addressbook;
+import org.pimalaya.client.Calendar;
 import org.pimalaya.client.PimdirSql;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -34,11 +38,18 @@ import java.util.Set;
  * them for exactly that reason.
  */
 final class PimdirCollections {
+    /** Where the collections the user may not write into are kept, by id. */
+    private static final String READ_ONLY_PREFS = "collections-read-only";
+
+    private static final String READ_ONLY = "ids";
+
     private final PimdirDb store;
     private final PimdirAccount accounts;
+    private final Context context;
 
     PimdirCollections(PimdirDb store, Context context) {
         this.store = store;
+        this.context = context;
         this.accounts = new PimdirAccount(context);
     }
 
@@ -74,6 +85,12 @@ final class PimdirCollections {
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
+        }
+
+        // NOTE: a mailbox's role is the mail roster's own to write
+        // (MailStore), from a richer vocabulary than a roster carries here.
+        if (!PimdirSummary.MAIL.equals(kind)) {
+            restate(collections);
         }
     }
 
@@ -113,12 +130,36 @@ final class PimdirCollections {
         final String description;
         final String color;
 
+        /** What the source says the collection is for (pimdir's role), or null. */
+        final String role;
+
+        /** Whether the user may write into it, as its source last said. */
+        final boolean writable;
+
         Stored(String id, String accountEmail, String name, String description, String color) {
+            this(id, accountEmail, name, description, color, null, true);
+        }
+
+        Stored(
+                String id,
+                String accountEmail,
+                String name,
+                String description,
+                String color,
+                String role,
+                boolean writable) {
             this.id = id;
             this.accountEmail = accountEmail;
             this.name = name;
             this.description = description;
             this.color = color;
+            this.role = role == null || role.isEmpty() ? null : role;
+            this.writable = writable;
+        }
+
+        /** Whether its source names it the default of its kind. */
+        boolean isDefault() {
+            return Calendar.DEFAULT.equals(role);
         }
     }
 
@@ -131,26 +172,107 @@ final class PimdirCollections {
      * of a listing that is meant to show everything.
      */
     List<Stored> list(String kind) {
-        List<Stored> stored = new ArrayList<>();
-        try (Cursor cursor =
-                store.getReadableDatabase()
-                        .rawQuery(
-                                "SELECT id, account, name, description, color FROM collections"
-                                        + " WHERE kind = ? ORDER BY account, name COLLATE NOCASE",
-                                new String[] {kind})) {
+        // NOTE: pimdir's own roster read, LIST_COLLECTIONS: id, account,
+        // kind, name, parent, color, description, sort order, generation,
+        // role, then the coverage.
+        Set<String> readOnly = readOnly();
+        List<String[]> rows = new ArrayList<>();
+        String sql = PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0];
+        try (Cursor cursor = store.getReadableDatabase().rawQuery(sql, null)) {
             while (cursor.moveToNext()) {
-                String account = cursor.isNull(1) ? null : cursor.getString(1);
-                String email = account == null ? null : accounts.emailOf(account);
-                stored.add(
-                        new Stored(
-                                cursor.getString(0),
-                                email == null ? cursor.getString(0) : email,
-                                cursor.getString(2),
-                                cursor.isNull(3) ? null : cursor.getString(3),
-                                cursor.isNull(4) ? null : cursor.getString(4)));
+                if (!kind.equals(cursor.getString(2))) {
+                    continue;
+                }
+                rows.add(
+                        new String[] {
+                            cursor.getString(0),
+                            cursor.isNull(1) ? null : cursor.getString(1),
+                            cursor.getString(3),
+                            cursor.isNull(6) ? null : cursor.getString(6),
+                            cursor.isNull(5) ? null : cursor.getString(5),
+                            cursor.isNull(9) ? null : cursor.getString(9),
+                        });
             }
         }
+        rows.sort(
+                Comparator.comparing(
+                                (String[] row) -> row[1],
+                                Comparator.nullsFirst(Comparator.<String>naturalOrder()))
+                        .thenComparing(row -> row[2], String.CASE_INSENSITIVE_ORDER));
+
+        List<Stored> stored = new ArrayList<>(rows.size());
+        for (String[] row : rows) {
+            String email = row[1] == null ? null : accounts.emailOf(row[1]);
+            stored.add(
+                    new Stored(
+                            row[0],
+                            email == null ? row[0] : email,
+                            row[2],
+                            row[3],
+                            row[4],
+                            row[5],
+                            !readOnly.contains(row[0])));
+        }
         return stored;
+    }
+
+    /**
+     * Restates what the source says of collections the store already holds:
+     * the role (pimdir's, null where it says none) and whether the user may
+     * write into them (the app's, pimdir keeping no such column).
+     *
+     * <p>Apart from {@link #replace} so a sync can refresh what an account's
+     * books are for without replacing the roster the switches hang off.
+     */
+    void restate(List<Stored> collections) {
+        SQLiteDatabase db = store.getWritableDatabase();
+        db.beginTransaction();
+        try {
+            // NOTE: the roles left first, so a default moving from one
+            // collection to another is never refused for being held twice.
+            for (Stored collection : collections) {
+                if (collection.role == null) {
+                    setRole(db, collection.id, null);
+                }
+            }
+            for (Stored collection : collections) {
+                if (collection.role != null) {
+                    setRole(db, collection.id, collection.role);
+                }
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+
+        Set<String> readOnly = readOnly();
+        for (Stored collection : collections) {
+            if (collection.writable) {
+                readOnly.remove(collection.id);
+            } else {
+                readOnly.add(collection.id);
+            }
+        }
+        context.getSharedPreferences(READ_ONLY_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putStringSet(READ_ONLY, readOnly)
+                .apply();
+    }
+
+    /** The collections the user may not write into, by id (a copy). */
+    private Set<String> readOnly() {
+        return new HashSet<>(
+                context.getSharedPreferences(READ_ONLY_PREFS, Context.MODE_PRIVATE)
+                        .getStringSet(READ_ONLY, new HashSet<>()));
+    }
+
+    /** pimdir's SET_COLLECTION_ROLE. */
+    private static void setRole(SQLiteDatabase db, String collection, String role) {
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collection);
+        values.put("role", role);
+        PimdirSql.Bound bound = PimdirSql.bind("SET_COLLECTION_ROLE", values);
+        db.execSQL(bound.sql, bound.args);
     }
 
     /** An address book roster in the shape {@link #replace} takes. */
@@ -159,7 +281,13 @@ final class PimdirCollections {
         for (Addressbook book : books) {
             listed.add(
                     new Stored(
-                            book.url, accountEmail, book.name, book.description, book.color));
+                            book.url,
+                            accountEmail,
+                            book.name,
+                            book.description,
+                            book.color,
+                            book.role,
+                            book.writable));
         }
         return listed;
     }

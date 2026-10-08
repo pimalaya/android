@@ -55,7 +55,19 @@
     <string name="mail_more_offline">Les e-mails plus anciens demandent le réseau</string>
     <string name="mail_more_failed">Impossible de charger les e-mails plus anciens. Touchez pour réessayer</string>
     <string name="mail_chip_unread">Non lus</string>
+    <string name="mail_chip_inbox">Réception</string>
+    <string name="mail_chip_sent">Envoyés</string>
+    <string name="mail_chip_drafts">Brouillons</string>
+    <string name="mail_chip_trash">Corbeille</string>
+    <string name="mail_chip_junk">Indésirables</string>
+    <string name="mail_chip_archive">Archives</string>
     <string name="mail_chip_attachments">Pièces jointes</string>
+    <string name="chip_default">Par défaut</string>
+    <string name="filter_title_of">Filtrer : %1$s</string>
+    <string name="filter_close">Fermer le filtre</string>
+    <string name="filter_default">Par défaut</string>
+    <string name="filter_set_default">Définir par défaut</string>
+    <string name="filter_reset">Réinitialiser</string>
     <string name="message_reply">Répondre</string>
     <string name="message_forward">Transférer</string>
     <string name="compose_quote_intro">Le %1$s, %2$s a écrit :</string>
@@ -437,5 +449,7 @@
     <string name="event_delete_confirm">Supprimer cette entrée ?</string>
     <string name="event_delete_failed">Impossible de supprimer l\'entrée</string>
     <string name="event_no_calendar">Aucun calendrier où la placer</string>
+    <string name="event_target_title">Ajouter au calendrier</string>
+    <string name="contacts_no_book">Aucun carnet d\'adresses où le placer</string>
 
 </resources>

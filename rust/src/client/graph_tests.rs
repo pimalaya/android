@@ -314,3 +314,14 @@ fn a_batched_read_asks_what_the_single_read_asks() {
         assert!(asked.contains(&batched));
     }
 }
+
+/// The folder Graph serves outside the folder list is where a contact
+/// lands when none is named: the default book.
+#[test]
+fn the_default_contacts_folder_is_the_default_book() {
+    let book = graph_default_book();
+
+    assert_eq!(book.id, "");
+    assert_eq!(book.role, "default");
+    assert!(book.writable);
+}

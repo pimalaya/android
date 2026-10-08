@@ -18,9 +18,8 @@ import org.pimalaya.client.PimalayaClient;
 /**
  * The full-screen account settings controller behind the drawer: it
  * opens one account's settings screen over the drawer, stages the
- * per-addressbook activation and spoke switches (a master switch
- * fanning onto every book, an advanced fold exposing the per-book
- * sections), commits them to the base on save, and
+ * account's activation and the per-addressbook switches (an advanced
+ * fold exposing the per-book sections), commits them to the base on save, and
  * confirms then removes the account and everything under it. It reaches
  * the base, store and io executor through the host, which keeps the
  * overlay navigation and calls in through {@link #open}, {@link #save},
@@ -40,6 +39,9 @@ final class AccountSettings {
 
     /** Whether the settings screen's advanced sections are unfolded. */
     private boolean settingsAdvancedOpen;
+
+    /** The staged account switch ({@link AccountActivation}); the FAB commits it. */
+    private boolean accountEnabled;
 
     /**
      * The list screen the drawer was raised over, restored on the way
@@ -64,8 +66,7 @@ final class AccountSettings {
      * Opens one account's settings screen: the staged switches load
      * from the store, the screen fades in over the drawer it came
      * from, which stays open underneath for the return. The activate
-     * switch fans out onto every addressbook; Advanced unfolds the
-     * per-book sections.
+     * switch is the account's; Advanced unfolds the per-book sections.
      */
     void open(String email) {
         settingsEmail = email;
@@ -83,6 +84,7 @@ final class AccountSettings {
             }
         }
         settingsAdvancedOpen = false;
+        accountEnabled = AccountActivation.enabled(host, email);
 
         ((TextView) host.findViewById(R.id.account_title)).setText(email);
         renderAccountSettings();
@@ -106,25 +108,12 @@ final class AccountSettings {
         addSubmission(content, rowParams);
         addMailScope(content);
 
-        boolean anyEnabled = false;
-        for (BookSettings staged : bookSettings.values()) {
-            anyEnabled |= staged.enabled;
-        }
-
-        // The master switch fans onto every addressbook: on puts both
-        // spokes on, off shuts everything down.
+        // The account switch: off, the account syncs nothing and the lists
+        // and their filters leave it out. The books keep their own switches.
         CheckBox activate = new CheckBox(host);
-        activate.setChecked(anyEnabled);
+        activate.setChecked(accountEnabled);
         content.addView(optionRow(R.string.account_enable, activate), rowParams);
-        activate.setOnCheckedChangeListener(
-                (view, checked) -> {
-                    for (BookSettings staged : bookSettings.values()) {
-                        staged.enabled = checked;
-                        staged.remote = checked;
-                        staged.local = checked;
-                    }
-                    renderAccountSettings();
-                });
+        activate.setOnCheckedChangeListener((view, checked) -> accountEnabled = checked);
 
         // A 1dp separator between the account switch and the advanced fold.
         View line = new View(host);
@@ -228,6 +217,7 @@ final class AccountSettings {
 
     /** Commits the staged switches and returns to the drawer. */
     void save() {
+        AccountActivation.set(host, settingsEmail, accountEnabled);
         for (Map.Entry<String, BookSettings> staged : bookSettings.entrySet()) {
             BookSettings state = staged.getValue();
             host.base.setBookState(staged.getKey(), state.enabled, state.remote, state.local);
@@ -235,6 +225,7 @@ final class AccountSettings {
 
         // The subscription switches move what the contacts root shows.
         host.reloadContacts();
+        host.filterChanged();
         leave();
     }
 
@@ -485,6 +476,8 @@ final class AccountSettings {
                 urls.add(entry.book.url);
             }
         }
+        // NOTE: before its collections go, which is what names them.
+        host.forgetViews(email);
 
         // NOTE: the account and every domain it covered. The screen shows the
         // contacts side, but the user is deleting the account they see, and

@@ -292,8 +292,12 @@ public class MailMoveTest {
         assertEquals("a whole page past the hidden newer row", "INBOX",
                 store.page(everything, null, 0, 1).get(0).mailbox);
         assertEquals("Sent alone, no outbox row stands for it", 1,
-                store.count(store.query((account, mailbox) -> mailbox.equals("Sent"), false,
-                        false, "")));
+                store.count(store.query(
+                        (account, collection) ->
+                                collection.equals(store.collectionOf(EMAIL, "Sent")),
+                        false,
+                        false,
+                        "")));
 
         store.acknowledge(store.outgoing().get(0).queued);
 

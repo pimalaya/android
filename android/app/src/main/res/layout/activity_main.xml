@@ -477,6 +477,10 @@
          in over the content (the drawer is closed while it runs). -->
     <include layout="@layout/panel_auth" />
 
+    <!-- A list's filter page: the same overlay treatment, over the list it
+         filters (the drawer is closed while it is up). -->
+    <include layout="@layout/panel_filter" />
+
     <!-- The screens' primary action, fixed above everything: add on
          the lists, save on the editor, continue through the auth flow
          (icon and action per screen in applyChrome). While an auth step

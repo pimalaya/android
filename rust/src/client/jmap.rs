@@ -16,7 +16,7 @@ use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
 use io_jmap::{
     calendars::{
         JMAP_CALENDARS_CAPABILITY,
-        calendar::{JmapCalendar, get::*},
+        calendar::{JmapCalendar, JmapCalendarRights, get::*},
         calendar_event::{JmapCalendarEvent, query::*},
     },
     coroutine::{JmapCoroutine, JmapCoroutineState, JmapYield},
@@ -62,7 +62,7 @@ use crate::{
     jmap,
     types::{
         Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, Mailbox,
-        PushChange, PushOutcome,
+        PushChange, PushOutcome, default_role,
     },
 };
 
@@ -1402,7 +1402,16 @@ fn jmap_calendar(session: &JmapSession, calendar: JmapCalendar) -> Calendar {
         id,
         description: calendar.description,
         color: calendar.color,
+        role: default_role(calendar.is_default),
+        writable: writable_calendar(&calendar.my_rights),
     }
+}
+
+/// Whether the user may write events into a calendar: any write right,
+/// or rights the server left unsaid (every one false, reading included),
+/// which says nothing rather than read only.
+fn writable_calendar(rights: &JmapCalendarRights) -> bool {
+    rights.may_write_all || rights.may_write_own || !rights.may_read_items
 }
 
 /// io-jmap CalendarEvent to the JNI-facing shape, its JSCalendar
@@ -1451,6 +1460,8 @@ fn jmap_addressbook(session: &JmapSession, book: JmapAddressBook) -> Addressbook
         id,
         description: book.description,
         color: None,
+        role: default_role(book.is_default),
+        writable: book.my_rights.may_write || !book.my_rights.may_read,
     }
 }
 
@@ -1480,9 +1491,11 @@ mod tests {
     use std::collections::BTreeMap;
     use url::Url;
 
-    use serde_json::{json, to_value};
+    use serde_json::{from_value, json, to_value};
 
-    use super::{copy_args, destroy_args, download_url, relocation_args};
+    use super::{
+        copy_args, destroy_args, download_url, jmap_addressbook, jmap_calendar, relocation_args,
+    };
 
     fn session(template: &str) -> JmapSession {
         JmapSession {
@@ -1553,5 +1566,38 @@ mod tests {
         let args = to_value(destroy_args("m1")).unwrap();
 
         assert_eq!(args, json!({ "destroy": ["m1"] }));
+    }
+
+    /// `isDefault` names the default; a calendar or a book shared read
+    /// only takes nothing, and rights the server left unsaid say nothing.
+    #[test]
+    fn the_default_is_the_one_jmap_names() {
+        let session = session("");
+        let calendar = |value| jmap_calendar(&session, from_value(value).unwrap());
+        let book = |value| jmap_addressbook(&session, from_value(value).unwrap());
+
+        let default = calendar(json!({
+            "id": "c1", "isDefault": true,
+            "myRights": { "mayReadItems": true, "mayWriteAll": true },
+        }));
+        let shared = calendar(json!({
+            "id": "c2", "isDefault": false, "myRights": { "mayReadItems": true },
+        }));
+        let unsaid = calendar(json!({ "id": "c3" }));
+
+        assert_eq!(default.role, "default");
+        assert!(default.writable);
+        assert_eq!(shared.role, "");
+        assert!(!shared.writable);
+        assert!(unsaid.writable);
+
+        let rights = |write| json!({ "mayRead": true, "mayWrite": write, "mayShare": false, "mayDelete": false });
+        let default = book(json!({ "id": "b1", "isDefault": true, "myRights": rights(true) }));
+        let shared = book(json!({ "id": "b2", "myRights": rights(false) }));
+
+        assert_eq!(default.role, "default");
+        assert!(default.writable);
+        assert_eq!(shared.role, "");
+        assert!(!shared.writable);
     }
 }

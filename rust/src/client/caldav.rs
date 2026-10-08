@@ -224,6 +224,11 @@ fn into_calendar(home_set: &Url, calendar: DavCalendar) -> Calendar {
         url: url.to_string(),
         description: calendar.description,
         color: calendar.color,
+        // NOTE: io-webdav reads neither RFC 6638's
+        // schedule-default-calendar-URL nor RFC 3744 privileges yet: no
+        // default, and writable.
+        role: String::new(),
+        writable: true,
     }
 }
 

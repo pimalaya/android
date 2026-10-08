@@ -30,8 +30,11 @@ use io_msgraph::{
     v1::{
         rest::batch::{MsgraphBatch, MsgraphBatchRequest, MsgraphBatchResponse},
         rest::users::{
-            calendars::list::{
-                MsgraphCalendarsList, MsgraphCalendarsListParams, MsgraphCalendarsListResponse,
+            calendars::{
+                MsgraphCalendar,
+                list::{
+                    MsgraphCalendarsList, MsgraphCalendarsListParams, MsgraphCalendarsListResponse,
+                },
             },
             events::{
                 MsgraphEvent, MsgraphEventType,
@@ -55,7 +58,7 @@ use crate::{
         Client,
         graph::{alone, batched, graph_url, parse_graph_url},
     },
-    types::{BridgeError, Calendar, Event, EventRef},
+    types::{BridgeError, Calendar, Event, EventRef, default_role},
 };
 
 /// The `$select` of the enumeration: an event's identity, kind and
@@ -88,22 +91,7 @@ impl<'a, 'local> Client<'a, 'local> {
 
         let mut calendars = Vec::new();
         loop {
-            for calendar in page.value {
-                if calendar.id.is_empty() {
-                    continue;
-                }
-                calendars.push(Calendar {
-                    name: calendar
-                        .name
-                        .as_option()
-                        .cloned()
-                        .unwrap_or_else(|| calendar.id.clone()),
-                    id: calendar.id,
-                    url: String::new(),
-                    description: None,
-                    color: calendar.hex_color.filter(|color| !color.is_empty()),
-                });
-            }
+            calendars.extend(page.value.into_iter().filter_map(graph_calendar));
 
             let Some(next) = page.next_link else {
                 break;
@@ -383,6 +371,29 @@ impl GraphReads for GraphCalls<'_, '_, '_> {
     }
 }
 
+/// io-msgraph calendar to the JNI-facing shape, [`None`] for one with no
+/// id: `isDefaultCalendar` makes it the account's default, and `canEdit`
+/// false (a shared calendar read only, a holidays one) not writable.
+fn graph_calendar(calendar: MsgraphCalendar) -> Option<Calendar> {
+    if calendar.id.is_empty() {
+        return None;
+    }
+
+    Some(Calendar {
+        name: calendar
+            .name
+            .as_option()
+            .cloned()
+            .unwrap_or_else(|| calendar.id.clone()),
+        id: calendar.id,
+        url: String::new(),
+        description: None,
+        color: calendar.hex_color.filter(|color| !color.is_empty()),
+        role: default_role(calendar.is_default_calendar == Some(true)),
+        writable: calendar.can_edit != Some(false),
+    })
+}
+
 /// The address one event is read at: the read [`MsgraphEventGet`] sends.
 fn event_url(id: &str) -> Result<Url, BridgeError> {
     let mut url = graph_url(&format!("me/events/{id}"))?;
@@ -613,7 +624,27 @@ mod tests {
         },
     };
 
+    use serde_json::{from_value, json};
+
     use super::*;
+
+    /// The default calendar says so; a calendar shared read only takes
+    /// no event.
+    #[test]
+    fn the_default_calendar_is_the_one_graph_names() {
+        let listed = |calendar| graph_calendar(from_value(calendar).unwrap()).unwrap();
+        let default = listed(json!({
+            "id": "AAA", "name": "Calendar", "isDefaultCalendar": true, "canEdit": true,
+        }));
+        let shared = listed(json!({
+            "id": "BBB", "name": "Boss", "isDefaultCalendar": false, "canEdit": false,
+        }));
+
+        assert_eq!(default.role, "default");
+        assert!(default.writable);
+        assert_eq!(shared.role, "");
+        assert!(!shared.writable);
+    }
 
     fn event(id: &str, change_key: &str) -> MsgraphEvent {
         MsgraphEvent {

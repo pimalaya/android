@@ -284,3 +284,29 @@ fn a_body_read_fails_on_anything_but_not_found() {
     };
     assert!(err.message.contains("people/c1"));
 }
+
+/// myContacts is the default book, and a user group a book beside it;
+/// the other system groups are no book at all.
+#[test]
+fn my_contacts_is_the_default_book() {
+    let listed = |group: Value| google_book(serde_json::from_value(group).unwrap());
+
+    let contacts = listed(json!({
+        "resourceName": "contactGroups/myContacts", "groupType": "SYSTEM_CONTACT_GROUP",
+    }))
+    .unwrap();
+    let friends = listed(json!({
+        "resourceName": "contactGroups/abc", "groupType": "USER_CONTACT_GROUP",
+        "name": "Friends",
+    }))
+    .unwrap();
+    let starred = listed(json!({
+        "resourceName": "contactGroups/starred", "groupType": "SYSTEM_CONTACT_GROUP",
+    }));
+
+    assert_eq!(contacts.role, "default");
+    assert!(contacts.writable);
+    assert_eq!(friends.role, "");
+    assert_eq!(friends.name, "Friends");
+    assert!(starred.is_none());
+}

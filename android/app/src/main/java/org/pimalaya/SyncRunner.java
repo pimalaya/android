@@ -102,14 +102,14 @@ final class SyncRunner {
      * the outcome instead.
      */
     Outcome syncRemote() {
-        return syncRemote(null);
+        return syncRemote(SyncScope.all(context));
     }
 
     /**
-     * The remote run narrowed to what a filter lets through: the books of
-     * the accounts and collections it shows, everything with null.
+     * The remote run narrowed to a scope: the books of the accounts and
+     * collections it takes.
      */
-    Outcome syncRemote(MergedFilter scope) {
+    Outcome syncRemote(SyncScope scope) {
         Outcome outcome = new Outcome();
 
         // NOTE: self-heal an account whose addressbooks a schema rebuild
@@ -123,7 +123,9 @@ final class SyncRunner {
         // for mail alone has no address books to re-fetch, and asking its
         // server for some would fail once per sync.
         for (AccountEntry account : store.loadAll()) {
-            if (!account.covers(PimDomain.CONTACTS) || known.contains(account.email)) {
+            if (!account.covers(PimDomain.CONTACTS)
+                    || known.contains(account.email)
+                    || !scope.account(account.email)) {
                 continue;
             }
             try {
@@ -146,7 +148,7 @@ final class SyncRunner {
 
         Map<String, List<BookEntry>> byAccount = new LinkedHashMap<>();
         for (BookEntry entry : base.loadSubscribedAddressbooks()) {
-            if (scope != null && !scope.accepts(entry.accountEmail, entry.book.id)) {
+            if (!scope.collection(entry.accountEmail, entry.book.url)) {
                 continue;
             }
             byAccount
@@ -165,12 +167,13 @@ final class SyncRunner {
 
             AccountCredential contacts = entry.credential(PimDomain.CONTACTS);
             try {
-                syncAccount(entry.server(PimDomain.CONTACTS), group.getValue(), outcome);
+                syncAccount(
+                        entry.email, entry.server(PimDomain.CONTACTS), group.getValue(), outcome);
                 SyncStamps.mark(context, entry.email);
             } catch (Exception error) {
                 if (expiredToken(error) && contacts.renewable()) {
                     try {
-                        syncAccount(refresh(entry), group.getValue(), outcome);
+                        syncAccount(entry.email, refresh(entry), group.getValue(), outcome);
                         SyncStamps.mark(context, entry.email);
                         continue;
                     } catch (Exception retryError) {
@@ -232,10 +235,29 @@ final class SyncRunner {
      * reconciles through io-offline (spine sync, body hydration,
      * conflict resolution), sharing one driver so the account-level
      * backends list their cards once per pass.
+     *
+     * <p>The books are listed first, for what the source says of each:
+     * which one is the default and which ones are read only. The roster
+     * itself is left as it is, the switches hanging off it.
      */
-    private void syncAccount(Account account, List<BookEntry> books, Outcome outcome)
+    private void syncAccount(
+            String email, Account account, List<BookEntry> books, Outcome outcome)
             throws Exception {
         try (Transport primary = new Transport()) {
+            try {
+                new PimdirCollections(pimdir, context)
+                        .restate(
+                                PimdirCollections.of(
+                                        email, client.listAddressbooks(primary, account)));
+            } catch (Exception error) {
+                // NOTE: a 401 is the pass's to refresh on, anything else
+                // leaves the books as last stated.
+                if (expiredToken(error)) {
+                    throw error;
+                }
+                Log.w("pimalaya", "addressbook roles failed for " + email, error);
+            }
+
             OfflineEngine engine = engine(primary, account);
 
             for (BookEntry entry : books) {
