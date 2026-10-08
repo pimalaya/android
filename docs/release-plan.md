@@ -67,4 +67,4 @@ Local search first (summaries, then bodies stored by item 5), then a "Search on 
 
 ## Later: real-time push (IMAP: ~/code/pimalaya/IMAP_SESSION_HANDOVER_PLAN.md)
 
-See the push notes: provider-native Web Push (JMAP, WebDAV-Push) delivered over UnifiedPush needs no server; Gmail, Graph and Google Calendar need a credential-less relay; IMAP needs IDLE on the phone or a credentialed watcher.
+See the push notes: provider-native Web Push (JMAP, WebDAV-Push) delivered over UnifiedPush needs no server; Gmail, Graph and Google Calendar need a credential-less relay; IMAP goes through the relay's keyless watcher (the phone logs in and hands over a pre-encrypted refresh queue). Live 2026-10-08 through relay.pimalaya.org: Graph, Gmail webhook, Google Calendar, Microsoft and Fastmail IMAP; Gmail IMAP partly (see the plan). Still owed: relay accounts for users (token issuance), the app side (UnifiedPush/FCM registration, subscriptions, renew, handover), Firebase.
