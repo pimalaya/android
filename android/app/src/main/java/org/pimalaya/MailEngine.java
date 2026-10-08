@@ -9,6 +9,7 @@ import org.pimalaya.client.Account;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.PimdirSql;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -38,7 +39,8 @@ import java.util.Map;
  * header fields the listing read, so a new message lands listed in the page
  * that found it, with no probe and no upgrade after it. Only the body needs
  * the network, which is why opening a message is the one read that still
- * reaches for one.
+ * reaches for one, beside the body step an account's offline setting runs
+ * ({@link MailBodies}).
  *
  * <p>A mailbox is listed whole, within the account's bound ({@link
  * MailScope}), newest first and a page at a time: each page lands in its own
@@ -166,7 +168,7 @@ class MailEngine extends PimdirEngine {
      * stalls.
      */
     boolean widen(String collection, int count) {
-        String bound = bound();
+        String bound = bound(collection);
         MailStore.Coverage coverage = mail().coverage(collection);
         if (coverage.filling || coverage.at == null) {
             sync(collection);
@@ -210,7 +212,7 @@ class MailEngine extends PimdirEngine {
      * listed, its first chunk, the {@link #FIRST_CHUNK} newest messages.
      */
     private String scopeOf(String collection) {
-        String bound = bound();
+        String bound = bound(collection);
         MailStore.Coverage coverage = mail().coverage(collection);
         if (coverage.filling) {
             return MailScope.clamp(coverage.roundSince, bound);
@@ -254,9 +256,12 @@ class MailEngine extends PimdirEngine {
                         + ", the pass so far " + clock);
     }
 
-    /** The floor of the account's bound today, null for all of its mail. */
-    private String bound() {
-        return MailScope.sinceOf(pimdir.context(), accountId);
+    /**
+     * The floor of a mailbox's bound today, null for all of its mail: its
+     * account's, or none for a mailbox kept whole.
+     */
+    private String bound(String collection) {
+        return MailScope.sinceOf(pimdir.context(), accountId, collection);
     }
 
     /** The account's mail store, for the coverage a pass starts from. */
@@ -472,16 +477,19 @@ class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The named members of the last page, whichever tier is asked.
+     * The named members of the last page at the meta tier, the bodies
+     * {@link #download} asked for at the full one.
      *
      * <p>A sync never asks: a listing names everything it carries. A meta
-     * upgrade revisiting a claim reads back what the last page named, and a
-     * body is the reader's to fetch ({@link MailStore#saveSource}), one
-     * message at a time and only one someone opened; answering one here
-     * would be an entire mailbox of downloads to reconcile a listing.
+     * upgrade revisiting a claim reads back what the last page named. A
+     * full one is the body step's alone ({@link MailBodies}), the reader
+     * fetching what someone opens itself ({@link MailStore#saveSource}).
      */
     @Override
     protected JSONObject fetch(JSONObject yielded) throws JSONException {
+        if ("full".equals(yielded.optString("tier"))) {
+            return fetchBodies(yielded.getString("collection"), yielded.getJSONArray("handles"));
+        }
         JSONArray items = new JSONArray();
         for (String handle : stringsOf(yielded.getJSONArray("handles"))) {
             JSONObject item = listed.get(handle);
@@ -493,6 +501,115 @@ class MailEngine extends PimdirEngine {
         JSONObject reply = new JSONObject();
         reply.put("items", items);
         return reply;
+    }
+
+    /** The rows {@link #download} asked for, by handle, while its upgrade runs. */
+    private final Map<String, MailBodies.Row> downloading = new HashMap<>();
+
+    /** The attachment mark each fetched body gives, by link id, applied once it lands. */
+    private final Map<String, Boolean> marks = new HashMap<>();
+
+    /**
+     * Downloads the bodies of some messages of one mailbox through the
+     * engine's upgrade to {@code Full}: a body the store holds under the
+     * same link id is linked rather than fetched, every other one is
+     * fetched, and each lands with its base moved to it. A message still
+     * pending (a move's target, a sent copy) is left: it has no handle the
+     * server knows.
+     *
+     * <p>The summary and sort key stay those the listing gave; only the
+     * attachment mark is restated, off the parts the body carries, as
+     * opening it does.
+     */
+    void download(String collection, List<MailBodies.Row> rows) {
+        downloading.clear();
+        marks.clear();
+        List<String> handles = new ArrayList<>(rows.size());
+        synchronized (STORE) {
+            for (MailBodies.Row row : rows) {
+                if (offline.isPendingCreate(collection, row.linkId)) {
+                    continue;
+                }
+                String handle = offline.handleFor(collection, row.linkId);
+                if (handle != null) {
+                    handles.add(handle);
+                    downloading.put(handle, row);
+                }
+            }
+        }
+        if (handles.isEmpty()) {
+            return;
+        }
+        Log.d(
+                "pimalaya",
+                "mail bodies " + collection + " (" + handles.size() + "): "
+                        + client.offlineUpgrade(this, collection, handles));
+        synchronized (STORE) {
+            for (Map.Entry<String, Boolean> mark : marks.entrySet()) {
+                mail().markAttachment(collection, mark.getKey(), mark.getValue());
+            }
+        }
+        downloading.clear();
+        marks.clear();
+    }
+
+    /**
+     * The bodies of some messages, as the reply to a full fetch: each one's
+     * source as the server holds it, in base64 since a message is bytes,
+     * under the link id and sort key the store holds. One the server no
+     * longer has, or fails to hand over, is left out and stays below
+     * {@code Full}; an expired token fails the fetch, for the caller to
+     * renew.
+     */
+    private JSONObject fetchBodies(String collection, JSONArray asked) throws JSONException {
+        String mailbox = mailboxOf(collection);
+        JSONArray items = new JSONArray();
+        for (String handle : stringsOf(asked)) {
+            MailBodies.Row row = downloading.get(handle);
+            if (row == null) {
+                continue;
+            }
+            byte[] source;
+            long started = System.nanoTime();
+            try {
+                source = source(mailbox, handle);
+            } catch (RuntimeException failure) {
+                if (SyncRunner.expiredToken(failure)) {
+                    throw failure;
+                }
+                Log.w("pimalaya", "body not downloaded: " + collection + " " + handle, failure);
+                continue;
+            } finally {
+                remote(System.nanoTime() - started);
+            }
+            if (source == null) {
+                continue;
+            }
+
+            JSONObject item = new JSONObject();
+            item.put("handle", handle);
+            item.put("linkId", row.linkId);
+            item.put("sortKey", row.sortKey);
+            item.put("hash", PimdirHash.of(source));
+            item.put("bodyBase64", java.util.Base64.getEncoder().encodeToString(source));
+            items.put(item);
+
+            JSONObject derived = PimdirSql.derive(PimdirSummary.MAIL, source);
+            JSONObject summary = derived.optJSONObject("summary");
+            JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
+            if (mail != null && mail.has("attachment")) {
+                marks.put(row.linkId, mail.getBoolean("attachment"));
+            }
+        }
+
+        JSONObject reply = new JSONObject();
+        reply.put("items", items);
+        return reply;
+    }
+
+    /** One message's source as the server holds it. */
+    protected byte[] source(String mailbox, String handle) {
+        return client.fetchMessageSource(session, mailbox, handle);
     }
 
     /** Tells a listening list that a write landed, page by page. */

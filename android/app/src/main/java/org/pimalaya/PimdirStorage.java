@@ -790,7 +790,12 @@ final class PimdirStorage {
     private void storeObject(SQLiteDatabase db, JSONObject op, Map<String, byte[]> bodies)
             throws JSONException {
         String hash = op.getString("hash");
-        byte[] body = op.optString("body", "").getBytes(StandardCharsets.UTF_8);
+        // NOTE: a body that is not UTF-8 (a message's 8-bit parts) comes
+        // as base64, so it is stored as the bytes it was fetched as.
+        byte[] body =
+                op.has("bodyBase64")
+                        ? java.util.Base64.getDecoder().decode(op.getString("bodyBase64"))
+                        : op.optString("body", "").getBytes(StandardCharsets.UTF_8);
         bodies.put(hash, body);
 
         try {

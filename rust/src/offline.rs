@@ -46,7 +46,12 @@ use jni::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, from_str, json};
 
-use crate::{client::clear_and_fail, summary::SummaryJson, types::BridgeError};
+use crate::{
+    client::clear_and_fail,
+    mail::{base64, unbase64},
+    summary::SummaryJson,
+    types::BridgeError,
+};
 
 /// Reconciles `collection` with its remote through the Java driver,
 /// returning the sync report as JSON. With `full` the checkpoint is
@@ -392,24 +397,30 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
         }
         PimdirYield::WantsFetch { .. } => {
             let fetched: FetchedJson = parse(reply)?;
-            let items = fetched
-                .items
-                .into_iter()
-                .map(|item| PimdirFetchedItem {
+            let mut items = Vec::with_capacity(fetched.items.len());
+            for item in fetched.items {
+                // NOTE: a message is bytes and a Java string UTF-8, so a
+                // body that is not text crosses in base64.
+                let bytes = match (item.body, item.body_base64) {
+                    (Some(body), _) => Some(body.into_bytes()),
+                    (None, Some(encoded)) => Some(unbase64(&encoded)?),
+                    (None, None) => None,
+                };
+                items.push(PimdirFetchedItem {
                     handle: PimdirHandle(item.handle),
                     link_id: PimdirLinkId(item.link_id),
                     summary: item.summary.map(Into::into),
                     sort_key: item.sort_key.into(),
-                    body: match (item.hash, item.body) {
-                        (Some(hash), Some(body)) => Some(PimdirFetchedBody::Inline {
+                    body: match (item.hash, bytes) {
+                        (Some(hash), Some(bytes)) => Some(PimdirFetchedBody::Inline {
                             hash: PimdirHash(hash),
-                            bytes: body.into_bytes(),
+                            bytes,
                         }),
                         _ => None,
                     },
                     revision: item.revision,
-                })
-                .collect();
+                });
+            }
             PimdirArg::Fetch(items)
         }
         PimdirYield::WantsPush { .. } => {
@@ -774,10 +785,15 @@ enum WriteOpJson {
         handle: String,
         reason: DropReasonJson,
     },
+    /// A body, as text where it is UTF-8 and as base64 otherwise, so a
+    /// message's 8-bit bytes are stored as fetched.
     StoreObject {
         hash: String,
         size: usize,
-        body: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        body_base64: Option<String>,
     },
     SetCheckpoint {
         collection: String,
@@ -833,17 +849,22 @@ impl From<&PimdirWriteOp> for WriteOpJson {
                 handle: handle.as_str().into(),
                 reason: (*reason).into(),
             },
-            PimdirWriteOp::StoreObject { object, body } => Self::StoreObject {
-                hash: object.hash.as_str().into(),
-                size: object.size,
-                // A byteless op (an object streamed into the store during fetch)
-                // does not arise for the contacts bridge, whose remote always
-                // returns inline bodies; map it to an empty payload for safety.
-                body: body
-                    .as_deref()
-                    .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
-                    .unwrap_or_default(),
-            },
+            PimdirWriteOp::StoreObject { object, body } => {
+                // NOTE: a byteless op (an object streamed into the store
+                // during fetch) does not arise here, every driver answering
+                // inline bodies; it maps to an empty payload for safety.
+                let bytes = body.as_deref().unwrap_or_default();
+                let (body, body_base64) = match core::str::from_utf8(bytes) {
+                    Ok(text) => (Some(text.to_owned()), None),
+                    Err(_) => (None, Some(base64(bytes))),
+                };
+                Self::StoreObject {
+                    hash: object.hash.as_str().into(),
+                    size: object.size,
+                    body,
+                    body_base64,
+                }
+            }
             PimdirWriteOp::SetCheckpoint {
                 collection,
                 checkpoint,
@@ -1355,6 +1376,10 @@ struct FetchedItemJson {
     hash: Option<String>,
     #[serde(default)]
     body: Option<String>,
+    /// The body as base64, in place of `body` when it is not UTF-8 text
+    /// (a message's 8-bit parts).
+    #[serde(default)]
+    body_base64: Option<String>,
     #[serde(default)]
     revision: Option<String>,
 }
@@ -1398,7 +1423,10 @@ mod tests {
     };
     use serde_json::{Value, from_str};
 
-    use super::{MutationJson, RoundJson, SnapshotJson, WriteOpJson, enumerate_json};
+    use super::{
+        MutationJson, PimdirArg, PimdirFetchedBody, PimdirHash, PimdirObject, PimdirTier,
+        PimdirYield, RoundJson, SnapshotJson, WriteOpJson, enumerate_json, parse_arg,
+    };
 
     fn mutation(json: &str) -> PimdirMutation {
         from_str::<MutationJson>(json).unwrap().into()
@@ -1526,5 +1554,34 @@ mod tests {
             !round.band,
             "a round loaded with no kind lists its whole scope"
         );
+    }
+
+    #[test]
+    fn a_body_that_is_not_text_crosses_in_base64() {
+        let yielded = PimdirYield::WantsFetch {
+            collection: PimdirCollectionId::from("acct/INBOX"),
+            handles: vec![PimdirHandle("7".into())],
+            tier: PimdirTier::Full,
+        };
+        let reply =
+            r#"{"items": [{"handle": "7", "linkId": "7", "hash": "h", "bodyBase64": "/wBh"}]}"#;
+        let PimdirArg::Fetch(items) = parse_arg(&yielded, reply).unwrap() else {
+            panic!("a fetch");
+        };
+        let Some(PimdirFetchedBody::Inline { bytes, .. }) = &items[0].body else {
+            panic!("an inline body");
+        };
+        assert_eq!(bytes, &[0xff, 0x00, b'a']);
+
+        let stored = serde_json::to_value(WriteOpJson::from(&PimdirWriteOp::StoreObject {
+            object: PimdirObject {
+                hash: PimdirHash("h".into()),
+                size: 3,
+            },
+            body: Some(vec![0xff, 0x00, b'a']),
+        }))
+        .unwrap();
+        assert_eq!(stored["bodyBase64"], "/wBh");
+        assert_eq!(stored.get("body"), None, "never a lossy copy beside it");
     }
 }

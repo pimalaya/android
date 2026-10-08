@@ -481,6 +481,33 @@ pub(crate) fn base64(bytes: &[u8]) -> String {
     encoded
 }
 
+/// The inverse of [`base64`]: how a body the Java side holds as bytes
+/// crosses back into the engine. Padding is skipped; any other character
+/// outside the alphabet refuses the whole input.
+pub(crate) fn unbase64(encoded: &str) -> Result<Vec<u8>, String> {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut bytes = Vec::with_capacity(encoded.len() / 4 * 3);
+    let mut bits = 0u32;
+    let mut held = 0;
+
+    for character in encoded.bytes().filter(|byte| *byte != b'=') {
+        let Some(sextet) = ALPHABET.iter().position(|entry| *entry == character) else {
+            return Err(format!(
+                "Invalid base64 character {:?}",
+                char::from(character)
+            ));
+        };
+        bits = (bits << 6) | sextet as u32;
+        held += 6;
+        if held >= 8 {
+            held -= 8;
+            bytes.push((bits >> held) as u8);
+        }
+    }
+    Ok(bytes)
+}
+
 /// The body as quoted-printable (RFC 2045 section 6.7): readable where
 /// it is ASCII, encoded where it is not, and never a line past 76.
 fn quoted_printable(body: &str) -> String {
@@ -767,7 +794,7 @@ mod tests {
                 .and_then(|w| w.strip_suffix("?="))
             {
                 Some(encoded) => {
-                    decoded.push_str(&String::from_utf8(decode_base64(encoded)).unwrap())
+                    decoded.push_str(&String::from_utf8(unbase64(encoded).unwrap()).unwrap())
                 }
                 None => {
                     decoded.push(' ');
@@ -818,28 +845,12 @@ mod tests {
         assert!(compose(&draft).is_err());
     }
 
-    /// The inverse of [`base64`], for the round trip one test needs.
-    fn decode_base64(encoded: &str) -> Vec<u8> {
-        const ALPHABET: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    #[test]
+    fn eight_bit_bytes_round_trip_through_base64() {
+        let bytes: Vec<u8> = (0..=255).collect();
 
-        let mut bytes = Vec::new();
-        let mut bits = 0u32;
-        let mut held = 0;
-
-        for character in encoded.bytes().filter(|byte| *byte != b'=') {
-            let sextet = ALPHABET
-                .iter()
-                .position(|entry| *entry == character)
-                .unwrap();
-            bits = (bits << 6) | sextet as u32;
-            held += 6;
-            if held >= 8 {
-                held -= 8;
-                bytes.push((bits >> held) as u8);
-            }
-        }
-        bytes
+        assert_eq!(unbase64(&base64(&bytes)).unwrap(), bytes);
+        assert!(unbase64("not base64!").is_err());
     }
 
     #[test]
