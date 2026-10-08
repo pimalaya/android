@@ -53,7 +53,7 @@ Gmail metadata reads SHALL go 50 to a `POST /batch/gmail/v1` (multipart/mixed), 
 - THEN three batch requests carry the 120 reads
 
 ### Requirement: An expired People sync token restarts the round
-A People round whose sync token Google refuses as expired (a 410, or a 400 whose message says the sync token expired) SHALL be run again as a full round without a token, rather than failing every pass.
+A People round whose sync token Google refuses as expired (a 410, or a 400 carrying the `EXPIRED_SYNC_TOKEN` reason, read from Google's error envelope rather than its message) SHALL be run again as a full round without a token, rather than failing every pass.
 
 #### Scenario: A token older than seven days
 - GIVEN a Google address book last synced weeks ago
@@ -61,12 +61,17 @@ A People round whose sync token Google refuses as expired (a 410, or a 400 whose
 - THEN the expired token is dropped and the book is listed in full
 
 ### Requirement: People is read once per account per pass
-People connections SHALL be listed 1,000 a page, and the account-wide delta SHALL be read once per pass and projected onto each contact group rather than relisted per group.
+People connections SHALL be listed 1,000 a page with the whole vCard field mask, so a round carries the body of every contact it names, and the account-wide delta SHALL be read once per pass and projected onto each contact group rather than relisted per group: a group whose checkpoint matches a round the pass already read SHALL take that round, and a push SHALL drop the pass's rounds. A body the round did not carry SHALL be read 200 to a `people:batchGet`, a contact no longer found left out, rather than one `people.get` a contact. A People checkpoint SHALL name the request shape its sync token was issued for (field mask and page size), and a checkpoint of another shape SHALL start a full round without sending its token.
 
 #### Scenario: Three contact groups
-- GIVEN a Google account with three contact groups
+- GIVEN a Google account with three contact groups at one checkpoint
 - WHEN its contacts sync
 - THEN `people.connections.list` is walked once
+
+#### Scenario: A checkpoint from 100-person pages
+- GIVEN a Google address book whose checkpoint is a bare sync token issued for pages of 100
+- WHEN it syncs
+- THEN the token is not sent and the book is listed in full, 1,000 a page
 
 ## MODIFIED Requirements
 
@@ -115,7 +120,7 @@ Gmail API requests SHALL be paced near 40 a second across every worker of the pr
 - THEN the request past the budget waits for the next minute rather than drawing a quota refusal
 
 ### Requirement: A Google calendar can run over the Calendar API
-A calendar connection behind the `google://` marker SHALL list the user's calendar list and read events as iCalendar, a series with its changed and cancelled instances as one entry, those instances being the listed events naming the series as theirs. An entry's revision SHALL be the master's ETag folded with its instances', so an instance edited on Google moves the entry. A pass after the first SHALL list only what changed since the calendar's `syncToken` (the same `showDeleted` and `maxResults` 2,500 every time), a changed instance folded into its series; a token Google refuses with 410 SHALL fall back to listing the calendar in full, building the bodies from that listing. A write SHALL go to the master with Google's `If-Match`, after the folded revision is checked, and a created event SHALL be imported so it keeps its UID.
+A calendar connection behind the `google://` marker SHALL list the user's calendar list and read events as iCalendar, a series with its changed and cancelled instances as one entry, those instances being the listed events naming the series as theirs. An entry's revision SHALL be the master's ETag folded with its instances', so an instance edited on Google moves the entry. A pass after the first SHALL list only what changed since the calendar's `syncToken` (the same `showDeleted` and `maxResults` 2,500 every time), a changed lone event read whole from the changes and a series changed in any part read again whole by the listing of its `iCalUID`, once however many of its parts changed, a cancelled lone event or master vanishing unread; a token Google refuses with 410 SHALL fall back to listing the calendar in full, building the bodies from that listing. A write SHALL go to the master with Google's `If-Match`, after the folded revision is checked, and a created event SHALL be imported so it keeps its UID.
 
 #### Scenario: An instance edited on Google
 - GIVEN a series whose one occurrence was moved on Google since the last pass

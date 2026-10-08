@@ -37,9 +37,9 @@ In order; 1, 2 and 5-A1 are small and can land first, together.
 
 ## 5. Audit items
 - [x] A1: People expired token (410, or 400 "Sync token is expired") falls back to a full round; optionally io-gpeople keeps `status` and `details[].reason` (io-gpeople commit f54c67b, unreleased)
-- [ ] A1 follow-up: once io-gpeople is released, bump it and match `GpeopleSendError::is_sync_token_expired` in `sync_google_cards` instead of the message text (TODO in rust/src/client/google.rs)
-- [ ] B6: People pages of 1,000; account delta read once per pass, projected per group
-- [ ] B2: Google Calendar with `syncToken`, series folding, 410 fallback
+- [x] A1 follow-up: once io-gpeople is released, bump it and match `GpeopleSendError::is_sync_token_expired` in `sync_google_cards` instead of the message text (TODO in rust/src/client/google.rs)
+- [x] B6: People pages of 1,000; account delta read once per pass, projected per group; bodies the round lacks read 200 to a `people:batchGet`; checkpoint versioned (`v2:`) by mask and page size
+- [x] B2: Google Calendar with `syncToken`, series folding (a changed series read again by its `iCalUID`), 410 fallback
 
 ## 6. Land
 - [ ] Measure on the device with the seeded account: first dialog, whole account, a quiet pass; compare with 2026-10-07 (SENT 64 in 11.2 s, INBOX 120 in 24.1 s, quota refusal)

@@ -233,9 +233,10 @@ pub struct CardDelta {
 /// reason: an enumerate answers which members moved, and the bodies are
 /// read afterwards for the ones the merge asks about.
 ///
-/// Except where the listing had to read them anyway: Google's and JMAP's
-/// complete rounds list every event whole, so they hand the bodies over in
-/// [`Self::bodies`] rather than have each one read a second time.
+/// Except where the round had to read them anyway: Google's rounds and
+/// JMAP's complete ones read every event they name whole, so they hand the
+/// bodies over in [`Self::bodies`] rather than have each one read a second
+/// time.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EventDelta {
