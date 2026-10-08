@@ -379,7 +379,9 @@ public class PimalayaClient {
                             string(book, "name"),
                             string(book, "url"),
                             optString(book, "description"),
-                            optString(book, "color")));
+                            optString(book, "color"),
+                            book.optString("role"),
+                            book.optBoolean("writable", true)));
         }
         return books;
     }
@@ -715,7 +717,9 @@ public class PimalayaClient {
                             string(calendar, "name"),
                             string(calendar, "url"),
                             optString(calendar, "description"),
-                            optString(calendar, "color")));
+                            optString(calendar, "color"),
+                            calendar.optString("role"),
+                            calendar.optBoolean("writable", true)));
         }
         return calendars;
     }

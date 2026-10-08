@@ -210,10 +210,12 @@
     <string name="mail_empty">No message</string>
     <string name="calendar_empty">No event</string>
     <string name="filter_title">Filter</string>
+    <string name="filter_title_of">Filter %1$s</string>
+    <string name="filter_close">Close the filter</string>
+    <string name="filter_default">Default</string>
+    <string name="filter_set_default">Set as default</string>
     <string name="contacts_transfer">Import or export</string>
-    <string name="filter_accounts">Accounts</string>
-    <string name="filter_collections">Collections</string>
-    <string name="filter_reset">Show all</string>
+    <string name="filter_reset">Reset</string>
 
     <!-- The large titles' supporting lines and the lists' sections. -->
     <plurals name="mail_meta">
@@ -238,7 +240,14 @@
     <string name="mail_more_offline">Older mail needs the network</string>
     <string name="mail_more_failed">Couldn\'t load older mail. Tap to retry</string>
     <string name="mail_chip_unread">Unread</string>
+    <string name="mail_chip_inbox">Inbox</string>
+    <string name="mail_chip_sent">Sent</string>
+    <string name="mail_chip_drafts">Drafts</string>
+    <string name="mail_chip_trash">Trash</string>
+    <string name="mail_chip_junk">Junk</string>
+    <string name="mail_chip_archive">Archive</string>
     <string name="mail_chip_attachments">Attachments</string>
+    <string name="chip_default">Default</string>
     <string name="message_reply">Reply</string>
     <string name="message_forward">Forward</string>
     <string name="compose_quote_intro">On %1$s, %2$s wrote:</string>
@@ -384,6 +393,8 @@
     <string name="event_delete_confirm">Delete this entry?</string>
     <string name="event_delete_failed">Could not delete the entry</string>
     <string name="event_no_calendar">No calendar to put it in</string>
+    <string name="event_target_title">Add to calendar</string>
+    <string name="contacts_no_book">No address book to put it in</string>
     <string name="event_unreadable">This entry could not be read</string>
     <string name="event_nothing_to_add">Nothing left to add</string>
     <string name="event_field_this_one">This occurrence</string>

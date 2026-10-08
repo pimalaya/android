@@ -234,7 +234,12 @@ public class MailChunksTest {
         // NOTE: a mailbox the filter hides limits nothing.
         assertEquals(
                 inboxServer.dateOf(21),
-                store.floorOf(store.query((account, name) -> name.equals("INBOX"), false, false, "")));
+                store.floorOf(store.query(
+                        (account, collection) ->
+                                collection.equals(store.collectionOf(EMAIL, "INBOX")),
+                        false,
+                        false,
+                        "")));
     }
 
     /**

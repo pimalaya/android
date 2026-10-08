@@ -77,6 +77,7 @@ public class MainActivity extends Activity {
     static final int PANEL_EVENT_VIEW = 8;
     private static final int PANEL_AUTH = 20;
     static final int PANEL_ACCOUNT = 21;
+    static final int PANEL_FILTER = 22;
 
     /**
      * The domain the app opens on, and the one every flow that finishes
@@ -123,8 +124,11 @@ public class MainActivity extends Activity {
     /** Every connected account (multi-account). */
     final List<AccountEntry> accounts = new ArrayList<>();
 
-    /** The merged view's account and collection filter, shared by the domains. */
-    final MergedFilter filter = new MergedFilter();
+    /** Each domain's filter, read once from where it was last left. */
+    private final Map<PimDomain, MergedFilter> filters = new java.util.EnumMap<>(PimDomain.class);
+
+    /** The filter page over a list. */
+    private final FilterPage filterPage = new FilterPage(this);
 
     /** The calendar side of the store, and the agenda over it. */
     EventStore events;
@@ -241,6 +245,7 @@ public class MainActivity extends Activity {
         mailList.setUp();
         setUpContactPanel();
         setUpHomePanel();
+        filterPage.setUp();
 
         // The selection's close and select-all buttons serve whichever
         // list is selecting.
@@ -533,6 +538,10 @@ public class MainActivity extends Activity {
         // back peels it off first.
         if (screen == PANEL_ACCOUNT) {
             accountSettings.leave();
+            return;
+        }
+        if (screen == PANEL_FILTER) {
+            filterPage.leave();
             return;
         }
         if (drawer.isDrawerOpen(android.view.Gravity.START)) {
@@ -835,7 +844,9 @@ public class MainActivity extends Activity {
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.WRAP_CONTENT, dp(30));
         pillParams.topMargin = dp(12);
-        card.addView(syncPill(accountEnabled(email), SyncStamps.at(this, email)), pillParams);
+        card.addView(
+                syncPill(AccountActivation.enabled(this, email), SyncStamps.at(this, email)),
+                pillParams);
         card.setOnClickListener(view -> openAccountSettings(email));
 
         LinearLayout.LayoutParams cardParams =
@@ -900,27 +911,6 @@ public class MainActivity extends Activity {
         labelParams.setMarginStart(dp(8));
         pill.addView(label, labelParams);
         return pill;
-    }
-
-    /**
-     * Whether an account takes part: the filter does not hide it, and
-     * when it holds addressbooks, at least one of them is on, which is
-     * what its settings' Activate switch says.
-     */
-    private boolean accountEnabled(String email) {
-        if (!filter.showsAccount(email)) {
-            return false;
-        }
-        boolean hasBook = false;
-        for (BookEntry entry : base.loadAllAddressbooks()) {
-            if (entry.accountEmail.equals(email)) {
-                hasBook = true;
-                if (entry.subscribed) {
-                    return true;
-                }
-            }
-        }
-        return !hasBook;
     }
 
     /**
@@ -1162,7 +1152,7 @@ public class MainActivity extends Activity {
         setSyncing(true);
         io.execute(
                 () -> {
-                    MailPass pass = mailPass(filter);
+                    MailPass pass = mailPass(filterOf(PimDomain.MAIL));
                     postAlive(
                             () -> {
                                 setSyncing(false);
@@ -1186,13 +1176,13 @@ public class MainActivity extends Activity {
 
     /**
      * Every mail account's outbox drained and mailboxes synced, on the
-     * calling thread: those the scope shows, every one with null.
+     * calling thread: those the scope takes.
      */
-    private MailPass mailPass(MergedFilter scope) {
+    private MailPass mailPass(SyncScope scope) {
         syncTitle(R.string.mail_title);
         MailPass pass = new MailPass();
         for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
-            if (scope != null && !scope.showsAccount(account.email)) {
+            if (!scope.account(account.email)) {
                 continue;
             }
             // One connection for the account's whole pass: the drain, the
@@ -1203,7 +1193,9 @@ public class MainActivity extends Activity {
                 // already in the sent mailbox by the time the walk beside it
                 // lists one.
                 try {
-                    pass.sent += drainOutbox(account, session);
+                    if (scope.collection(account.email, mail.outboxOf(account.email))) {
+                        pass.sent += drainOutbox(account, session);
+                    }
                 } catch (Exception error) {
                     Log.w("pimalaya", "outbox drain failed: " + account.email, error);
                     if (pass.failure == null) {
@@ -1318,7 +1310,7 @@ public class MainActivity extends Activity {
         setSyncing(true);
         io.execute(
                 () -> {
-                    Exception failure = calendarPass(filter);
+                    Exception failure = calendarPass(filterOf(PimDomain.CALENDAR));
                     postAlive(
                             () -> {
                                 setSyncing(false);
@@ -1332,9 +1324,9 @@ public class MainActivity extends Activity {
 
     /**
      * Every calendar account synced, on the calling thread: those the
-     * scope shows, every one with null. Answers the first failure.
+     * scope takes. Answers the first failure.
      */
-    private Exception calendarPass(MergedFilter scope) {
+    private Exception calendarPass(SyncScope scope) {
         syncTitle(R.string.calendar_title);
         Exception failure = null;
         // NOTE: the calendar accounts, rather than the contacts accounts that
@@ -1342,7 +1334,7 @@ public class MainActivity extends Activity {
         // calendar account the app had before the connection flow could make
         // one, and it walked a CardDAV home looking for calendars.
         for (AccountEntry account : accountsFor(PimDomain.CALENDAR)) {
-            if (scope != null && !scope.showsAccount(account.email)) {
+            if (!scope.account(account.email)) {
                 continue;
             }
             Exception error = fetchCalendars(account, scope);
@@ -1370,7 +1362,7 @@ public class MainActivity extends Activity {
      * One mailbox failing leaves the others running; the first failure is
      * what the pass reports.
      */
-    private Exception fetchMail(AccountEntry account, MailSession session, MergedFilter scope) {
+    private Exception fetchMail(AccountEntry account, MailSession session, SyncScope scope) {
         String accountId = accountIdOf(account.email);
         List<String> collections = new ArrayList<>();
         try {
@@ -1389,10 +1381,11 @@ public class MainActivity extends Activity {
             for (Mailbox mailbox : MailEngine.ordered(mailboxes)) {
                 // NOTE: a pass scoped to the filter skips what it hides. The
                 // roster above is still read, so the filter keeps offering it.
-                if (scope != null && !scope.accepts(account.email, mailbox.name)) {
+                String collection = mail.collectionOf(account.email, mailbox.name);
+                if (!scope.collection(account.email, collection)) {
                     continue;
                 }
-                collections.add(mail.collectionOf(account.email, mailbox.name));
+                collections.add(collection);
             }
         } catch (Exception error) {
             Log.w("pimalaya", "mail sync failed: " + account.email, error);
@@ -1428,7 +1421,7 @@ public class MainActivity extends Activity {
      * thread. Answers what went wrong, or null; a calendar whose pass
      * fails leaves the ones beside it alone.
      */
-    private Exception fetchCalendars(AccountEntry account, MergedFilter scope) {
+    private Exception fetchCalendars(AccountEntry account, SyncScope scope) {
         // NOTE: one session for the whole account, so the listing and every
         // event round after it share the token a refresh may have replaced
         // part-way; the listing's transport is then the first calendar
@@ -1453,7 +1446,7 @@ public class MainActivity extends Activity {
                 if (!calendar.accountEmail.equals(account.email)) {
                     continue;
                 }
-                if (scope != null && !scope.accepts(account.email, calendar.id)) {
+                if (!scope.collection(account.email, calendar.id)) {
                     continue;
                 }
                 calendars.add(calendar.id);
@@ -1576,7 +1569,8 @@ public class MainActivity extends Activity {
         List<AccountEntry> owing = new ArrayList<>();
         for (String email : FirstSync.owing(this, domain)) {
             for (AccountEntry account : accountsFor(domain)) {
-                if (account.email.equals(email)) {
+                // NOTE: an account that is off keeps owing it.
+                if (account.email.equals(email) && AccountActivation.enabled(this, email)) {
                     owing.add(account);
                 }
             }
@@ -1614,7 +1608,7 @@ public class MainActivity extends Activity {
                     for (AccountEntry account : owing) {
                         Exception error;
                         try (MailSession session = openMail(account)) {
-                            error = fetchMail(account, session, null);
+                            error = fetchMail(account, session, SyncScope.all(this));
                         } catch (Exception opened) {
                             error = opened;
                         }
@@ -1670,7 +1664,7 @@ public class MainActivity extends Activity {
                     syncTitle(R.string.calendar_title);
                     Exception failure = null;
                     for (AccountEntry account : owing) {
-                        Exception error = fetchCalendars(account, null);
+                        Exception error = fetchCalendars(account, SyncScope.all(this));
                         if (error == null) {
                             FirstSync.paid(this, account.email, PimDomain.CALENDAR);
                         } else if (failure == null) {
@@ -1721,7 +1715,14 @@ public class MainActivity extends Activity {
 
                             @Override
                             public List<MailStore.Edge> edges() {
-                                return mail.edges();
+                                // NOTE: an account that is off syncs nothing, the
+                                // background fill included.
+                                List<MailStore.Edge> edges = mail.edges();
+                                edges.removeIf(
+                                        edge ->
+                                                !AccountActivation.enabled(
+                                                        MainActivity.this, edge.accountEmail));
+                                return edges;
                             }
 
                             @Override
@@ -1893,7 +1894,7 @@ public class MainActivity extends Activity {
         setSyncing(true);
         io.execute(
                 () -> {
-                    SyncRunner.Outcome outcome = runner.syncRemote(filter);
+                    SyncRunner.Outcome outcome = runner.syncRemote(filterOf(PimDomain.CONTACTS));
                     OfflineEngine.Report report = new OfflineEngine.Report();
                     Exception failure = runner.syncLocal(report);
                     outcome.absorb(report);
@@ -1913,8 +1914,8 @@ public class MainActivity extends Activity {
     /**
      * Syncs every domain in turn, contacts then mail then calendars, the
      * dialog naming each as it goes: the drawer's sync, which takes every
-     * account and collection whatever the filter hides, where a list's
-     * pull takes its own domain within the filter.
+     * collection of every account that is on whatever the filters hide,
+     * where a list's pull takes its own domain within its filter.
      */
     void syncAll() {
         // NOTE: only the phone passes need the contacts permission;
@@ -1936,8 +1937,8 @@ public class MainActivity extends Activity {
                         outcome.failure = failure;
                     }
 
-                    MailPass sent = mailPass(null);
-                    Exception calendars = calendarPass(null);
+                    MailPass sent = mailPass(SyncScope.all(this));
+                    Exception calendars = calendarPass(SyncScope.all(this));
                     Exception other = sent.failure != null ? sent.failure : calendars;
                     postAlive(
                             () -> {
@@ -2149,72 +2150,105 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Starts a new contact, asking for the target addressbook whenever
-     * more than one real one is subscribed. With no account the contact
-     * is created unattached (the hidden local book); the local book is
-     * never offered as an explicit target.
+     * Starts a new contact in the default address book of the account in
+     * view, asking only when there is none ({@link DefaultCollection}). With
+     * no account the contact is created unattached (the hidden local book);
+     * the local book is never offered as an explicit target.
      */
     private void addContact() {
-        List<BookEntry> books = new ArrayList<>();
+        Map<String, BookEntry> byUrl = new HashMap<>();
         BookEntry local = null;
         for (BookEntry entry : base.loadSubscribedAddressbooks()) {
             if (LocalBook.is(entry.accountEmail)) {
                 local = entry;
             } else {
-                books.add(entry);
+                byUrl.put(entry.book.url, entry);
             }
         }
 
         // With no real account the contact is born unattached, in the
         // hidden local book.
-        if (books.isEmpty()) {
+        if (byUrl.isEmpty()) {
             if (local != null) {
                 openNewContact(local.book, local.accountEmail);
             }
             return;
         }
-        if (books.size() == 1) {
-            openNewContact(books.get(0).book, books.get(0).accountEmail);
-            return;
-        }
 
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.save_target_title)
-                .setItems(
-                        bookLabels(books),
-                        (dialog, which) ->
-                                openNewContact(
-                                        books.get(which).book,
-                                        books.get(which).accountEmail))
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        List<PimdirCollections.Stored> books = new ArrayList<>();
+        for (PimdirCollections.Stored book : collectionsOf(PimDomain.CONTACTS)) {
+            if (byUrl.containsKey(book.id)) {
+                books.add(book);
+            }
+        }
+        target(
+                PimDomain.CONTACTS,
+                PimdirSummary.CONTACT,
+                R.string.save_target_title,
+                R.string.contacts_no_book,
+                books,
+                book -> openNewContact(byUrl.get(book.id).book, book.accountEmail));
     }
 
     /**
-     * Starts a new calendar entry, asking which calendar it lands in
-     * when there is more than one and taking it silently when there is
-     * one, exactly as a new contact picks its addressbook.
+     * Starts a new calendar entry in the default calendar of the account
+     * in view, asking only when there is none, exactly as a new contact
+     * picks its address book. A read-only calendar is never offered.
      */
     private void composeEvent() {
-        List<EventStore.StoredCalendar> calendars = events.loadCalendars();
-        if (calendars.isEmpty()) {
-            toast(getString(R.string.event_no_calendar));
+        Map<String, EventStore.StoredCalendar> byId = new HashMap<>();
+        for (EventStore.StoredCalendar calendar : events.loadCalendars()) {
+            byId.put(calendar.id, calendar);
+        }
+        target(
+                PimDomain.CALENDAR,
+                PimdirSummary.CALENDAR,
+                R.string.event_target_title,
+                R.string.event_no_calendar,
+                collectionsOf(PimDomain.CALENDAR),
+                calendar -> eventView.compose(byId.get(calendar.id)));
+    }
+
+    /**
+     * Opens a new item of a domain in its target collection: the default
+     * when one is plain, else the one the user picks among the writable
+     * ones, the default preselected.
+     */
+    private void target(
+            PimDomain domain,
+            String kind,
+            int title,
+            int none,
+            List<PimdirCollections.Stored> collections,
+            java.util.function.Consumer<PimdirCollections.Stored> open) {
+        DefaultCollection.Choice choice =
+                DefaultCollection.choice(this, kind, collections, filterOf(domain)::accepts);
+        if (choice.direct != null) {
+            open.accept(choice.direct);
             return;
         }
-        if (calendars.size() == 1) {
-            eventView.compose(calendars.get(0));
+        if (choice.offered.isEmpty()) {
+            toast(getString(none));
             return;
         }
 
-        CharSequence[] labels = new CharSequence[calendars.size()];
-        for (int index = 0; index < calendars.size(); index++) {
-            labels[index] =
-                    calendars.get(index).name + "\n" + calendars.get(index).accountEmail;
+        CharSequence[] labels = new CharSequence[choice.offered.size()];
+        for (int index = 0; index < labels.length; index++) {
+            PimdirCollections.Stored collection = choice.offered.get(index);
+            labels[index] = bookLabel(collection.name, collection.accountEmail);
         }
-
+        int[] picked = {choice.preselected};
         new AlertDialog.Builder(this)
-                .setTitle(R.string.save_target_title)
-                .setItems(labels, (dialog, which) -> eventView.compose(calendars.get(which)))
+                .setTitle(title)
+                .setSingleChoiceItems(
+                        labels, choice.preselected, (dialog, which) -> picked[0] = which)
+                .setPositiveButton(
+                        android.R.string.ok,
+                        (dialog, which) -> {
+                            if (picked[0] >= 0) {
+                                open.accept(choice.offered.get(picked[0]));
+                            }
+                        })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
@@ -2591,7 +2625,7 @@ public class MainActivity extends Activity {
 
         showDomainTitle(panel);
         findViewById(R.id.bar_menu).setVisibility(View.VISIBLE);
-        showFilterButton();
+        showFilterButton(panel);
     }
 
     /** Retitles the bar, for a page whose own edits change its title. */
@@ -2739,12 +2773,13 @@ public class MainActivity extends Activity {
     }
 
     /** The filter, on every list screen, accented while it bites. */
-    private void showFilterButton() {
+    private void showFilterButton(int panel) {
+        PimDomain domain = domainOf(panel);
         android.widget.ImageButton button = findViewById(R.id.bar_filter);
         button.setVisibility(View.VISIBLE);
         button.setImageTintList(
                 android.content.res.ColorStateList.valueOf(
-                        filter.isActive()
+                        domain != null && filterOf(domain).isActive()
                                 ? ui.resolveColor(android.R.attr.colorAccent)
                                 : ui.resolveColor(android.R.attr.textColorPrimary)));
     }
@@ -2775,52 +2810,125 @@ public class MainActivity extends Activity {
                         });
     }
 
-    /** Opens the two-axis filter over the subscribed books and accounts. */
+    /** Opens the filter page of the domain on screen. */
     private void openFilter() {
-        // NOTE: the accounts covering the domain on screen, and never the
-        // on-device one: its single book is on the collection axis already,
-        // and it holds no mail or calendar a box could hide.
-        PimDomain domain =
-                screen == PANEL_CALENDAR
-                        ? PimDomain.CALENDAR
-                        : screen == PANEL_MAIL ? PimDomain.MAIL : PimDomain.CONTACTS;
-        MergedFilter.Axis byAccount = filter.accountAxis(getString(R.string.filter_accounts));
+        filterPage.open(domainOf(screen) == null ? PimDomain.CONTACTS : domainOf(screen));
+    }
+
+    /** One domain's filter, as it was last left. */
+    MergedFilter filterOf(PimDomain domain) {
+        return filters.computeIfAbsent(domain, key -> MergedFilter.of(this, key));
+    }
+
+    /** A filter changed: the lists and the bar's filter icon follow. */
+    void filterChanged() {
+        contactsList.reRender();
+        calendarList.reload();
+        mailList.reload();
+    }
+
+    /**
+     * One domain's collections as the store holds them, every account's:
+     * the mailboxes, the calendars, or the subscribed address books (the
+     * on-device one among them).
+     */
+    List<PimdirCollections.Stored> collectionsOf(PimDomain domain) {
+        PimdirCollections collections = new PimdirCollections(pimdir, this);
+        switch (domain) {
+            case MAIL:
+                return collections.list(PimdirSummary.MAIL);
+            case CALENDAR:
+                return collections.list(PimdirSummary.CALENDAR);
+            default:
+                java.util.Set<String> subscribed = new java.util.HashSet<>();
+                for (BookEntry book : base.loadSubscribedAddressbooks()) {
+                    subscribed.add(book.book.url);
+                }
+                List<PimdirCollections.Stored> books = new ArrayList<>();
+                for (PimdirCollections.Stored book : collections.list(PimdirSummary.CONTACT)) {
+                    if (subscribed.contains(book.id)) {
+                        books.add(book);
+                    }
+                }
+                return books;
+        }
+    }
+
+    /**
+     * What the filter page lists for a domain: every account that is on and
+     * covers it, each with its collections, the outbox among a mail
+     * account's and the on-device book as an account of its own. An account
+     * holding none is left out, having nothing to tick.
+     */
+    List<FilterPage.Account> filterRoster(PimDomain domain) {
+        List<String> emails = new ArrayList<>();
         for (AccountEntry account : accounts) {
-            if (account.covers(domain) && !LocalBook.is(account.email)) {
-                byAccount.add(account.email, account.email);
+            if (account.covers(domain) && AccountActivation.enabled(this, account.email)) {
+                emails.add(account.email);
             }
         }
+        List<PimdirCollections.Stored> collections =
+                domain == PimDomain.MAIL
+                        ? mail.loadMailboxes(emails)
+                        : collectionsOf(domain);
 
-        // The collection axis follows the domain on screen: addressbooks
-        // and calendars share the axis but never the same list, since a
-        // mixed roster of both would say nothing about either.
-        MergedFilter.Axis byCollection =
-                filter.collectionAxis(getString(R.string.filter_collections));
-        if (screen == PANEL_CALENDAR) {
-            for (EventStore.StoredCalendar calendar : events.loadCalendars()) {
-                byCollection.add(calendar.id, calendar.name);
-            }
-        } else if (screen == PANEL_MAIL) {
-            for (String mailbox : mail.loadMailboxes()) {
-                byCollection.add(mailbox, mailbox);
-            }
-        } else {
-            for (BookEntry book : base.loadAllAddressbooks()) {
-                if (book.subscribed) {
-                    byCollection.add(book.book.id, book.book.name);
+        List<FilterPage.Account> roster = new ArrayList<>();
+        for (String email : emails) {
+            List<PimdirCollections.Stored> own = new ArrayList<>();
+            for (PimdirCollections.Stored collection : collections) {
+                if (collection.accountEmail.equals(email)) {
+                    own.add(collection);
                 }
             }
+            if (!own.isEmpty()) {
+                String label = LocalBook.is(email) ? getString(R.string.local_book) : email;
+                roster.add(new FilterPage.Account(email, label, own));
+            }
         }
+        return roster;
+    }
 
-        filter.show(
-                this,
-                java.util.Arrays.asList(byAccount, byCollection),
-                () -> {
-                    showFilterButton();
-                    contactsList.reRender();
-                    calendarList.reload();
-                    mailList.reload();
-                });
+    /**
+     * Drops what the filters, the defaults and the account switch held of an
+     * account being deleted, before its collections go.
+     */
+    void forgetViews(String email) {
+        for (PimDomain domain : PimDomain.values()) {
+            List<PimdirCollections.Stored> collections =
+                    domain == PimDomain.MAIL
+                            ? mail.loadMailboxes(List.of(email))
+                            : collectionsOf(domain);
+            List<String> ids = new ArrayList<>();
+            for (PimdirCollections.Stored collection : collections) {
+                if (collection.accountEmail.equals(email)) {
+                    ids.add(collection.id);
+                }
+            }
+            filterOf(domain).forget(email, ids);
+        }
+        DefaultCollection.forget(this, email);
+        AccountActivation.set(this, email, true);
+    }
+
+    /**
+     * The default collection of every account a domain's filter shows: what
+     * the Default chip narrows a list to ({@link DefaultCollection}).
+     */
+    java.util.Set<String> shownDefaults(PimDomain domain) {
+        String kind = domain == PimDomain.CALENDAR ? PimdirSummary.CALENDAR : PimdirSummary.CONTACT;
+        List<PimdirCollections.Stored> collections = collectionsOf(domain);
+        java.util.Set<String> emails = new java.util.LinkedHashSet<>();
+        for (PimdirCollections.Stored collection : collections) {
+            emails.add(collection.accountEmail);
+        }
+        java.util.Set<String> defaults = new java.util.HashSet<>();
+        for (String email : emails) {
+            PimdirCollections.Stored found = DefaultCollection.of(this, email, kind, collections);
+            if (found != null) {
+                defaults.add(found.id);
+            }
+        }
+        return defaults;
     }
 
     /** Navigates forward: the panels slide in from the right. */
@@ -2903,7 +3011,14 @@ public class MainActivity extends Activity {
 
     /** The whole-frame overlay view behind an overlay panel id. */
     private View overlayOf(int panel) {
-        return findViewById(panel == PANEL_ACCOUNT ? R.id.overlay_account : R.id.overlay_auth);
+        switch (panel) {
+            case PANEL_ACCOUNT:
+                return findViewById(R.id.overlay_account);
+            case PANEL_FILTER:
+                return findViewById(R.id.overlay_filter);
+            default:
+                return findViewById(R.id.overlay_auth);
+        }
     }
 
     /**
@@ -3155,6 +3270,11 @@ public class MainActivity extends Activity {
         account.chrome = () -> findViewById(R.id.fab).setVisibility(View.GONE);
         account.fab = accountSettings::save;
         screens.put(PANEL_ACCOUNT, account);
+
+        Screen filterScreen = new Screen();
+        filterScreen.ownBar = true;
+        filterScreen.chrome = () -> findViewById(R.id.fab).setVisibility(View.GONE);
+        screens.put(PANEL_FILTER, filterScreen);
     }
 
     /**
@@ -3355,7 +3475,13 @@ public class MainActivity extends Activity {
         // by the inset it takes, keeping its content the full bar height
         // under the status bar.
         for (int bar :
-                new int[] {R.id.app_bar, R.id.drawer_header, R.id.auth_bar, R.id.account_bar}) {
+                new int[] {
+                    R.id.app_bar,
+                    R.id.drawer_header,
+                    R.id.auth_bar,
+                    R.id.account_bar,
+                    R.id.filter_bar,
+                }) {
             padTop(bar, bars.top);
             findViewById(bar).setMinimumHeight(dimen(R.dimen.app_bar_height) + bars.top);
         }
@@ -3379,6 +3505,7 @@ public class MainActivity extends Activity {
         padBottom(R.id.config_container, 88, bottom);
         padBottom(R.id.books_container, 88, bottom);
         padBottom(R.id.advanced_container, 24, bottom);
+        padBottom(R.id.filter_content, 24, bottom);
         padBottom(R.id.source_input, 16, bottom);
         padBottom(R.id.email_row, 16, bottom);
         padBottom(R.id.message_view_replies, 12, bottom);

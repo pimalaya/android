@@ -9,7 +9,7 @@ use io_gpeople::{
     v1::{
         rest::{
             contact_groups::{
-                GpeopleContactGroupType,
+                GpeopleContactGroup, GpeopleContactGroupType,
                 list::{GpeopleContactGroupsList, GpeopleContactGroupsListParams},
                 members::modify::GpeopleContactGroupMembersModify,
             },
@@ -36,7 +36,7 @@ use io_http::rfc6750::bearer::HttpAuthBearer;
 
 use crate::{
     client::{Client, convert::coroutine_error},
-    types::{Addressbook, BridgeError, Card, CardDelta},
+    types::{Addressbook, BridgeError, Card, CardDelta, default_role},
 };
 
 /// The person fields an update with no base replaces: every field the
@@ -91,45 +91,11 @@ impl<'a, 'local> Client<'a, 'local> {
                 .map_err(|err| err.to_string())?;
             let page = self.run_google(coroutine)?;
 
-            for group in page.contact_groups {
-                if group.metadata.as_ref().and_then(|m| m.deleted) == Some(true) {
-                    continue;
-                }
-
-                let id = group
-                    .resource_name
-                    .strip_prefix("contactGroups/")
-                    .unwrap_or(&group.resource_name)
-                    .to_string();
-                if id.is_empty() {
-                    continue;
-                }
-
-                // NOTE: of the system groups, only myContacts is a
-                // container; the others are not addressbooks.
-                if id == "myContacts" {
-                    books.insert(
-                        0,
-                        Addressbook {
-                            id,
-                            name: "Contacts".to_string(),
-                            url: String::new(),
-                            description: None,
-                            color: None,
-                        },
-                    );
-                } else if group.group_type == Some(GpeopleContactGroupType::UserContactGroup) {
-                    let name = group
-                        .name
-                        .or(group.formatted_name)
-                        .unwrap_or_else(|| id.clone());
-                    books.push(Addressbook {
-                        id,
-                        name,
-                        url: String::new(),
-                        description: None,
-                        color: None,
-                    });
+            for book in page.contact_groups.into_iter().filter_map(google_book) {
+                if book.role.is_empty() {
+                    books.push(book);
+                } else {
+                    books.insert(0, book);
                 }
             }
 
@@ -734,6 +700,49 @@ fn google_card(person: GpeoplePerson) -> Card {
         vcard,
         books,
     }
+}
+
+/// io-gpeople contact group to the JNI-facing book shape, [`None`] for a
+/// deleted group and a system group other than myContacts, which are not
+/// addressbooks. myContacts, the group every contact belongs to and the
+/// one a create lands in, is the account's default book.
+fn google_book(group: GpeopleContactGroup) -> Option<Addressbook> {
+    if group.metadata.as_ref().and_then(|m| m.deleted) == Some(true) {
+        return None;
+    }
+
+    let id = group
+        .resource_name
+        .strip_prefix("contactGroups/")
+        .unwrap_or(&group.resource_name)
+        .to_string();
+    if id.is_empty() {
+        return None;
+    }
+
+    let default = id == "myContacts";
+    if !default && group.group_type != Some(GpeopleContactGroupType::UserContactGroup) {
+        return None;
+    }
+
+    let name = if default {
+        "Contacts".to_string()
+    } else {
+        group
+            .name
+            .or(group.formatted_name)
+            .unwrap_or_else(|| id.clone())
+    };
+
+    Some(Addressbook {
+        id,
+        name,
+        url: String::new(),
+        description: None,
+        color: None,
+        role: default_role(default),
+        writable: true,
+    })
 }
 
 #[cfg(test)]

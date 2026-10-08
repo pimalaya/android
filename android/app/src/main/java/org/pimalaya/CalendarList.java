@@ -19,6 +19,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The calendar screen: one agenda merging every calendar of
@@ -58,6 +59,9 @@ final class CalendarList {
 
     /** How many weeks from this one the week card shows, negative before it. */
     private int weekOffset;
+
+    /** Whether the Default chip narrows the agenda to the shown accounts' default calendars. */
+    private boolean defaultOnly;
 
     CalendarList(MainActivity host, EventStore store) {
         this.host = host;
@@ -100,6 +104,15 @@ final class CalendarList {
                 .setOnClickListener(view -> moveWeek(weekOffset + 1));
         // The week's number brings the card back to this week.
         header.view.findViewById(R.id.header_week_number).setOnClickListener(view -> moveWeek(0));
+        Chips.add(
+                host,
+                header.chips(),
+                R.string.chip_default,
+                R.drawable.ic_star,
+                on -> {
+                    defaultOnly = on;
+                    reload();
+                });
         list.setAdapter(adapter);
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
@@ -135,13 +148,16 @@ final class CalendarList {
             byCollection.put(calendar.id, calendar);
         }
 
+        MergedFilter filter = host.filterOf(PimDomain.CALENDAR);
+        Set<String> defaults = defaultOnly ? host.shownDefaults(PimDomain.CALENDAR) : null;
         rows.clear();
         for (EventStore.StoredEvent event : store.loadEvents()) {
             EventStore.StoredCalendar calendar = byCollection.get(event.collectionId);
             if (calendar == null) {
                 continue;
             }
-            if (!host.filter.accepts(calendar.accountEmail, calendar.id)) {
+            if (!filter.accepts(calendar.accountEmail, calendar.id)
+                    || defaults != null && !defaults.contains(calendar.id)) {
                 continue;
             }
             try {

@@ -752,7 +752,7 @@ final class MailStore {
 
     /**
      * The query a list asks for: the mail collections {@code accepts} lets
-     * through by account and mailbox name, the chips, and the words
+     * through by account and collection id, the chips, and the words
      * searched for (empty for none).
      */
     Query query(
@@ -762,7 +762,7 @@ final class MailStore {
             String words) {
         List<String> ids = new ArrayList<>();
         for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
-            if (accepts.test(stored.accountEmail, stored.name)) {
+            if (accepts.test(stored.accountEmail, stored.id)) {
                 ids.add(stored.id);
             }
         }
@@ -773,7 +773,7 @@ final class MailStore {
         for (PimdirQueue.Action action : submissions()) {
             String from = action.payload.optString("from");
             String sent = sentOf(from);
-            if (sent != null && ids.contains(sent) && accepts.test(from, outboxName())) {
+            if (sent != null && ids.contains(sent) && accepts.test(from, outboxOf(from))) {
                 hidden.add(new String[] {sent, action.payload.optString("messageId")});
             }
         }
@@ -1463,17 +1463,18 @@ final class MailStore {
     }
 
     /**
-     * The distinct mailbox names seen, for the filter's collection axis,
-     * the outbox first.
+     * Every account's mailboxes as the store holds them, each with its role,
+     * for the filter page, the outbox of each mail account in {@code emails}
+     * among them under its own collection.
      */
-    List<String> loadMailboxes() {
-        List<String> mailboxes = new ArrayList<>();
-        mailboxes.add(outboxName());
-        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
-            if (!mailboxes.contains(stored.name)) {
-                mailboxes.add(stored.name);
-            }
+    List<PimdirCollections.Stored> loadMailboxes(List<String> emails) {
+        List<PimdirCollections.Stored> mailboxes = new ArrayList<>();
+        for (String email : emails) {
+            mailboxes.add(
+                    new PimdirCollections.Stored(
+                            outboxOf(email), email, outboxName(), null, null));
         }
+        mailboxes.addAll(collections.list(PimdirSummary.MAIL));
         return mailboxes;
     }
 

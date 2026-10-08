@@ -264,6 +264,10 @@ fn into_addressbook(home_set: &Url, book: DavAddressbook) -> Addressbook {
         url: url.to_string(),
         description: book.description,
         color: book.color,
+        // NOTE: CardDAV states no default; io-webdav reads no RFC 3744
+        // privileges, so writable.
+        role: String::new(),
+        writable: true,
     }
 }
 

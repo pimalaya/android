@@ -45,7 +45,7 @@ use crate::{
         Client,
         convert::{coroutine_error, rejected, required},
     },
-    types::{Addressbook, BridgeError, Card, CardDelta, PushChange, PushOutcome},
+    types::{Addressbook, BridgeError, Card, CardDelta, PushChange, PushOutcome, default_role},
 };
 
 /// How many inner requests one Graph $batch call carries (the
@@ -66,13 +66,7 @@ impl<'a, 'local> Client<'a, 'local> {
     ) -> Result<Vec<Addressbook>, BridgeError> {
         let auth = HttpAuthBearer::new(token);
 
-        let mut books = vec![Addressbook {
-            id: String::new(),
-            name: "Contacts".to_string(),
-            url: String::new(),
-            description: None,
-            color: None,
-        }];
+        let mut books = vec![graph_default_book()];
 
         let coroutine = MsgraphContactFoldersList::new(&auth, "me", &Default::default())
             .map_err(|err| err.to_string())?;
@@ -90,6 +84,8 @@ impl<'a, 'local> Client<'a, 'local> {
                     url: String::new(),
                     description: None,
                     color: None,
+                    role: String::new(),
+                    writable: true,
                 });
             }
 
@@ -497,6 +493,21 @@ fn graph_card(contact: MsgraphContact) -> Card {
         etag: contact.change_key,
         vcard,
         books: Vec::new(),
+    }
+}
+
+/// The default Contacts folder, which Graph serves outside the folder
+/// list (an empty folder id addresses it) and which is where a contact
+/// lands when no folder is named: the account's default book.
+fn graph_default_book() -> Addressbook {
+    Addressbook {
+        id: String::new(),
+        name: "Contacts".to_string(),
+        url: String::new(),
+        description: None,
+        color: None,
+        role: default_role(true),
+        writable: true,
     }
 }
 

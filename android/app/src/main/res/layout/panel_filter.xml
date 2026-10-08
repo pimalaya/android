@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- One domain's filter, a whole-frame overlay over its list, its own bar
+     included: the closing cross lands back on the list, Reset shows
+     everything again. The content is built by FilterPage: each account
+     with a three-state checkbox, its collections indented below with
+     theirs. Every tick applies at once and is kept. Invisible rather than
+     gone, as panel_account is, so the entrance zoom pivots on its centre
+     from the first show. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/overlay_filter"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?android:attr/colorBackground"
+    android:clickable="true"
+    android:visibility="invisible">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/filter_bar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/surface"
+            android:gravity="center_vertical"
+            android:minHeight="@dimen/app_bar_height"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/app_bar_padding"
+            android:paddingEnd="@dimen/app_bar_padding">
+
+            <ImageButton
+                android:id="@+id/filter_back"
+                android:layout_width="@dimen/app_bar_button"
+                android:layout_height="@dimen/app_bar_button"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/filter_close"
+                android:src="@drawable/ic_close"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <TextView
+                android:id="@+id/filter_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:paddingStart="@dimen/app_bar_title_padding"
+                android:paddingEnd="@dimen/app_bar_title_padding"
+                android:singleLine="true"
+                android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
+                android:textColor="?android:attr/textColorPrimary" />
+
+            <Button
+                android:id="@+id/filter_reset"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/filter_reset"
+                android:textAllCaps="false"
+                android:textColor="?android:attr/colorAccent" />
+
+        </LinearLayout>
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:id="@+id/filter_content"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="24dp" />
+
+        </ScrollView>
+
+    </LinearLayout>
+
+</FrameLayout>

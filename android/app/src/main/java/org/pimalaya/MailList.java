@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 
 /**
@@ -61,6 +62,45 @@ final class MailList {
     /** How long a burst of sync writes is let settle before the list redraws. */
     private static final long SETTLE_MILLIS = 400;
 
+    /**
+     * The roles the chips give direct access to, pimdir's mail roles (STORAGE
+     * section 14), each every shown account's mailbox of that role.
+     */
+    private static final String[] ROLES = {"inbox", "sent", "drafts", "trash", "junk", "archive"};
+
+    private static final int[] ROLE_LABELS = {
+        R.string.mail_chip_inbox,
+        R.string.mail_chip_sent,
+        R.string.mail_chip_drafts,
+        R.string.mail_chip_trash,
+        R.string.mail_chip_junk,
+        R.string.mail_chip_archive,
+    };
+
+    private static final int[] ROLE_ICONS = {
+        R.drawable.ic_domain_mail,
+        R.drawable.ic_send,
+        R.drawable.ic_edit_note,
+        R.drawable.ic_delete_bar,
+        R.drawable.ic_cancel,
+        R.drawable.ic_folder_open,
+    };
+
+    /**
+     * What a list shows under a role chip: the collections {@code accepts}
+     * lets through, narrowed to those holding {@code role} ({@code roles} by
+     * collection id), all of them with no chip on. The outbox holds no role,
+     * so a chip leaves it out.
+     */
+    static BiPredicate<String, String> narrowed(
+            BiPredicate<String, String> accepts, String role, Map<String, String> roles) {
+        if (role == null) {
+            return accepts;
+        }
+        return (account, collection) ->
+                accepts.test(account, collection) && role.equals(roles.get(collection));
+    }
+
     private final MainActivity host;
     private final MailStore store;
     private final Adapter adapter = new Adapter();
@@ -93,6 +133,10 @@ final class MailList {
     private ListHeader header;
 
     private String query = "";
+
+    /** The role chip on, pimdir's mail role it narrows to, null for none. */
+    private String role;
+
     private boolean unreadOnly;
     private boolean attachmentsOnly;
 
@@ -126,6 +170,15 @@ final class MailList {
                     reload();
                 });
         LinearLayout chips = header.chips();
+        Chips.exclusive(
+                host,
+                chips,
+                ROLE_LABELS,
+                ROLE_ICONS,
+                picked -> {
+                    role = picked < 0 ? null : ROLES[picked];
+                    reload();
+                });
         Chips.add(
                 host,
                 chips,
@@ -208,7 +261,8 @@ final class MailList {
         int asked = ++generation;
         ListView list = host.findViewById(R.id.mail_list);
         int around = Math.max(0, header.rowAt(list.getFirstVisiblePosition()));
-        MergedFilter filter = host.filter;
+        MergedFilter filter = host.filterOf(PimDomain.MAIL);
+        String narrowing = role;
         String words = query;
         boolean unread = unreadOnly;
         boolean attachments = attachmentsOnly;
@@ -217,8 +271,12 @@ final class MailList {
 
         reads.execute(
                 () -> {
-                    MailStore.Query wanted =
-                            store.query(filter::accepts, unread, attachments, words);
+                    BiPredicate<String, String> shown =
+                            narrowed(
+                                    filter::accepts,
+                                    narrowing,
+                                    narrowing == null ? Map.of() : store.roles());
+                    MailStore.Query wanted = store.query(shown, unread, attachments, words);
                     MailStore.Query everything = store.query(filter::accepts, false, false, "");
                     // NOTE: a search covers every stored message; the list
                     // reaches down to the floor its mailboxes share alone.
@@ -227,7 +285,7 @@ final class MailList {
 
                     List<MailStore.StoredMessage> outbox = new ArrayList<>();
                     for (MailStore.StoredMessage message : store.outgoing()) {
-                        if (filter.accepts(message.accountEmail, message.mailbox)
+                        if (shown.test(message.accountEmail, message.collection)
                                 && !unread
                                 && !attachments
                                 && matches(message, words)) {

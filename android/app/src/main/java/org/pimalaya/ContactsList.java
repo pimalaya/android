@@ -44,6 +44,9 @@ final class ContactsList {
     /** Lower-cased raw-vCard filter; empty shows all. */
     private String searchQuery = "";
 
+    /** Whether the Default chip narrows the list to the shown accounts' default books. */
+    private boolean defaultOnly;
+
     ContactsList(MainActivity host) {
         this.host = host;
     }
@@ -79,6 +82,15 @@ final class ContactsList {
                 R.string.contacts_search,
                 query -> {
                     searchQuery = query;
+                    render();
+                });
+        Chips.add(
+                host,
+                header.chips(),
+                R.string.chip_default,
+                R.drawable.ic_star,
+                on -> {
+                    defaultOnly = on;
                     render();
                 });
         list.setAdapter(adapter);
@@ -167,6 +179,8 @@ final class ContactsList {
         updateSelectionUi();
 
         sortedContacts = new ArrayList<>();
+        MergedFilter filter = host.filterOf(PimDomain.CONTACTS);
+        Set<String> defaults = defaultOnly ? host.shownDefaults(PimDomain.CONTACTS) : null;
         for (Group group : groupedContacts) {
             // A merged row survives when any replica of it passes both
             // the filter axes and the query: hiding an account thins a
@@ -174,7 +188,8 @@ final class ContactsList {
             // held all of them.
             boolean matches = false;
             for (Entry entry : group.replicas) {
-                if (!host.filter.accepts(entry.accountEmail, entry.book.id)) {
+                if (!filter.accepts(entry.accountEmail, entry.book.url)
+                        || defaults != null && !defaults.contains(entry.book.url)) {
                     continue;
                 }
                 if (searchQuery.isEmpty()

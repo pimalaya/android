@@ -26,7 +26,11 @@ use io_gcal::{
     coroutine::*,
     v3::{
         rest::{
-            calendar_list::list::{GcalCalendarListList, GcalCalendarListListParams},
+            acl::GcalAccessRole,
+            calendar_list::{
+                GcalCalendarListEntry,
+                list::{GcalCalendarListList, GcalCalendarListListParams},
+            },
             events::{
                 GcalEvent, GcalEventStatus, GcalEvents,
                 delete::GcalEventDelete,
@@ -44,7 +48,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     client::{Client, convert::coroutine_error},
-    types::{BridgeError, Calendar, Event, EventDelta, EventRef},
+    types::{BridgeError, Calendar, Event, EventDelta, EventRef, default_role},
 };
 
 /// The page size asked for when listing events, the API's ceiling.
@@ -67,21 +71,7 @@ impl<'a, 'local> Client<'a, 'local> {
                 GcalCalendarListList::new(&auth, &params).map_err(|err| err.to_string())?;
             let page = self.run_gcal(coroutine)?;
 
-            for entry in page.items {
-                let Some(id) = entry.id.filter(|id| !id.is_empty()) else {
-                    continue;
-                };
-                calendars.push(Calendar {
-                    name: entry
-                        .summary_override
-                        .or(entry.summary)
-                        .unwrap_or_else(|| id.clone()),
-                    id,
-                    url: String::new(),
-                    description: entry.description,
-                    color: entry.background_color.filter(|color| !color.is_empty()),
-                });
-            }
+            calendars.extend(page.items.into_iter().filter_map(gcal_calendar));
 
             match page.next_page_token {
                 Some(next) => page_token = Some(next),
@@ -606,9 +596,66 @@ fn calendar_path(id: &str) -> String {
     encoded
 }
 
+/// io-gcal calendar list entry to the JNI-facing shape, [`None`] for one
+/// with no id. The primary calendar is the account's default; one the
+/// user only reads (`reader`, `freeBusyReader`) is not writable.
+fn gcal_calendar(entry: GcalCalendarListEntry) -> Option<Calendar> {
+    let id = entry.id.filter(|id| !id.is_empty())?;
+    let writable = !matches!(
+        entry.access_role,
+        Some(GcalAccessRole::None | GcalAccessRole::FreeBusyReader | GcalAccessRole::Reader)
+    );
+
+    Some(Calendar {
+        name: entry
+            .summary_override
+            .or(entry.summary)
+            .unwrap_or_else(|| id.clone()),
+        id,
+        url: String::new(),
+        description: entry.description,
+        color: entry.background_color.filter(|color| !color.is_empty()),
+        role: default_role(entry.primary == Some(true)),
+        writable,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use serde_json::{Value, from_value, json};
+
     use super::*;
+
+    fn listed(entry: Value) -> Option<Calendar> {
+        gcal_calendar(from_value(entry).unwrap())
+    }
+
+    /// The primary calendar is the default; a subscribed one is not, and
+    /// one the user only reads takes no event.
+    #[test]
+    fn the_primary_calendar_is_the_default() {
+        let primary = listed(json!({
+            "id": "jane@example.com", "summary": "Jane",
+            "primary": true, "accessRole": "owner",
+        }))
+        .unwrap();
+        let holidays = listed(json!({
+            "id": "en.usa#holiday@group.v.calendar.google.com",
+            "summary": "Holidays", "accessRole": "reader",
+        }))
+        .unwrap();
+        let shared = listed(json!({
+            "id": "team@example.com", "summary": "Team", "accessRole": "writer",
+        }))
+        .unwrap();
+
+        assert_eq!(primary.role, "default");
+        assert!(primary.writable);
+        assert_eq!(holidays.role, "");
+        assert!(!holidays.writable);
+        assert_eq!(shared.role, "");
+        assert!(shared.writable);
+    }
 
     fn event(id: &str, etag: &str, master: Option<&str>) -> GcalEvent {
         GcalEvent {

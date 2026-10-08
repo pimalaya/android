@@ -101,11 +101,27 @@ pub struct Addressbook {
     pub description: Option<String>,
     /// Display colour (`#RRGGBB`), when the server exposes one.
     pub color: Option<String>,
+    /// What the source says the book is for, in pimdir's role
+    /// vocabulary: [`DEFAULT_ROLE`] for the one it writes to when none is
+    /// named, empty where it says nothing.
+    pub role: String,
+    /// Whether the user may write into it, true where the source says
+    /// nothing.
+    pub writable: bool,
+}
+
+/// pimdir's role (STORAGE §14) for the calendar or the address book a
+/// source writes to when none is named.
+pub const DEFAULT_ROLE: &str = "default";
+
+/// The role of a collection the source does or does not call its default.
+pub fn default_role(default: bool) -> String {
+    if default { DEFAULT_ROLE } else { "" }.into()
 }
 
 /// One CalDAV calendar surfaced to the Java client.
 ///
-/// The same five fields as [`Addressbook`], and kept a separate type
+/// The same fields as [`Addressbook`], and kept a separate type
 /// rather than shared: the two are the same shape today by coincidence
 /// of both being WebDAV collections, and a calendar grows a default
 /// time zone and a component set that an addressbook never will.
@@ -121,6 +137,12 @@ pub struct Calendar {
     pub description: Option<String>,
     /// Display colour (`#RRGGBB`), when the server exposes one.
     pub color: Option<String>,
+    /// What the source says the calendar is for, as
+    /// [`Addressbook::role`].
+    pub role: String,
+    /// Whether the user may write into it, true where the source says
+    /// nothing.
+    pub writable: bool,
 }
 
 /// One calendar item surfaced to the Java client, raw.
