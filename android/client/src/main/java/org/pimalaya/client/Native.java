@@ -279,6 +279,13 @@ final class Native {
     static native void closeMailSession(long session);
 
     /**
+     * Has a session work for the pool run numbered {@code run}, sharing with
+     * the run's other sessions what it reads of a Gmail account (its listing,
+     * envelopes and history), dropped with the run; 0 leaves the run.
+     */
+    static native void joinMailRun(long session, long run);
+
+    /**
      * Reads one message whole, as the RFC 5322 bytes the server holds.
      * Returns a JSON object of {@code {source}}, the message
      * base64-encoded: a Java string is UTF-8 and a message is not, so

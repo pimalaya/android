@@ -125,6 +125,34 @@ public class MailFillTest {
     }
 
     @Test
+    public void anAccountListedAccountWideWidensEveryUnfinishedMailboxInOneStep() {
+        List<MailStore.Edge> edges =
+                List.of(
+                        new MailStore.Edge(
+                                "jane@gmail.com", "INBOX", "g/INBOX", "inbox", true,
+                                "2026-09-03T00:00:00Z", true),
+                        new MailStore.Edge(
+                                "jane@gmail.com", "SENT", "g/SENT", "sent", true, null, true),
+                        new MailStore.Edge(
+                                "jane@gmail.com", "Seed/Clients", "g/Clients", "", true,
+                                "2026-09-08T00:00:00Z", true),
+                        new MailStore.Edge(
+                                "jane@gmail.com", "IMPORTANT", "g/IMPORTANT", "important", false,
+                                null, true),
+                        edge("INBOX", "inbox", true, "2026-09-05T00:00:00Z"),
+                        edge("Projets", "", true, "2026-09-20T00:00:00Z"));
+
+        List<String> picked = new ArrayList<>();
+        for (MailStore.Edge edge : MailFill.batch(edges, account -> 1)) {
+            picked.add(edge.collection);
+        }
+        assertEquals(
+                "every label but the whole one, past the room; the other account by its room",
+                List.of("INBOX", "g/INBOX", "g/IMPORTANT", "g/Clients"),
+                picked);
+    }
+
+    @Test
     public void aFailedChunkStopsTheFill() {
         Host host = new Host();
         host.edges.add(edge("INBOX", "inbox", true, "2026-09-03T00:00:00Z"));

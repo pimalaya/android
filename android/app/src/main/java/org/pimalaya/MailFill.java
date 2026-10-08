@@ -92,7 +92,9 @@ final class MailFill {
     /**
      * The mailboxes one step of the fill widens side by side: the next ones
      * in the fill's order ({@link #next}), as many of an account as it runs
-     * sessions at once ({@code room}). Empty once every mailbox is whole.
+     * sessions at once ({@code room}), every unfinished one of an account
+     * listed account-wide, whose mailboxes widen one listing together.
+     * Empty once every mailbox is whole.
      */
     static List<MailStore.Edge> batch(
             List<MailStore.Edge> edges, ToIntFunction<String> room) {
@@ -103,7 +105,7 @@ final class MailFill {
         while ((edge = next(left)) != null) {
             left.remove(edge);
             int used = taken.getOrDefault(edge.accountEmail, 0);
-            if (used < room.applyAsInt(edge.accountEmail)) {
+            if (edge.accountWide || used < room.applyAsInt(edge.accountEmail)) {
                 picked.add(edge);
                 taken.put(edge.accountEmail, used + 1);
             }

@@ -29,9 +29,10 @@ pub const IMAP_PAGE: usize = 500;
 /// `/messages` page (`$top`, at most 1,000).
 pub const GRAPH_PAGE: u32 = 1000;
 
-/// Message ids per Gmail `messages.list`, each read for its metadata
-/// under the account's pacing.
-pub const GMAIL_PAGE: u32 = 100;
+/// Message ids per Gmail `messages.list`, the API's ceiling: the
+/// account's listing and a label's alike, their metadata read 50 to a
+/// batch under the account's pacing.
+pub const GMAIL_PAGE: u32 = 500;
 
 /// Emails per JMAP `Email/query`, capped by the server's own
 /// `maxObjectsInGet`.
@@ -235,7 +236,7 @@ impl Floor {
 
 /// A chunk's floor on the JSON wire: `floor` null when the mailbox is
 /// whole below the ceiling, `dated` how many dated messages were taken.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct FloorReply {
     pub floor: Option<String>,
     pub dated: usize,

@@ -20,13 +20,17 @@
 //! pools its socket for the whole pass, which is the same win by the
 //! other route.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use url::Url;
 
 use crate::{
     account::{self, Backend},
-    client::{self, Client, gmail::GmailEnvelope, imap::ImapState},
+    client::{
+        self, Client,
+        gmail_sync::{self, GmailRun},
+        imap::ImapState,
+    },
     ffi::parse_url,
     types::{BridgeError, Credentials, Mailbox},
 };
@@ -38,6 +42,10 @@ pub struct MailSession {
     login: String,
     password: String,
     kind: MailKind,
+    /// What the pool run this session works for read of a Gmail account,
+    /// shared with the run's other sessions; the session's own until it
+    /// joins one ([`Self::join_run`]).
+    gmail: Arc<GmailRun>,
 }
 
 /// The protocol state a session carries, if its backend has any.
@@ -54,13 +62,12 @@ enum MailKind {
 /// worth of answers all the same: the mailbox ids the roster named, which
 /// every later verb addresses a mailbox by.
 ///
-/// Gmail answers a label with ids alone, so its session also keeps every
-/// envelope it read, by message id: a message filed under two labels, or
-/// moved in a delta two mailboxes replay, is read once per pass.
+/// What a Gmail pass reads beyond the roster, the account's listing and
+/// envelopes, is the pool run's rather than one session's
+/// ([`GmailRun`]).
 #[derive(Default)]
 pub struct MailListing {
     pub ids: BTreeMap<String, String>,
-    pub envelopes: BTreeMap<String, GmailEnvelope>,
 }
 
 impl MailListing {
@@ -136,6 +143,7 @@ impl MailSession {
             login: login.into(),
             password: password.into(),
             kind,
+            gmail: Arc::default(),
         })
     }
 
@@ -165,6 +173,19 @@ impl MailSession {
     /// Whether the backend behind this session is the Gmail API.
     pub fn is_gmail(&self) -> bool {
         matches!(self.kind, MailKind::Gmail(_))
+    }
+
+    /// What the run this session works for read of its Gmail account.
+    pub fn gmail_run(&self) -> Arc<GmailRun> {
+        Arc::clone(&self.gmail)
+    }
+
+    /// Joins the pool run numbered `run`, sharing what it reads of a
+    /// Gmail account with the run's other sessions; 0 leaves it for a
+    /// run of the session's own, empty.
+    pub fn join_run(&mut self, run: i64) {
+        let account = format!("{}\u{0}{}", self.base_url, self.login);
+        self.gmail = gmail_sync::join(&account, run);
     }
 
     /// Whether the backend behind this session is IMAP.

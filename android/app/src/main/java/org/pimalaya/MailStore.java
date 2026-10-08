@@ -1,6 +1,7 @@
 package org.pimalaya;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteCursor;
 import android.database.sqlite.SQLiteDatabase;
@@ -71,6 +72,9 @@ final class MailStore {
 
     /** Where each account's trash mailbox is remembered, by address. */
     private static final String TRASH_PREFS = "mail-trash";
+
+    /** Which accounts are listed account-wide, by account id. */
+    private static final String ACCOUNT_WIDE_PREFS = "mail-account-wide";
 
     private final PimdirItems items;
     private final PimdirDb store;
@@ -159,6 +163,29 @@ final class MailStore {
                 .remove(accountEmail)
                 .apply();
         MailScope.forget(context, accounts.idOf(accountEmail));
+        markAccountWide(context, accounts.idOf(accountEmail), false);
+    }
+
+    /**
+     * Remembers whether an account's mailboxes are listed account-wide: one
+     * listing of the whole account, each mailbox a projection of it (Gmail's
+     * labels), so they share one floor and widen together.
+     */
+    static void markAccountWide(Context context, String accountId, boolean accountWide) {
+        SharedPreferences.Editor prefs =
+                context.getSharedPreferences(ACCOUNT_WIDE_PREFS, Context.MODE_PRIVATE).edit();
+        if (accountWide) {
+            prefs.putBoolean(accountId, true);
+        } else {
+            prefs.remove(accountId);
+        }
+        prefs.apply();
+    }
+
+    /** Whether an account's mailboxes are listed account-wide ({@link #markAccountWide}). */
+    static boolean accountWide(Context context, String accountId) {
+        return context.getSharedPreferences(ACCOUNT_WIDE_PREFS, Context.MODE_PRIVATE)
+                .getBoolean(accountId, false);
     }
 
     /**
@@ -1010,6 +1037,9 @@ final class MailStore {
         /** The floor the list stops at for it, null where it limits nothing. */
         final String limit;
 
+        /** Whether its account is listed account-wide ({@link MailStore#markAccountWide}). */
+        final boolean accountWide;
+
         Edge(
                 String accountEmail,
                 String mailbox,
@@ -1017,12 +1047,24 @@ final class MailStore {
                 String role,
                 boolean listed,
                 String limit) {
+            this(accountEmail, mailbox, collection, role, listed, limit, false);
+        }
+
+        Edge(
+                String accountEmail,
+                String mailbox,
+                String collection,
+                String role,
+                boolean listed,
+                String limit,
+                boolean accountWide) {
             this.accountEmail = accountEmail;
             this.mailbox = mailbox;
             this.collection = collection;
             this.role = role;
             this.listed = listed;
             this.limit = limit;
+            this.accountWide = accountWide;
         }
     }
 
@@ -1030,12 +1072,17 @@ final class MailStore {
     List<Edge> edges() {
         Map<String, String> roles = roles();
         Map<String, String> bounds = new HashMap<>();
+        Map<String, Boolean> wide = new HashMap<>();
         List<Edge> edges = new ArrayList<>();
         for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
             String bound =
                     bounds.computeIfAbsent(
                             stored.accountEmail,
                             email -> MailScope.sinceOf(context, accounts.idOf(email)));
+            boolean accountWide =
+                    wide.computeIfAbsent(
+                            stored.accountEmail,
+                            email -> accountWide(context, accounts.idOf(email)));
             Coverage coverage = coverage(stored.id);
             edges.add(
                     new Edge(
@@ -1044,7 +1091,8 @@ final class MailStore {
                             stored.id,
                             roles.get(stored.id),
                             coverage.at != null || coverage.filling,
-                            coverage.limit(bound)));
+                            coverage.limit(bound),
+                            accountWide));
         }
         return edges;
     }

@@ -28,6 +28,7 @@ public final class MailSession implements AutoCloseable {
     private final Account account;
     private Transport transport;
     private long handle;
+    private long run;
 
     MailSession(Account account, Transport transport, long handle) {
         this.account = account;
@@ -51,6 +52,18 @@ public final class MailSession implements AutoCloseable {
     }
 
     /**
+     * Has the session work for the pool run numbered {@code run}, sharing
+     * with the run's other sessions what it reads of a Gmail account; 0
+     * leaves the run. Kept across {@link #reopen}.
+     */
+    public void join(long run) {
+        this.run = run;
+        if (handle != 0) {
+            Native.joinMailRun(handle, run);
+        }
+    }
+
+    /**
      * Drops the connection and opens another, for a caller that has just
      * been refused by a server that had already hung up.
      *
@@ -67,6 +80,9 @@ public final class MailSession implements AutoCloseable {
         // The freshly opened one must not free what this one now owns.
         opened.handle = 0;
         opened.transport = null;
+        if (run != 0) {
+            Native.joinMailRun(handle, run);
+        }
     }
 
     @Override

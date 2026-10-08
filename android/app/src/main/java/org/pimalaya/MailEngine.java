@@ -111,9 +111,15 @@ class MailEngine extends PimdirEngine {
         this.accountId = accountId;
     }
 
-    /** The account's mailboxes and the role each carries, in one round. */
+    /**
+     * The account's mailboxes and the role each carries, in one round; a
+     * Gmail account's are remembered as listed account-wide.
+     */
     List<Mailbox> mailboxes() {
-        return client.listMailboxes(session);
+        List<Mailbox> mailboxes = client.listMailboxes(session);
+        MailStore.markAccountWide(
+                pimdir.context(), accountId, PimalayaClient.isGoogle(session.account()));
+        return mailboxes;
     }
 
     /**
@@ -149,6 +155,12 @@ class MailEngine extends PimdirEngine {
      * <p>The wider scope lists only the band below the old floor, on every
      * backend: no checkpoint is bound to a scope, a Graph delta link being
      * made with no filter, so it reports what changes in the band too.
+     *
+     * <p>An account listed account-wide holds one floor: its mailboxes widen
+     * below the most recent floor among them, sharing one listing. One
+     * already at or below that chunk's floor (an inbox whose first chunk
+     * reached further) widens below its own instead, so a scroll never
+     * stalls.
      */
     boolean widen(String collection, int count) {
         String bound = bound();
@@ -160,10 +172,32 @@ class MailEngine extends PimdirEngine {
         if (!MailScope.limits(coverage.since, bound)) {
             return false;
         }
+        boolean accountWide = MailStore.accountWide(pimdir.context(), accountId);
+        String ceiling = accountWide ? accountFloor(coverage.since) : coverage.since;
         step(Progress.STAGE_SERVER, 0);
-        String floor = timedFloor(collection, coverage.since, count);
+        String floor = timedFloor(collection, ceiling, count);
+        if (accountWide && floor != null && coverage.since.compareTo(floor) <= 0) {
+            floor = timedFloor(collection, coverage.since, count);
+        }
         list(collection, MailScope.clamp(floor, bound));
         return true;
+    }
+
+    /**
+     * The most recent floor among the account's mailboxes, {@code since} at
+     * the least: where the account's one listing widens from.
+     */
+    private String accountFloor(String since) {
+        String prefix = PimdirAccount.collectionId(accountId, "");
+        String latest = since;
+        for (MailStore.Edge edge : mail().edges()) {
+            if (edge.collection.startsWith(prefix)
+                    && edge.limit != null
+                    && edge.limit.compareTo(latest) > 0) {
+                latest = edge.limit;
+            }
+        }
+        return latest;
     }
 
     /**
