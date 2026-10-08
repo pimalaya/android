@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <dimen name="app_bar_height">64dp</dimen>
-    <dimen name="app_bar_padding">4dp</dimen>
+    <!-- The design's bar: 60dp under the status bar, its 40dp buttons
+         (4dp margin each) 12dp in from the screen's edges. -->
+    <dimen name="app_bar_height">60dp</dimen>
+    <dimen name="app_bar_padding">8dp</dimen>
     <dimen name="app_bar_button">48dp</dimen>
     <dimen name="app_bar_icon">24dp</dimen>
     <dimen name="app_bar_title_padding">4dp</dimen>
