@@ -296,24 +296,74 @@ public class PimdirStorageTest {
                         .length());
     }
 
-    @Test
-    public void aRekeyDoesNotDeleteWhatItJustRenamed() throws Exception {
-        storage.applyWrites(batch(storeObject("bb88", "body"), upsert("temp-1", "uid-h", "bb88", "hana")));
-
-        // An accepted create drops the placeholder and upserts the assigned
-        // handle in one batch. Applying those in arrival order would delete the
-        // row the upsert had just renamed, so drops are held to the end and
-        // cancelled by an upsert of the same placement.
+    /** A `Deleted` drop of one handle. */
+    private JSONObject drop(String handle) throws Exception {
         JSONObject drop = new JSONObject();
         drop.put("op", "drop");
         drop.put("collection", "acct/Contacts");
-        drop.put("handle", "temp-1");
-        storage.applyWrites(batch(drop, upsert("temp-1", "uid-h", "bb88", "hana")));
+        drop.put("handle", handle);
+        return drop;
+    }
+
+    @Test
+    public void aDropThenAnUpsertOfOneHandleLeavesItPresent() throws Exception {
+        storage.applyWrites(batch(storeObject("bb88", "body"), upsert("h.vcf", "uid-h", "bb88", "hana")));
+
+        // A batch applies in order (SYNC §10): the upsert after the drop
+        // restores what the drop took.
+        storage.applyWrites(batch(drop("h.vcf"), upsert("h.vcf", "uid-h", "bb88", "hana")));
 
         JSONArray placements =
                 storage.loadCollection("acct/Contacts", null).getJSONArray("placements");
-        assertEquals("the rekeyed placement survived", 1, placements.length());
+        assertEquals("the placement is present", 1, placements.length());
+        assertEquals("h.vcf", placements.getJSONObject(0).getString("handle"));
         assertEquals(0, scalar("SELECT count(*) FROM items WHERE retained_at IS NOT NULL"));
+    }
+
+    @Test
+    public void anUpsertThenADropOfOneHandleLeavesItDropped() throws Exception {
+        storage.applyWrites(batch(storeObject("bb88", "body"), upsert("h.vcf", "uid-h", "bb88", "hana")));
+
+        // The order io-pimdir writes a withdrawn pending create in: the
+        // tombstone, then the drop taking its binding.
+        JSONObject tombstone = upsert("h.vcf", "uid-h", "bb88", "hana");
+        tombstone.getJSONObject("placement").put("status", "tombstone");
+        storage.applyWrites(batch(tombstone, drop("h.vcf")));
+
+        assertEquals(
+                0,
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("placements")
+                        .length());
+        assertEquals(0, scalar("SELECT count(*) FROM bindings"));
+        assertEquals(1, scalar("SELECT count(*) FROM items WHERE retained_at IS NOT NULL"));
+    }
+
+    @Test
+    public void anItemABatchCreatesAndDropsIsNeverStored() throws Exception {
+        storage.applyWrites(
+                batch(
+                        storeObject("bb88", "body"),
+                        upsert("h.vcf", "uid-h", "bb88", "hana"),
+                        drop("h.vcf")));
+
+        assertEquals(0, scalar("SELECT count(*) FROM items"));
+        assertEquals(0, scalar("SELECT count(*) FROM objects WHERE hash = 'bb88'"));
+    }
+
+    @Test
+    public void anUnnamedUpsertAfterADropContinuesTheIdentityItHeld() throws Exception {
+        storage.applyWrites(batch(storeObject("bb88", "body"), upsert("h.vcf", "uid-h", "bb88", "hana")));
+
+        // Named against the store the batch began from, as io-pimdir names it.
+        JSONObject unnamed = upsert("h.vcf", "uid-h", "bb88", "hana");
+        unnamed.getJSONObject("placement").remove("linkId");
+        storage.applyWrites(batch(drop("h.vcf"), unnamed));
+
+        JSONArray placements =
+                storage.loadCollection("acct/Contacts", null).getJSONArray("placements");
+        assertEquals(1, placements.length());
+        assertEquals("uid-h", placements.getJSONObject(0).getString("linkId"));
     }
 
     @Test

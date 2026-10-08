@@ -46,10 +46,9 @@ import java.util.Set;
  *       {@code sort_key}
  * </ul>
  *
- * <p>Writes are one transaction, and drops are held to the end of a batch and
- * cancelled by an upsert of the same placement: an accepted create rekeys by
- * dropping its placeholder and upserting the assigned handle, and applying those
- * in arrival order would delete what it had just renamed.
+ * <p>Writes are one transaction, applied in the batch's order (SYNC §10): a
+ * batch naming one handle twice means what its order says, a tombstone then
+ * its withdrawal, or a drop then the upsert that restores it.
  */
 final class PimdirStorage {
     /** The source name this app syncs a server under. */
@@ -446,12 +445,9 @@ final class PimdirStorage {
         // derives its destination from (SYNC §3), so its removal pushes as a
         // relocation. Mail only: no other kind is moved.
         if ("tombstone".equals(status) && PimdirSummary.MAIL.equals(cursor.getString(15))) {
-            String destination = destinationOf(collection, linkId);
+            JSONObject destination = destinationOf(collection, linkId);
             if (destination != null) {
-                JSONObject origin = new JSONObject();
-                origin.put("collection", destination);
-                origin.put("handle", handle);
-                placement.put("origin", origin);
+                placement.put("origin", destination);
             }
         }
         return placement;
@@ -631,10 +627,11 @@ final class PimdirStorage {
         compiled = new HashMap<>();
         try {
             Map<String, byte[]> bodies = new HashMap<>();
-            List<JSONObject> drops = new ArrayList<>();
             List<JSONObject> stamps = new ArrayList<>();
-            Set<String> upserted = new HashSet<>();
             Set<String> links = new HashSet<>();
+            Set<String> fresh = new HashSet<>();
+            Set<String> staged = new HashSet<>();
+            Map<String, String> released = new HashMap<>();
             JSONArray effects = new JSONArray();
             Set<String> superseded = supersededHandles(writes);
 
@@ -646,17 +643,16 @@ final class PimdirStorage {
                         break;
                     case "upsert": {
                         JSONObject placement = op.getJSONObject("placement");
-                        String kind = applyUpsert(db, placement, superseded, links);
+                        String kind =
+                                applyUpsert(db, placement, superseded, links, released, fresh);
                         if (kind != null) {
                             effects.put(effect(placement.getString("collection"),
                                     placement.getString("handle"), kind));
                         }
-                        upserted.add(placement.getString("collection") + "\n"
-                                + placement.getString("handle"));
                         break;
                     }
                     case "drop":
-                        drops.add(op);
+                        applyBatchDrop(db, op, staged, released, effects);
                         break;
                     case "setCheckpoint":
                         setCheckpoint(db, op);
@@ -682,36 +678,21 @@ final class PimdirStorage {
                 }
             }
 
-            // NOTE: held to the end and cancelled by an upsert of the same
-            // placement, so an accepted create's rekey does not delete itself.
-            for (JSONObject drop : drops) {
-                String collection = drop.getString("collection");
-                String handle = drop.getString("handle");
-                if (upserted.contains(collection + "\n" + handle)) {
-                    continue;
+            // NOTE: an item's fate is the batch's outcome, as io-pimdir
+            // settles it from the hub the whole batch folded into: a staged
+            // mail create no upsert carried on goes with its provisional
+            // handle, and an item the batch created and left unbound was
+            // never stored.
+            for (String key : staged) {
+                if (!links.contains(key)) {
+                    String[] parts = key.split("\n", 2);
+                    items.remove(db, parts[0], parts[1]);
                 }
-                // NOTE: only a delete retires the item. A superseded drop is a
-                // provisional handle an accepted add replaced and a rekeyed one
-                // a handle a rebuild renumbered, so the row goes and the item
-                // stays; reading either as a removal would retain what the same
-                // batch just renamed, and propagate a delete nobody asked for.
-                boolean deleted = "deleted".equals(drop.optString("reason", "deleted"));
-                String stored = collectionOf(collection);
-                // NOTE: a message is filed under the handle its listing names
-                // (applyUpsert), so a mail create whose provisional handle an
-                // accepted push or a landing supersedes is no item of its own:
-                // the arrival is, under its handle, whether this batch filed
-                // it or the next listing brings it.
-                String staged =
-                        !deleted && handle.startsWith(PROVISIONAL) && isMail(db, stored)
-                                ? linkOf(db, stored, sourceOf(collection), handle)
-                                : null;
-                applyDrop(db, collection, handle, deleted);
-                if (staged != null && !links.contains(stored + "\n" + staged)) {
-                    items.remove(db, stored, staged);
-                }
-                if (deleted) {
-                    effects.put(effect(collection, handle, "removed"));
+            }
+            for (String key : fresh) {
+                String[] parts = key.split("\n", 2);
+                if (!isBound(db, parts[0], parts[1])) {
+                    items.remove(db, parts[0], parts[1]);
                 }
             }
 
@@ -757,6 +738,54 @@ final class PimdirStorage {
         return superseded;
     }
 
+    /**
+     * Applies one drop of a batch where it stands, recording what the rest of
+     * the batch reads of it: the link id its handle was bound to, which an
+     * unnamed upsert of the same handle later in the batch continues (as
+     * io-pimdir resolves it against the store the batch started from), and
+     * the staged mail create it superseded.
+     */
+    private void applyBatchDrop(SQLiteDatabase db, JSONObject drop, Set<String> staged,
+            Map<String, String> released, JSONArray effects) throws JSONException {
+        String collection = drop.getString("collection");
+        String handle = drop.getString("handle");
+        // NOTE: only a delete retires the item. A superseded drop is a
+        // provisional handle an accepted add replaced and a rekeyed one a
+        // handle a rebuild renumbered, so the row goes and the item stays;
+        // reading either as a removal would retain what the same batch
+        // renames, and propagate a delete nobody asked for.
+        boolean deleted = "deleted".equals(drop.optString("reason", "deleted"));
+        String stored = collectionOf(collection);
+        String source = sourceOf(collection);
+        String bound = linkOf(db, stored, source, handle);
+        if (bound != null) {
+            released.putIfAbsent(stored + "\n" + source + "\n" + handle, bound);
+        }
+        // NOTE: a message is filed under the handle its listing names
+        // (applyUpsert), so a mail create whose provisional handle an accepted
+        // push or a landing supersedes is no item of its own: the arrival is,
+        // under its handle, whether this batch files it or the next listing
+        // brings it. Settled at the batch's end, the upsert landing it reading
+        // the summary it carries on.
+        if (bound != null && !deleted && handle.startsWith(PROVISIONAL) && isMail(db, stored)) {
+            staged.add(stored + "\n" + bound);
+        }
+        applyDrop(db, collection, handle, deleted);
+        if (deleted) {
+            effects.put(effect(collection, handle, "removed"));
+        }
+    }
+
+    /** Whether any source binds the item. */
+    private static boolean isBound(SQLiteDatabase db, String collection, String linkId) {
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT 1 FROM bindings WHERE collection = ? AND link_id = ? LIMIT 1",
+                        new String[] {collection, linkId})) {
+            return cursor.moveToFirst();
+        }
+    }
+
     /** Files a body under the hash the engine computed and indexes it. */
     private void storeObject(SQLiteDatabase db, JSONObject op, Map<String, byte[]> bodies)
             throws JSONException {
@@ -778,21 +807,26 @@ final class PimdirStorage {
     /**
      * Writes one placement, returning what changed for the sync report:
      * {@code created}, {@code changed} when the body differs, or null for a
-     * bookkeeping-only upsert (flags, bases).
+     * bookkeeping-only upsert (flags, bases). {@code released} is what the
+     * batch's earlier drops unbound, by handle, and {@code fresh} collects the
+     * items this upsert creates.
      */
-    private String applyUpsert(
-            SQLiteDatabase db, JSONObject placement, Set<String> superseded, Set<String> links)
+    private String applyUpsert(SQLiteDatabase db, JSONObject placement, Set<String> superseded,
+            Set<String> links, Map<String, String> released, Set<String> fresh)
             throws JSONException {
         String engineCollection = placement.getString("collection");
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
         String handle = placement.getString("handle");
         // The identity the placement names, else the one its handle is already
-        // bound to (STORAGE §10). Never the handle itself: an item is keyed by
-        // its link id, so filing an unnamed handle as one mints an item the
-        // next fetch has to un-mint, leaving two bindings on one handle.
+        // bound to (STORAGE §10), or was when the batch began. Never the handle
+        // itself: an item is keyed by its link id, so filing an unnamed handle
+        // as one mints an item the next fetch has to un-mint, leaving two
+        // bindings on one handle.
         String bound = linkOf(db, collection, source, handle);
-        String linkId = placement.isNull("linkId") ? bound : placement.optString("linkId", bound);
+        String known =
+                bound != null ? bound : released.get(collection + "\n" + source + "\n" + handle);
+        String linkId = placement.isNull("linkId") ? known : placement.optString("linkId", known);
         // NOTE: a message is filed under its handle, the identity its
         // listing names it by, so a create landed onto the handle its
         // arrival is listed at takes that handle as its identity too; the
@@ -901,6 +935,7 @@ final class PimdirStorage {
         adjustRefcount(db, previousObject, object);
 
         if (!exists) {
+            fresh.add(collection + "\n" + linkId);
             return "created";
         }
         return sameObject(previousObject, object) ? null : "changed";
@@ -1012,14 +1047,7 @@ final class PimdirStorage {
             return;
         }
 
-        boolean held;
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT 1 FROM bindings WHERE collection = ? AND link_id = ? LIMIT 1",
-                        new String[] {collection, linkId})) {
-            held = cursor.moveToFirst();
-        }
-        if (!held) {
+        if (!isBound(db, collection, linkId)) {
             db.execSQL(
                     "UPDATE items SET deleted = 1,"
                             + " retained_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
@@ -1465,27 +1493,28 @@ final class PimdirStorage {
     }
 
     /**
-     * Where a tombstone of {@code linkId} moves to: another collection this
-     * source holds a pending create of that identity in, under its own key
-     * or the one minted from it, or null.
+     * Where a tombstone of {@code linkId} moves to, as the tombstone's origin
+     * (SYNC §3): another collection this source holds a pending create of
+     * that identity in, under its own key or the one minted from it, with
+     * that create's handle, or null.
      */
-    private String destinationOf(String engineCollection, String linkId) {
+    private JSONObject destinationOf(String engineCollection, String linkId)
+            throws JSONException {
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collectionOf(engineCollection));
+        values.put("source", sourceOf(engineCollection));
+        values.put("link_id", linkId);
+        PimdirSql.Bound bound = PimdirSql.bind("DESTINATION_FOR_LINK", values);
+
         SQLiteDatabase db = store.getReadableDatabase();
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.collection FROM items i"
-                                + " JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.link_id IN (?, ?) AND i.collection <> ?"
-                                + " AND i.deleted = 0 AND b.base_present = 0"
-                                + " ORDER BY i.collection LIMIT 1",
-                        new String[] {
-                            sourceOf(engineCollection),
-                            linkId,
-                            mintedOf(linkId),
-                            collectionOf(engineCollection)
-                        })) {
-            return cursor.moveToFirst() ? cursor.getString(0) : null;
+        try (Cursor cursor = db.rawQuery(bound.sql, stringsOf(bound.args))) {
+            if (!cursor.moveToFirst()) {
+                return null;
+            }
+            JSONObject origin = new JSONObject();
+            origin.put("collection", cursor.getString(0));
+            origin.put("handle", cursor.getString(1));
+            return origin;
         }
     }
 
