@@ -2,20 +2,27 @@
 //! Gmail keeps of them, the Gmail half of what `syncMail` does over
 //! IMAP, JMAP and Graph.
 //!
-//! A label lists message ids and nothing else, so a message's summary
-//! and markers cost one metadata read each, paced under the account's
-//! quota. A round lists the label 100 ids a page (newest first, narrowed
-//! by `after:` two days below the scope's floor), each page's ids read
-//! for their headers, the page token being the resume cursor; every pass
-//! after it replays the mailbox's history from the `historyId` taken at
-//! the round's first page and reads again only the messages that moved,
-//! which is what keeps a quiet mailbox one request.
+//! Gmail files a message once and names it under several labels, so the
+//! account is listed once (`messages.list` with no `labelIds`, spam and
+//! trash included, 500 ids a page) and each message placed in every
+//! mailbox its labels name ([`super::gmail_sync`]). A listing names ids
+//! and nothing else, so a message's summary, markers and labels cost one
+//! metadata read, sent 50 to a batch (`POST /batch/gmail/v1`) under the
+//! account's pacing, an inner answer that was throttled sent again on its
+//! own. One unfiltered history per account replays what moved since a
+//! `historyId`, which is what keeps a quiet pass one request.
+
+use std::collections::BTreeSet;
 
 use io_gmail::{
     coroutine::*,
     v1::{
+        batch::{GMAIL_BATCH_URL, GmailBatch, GmailBatchRequest, GmailBatchResponse},
         rest::{
-            history::list::{GmailHistoryList, GmailHistoryListParams},
+            history::{
+                GmailHistory,
+                list::{GmailHistoryList, GmailHistoryListParams},
+            },
             labels::{GmailLabelType, list::GmailLabelsList},
             messages::{
                 GmailMessage, GmailMessageFormat, decode_raw, encode_raw,
@@ -61,7 +68,20 @@ pub(crate) mod units {
 }
 
 /// The label Gmail files deleted mail under.
-const TRASH: &str = "TRASH";
+pub(crate) const TRASH: &str = "TRASH";
+
+/// The label Gmail files junk under.
+pub(crate) const SPAM: &str = "SPAM";
+
+/// The label of the inbox.
+pub(crate) const INBOX: &str = "INBOX";
+
+/// Metadata reads per batch: the most Google advises for Gmail, whose
+/// larger batches draw rate-limited parts.
+pub(crate) const BATCH: usize = 50;
+
+/// History records per `history.list` page, the API's ceiling.
+const HISTORY_PAGE: u32 = 500;
 
 /// The headers a metadata read asks for: what Annex A's summary and
 /// addresses are derived from, `Date` the `Date` header and never Gmail's
@@ -83,7 +103,7 @@ const ENVELOPE_HEADERS: [&str; 8] = [
 const NOT_MAILBOXES: [&str; 5] = ["UNREAD", "STARRED", "IMPORTANT", "CHAT", "YELLOW_STAR"];
 
 /// One message's metadata: its labels, its markers and its summary.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GmailEnvelope {
     pub labels: Vec<String>,
     pub flags: Vec<String>,
@@ -98,12 +118,175 @@ impl GmailEnvelope {
             .contains(self.summary.date.as_deref())
             .then(|| Named::new(id.to_string(), self.flags.clone(), self.summary.clone()))
     }
+
+    /// Whether this message is a member of `label`'s mailbox ([`belongs`]).
+    pub fn belongs(&self, label: &str) -> bool {
+        belongs(&self.labels, label)
+    }
 }
 
-/// One page of a label's ids, and the token of the next.
+/// Whether a message carrying `labels` is a member of `label`'s mailbox:
+/// it carries the label, and a message in the trash or the spam is a
+/// member of that one alone, as Gmail shows it nowhere else.
+pub(crate) fn belongs(labels: &[String], label: &str) -> bool {
+    let has = |id: &str| labels.iter().any(|carried| carried == id);
+    has(label) && (label == SPAM || label == TRASH || !(has(SPAM) || has(TRASH)))
+}
+
+/// One page of a listing's ids, and the token of the next.
+#[derive(Clone, Debug, Default)]
 pub struct GmailIds {
     pub ids: Vec<String>,
     pub next: Option<String>,
+}
+
+/// What an account's history holds past a `historyId`: the messages that
+/// moved (added, labelled, unlabelled), those deleted for good, and the
+/// history id the next replay starts from.
+#[derive(Clone, Debug, Default)]
+pub struct GmailHistoryDelta {
+    pub changed: Vec<String>,
+    pub deleted: Vec<String>,
+    pub next: String,
+}
+
+/// What one batch of metadata reads came to: the messages read, each
+/// with its envelope or [`None`] when it is gone, and the ids whose inner
+/// answer was throttled or missing, to read again alone.
+#[derive(Debug, Default)]
+pub(crate) struct Settled {
+    pub read: Vec<(String, Option<GmailEnvelope>)>,
+    pub again: Vec<String>,
+}
+
+/// Sorts a batch's answers into read, gone and to read again: a 404 is a
+/// message gone since it was listed, a throttled or missing answer is
+/// sent again on its own, and any other refusal fails the read with its
+/// status, a 401 included, so the token is refreshed as for one request.
+pub(crate) fn settle(
+    responses: Vec<GmailBatchResponse<GmailMessage>>,
+) -> Result<Settled, BridgeError> {
+    let mut settled = Settled::default();
+    for response in responses {
+        match response.result {
+            Ok(message) => settled.read.push((response.id, Some(envelope(message)))),
+            Err(err) if err.is_not_found() => settled.read.push((response.id, None)),
+            Err(err) if err.is_retryable() => settled.again.push(response.id),
+            Err(err) => {
+                return Err(BridgeError {
+                    message: err.to_string(),
+                    status: err.status(),
+                });
+            }
+        }
+    }
+    Ok(settled)
+}
+
+/// How metadata reads are sent: a batch, and one read alone for an inner
+/// answer that has to be sent again.
+///
+/// [`Client`] is the one sender the app runs; the trait exists so the
+/// reads can be counted and throttled without a JVM.
+pub(crate) trait GmailBatcher {
+    /// One batch of metadata reads, answered in the order of `ids`.
+    fn batch(
+        &mut self,
+        ids: &[String],
+    ) -> Result<Vec<GmailBatchResponse<GmailMessage>>, BridgeError>;
+
+    /// One metadata read alone, through the throttled path: [`None`] when
+    /// the message is gone.
+    fn single(&mut self, id: &str) -> Result<Option<GmailEnvelope>, BridgeError>;
+}
+
+/// Reads the metadata of `ids`, [`BATCH`] to a batch, an inner answer
+/// that was throttled or missing read again on its own; each id answered
+/// once, with [`None`] for a message gone.
+pub(crate) fn read_envelopes<B: GmailBatcher>(
+    batcher: &mut B,
+    ids: &[String],
+) -> Result<Vec<(String, Option<GmailEnvelope>)>, BridgeError> {
+    let mut read = Vec::with_capacity(ids.len());
+    for chunk in ids.chunks(BATCH) {
+        let settled = settle(batcher.batch(chunk)?)?;
+        read.extend(settled.read);
+        for id in settled.again {
+            let envelope = batcher.single(&id)?;
+            read.push((id, envelope));
+        }
+    }
+    Ok(read)
+}
+
+/// The ids a history replay touched, in first-seen order, against the
+/// ones it deleted for good, which are not read again.
+fn history_changes(records: &[GmailHistory]) -> (Vec<String>, Vec<String>) {
+    let mut deleted = Vec::new();
+    let mut gone = BTreeSet::new();
+    for record in records {
+        for entry in &record.messages_deleted {
+            if !entry.message.id.is_empty() && gone.insert(entry.message.id.clone()) {
+                deleted.push(entry.message.id.clone());
+            }
+        }
+    }
+
+    let mut seen = BTreeSet::new();
+    let changed = records
+        .iter()
+        .flat_map(|record| {
+            let added = record.messages_added.iter().map(|entry| &entry.message);
+            let labelled = record.labels_added.iter().map(|entry| &entry.message);
+            let unlabelled = record.labels_removed.iter().map(|entry| &entry.message);
+            added.chain(labelled).chain(unlabelled)
+        })
+        .map(|message| message.id.clone())
+        .filter(|id| !id.is_empty() && !gone.contains(id) && seen.insert(id.clone()))
+        .collect();
+
+    (changed, deleted)
+}
+
+/// The batch sender over the JNI transport.
+struct LiveBatcher<'c, 'a, 'local> {
+    client: &'c mut Client<'a, 'local>,
+    token: &'c str,
+}
+
+impl GmailBatcher for LiveBatcher<'_, '_, '_> {
+    fn batch(
+        &mut self,
+        ids: &[String],
+    ) -> Result<Vec<GmailBatchResponse<GmailMessage>>, BridgeError> {
+        let requests = ids
+            .iter()
+            .map(|id| {
+                GmailBatchRequest::message_get(
+                    id,
+                    "me",
+                    id,
+                    GmailMessageFormat::Metadata,
+                    &ENVELOPE_HEADERS,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|err| err.to_string())?;
+        let auth = HttpAuthBearer::new(self.token);
+        let coroutine =
+            GmailBatch::<GmailMessage>::new(&auth, &requests).map_err(|err| err.to_string())?;
+
+        // NOTE: one request, one per-second slot, but every inner call is
+        // billed its own units, so the batch spends their sum.
+        let units = units::MESSAGES_GET * ids.len() as u32;
+        self.client
+            .run_gmail_at(GMAIL_BATCH_URL, units, coroutine)?
+            .map_err(|err| coroutine_error(&err))
+    }
+
+    fn single(&mut self, id: &str) -> Result<Option<GmailEnvelope>, BridgeError> {
+        self.client.gmail_envelope(self.token, id)
+    }
 }
 
 impl<'a, 'local> Client<'a, 'local> {
@@ -139,10 +322,10 @@ impl<'a, 'local> Client<'a, 'local> {
             })
             .map(|label| {
                 let role = match label.id.as_str() {
-                    "INBOX" => "inbox",
+                    INBOX => "inbox",
                     "SENT" => "sent",
                     "DRAFT" => "drafts",
-                    "SPAM" => "junk",
+                    SPAM => "junk",
                     TRASH => "trash",
                     _ => "",
                 };
@@ -155,19 +338,20 @@ impl<'a, 'local> Client<'a, 'local> {
             .collect())
     }
 
-    /// One page of the ids filed under a label, newest first, narrowed
-    /// to what Gmail received from two days below the scope's floor
-    /// (`after:`, whole days in Gmail's own zone, hence the margin) and up
-    /// to two days above its ceiling.
+    /// One page of ids, newest first, 500 a page: the whole account's,
+    /// spam and trash included, when `label` is [`None`], else the ones
+    /// filed under the label. Narrowed to what Gmail received from two
+    /// days below the scope's floor (`after:`, whole days in Gmail's own
+    /// zone, hence the margin) and up to two days above its ceiling.
     pub fn list_gmail_page(
         &mut self,
         token: &str,
-        label: &str,
+        label: Option<&str>,
         scope: &Scope,
         page_token: Option<&str>,
     ) -> Result<GmailIds, BridgeError> {
         let auth = HttpAuthBearer::new(token);
-        let label_ids = [label.to_string()];
+        let label_ids: Vec<String> = label.map(String::from).into_iter().collect();
         let mut query = Vec::new();
         if let Some(since) = scope.received_since(RECEIVED_MARGIN_DAYS) {
             query.push(format!("after:{}", since.as_second()));
@@ -181,7 +365,7 @@ impl<'a, 'local> Client<'a, 'local> {
             label_ids: &label_ids,
             max_results: Some(GMAIL_PAGE),
             page_token,
-            include_spam_trash: label == TRASH || label == "SPAM",
+            include_spam_trash: label.is_none_or(|label| label == TRASH || label == SPAM),
         };
 
         let coroutine =
@@ -198,59 +382,55 @@ impl<'a, 'local> Client<'a, 'local> {
         })
     }
 
-    /// The messages that moved since `start`, and the history id the next
-    /// round resumes from; [`None`] when Gmail no longer holds history
+    /// What moved in the whole account since `start`, read unfiltered,
+    /// 500 records a page; [`None`] when Gmail no longer holds history
     /// that old, which a full round recovers from.
     pub fn gmail_history(
         &mut self,
         token: &str,
         start: &str,
-    ) -> Result<Option<(Vec<String>, String)>, BridgeError> {
+    ) -> Result<Option<GmailHistoryDelta>, BridgeError> {
         let auth = HttpAuthBearer::new(token);
-        let mut touched = Vec::new();
+        let mut records = Vec::new();
         let mut next = start.to_string();
         let mut page_token: Option<String> = None;
 
         loop {
             let params = GmailHistoryListParams {
                 start_history_id: start,
+                max_results: Some(HISTORY_PAGE),
                 page_token: page_token.as_deref(),
                 ..Default::default()
             };
             let coroutine =
                 GmailHistoryList::new(&auth, "me", &params).map_err(|err| err.to_string())?;
-            let page = match self.run_gmail(units::HISTORY_LIST, coroutine) {
+            let page = match self.run_gmail_at(GMAIL_API_BASE, units::HISTORY_LIST, coroutine)? {
                 Ok(page) => page,
-                Err(err) if err.status == Some(404) => return Ok(None),
-                Err(err) => return Err(err),
+                Err(err) if err.is_history_expired() => return Ok(None),
+                Err(err) => return Err(coroutine_error(&err)),
             };
 
-            for record in page.history {
-                let added = record.messages_added.into_iter().map(|entry| entry.message);
-                let deleted = record
-                    .messages_deleted
-                    .into_iter()
-                    .map(|entry| entry.message);
-                let labelled = record.labels_added.into_iter().map(|entry| entry.message);
-                let unlabelled = record.labels_removed.into_iter().map(|entry| entry.message);
-                for message in added.chain(deleted).chain(labelled).chain(unlabelled) {
-                    if !touched.contains(&message.id) {
-                        touched.push(message.id);
-                    }
-                }
-            }
+            records.extend(page.history);
             if let Some(id) = page.history_id {
                 next = id;
             }
 
             match page.next_page_token {
                 Some(token) => page_token = Some(token),
-                None => return Ok(Some((touched, next))),
+                None => break,
             }
         }
+
+        let (changed, deleted) = history_changes(&records);
+        Ok(Some(GmailHistoryDelta {
+            changed,
+            deleted,
+            next,
+        }))
     }
 
-    /// One message's labels and envelope; [`None`] when it is gone.
+    /// One message's labels and envelope, read alone; [`None`] when it is
+    /// gone.
     pub fn gmail_envelope(
         &mut self,
         token: &str,
@@ -265,11 +445,27 @@ impl<'a, 'local> Client<'a, 'local> {
             &ENVELOPE_HEADERS,
         )
         .map_err(|err| err.to_string())?;
-        match self.run_gmail(units::MESSAGES_GET, coroutine) {
+        match self.run_gmail_at(GMAIL_API_BASE, units::MESSAGES_GET, coroutine)? {
             Ok(message) => Ok(Some(envelope(message))),
-            Err(err) if err.status == Some(404) => Ok(None),
-            Err(err) => Err(err),
+            Err(err) if err.is_not_found() => Ok(None),
+            Err(err) => Err(coroutine_error(&err)),
         }
+    }
+
+    /// The labels and envelopes of `ids`, [`BATCH`] to a batch
+    /// ([`read_envelopes`]); [`None`] for a message gone.
+    pub fn gmail_envelopes(
+        &mut self,
+        token: &str,
+        ids: &[String],
+    ) -> Result<Vec<(String, Option<GmailEnvelope>)>, BridgeError> {
+        read_envelopes(
+            &mut LiveBatcher {
+                client: self,
+                token,
+            },
+            ids,
+        )
     }
 
     /// Reads one message whole, as the RFC 5322 bytes Gmail serves.
@@ -338,10 +534,28 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(())
     }
 
+    /// Runs one Gmail API coroutine costing `units` quota units to
+    /// completion ([`Self::run_gmail_at`]), its failure as the bridge's.
+    fn run_gmail<C, T>(&mut self, units: u32, coroutine: C) -> Result<T, BridgeError>
+    where
+        C: GmailCoroutine<Yield = GmailYield, Return = Result<GmailSendOutput<T>, GmailSendError>>,
+    {
+        self.run_gmail_at(GMAIL_API_BASE, units, coroutine)?
+            .map_err(|err| coroutine_error(&err))
+    }
+
     /// Runs one Gmail coroutine costing `units` quota units to completion
-    /// over the transport, paced under Gmail's per-user quota
-    /// ([`throttle::pace_gmail`]).
-    fn run_gmail<C, T>(&mut self, units: u32, mut coroutine: C) -> Result<T, BridgeError>
+    /// over the transport stream for `url` (the API's, or the batch
+    /// endpoint's on another host), paced under Gmail's per-user quota
+    /// ([`throttle::pace_gmail`]). The outer error is the transport's, the
+    /// inner one Gmail's, kept whole so its reasons are matched rather
+    /// than its text.
+    pub(crate) fn run_gmail_at<C, T>(
+        &mut self,
+        url: &str,
+        units: u32,
+        mut coroutine: C,
+    ) -> Result<Result<T, GmailSendError>, BridgeError>
     where
         C: GmailCoroutine<Yield = GmailYield, Return = Result<GmailSendOutput<T>, GmailSendError>>,
     {
@@ -350,13 +564,13 @@ impl<'a, 'local> Client<'a, 'local> {
 
         loop {
             match coroutine.resume(arg.as_deref()) {
-                GmailCoroutineState::Complete(Ok(output)) => return Ok(output.response),
-                GmailCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
+                GmailCoroutineState::Complete(Ok(output)) => return Ok(Ok(output.response)),
+                GmailCoroutineState::Complete(Err(err)) => return Ok(Err(err)),
                 GmailCoroutineState::Yielded(GmailYield::WantsRead) => {
-                    arg = Some(self.http_read(GMAIL_API_BASE)?);
+                    arg = Some(self.http_read(url)?);
                 }
                 GmailCoroutineState::Yielded(GmailYield::WantsWrite(bytes)) => {
-                    self.http_write(GMAIL_API_BASE, &bytes)?;
+                    self.http_write(url, &bytes)?;
                     arg = None;
                 }
             }
@@ -404,16 +618,21 @@ fn envelope(message: GmailMessage) -> GmailEnvelope {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use io_gmail::v1::rest::messages::{GmailMessageHeader, GmailMessagePayload};
 
     use super::*;
 
-    #[test]
-    fn a_metadata_read_becomes_a_decoded_envelope() {
-        let header = |name: &str, value: &str| GmailMessageHeader {
+    fn header(name: &str, value: &str) -> GmailMessageHeader {
+        GmailMessageHeader {
             name: name.into(),
             value: value.into(),
-        };
+        }
+    }
+
+    #[test]
+    fn a_metadata_read_becomes_a_decoded_envelope() {
         let message = GmailMessage {
             id: "m1".into(),
             label_ids: vec!["INBOX".into(), "UNREAD".into(), "STARRED".into()],
@@ -443,5 +662,250 @@ mod tests {
         assert_eq!(envelope.summary.attachment, Some(true));
         assert!(!envelope.flags.iter().any(|flag| flag == "\\Seen"));
         assert!(envelope.flags.iter().any(|flag| flag == "\\Flagged"));
+    }
+
+    #[test]
+    fn trash_and_spam_take_a_message_out_of_its_other_labels() {
+        let labels = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+
+        let filed = labels(&["INBOX", "Label_7", "IMPORTANT"]);
+        assert!(belongs(&filed, "INBOX"));
+        assert!(belongs(&filed, "Label_7"));
+        assert!(!belongs(&filed, "SENT"));
+
+        let trashed = labels(&["TRASH", "Label_7"]);
+        assert!(belongs(&trashed, "TRASH"));
+        assert!(
+            !belongs(&trashed, "Label_7"),
+            "a trashed message is in the trash alone"
+        );
+
+        let junk = labels(&["SPAM", "INBOX"]);
+        assert!(belongs(&junk, "SPAM"));
+        assert!(!belongs(&junk, "INBOX"));
+    }
+
+    #[test]
+    fn a_history_names_each_move_once_and_reads_no_deleted_message() {
+        let message = |id: &str| serde_json::json!({ "message": { "id": id } });
+        let labelled =
+            |id: &str| serde_json::json!({ "message": { "id": id }, "labelIds": ["INBOX"] });
+        let records: Vec<GmailHistory> = serde_json::from_value(serde_json::json!([
+            { "id": "1", "messagesAdded": [message("a"), message("b")] },
+            { "id": "2", "labelsRemoved": [labelled("a")], "labelsAdded": [labelled("c")] },
+            { "id": "3", "messagesDeleted": [message("b"), message("d")] },
+        ]))
+        .unwrap();
+
+        let (changed, deleted) = history_changes(&records);
+        assert_eq!(changed, ["a", "c"], "b was deleted after its arrival");
+        assert_eq!(deleted, ["b", "d"]);
+    }
+
+    /// A metadata answer as Gmail writes it, for one message.
+    fn metadata_json(id: &str) -> String {
+        serde_json::json!({
+            "id": id,
+            "threadId": "t1",
+            "labelIds": ["INBOX", "Label_7", "UNREAD"],
+            "sizeEstimate": 2048,
+            "internalDate": "1700086400000",
+            "payload": {
+                "mimeType": "multipart/alternative",
+                "headers": [
+                    {"name": "Date", "value": "Tue, 14 Nov 2023 22:13:20 +0100"},
+                    {"name": "From", "value": "Ren\u{e9} <rene@example.org>"},
+                    {"name": "To", "value": "jane@example.com"},
+                    {"name": "Subject", "value": "=?UTF-8?Q?R=C3=A9union?="},
+                    {"name": "Message-ID", "value": "<m1@example.org>"},
+                    {"name": "Content-Type", "value": "multipart/alternative; boundary=b"}
+                ]
+            }
+        })
+        .to_string()
+    }
+
+    /// Runs a Gmail coroutine against one canned answer.
+    fn drive<C, T>(mut coroutine: C, answer: &[u8]) -> Result<GmailSendOutput<T>, GmailSendError>
+    where
+        C: GmailCoroutine<Yield = GmailYield, Return = Result<GmailSendOutput<T>, GmailSendError>>,
+    {
+        let mut answered = false;
+        let mut arg: Option<&[u8]> = None;
+        loop {
+            match coroutine.resume(arg.take()) {
+                GmailCoroutineState::Complete(result) => return result,
+                GmailCoroutineState::Yielded(GmailYield::WantsWrite(_)) => {}
+                GmailCoroutineState::Yielded(GmailYield::WantsRead) => {
+                    arg = Some(match answered {
+                        false => answer,
+                        true => &[],
+                    });
+                    answered = true;
+                }
+            }
+        }
+    }
+
+    fn http(status: &str, content_type: &str, body: &str) -> Vec<u8> {
+        format!(
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes()
+    }
+
+    /// A batch answer: one part per `(id, status, body)`, in the order
+    /// given, which Google does not promise to keep.
+    fn batch_answer(parts: &[(&str, &str, String)]) -> Vec<u8> {
+        let mut body = String::new();
+        for (id, status, json) in parts {
+            body.push_str("--batch_x\r\nContent-Type: application/http\r\n");
+            body.push_str(&format!("Content-ID: <response-{id}>\r\n\r\n"));
+            body.push_str(&format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{json}\r\n"
+            ));
+        }
+        body.push_str("--batch_x--\r\n");
+        http("200 OK", "multipart/mixed; boundary=batch_x", &body)
+    }
+
+    fn batch_of(ids: &[&str]) -> GmailBatch<GmailMessage> {
+        let requests: Vec<GmailBatchRequest> = ids
+            .iter()
+            .map(|id| {
+                GmailBatchRequest::message_get(
+                    id,
+                    "me",
+                    id,
+                    GmailMessageFormat::Metadata,
+                    &ENVELOPE_HEADERS,
+                )
+                .unwrap()
+            })
+            .collect();
+        GmailBatch::new(&HttpAuthBearer::new("token"), &requests).unwrap()
+    }
+
+    #[test]
+    fn a_batched_read_equals_a_single_read() {
+        let json = metadata_json("18b0a1");
+
+        let auth = HttpAuthBearer::new("token");
+        let get = GmailMessageGet::new(
+            &auth,
+            "me",
+            "18b0a1",
+            GmailMessageFormat::Metadata,
+            &ENVELOPE_HEADERS,
+        )
+        .unwrap();
+        let single = drive(get, &http("200 OK", "application/json", &json)).unwrap();
+        let single = envelope(single.response);
+
+        let answer = batch_answer(&[("18b0a1", "200 OK", json.clone())]);
+        let batched = drive(batch_of(&["18b0a1"]), &answer).unwrap();
+        let settled = settle(batched.response).unwrap();
+
+        assert!(settled.again.is_empty());
+        assert_eq!(settled.read, [("18b0a1".to_string(), Some(single.clone()))]);
+        assert_eq!(single.summary.subject, "Réunion");
+        assert_eq!(single.summary.date.as_deref(), Some("2023-11-14T21:13:20Z"));
+        assert!(single.belongs("Label_7"));
+    }
+
+    /// The minute quota refusal Gmail answered on 2026-10-07.
+    const MINUTE_QUOTA: &str = r#"{"error":{"code":403,"message":"Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user'","errors":[{"message":"Quota exceeded","domain":"usageLimits","reason":"rateLimitExceeded"}],"status":"PERMISSION_DENIED"}}"#;
+
+    #[test]
+    fn a_batch_sorts_its_answers_into_read_gone_and_again() {
+        let answer = batch_answer(&[
+            ("a1", "200 OK", metadata_json("a1")),
+            ("b2", "404 Not Found", r#"{"error":{"code":404}}"#.into()),
+            ("c3", "429 Too Many Requests", "{}".into()),
+            ("d4", "403 Forbidden", MINUTE_QUOTA.into()),
+        ]);
+        // NOTE: e5 has no part in the answer at all.
+        let batched = drive(batch_of(&["a1", "b2", "c3", "d4", "e5"]), &answer).unwrap();
+        let settled = settle(batched.response).unwrap();
+
+        let read: BTreeMap<String, bool> = settled
+            .read
+            .iter()
+            .map(|(id, envelope)| (id.clone(), envelope.is_some()))
+            .collect();
+        assert_eq!(
+            read,
+            BTreeMap::from([("a1".into(), true), ("b2".into(), false)])
+        );
+        assert_eq!(settled.again, ["c3", "d4", "e5"]);
+
+        // NOTE: a refusal no wait lifts fails the read with its status.
+        let answer = batch_answer(&[("a1", "401 Unauthorized", "{}".into())]);
+        let batched = drive(batch_of(&["a1"]), &answer).unwrap();
+        assert_eq!(settle(batched.response).unwrap_err().status, Some(401));
+    }
+
+    /// A Gmail answering batches from a script: the inner status of each
+    /// message, the throttled ones served on their own.
+    #[derive(Default)]
+    struct FakeBatcher {
+        /// Messages Gmail throttles inside a batch, served alone.
+        throttled: BTreeSet<String>,
+        /// Messages gone.
+        gone: BTreeSet<String>,
+        batches: Vec<usize>,
+        singles: Vec<String>,
+    }
+
+    impl GmailBatcher for FakeBatcher {
+        fn batch(
+            &mut self,
+            ids: &[String],
+        ) -> Result<Vec<GmailBatchResponse<GmailMessage>>, BridgeError> {
+            self.batches.push(ids.len());
+            let parts: Vec<(&str, &str, String)> = ids
+                .iter()
+                .map(|id| match () {
+                    _ if self.throttled.contains(id) => {
+                        (id.as_str(), "429 Too Many Requests", "{}".to_string())
+                    }
+                    _ if self.gone.contains(id) => (id.as_str(), "404 Not Found", "{}".to_string()),
+                    _ => (id.as_str(), "200 OK", metadata_json(id)),
+                })
+                .collect();
+            let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+            Ok(drive(batch_of(&ids), &batch_answer(&parts))
+                .unwrap()
+                .response)
+        }
+
+        fn single(&mut self, id: &str) -> Result<Option<GmailEnvelope>, BridgeError> {
+            self.singles.push(id.into());
+            let message: GmailMessage = serde_json::from_str(&metadata_json(id)).unwrap();
+            Ok(Some(envelope(message)))
+        }
+    }
+
+    #[test]
+    fn a_hundred_and_twenty_reads_ride_three_batches_the_throttled_alone() {
+        let ids: Vec<String> = (0..120).map(|n| format!("m{n:03}")).collect();
+        let mut batcher = FakeBatcher {
+            throttled: ["m007", "m061"].map(String::from).into(),
+            gone: ["m100"].map(String::from).into(),
+            ..Default::default()
+        };
+
+        let read = read_envelopes(&mut batcher, &ids).unwrap();
+
+        assert_eq!(batcher.batches, [50, 50, 20], "three batch requests");
+        assert_eq!(batcher.singles, ["m007", "m061"], "the throttled two alone");
+        assert_eq!(read.len(), 120, "every id answered once");
+        let gone: Vec<&str> = read
+            .iter()
+            .filter(|(_, envelope)| envelope.is_none())
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(gone, ["m100"]);
     }
 }

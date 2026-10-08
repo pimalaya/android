@@ -23,6 +23,7 @@ mod discovery;
 mod dispatch;
 mod gcal;
 pub(crate) mod gmail;
+pub(crate) mod gmail_sync;
 mod google;
 mod graph;
 mod graph_calendar;

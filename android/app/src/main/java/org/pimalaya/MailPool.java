@@ -3,6 +3,7 @@ package org.pimalaya;
 import android.util.Log;
 
 import org.pimalaya.client.Account;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
 
 import java.util.ArrayList;
@@ -37,8 +38,12 @@ import java.util.concurrent.atomic.AtomicReference;
  * until the pool is closed: the background fill runs a step at a time and
  * keeps its connections between steps.
  *
- * @param <S> the session, a {@link org.pimalaya.client.MailSession} in the
- *     app; anything closeable in a test.
+ * <p>Each run is numbered, and every session a worker runs it on joins that
+ * number ({@link MailSession#join}) for its length: a Gmail account is one
+ * listing, which the run's sessions then read once between them.
+ *
+ * @param <S> the session, a {@link MailSession} in the app; anything
+ *     closeable in a test.
  */
 final class MailPool<S extends AutoCloseable> implements AutoCloseable {
     /** Graph sessions an account runs at once: HTTP requests, nothing held. */
@@ -50,8 +55,15 @@ final class MailPool<S extends AutoCloseable> implements AutoCloseable {
     /** IMAP sessions an account runs at once: a connection and a login each. */
     static final int IMAP = 3;
 
-    /** Gmail sessions an account runs at once: its reads share one pacing bucket. */
+    /**
+     * Gmail sessions an account runs at once: the account is one listing,
+     * read once per run, and its metadata batches spread over the sessions
+     * under one pacing bucket.
+     */
     static final int GMAIL = 2;
+
+    /** The number the last run took; 0 is no run. */
+    private static final AtomicLong RUNS = new AtomicLong();
 
     /** The workers every pool runs on; idle ones die after a minute. */
     private static final ExecutorService WORKERS =
@@ -188,6 +200,7 @@ final class MailPool<S extends AutoCloseable> implements AutoCloseable {
         }
 
         long started = System.nanoTime();
+        long number = RUNS.incrementAndGet();
         AtomicInteger next = new AtomicInteger();
         AtomicInteger done = new AtomicInteger();
         AtomicLong remote = new AtomicLong();
@@ -213,20 +226,27 @@ final class MailPool<S extends AutoCloseable> implements AutoCloseable {
                                     unopened.compareAndSet(null, failure);
                                     return;
                                 }
-                                int index;
-                                while ((index = next.getAndIncrement()) < collections.size()) {
-                                    taken[index] = true;
-                                    MailEngine engine = engines.on(session);
-                                    try {
-                                        step.run(engine, collections.get(index));
-                                    } catch (Exception failure) {
-                                        errors[index] = failure;
-                                    } finally {
-                                        remote.addAndGet(engine.remoteSoFar());
+                                join(session, number);
+                                try {
+                                    int index;
+                                    while ((index = next.getAndIncrement())
+                                            < collections.size()) {
+                                        taken[index] = true;
+                                        MailEngine engine = engines.on(session);
+                                        try {
+                                            step.run(engine, collections.get(index));
+                                        } catch (Exception failure) {
+                                            errors[index] = failure;
+                                        } finally {
+                                            remote.addAndGet(engine.remoteSoFar());
+                                        }
+                                        if (landed != null) {
+                                            landed.landed(
+                                                    done.incrementAndGet(), collections.size());
+                                        }
                                     }
-                                    if (landed != null) {
-                                        landed.landed(done.incrementAndGet(), collections.size());
-                                    }
+                                } finally {
+                                    join(session, 0);
                                 }
                             }));
         }
@@ -285,6 +305,13 @@ final class MailPool<S extends AutoCloseable> implements AutoCloseable {
         Outcome outcome = new Outcome();
         outcome.failures.add(new Failure("", failure));
         return outcome;
+    }
+
+    /** Has a worker's session join the run numbered {@code run}, or leave it on 0. */
+    private static void join(Object session, long run) {
+        if (session instanceof MailSession) {
+            ((MailSession) session).join(run);
+        }
     }
 
     /** The session of one worker slot, opened the first time it is asked for. */

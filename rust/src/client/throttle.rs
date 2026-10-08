@@ -44,6 +44,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use io_gmail::v1::{batch::GMAIL_BATCH_URL, send::GmailApiError};
 use jiff::{Timestamp, fmt::rfc2822::DateTimeParser};
 use url::Url;
 
@@ -105,7 +106,8 @@ const GMAIL_UNITS_PER_MINUTE_DOCUMENTED: u32 = 15_000;
 /// requests still in flight never carry a pass over it.
 pub(crate) const GMAIL_UNITS_PER_MINUTE: u32 = GMAIL_UNITS_PER_MINUTE_DOCUMENTED / 5 * 4;
 
-/// Where Gmail API requests go, to tell its quota refusals apart.
+/// Where Gmail API requests go, to tell its quota refusals apart; its
+/// batches go to [`GMAIL_BATCH_URL`], on another host.
 const GMAIL_HOST: &str = "gmail.googleapis.com";
 
 /// The Gmail pacing, shared by every worker.
@@ -227,7 +229,7 @@ fn throttled_read<W: Wire>(wire: &mut W, url: &str) -> Result<Vec<u8>, BridgeErr
 
         // NOTE: the other workers would draw the same refusal, so the
         // shared pacing holds them a minute too.
-        if throttle == Throttle::Minute && url.contains(GMAIL_HOST) {
+        if throttle == Throttle::Minute && gmail(url) {
             gmail_quota_refused();
         }
 
@@ -448,13 +450,17 @@ enum Answered {
 /// is waited out: a 503, a 429, or one of Google's rate-limit 403s (a
 /// 403 for anything else, a daily quota included, is no reason to
 /// wait). Google's are per-minute quotas; `google` says the request
-/// went to a Google API, whose 429s count by the minute too.
+/// went to a Google API, whose 429s count by the minute too, and whose
+/// error envelope names its reasons, matched before the text is.
 fn throttled(status: u16, body: &[u8], google: bool) -> Option<Throttle> {
     match status {
         503 => Some(Throttle::Burst),
         429 if google || names_minute_quota(body) => Some(Throttle::Minute),
         429 => Some(Throttle::Burst),
         403 if names_daily_quota(body) => None,
+        403 if google && GmailApiError::parse(status, body).is_rate_limited() => {
+            Some(Throttle::Minute)
+        }
         403 if names_minute_quota(body)
             || contains(body, b"rateLimitExceeded")
             || contains(body, b"userRateLimitExceeded") =>
@@ -478,6 +484,15 @@ fn names_minute_quota(body: &[u8]) -> bool {
 /// brings back.
 fn names_daily_quota(body: &[u8]) -> bool {
     contains(body, b"dailyLimitExceeded") || contains(body, b"per day")
+}
+
+/// Whether a URL is Gmail's, its API or its batch endpoint, whose quota
+/// refusals hold the shared pacing.
+fn gmail(url: &str) -> bool {
+    url.starts_with(GMAIL_BATCH_URL)
+        || Url::parse(url)
+            .ok()
+            .is_some_and(|url| url.host_str() == Some(GMAIL_HOST))
 }
 
 /// Whether a URL is one of Google's APIs.
@@ -766,6 +781,29 @@ mod tests {
             throttled(429, br#"{"status":"RESOURCE_EXHAUSTED"}"#, false),
             Some(Throttle::Burst)
         );
+        // NOTE: the reasons Google's envelope names, read as reasons: a
+        // `RESOURCE_EXHAUSTED` 403 whose message names no quota at all.
+        assert_eq!(
+            throttled(
+                403,
+                br#"{"error":{"code":403,"message":"Too many","errors":[{"reason":"quotaExceeded"}],"status":"RESOURCE_EXHAUSTED"}}"#,
+                true
+            ),
+            Some(Throttle::Minute)
+        );
+        assert_eq!(
+            throttled(
+                403,
+                br#"{"error":{"code":403,"message":"No","errors":[{"reason":"insufficientPermissions"}]}}"#,
+                true
+            ),
+            None
+        );
+        assert!(gmail("https://gmail.googleapis.com/gmail/v1/"));
+        assert!(gmail(GMAIL_BATCH_URL), "the batch endpoint counts as Gmail");
+        assert!(!gmail("https://people.googleapis.com/v1/"));
+        assert!(!gmail("https://www.googleapis.com/calendar/v3/"));
+        assert!(google(GMAIL_BATCH_URL));
         assert!(google("https://gmail.googleapis.com/gmail/v1/"));
         assert!(google("https://people.googleapis.com/v1/"));
         assert!(!google("https://graph.microsoft.com/v1.0/"));

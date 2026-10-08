@@ -21,8 +21,8 @@ use serde_json::{from_str, json, to_string};
 use crate::{
     client::{
         self, Client,
-        gmail::GmailEnvelope,
-        listing::{Floor, Listing, MailPage, MailRequest, Named},
+        gmail_sync::{self, LiveGmail},
+        listing::{Floor, FloorReply, MailPage, MailRequest, Named},
     },
     ffi::{
         error_json, parse_url, read_string,
@@ -206,9 +206,9 @@ pub extern "system" fn Java_org_pimalaya_client_Native_mailFloor<'local>(
         let before = read_string(env, &before);
 
         let mut client = Client::new(env, &transport);
-        let mut asked = Floor::new(Some(before.as_str()), count.max(1) as usize);
-        let json = match floor(&mut client, handle, &mailbox, &mut asked) {
-            Ok(()) => to_string(&asked.reply()).unwrap_or_else(|err| error_json(err.to_string())),
+        let asked = Floor::new(Some(before.as_str()), count.max(1) as usize);
+        let json = match floor(&mut client, handle, &mailbox, asked) {
+            Ok(reply) => to_string(&reply).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 
@@ -222,42 +222,35 @@ fn floor(
     client: &mut Client<'_, '_>,
     handle: i64,
     mailbox: &str,
-    floor: &mut Floor,
-) -> Result<(), BridgeError> {
+    mut floor: Floor,
+) -> Result<FloorReply, BridgeError> {
     let session = unsafe { session::borrow(handle) }?;
     if session.is_imap() {
-        return session.imap(client)?.floor(mailbox, floor);
+        session.imap(client)?.floor(mailbox, &mut floor)?;
+        return Ok(floor.reply());
     }
 
     let id = mailbox_id(client, session, mailbox)?;
     if session.is_jmap() {
         let url = session.jmap_url()?;
-        return client.jmap_floor(&url, &session.credentials(), &id, floor);
+        client.jmap_floor(&url, &session.credentials(), &id, &mut floor)?;
+        return Ok(floor.reply());
     }
     if session.is_graph() {
-        return client.graph_floor(session.credentials().password, &id, floor);
+        client.graph_floor(session.credentials().password, &id, &mut floor)?;
+        return Ok(floor.reply());
     }
 
-    // NOTE: Gmail lists ids alone, so each is read for its metadata; the
-    // session keeps what it read, and the round after this one reads none
-    // of them again.
+    // NOTE: one floor per account, walked once per pool run whichever
+    // mailbox asks, the envelopes it read kept for the rounds after it.
+    let run = session.gmail_run();
     let token = session.credentials().password.to_string();
-    let scope = floor.scope().clone();
-    let mut cursor: Option<String> = None;
-    loop {
-        let listed = client.list_gmail_page(&token, &id, &scope, cursor.as_deref())?;
-        for message in &listed.ids {
-            let date = gmail_envelope(client, session, &token, message)?
-                .and_then(|envelope| envelope.summary.date);
-            if floor.take(date.as_deref()) {
-                return Ok(());
-            }
-        }
-        match listed.next {
-            Some(next) => cursor = Some(next),
-            None => return Ok(()),
-        }
-    }
+    let before = floor.scope().until.clone();
+    let mut source = LiveGmail {
+        client,
+        token: &token,
+    };
+    gmail_sync::floor(&mut source, &run, &id, before.as_deref(), floor.count())
 }
 
 /// `Native.fetchMessageSource`: reads one message whole, as the RFC 5322
@@ -381,8 +374,7 @@ fn mailbox_id(
     mailbox: &str,
 ) -> Result<String, BridgeError> {
     // NOTE: the listing is lifted out while the roster is read, which
-    // needs the session's credentials, and put back whatever came of it,
-    // the Gmail envelopes it keeps with it.
+    // needs the session's credentials, and put back whatever came of it.
     let mut listing = std::mem::take(session.listing());
     let id = listing.resolve(mailbox, || http_roster(client, session));
     *session.listing() = listing;
@@ -407,7 +399,15 @@ fn enumerate(
 
     let id = mailbox_id(client, session, mailbox)?;
     if session.is_gmail() {
-        return list_gmail(client, session, &id, &request);
+        // NOTE: a label's page is the account's listing projected onto it,
+        // read once for every session of the pool run.
+        let run = session.gmail_run();
+        let token = session.credentials().password.to_string();
+        let mut source = LiveGmail {
+            client,
+            token: &token,
+        };
+        return gmail_sync::list_label(&mut source, &run, &id, &request);
     }
     if session.is_jmap() {
         let url = session.jmap_url()?;
@@ -417,93 +417,20 @@ fn enumerate(
     client.list_graph_page(session.credentials().password, &id, &request)
 }
 
-/// One page of a Gmail label's listing.
-///
-/// A delta replays the history from the checkpoint: a message it names
-/// is read again, and is a member while it still carries the label, gone
-/// from this mailbox otherwise; history Gmail no longer holds is refused
-/// for the engine to open a round. A round lists the label's ids a page
-/// at a time, the page token its cursor, each id read for its metadata,
-/// the `historyId` taken before the first page its checkpoint, so what
-/// moves during the round is replayed by the next delta rather than
-/// missed.
-fn list_gmail(
-    client: &mut Client<'_, '_>,
-    session: &mut MailSession,
-    label: &str,
-    request: &MailRequest,
-) -> Result<MailPage, BridgeError> {
-    let token = session.credentials().password.to_string();
-    let scope = &request.scope;
-
-    let (cursor, band) = match &request.listing {
-        Listing::Delta { checkpoint } => {
-            let Some((touched, next)) = client.gmail_history(&token, checkpoint)? else {
-                return Ok(MailPage::rejected());
-            };
-
-            let mut items = Vec::new();
-            let mut vanished = Vec::new();
-            for id in touched {
-                match gmail_envelope(client, session, &token, &id)? {
-                    Some(envelope) if envelope.labels.iter().any(|filed| filed == label) => {
-                        items.extend(envelope.named(&id, scope));
-                    }
-                    _ => vanished.push(id),
-                }
-            }
-            return Ok(MailPage::delta(items, vanished, next));
-        }
-        Listing::Round { cursor, band } => (cursor.as_deref(), *band),
-    };
-
-    let checkpoint = match (cursor, band) {
-        (None, false) => Some(client.gmail_history_id(&token)?),
-        _ => None,
-    };
-    let listed = match client.list_gmail_page(&token, label, scope, cursor) {
-        Ok(listed) => listed,
-        // NOTE: a page token Gmail no longer honours restarts the round,
-        // which relists and refetches nothing already named.
-        Err(err) if cursor.is_some() && err.status == Some(400) => {
-            return Ok(MailPage::rejected());
-        }
-        Err(err) => return Err(err),
-    };
-
-    let mut items = Vec::with_capacity(listed.ids.len());
-    for id in &listed.ids {
-        if let Some(envelope) = gmail_envelope(client, session, &token, id)? {
-            items.extend(envelope.named(id, scope));
-        }
+/// `Native.joinMailRun`: has a session work for the pool run numbered
+/// `run`, sharing with the run's other sessions what it reads of a Gmail
+/// account (its listing, envelopes and history), which the run drops
+/// with it; 0 leaves the run for the session's own.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_joinMailRun(
+    _env: EnvUnowned<'_>,
+    _class: JClass<'_>,
+    handle: i64,
+    run: i64,
+) {
+    if let Ok(session) = unsafe { session::borrow(handle) } {
+        session.join_run(run);
     }
-
-    Ok(MailPage::round(items, listed.next, checkpoint))
-}
-
-/// One Gmail message's labels and summary, read once per pass.
-///
-/// The session lasts one pass, so what it holds was read during it: a
-/// message two labels list, or two mailboxes' histories replay, costs
-/// one read.
-fn gmail_envelope(
-    client: &mut Client<'_, '_>,
-    session: &mut MailSession,
-    token: &str,
-    id: &str,
-) -> Result<Option<GmailEnvelope>, BridgeError> {
-    if let Some(envelope) = session.listing().envelopes.get(id) {
-        return Ok(Some(envelope.clone()));
-    }
-
-    let envelope = client.gmail_envelope(token, id)?;
-    if let Some(envelope) = &envelope {
-        session
-            .listing()
-            .envelopes
-            .insert(id.to_string(), envelope.clone());
-    }
-    Ok(envelope)
 }
 
 /// `Native.setMessageFlag`: adds or removes one marker (`\Seen`,
@@ -584,8 +511,8 @@ fn set_flag(
     if session.is_gmail() {
         client.set_gmail_flag(session.credentials().password, id, flag, add)?;
         // NOTE: dropped rather than patched, so a later read in the same
-        // pass asks Gmail what the change left.
-        session.listing().envelopes.remove(id);
+        // run asks Gmail what the change left.
+        session.gmail_run().forget(id);
         return Ok(());
     }
 
@@ -613,7 +540,7 @@ fn delete_message(
     }
     if session.is_gmail() {
         let trash = client.delete_gmail_message(session.credentials().password, id)?;
-        session.listing().envelopes.remove(id);
+        session.gmail_run().forget(id);
         return Ok(Some(trash));
     }
 
