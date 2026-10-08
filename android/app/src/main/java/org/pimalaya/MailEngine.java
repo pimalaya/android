@@ -5,6 +5,7 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.client.Account;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
@@ -329,6 +330,7 @@ class MailEngine extends PimdirEngine {
         String raw = client.enumerateMailboxRaw(session, mailboxOf(collection), request);
         JSONObject page = PimalayaClient.reply(raw);
         nameUnnamed(collection, page);
+        nameByMessageId(collection, page);
         remote(System.nanoTime() - started);
 
         listed.clear();
@@ -413,6 +415,50 @@ class MailEngine extends PimdirEngine {
         page.put("items", kept);
     }
 
+    /**
+     * Names an arrival by the pending create staged for it, matched on the
+     * {@code Message-ID} both carry, so the engine lands the create on it
+     * (pimdir SYNC §6) rather than pushing a second copy: the sent copy a
+     * provider filed itself. A member this source binds already is left
+     * named as it is.
+     */
+    void nameByMessageId(String collection, JSONObject page) throws JSONException {
+        JSONArray items = page.optJSONArray("items");
+        if (items == null || items.length() == 0) {
+            return;
+        }
+        Map<String, String> creates;
+        synchronized (STORE) {
+            creates = offline.pendingCreatesByMessageId(collection);
+        }
+        if (creates.isEmpty()) {
+            return;
+        }
+
+        List<String> handles = new ArrayList<>(items.length());
+        for (int index = 0; index < items.length(); index++) {
+            handles.add(items.getJSONObject(index).getString("handle"));
+        }
+        Map<String, String[]> bound;
+        synchronized (STORE) {
+            bound = offline.bound(collection, handles);
+        }
+
+        for (int index = 0; index < items.length(); index++) {
+            JSONObject item = items.getJSONObject(index);
+            JSONObject summary = item.optJSONObject("summary");
+            JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
+            String messageId = mail == null ? null : mail.optString("message_id", null);
+            if (messageId == null || bound.containsKey(item.getString("handle"))) {
+                continue;
+            }
+            String create = creates.remove(messageId);
+            if (create != null) {
+                item.put("linkId", create);
+            }
+        }
+    }
+
     /** The messages of a mailbox read by id with their summary, as listed. */
     protected JSONArray read(String collection, List<String> handles) {
         return client.nameMessages(session, mailboxOf(collection), handles);
@@ -480,16 +526,129 @@ class MailEngine extends PimdirEngine {
             case "setFlags":
                 return pushFlags(collection, mailbox, handle, change);
             case "remove":
-                client.deleteMessage(session, mailbox, handle);
-                return result(handle, true, null, null);
+                return pushRemove(mailbox, handle, change);
+            case "add":
+                return pushAdd(collection, mailbox, handle, change);
             default:
-                // NOTE: a message is not authored here and never edited: the
-                // one thing this app composes goes out through the outbox and
-                // is submitted rather than appended. Refusing keeps the
-                // placement staged instead of reporting a write nobody made.
+                // NOTE: a message is immutable, so no update is ever
+                // derived for one. Refusing keeps the placement staged
+                // instead of reporting a write nobody made.
                 Log.w("pimalaya", "unsupported mail push " + change.getString("op"));
                 return result(handle, false, null, null);
         }
+    }
+
+    /**
+     * A removal as staged (pimdir SYNC §4): one naming a destination is a
+     * server move, a plain one a delete for good.
+     *
+     * <p>A move's pending create is withdrawn once the move is delivered:
+     * the message arrives with the destination's next listing under the
+     * handle the server gave it there, which is the identity a message is
+     * filed under.
+     */
+    private JSONObject pushRemove(String mailbox, String handle, JSONObject change)
+            throws JSONException {
+        String to = change.isNull("to") ? null : change.optString("to", null);
+        if (to == null) {
+            destroy(mailbox, handle);
+            return result(handle, true, null, null);
+        }
+        if (!ownCollection(to)) {
+            String create = offline.pendingCreateOf(to, change.optString("linkId", handle));
+            return refuse(to, create, handle);
+        }
+
+        relocate(mailbox, handle, mailboxOf(to));
+        String linkId = change.optString("linkId", handle);
+        synchronized (STORE) {
+            String create = offline.pendingCreateOf(to, linkId);
+            if (create != null) {
+                offline.withdrawCreate(to, create);
+            }
+        }
+        return result(handle, true, null, null);
+    }
+
+    /**
+     * A create as staged (pimdir SYNC §4): one with an origin is a
+     * server-side copy, one without an append. Accepted with no handle
+     * assigned, the copy arriving with the mailbox's next listing under the
+     * handle the server gave it.
+     *
+     * <p>Three wait, rejected and so kept pending. A move's target is
+     * delivered by its source's removal, which relocates it. A sent copy
+     * waits for its submission, a copy filed for a message that was not
+     * sent being a lie the sender reads as a sent one. And off IMAP a
+     * create with no origin is a sent copy the provider files itself,
+     * which its listing lands.
+     */
+    private JSONObject pushAdd(String collection, String mailbox, String handle, JSONObject change)
+            throws JSONException {
+        String linkId = change.optString("linkId", PimdirStorage.nameOf(handle));
+        synchronized (STORE) {
+            // NOTE: withdrawn since the sync loaded it, by the move it was
+            // the target of, delivered on another session.
+            if (!offline.isPendingCreate(collection, linkId)
+                    || offline.moveSourceOf(collection, linkId) != null) {
+                return result(handle, false, null, null);
+            }
+        }
+
+        JSONObject origin = change.optJSONObject("origin");
+        if (origin != null) {
+            String from = origin.getString("collection");
+            if (!ownCollection(from)) {
+                return refuse(collection, linkId, handle);
+            }
+            copy(mailboxOf(from), origin.getString("handle"), mailbox);
+            return result(handle, true, null, null);
+        }
+
+        Account server = session.account();
+        if (PimalayaClient.isGraph(server)
+                || PimalayaClient.isGoogle(server)
+                || PimalayaClient.isJmap(server)) {
+            return "sent".equals(mail().roles().get(collection))
+                    ? result(handle, false, null, null)
+                    : refuse(collection, linkId, handle);
+        }
+        if (mail().submitting(linkId)) {
+            return result(handle, false, null, null);
+        }
+
+        byte[] source = mail().storedSource(collection, linkId);
+        if (source == null) {
+            return result(handle, false, null, null);
+        }
+        JSONArray flags = change.optJSONArray("flags");
+        append(mailbox, source, flags == null ? new JSONArray() : flags);
+        return result(handle, true, null, null);
+    }
+
+    /** Whether a collection is one of this account's mailboxes. */
+    private boolean ownCollection(String collection) {
+        return collection.startsWith(PimdirAccount.collectionId(accountId, ""));
+    }
+
+    /** Moves one message from {@code mailbox} into {@code target} on the server. */
+    protected void relocate(String mailbox, String handle, String target) {
+        client.relocateMessage(session, mailbox, handle, target);
+    }
+
+    /** Copies one message from {@code mailbox} into {@code target} on the server. */
+    protected void copy(String mailbox, String handle, String target) {
+        client.copyMessage(session, mailbox, handle, target);
+    }
+
+    /** Deletes one message for good on the server. */
+    protected void destroy(String mailbox, String handle) {
+        client.destroyMessage(session, mailbox, handle);
+    }
+
+    /** Appends one message to {@code mailbox} on the server. */
+    protected void append(String mailbox, byte[] source, JSONArray flags) {
+        client.appendMessage(session, mailbox, source, flags);
     }
 
     /**

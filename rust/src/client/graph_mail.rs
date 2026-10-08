@@ -28,6 +28,7 @@ use io_msgraph::v1::{
             },
             messages::{
                 MsgraphFlagStatus, MsgraphFollowupFlag, MsgraphMessage, MsgraphRecipient,
+                copy::MsgraphMessageCopy,
                 delta::{
                     MsgraphMessageDelta, MsgraphMessagesDelta, MsgraphMessagesDeltaParams,
                     MsgraphMessagesDeltaResponse,
@@ -42,7 +43,7 @@ use io_msgraph::v1::{
             send_mail::MsgraphMailSendMime,
         },
     },
-    send::{MSGRAPH_API_BASE, MsgraphSend},
+    send::{MSGRAPH_API_BASE, MsgraphNoResponse, MsgraphSend},
 };
 
 use io_pimdir::summary::{
@@ -50,6 +51,7 @@ use io_pimdir::summary::{
     mail::{PimdirMailSummary, decode},
 };
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::{
     client::{
@@ -301,21 +303,47 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(())
     }
 
-    /// Moves one message into `Deleted Items`, naming the mailbox it
-    /// landed in.
-    ///
-    /// The name is the bare display name: the trash is a top-level
-    /// folder, so its path is its name.
-    pub fn delete_graph_message(&mut self, token: &str, id: &str) -> Result<String, BridgeError> {
+    /// Moves one message into the folder `to` (a folder id).
+    pub fn relocate_graph_message(
+        &mut self,
+        token: &str,
+        id: &str,
+        to: &str,
+    ) -> Result<(), BridgeError> {
         let auth = HttpAuthBearer::new(token);
-
         let coroutine =
-            MsgraphMessageMove::new(&auth, "me", id, TRASH).map_err(|err| err.to_string())?;
+            MsgraphMessageMove::new(&auth, "me", id, to).map_err(|err| err.to_string())?;
         self.run_msgraph(coroutine)?;
+        Ok(())
+    }
 
+    /// Copies one message into the folder `to` (a folder id).
+    pub fn copy_graph_message(
+        &mut self,
+        token: &str,
+        id: &str,
+        to: &str,
+    ) -> Result<(), BridgeError> {
+        let auth = HttpAuthBearer::new(token);
         let coroutine =
-            MsgraphMailFolderGet::new(&auth, "me", TRASH).map_err(|err| err.to_string())?;
-        Ok(self.run_msgraph(coroutine)?.display_name)
+            MsgraphMessageCopy::new(&auth, "me", id, to).map_err(|err| err.to_string())?;
+        self.run_msgraph(coroutine)?;
+        Ok(())
+    }
+
+    /// Deletes one message for good, past `Recoverable Items`
+    /// (`permanentDelete`), which io-msgraph has no coroutine for.
+    pub fn destroy_graph_message(&mut self, token: &str, id: &str) -> Result<(), BridgeError> {
+        let auth = HttpAuthBearer::new(token);
+        let send = MsgraphSend::<MsgraphNoResponse>::with_method(
+            &auth,
+            "POST",
+            permanent_delete_url(id)?,
+            None,
+            Vec::new(),
+        );
+        self.run_msgraph(send)?;
+        Ok(())
     }
 
     /// Sends one RFC 5322 message, Graph filing the copy in `Sent Items`
@@ -851,6 +879,13 @@ fn address(recipient: &MsgraphRecipient) -> Option<PimdirAddress> {
     Some(PimdirAddress { address, name })
 }
 
+/// The `permanentDelete` action on one message (Graph v1.0).
+fn permanent_delete_url(id: &str) -> Result<Url, BridgeError> {
+    parse_graph_url(&format!(
+        "{MSGRAPH_API_BASE}me/messages/{id}/permanentDelete"
+    ))
+}
+
 #[cfg(test)]
 #[path = "graph_mail_tests.rs"]
 mod sync_tests;
@@ -861,7 +896,15 @@ mod tests {
         MsgraphEmailAddress, MsgraphMessage, MsgraphRecipient,
     };
 
-    use super::graph_summary;
+    use super::{graph_summary, permanent_delete_url};
+
+    #[test]
+    fn a_permanent_delete_posts_the_action() {
+        assert_eq!(
+            permanent_delete_url("AAMk-1=").unwrap().as_str(),
+            "https://graph.microsoft.com/v1.0/me/messages/AAMk-1=/permanentDelete"
+        );
+    }
 
     #[test]
     fn the_date_is_the_sent_date_not_the_reception() {

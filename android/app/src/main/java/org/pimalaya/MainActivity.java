@@ -3,6 +3,7 @@ package org.pimalaya;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.job.JobScheduler;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Insets;
@@ -15,12 +16,10 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.WindowInsets;
 import android.content.res.ColorStateList;
-import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ViewFlipper;
@@ -100,7 +99,6 @@ public class MainActivity extends Activity {
     static final int REQUEST_CONTACTS = 1;
     private static final int REQUEST_IMPORT = 2;
     private static final int REQUEST_EXPORT = 3;
-    private static final int REQUEST_NOTIFICATIONS = 4;
 
     /** The shared backend client, the single-thread io executor, the
      *  main-thread handler and the theme helper. */
@@ -300,10 +298,11 @@ public class MainActivity extends Activity {
         accounts.add(LocalBook.account());
         accounts.addAll(store.loadAll());
 
-        // NOTE: an app update or wiped WorkManager database silently
-        // drops periodic work; reconciling on launch converges it back
-        // onto the stored books.
-        BackgroundSync.reconcile(this, base.loadAllAddressbooks());
+        // NOTE: sync is manual only; an install upgraded from a build
+        // that scheduled background sync still holds its periodic jobs
+        // and their interval choices, dropped here.
+        getSystemService(JobScheduler.class).cancelAll();
+        deleteSharedPreferences("pimalaya.background");
 
         goHome();
 
@@ -656,23 +655,6 @@ public class MainActivity extends Activity {
         return android.graphics.Color.luminance(accent) > 0.5f
                 ? android.graphics.Color.BLACK
                 : android.graphics.Color.WHITE;
-    }
-
-    /**
-     * A background-sync interval spinner over the shared labels, flush
-     * with the surrounding text like the contact form's type spinners.
-     */
-    Spinner intervalSpinner() {
-        Spinner spinner = new Spinner(this);
-        ArrayAdapter<CharSequence> intervals =
-                ArrayAdapter.createFromResource(
-                        this, R.array.background_sync_intervals, R.layout.spinner_form_item);
-        intervals.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        spinner.setAdapter(intervals);
-        // NOTE: only the start goes flush; the caret-zone end padding
-        // stays, so a long entry ellipsizes before running under it.
-        spinner.setPadding(0, 0, spinner.getPaddingRight(), 0);
-        return spinner;
     }
 
     @Override
@@ -1130,8 +1112,7 @@ public class MainActivity extends Activity {
      * axis: a Local toast (cards in, out and changed against the phone's
      * Contacts app) first when any synced book mirrors there, then the
      * Remote toast, carrying the pending-conflicts line when contacts
-     * wait for manual resolution. The background notification keeps both
-     * axes on one card (SyncWorker.notifyReport).
+     * wait for manual resolution.
      */
     private void reportSync(SyncRunner.Outcome outcome) {
         if (outcome.failure != null) {
@@ -1980,7 +1961,7 @@ public class MainActivity extends Activity {
      * Android accounts, then runs the two-way phone engine pass per
      * subscribed book right here, behind the same spinner as the remote
      * sync (SyncService keeps serving the syncs the OS schedules on its
-     * own, SyncWorker the scheduled background ones). Needs the contacts
+     * own). Needs the contacts
      * permission, requested on first use; the full sync's own phone
      * passes stay silently off until this ran once.
      */
@@ -2016,22 +1997,6 @@ public class MainActivity extends Activity {
     /** The subscribed addressbooks set to mirror into the phone. */
     List<BookEntry> phoneSyncedBooks() {
         return runner.phoneSyncedBooks();
-    }
-
-    /**
-     * Asks for the notifications permission (Android 13+) when
-     * background sync gets enabled, so the sync-report notification
-     * (and its pending-conflicts warning) can show. Denying keeps
-     * background sync working, just silent.
-     */
-    void ensureNotificationsPermission() {
-        if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(
-                    new String[] {Manifest.permission.POST_NOTIFICATIONS},
-                    REQUEST_NOTIFICATIONS);
-        }
     }
 
     /**

@@ -68,10 +68,12 @@ public class PimdirContactsTest {
         String object = objectOf(collection, linkId);
         db.execSQL(
                 "INSERT INTO bindings(collection, link_id, source, handle, base_object,"
-                        + " base_revision) VALUES(?, ?, 'server', ?, ?, ?)"
+                        + " base_revision, base_present) VALUES(?, ?, 'server', ?, ?, ?, 1)"
                         + " ON CONFLICT(collection, link_id, source) DO UPDATE SET"
+                        + " handle = excluded.handle,"
                         + " base_object = excluded.base_object,"
-                        + " base_revision = excluded.base_revision",
+                        + " base_revision = excluded.base_revision,"
+                        + " base_present = 1",
                 new Object[] {collection, linkId, handle, object, revision});
         db.execSQL(
                 "UPDATE objects SET refcount = refcount + 1 WHERE hash = ?",
@@ -97,10 +99,14 @@ public class PimdirContactsTest {
     public void aSavedCardIsAPendingCreateUntilSomethingBindsIt() {
         contacts.save(BOOK, new Card("u1", null, null, vcard("u1", "Jane Doe")));
 
-        // No binding at all is what says "the server has never seen this": the
-        // engine reads such a placement as a create to push.
+        // A binding no base agreed on, under the provisional handle, is what
+        // says "the server has never seen this": the engine reads such a
+        // placement as a create to push.
         assertEquals(1, scalar("SELECT count(*) FROM items WHERE collection = ?", BOOK));
-        assertEquals(0, scalar("SELECT count(*) FROM bindings"));
+        assertEquals(0, scalar("SELECT count(*) FROM bindings WHERE base_present = 1"));
+        assertEquals(
+                PimdirStorage.provisionalOf("u1"),
+                stringOf("SELECT handle FROM bindings WHERE link_id = 'u1'"));
 
         List<PimdirContacts.Indexed> listed = contacts.list(BOOK);
         assertEquals(1, listed.size());
@@ -109,6 +115,18 @@ public class PimdirContactsTest {
         assertEquals("u1", listed.get(0).uid);
         assertEquals("the body round-trips through the blob directory",
                 vcard("u1", "Jane Doe"), listed.get(0).card.vcard);
+    }
+
+    @Test
+    public void aCardIsUnsyncedUntilItsServerAgreesOnIt() {
+        contacts.save(BOOK, new Card("u7", null, null, vcard("u7", "Gil")));
+        assertTrue("a create no push carried out", contacts.list(BOOK).get(0).unsynced);
+
+        bind(BOOK, "u7", "c7.vcf", "etag-7");
+        assertFalse(contacts.list(BOOK).get(0).unsynced);
+
+        contacts.save(BOOK, new Card("u7", null, null, vcard("u7", "Gilbert")));
+        assertTrue("an edit past the agreed body", contacts.list(BOOK).get(0).unsynced);
     }
 
     @Test
@@ -132,7 +150,7 @@ public class PimdirContactsTest {
     }
 
     @Test
-    public void deletingASyncedCardStagesItAndDeletingAFreshOneDropsIt() {
+    public void deletingACardStagesATombstone() {
         contacts.save(BOOK, new Card("u3", null, null, vcard("u3", "Carol")));
         contacts.save(BOOK, new Card("u4", null, null, vcard("u4", "Dan")));
         bind(BOOK, "u3", "c3.vcf", "etag-3");
@@ -141,10 +159,10 @@ public class PimdirContactsTest {
         contacts.stageDelete(BOOK, "u4");
 
         // The synced one has to survive as a tombstone, or the next sync has
-        // nothing to tell the server about; the never-pushed one has nobody to
-        // tell, so it simply goes.
+        // nothing to tell the server about; the never-pushed one too, a
+        // tombstone the engine withdraws on the next sync with nobody to tell.
         assertEquals(1, scalar("SELECT deleted FROM items WHERE link_id = 'u3'"));
-        assertEquals(0, scalar("SELECT count(*) FROM items WHERE link_id = 'u4'"));
+        assertEquals(1, scalar("SELECT deleted FROM items WHERE link_id = 'u4'"));
         assertTrue("neither is displayed any more", contacts.list(BOOK).isEmpty());
     }
 

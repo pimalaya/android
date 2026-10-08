@@ -1,5 +1,5 @@
 //! IMAP operations: the mailbox list, the envelope spine, one message
-//! whole, and the three verbs a reader applies to one, run over
+//! whole, and the verbs a push carries out on one, run over
 //! io-imap's sans-io coroutines and the same Java transport the WebDAV
 //! side uses.
 //!
@@ -27,6 +27,7 @@ use io_imap::{
         select::{ImapMailboxSelect, ImapMailboxSelectOptions},
         store::{ImapMessageStoreOptions, ImapMessageStoreSilent},
     },
+    rfc4315::expunge_uid::ImapMessageExpungeUid,
     rfc5161::enable::ImapExtensionEnable,
     rfc6851::r#move::{ImapMessageMove, ImapMessageMoveOptions},
     sasl::{
@@ -634,7 +635,7 @@ impl ImapSession<'_, '_, '_> {
     }
 }
 
-/// The write verbs: what a reader does to a message once it is open.
+/// The write verbs: what a push carries out on a message (pimdir SYNC §4).
 ///
 /// SELECT rather than the EXAMINE the reads use, since a read-only
 /// mailbox refuses both a STORE and a MOVE. Silent variants throughout:
@@ -670,112 +671,103 @@ impl ImapSession<'_, '_, '_> {
         ))
     }
 
-    /// Deletes one message into the account's trash, naming the mailbox
-    /// it landed in, or [`None`] when the account names no trash and the
-    /// message was marked `\Deleted` where it is instead.
-    ///
-    /// Nothing is expunged either way. With no UIDPLUS (RFC 4315) an
-    /// expunge is mailbox-wide, so it would take every message another
-    /// client had marked; with it, the message is already out of the
-    /// mailbox and expunging its copy in the trash is not what deleting
-    /// asked for.
-    pub fn delete_message(
-        &mut self,
-        mailbox: &str,
-        uid: &str,
-    ) -> Result<Option<String>, BridgeError> {
-        // NOTE: `None` says the message stayed where it is, whether
-        // because the account names no trash or because it already is
-        // in it. Both are the same answer to the caller, which uses it
-        // to decide whether the row leaves its mailbox.
-        let trash = match self.special_use("\\Trash")? {
-            Some(trash) if trash != mailbox => trash,
-            _ => {
-                self.store_flag(mailbox, uid, "\\Deleted", true)?;
-                return Ok(None);
-            }
-        };
-
+    /// Relocates one message into `target` (pimdir SYNC §4): MOVE (RFC
+    /// 6851) where the server has it, else COPY then the disposal of the
+    /// original [`Self::destroy`] makes.
+    pub fn relocate(&mut self, mailbox: &str, uid: &str, target: &str) -> Result<(), BridgeError> {
         self.select(mailbox)?;
-        self.move_or_copy(uid, &trash)?;
 
-        Ok(Some(trash))
-    }
-
-    /// The mailbox the server marks with one RFC 6154 special-use
-    /// attribute, or [`None`] when it marks none with it.
-    fn special_use(&mut self, attribute: &str) -> Result<Option<String>, BridgeError> {
-        Ok(self
-            .list()?
-            .into_iter()
-            .find(|(_, attributes)| {
-                attributes
-                    .iter()
-                    .any(|held| held.to_string().eq_ignore_ascii_case(attribute))
-            })
-            .map(|(name, _)| name))
-    }
-
-    /// Relocates one message of the selected mailbox into `target`:
-    /// MOVE where the server has it, else the COPY the extension folds
-    /// into one command, with the original left marked `\Deleted`.
-    fn move_or_copy(&mut self, uid: &str, target: &str) -> Result<(), BridgeError> {
-        let name: Mailbox<'static> = target
-            .to_string()
-            .try_into()
-            .map_err(|_| format!("Invalid mailbox name `{target}`"))?;
-
-        if self.state.capabilities.contains(&Capability::Move) {
-            self.run(ImapMessageMove::new(
-                uids(uid)?,
-                name,
-                ImapMessageMoveOptions { uid: true },
-            ))?;
-
-            return Ok(());
+        match relocation(&self.state.capabilities) {
+            Relocation::Move => {
+                self.run(ImapMessageMove::new(
+                    uids(uid)?,
+                    mailbox_name(target)?,
+                    ImapMessageMoveOptions { uid: true },
+                ))?;
+            }
+            Relocation::CopyThenDispose => {
+                self.run(ImapMessageCopy::new(
+                    uids(uid)?,
+                    mailbox_name(target)?,
+                    ImapMessageCopyOptions { uid: true },
+                ))?;
+                self.dispose(uid)?;
+            }
         }
 
+        Ok(())
+    }
+
+    /// Copies one message into `target`, the original kept.
+    pub fn copy(&mut self, mailbox: &str, uid: &str, target: &str) -> Result<(), BridgeError> {
+        self.select(mailbox)?;
         self.run(ImapMessageCopy::new(
             uids(uid)?,
-            name,
+            mailbox_name(target)?,
             ImapMessageCopyOptions { uid: true },
         ))?;
 
+        Ok(())
+    }
+
+    /// Deletes one message for good: `\Deleted`, then `UID EXPUNGE` of
+    /// that one message where the server announces UIDPLUS (RFC 4315).
+    ///
+    /// The marker alone otherwise: a plain EXPUNGE is mailbox-wide, so it
+    /// would take every message another client had marked.
+    pub fn destroy(&mut self, mailbox: &str, uid: &str) -> Result<(), BridgeError> {
+        self.select(mailbox)?;
+        self.dispose(uid)
+    }
+
+    /// Marks one message of the selected mailbox `\Deleted`, then expunges
+    /// it where [`disposal`] says the server can do so for that one alone.
+    fn dispose(&mut self, uid: &str) -> Result<(), BridgeError> {
         self.run(ImapMessageStoreSilent::new(
             uids(uid)?,
             StoreType::Add,
             vec![Flag::Deleted],
             ImapMessageStoreOptions { uid: true },
-        ))
+        ))?;
+
+        if disposal(&self.state.capabilities) == Disposal::Expunge {
+            self.run(ImapMessageExpungeUid::new(uids(uid)?))?;
+        }
+
+        Ok(())
     }
 
-    /// Files a copy of a sent message in the account's sent mailbox
-    /// (RFC 6154 `\Sent`), naming it, or [`None`] when the account names
-    /// none and nothing was filed.
-    ///
-    /// The copy is the sender's own record, so it is appended already
-    /// `\Seen`: it is not new mail and an unread count that climbs every
-    /// time the user writes something is wrong about what it counts.
-    pub fn append_sent(&mut self, message: Vec<u8>) -> Result<Option<String>, BridgeError> {
-        let Some(sent) = self.special_use("\\Sent")? else {
-            return Ok(None);
-        };
-
-        let name: Mailbox<'static> = sent
-            .clone()
-            .try_into()
-            .map_err(|_| format!("Invalid mailbox name `{sent}`"))?;
+    /// Appends one message to `mailbox` with `flags`, the push of a create
+    /// staged with no origin: the sent copy of a submitted message.
+    pub fn append(
+        &mut self,
+        mailbox: &str,
+        message: Vec<u8>,
+        flags: &[String],
+    ) -> Result<(), BridgeError> {
+        let mut owned = Vec::with_capacity(flags.len());
+        // NOTE: `\Recent` is the server's alone (RFC 3501 section 2.3.2),
+        // refused on an APPEND.
+        for flag in flags
+            .iter()
+            .filter(|flag| !flag.eq_ignore_ascii_case("\\Recent"))
+        {
+            let parsed = Flag::try_from(flag.as_str())
+                .map(|flag| flag.into_static())
+                .map_err(|_| format!("Invalid message marker `{flag}`"))?;
+            owned.push(parsed);
+        }
 
         self.run(ImapMessageAppend::new(
-            name,
+            mailbox_name(mailbox)?,
             message,
             ImapMessageAppendOptions {
-                flags: vec![Flag::Seen],
+                flags: owned,
                 ..Default::default()
             },
         ))?;
 
-        Ok(Some(sent))
+        Ok(())
     }
 
     /// Whether the mailbox is already open, either way: both a SELECT and
@@ -836,6 +828,47 @@ impl ImapSession<'_, '_, '_> {
 fn uids(uid: &str) -> Result<SequenceSet, BridgeError> {
     uid.try_into()
         .map_err(|_| BridgeError::from(format!("Invalid message id `{uid}`")))
+}
+
+/// One mailbox name as a command takes it.
+fn mailbox_name(name: &str) -> Result<Mailbox<'static>, BridgeError> {
+    name.to_string()
+        .try_into()
+        .map_err(|_| BridgeError::from(format!("Invalid mailbox name `{name}`")))
+}
+
+/// How a server relocates one message.
+#[derive(Debug, Eq, PartialEq)]
+enum Relocation {
+    /// One MOVE (RFC 6851).
+    Move,
+    /// A COPY, then the original disposed of as [`disposal`] says.
+    CopyThenDispose,
+}
+
+/// How a server disposes of one message marked `\Deleted`.
+#[derive(Debug, Eq, PartialEq)]
+enum Disposal {
+    /// `UID EXPUNGE` of that one message (RFC 4315).
+    Expunge,
+    /// The marker alone: an EXPUNGE without UIDPLUS is mailbox-wide.
+    Mark,
+}
+
+/// How a server announcing `capabilities` relocates one message.
+fn relocation(capabilities: &[Capability<'static>]) -> Relocation {
+    match capabilities.contains(&Capability::Move) {
+        true => Relocation::Move,
+        false => Relocation::CopyThenDispose,
+    }
+}
+
+/// How a server announcing `capabilities` disposes of one message.
+fn disposal(capabilities: &[Capability<'static>]) -> Disposal {
+    match capabilities.contains(&Capability::UidPlus) {
+        true => Disposal::Expunge,
+        false => Disposal::Mark,
+    }
 }
 
 /// One FETCH response's items as the member they name, with the
@@ -1017,7 +1050,32 @@ mod tests {
         flag::{Flag, FlagFetch},
     };
 
-    use super::named;
+    use super::{Capability, Disposal, Relocation, disposal, named, relocation};
+
+    #[test]
+    fn a_server_with_move_relocates_in_one_command() {
+        let capabilities = [Capability::Move, Capability::UidPlus];
+        assert_eq!(relocation(&capabilities), Relocation::Move);
+    }
+
+    #[test]
+    fn a_server_without_move_copies_then_disposes() {
+        assert_eq!(
+            relocation(&[Capability::UidPlus]),
+            Relocation::CopyThenDispose
+        );
+        assert_eq!(relocation(&[]), Relocation::CopyThenDispose);
+    }
+
+    #[test]
+    fn only_uidplus_expunges_one_message() {
+        assert_eq!(disposal(&[Capability::UidPlus]), Disposal::Expunge);
+        assert_eq!(
+            disposal(&[Capability::Move]),
+            Disposal::Mark,
+            "a plain EXPUNGE would take every message marked"
+        );
+    }
 
     #[test]
     fn a_fetched_header_block_names_the_member() {

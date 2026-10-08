@@ -335,28 +335,48 @@ final class Native {
     static native String composeMessage(String draft);
 
     /**
-     * Hands one stored message over, then files the copy the sender
-     * keeps. Returns {@code {mailbox}} naming where the copy landed, or
-     * a null mailbox when the account named no sent mailbox.
-     *
-     * <p>Two endpoints: the session is where mail is read, which is where
-     * the copy is filed, and the submit URL is where the message is
-     * handed over on a connection of its own. The envelope comes off the message's own address
-     * headers, the {@code Bcc} among them, and that header leaves the
-     * bytes on the way out.
+     * Hands one stored message over: the submit URL is where it goes, on a
+     * connection of its own, or the session's own API on Graph and Gmail.
+     * The envelope comes off the message's own address headers, the
+     * {@code Bcc} among them, and that header leaves the bytes on the way
+     * out. Returns an empty JSON object, or the error and whether it is
+     * permanent.
      */
     static native String submitMessage(
             Transport transport, long session, String submitUrl, byte[] source);
 
     /**
-     * Deletes one message into the account's trash: the mailbox the
-     * server marks {@code \Trash} (RFC 6154) or whose JMAP role is
-     * {@code trash}. Returns {@code {mailbox}} naming where it landed, or
-     * a null mailbox when the account named none and the message was
-     * marked deleted where it is instead.
+     * Moves one message from {@code mailbox} into {@code target}, the push
+     * of a removal naming a destination (pimdir SYNC §4). Returns an empty
+     * JSON object.
      */
-    static native String deleteMessage(
+    static native String relocateMessage(
+            Transport transport, long session, String mailbox, String id, String target);
+
+    /**
+     * Copies one message from {@code mailbox} into {@code target} on the
+     * server, the push of a create naming an origin. Returns an empty JSON
+     * object.
+     */
+    static native String copyMessage(
+            Transport transport, long session, String mailbox, String id, String target);
+
+    /**
+     * Deletes one message for good, the push of a removal naming no
+     * destination: on IMAP {@code \Deleted} then {@code UID EXPUNGE} with
+     * UIDPLUS (RFC 4315), the marker alone otherwise. Returns an empty JSON
+     * object.
+     */
+    static native String destroyMessage(
             Transport transport, long session, String mailbox, String id);
+
+    /**
+     * Appends one message to {@code mailbox} with {@code flags} (a JSON
+     * array of markers), the push of a create naming no origin. IMAP only.
+     * Returns an empty JSON object.
+     */
+    static native String appendMessage(
+            Transport transport, long session, String mailbox, byte[] source, String flags);
 
     /**
      * Lists the account's calendars off its base URL, CalDAV or JMAP.

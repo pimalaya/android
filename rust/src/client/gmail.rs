@@ -25,12 +25,15 @@ use io_gmail::{
             },
             labels::{GmailLabelType, list::GmailLabelsList},
             messages::{
-                GmailMessage, GmailMessageFormat, decode_raw, encode_raw,
+                GmailMessage, GmailMessageFormat, decode_raw,
+                delete::GmailMessageDelete,
+                encode_raw,
                 get::GmailMessageGet,
                 list::{GmailMessagesList, GmailMessagesListParams},
                 modify::GmailMessageModify,
                 send::GmailMessageSend,
                 trash::GmailMessageTrash,
+                untrash::GmailMessageUntrash,
             },
             users::get_profile::GmailProfileGet,
         },
@@ -64,6 +67,8 @@ pub(crate) mod units {
     pub(crate) const MESSAGES_GET: u32 = 5;
     pub(crate) const MESSAGES_MODIFY: u32 = 5;
     pub(crate) const MESSAGES_TRASH: u32 = 5;
+    pub(crate) const MESSAGES_UNTRASH: u32 = 5;
+    pub(crate) const MESSAGES_DELETE: u32 = 10;
     pub(crate) const MESSAGES_SEND: u32 = 100;
 }
 
@@ -131,6 +136,36 @@ impl GmailEnvelope {
 pub(crate) fn belongs(labels: &[String], label: &str) -> bool {
     let has = |id: &str| labels.iter().any(|carried| carried == id);
     has(label) && (label == SPAM || label == TRASH || !(has(SPAM) || has(TRASH)))
+}
+
+/// How Gmail relocates one message between two labels.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum GmailRelocation {
+    /// `messages.trash`, which takes it out of every other label's view.
+    Trash,
+    /// `messages.untrash`, then the target label added.
+    Untrash { add: Vec<String> },
+    /// The target label added and the source one removed.
+    Modify {
+        add: Vec<String>,
+        remove: Vec<String>,
+    },
+}
+
+/// How a message labelled `from` is relocated under `to`.
+pub(crate) fn relocation(from: &str, to: &str) -> GmailRelocation {
+    if to == TRASH {
+        return GmailRelocation::Trash;
+    }
+    if from == TRASH {
+        return GmailRelocation::Untrash {
+            add: vec![to.to_string()],
+        };
+    }
+    GmailRelocation::Modify {
+        add: vec![to.to_string()],
+        remove: vec![from.to_string()],
+    }
 }
 
 /// One page of a listing's ids, and the token of the next.
@@ -512,12 +547,66 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(self.run_gmail(units::MESSAGES_MODIFY, coroutine)?.label_ids)
     }
 
-    /// Moves one message into the trash, naming the mailbox it landed in.
-    pub fn delete_gmail_message(&mut self, token: &str, id: &str) -> Result<String, BridgeError> {
+    /// Relocates one message from the label `from` to the label `to`, the
+    /// way [`relocation`] says Gmail does it.
+    pub fn relocate_gmail_message(
+        &mut self,
+        token: &str,
+        id: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<(), BridgeError> {
         let auth = HttpAuthBearer::new(token);
-        let coroutine = GmailMessageTrash::new(&auth, "me", id).map_err(|err| err.to_string())?;
-        self.run_gmail(units::MESSAGES_TRASH, coroutine)?;
-        Ok(TRASH.into())
+        match relocation(from, to) {
+            GmailRelocation::Trash => {
+                let coroutine =
+                    GmailMessageTrash::new(&auth, "me", id).map_err(|err| err.to_string())?;
+                self.run_gmail(units::MESSAGES_TRASH, coroutine)?;
+            }
+            GmailRelocation::Untrash { add } => {
+                let coroutine =
+                    GmailMessageUntrash::new(&auth, "me", id).map_err(|err| err.to_string())?;
+                self.run_gmail(units::MESSAGES_UNTRASH, coroutine)?;
+                self.modify_gmail_labels(token, id, &add, &[])?;
+            }
+            GmailRelocation::Modify { add, remove } => {
+                self.modify_gmail_labels(token, id, &add, &remove)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Files one message under the label `to` too, the copy a label is.
+    pub fn copy_gmail_message(
+        &mut self,
+        token: &str,
+        id: &str,
+        to: &str,
+    ) -> Result<(), BridgeError> {
+        self.modify_gmail_labels(token, id, &[to.to_string()], &[])
+    }
+
+    /// Deletes one message for good, bypassing the trash.
+    pub fn destroy_gmail_message(&mut self, token: &str, id: &str) -> Result<(), BridgeError> {
+        let auth = HttpAuthBearer::new(token);
+        let coroutine = GmailMessageDelete::new(&auth, "me", id).map_err(|err| err.to_string())?;
+        self.run_gmail(units::MESSAGES_DELETE, coroutine)?;
+        Ok(())
+    }
+
+    /// Adds and removes labels on one message.
+    fn modify_gmail_labels(
+        &mut self,
+        token: &str,
+        id: &str,
+        add: &[String],
+        remove: &[String],
+    ) -> Result<(), BridgeError> {
+        let auth = HttpAuthBearer::new(token);
+        let coroutine =
+            GmailMessageModify::new(&auth, "me", id, add, remove).map_err(|err| err.to_string())?;
+        self.run_gmail(units::MESSAGES_MODIFY, coroutine)?;
+        Ok(())
     }
 
     /// Sends one RFC 5322 message, Gmail filing the copy under `SENT`
@@ -629,6 +718,32 @@ mod tests {
             name: name.into(),
             value: value.into(),
         }
+    }
+
+    #[test]
+    fn a_relocation_into_the_trash_is_a_trash() {
+        assert_eq!(relocation("INBOX", TRASH), GmailRelocation::Trash);
+    }
+
+    #[test]
+    fn a_relocation_out_of_the_trash_untrashes_first() {
+        assert_eq!(
+            relocation(TRASH, "Label_7"),
+            GmailRelocation::Untrash {
+                add: vec!["Label_7".into()]
+            }
+        );
+    }
+
+    #[test]
+    fn a_relocation_between_labels_swaps_them() {
+        assert_eq!(
+            relocation(INBOX, "Label_7"),
+            GmailRelocation::Modify {
+                add: vec!["Label_7".into()],
+                remove: vec![INBOX.into()],
+            }
+        );
     }
 
     #[test]

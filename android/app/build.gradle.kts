@@ -116,11 +116,6 @@ dependencies {
     // Another small, standalone AndroidX ViewGroup, no theme needed.
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 
-    // Scheduled background sync: one periodic worker per addressbook
-    // (BackgroundSync schedules, SyncWorker runs the pass). The plain
-    // Java runtime, no KTX.
-    implementation("androidx.work:work-runtime:2.10.0")
-
     // JVM-only test dependencies (nothing ships in the APK). The org.json
     // artifact stands in for the android.jar stubs so Mapping runs on the
     // host JVM.

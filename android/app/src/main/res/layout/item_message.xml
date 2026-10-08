@@ -171,6 +171,15 @@
                         android:textColor="?android:attr/textColorSecondary"
                         android:textSize="14sp" />
 
+                    <ImageView
+                        android:id="@+id/message_unsynced"
+                        android:layout_width="16dp"
+                        android:layout_height="16dp"
+                        android:layout_marginStart="6dp"
+                        android:contentDescription="@string/row_unsynced"
+                        android:src="@drawable/ic_cloud_upload"
+                        android:visibility="gone" />
+
                 </LinearLayout>
 
             </LinearLayout>

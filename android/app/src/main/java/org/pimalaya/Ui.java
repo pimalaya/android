@@ -1,9 +1,12 @@
 package org.pimalaya;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.text.InputType;
 import android.util.TypedValue;
+import android.view.View;
 import android.widget.EditText;
+import android.widget.ImageView;
 
 /**
  * Theme and density helpers every hand-built view needs, shared by the
@@ -32,6 +35,24 @@ final class Ui {
             return context.getResources().getColor(value.resourceId, context.getTheme());
         }
         return value.data;
+    }
+
+    /**
+     * A row's sync mark: shown while the store holds a change of the item
+     * the server has not taken, in the error colour once the server refused
+     * it for good.
+     */
+    void syncMark(ImageView mark, boolean unsynced, boolean refused) {
+        mark.setVisibility(unsynced ? View.VISIBLE : View.GONE);
+        if (!unsynced) {
+            return;
+        }
+        int color =
+                resolveColor(
+                        refused ? android.R.attr.colorError : android.R.attr.textColorSecondary);
+        mark.setImageTintList(ColorStateList.valueOf(color));
+        mark.setContentDescription(
+                context.getString(refused ? R.string.row_refused : R.string.row_unsynced));
     }
 
     /** Density-independent pixels to raw pixels. */

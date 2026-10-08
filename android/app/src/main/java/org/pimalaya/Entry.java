@@ -20,12 +20,19 @@ final class Entry {
     final String hash;
     final boolean conflicted;
 
+    /** True when the card holds a change its server has not taken yet. */
+    final boolean unsynced;
+
     /** The replica's display name from its index, id fallback. */
     String displayName() {
         return name.isEmpty() ? card.id : name;
     }
 
-    Entry(Addressbook book, String accountEmail, PimdirContacts.Indexed indexed) {
+    Entry(
+            Addressbook book,
+            String accountEmail,
+            PimdirContacts.Indexed indexed,
+            boolean unsynced) {
         this.book = book;
         this.accountEmail = accountEmail;
         this.card = indexed.card;
@@ -36,5 +43,6 @@ final class Entry {
         this.uid = indexed.uid;
         this.hash = indexed.hash;
         this.conflicted = indexed.conflicted;
+        this.unsynced = unsynced;
     }
 }

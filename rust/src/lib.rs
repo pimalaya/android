@@ -22,9 +22,10 @@
 //!
 //! Mail: `syncMail` walks an account's mailboxes, `fetchMessageSource`
 //! reads one whole and `parseMessage` turns those bytes into what a
-//! reader draws, `setMessageFlag` and `deleteMessage` are what a reader
-//! writes back, and `sendMessage` composes a draft to RFC 5322 and
-//! hands it to the account's submission server.
+//! reader draws, `setMessageFlag`, `relocateMessage`, `copyMessage`,
+//! `destroyMessage` and `appendMessage` are what a push writes back,
+//! and `sendMessage` composes a draft to RFC 5322 and hands it to the
+//! account's submission server.
 //!
 //! Calendar: `listCalendars` and `listEvents` read, `expandEvent` and
 //! `readEvent` project one object for the page that shows it, and

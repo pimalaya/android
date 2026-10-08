@@ -463,12 +463,69 @@ pub extern "system" fn Java_org_pimalaya_client_Native_setMessageFlag<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// `Native.deleteMessage`: deletes one message into the account's trash.
-/// Returns `{"mailbox": ".."}` naming where it landed, `{"mailbox": null}`
-/// when the account named no trash and the message was marked deleted
-/// where it is, or `{"error": ".."}`.
+/// `Native.relocateMessage`: moves one message from `mailbox` into
+/// `target` (pimdir SYNC §4, a `Remove` carrying `to`). Returns an empty
+/// JSON object, or `{"error": ".."}`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_deleteMessage<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_relocateMessage<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    handle: i64,
+    mailbox: JString<'local>,
+    id: JString<'local>,
+    target: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let mailbox = read_string(env, &mailbox);
+        let id = read_string(env, &id);
+        let target = read_string(env, &target);
+
+        let mut client = Client::new(env, &transport);
+        let json = match relocate(&mut client, handle, &mailbox, &id, &target) {
+            Ok(()) => String::from("{}"),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.copyMessage`: copies one message from `mailbox` into `target`
+/// on the server (pimdir SYNC §4, an `Add` carrying an origin). Returns an
+/// empty JSON object, or `{"error": ".."}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_copyMessage<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    handle: i64,
+    mailbox: JString<'local>,
+    id: JString<'local>,
+    target: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let mailbox = read_string(env, &mailbox);
+        let id = read_string(env, &id);
+        let target = read_string(env, &target);
+
+        let mut client = Client::new(env, &transport);
+        let json = match copy(&mut client, handle, &mailbox, &id, &target) {
+            Ok(()) => String::from("{}"),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.destroyMessage`: deletes one message for good (pimdir SYNC §4,
+/// a `Remove` carrying no `to`). Returns an empty JSON object, or
+/// `{"error": ".."}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_destroyMessage<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
@@ -481,8 +538,37 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteMessage<'local>(
         let id = read_string(env, &id);
 
         let mut client = Client::new(env, &transport);
-        let json = match delete_message(&mut client, handle, &mailbox, &id) {
-            Ok(trash) => json!({ "mailbox": trash }).to_string(),
+        let json = match destroy(&mut client, handle, &mailbox, &id) {
+            Ok(()) => String::from("{}"),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.appendMessage`: appends one message to `mailbox` with `flags`
+/// (a JSON array of markers), the push of a create staged with no origin.
+/// IMAP only. Returns an empty JSON object, or `{"error": ".."}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_appendMessage<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    handle: i64,
+    mailbox: JString<'local>,
+    source: JByteArray<'local>,
+    flags: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let mailbox = read_string(env, &mailbox);
+        let raw = env.convert_byte_array(&source).unwrap_or_default();
+        let flags = read_string(env, &flags);
+
+        let mut client = Client::new(env, &transport);
+        let json = match append(&mut client, handle, &mailbox, raw, &flags) {
+            Ok(()) => String::from("{}"),
             Err(err) => error_json(err),
         };
 
@@ -519,32 +605,102 @@ fn set_flag(
     session.imap(client)?.store_flag(mailbox, id, flag, add)
 }
 
-/// Deletes one message with whichever backend the session speaks.
-fn delete_message(
+/// Relocates one message with whichever backend the session speaks.
+fn relocate(
     client: &mut Client<'_, '_>,
     handle: i64,
     mailbox: &str,
     id: &str,
-) -> Result<Option<String>, BridgeError> {
+    target: &str,
+) -> Result<(), BridgeError> {
+    let session = unsafe { session::borrow(handle) }?;
+    if session.is_imap() {
+        return session.imap(client)?.relocate(mailbox, id, target);
+    }
+
+    let from = mailbox_id(client, session, mailbox)?;
+    let to = mailbox_id(client, session, target)?;
+    if session.is_jmap() {
+        let url = session.jmap_url()?;
+        return client.relocate_jmap_message(&url, &session.credentials(), id, &from, &to);
+    }
+    if session.is_graph() {
+        return client.relocate_graph_message(session.credentials().password, id, &to);
+    }
+
+    client.relocate_gmail_message(session.credentials().password, id, &from, &to)?;
+    // NOTE: dropped rather than patched, so a later read in the same run
+    // asks Gmail what the change left.
+    session.gmail_run().forget(id);
+    Ok(())
+}
+
+/// Copies one message with whichever backend the session speaks.
+fn copy(
+    client: &mut Client<'_, '_>,
+    handle: i64,
+    mailbox: &str,
+    id: &str,
+    target: &str,
+) -> Result<(), BridgeError> {
+    let session = unsafe { session::borrow(handle) }?;
+    if session.is_imap() {
+        return session.imap(client)?.copy(mailbox, id, target);
+    }
+
+    let to = mailbox_id(client, session, target)?;
+    if session.is_jmap() {
+        let url = session.jmap_url()?;
+        return client.copy_jmap_message(&url, &session.credentials(), id, &to);
+    }
+    if session.is_graph() {
+        return client.copy_graph_message(session.credentials().password, id, &to);
+    }
+
+    client.copy_gmail_message(session.credentials().password, id, &to)?;
+    session.gmail_run().forget(id);
+    Ok(())
+}
+
+/// Deletes one message for good with whichever backend the session
+/// speaks.
+fn destroy(
+    client: &mut Client<'_, '_>,
+    handle: i64,
+    mailbox: &str,
+    id: &str,
+) -> Result<(), BridgeError> {
     let session = unsafe { session::borrow(handle) }?;
     if session.is_jmap() {
         let url = session.jmap_url()?;
-        return client
-            .delete_jmap_message(&url, &session.credentials(), id)
-            .map(Some);
+        return client.destroy_jmap_message(&url, &session.credentials(), id);
     }
     if session.is_graph() {
-        return client
-            .delete_graph_message(session.credentials().password, id)
-            .map(Some);
+        return client.destroy_graph_message(session.credentials().password, id);
     }
     if session.is_gmail() {
-        let trash = client.delete_gmail_message(session.credentials().password, id)?;
+        client.destroy_gmail_message(session.credentials().password, id)?;
         session.gmail_run().forget(id);
-        return Ok(Some(trash));
+        return Ok(());
     }
 
-    session.imap(client)?.delete_message(mailbox, id)
+    session.imap(client)?.destroy(mailbox, id)
+}
+
+/// Appends one message; only an IMAP session files mail it was handed.
+fn append(
+    client: &mut Client<'_, '_>,
+    handle: i64,
+    mailbox: &str,
+    raw: Vec<u8>,
+    flags: &str,
+) -> Result<(), BridgeError> {
+    let flags: Vec<String> = from_str(flags).map_err(|err| format!("Invalid markers: {err}"))?;
+    let session = unsafe { session::borrow(handle) }?;
+    if !session.is_imap() {
+        return Err("Only an IMAP session appends a message".into());
+    }
+    session.imap(client)?.append(mailbox, raw, &flags)
 }
 
 /// `Native.composeMessage`: one draft to the RFC 5322 message an outbox
@@ -572,13 +728,10 @@ pub extern "system" fn Java_org_pimalaya_client_Native_composeMessage<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// `Native.submitMessage`: hands one stored message over, then files a
-/// copy in the account's sent mailbox. Returns `{"mailbox": ".."}` naming
-/// where the copy landed, `{"mailbox": null}` when the account named no
-/// sent mailbox, or `{"error": ".."}`.
+/// `Native.submitMessage`: hands one stored message over. Returns an
+/// empty JSON object, or `{"error": "..", "permanent": bool}`.
 ///
-/// The submission opens its own connection, SMTP being a second server;
-/// the copy is filed on the session, which is already open.
+/// The submission opens its own connection, SMTP being a second server.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
     mut env: EnvUnowned<'local>,
@@ -594,7 +747,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
 
         let mut client = Client::new(env, &transport);
         let json = match submit_message(&mut client, handle, &submit_url, &raw) {
-            Ok(sent) => json!({ "mailbox": sent }).to_string(),
+            Ok(()) => String::from("{}"),
             Err(refused) => {
                 json!({ "error": refused.message, "permanent": refused.permanent }).to_string()
             }
@@ -637,14 +790,17 @@ impl Refused {
     }
 }
 
-/// Submits one stored message over SMTP and files the copy the sender
-/// keeps.
+/// Submits one stored message, over SMTP or the session's own API.
+///
+/// The submission alone: the sent copy is a create staged in the sent
+/// mailbox when the message was queued, landed by the provider's own
+/// filing or pushed as an append on IMAP.
 fn submit_message(
     client: &mut Client<'_, '_>,
     handle: i64,
     submit_url: &str,
     raw: &[u8],
-) -> Result<Option<String>, Refused> {
+) -> Result<(), Refused> {
     let session = unsafe { session::borrow(handle) }.map_err(Refused::transient)?;
     if session.is_jmap() {
         return Err(Refused::transient(
@@ -653,14 +809,13 @@ fn submit_message(
     }
     if session.is_graph() || session.is_gmail() {
         // NOTE: Graph and Gmail submit through the session they read from
-        // and file the sent copy themselves, so there is no copy to append
-        // and no mailbox to name: the next sync reads it from there.
+        // and file the sent copy themselves.
         let token = session.credentials().password;
         let sent = match session.is_graph() {
             true => client.send_graph_message(token, raw),
             false => client.send_gmail_message(token, raw),
         };
-        return sent.map(|()| None).map_err(|err| Refused {
+        return sent.map_err(|err| Refused {
             permanent: matches!(err.status, Some(400 | 403 | 404 | 413 | 422)),
             message: err.to_string(),
         });
@@ -673,30 +828,8 @@ fn submit_message(
 
     let composed = mail::envelope(raw).map_err(Refused::transient)?;
     let submit = parse_url(submit_url).map_err(Refused::transient)?;
-    client::smtp::send(client, &submit, &session.credentials(), &composed).map_err(|err| {
-        Refused {
-            permanent: err.is_permanent(),
-            message: err.to_string(),
-        }
-    })?;
-
-    // NOTE: after the submission and never instead of it. A copy filed
-    // for a message that was not sent is a lie the sender reads as a
-    // sent message; a message sent with no copy filed is only a missing
-    // record, which the next sync cannot invent but nobody loses over.
-    //
-    // Which is also why a failure here is not the caller's to retry:
-    // the message has gone, and running the action again to file its
-    // copy would send it a second time.
-    let filed = session
-        .imap(client)
-        .and_then(|mut imap| imap.append_sent(composed.message));
-
-    match filed {
-        Ok(mailbox) => Ok(mailbox),
-        Err(err) => {
-            log::warn!("could not file the sent copy: {err}");
-            Ok(None)
-        }
-    }
+    client::smtp::send(client, &submit, &session.credentials(), &composed).map_err(|err| Refused {
+        permanent: err.is_permanent(),
+        message: err.to_string(),
+    })
 }
