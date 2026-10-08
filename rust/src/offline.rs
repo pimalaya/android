@@ -138,7 +138,8 @@ pub fn mutate<'local>(
 ) -> Result<(), BridgeError> {
     let mutation: MutationJson =
         from_str(mutation).map_err(|err| format!("Invalid mutation: {err}"))?;
-    Driver::new(env, driver).run(PimdirMutate::new(collection, mutation.into()))
+    let mutation = PimdirMutation::try_from(mutation)?;
+    Driver::new(env, driver).run(PimdirMutate::new(collection, mutation))
 }
 
 /// Upcall handle to the Java `OfflineDriver` servicing engine yields.
@@ -1081,7 +1082,12 @@ enum MutationJson {
         flags: Vec<String>,
         hash: String,
         size: usize,
-        body: String,
+        #[serde(default)]
+        body: Option<String>,
+        /// The body as base64, in place of `body` when it is not UTF-8
+        /// text (a restored message's 8-bit parts).
+        #[serde(default)]
+        body_base64: Option<String>,
         #[serde(default)]
         summary: Option<SummaryJson>,
         /// Stated rather than optional: a create has no stored key to keep,
@@ -1091,9 +1097,11 @@ enum MutationJson {
     },
 }
 
-impl From<MutationJson> for PimdirMutation {
-    fn from(wire: MutationJson) -> Self {
-        match wire {
+impl TryFrom<MutationJson> for PimdirMutation {
+    type Error = String;
+
+    fn try_from(wire: MutationJson) -> Result<Self, String> {
+        Ok(match wire {
             MutationJson::SetFlags { handle, flags } => Self::SetFlags {
                 handle: PimdirHandle(handle),
                 flags: PimdirFlags::from_iter(flags),
@@ -1130,6 +1138,7 @@ impl From<MutationJson> for PimdirMutation {
                 hash,
                 size,
                 body,
+                body_base64,
                 summary,
                 sort_key,
             } => Self::Add {
@@ -1139,11 +1148,15 @@ impl From<MutationJson> for PimdirMutation {
                     hash: PimdirHash(hash),
                     size,
                 },
-                body: body.into_bytes(),
+                body: match (body, body_base64) {
+                    (Some(body), _) => body.into_bytes(),
+                    (None, Some(encoded)) => unbase64(&encoded)?,
+                    (None, None) => return Err("An add carries no body".into()),
+                },
                 summary: summary.map(Into::into),
                 sort_key: sort_key.into(),
             },
-        }
+        })
     }
 }
 
@@ -1429,7 +1442,7 @@ mod tests {
     };
 
     fn mutation(json: &str) -> PimdirMutation {
-        from_str::<MutationJson>(json).unwrap().into()
+        from_str::<MutationJson>(json).unwrap().try_into().unwrap()
     }
 
     #[test]
@@ -1452,6 +1465,16 @@ mod tests {
                 target: PimdirCollectionId("a/Archive".into()),
             }
         );
+    }
+
+    #[test]
+    fn an_add_carries_bytes_in_base64() {
+        let PimdirMutation::Add { body, .. } = mutation(
+            r#"{"op": "add", "linkId": "l", "hash": "h", "size": 3, "bodyBase64": "/wBh"}"#,
+        ) else {
+            panic!("an add");
+        };
+        assert_eq!(body, b"\xff\x00a");
     }
 
     fn page(json: &str) -> PimdirEnumerated {

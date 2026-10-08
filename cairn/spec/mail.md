@@ -8,7 +8,7 @@ status: current
 
 Mail is a list of summaries: a pass connects to an account on a few sessions and lists its mailboxes on them side by side, storing every message as an item with its summary and sort key and no body, which is what pimdir's detail ladder calls the meta level. The merged list is one descending scan of the sort key across the mail collections the filter lets through, read a page at a time around the scroll position and sized by a count, so a listing never parses a date and never holds the whole store.
 
-A message rises off that rung by being opened: what the open fetched is filed as the item's object, so the item reaches full and every read after it, offline included, is a read of the store.
+A message rises off that rung by being opened, or by the body step its account's offline setting runs behind the list: what was fetched is filed as the item's object, as the bytes the server sent, so the item reaches full and every read after it, offline included, is a read of the store.
 
 Every mailbox runs io-pimdir's sync, on a session of the pass's pool, from its floor: its first pass lists its 50 newest messages, the floor being the oldest `Date` among them, and the end of the list and a background fill widen it a chunk of messages at a time toward the account's bound, all of its mail or the last N months on the `Date` header. One LIST names the mailboxes and a few are listed at once, each on its own session, the inbox begun first. A mailbox carrying a `(UIDVALIDITY, HIGHESTMODSEQ)` checkpoint on a QRESYNC server is selected with the QRESYNC parameter, the server streams what moved and what went, and the messages that moved are read for their header fields in the same pass. Anything else is a round: the UIDs `UID SEARCH` finds in the scope, newest first, read 500 at a time by `UID FETCH` for their markers, their size and the header fields pimdir STORAGE Annex A derives a summary from, `Content-Type` among them and no `BODYSTRUCTURE`. The connection ENABLEs CONDSTORE and QRESYNC once when it opens, which RFC 7162 section 3.1 requires before the parameter may be used at all. Every message a page lists arrives named, so it is listed the moment its page lands: there is no probe and no upgrade after the sync. Each page is one write with the round's resume cursor, so a pass cut off resumes below its last page, and only the round's last page retires what it found absent, within the bound; mail outside the bound is never deleted by a sync, only by narrowing the bound.
 
@@ -238,7 +238,7 @@ A submission the server refuses for good, which is a 5yz reply (RFC 5321 section
 - THEN the submission's row is cancelled anyway, nothing offers the message again, and the copy stays pending for the next sync
 
 ### Requirement: An opened message is stored and read back
-The app SHALL store an opened message as its item's object, as the bytes the server sent, and SHALL render a later open from the store without reaching the network. Fetching SHALL happen only for a message the store does not hold.
+The app SHALL store an opened message as its item's object, as the bytes the server sent, and SHALL render a later open from the store without reaching the network, whether the body was stored by an open or by the body step. Fetching SHALL happen only for a message the store does not hold.
 
 #### Scenario: The same message twice
 - GIVEN a message opened once
@@ -253,6 +253,11 @@ The app SHALL store an opened message as its item's object, as the bytes the ser
 #### Scenario: Offline
 - GIVEN a stored message and no network
 - WHEN it is opened
+- THEN it renders
+
+#### Scenario: Downloaded in the background
+- GIVEN a message whose body the body step stored
+- WHEN it is opened with no network
 - THEN it renders
 
 ### Requirement: A message body is read through the bridge
@@ -329,12 +334,12 @@ A mail round SHALL list every message of a mailbox within its scope (its floor, 
 - THEN older messages are neither fetched nor listed, and none already stored is deleted
 
 ### Requirement: An account bounds its mail
-An account's settings SHALL offer to sync all of its mail or the last 1, 3, 6, 12 or 24 months, the floor being the first day of the month that many months back, on the `Date` header (a message with no usable date in every scope). A mailbox's floor SHALL never go below the bound: a chunk reaching past it stops at it, and a mailbox whose floor is the bound is whole. A provider's received-date filter SHALL only narrow a listing, two days below the floor (IMAP `SENTSINCE` one day below). Widening the bound SHALL have the fill carry on below the old floor, chunk by chunk. Narrowing it SHALL collect the stored messages dated below the new floor that owe nothing to the server, their mailboxes keeping them there.
+An account's settings SHALL offer to sync all of its mail or the last 1, 3, 6, 12 or 24 months, the floor being the first day of the month that many months back, on the `Date` header (a message with no usable date in every scope). A mailbox's floor SHALL never go below its bound: its account's, or none for a mailbox kept whole or an account set to whole mailbox. A chunk reaching past the bound stops at it, and a mailbox whose floor is the bound is whole. A provider's received-date filter SHALL only narrow a listing, two days below the floor (IMAP `SENTSINCE` one day below). Widening the bound SHALL have the fill carry on below the old floor, chunk by chunk. Narrowing it SHALL collect the stored messages dated below the new floor that owe nothing to the server, their mailboxes keeping them there, except in a mailbox kept whole.
 
 #### Scenario: Narrowing to a year
 - GIVEN an account syncing all of its mail
 - WHEN its bound is set to the last year
-- THEN the messages older than that leave the store, except one with a change not pushed yet
+- THEN the messages older than that leave the store, except one with a change not pushed yet or one in a mailbox kept whole
 - AND nothing is deleted on the server
 
 #### Scenario: Widening again
@@ -496,3 +501,50 @@ Sending SHALL stage the message as composed into the mailbox the account marks a
 - GIVEN a message sent from a Graph account
 - WHEN the next sync lists `Sent Items`
 - THEN the staged copy is landed on Graph's own copy, and Sent holds one
+
+### Requirement: An account chooses which bodies it keeps offline
+A mail account's settings SHALL offer three offline policies: bodies on open (the default), where a body is fetched when its message is opened; bodies in the background; and whole mailbox, which sets the account's bound to all mail and holds it there, the bound's choice dimmed, and downloads bodies in the background. The settings SHALL also offer a switch, off by default, to download bodies on a metered network. Both SHALL be committed when picked. The bound SHALL be the only limit on what is kept: there is no storage cap, space being freed from Deleted items and by narrowing the bound.
+
+#### Scenario: The default
+- GIVEN a mail account just added
+- WHEN a pass lists its mailboxes
+- THEN no body is downloaded until a message is opened
+
+#### Scenario: Whole mailbox
+- GIVEN an account bounded to the last 6 months
+- WHEN its offline policy is set to whole mailbox
+- THEN its bound reads all mail and cannot be changed, the fill lists below the old floor, and every listed body is downloaded
+
+### Requirement: A mailbox can be downloaded whole
+A mailbox's row on the mail filter page SHALL offer "Download", which after a confirmation keeps that mailbox whole whatever its account's policy: its scope SHALL be all of its mail, past the account's bound, the fill SHALL widen it below its floor, narrowing the account's bound SHALL NOT collect it, and every listed body SHALL be downloaded. The row SHALL then say it is kept whole and offer "Stop", which returns it to the account's bound and policy, what is stored staying until the bound is narrowed again.
+
+#### Scenario: An archive kept whole
+- GIVEN an account bounded to the last year, with bodies on open
+- WHEN its Archive is downloaded from the filter page
+- THEN every message of the Archive is listed and its body stored, and the account's other mailboxes keep their year and fetch bodies on open
+
+### Requirement: Bodies download behind the list
+For each account that is on, and whose policy downloads bodies or holds a mailbox kept whole, the app SHALL raise the listed messages lacking a body to `Full` through the engine's upgrade, after each pass and each fill step while the app is open: newest first, the mailboxes the mail filter shows before the others, at most 24 bodies an account a step, side by side on the account's pool. A message dated below its mailbox's bound SHALL NOT be downloaded, nor an undated one where a bound applies, nor a pending create. A body the store already holds under the same link id SHALL be linked rather than fetched. The body SHALL be stored as the bytes the server sent, its base moved to it, its summary and sort key kept, its attachment mark restated from its parts. The step SHALL run only while the app is in the foreground, no other sync runs, and a network is there that is unmetered unless the account allows a metered one; it SHALL never be periodic work, and SHALL stop when the user starts a sync or leaves the app. A body the server fails to hand over SHALL be left below `Full` and tried by a later run; an account whose download fails as a whole (no session, an expired token) SHALL leave the run. Gmail body reads SHALL count against the account's per-minute quota units like any other read, with no pacing of their own.
+
+#### Scenario: Within the bound only
+- GIVEN an account bounded to the last year with bodies in the background, holding a message from yesterday and one from three years back
+- WHEN the body step runs
+- THEN yesterday's body is downloaded and stored, the other stays a summary
+
+#### Scenario: A metered network
+- GIVEN an account with bodies in the background on mobile data
+- WHEN a pass ends
+- THEN no body is downloaded until an unmetered network is back, or the account allows metered networks
+
+#### Scenario: The same message under two labels
+- GIVEN a Gmail message under two labels, its body downloaded in one
+- WHEN the body step reaches the other
+- THEN the body is linked from the store and not read again
+
+### Requirement: The drawer shows bodies left to download
+While the body step runs for an account, the account's pill in the drawer SHALL say how many bodies it has left to download, in place of when it last synced, and SHALL go back to that once the step ends.
+
+#### Scenario: A first whole download
+- GIVEN an account set to whole mailbox
+- WHEN the drawer is opened while its bodies download
+- THEN its pill counts the messages left, falling as they land

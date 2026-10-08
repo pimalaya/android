@@ -1,5 +1,6 @@
 package org.pimalaya;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -304,6 +305,28 @@ public class DeletedItemsTest {
         assertNotNull(flags);
         assertTrue(flags, flags.contains("Seen"));
         assertFalse("restored, no longer marked deleted", flags.contains("Deleted"));
+        assertTrue(deleted.list().isEmpty());
+    }
+
+    @Test
+    public void aLatin1MailIsRestoredByteForByte() throws Exception {
+        String inbox = inbox();
+        retainedMail(inbox, "43", new JSONArray());
+        byte[] source =
+                ("Message-ID: <m43@example.org>\r\nSubject: Café\r\n"
+                                + "Content-Type: text/plain; charset=iso-8859-1\r\n"
+                                + "Content-Transfer-Encoding: 8bit\r\n\r\ndéjà vu\r\n")
+                        .getBytes(StandardCharsets.ISO_8859_1);
+        MailStore store = new MailStore(context, pimdir);
+        store.saveSource(inbox, "43", source);
+        drop(inbox, "43");
+
+        deleted.restore(mailEngine(), only(), inbox);
+
+        assertEquals(0, scalar("SELECT deleted FROM items WHERE link_id = '43'"));
+        assertArrayEquals(source, store.storedSource(inbox, "43"));
+        assertEquals(PimdirHash.of(source),
+                string("SELECT object_hash FROM items WHERE link_id = '43'"));
         assertTrue(deleted.list().isEmpty());
     }
 }

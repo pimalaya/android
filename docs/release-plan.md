@@ -11,8 +11,8 @@ Gathers the work agreed on 2026-10-08 toward a first public release, after a few
 | 1b | trash-disposal-is-a-move | pimdir | draft | no (note only) |
 | 2 | collection-filter-page | android | landed 2026-10-08 | yes |
 | 3 | background-sync | android | deferred; manual sync only | no |
-| 4 | deleted-items | android | draft | no |
-| 5 | mail-offline-policy | android | implemented 2026-10-08; land left | no |
+| 4 | deleted-items | android | landed 2026-10-08 | no |
+| 5 | mail-offline-policy | android | landed 2026-10-08 | no |
 | 6 | quiet-first-sync | android | draft, to discuss | yes (standard onboarding) |
 | later | remote search | pimdir + android | not opened | no |
 | later | real-time push | android + relay | not opened | no |
@@ -49,11 +49,11 @@ No longer blocking. The release syncs manually only: background sync is removed 
 - New-mail notifications come later, from the IMAP watcher prototype (~/code/pimalaya/IMAP_SESSION_HANDOVER_PLAN.md).
 - Event reminders come after the release blockers: AlarmManager exact alarms from the local store, with USE_EXACT_ALARM, RECEIVE_BOOT_COMPLETED and POST_NOTIFICATIONS.
 
-## 4. deleted-items
+## 4. deleted-items (landed 2026-10-08)
 
-Settings > Deleted items, one list for all domains over pimdir's retained rows. Restore asks for the target collection (last one preselected) and needs a stored body; mail held as summary only says so. Rows still bound by a source show as waiting. Free space at the top: bytes, purge, collect garbage.
+Deleted items, from the drawer, one list for all domains over pimdir's retained rows. Mail restores on IMAP only for now. Restore asks for the target collection (last one preselected) and needs a stored body; mail held as summary only says so. Rows still bound by a source show as waiting. Free space at the top: bytes, purge, collect garbage.
 
-## 5. mail-offline-policy
+## 5. mail-offline-policy (landed 2026-10-08)
 
 Per account: bodies on open (default), bodies in the background, whole mailbox (full sync); per collection "Download this mailbox". Unmetered by default.
 
