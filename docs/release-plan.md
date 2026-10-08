@@ -7,9 +7,9 @@ Gathers the work agreed on 2026-10-08 toward a first public release, after a few
 | # | Change | Repo | Status | Blocks release |
 |---|---|---|---|---|
 | 0 | google-sync | android | sections 1-5 landed; device measure + fold left | yes |
-| 1 | local-first-actions | android | tasks 1-6 done; task 0 (pimdir), live checks, land left | yes |
+| 1 | local-first-actions | android | landed 2026-10-08; live checks left | yes |
 | 1b | trash-disposal-is-a-move | pimdir | draft | no (note only) |
-| 2 | collection-filter-page | android | draft | yes |
+| 2 | collection-filter-page | android | landed 2026-10-08 | yes |
 | 3 | background-sync | android | deferred; manual sync only | no |
 | 4 | deleted-items | android | draft | no |
 | 5 | mail-offline-policy | android | draft | no |
@@ -21,11 +21,11 @@ Gathers the work agreed on 2026-10-08 toward a first public release, after a few
 
 Gmail as one account listing with batched reads, one Google consent, per-minute quota, People 1,000 a page with one delta per pass, Calendar from its syncToken. Left: live checks (quota of project 991810147220, history `labelIds`, batch host, iCalUID listing, People token and batchGet), device measure against SENT 64 in 11.2 s and INBOX 120 in 24.1 s, fold into spec, log, CHANGELOG. A Google account added before section 1 must be re-added to get the single consent.
 
-## 1. local-first-actions
+## 1. local-first-actions (landed 2026-10-08)
 
 Every user action is a pimdir mutation, visible at once; the sync carries it out as staged, never translated.
 
-- Task 0: io-pimdir test that a move under a minted `dup:` key (or an `alt:` key) is landed by its arrival, not pushed twice.
+- Task 0: done, io-pimdir 2eb6d42 and 5fb00fe (a move beside a held copy is landed once and relocates rather than deletes).
 - Bridge wires `Move` and `Copy`.
 - Push honours SYNC §4: `Remove { to }` relocates (or rejects), `Remove` deletes, `Add` with origin copies server-side, without appends. Mail and calendar today ignore `to`, mail rejects every `Add`.
 - Delete = `Move` into the trash: visible in the trash at once (the Posteo report).
@@ -36,7 +36,7 @@ Every user action is a pimdir mutation, visible at once; the sync carries it out
 
 1b. pimdir note for implementers (SYNC §7, GUIDE): a delete meant to land in a trash is a `Move`, not a `Remove`.
 
-## 2. collection-filter-page
+## 2. collection-filter-page (landed 2026-10-08)
 
 - Full page, accounts with tri-state checkboxes, their collections below; keyed by collection id, persisted. Checkboxes, not switches, to stay distinct from the drawer's sync on/off.
 - Mail role chips (Inbox, Sent, Drafts, Trash, Junk, Archive; none on narrows nothing) replace the merge by mailbox name; Default chip for contacts and calendars. An account off in the drawer syncs nothing and leaves the filters; a tab's filter also scopes its pull.

@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: local-first-actions
-status: draft
+status: landed
 created: 2026-10-08
 ---
 
