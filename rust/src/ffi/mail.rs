@@ -33,7 +33,9 @@ use crate::{
 };
 
 /// `Native.openMailSession`: connects to the account's mail server and
-/// authenticates, answering `{"handle": n}` or `{"error": ".."}`.
+/// authenticates, answering `{"handle": n, "expungesOne": bool}` or
+/// `{"error": ".."}`; `expungesOne` says whether a delete for good erases
+/// one message alone (UIDPLUS on IMAP).
 ///
 /// The handle is a pointer the caller owns until it gives it back to
 /// `closeMailSession`, and it is only ever used from one thread at a
@@ -54,7 +56,11 @@ pub extern "system" fn Java_org_pimalaya_client_Native_openMailSession<'local>(
 
         let mut client = Client::new(env, &transport);
         let json = match MailSession::open(&mut client, &url, &login, &password) {
-            Ok(opened) => json!({ "handle": session::into_handle(opened) }).to_string(),
+            Ok(opened) => json!({
+                "expungesOne": opened.expunges_one(),
+                "handle": session::into_handle(opened),
+            })
+            .to_string(),
             Err(err) => error_json(err),
         };
 

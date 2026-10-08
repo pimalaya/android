@@ -29,16 +29,27 @@ public final class MailSession implements AutoCloseable {
     private Transport transport;
     private long handle;
     private long run;
+    private boolean expungesOne;
 
-    MailSession(Account account, Transport transport, long handle) {
+    MailSession(Account account, Transport transport, long handle, boolean expungesOne) {
         this.account = account;
         this.transport = transport;
         this.handle = handle;
+        this.expungesOne = expungesOne;
     }
 
     /** The account this session reads and writes for. */
     public Account account() {
         return account;
+    }
+
+    /**
+     * Whether a delete for good erases one message alone: every HTTP
+     * backend, an IMAP server only with UIDPLUS (RFC 4315), whose plain
+     * EXPUNGE would take every message marked deleted.
+     */
+    public boolean expungesOne() {
+        return expungesOne;
     }
 
     /** The transport its sockets live in, for the verbs that run on it. */
@@ -77,6 +88,7 @@ public final class MailSession implements AutoCloseable {
         MailSession opened = PimalayaClient.openMail(account);
         this.transport = opened.transport;
         this.handle = opened.handle;
+        this.expungesOne = opened.expungesOne;
         // The freshly opened one must not free what this one now owns.
         opened.handle = 0;
         opened.transport = null;

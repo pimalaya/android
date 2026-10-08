@@ -236,6 +236,71 @@ public class MailMoveTest {
         assertEquals(List.of("destroy Trash 7"), server.calls);
     }
 
+    /** The first listed row of one mailbox, null when it lists none. */
+    private MailStore.StoredMessage rowIn(String mailbox) {
+        for (MailStore.StoredMessage row : store.loadMerged(10)) {
+            if (row.mailbox.equals(mailbox)) {
+                return row;
+            }
+        }
+        return null;
+    }
+
+    @Test
+    public void aTrashDeleteOnAServerErasingNoSingleMessageMarksIt() throws Exception {
+        file(trash, named("7", "Old"));
+        MailStore.markExpungesOne(context, accountId, false);
+
+        assertEquals(MailEngine.Deletion.MARKED, stager().stageDelete(rowIn("Trash")));
+
+        // No UIDPLUS: an EXPUNGE would take every marked message, so the row
+        // stays, saying so, rather than leaving and coming back.
+        MailStore.StoredMessage row = rowIn("Trash");
+        assertTrue(row.deleted);
+        assertTrue(row.unsynced);
+        assertEquals("not a tombstone", "0",
+                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '7'", trash));
+    }
+
+    @Test
+    public void aTrashDeleteOnAServerErasingOneMessageRemovesIt() throws Exception {
+        file(trash, named("7", "Old"));
+        MailStore.markExpungesOne(context, accountId, true);
+
+        assertEquals(MailEngine.Deletion.ERASED, stager().stageDelete(rowIn("Trash")));
+        assertNull(rowIn("Trash"));
+    }
+
+    @Test
+    public void aSentCopyIsHiddenWhileItsSubmissionWaits() throws Exception {
+        String date = "2026-10-08T09:00:00Z";
+        String body = "Message-ID: <m2@example.com>\r\nSubject: Hi\r\n\r\nbody\r\n";
+        store.queueSubmission(EMAIL, "m2@example.com", "Hi", PimdirSummary.mailSortKey(date),
+                body.getBytes(StandardCharsets.UTF_8));
+        stager().mutateAdd(
+                sent,
+                "m2@example.com",
+                body,
+                new JSONArray().put(MailEngine.SEEN),
+                PimdirSummary.mail("m2@example.com", "Hi", null, EMAIL, "bob@example.org",
+                        date, body.length(), false),
+                PimdirSummary.mailSortKey(date));
+
+        MailStore.Query everything = store.query((account, mailbox) -> true, false, false, "");
+        assertNull("the outbox row stands for it", rowIn("Sent"));
+        assertEquals("the inbox's message alone", 1, store.count(everything));
+        assertEquals("a whole page past the hidden newer row", "INBOX",
+                store.page(everything, null, 0, 1).get(0).mailbox);
+        assertEquals("Sent alone, no outbox row stands for it", 1,
+                store.count(store.query((account, mailbox) -> mailbox.equals("Sent"), false,
+                        false, "")));
+
+        store.acknowledge(store.outgoing().get(0).queued);
+
+        assertTrue("shown once the submission went", rowIn("Sent").unsynced);
+        assertEquals(2, store.count(store.query((account, mailbox) -> true, false, false, "")));
+    }
+
     @Test
     public void aCopyIsPushedServerSide() throws Exception {
         stager().mutateCopy(inbox, "42", trash);

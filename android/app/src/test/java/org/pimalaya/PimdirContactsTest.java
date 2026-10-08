@@ -159,11 +159,34 @@ public class PimdirContactsTest {
         contacts.stageDelete(BOOK, "u4");
 
         // The synced one has to survive as a tombstone, or the next sync has
-        // nothing to tell the server about; the never-pushed one too, a
-        // tombstone the engine withdraws on the next sync with nobody to tell.
+        // nothing to tell the server about. The never-pushed one is withdrawn
+        // at once (SYNC §7): nobody to tell, so no binding, the item retained.
         assertEquals(1, scalar("SELECT deleted FROM items WHERE link_id = 'u3'"));
-        assertEquals(1, scalar("SELECT deleted FROM items WHERE link_id = 'u4'"));
+        assertEquals(1, scalar("SELECT count(*) FROM bindings WHERE link_id = 'u3'"));
+        assertEquals(0, scalar("SELECT count(*) FROM bindings WHERE link_id = 'u4'"));
+        assertEquals(1, scalar("SELECT count(*) FROM items WHERE link_id = 'u4'"
+                + " AND deleted = 1 AND retained_at IS NOT NULL"));
         assertTrue("neither is displayed any more", contacts.list(BOOK).isEmpty());
+    }
+
+    @Test
+    public void deletingAnOnDeviceCardLeavesNoBindingBehind() {
+        collection(LocalBook.URL);
+        contacts.save(LocalBook.URL, new Card("u14", null, null, vcard("u14", "Mia")));
+        // A card a removed account left behind, which no source ever bound.
+        contacts.save(BOOK, new Card("u15", null, null, vcard("u15", "Noe")));
+        bind(BOOK, "u15", "c15.vcf", "etag-15");
+        contacts.detachToLocal(List.of(BOOK), LocalBook.URL);
+
+        contacts.stageDelete(LocalBook.URL, "u14");
+        contacts.stageDelete(LocalBook.URL, "u15");
+
+        // No sync ever visits the on-device book, so nothing would ever clear
+        // a provisional binding left here: a hidden tombstone for good.
+        assertEquals(0, scalar("SELECT count(*) FROM bindings"));
+        assertEquals(2, scalar("SELECT count(*) FROM items WHERE collection = ?"
+                + " AND deleted = 1 AND retained_at IS NOT NULL", LocalBook.URL));
+        assertTrue(contacts.list(LocalBook.URL).isEmpty());
     }
 
     @Test
