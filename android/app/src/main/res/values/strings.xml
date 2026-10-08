@@ -217,6 +217,32 @@
     <string name="contacts_transfer">Import or export</string>
     <string name="filter_reset">Reset</string>
 
+    <!-- Deleted items -->
+    <string name="deleted_title">Deleted items</string>
+    <string name="deleted_close">Close deleted items</string>
+    <string name="deleted_free">Free space</string>
+    <plurals name="deleted_summary">
+        <item quantity="one">%1$d item, %2$s kept on this device</item>
+        <item quantity="other">%1$d items, %2$s kept on this device</item>
+    </plurals>
+    <string name="deleted_empty">No deleted items</string>
+    <string name="deleted_more">Show more</string>
+    <string name="deleted_unnamed">(No name)</string>
+    <string name="deleted_at">Deleted %1$s</string>
+    <string name="deleted_waiting">Waiting for the server</string>
+    <string name="deleted_not_stored">Not stored on this device</string>
+    <string name="deleted_unreadable">This message cannot be restored from this device</string>
+    <string name="deleted_present">Already in that collection</string>
+    <string name="deleted_unsupported">Restoring mail is not supported for this account yet</string>
+    <string name="deleted_nowhere">Nowhere to restore it</string>
+    <string name="deleted_restore_title">Restore to</string>
+    <string name="deleted_restore">Restore</string>
+    <string name="deleted_restored">Restored, uploaded at the next sync</string>
+    <string name="deleted_restore_failed">Could not restore</string>
+    <string name="deleted_free_confirm">Free %1$s? Every deleted item kept on this device goes for good. Items waiting for the server stay.</string>
+    <string name="deleted_freed">%1$s freed</string>
+    <string name="deleted_free_failed">Could not free space</string>
+
     <!-- The large titles' supporting lines and the lists' sections. -->
     <plurals name="mail_meta">
         <item quantity="one">%1$d message</item>

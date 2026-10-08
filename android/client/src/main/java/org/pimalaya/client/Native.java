@@ -220,6 +220,13 @@ final class Native {
     static native String pimdirMigrations();
 
     /**
+     * What STORAGE Annex A derives from one body of a kind (its collection's
+     * media type): {@code {linkId, summary, sortKey}}, the summary null where
+     * the body yields none. Pure computation.
+     */
+    static native String pimdirDerive(String kind, byte[] body);
+
+    /**
      * The account's mailboxes and the RFC 6154 role of each. Returns a
      * JSON array of {@code {name, role}} objects.
      *

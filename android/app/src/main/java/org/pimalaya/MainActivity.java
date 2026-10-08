@@ -78,6 +78,7 @@ public class MainActivity extends Activity {
     private static final int PANEL_AUTH = 20;
     static final int PANEL_ACCOUNT = 21;
     static final int PANEL_FILTER = 22;
+    static final int PANEL_DELETED = 23;
 
     /**
      * The domain the app opens on, and the one every flow that finishes
@@ -129,6 +130,9 @@ public class MainActivity extends Activity {
 
     /** The filter page over a list. */
     private final FilterPage filterPage = new FilterPage(this);
+
+    /** The deleted items page, raised from the drawer. */
+    private final DeletedItemsPage deletedPage = new DeletedItemsPage(this);
 
     /** The calendar side of the store, and the agenda over it. */
     EventStore events;
@@ -246,6 +250,7 @@ public class MainActivity extends Activity {
         setUpContactPanel();
         setUpHomePanel();
         filterPage.setUp();
+        deletedPage.setUp();
 
         // The selection's close and select-all buttons serve whichever
         // list is selecting.
@@ -544,6 +549,10 @@ public class MainActivity extends Activity {
             filterPage.leave();
             return;
         }
+        if (screen == PANEL_DELETED) {
+            deletedPage.leave();
+            return;
+        }
         if (drawer.isDrawerOpen(android.view.Gravity.START)) {
             drawer.closeDrawer(android.view.Gravity.START);
             return;
@@ -705,6 +714,7 @@ public class MainActivity extends Activity {
                             syncAll();
                         });
         findViewById(R.id.drawer_add).setOnClickListener(view -> startAuth());
+        findViewById(R.id.drawer_deleted).setOnClickListener(view -> deletedPage.open());
         findViewById(R.id.drawer_about).setOnClickListener(view -> showAbout());
 
         findViewById(R.id.account_back).setOnClickListener(view -> accountSettings.leave());
@@ -2290,7 +2300,7 @@ public class MainActivity extends Activity {
      * auth config options), so long names and emails never wrap into
      * one unreadable line.
      */
-    private CharSequence bookLabel(String name, String email) {
+    CharSequence bookLabel(String name, String email) {
         android.text.SpannableString label = new android.text.SpannableString(name + "\n" + email);
         int start = name.length() + 1;
         label.setSpan(
@@ -3016,6 +3026,8 @@ public class MainActivity extends Activity {
                 return findViewById(R.id.overlay_account);
             case PANEL_FILTER:
                 return findViewById(R.id.overlay_filter);
+            case PANEL_DELETED:
+                return findViewById(R.id.overlay_deleted);
             default:
                 return findViewById(R.id.overlay_auth);
         }
@@ -3275,6 +3287,11 @@ public class MainActivity extends Activity {
         filterScreen.ownBar = true;
         filterScreen.chrome = () -> findViewById(R.id.fab).setVisibility(View.GONE);
         screens.put(PANEL_FILTER, filterScreen);
+
+        Screen deleted = new Screen();
+        deleted.ownBar = true;
+        deleted.chrome = () -> findViewById(R.id.fab).setVisibility(View.GONE);
+        screens.put(PANEL_DELETED, deleted);
     }
 
     /**
@@ -3481,6 +3498,7 @@ public class MainActivity extends Activity {
                     R.id.auth_bar,
                     R.id.account_bar,
                     R.id.filter_bar,
+                    R.id.deleted_bar,
                 }) {
             padTop(bar, bars.top);
             findViewById(bar).setMinimumHeight(dimen(R.dimen.app_bar_height) + bars.top);
@@ -3506,6 +3524,7 @@ public class MainActivity extends Activity {
         padBottom(R.id.books_container, 88, bottom);
         padBottom(R.id.advanced_container, 24, bottom);
         padBottom(R.id.filter_content, 24, bottom);
+        padBottom(R.id.deleted_list, 24, bottom);
         padBottom(R.id.source_input, 16, bottom);
         padBottom(R.id.email_row, 16, bottom);
         padBottom(R.id.message_view_replies, 12, bottom);

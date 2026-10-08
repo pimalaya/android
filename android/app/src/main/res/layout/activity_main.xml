@@ -670,7 +670,7 @@
             android:background="@color/divider_light" />
 
         <!-- The actions, fixed under the scrolling cards: add an
-             account, sync, then About (its dialog carries the app
+             account, sync, deleted items, then About (its dialog carries the app
              version). -->
         <LinearLayout
             android:id="@+id/drawer_actions"
@@ -771,6 +771,51 @@
             </LinearLayout>
 
             <LinearLayout
+                android:id="@+id/drawer_deleted"
+                android:layout_width="match_parent"
+                android:layout_height="50dp"
+                android:background="@drawable/drawer_row"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="14dp">
+
+                <FrameLayout
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:background="@drawable/drawer_tile">
+
+                    <ImageView
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_gravity="center"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_delete_bar"
+                        android:tint="?android:attr/textColorPrimary" />
+
+                </FrameLayout>
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
+                    android:text="@string/deleted_title"
+                    android:textColor="?android:attr/textColorPrimary"
+                    android:textSize="15sp" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_chevron_right"
+                    android:tint="?android:attr/textColorSecondary" />
+
+            </LinearLayout>
+
+            <LinearLayout
                 android:id="@+id/drawer_about"
                 android:layout_width="match_parent"
                 android:layout_height="50dp"
@@ -825,5 +870,9 @@
          DrawerLayout, so the drawer's account rows raise it over the
          open drawer and closing it reveals that drawer again. -->
     <include layout="@layout/panel_account" />
+
+    <!-- Deleted items: the same treatment, raised from the drawer's row
+         and closing back onto the drawer. -->
+    <include layout="@layout/panel_deleted" />
 
 </FrameLayout>

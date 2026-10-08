@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Deleted items, a whole-frame overlay over the open drawer (it sits
+     above the DrawerLayout in activity_main, as panel_account does), its
+     own bar included: the closing cross lands back on the drawer. Under
+     the bar, what the retained items hold and the button freeing it, then
+     every deleted item of every domain, newest deletion first, built by
+     DeletedItemsPage. Invisible rather than gone, so the entrance zoom
+     pivots on its centre from the first show. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/overlay_deleted"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?android:attr/colorBackground"
+    android:clickable="true"
+    android:visibility="invisible">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/deleted_bar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/surface"
+            android:gravity="center_vertical"
+            android:minHeight="@dimen/app_bar_height"
+            android:orientation="horizontal"
+            android:paddingStart="@dimen/app_bar_padding"
+            android:paddingEnd="@dimen/app_bar_padding">
+
+            <ImageButton
+                android:id="@+id/deleted_back"
+                android:layout_width="@dimen/app_bar_button"
+                android:layout_height="@dimen/app_bar_button"
+                android:background="@drawable/ripple_circle"
+                android:contentDescription="@string/deleted_close"
+                android:src="@drawable/ic_close"
+                android:tint="?android:attr/textColorPrimary" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:paddingStart="@dimen/app_bar_title_padding"
+                android:paddingEnd="@dimen/app_bar_title_padding"
+                android:singleLine="true"
+                android:text="@string/deleted_title"
+                android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
+                android:textColor="?android:attr/textColorPrimary" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:minHeight="56dp"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="8dp">
+
+            <TextView
+                android:id="@+id/deleted_summary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/deleted_free"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/deleted_free"
+                android:textAllCaps="false"
+                android:textColor="?android:attr/colorAccent" />
+
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/divider_light" />
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <ListView
+                android:id="@+id/deleted_list"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:divider="@null" />
+
+            <TextView
+                android:id="@+id/deleted_empty"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:padding="32dp"
+                android:text="@string/deleted_empty"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="15sp"
+                android:visibility="gone" />
+
+            <ProgressBar
+                android:id="@+id/deleted_progress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:visibility="gone" />
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+</FrameLayout>
