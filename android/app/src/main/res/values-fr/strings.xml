@@ -68,6 +68,32 @@
     <string name="filter_default">Par défaut</string>
     <string name="filter_set_default">Définir par défaut</string>
     <string name="filter_reset">Réinitialiser</string>
+
+    <!-- Deleted items -->
+    <string name="deleted_title">Éléments supprimés</string>
+    <string name="deleted_close">Fermer les éléments supprimés</string>
+    <string name="deleted_free">Libérer de l\'espace</string>
+    <plurals name="deleted_summary">
+        <item quantity="one">%1$d élément, %2$s conservés sur cet appareil</item>
+        <item quantity="other">%1$d éléments, %2$s conservés sur cet appareil</item>
+    </plurals>
+    <string name="deleted_empty">Aucun élément supprimé</string>
+    <string name="deleted_more">Afficher plus</string>
+    <string name="deleted_unnamed">(Sans nom)</string>
+    <string name="deleted_at">Supprimé le %1$s</string>
+    <string name="deleted_waiting">En attente du serveur</string>
+    <string name="deleted_not_stored">Non conservé sur cet appareil</string>
+    <string name="deleted_unreadable">Ce message ne peut pas être restauré depuis cet appareil</string>
+    <string name="deleted_present">Déjà présent à cet endroit</string>
+    <string name="deleted_unsupported">La restauration de messages n\'est pas encore prise en charge pour ce compte</string>
+    <string name="deleted_nowhere">Aucun endroit où le restaurer</string>
+    <string name="deleted_restore_title">Restaurer dans</string>
+    <string name="deleted_restore">Restaurer</string>
+    <string name="deleted_restored">Restauré, envoyé à la prochaine synchronisation</string>
+    <string name="deleted_restore_failed">Restauration impossible</string>
+    <string name="deleted_free_confirm">Libérer %1$s ? Tous les éléments supprimés conservés sur cet appareil disparaissent définitivement. Ceux en attente du serveur restent.</string>
+    <string name="deleted_freed">%1$s libérés</string>
+    <string name="deleted_free_failed">Impossible de libérer de l\'espace</string>
     <string name="message_reply">Répondre</string>
     <string name="message_forward">Transférer</string>
     <string name="compose_quote_intro">Le %1$s, %2$s a écrit :</string>

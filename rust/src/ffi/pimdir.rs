@@ -1,4 +1,5 @@
-//! The canonical pimdir SQL, handed to the Java side.
+//! The canonical pimdir SQL and the Annex A derivation, handed to the
+//! Java side.
 //!
 //! Android ships SQLite and the app's storage seam already drives
 //! `android.database.sqlite`, so this app takes io-pimdir **without** its
@@ -7,14 +8,18 @@
 //! cross the boundary here rather than being transcribed into Java where they
 //! would drift from the spec in silence.
 
+use io_pimdir::summary::derive;
 use jni::{
     EnvUnowned,
     errors::{Error, LogErrorAndDefault},
-    objects::{JClass, JObject},
+    objects::{JByteArray, JClass, JObject, JString},
 };
-use serde_json::{Map, Value, to_string};
+use serde_json::{Map, Value, json, to_string};
 
-use crate::ffi::error_json;
+use crate::{
+    ffi::{error_json, read_string},
+    summary::SummaryJson,
+};
 
 /// `Native.pimdirSql`: every statement, canonical then the crate's own, keyed
 /// by its constant name, as a JSON object.
@@ -72,4 +77,37 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirVersion<'local>(
     _class: JClass<'local>,
 ) -> i32 {
     io_pimdir::sql::VERSION as i32
+}
+
+/// `Native.pimdirDerive`: what STORAGE Annex A derives from one body of
+/// the given kind (its collection's media type), as
+/// `{"linkId", "summary", "sortKey"}`, `summary` null where the body
+/// yields none.
+///
+/// Pure computation: a body the store holds is named and summarised the
+/// way any writer of the store would, with nothing transcribed in Java.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_pimdirDerive<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    kind: JString<'local>,
+    body: JByteArray<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let kind = read_string(env, &kind);
+        let body = env.convert_byte_array(&body).unwrap_or_default();
+
+        let json = match derive(&kind, &body) {
+            None => error_json(format!("No pimdir derivation for {kind}")),
+            Some(derived) => json!({
+                "linkId": derived.link_id.0,
+                "summary": derived.summary.as_ref().map(SummaryJson::from),
+                "sortKey": derived.sort_key.as_str(),
+            })
+            .to_string(),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
 }

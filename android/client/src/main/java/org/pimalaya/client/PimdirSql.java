@@ -55,6 +55,20 @@ public final class PimdirSql {
         return sql;
     }
 
+    /**
+     * What io-pimdir derives from one body of {@code kind} (STORAGE Annex A):
+     * {@code {linkId, summary, sortKey}}, the summary in the shape the store's
+     * writes take it, null where the body yields none.
+     *
+     * <p>Beside the statements because it is the same contribution: the rule a
+     * writer of the store follows, from the crate rather than restated here.
+     *
+     * @throws PimalayaException when the kind has no derivation.
+     */
+    public static JSONObject derive(String kind, byte[] body) {
+        return PimalayaClient.object(Native.pimdirDerive(kind, body));
+    }
+
     /** Every statement, by name; unmodifiable. */
     public static synchronized Map<String, String> all() {
         if (statements == null) {
