@@ -3386,10 +3386,14 @@ public class MainActivity extends Activity {
 
         // NOTE: all bars carry the top inset (the drawer header too,
         // since the drawer runs under the status bar).
-        padTop(R.id.app_bar, bars.top);
-        padTop(R.id.drawer_header, bars.top);
-        padTop(R.id.auth_bar, bars.top);
-        padTop(R.id.account_bar, bars.top);
+        // NOTE: a bar's minimum height counts its padding, so each grows
+        // by the inset it takes, keeping its content the full bar height
+        // under the status bar.
+        for (int bar :
+                new int[] {R.id.app_bar, R.id.drawer_header, R.id.auth_bar, R.id.account_bar}) {
+            padTop(bar, bars.top);
+            findViewById(bar).setMinimumHeight(dimen(R.dimen.app_bar_height) + bars.top);
+        }
 
         // NOTE: the base is each view's designed FAB clearance, so
         // re-applying stays idempotent as the listener fires again; the
