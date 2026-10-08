@@ -24,4 +24,4 @@ change: collection-filter-page
 - [x] Tests: role set from each source; fallback; a read-only calendar never offered; filter persistence, tri-state, same-named mailboxes, role chips, pull scope
 
 ## 4. Land
-- [ ] Fold into spec (mail, calendar, contacts, the merged view); log; CHANGELOG
+- [x] Fold the delta into mail and offline-store; log; CHANGELOG; archive

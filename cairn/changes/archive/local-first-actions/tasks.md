@@ -6,7 +6,7 @@ change: local-first-actions
 # Tasks
 
 ## 0. Settle the landing
-- [ ] io-pimdir test: a `Move` whose target already holds the identity (minted `dup:` key) is landed by its arrival, not pushed twice; same for an `alt:` key. Fix in io-pimdir if not.
+- [x] io-pimdir test: a `Move` whose target already holds the identity (minted `dup:` key) is landed by its arrival, not pushed twice; same for an `alt:` key. Failed for `dup:`, fixed in io-pimdir 2eb6d42 and 5fb00fe (pimdir vectors 48 to 50).
 
 ## 1. Move and Copy reach pimdir
 - [x] `MutationJson` `move` / `copy` (rust/src/offline.rs) and their `From` arms
@@ -35,4 +35,4 @@ change: local-first-actions
 - [x] `PimdirContacts.save` / `stageDelete` through `mutateAdd` / `mutateEdit` / `mutateRemove`
 
 ## 7. Land
-- [ ] Fold delta into cairn/spec/mail.md, calendar.md, contacts spec; log; CHANGELOG
+- [x] Fold the delta into mail and offline-store; log; CHANGELOG; archive

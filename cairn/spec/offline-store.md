@@ -209,7 +209,7 @@ The bridge SHALL hold an IMAP session across native calls, connected and authent
 ### Requirement: A connection the server dropped is reopened once
 An idempotent verb failing on a held session SHALL reopen it and run once more, and SHALL report the failure only if that fails too. A server idle timeout, a rebound NAT and a walk from wifi to cellular all end a connection under the app, so a held one is a hint and never a promise.
 
-Submitting a message SHALL NOT be retried: a submission that was accepted and then failed to file its copy is indistinguishable from one that never went, and running it again would send the message twice. Its failure SHALL leave the message in the outbox.
+Submitting a message SHALL NOT be retried: a submission whose reply was lost is indistinguishable from one that never went, and running it again would send the message twice. Its failure SHALL leave the message in the outbox.
 
 #### Scenario: An idle timeout
 - GIVEN a session the server has since closed
@@ -222,7 +222,7 @@ Submitting a message SHALL NOT be retried: a submission that was accepted and th
 - THEN the failure is reported rather than retried forever
 
 #### Scenario: A submission that failed
-- GIVEN a server that accepted a message and then refused the filed copy
+- GIVEN a server that accepted a message and then dropped the connection
 - WHEN the drain reports it
 - THEN nothing is sent a second time
 
@@ -260,7 +260,7 @@ The drawer's sync SHALL reconcile contacts, then mail, then calendars, and SHALL
 - THEN the flag is pushed to the server
 
 ### Requirement: A list's pull syncs what it shows
-Pulling a list down SHALL sync that list's domain alone, and within it only the accounts and collections the filter shows; the contacts pull SHALL also run the phone's pass. The drawer's sync SHALL take every domain, every account and every collection, whatever the filter hides.
+Pulling a list down SHALL sync that list's domain alone, and within it only the accounts and collections its filter shows, never an account that is off; the contacts pull SHALL also run the phone's pass. The drawer's sync SHALL take every domain, and every collection of every account that is on, whatever the filters hide.
 
 #### Scenario: Pulling the agenda
 - GIVEN two calendar accounts, one hidden by the filter
@@ -268,7 +268,7 @@ Pulling a list down SHALL sync that list's domain alone, and within it only the 
 - THEN only the shown account's calendars are synced, and no mail or contact is
 
 ### Requirement: The filter offers what it can hide
-The filter's account axis SHALL list the accounts covering the domain on screen, and SHALL NOT list the on-device account, whose one address book is on the collection axis.
+The filter page SHALL list the accounts that are on and cover the domain on screen, each with its collections, and SHALL list the on-device book under its own entry on contacts alone. An account holding no collection of the domain SHALL NOT be listed.
 
 #### Scenario: A contacts-only account on the mail list
 - GIVEN an account connected for contacts alone
@@ -276,15 +276,15 @@ The filter's account axis SHALL list the accounts covering the domain on screen,
 - THEN the account is not listed
 
 ### Requirement: The bottom bar switches domains
-A bottom navigation bar SHALL switch between mail, contacts and calendars, in that order, the one on screen on a neutral indicator, mail carrying the count of unread messages among those listed. It SHALL show on the three lists only. The drawer SHALL open on the app's name beside a closing cross, then one card per account naming its address and the domains it covers, with a pill saying Deactivated when the account does not take part and otherwise when it last synced, then, fixed at the bottom, a line and the actions. Pressing a card SHALL open that account's settings. The drawer SHALL NOT list mailboxes. A list screen's bar SHALL carry the burger and SHALL NOT carry the domain buttons.
+A bottom navigation bar SHALL switch between mail, contacts and calendars, in that order, the one on screen on a neutral indicator, mail carrying the count of unread messages among those listed. It SHALL show on the three lists only. The drawer SHALL open on the app's name beside a closing cross, then one card per account naming its address and the domains it covers, with a pill saying Deactivated when the account is off and otherwise when it last synced, then, fixed at the bottom, a line and the actions. Pressing a card SHALL open that account's settings. The drawer SHALL NOT list mailboxes. A list screen's bar SHALL carry the burger and SHALL NOT carry the domain buttons.
 
 #### Scenario: Switching to the calendars
 - GIVEN the mail list
 - WHEN the calendars item of the bottom bar is pressed
 - THEN the agenda is swapped in with no slide, the calendars item on the indicator
 
-#### Scenario: An account the filter hides
-- GIVEN an account hidden by the filter
+#### Scenario: An account that is off
+- GIVEN an account switched off in its settings
 - WHEN the drawer opens
 - THEN its card's pill says Deactivated
 
@@ -430,3 +430,72 @@ A store load SHALL carry each mail placement's `Date` beside its state, which th
 - GIVEN a message listed with its subject and sender
 - WHEN a marker is staged on it and the next sync pushes it
 - THEN its subject and sender are still stored
+
+### Requirement: A local action is visible before any sync
+Every action a user takes on an item (create, edit, flag, delete, send) SHALL be staged as a pimdir mutation, never as a direct row write, and SHALL show in every list it concerns at once, a relocation's target included. The bridge SHALL carry pimdir's `Move` and `Copy` beside `Add`, `Edit`, `SetFlags` and `Remove`, and the sync SHALL carry each staged change out as staged (pimdir SYNC section 4): a `Remove` naming a destination as a server move, one naming none as a server delete, an `Add` with an origin as a server-side copy and one without as an append, never one turned into another. A connector that cannot carry one out, a relocation into another account's collection or any calendar relocation, SHALL reject it. A visible row whose placement is created or changed and not pushed yet SHALL carry a pending mark, a relocated item's on its target's row; a staged removal is listed nowhere and carries none. A message or an entry whose change the connector refused for good SHALL carry a refused mark instead, kept by the app beside the store until a push of the item is accepted.
+
+#### Scenario: A message deleted offline
+- GIVEN a message in the inbox of an account with a trash
+- WHEN it is deleted, offline
+- THEN it shows in the trash at once with a pending mark, and no longer in the inbox
+- AND the next sync moves it on the server and the mark goes
+
+#### Scenario: A contact saved offline
+- GIVEN no network
+- WHEN a contact is created in an account's address book
+- THEN it is listed at once with a pending mark, staged as an `Add`
+
+### Requirement: The filter lists accounts and their collections
+The filter SHALL be a page per domain listing each account that is on and covers the domain with a checkbox, and its collections indented below it with theirs: the mailboxes and the account's outbox, the calendars, or the subscribed address books, the on-device book listed as an account of its own. It SHALL be keyed by collection id and kept across restarts, per domain, a store with no kept filter showing everything. An account's checkbox SHALL read ticked when all its collections show, partly ticked when some do, unticked when none do or the account is hidden. Unticking an account SHALL hide it and keep its collections' own choices; ticking it back SHALL restore them, or tick them all when they tick none. Ticking a collection of a hidden account SHALL show the account with that collection alone. A Reset SHALL show everything again. Every tick SHALL apply to the list at once. The boxes SHALL be checkboxes, not switches, to stay apart from an account's on and off.
+
+#### Scenario: Two accounts with an Archive
+- GIVEN two mail accounts each holding a mailbox named Archive
+- WHEN one account's Archive is unticked
+- THEN the other account's Archive still shows
+
+#### Scenario: An account unticked and back
+- GIVEN an account with its Archive unticked
+- WHEN the account is unticked, then ticked again
+- THEN it shows again without its Archive
+
+#### Scenario: After a restart
+- GIVEN a calendar unticked
+- WHEN the app is restarted
+- THEN the calendar is still hidden, and nothing is hidden in mail or contacts
+
+### Requirement: An account that is off takes no part
+An account's settings SHALL switch the account on and off. An account that is off SHALL NOT be synced by any sync (the drawer's, a list's pull, a first sync, the mail fill), SHALL NOT be listed by a filter, and its items SHALL NOT be listed. Its data SHALL stay stored, and switching it back on SHALL bring both back. The phone's mirror of its address books is local and SHALL be left as it is.
+
+#### Scenario: A work account on the weekend
+- GIVEN an account switched off in its settings
+- WHEN the drawer's sync runs
+- THEN the account is not contacted, its card says Deactivated, and no list or filter shows it
+
+### Requirement: A role gives direct access across accounts
+The mail list SHALL offer role chips, Inbox, Sent, Drafts, Trash, Junk and Archive, at most one on: a chip SHALL narrow the collections the filter shows to those holding that role (pimdir's collection role, as the source states it), and no chip on SHALL narrow nothing. The outbox holds no role. Gmail, listed as one account, SHALL hold the roles of its system labels (INBOX, SENT, DRAFT, TRASH and SPAM as inbox, sent, drafts, trash and junk); Gmail has no archive label, so Archive SHALL show none of its mail. Contacts and calendars SHALL offer a Default chip narrowing to the default collection of every shown account. No chip SHALL change what syncs.
+
+#### Scenario: Every trash
+- GIVEN three shown mail accounts
+- WHEN the Trash chip is chosen
+- THEN the list shows the three trashes merged
+
+### Requirement: The source states a collection's default and whether it takes writes
+Listing an account's calendars or address books SHALL say which one the source writes to when none is named, stored as pimdir's `default` role: JMAP `isDefault`, Graph's `isDefaultCalendar` and its default contacts folder, Google's `primary` calendar and its `myContacts` group. CalDAV and CardDAV state none. It SHALL also say which ones the user may not write into: JMAP `myRights`, Graph `canEdit`, Google's `accessRole` below writer; rights a source leaves unsaid SHALL read as writable. A contacts sync SHALL restate both for the account's books before it reconciles them.
+
+#### Scenario: A source moving its default
+- GIVEN a calendar the source named default
+- WHEN the source names another one
+- THEN the store's default role moves to it in the same listing
+
+### Requirement: A new contact or event goes to the default collection
+A collection SHALL be its account's default when its source states it and it is writable, else when it is the account's only writable one of its kind, else when the user set it so with "Set as default" on the filter page, which the app keeps and never writes to pimdir. A new contact or event SHALL go to the default of the account in view, the one account the filter shows, without asking. Otherwise the app SHALL ask, offering writable collections only, the default preselected; a single writable one on offer SHALL be taken without asking.
+
+#### Scenario: A Google account
+- GIVEN a Google account with several calendars
+- WHEN an event is created
+- THEN it goes to the primary calendar without asking
+
+#### Scenario: A read-only calendar
+- GIVEN an account with a read-only holidays calendar and two writable calendars, none named default
+- WHEN an event is created
+- THEN the two writable calendars alone are offered, and once one is set as default the next event goes there

@@ -30,7 +30,7 @@ A message row SHALL lead the sender's line with the replied mark and end it with
 - THEN the sender's line opens with the replied mark and ends with the time and the dot, and the subject's line ends with the yellow star and the paperclip under that dot
 
 ### Requirement: The mail list narrows what it shows
-The mail list SHALL list every stored message of every mailbox the filter lets through, and SHALL offer a search over the sender and the subject, an unread chip and an attachments chip, all answered by the store over every stored message. None of these SHALL change what syncs, which the filter alone decides.
+The mail list SHALL list every stored message of every mailbox the filter lets through, and SHALL offer a search over the sender and the subject, the role chips, an unread chip and an attachments chip, all answered by the store over every stored message. None of these SHALL change what syncs, which the filter alone decides.
 
 #### Scenario: Unread only
 - GIVEN read and unread mail in two accounts
@@ -59,7 +59,7 @@ A connection SHALL ENABLE CONDSTORE and QRESYNC when it opens, where the server 
 - THEN the mailbox is enumerated whole and the pass carries on
 
 ### Requirement: A sync skips what the filter hides
-A mail pull SHALL list the shown accounts' mailboxes and SHALL NOT reconcile a mailbox the filter hides, by its account or by its name. The drawer's sync SHALL reconcile every mailbox.
+A mail pull SHALL list the shown accounts' mailboxes and SHALL NOT reconcile a mailbox the filter hides, by its account or by its collection, nor drain an outbox it hides. The drawer's sync SHALL reconcile every mailbox of every account that is on.
 
 #### Scenario: A hidden mailbox
 - GIVEN a mailbox unchecked in the filter
@@ -114,35 +114,35 @@ Opening a message SHALL mark it read in the store, once its body has arrived, an
 - THEN it is still unread
 
 ### Requirement: A message is deleted into the account's trash
-Deleting a message SHALL stage a removal, and the row SHALL leave the list at once. The next sync SHALL move the message into the mailbox the account records as its trash, with MOVE or with a COPY where the server implements none. Nothing SHALL be expunged, an expunge without `UIDPLUS` being mailbox-wide and taking every message another client had marked.
+Deleting a message outside the trash SHALL stage a move into the mailbox the account records as its trash: the row SHALL leave its mailbox and show in the trash at once, marked pending. The next sync SHALL relocate it as staged: on IMAP with MOVE, or where the server implements no MOVE with COPY and `\Deleted`, then `UID EXPUNGE` where it announces `UIDPLUS`; on Graph into the folder Graph names `deleteditems`, recognised by id when the roster is read; on Gmail with `messages.trash`; on JMAP through `mailboxIds`.
 
-Where the account records no trash, or the message already sits in it, `\Deleted` SHALL be staged in place and the row SHALL stay in the list, which says so. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`, so there is nothing to mark it with, and staging a change nothing could carry out would fail once per sync forever. A Graph account always records one: its trash is the folder Graph names `deleteditems`, recognised by id when the roster is read, and a delete moves the message there. A Gmail account's trash is the `TRASH` label, and a delete trashes the message.
+Deleting a message in the trash SHALL stage a removal, pushed as a permanent delete: on IMAP `\Deleted` then `UID EXPUNGE` (RFC 4315); on Graph `permanentDelete`; on Gmail `messages.delete`; on JMAP `Email/set` destroy. Where an IMAP account records no trash, or the message sits in the trash of an account whose last session announced no `UIDPLUS` (an expunge without it is mailbox-wide), a delete SHALL stage `\Deleted` in place: the row stays, its line saying it is marked deleted, and the toast says so. An account no session recorded yet SHALL read as announcing it. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`. Deleting a message still in the outbox SHALL cancel its submission and withdraw its staged sent copy, there being nothing on the server to tell.
 
 #### Scenario: An account with a trash
 - GIVEN an account recording a mailbox marked `\Trash`
 - WHEN a message is deleted
-- THEN the row leaves the list at once
+- THEN the row leaves the list and shows in the trash at once, marked pending
 - AND the next sync moves it there
+
+#### Scenario: A message already in the trash
+- GIVEN a message in the trash of a server announcing `UIDPLUS`
+- WHEN it is deleted
+- THEN the next sync expunges that one message, and no other
 
 #### Scenario: An IMAP account with no trash
 - GIVEN an account recording none
 - WHEN a message is deleted
-- THEN `\Deleted` is staged where it is, the reader is told so, and the row stays
-
-#### Scenario: A message already in the trash
-- GIVEN a message whose mailbox is the trash
-- WHEN it is deleted
-- THEN `\Deleted` is staged where it is rather than a move into the mailbox it already sits in
+- THEN `\Deleted` is staged where it is, the reader is told so, and the row stays, marked deleted
 
 #### Scenario: A JMAP account with no trash
 - GIVEN a JMAP account recording none
-- WHEN a message is deleted
+- WHEN a message outside a trash is deleted
 - THEN the delete is refused saying so, and nothing is staged
 
 ### Requirement: A mail account carries where it submits and where its trash is
 A mail connection SHALL carry the endpoint mail is submitted through, beside the one it is read from, chosen in the connection flow from what discovery turned up or from what was entered by hand, and stored with it. Implicit TLS only: this client has no STARTTLS step, and driving a `starttls` endpoint as if it were implicit would hand a message over in the clear rather than fail. Every other domain carries none, and so does a mail account reading over JMAP, or whose sending was switched off. The sending question, headed Submission, SHALL be asked only once mail is read over IMAP, discovered or typed, or over Graph, and its rows SHALL follow that choice: IMAP reading is offered the SMTP servers, one row per server and sign-in method as the reading rows are, those reading the same collapsed and only those signing in the way mail does offered, since sending reuses its credential, and manual entry, Graph reading Graph alone, Gmail reading Gmail alone, and both the row for not sending. A Graph or Gmail account sending SHALL carry its own `msgraph://` or `google://` base as its submit endpoint.
 
-The account SHALL also record the mailbox the server marks `\Trash` (RFC 6154), refreshed by every mail sync from the roster the LIST builds, so a delete decides between a move and a marker with no round trip.
+The account SHALL also record the mailbox the server marks `\Trash` (RFC 6154), refreshed by every mail sync from the roster the LIST builds, and whether its last session can expunge one message alone (`UIDPLUS` on IMAP, always elsewhere), so a delete decides between a move, a delete for good and a marker with no round trip.
 
 #### Scenario: An address that publishes both
 - GIVEN an address whose discovery turns up IMAP and SMTP
@@ -186,7 +186,7 @@ Submitting SHALL compose the message on the device and stage it as one action on
 
 The queued actions of an account SHALL be shown as its outbox, above everything the store synced, and discarding one SHALL cancel its row and release its pin, there being nothing anywhere to tell. A parked one SHALL be shown too, saying it was refused rather than that it is waiting: a message the sender wrote is not something to drop quietly.
 
-The waiting messages SHALL be filed under a mailbox named *Outbox*, which the filter's collection axis SHALL offer first, so they can be shown alone or hidden like any mailbox.
+The waiting messages SHALL be filed under each account's own *Outbox*, which the filter page SHALL offer first among the account's mailboxes, so they can be shown alone or hidden like any mailbox.
 
 #### Scenario: Composed with no network
 - GIVEN no network
@@ -204,23 +204,23 @@ The waiting messages SHALL be filed under a mailbox named *Outbox*, which the fi
 - THEN its row is cancelled and the body it pinned is released
 
 ### Requirement: A message is submitted and a copy is kept
-A sync draining the queue SHALL take an account's pending actions in append order and hand each message's bytes to the account's submit endpoint with the envelope its own address headers name, the `Bcc` among them, that header leaving the bytes on the way out so no copy a recipient receives names a blind one. It SHALL then `APPEND` the stripped copy into the mailbox the server marks `\Sent` (RFC 6154), already `\Seen`. The copy SHALL be filed after the submission and never instead of it, and a copy that could not be filed SHALL NOT be a reason to run the action again: the message has gone, and sending it a second time to file a record of it is worse than the missing record. An account with no sent mailbox SHALL send anyway and say no copy was kept.
+A sync draining the queue SHALL take an account's pending actions in append order and hand each message's bytes to the account's submit endpoint with the envelope its own address headers name, the `Bcc` among them, that header leaving the bytes on the way out so no copy a recipient receives names a blind one. A Graph or Gmail account SHALL hand the bytes, `Bcc` still in them, to `sendMail` or `messages.send` on the session it reads from: the API reads the recipients off the headers, keeps the blind ones from the recipients, and files the sent copy itself, in `Sent Items` or under `SENT`. A refusal for good is a 400, 403, 404, 413 or 422 there.
 
-A Graph or Gmail account SHALL hand the bytes, `Bcc` still in them, to `sendMail` or `messages.send` on the session it reads from and file no copy: the API reads the recipients off the headers, keeps the blind ones from the recipients, and files the sent copy itself, in `Sent Items` or under `SENT`. A refusal for good is a 400, 403, 404, 413 or 422 there.
+The submission SHALL file no copy itself: the copy is the create staged in the sent mailbox beside it (A sent message is in Sent at once), carried out by a push of its own. On IMAP that push SHALL `APPEND` the message as composed, already `\Seen`, its `Bcc` kept as the sender's record of whom it went to, and SHALL wait while the submission is queued or parked: a copy filed for a message that was not sent is a lie the sender reads as a sent message. A copy that could not be filed SHALL stay pending for the next sync and SHALL NOT be a reason to submit again. An account marking no sent mailbox SHALL send anyway, with no copy staged.
 
 The row SHALL be removed by cancelling it once the message has been handed over, and never claimed before: a submission's effect is not a store mutation, so there is nothing to apply, and a claim that deleted the row before the server accepted the message would lose the message. Submission is therefore at-least-once, and a drain interrupted between the handover and the cancel SHALL send the message again.
 
 A submission the server refuses for good, which is a 5yz reply (RFC 5321 section 4.2.1), SHALL park the row with what the server said, counted as one attempt, shown as failed to send and never retried on its own; the drain SHALL carry on to the rows behind it. Any other failure SHALL count an attempt, leave the row pending and stop the drain, the usual cause being that there is no network and the next message would fail too. An action of a kind this app does not carry out SHALL be left pending and untouched, its attempts unbumped.
 
 #### Scenario: The next sync
-- GIVEN a queued message and an account with a submit endpoint and a `\Sent` mailbox
-- WHEN the sync drains the queue
-- THEN it is handed over, a copy carrying no `Bcc` is filed, and the row is cancelled
+- GIVEN a queued message and an IMAP account with a submit endpoint and a `\Sent` mailbox
+- WHEN the sync drains the queue and pushes
+- THEN it is handed over, the row is cancelled, and the staged copy is appended to the sent mailbox
 
 #### Scenario: A submission the server refuses
 - GIVEN a server answering the envelope with a 5yz reply
 - WHEN the sync drains the queue
-- THEN nothing is filed anywhere, the row is parked carrying the error, and the message shows as failed to send
+- THEN nothing is appended anywhere, the row is parked carrying the error, and the message shows as failed to send
 
 #### Scenario: One refusal among several
 - GIVEN two queued messages, the first of which is refused
@@ -234,8 +234,8 @@ A submission the server refuses for good, which is a 5yz reply (RFC 5321 section
 
 #### Scenario: The copy cannot be filed
 - GIVEN a submission the server accepted and a `\Sent` mailbox that refuses the `APPEND`
-- WHEN the drain finishes the message
-- THEN the row is cancelled anyway and nothing offers the message again
+- WHEN the sync pushes the copy
+- THEN the submission's row is cancelled anyway, nothing offers the message again, and the copy stays pending for the next sync
 
 ### Requirement: An opened message is stored and read back
 The app SHALL store an opened message as its item's object, as the bytes the server sent, and SHALL render a later open from the store without reaching the network. Fetching SHALL happen only for a message the store does not hold.
@@ -483,3 +483,16 @@ A mail pass, the first-sync dialog, the scroll widening and the background fill 
 - GIVEN two mailboxes whose pages arrive at the same moment
 - WHEN both are written
 - THEN one write lands whole before the other begins
+
+### Requirement: A sent message is in Sent at once
+Sending SHALL stage the message as composed into the mailbox the account marks as its sent mail, beside its submission, so Sent shows it before any sync, marked pending. Gmail and Graph file sent mail themselves: before a page reaches the engine, an arrival carrying the `Message-ID` of a pending create in that mailbox SHALL be named by the create's key, so the listing lands the staged copy and nothing is pushed there. On IMAP the staged copy's push SHALL be the append, made only once the submission went (A message is submitted and a copy is kept). A JMAP account, which sends nothing yet, and an account marking no sent mailbox SHALL stage none. While the submission is in the outbox, a list showing the outbox SHALL list its outbox row alone, not the staged copy; discarding the outbox row SHALL withdraw the copy with it.
+
+#### Scenario: Sent offline
+- GIVEN a message sent with no network
+- WHEN the Sent mailbox is opened
+- THEN the message is there, marked pending
+
+#### Scenario: A provider filing sent mail itself
+- GIVEN a message sent from a Graph account
+- WHEN the next sync lists `Sent Items`
+- THEN the staged copy is landed on Graph's own copy, and Sent holds one
