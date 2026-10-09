@@ -33,7 +33,7 @@ Each step ends with a commit on master (no push until the end, no `Co-Authored-B
 | Android accounts for calendars | One per Pimalaya account, named by the address, so calendar apps group per address; which accounts and calendars reach the phone is chosen in Pimalaya (switch in setup, per calendar in settings). Contacts keep one account per book |
 | ical-rs fixes | Implemented in ical-rs, path dependency until the user releases |
 | Mapping contract | Researched by agents against existing apps, settled by the supervisor |
-| Zones | Platform tzdata through `java.time`; no time-zone database in the native library (`tzdb` feature off); non-IANA `TZID`s through ical-rs `IcalTz`, Windows names through the CLDR table |
+| Zones | Read through the platform's tzdata (`java.time`, kept current by Android's own updates) for every name it knows, the object's `VTIMEZONE` through ical-rs `IcalTz` otherwise, Windows names through the CLDR table; `VTIMEZONE`s for new entries and phone edits built from the platform's `ZoneRules`. The app's own code takes no time-zone database; io-msgraph and io-gcal still bundle one (ical-rs `tzdb`) to write the `VTIMEZONE` RFC 5545 requires beside a Graph or Google zone name, which the platform's rules override on read. DAVx5 does the same with ical4j's bundled zones (2026-10-09) |
 
 ## How to run each change
 
