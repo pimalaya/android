@@ -6,19 +6,20 @@ The handoff for the session that builds what was planned on 2026-10-09. That ses
 
 - **Committed, awaiting the user's device test:** `account-settings-page` (5e72ce6) and `background-check` (e536343), not pushed.
 - **Active, device test owed:** `standard-onboarding-one-password`, `advanced-onboarding-pages`, and the two above.
-- **Planned, not started:** the five changes below.
+- **Planned, not started:** the changes below.
+- **Abandoned:** `quiet-first-sync` (archived) and docs/release-plan.md (removed).
 
 ## Order
 
-Each step ends with a commit on master (no push until the end, no `Co-Authored-By` or AI trailer):
+Each step ends with a commit on master (no push until the end, no `Co-Authored-By` or AI trailer). Steps 1, 2, 3 and 5 run in parallel, each Android change in its own worktree beside this one (~/code/pimalaya/android-<id>, so the `../../` path patches resolve), squashed onto master:
 
 1. **`phone-contacts-mirror`**: explicit option, event-driven triggers, detection of the same address under another account type.
 2. **`calendar-zones-and-series`**: the agenda at the reader's time, zones kept and written, the recurrence set, this occurrence / this and following / all. Closes two blockers of docs/production-review.md.
-3. **ical-rs**, in ~/code/pimalaya/ical under its own cairn: `a-conflict-names-its-sides` and `a-removed-component-comes-back-for-an-edit`. Consumed here through a path dependency (`ical-rs = { path = "../../ical" }` or a `[patch.crates-io]`), never a version bump; the user publishes.
+3. **ical-rs**, in ~/code/pimalaya/ical under its own cairn: `a-conflict-names-its-sides` and `a-removed-component-comes-back-for-an-edit` already shipped (0.5.0, 0.5.1), so what is left is `rfc5545-contract-fixes` and whatever the calendar work finds. Consumed here through a `[patch.crates-io]` path dependency during development, then released by the supervisor at the end (CHANGELOG, version, tag, `cargo publish`) and pinned here.
 4. **`calendar-conflict-form`**: calendar conflicts triaged by `IcalMerge`, the rest settled in a form like contacts'.
-5. **Calendar mapping research**, then a **stop**: agents study DAVx5 (synctools, ical4android), AOSP `CalendarProvider` and Etar, ICSx⁵ and Fossify Calendar against docs/calendar-mapping.md; the supervisor revises the contract and **asks the user to agree it** before any mirror code.
+5. **Calendar mapping research**: agents study DAVx5 (synctools, ical4android), AOSP `CalendarProvider` and Etar, ICSx⁵ and Fossify Calendar against docs/calendar-mapping.md; the supervisor revises and settles the contract (delegated by the user, 2026-10-09).
 6. **`phone-calendar-mirror`**: Rust projection and patch, `CalendarMapping`, `CalendarRemote`, accounts and the calendar sync adapter, triggers, the switch.
-7. **Push** at the end.
+7. **Release and push** at the end: ical-rs released and pinned, every repository modified during the session pushed.
 
 ## Decisions (2026-10-09)
 
@@ -30,7 +31,7 @@ Each step ends with a commit on master (no push until the end, no `Co-Authored-B
 | Calendar conflicts | A form like contacts', never dropping a side |
 | Android accounts for calendars | One per Pimalaya account, named by the address, so calendar apps group per address; which accounts and calendars reach the phone is chosen in Pimalaya (switch in setup, per calendar in settings). Contacts keep one account per book |
 | ical-rs fixes | Implemented in ical-rs, path dependency until the user releases |
-| Mapping contract | Researched by agents against existing apps, then agreed with the user |
+| Mapping contract | Researched by agents against existing apps, settled by the supervisor |
 | Zones | Platform tzdata through `java.time`; no time-zone database in the native library (`tzdb` feature off); non-IANA `TZID`s through ical-rs `IcalTz`, Windows names through the CLDR table |
 
 ## How to run each change

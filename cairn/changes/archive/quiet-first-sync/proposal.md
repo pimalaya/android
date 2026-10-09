@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: quiet-first-sync
-status: draft
+status: abandoned
 created: 2026-10-08
 ---
 
