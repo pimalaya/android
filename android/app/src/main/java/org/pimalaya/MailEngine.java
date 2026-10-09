@@ -460,6 +460,15 @@ class MailEngine extends PimdirEngine {
                 continue;
             }
             String create = creates.remove(messageId);
+            if (create == null) {
+                // NOTE: a provider that stamped a Message-ID of its own on
+                // what it sent (Gmail) files its copy under that one.
+                String staged = mail().stagedSentCopy(messageId);
+                create = staged == null ? null : creates.remove(staged);
+                if (create != null) {
+                    mail().forgetSentAlias(messageId);
+                }
+            }
             if (create != null) {
                 item.put("linkId", create);
             }

@@ -31,6 +31,9 @@ final class SyncRunner {
         /** An engine stage of a domain stepped (the loader's detail line). */
         void step(PimDomain domain, int stage, int count);
 
+        /** A pass moved on to one account (the loader's title). */
+        void account(String email);
+
         /** A token refresh re-persisted the account's credentials. */
         void accountRefreshed(AccountEntry updated);
     }
@@ -243,6 +246,9 @@ final class SyncRunner {
     private void syncAccount(
             String email, Account account, List<BookEntry> books, Outcome outcome)
             throws Exception {
+        if (observer != null) {
+            observer.account(email);
+        }
         try (Transport primary = new Transport()) {
             try {
                 new PimdirCollections(pimdir, context)

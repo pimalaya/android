@@ -107,7 +107,7 @@ Every HTTP backend (Graph, Gmail, Google Calendar and People, CalDAV, CardDAV, J
 - THEN the request fails with the 503 within the bound, and the pass reports it as it reports any error
 
 ### Requirement: Gmail is paced below its quota
-Gmail API requests SHALL be paced near 40 a second across every worker of the process, below the 50 metadata reads a second Gmail's per-user quota allows, and SHALL spend at most a per-minute budget of quota units below the 15,000 units per minute per user Google documents, each request counting its method's units, rather than sent until Gmail answers 429 or a quota 403.
+Gmail API requests SHALL be paced near 40 a second across every worker of the process, below the 50 metadata reads a second Gmail's per-user quota allows, and SHALL spend at most a per-minute budget of quota units below the project's quota of units per minute per user (6,000 for project 991810147220, where Google documents 15,000), each request counting its method's units, rather than sent until Gmail answers 429 or a quota 403.
 
 #### Scenario: A first round over a large label
 - GIVEN several workers reading Gmail envelopes at once

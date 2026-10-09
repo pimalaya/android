@@ -79,6 +79,9 @@ final class MailStore {
     /** Which accounts' servers erase no single message (no UIDPLUS), by account id. */
     private static final String MARKING_PREFS = "mail-marks-deleted";
 
+    /** Which sent copies a provider filed under its own Message-ID, by that id. */
+    private static final String SENT_ALIAS_PREFS = "mail-sent-alias";
+
     private final PimdirItems items;
     private final PimdirDb store;
     private final PimdirCollections collections;
@@ -277,6 +280,24 @@ final class MailStore {
         return items.objectBytes(collection, linkId);
     }
 
+    /** Whether the store holds one message's body, without reading it. */
+    boolean holdsBody(StoredMessage message) {
+        return items.objectOf(items.readable(), message.collection, message.id) != null;
+    }
+
+    /**
+     * Whether deleting one message removes it for good: in its account's
+     * trash, where the server erases one message alone (the rule
+     * {@code MailEngine.stageDelete} stages by).
+     */
+    boolean erases(StoredMessage message) {
+        String trash = trashOf(message.accountEmail);
+        return !message.pending
+                && !trash.isEmpty()
+                && trash.equals(message.mailbox)
+                && expungesOne(message.accountEmail);
+    }
+
     /** The id one account's collections are namespaced under. */
     String accountIdOf(String accountEmail) {
         return accounts.idOf(accountEmail);
@@ -325,6 +346,10 @@ final class MailStore {
         final String collection;
 
         final String mailbox;
+
+        /** The mailbox as the reader is shown it ({@link MailStore#mailboxLabel}). */
+        final String mailboxLabel;
+
         final String id;
         final String subject;
 
@@ -421,6 +446,7 @@ final class MailStore {
             this.accountEmail = accountEmail;
             this.collection = collection;
             this.mailbox = mailbox;
+            this.mailboxLabel = mailbox;
             this.id = id;
             this.subject = subject;
             this.fromName = fromName;
@@ -446,6 +472,7 @@ final class MailStore {
                 String accountEmail,
                 String collection,
                 String mailbox,
+                String mailboxLabel,
                 String id,
                 String subject,
                 String fromName,
@@ -459,6 +486,7 @@ final class MailStore {
             this.accountEmail = accountEmail;
             this.collection = collection;
             this.mailbox = mailbox;
+            this.mailboxLabel = mailboxLabel;
             this.id = id;
             this.subject = subject;
             this.fromName = fromName;
@@ -944,6 +972,7 @@ final class MailStore {
                                 mailbox.accountEmail,
                                 cursor.getString(0),
                                 mailbox.name,
+                                mailboxLabel(mailbox),
                                 cursor.getString(2),
                                 cursor.isNull(9) ? "" : cursor.getString(9),
                                 cursor.isNull(11) ? "" : cursor.getString(11),
@@ -1019,6 +1048,17 @@ final class MailStore {
             }
             after = page.get(page.size() - 1);
         }
+    }
+
+    /**
+     * The name a mailbox is shown under: its role's in the reader's
+     * language where the source states one, since servers name those in
+     * their own words (IMAP's INBOX, Gmail's SENT or SPAM labels), its own
+     * name otherwise.
+     */
+    String mailboxLabel(PimdirCollections.Stored mailbox) {
+        int label = MailList.roleLabel(mailbox.role);
+        return label == 0 ? mailbox.name : context.getString(label);
     }
 
     /** The mail collections, by id, for the account and name a row shows. */
@@ -1444,10 +1484,14 @@ final class MailStore {
         /** The queue row, which is what acknowledging it addresses. */
         final long id;
 
+        /** The {@code Message-ID} it was stamped with, bare. */
+        final String messageId;
+
         final byte[] source;
 
-        Outgoing(long id, byte[] source) {
+        Outgoing(long id, String messageId, byte[] source) {
             this.id = id;
+            this.messageId = messageId;
             this.source = source;
         }
     }
@@ -1474,7 +1518,8 @@ final class MailStore {
             }
             byte[] source = queue.body(action.objectHash);
             if (source != null) {
-                waiting.add(new Outgoing(action.id, source));
+                waiting.add(
+                        new Outgoing(action.id, action.payload.optString("messageId"), source));
             }
         }
         return waiting;
@@ -1490,6 +1535,40 @@ final class MailStore {
      */
     void acknowledge(long queued) {
         queue.acknowledge(queued);
+    }
+
+    /**
+     * Remembers that the sent copy staged for {@code messageId} arrives
+     * under {@code filed}, the {@code Message-ID} the provider stamped on
+     * what it sent instead (Gmail), so the sync lands the staged copy on
+     * the provider's rather than listing a second.
+     */
+    void aliasSentCopy(String messageId, String filed) {
+        if (filed.equals(messageId)) {
+            return;
+        }
+        context.getSharedPreferences(SENT_ALIAS_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(filed, messageId)
+                .apply();
+    }
+
+    /**
+     * The {@code Message-ID} of the sent copy staged for a message the
+     * provider filed under {@code filed} ({@link #aliasSentCopy}), else
+     * null.
+     */
+    String stagedSentCopy(String filed) {
+        return context.getSharedPreferences(SENT_ALIAS_PREFS, Context.MODE_PRIVATE)
+                .getString(filed, null);
+    }
+
+    /** Forgets an alias once its staged copy landed on the provider's. */
+    void forgetSentAlias(String filed) {
+        context.getSharedPreferences(SENT_ALIAS_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .remove(filed)
+                .apply();
     }
 
     /** Records why a submission will not be tried again. */

@@ -174,7 +174,7 @@ final class OnboardingFlow {
 
     /**
      * Asks whether to set the account up the standard way (a switch per
-     * domain, the password sign-in of the best configuration found for
+     * domain, the best sign-in of the best configuration found for
      * it, every addressbook, phone mirroring) or step by step, while the discovery already runs
      * behind; the flow proceeds once both the choice and the discovery
      * are in.
@@ -527,8 +527,8 @@ final class OnboardingFlow {
      * between screens.
      *
      * <p>The standard setup shows the headings alone. It answers the
-     * configuration question itself, with the password sign-in of the best
-     * configuration found ({@link #passwordOption}), so a screen listing
+     * configuration question itself, with the best sign-in of the best
+     * configuration found ({@link #standardOption}), so a screen listing
      * protocols under each switch would be asking again the question the setup
      * choice just declined. What is left is what the user actually decides:
      * which of the three to keep on this device.
@@ -553,7 +553,7 @@ final class OnboardingFlow {
             setup.options.addAll(optionsFor(domain));
             discovered |= !setup.options.isEmpty();
             if (simpleSetup()) {
-                setup.selected = passwordOption(setup);
+                setup.selected = standardOption(setup);
             } else {
                 setup.options.add(manualOption());
             }
@@ -626,23 +626,52 @@ final class OnboardingFlow {
     }
 
     /**
-     * The standard setup's way into one domain: the best-ranked
-     * configuration found for it that signs in with a login and a password,
-     * or null when it offers none.
+     * The standard setup's way into one domain, or null when it offers none.
      *
-     * <p>A password and nothing else. It is the credential every provider
-     * documents on its own help page, so it is the one a setup that asks no
-     * questions can be sure of; a browser grant, an API token or a
-     * hand-entered server is a decision, and a decision is what the advanced
-     * setup is for.
+     * <p>Google's and Microsoft's own APIs first, which sign in through the
+     * app's registration at either; elsewhere the best-ranked configuration
+     * found, JMAP over the rest, then OAuth over an API token over a
+     * password. The user picks the domains and the setup picks the rest.
      */
-    private static SetupOption passwordOption(DomainSetup setup) {
+    private SetupOption standardOption(DomainSetup setup) {
+        SetupOption best = null;
         for (SetupOption option : setup.options) {
-            if (option.method != null && option.method.type == AuthMethod.Type.PASSWORD) {
-                return option;
+            if (option.method == null) {
+                continue;
+            }
+            if (best == null || standardRank(option) < standardRank(best)) {
+                best = option;
             }
         }
-        return null;
+        return best;
+    }
+
+    /** The standard setup's order: the service first, then the sign-in. */
+    private int standardRank(SetupOption option) {
+        int service = proprietary(option) ? 0 : 1 + serviceRank(option.service);
+        return service * 10 + authRank(option.method.type);
+    }
+
+    /**
+     * Whether an option reads Google's or Microsoft's own API: a discovered
+     * Gmail, Google Calendar or Graph service, or a provider sign-in to the
+     * People API or Graph.
+     */
+    private boolean proprietary(SetupOption option) {
+        if (option.service == null) {
+            return option.baseUrl != null
+                    && (option.baseUrl.equals(PimalayaClient.googleBase(pendingEmail))
+                            || option.baseUrl.equals(PimalayaClient.msgraphBase(pendingEmail)));
+        }
+        switch (option.service) {
+            case "gmail":
+            case "gcal":
+            case "msgraph":
+            case "msgraphCalendar":
+                return true;
+            default:
+                return false;
+        }
     }
 
     /** Whether this domain can be switched on at all, in the running mode. */

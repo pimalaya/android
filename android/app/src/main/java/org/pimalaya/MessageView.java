@@ -100,7 +100,7 @@ final class MessageView {
                                 : message.subject);
         ((TextView) host.findViewById(R.id.message_view_from)).setText(sender(message));
         ((TextView) host.findViewById(R.id.message_view_mailbox))
-                .setText(message.mailbox + " · " + message.accountEmail);
+                .setText(message.mailboxLabel + " · " + message.accountEmail);
         // NOTE: the recipients come with the body, and a line of the
         // previous message's must not linger until then.
         host.findViewById(R.id.message_view_recipients).setVisibility(View.GONE);
@@ -449,20 +449,64 @@ final class MessageView {
     /** Asks before deleting: the reader is one tap from losing a message. */
     private void confirmDelete() {
         MailStore.StoredMessage message = current;
-        new AlertDialog.Builder(host)
-                .setMessage(R.string.message_delete_confirm)
-                .setPositiveButton(
-                        R.string.message_delete,
-                        (dialog, which) ->
-                                stageDelete(
-                                        List.of(message),
-                                        () -> {
-                                            if (current == message) {
-                                                host.showBack(MainActivity.PANEL_MAIL);
-                                            }
-                                        }))
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        confirmDelete(
+                List.of(message),
+                () -> {
+                    if (current == message) {
+                        host.showBack(MainActivity.PANEL_MAIL);
+                    }
+                });
+    }
+
+    /**
+     * Asks before deleting {@code messages}, then stages it and runs
+     * {@code done}; the reader's delete and the list's selection both come
+     * here.
+     *
+     * <p>The question counts the messages a delete removes for good while
+     * the phone holds no body of them, which no restore can bring back:
+     * Deleted items keeps what was stored, and a header is not a message.
+     */
+    void confirmDelete(List<MailStore.StoredMessage> messages, Runnable done) {
+        host.io.execute(
+                () -> {
+                    int lost = 0;
+                    for (MailStore.StoredMessage message : messages) {
+                        if (host.mail.erases(message) && !host.mail.holdsBody(message)) {
+                            lost++;
+                        }
+                    }
+                    int unrestorable = lost;
+                    host.postAlive(
+                            () -> {
+                                String question =
+                                        host.getResources()
+                                                .getQuantityString(
+                                                        R.plurals.messages_delete_confirm,
+                                                        messages.size(),
+                                                        messages.size());
+                                if (unrestorable > 0) {
+                                    String warning =
+                                            messages.size() == 1
+                                                    ? host.getString(
+                                                            R.string.message_delete_unrestorable)
+                                                    : host.getResources()
+                                                            .getQuantityString(
+                                                                    R.plurals
+                                                                            .messages_delete_unrestorable,
+                                                                    unrestorable,
+                                                                    unrestorable);
+                                    question += "\n\n" + warning;
+                                }
+                                new AlertDialog.Builder(host)
+                                        .setMessage(question)
+                                        .setPositiveButton(
+                                                R.string.message_delete,
+                                                (dialog, which) -> stageDelete(messages, done))
+                                        .setNegativeButton(android.R.string.cancel, null)
+                                        .show();
+                            });
+                });
     }
 
     /**
@@ -550,7 +594,7 @@ final class MessageView {
         switch (deletion) {
             case MOVED:
                 return host.getString(
-                        R.string.message_deleted, host.mail.trashOf(message.accountEmail));
+                        R.string.message_deleted, host.getString(R.string.mail_chip_trash));
             case ERASED:
                 return host.getString(R.string.message_deleted_for_good);
             default:

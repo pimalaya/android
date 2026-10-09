@@ -8,7 +8,7 @@ change: google-sync
 In order; 1, 2 and 5-A1 are small and can land first, together.
 
 ## 0. Before tuning
-- [ ] Read the Gmail API quotas of project 991810147220 (per-minute per-user, per-day) in the Cloud console
+- [x] Read the Gmail API quotas of project 991810147220 (per-minute per-user, per-day) in the Cloud console: 6,000 units per minute per user (the previous quota, 15,000, is what Google still documents), 1,200,000 per minute for the project (2026-10-09)
 - [ ] Check live on `google@pimalaya.org` whether `history.list` records carry `labelIds`
 
 ## 1. One consent
@@ -43,7 +43,7 @@ In order; 1, 2 and 5-A1 are small and can land first, together.
 
 ## 6. Land
 - [ ] Measure on the device with the seeded account: first dialog, whole account, a quiet pass; compare with 2026-10-07 (SENT 64 in 11.2 s, INBOX 120 in 24.1 s, quota refusal)
-- [ ] Check live: the budget uses the documented 15,000 units/min (`GMAIL_UNITS_PER_MINUTE_DOCUMENTED` in throttle.rs) while the device was refused around 1,000 to 2,000
+- [x] Check live: the budget used the documented 15,000 units/min while the project's quota is 6,000; `GMAIL_UNITS_PER_MINUTE_PER_USER` in throttle.rs is now 6,000 (budget 4,800). A whole-account fill on 2026-10-09 at the old budget still drew a 403 on INBOX past the 75 s wait, resumed by the next fill
 - [ ] Check live: `gmail.googleapis.com/batch/gmail/v1` also answers (we use `www.googleapis.com`); a burst of batches (250 units each, one per-second slot) gets no inner part throttled
 - [ ] Check live: an iCalUID listing returns the master with its instances; `nextSyncToken` comes back on a full listing with only `showDeleted`
 - [ ] Check live: People rejects a token after a pageSize change or not; how `people:batchGet` reports a deleted contact; a quiet pass is one People request

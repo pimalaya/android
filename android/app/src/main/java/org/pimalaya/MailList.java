@@ -77,6 +77,16 @@ final class MailList {
         R.string.mail_chip_archive,
     };
 
+    /** The chip label of a mail role, or 0 for a role no chip names. */
+    static int roleLabel(String role) {
+        for (int index = 0; index < ROLES.length; index++) {
+            if (ROLES[index].equals(role)) {
+                return ROLE_LABELS[index];
+            }
+        }
+        return 0;
+    }
+
     private static final int[] ROLE_ICONS = {
         R.drawable.ic_domain_mail,
         R.drawable.ic_send,
@@ -838,13 +848,13 @@ final class MailList {
             return host.getString(R.string.message_pending);
         }
         if (message.refused) {
-            return host.getString(R.string.row_refused) + " · " + message.mailbox;
+            return host.getString(R.string.row_refused) + " · " + message.mailboxLabel;
         }
         // NOTE: deleted on a server expunging no single message, so still
         // listed until something expunges the mailbox.
         return message.deleted
-                ? message.mailbox + " · " + host.getString(R.string.message_marked_deleted)
-                : message.mailbox;
+                ? message.mailboxLabel + " · " + host.getString(R.string.message_marked_deleted)
+                : message.mailboxLabel;
     }
 
     /**
@@ -1035,21 +1045,6 @@ final class MailList {
 
     /** Asks, then stages the selection's deletion. */
     private void deleteSelected() {
-        withSelection(
-                messages ->
-                        new android.app.AlertDialog.Builder(host)
-                                .setMessage(
-                                        host.getResources()
-                                                .getQuantityString(
-                                                        R.plurals.messages_delete_confirm,
-                                                        messages.size(),
-                                                        messages.size()))
-                                .setPositiveButton(
-                                        R.string.message_delete,
-                                        (dialog, which) ->
-                                                host.messageView.stageDelete(
-                                                        messages, this::exitSelection))
-                                .setNegativeButton(android.R.string.cancel, null)
-                                .show());
+        withSelection(messages -> host.messageView.confirmDelete(messages, this::exitSelection));
     }
 }

@@ -94,17 +94,16 @@ pub(crate) const GMAIL_REQUESTS_PER_SECOND: u32 = 40;
 /// the one the pacing lets through.
 const GMAIL_BURST: u32 = 10;
 
-/// Gmail's per-minute quota per user, in quota units, as Google
-/// documents it by default (Gmail API, "Usage limits": 15,000 units per
-/// user per minute). The documented default, not a measurement: a
-/// project's own quota is read in its Cloud console, and the project
-/// the app runs under refused a pass that spent far fewer (2026-10-07).
-const GMAIL_UNITS_PER_MINUTE_DOCUMENTED: u32 = 15_000;
+/// Gmail's per-minute quota per user, in quota units, as the Cloud
+/// console of the app's project 991810147220 states it (2026-10-09):
+/// 6,000 units per user per minute, below the 15,000 Gmail's "Usage
+/// limits" page still documents, which Google calls the previous quota.
+const GMAIL_UNITS_PER_MINUTE_PER_USER: u32 = 6_000;
 
 /// The quota units Gmail requests may spend in any sixty seconds: the
-/// documented default less a fifth, so the two sides' clocks and the
+/// project's quota less a fifth, so the two sides' clocks and the
 /// requests still in flight never carry a pass over it.
-pub(crate) const GMAIL_UNITS_PER_MINUTE: u32 = GMAIL_UNITS_PER_MINUTE_DOCUMENTED / 5 * 4;
+pub(crate) const GMAIL_UNITS_PER_MINUTE: u32 = GMAIL_UNITS_PER_MINUTE_PER_USER / 5 * 4;
 
 /// Where Gmail API requests go, to tell its quota refusals apart; its
 /// batches go to [`GMAIL_BATCH_URL`], on another host.

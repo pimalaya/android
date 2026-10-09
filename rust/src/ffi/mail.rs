@@ -734,8 +734,9 @@ pub extern "system" fn Java_org_pimalaya_client_Native_composeMessage<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// `Native.submitMessage`: hands one stored message over. Returns an
-/// empty JSON object, or `{"error": "..", "permanent": bool}`.
+/// `Native.submitMessage`: hands one stored message over. Returns a JSON
+/// object of `{messageId}`, the provider's own or null, or
+/// `{"error": "..", "permanent": bool}`.
 ///
 /// The submission opens its own connection, SMTP being a second server.
 #[unsafe(no_mangle)]
@@ -753,7 +754,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
 
         let mut client = Client::new(env, &transport);
         let json = match submit_message(&mut client, handle, &submit_url, &raw) {
-            Ok(()) => String::from("{}"),
+            Ok(filed) => json!({ "messageId": filed }).to_string(),
             Err(refused) => {
                 json!({ "error": refused.message, "permanent": refused.permanent }).to_string()
             }
@@ -797,6 +798,8 @@ impl Refused {
 }
 
 /// Submits one stored message, over SMTP or the session's own API.
+/// Returns the `Message-ID` the provider filed its sent copy under when
+/// it stamped one of its own.
 ///
 /// The submission alone: the sent copy is a create staged in the sent
 /// mailbox when the message was queued, landed by the provider's own
@@ -806,7 +809,7 @@ fn submit_message(
     handle: i64,
     submit_url: &str,
     raw: &[u8],
-) -> Result<(), Refused> {
+) -> Result<Option<String>, Refused> {
     let session = unsafe { session::borrow(handle) }.map_err(Refused::transient)?;
     if session.is_jmap() {
         return Err(Refused::transient(
@@ -817,14 +820,27 @@ fn submit_message(
         // NOTE: Graph and Gmail submit through the session they read from
         // and file the sent copy themselves.
         let token = session.credentials().password;
-        let sent = match session.is_graph() {
-            true => client.send_graph_message(token, raw),
-            false => client.send_gmail_message(token, raw),
-        };
-        return sent.map_err(|err| Refused {
+        let refused = |err: BridgeError| Refused {
             permanent: matches!(err.status, Some(400 | 403 | 404 | 413 | 422)),
             message: err.to_string(),
-        });
+        };
+        if session.is_graph() {
+            client.send_graph_message(token, raw).map_err(refused)?;
+            return Ok(None);
+        }
+
+        // NOTE: Gmail replaces the Message-ID of what it sends, so its sent
+        // copy is read back for the one it stamped. The message has left
+        // either way: a failed read only leaves the staged copy unmatched.
+        let id = client.send_gmail_message(token, raw).map_err(refused)?;
+        let filed = match client.gmail_envelope(token, &id) {
+            Ok(envelope) => envelope.and_then(|envelope| envelope.summary.message_id),
+            Err(err) => {
+                log::warn!("sent copy {id} unread: {err}");
+                None
+            }
+        };
+        return Ok(filed);
     }
     if submit_url.is_empty() {
         return Err(Refused::transient(
@@ -834,8 +850,11 @@ fn submit_message(
 
     let composed = mail::envelope(raw).map_err(Refused::transient)?;
     let submit = parse_url(submit_url).map_err(Refused::transient)?;
-    client::smtp::send(client, &submit, &session.credentials(), &composed).map_err(|err| Refused {
-        permanent: err.is_permanent(),
-        message: err.to_string(),
-    })
+    client::smtp::send(client, &submit, &session.credentials(), &composed).map_err(|err| {
+        Refused {
+            permanent: err.is_permanent(),
+            message: err.to_string(),
+        }
+    })?;
+    Ok(None)
 }

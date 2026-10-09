@@ -7,6 +7,7 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.BaseAdapter;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -127,7 +128,15 @@ final class DeletedItemsPage {
         for (DeletedItems.Row row : listed) {
             retained |= !row.waiting();
         }
-        View free = host.findViewById(R.id.deleted_free);
+        Button free = host.findViewById(R.id.deleted_free);
+        // NOTE: the figure on the button too, so what a purge gives back is
+        // read where it is asked for, not on the line beside it alone.
+        free.setText(
+                bytes > 0
+                        ? host.getString(
+                                R.string.deleted_free_amount,
+                                Formatter.formatShortFileSize(host, bytes))
+                        : host.getString(R.string.deleted_free));
         free.setEnabled(retained);
         free.setAlpha(retained ? 1f : 0.5f);
         free.setTag(bytes);
@@ -183,7 +192,7 @@ final class DeletedItemsPage {
 
         CharSequence[] labels = new CharSequence[own.size()];
         for (int index = 0; index < labels.length; index++) {
-            labels[index] = host.bookLabel(own.get(index).name, accountLabel(row));
+            labels[index] = host.bookLabel(label(row, own.get(index)), accountLabel(row));
         }
         int[] picked = {preselected};
         new AlertDialog.Builder(host)
@@ -406,7 +415,14 @@ final class DeletedItemsPage {
                         : PimdirSummary.CONTACT.equals(row.kind)
                                 ? R.string.domain_contacts
                                 : R.string.domain_calendar;
-        return host.getString(domain) + " · " + accountLabel(row) + " · " + row.collection.name;
+        return host.getString(domain) + " · " + accountLabel(row) + " · " + label(row, row.collection);
+    }
+
+    /** A collection of the row's kind as the reader is shown it. */
+    private String label(DeletedItems.Row row, PimdirCollections.Stored collection) {
+        return PimdirSummary.MAIL.equals(row.kind)
+                ? host.mail.mailboxLabel(collection)
+                : collection.name;
     }
 
     private String status(DeletedItems.Row row) {
