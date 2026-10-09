@@ -501,7 +501,7 @@ final class EventView {
         return readable() && writes();
     }
 
-    /** Whether the calendar's backend takes event writes, which a JMAP one does not yet. */
+    /** Whether the calendar's backend takes event writes at all. */
     private boolean writes() {
         return PimalayaClient.writesEvents(calendar.url);
     }
@@ -1440,9 +1440,8 @@ final class EventView {
      * Asks which occurrences of the series a change is for.
      *
      * <p>This occurrence alone is offered only where the calendar's push
-     * carries it: CalDAV, Graph and Google do, and a JMAP calendar takes no
-     * write yet, so offering it there would stage a change the server never
-     * sees.
+     * carries it, as every calendar backend's does: offering it where one did
+     * not would stage a change the server never sees.
      */
     private void scope(int title, boolean one, Consumer<String> then) {
         List<String> scopes = new ArrayList<>();

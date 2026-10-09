@@ -77,22 +77,32 @@ impl Backend {
     /// True when a calendar write carries an override of one occurrence
     /// (RFC 5545 3.8.4.4) to the server: CalDAV's puts the whole object,
     /// Graph's and Google's write the occurrence through its instance
-    /// after the series, and a JMAP calendar takes no write yet.
+    /// after the series, and JMAP's carries it inside the event's
+    /// `recurrenceOverrides`.
     pub fn writes_overrides(self) -> bool {
-        matches!(self, Self::Carddav | Self::Graph | Self::Google)
+        matches!(
+            self,
+            Self::Carddav | Self::Graph | Self::Jmap | Self::Google
+        )
     }
 
     /// True when a calendar write carries an `EXDATE` to the server, the
     /// occurrence deleted through its instance where it is not the whole
-    /// object; a JMAP calendar takes no write yet.
+    /// object, or excluded in the event's `recurrenceOverrides` on JMAP.
     pub fn writes_exdates(self) -> bool {
-        matches!(self, Self::Carddav | Self::Graph | Self::Google)
+        matches!(
+            self,
+            Self::Carddav | Self::Graph | Self::Jmap | Self::Google
+        )
     }
 
-    /// True when a calendar of this backend takes event writes: every one
-    /// but JMAP, whose `CalendarEvent/set` is not written yet.
+    /// True when a calendar of this backend takes event writes: every one,
+    /// JMAP's through `CalendarEvent/set`.
     pub fn writes_events(self) -> bool {
-        !matches!(self, Self::Jmap)
+        matches!(
+            self,
+            Self::Carddav | Self::Graph | Self::Jmap | Self::Google
+        )
     }
 
     /// True when a mail account of this backend submits through the
@@ -220,28 +230,6 @@ mod tests {
         assert!(Backend::Google.account_level());
         assert!(!Backend::Carddav.account_level());
         assert!(!Backend::Graph.account_level());
-    }
-
-    /// Only a push that carries an occurrence on its own can be asked to:
-    /// every backend that writes calendars does, JMAP none yet.
-    #[test]
-    fn occurrence_writes_follow_what_each_push_carries() {
-        for backend in [Backend::Carddav, Backend::Google, Backend::Graph] {
-            assert!(backend.writes_overrides());
-            assert!(backend.writes_exdates());
-        }
-        assert!(!Backend::Jmap.writes_overrides());
-        assert!(!Backend::Jmap.writes_exdates());
-    }
-
-    /// A JMAP calendar takes no write until `CalendarEvent/set` exists,
-    /// so nothing may be staged on one.
-    #[test]
-    fn only_jmap_calendars_refuse_writes() {
-        for backend in [Backend::Carddav, Backend::Google, Backend::Graph] {
-            assert!(backend.writes_events());
-        }
-        assert!(!Backend::Jmap.writes_events());
     }
 
     /// The backends reading mail over an API send over it; an IMAP base

@@ -2482,8 +2482,8 @@ public class MainActivity extends Activity {
             readOnlyBackend |= !PimalayaClient.writesEvents(calendar.url);
         }
         List<PimdirCollections.Stored> collections = collectionsOf(PimDomain.CALENDAR);
-        // NOTE: a JMAP calendar lists as read only, and the line for no
-        // calendar at all would leave its owner guessing why.
+        // NOTE: a backend taking no event write lists as read only, and the
+        // line for no calendar at all would leave its owner guessing why.
         if (readOnlyBackend && DefaultCollection.writable(collections).isEmpty()) {
             toast(getString(R.string.event_read_only));
             return;

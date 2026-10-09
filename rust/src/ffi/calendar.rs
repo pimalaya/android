@@ -22,24 +22,10 @@ use serde_json::{from_str, json, to_string};
 
 use crate::{
     account::{self, Backend},
-    client::{Client, convert::REFUSED},
+    client::Client,
     ffi::{error_json, parse_url, read_string},
     types::{BridgeError, Calendar, Credentials, Event, EventRef},
 };
-
-/// Why the three write verbs refuse a JMAP calendar, for good.
-///
-/// They take `CalendarEvent/set` in JSCalendar, which is the conversion
-/// the read path does in the other direction and is not written yet.
-/// Refusing beats a silent no-op that looks like a save, and refusing
-/// with [`REFUSED`] has an edit staged by an earlier build shown as
-/// refused rather than failing every pass of its calendar.
-fn jmap_unsupported() -> BridgeError {
-    BridgeError {
-        message: "JMAP calendars are read only for now".into(),
-        status: Some(REFUSED),
-    }
-}
 
 /// `Native.listCalendars`: lists the account's calendars off its base
 /// URL. Returns a JSON array of calendars carrying the collection URL
@@ -379,7 +365,13 @@ fn update_event(
     etag: &str,
 ) -> Result<Option<String>, BridgeError> {
     match Backend::of(base_url) {
-        Backend::Jmap => Err(jmap_unsupported()),
+        Backend::Jmap => client.update_jmap_event(
+            &account::jmap_session_url(base_url)?,
+            credentials,
+            id,
+            ical,
+            Some(etag).filter(|etag| !etag.is_empty()),
+        ),
         Backend::Graph => client.update_graph_event(
             credentials.password,
             id,
@@ -668,7 +660,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteEvent<'local>(
 
 /// Files one new object with whichever backend the base URL names,
 /// answering the resource it landed under: the name asked for on CalDAV,
-/// the id Graph minted.
+/// the id Graph, Google or the JMAP server minted.
 fn create_event(
     client: &mut Client<'_, '_>,
     base_url: &str,
@@ -678,7 +670,12 @@ fn create_event(
     ical: &str,
 ) -> Result<EventRef, BridgeError> {
     match Backend::of(base_url) {
-        Backend::Jmap => Err(jmap_unsupported()),
+        Backend::Jmap => client.create_jmap_event(
+            &account::jmap_session_url(base_url)?,
+            credentials,
+            account::jmap_collection_id(calendar_url),
+            ical,
+        ),
         Backend::Graph => client.create_graph_event(
             credentials.password,
             account::book_segment(base_url, calendar_url),
@@ -710,7 +707,12 @@ fn delete_event(
     etag: &str,
 ) -> Result<(), BridgeError> {
     match Backend::of(base_url) {
-        Backend::Jmap => Err(jmap_unsupported()),
+        Backend::Jmap => client.delete_jmap_event(
+            &account::jmap_session_url(base_url)?,
+            credentials,
+            id,
+            Some(etag).filter(|etag| !etag.is_empty()),
+        ),
         Backend::Graph => client.delete_graph_event(
             credentials.password,
             id,

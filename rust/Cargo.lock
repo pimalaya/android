@@ -647,9 +647,9 @@ dependencies = [
 
 [[package]]
 name = "io-jmap"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "921c612371546a675cd49fa846db111cd34aee6dd10cb8550bb8c2580d549520"
+checksum = "388647709d786c59635ca1749f51169896e3d043edb529d293aadf8a39f1cf7c"
 dependencies = [
  "io-http",
  "log",
@@ -1368,9 +1368,9 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "vcard-rs"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bea378d5fe5266787d2386dfc20cfe37232b24386379d3742ecc4b947471f268"
+checksum = "a40d51ee30e110bb162cb9bc8d5d27696eb2d5e39ecff4e67de6069d014b230b"
 dependencies = [
  "memchr",
  "serde_json",

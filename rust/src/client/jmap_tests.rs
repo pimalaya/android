@@ -1,11 +1,12 @@
 //! The JMAP verbs over fake JMAP accounts: a calendar listed a page at a
 //! time and never complete when the server stops short, an address book
 //! paged and its delta chunked by `maxObjectsInGet`, a message sent
-//! through Drafts to Sent with its refusals mapped, and the session
-//! cache.
+//! through Drafts to Sent with its refusals mapped, the session cache,
+//! and calendar entries written through `CalendarEvent/set`, one
+//! occurrence inside its event.
 //!
 //! Each fake answers the requests of one of [`JmapEventPages`],
-//! [`JmapCardReads`] and [`JmapSubmit`] the way a server does where it
+//! [`JmapCardReads`], [`JmapSubmit`] and [`JmapEventWrites`] the way a server does where it
 //! matters here, and records what it was asked.
 
 use std::time::{Duration, Instant};
@@ -593,4 +594,568 @@ fn a_cached_session_serves_until_it_ages_or_its_api_fails() {
     cache.put(other, now + SESSION_TTL, session(json!({}), json!({})));
 
     assert_eq!(cache.entries.len(), 1);
+}
+
+/// A weekly series on a JMAP calendar as a jscalendarbis server holds
+/// it, with an attendee, and a member the conversion carries only through
+/// its escape hatch.
+fn standup() -> Value {
+    json!({
+        "id": "ev1",
+        "calendarIds": { "c1": true },
+        "@type": "Event",
+        "uid": "standup",
+        "title": "Standup",
+        "start": "2026-10-01T09:00:00",
+        "timeZone": "Europe/Paris",
+        "duration": "PT30M",
+        "recurrenceRule": { "@type": "RecurrenceRule", "frequency": "weekly" },
+        "organizerCalendarAddress": "mailto:jane@example.com",
+        "participants": {
+            "p1": {
+                "@type": "Participant",
+                "name": "Ada",
+                "calendarAddress": "mailto:ada@example.com",
+                "roles": { "attendee": true },
+            },
+        },
+        "useDefaultAlerts": true,
+    })
+}
+
+/// A JMAP account's events, applying the writes it takes, and what was
+/// asked of it.
+struct FakeEvents {
+    events: BTreeMap<String, Value>,
+    state: u32,
+    /// Whether another client writes between each read and the next write.
+    races: bool,
+    /// The refusal each write of these ids or creation keys answers.
+    refusals: BTreeMap<String, Value>,
+    /// Every `CalendarEvent/set` asked for, as sent.
+    sets: Vec<Value>,
+}
+
+fn events(events: &[Value]) -> FakeEvents {
+    FakeEvents {
+        events: events
+            .iter()
+            .map(|event| (event["id"].as_str().unwrap().to_string(), event.clone()))
+            .collect(),
+        state: 1,
+        races: false,
+        refusals: BTreeMap::new(),
+        sets: Vec::new(),
+    }
+}
+
+impl FakeEvents {
+    /// The iCalendar the listing gives the event `id`, which is what an
+    /// edit starts from.
+    fn listed(&self, id: &str) -> Event {
+        jmap_event(from_value(self.events[id].clone()).unwrap()).unwrap()
+    }
+
+    /// The one patch the last write sent.
+    fn patch(&self) -> &serde_json::Map<String, Value> {
+        let update = self.sets.last().unwrap()["update"].as_object().unwrap();
+        assert_eq!(update.len(), 1, "{update:?}");
+        update.values().next().unwrap().as_object().unwrap()
+    }
+}
+
+impl JmapEventWrites for FakeEvents {
+    fn event(&mut self, id: &str) -> Result<(Option<JmapCalendarEvent>, String), BridgeError> {
+        let read = self
+            .events
+            .get(id)
+            .map(|event| from_value(event.clone()).unwrap());
+        let state = format!("s{}", self.state);
+        if self.races {
+            self.state += 1;
+        }
+        Ok((read, state))
+    }
+
+    fn set(
+        &mut self,
+        args: JmapCalendarEventSetArgs,
+    ) -> Result<JmapCalendarEventSetOutput, BridgeError> {
+        let sent = to_value(&args).unwrap();
+        self.sets.push(sent.clone());
+        if args
+            .if_in_state
+            .is_some_and(|state| state != format!("s{}", self.state))
+        {
+            let mismatch = JmapCalendarEventSetError::Set(JmapSetError::Method(
+                JmapMethodError::StateMismatch { description: None },
+            ));
+            return Err(set_failure(&mismatch));
+        }
+
+        let refusal = |key: &str| {
+            self.refusals
+                .get(key)
+                .map(|err| from_value::<JmapCalendarEventSetItemError>(err.clone()).unwrap())
+        };
+        let mut out = JmapCalendarEventSetOutput {
+            new_state: String::new(),
+            created: BTreeMap::new(),
+            updated: BTreeMap::new(),
+            destroyed: Vec::new(),
+            not_created: BTreeMap::new(),
+            not_updated: BTreeMap::new(),
+            not_destroyed: BTreeMap::new(),
+            keep_alive: true,
+        };
+
+        for (key, event) in sent["create"].as_object().into_iter().flatten() {
+            if let Some(err) = refusal(key) {
+                out.not_created.insert(key.clone(), err);
+                continue;
+            }
+            let id = format!("ev{}", self.events.len() + 1);
+            let mut event = event.clone();
+            event["id"] = Value::from(id.clone());
+            self.events.insert(id.clone(), event);
+            out.created
+                .insert(key.clone(), from_value(json!({ "id": id })).unwrap());
+        }
+        for (id, patch) in sent["update"].as_object().into_iter().flatten() {
+            match (refusal(id), self.events.get_mut(id)) {
+                (Some(err), _) => {
+                    out.not_updated.insert(id.clone(), err);
+                }
+                (None, None) => {
+                    out.not_updated.insert(
+                        id.clone(),
+                        JmapCalendarEventSetItemError::NotFound { description: None },
+                    );
+                }
+                (None, Some(event)) => {
+                    for (pointer, value) in patch.as_object().unwrap() {
+                        let path: Vec<String> = pointer
+                            .split('/')
+                            .map(|part| part.replace("~1", "/").replace("~0", "~"))
+                            .collect();
+                        let (last, parents) = path.split_last().unwrap();
+                        let mut target = &mut *event;
+                        for parent in parents {
+                            target = &mut target[parent.as_str()];
+                        }
+                        let target = target.as_object_mut().unwrap();
+                        match value {
+                            Value::Null => target.remove(last),
+                            value => target.insert(last.clone(), value.clone()),
+                        };
+                    }
+                    out.updated.insert(id.clone(), None);
+                }
+            }
+        }
+        for id in sent["destroy"].as_array().into_iter().flatten() {
+            let id = id.as_str().unwrap().to_string();
+            match (refusal(&id), self.events.remove(&id)) {
+                (Some(err), _) => {
+                    out.not_destroyed.insert(id, err);
+                }
+                (None, None) => {
+                    out.not_destroyed.insert(
+                        id,
+                        JmapCalendarEventSetItemError::NotFound { description: None },
+                    );
+                }
+                (None, Some(_)) => out.destroyed.push(id),
+            }
+        }
+
+        self.state += 1;
+        out.new_state = format!("s{}", self.state);
+        Ok(out)
+    }
+}
+
+/// A new entry as the entry page starts it.
+const NEW_ENTRY: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Pimalaya//Android//EN\r\n\
+    BEGIN:VEVENT\r\nUID:lunch\r\nDTSTAMP:20261009T080000Z\r\n\
+    DTSTART;TZID=Europe/Paris:20261012T120000\r\nDURATION:PT1H\r\nSUMMARY:Lunch\r\n\
+    END:VEVENT\r\nEND:VCALENDAR\r\n";
+
+#[test]
+fn a_new_entry_lands_in_its_calendar_under_the_id_the_server_gives() {
+    let mut account = events(&[]);
+
+    let created = create_event(&mut account, "c1", NEW_ENTRY).unwrap();
+
+    assert_eq!(created.id, "ev1");
+    let stored = &account.events["ev1"];
+    assert_eq!(stored["calendarIds"], json!({ "c1": true }));
+    assert_eq!(stored["uid"], "lunch");
+    assert_eq!(stored["title"], "Lunch");
+    assert_eq!(stored["start"], "2026-10-12T12:00:00");
+    assert_eq!(stored["timeZone"], "Europe/Paris");
+    assert!(stored.get("isOrigin").is_none(), "{stored}");
+    assert_eq!(
+        created.etag,
+        account.listed("ev1").etag,
+        "the revision is the one the next listing reads"
+    );
+}
+
+#[test]
+fn an_edit_patches_only_what_it_changed() {
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+    let edited = listed.ical.replace("SUMMARY:Standup", "SUMMARY:Daily");
+
+    let etag = update_event(&mut account, "ev1", &edited, listed.etag.as_deref()).unwrap();
+
+    let patch = account.patch();
+    assert_eq!(
+        patch.keys().collect::<Vec<_>>(),
+        ["title"],
+        "the escape hatch's member is never sent: {patch:?}"
+    );
+    assert_eq!(account.sets[0]["ifInState"], "s1");
+    let stored = &account.events["ev1"];
+    assert_eq!(stored["title"], "Daily");
+    assert_eq!(stored["useDefaultAlerts"], true);
+    assert_eq!(etag, account.listed("ev1").etag);
+    assert_ne!(etag, listed.etag);
+}
+
+#[test]
+fn an_edit_changing_nothing_writes_nothing() {
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+
+    let etag = update_event(&mut account, "ev1", &listed.ical, listed.etag.as_deref()).unwrap();
+
+    assert!(account.sets.is_empty());
+    assert_eq!(etag, listed.etag);
+}
+
+#[test]
+fn one_occurrence_moved_sends_that_occurrence_alone() {
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+    let edit = json!({
+        "scope": "this",
+        "recurrenceId": "20261008T090000",
+        "start": {"time": "20261008T100000"},
+        "summary": "Standup, later",
+    });
+    let moved = crate::calendar::write(&listed.ical, &edit.to_string()).unwrap();
+
+    update_event(&mut account, "ev1", &moved, listed.etag.as_deref()).unwrap();
+
+    let patch = account.patch();
+    assert_eq!(
+        patch.keys().collect::<Vec<_>>(),
+        ["recurrenceOverrides"],
+        "no override existed, so the member is set whole: {patch:?}"
+    );
+    let over = &account.events["ev1"]["recurrenceOverrides"]["2026-10-08T09:00:00"];
+    assert_eq!(over["start"], "2026-10-08T10:00:00", "{over}");
+    assert_eq!(over["title"], "Standup, later", "{over}");
+    assert_eq!(account.events["ev1"]["title"], "Standup");
+
+    // Moved again, the override already there is replaced alone.
+    let listed = account.listed("ev1");
+    let edit = json!({
+        "scope": "this",
+        "recurrenceId": "20261008T090000",
+        "start": {"time": "20261008T110000"},
+    });
+    let again = crate::calendar::write(&listed.ical, &edit.to_string()).unwrap();
+
+    update_event(&mut account, "ev1", &again, listed.etag.as_deref()).unwrap();
+
+    let patch = account.patch();
+    assert_eq!(
+        patch.keys().collect::<Vec<_>>(),
+        ["recurrenceOverrides/2026-10-08T09:00:00"],
+        "{patch:?}"
+    );
+    let over = &account.events["ev1"]["recurrenceOverrides"]["2026-10-08T09:00:00"];
+    assert_eq!(over["start"], "2026-10-08T11:00:00", "{over}");
+}
+
+#[test]
+fn one_occurrence_deleted_is_excluded_in_the_event() {
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+    let edit = json!({"scope": "this", "recurrenceId": "20261015T090000"});
+    let left = crate::calendar::remove(&listed.ical, &edit.to_string())
+        .unwrap()
+        .unwrap();
+
+    update_event(&mut account, "ev1", &left, listed.etag.as_deref()).unwrap();
+
+    assert_eq!(
+        account.events["ev1"]["recurrenceOverrides"],
+        json!({ "2026-10-15T09:00:00": { "excluded": true } })
+    );
+    assert_eq!(account.events["ev1"]["title"], "Standup");
+}
+
+#[test]
+fn an_override_removed_is_nulled_alone() {
+    let mut series = standup();
+    series["recurrenceOverrides"] = json!({
+        "2026-10-08T09:00:00": { "title": "Moved" },
+        "2026-10-15T09:00:00": { "excluded": true },
+    });
+    let mut account = events(&[series]);
+    let listed = account.listed("ev1");
+    // NOTE: the occurrence edited back to the series' own values is what
+    // a removed override is; here it is taken out of the object by hand.
+    let start = listed
+        .ical
+        .match_indices("BEGIN:VEVENT\r\n")
+        .map(|(at, _)| at)
+        .find(|at| {
+            let component = listed.ical[*at..].split("END:VEVENT").next().unwrap();
+            component.contains("SUMMARY:Moved")
+        })
+        .expect("the override of the 8th");
+    let end = start + listed.ical[start..].find("END:VEVENT\r\n").unwrap() + "END:VEVENT\r\n".len();
+    let reverted = format!("{}{}", &listed.ical[..start], &listed.ical[end..]);
+
+    update_event(&mut account, "ev1", &reverted, listed.etag.as_deref()).unwrap();
+
+    assert_eq!(
+        account.patch().clone(),
+        json!({ "recurrenceOverrides/2026-10-08T09:00:00": null })
+            .as_object()
+            .unwrap()
+            .clone()
+    );
+    assert_eq!(
+        account.events["ev1"]["recurrenceOverrides"],
+        json!({ "2026-10-15T09:00:00": { "excluded": true } })
+    );
+}
+
+#[test]
+fn an_edit_of_an_event_that_moved_is_never_written() {
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+    account.events.get_mut("ev1").unwrap()["title"] = Value::from("Renamed elsewhere");
+    let edited = listed.ical.replace("SUMMARY:Standup", "SUMMARY:Daily");
+
+    let err = update_event(&mut account, "ev1", &edited, listed.etag.as_deref()).unwrap_err();
+
+    assert_eq!(err.status, Some(412));
+    assert!(account.sets.is_empty());
+    assert_eq!(account.events["ev1"]["title"], "Renamed elsewhere");
+}
+
+#[test]
+fn a_write_racing_another_client_lands_nothing_and_waits() {
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+    account.races = true;
+    let edited = listed.ical.replace("SUMMARY:Standup", "SUMMARY:Daily");
+
+    let err = update_event(&mut account, "ev1", &edited, listed.etag.as_deref()).unwrap_err();
+
+    assert_eq!(err.status, Some(412), "{}", err.message);
+    assert_eq!(account.events["ev1"]["title"], "Standup");
+}
+
+#[test]
+fn a_set_refused_for_its_state_waits() {
+    // The answer a server gives an `ifInState` it no longer stands at,
+    // through the real coroutine.
+    let session = session(
+        json!({ "urn:ietf:params:jmap:calendars": {} }),
+        json!({ "urn:ietf:params:jmap:calendars": "a1" }),
+    );
+    let args = JmapCalendarEventSetArgs {
+        if_in_state: Some("s1".into()),
+        destroy: Some(vec!["ev1".into()]),
+        ..Default::default()
+    };
+    let mut coroutine =
+        JmapCalendarEventSet::new(&session, &SecretString::from("Bearer jane"), args).unwrap();
+    let body =
+        br#"{"methodResponses":[["error",{"type":"stateMismatch"},"c0"]],"sessionState":"s2"}"#;
+    let mut reply = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    reply.extend_from_slice(body);
+
+    let mut arg: Option<&[u8]> = None;
+    let err = loop {
+        match coroutine.resume(arg.take()) {
+            JmapCoroutineState::Yielded(JmapYield::WantsWrite(_)) => {}
+            JmapCoroutineState::Yielded(JmapYield::WantsRead) => arg = Some(&reply),
+            JmapCoroutineState::Complete(Err(err)) => break err,
+            JmapCoroutineState::Complete(Ok(_)) => panic!("a refused set completed"),
+        }
+    };
+
+    assert_eq!(set_failure(&err).status, Some(412));
+}
+
+#[test]
+fn a_property_the_server_refuses_is_refused_for_good() {
+    let mut account = events(&[standup()]);
+    account.refusals.insert(
+        "ev1".into(),
+        json!({ "type": "invalidProperties", "properties": ["recurrenceOverrides"] }),
+    );
+    let listed = account.listed("ev1");
+    let edited = listed.ical.replace("SUMMARY:Standup", "SUMMARY:Daily");
+
+    let err = update_event(&mut account, "ev1", &edited, listed.etag.as_deref()).unwrap_err();
+
+    assert_eq!(err.status, Some(REFUSED));
+    assert!(
+        err.message.contains("recurrenceOverrides"),
+        "{}",
+        err.message
+    );
+}
+
+#[test]
+fn a_rate_limited_create_waits() {
+    let mut account = events(&[]);
+    account
+        .refusals
+        .insert("e0".into(), json!({ "type": "rateLimit" }));
+
+    let err = create_event(&mut account, "c1", NEW_ENTRY)
+        .err()
+        .expect("a refused create");
+
+    assert_eq!(err.status, Some(412));
+    assert!(account.events.is_empty());
+}
+
+#[test]
+fn a_delete_goes_under_the_state_its_check_read() {
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+
+    destroy_event(&mut account, "ev1", listed.etag.as_deref()).unwrap();
+
+    assert!(account.events.is_empty());
+    assert_eq!(account.sets[0]["ifInState"], "s1");
+    assert_eq!(account.sets[0]["destroy"], json!(["ev1"]));
+}
+
+#[test]
+fn a_delete_of_an_event_already_gone_converges() {
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+    account.events.clear();
+
+    destroy_event(&mut account, "ev1", listed.etag.as_deref()).unwrap();
+    destroy_event(&mut account, "ev1", None).unwrap();
+
+    assert_eq!(account.sets.len(), 1, "the checked delete sends nothing");
+}
+
+#[test]
+fn a_delete_of_an_event_that_moved_is_never_sent() {
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+    account.events.get_mut("ev1").unwrap()["title"] = Value::from("Renamed elsewhere");
+
+    let err = destroy_event(&mut account, "ev1", listed.etag.as_deref()).unwrap_err();
+
+    assert_eq!(err.status, Some(412));
+    assert!(account.sets.is_empty());
+    assert!(account.events.contains_key("ev1"));
+}
+
+#[test]
+fn an_object_of_two_events_is_refused_for_good() {
+    let two = NEW_ENTRY.replace(
+        "END:VEVENT\r\n",
+        "END:VEVENT\r\nBEGIN:VEVENT\r\nUID:other\r\nDTSTAMP:20261009T080000Z\r\n\
+         DTSTART:20261013T120000\r\nEND:VEVENT\r\n",
+    );
+    let mut account = events(&[]);
+
+    let err = create_event(&mut account, "c1", &two)
+        .err()
+        .expect("a refused create");
+
+    assert_eq!(err.status, Some(REFUSED));
+    assert!(account.sets.is_empty());
+}
+
+#[test]
+fn a_jscalendarbis_series_reads_as_a_series_with_its_people() {
+    let account = events(&[standup()]);
+
+    let listed = account.listed("ev1");
+
+    assert!(
+        listed.ical.contains("RRULE:FREQ=WEEKLY\r\n"),
+        "{}",
+        listed.ical
+    );
+    assert!(
+        listed.ical.contains("mailto:ada@example.com"),
+        "{}",
+        listed.ical
+    );
+    assert!(listed.ical.contains("ORGANIZER"), "{}", listed.ical);
+    assert!(
+        !listed.ical.contains("JSPTR=recurrenceRule"),
+        "{}",
+        listed.ical
+    );
+}
+
+#[test]
+fn a_new_series_is_written_as_jscalendarbis() {
+    let mut account = events(&[]);
+    let series = NEW_ENTRY.replace(
+        "SUMMARY:Lunch\r\n",
+        "SUMMARY:Lunch\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\n\
+         ORGANIZER:mailto:jane@example.com\r\nATTENDEE;CN=Ada:mailto:ada@example.com\r\n",
+    );
+
+    create_event(&mut account, "c1", &series).unwrap();
+
+    let stored = &account.events["ev1"];
+    assert_eq!(stored["recurrenceRule"]["frequency"], "weekly", "{stored}");
+    assert_eq!(stored["recurrenceRule"]["count"], 4, "{stored}");
+    assert!(stored.get("recurrenceRules").is_none(), "{stored}");
+    assert_eq!(
+        stored["organizerCalendarAddress"],
+        "mailto:jane@example.com"
+    );
+    assert!(stored.get("replyTo").is_none(), "{stored}");
+    let ada = stored["participants"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|participant| participant["name"] == "Ada")
+        .expect("the attendee");
+    assert_eq!(ada["calendarAddress"], "mailto:ada@example.com", "{stored}");
+    assert!(ada.get("sendTo").is_none(), "{stored}");
+}
+
+#[test]
+fn a_series_of_two_rules_is_refused_for_good() {
+    let mut account = events(&[]);
+    let series = NEW_ENTRY.replace(
+        "SUMMARY:Lunch\r\n",
+        "SUMMARY:Lunch\r\nRRULE:FREQ=WEEKLY\r\nRRULE:FREQ=MONTHLY\r\n",
+    );
+
+    let err = create_event(&mut account, "c1", &series)
+        .err()
+        .expect("a refused create");
+
+    assert_eq!(err.status, Some(REFUSED));
+    assert!(account.sets.is_empty());
 }
