@@ -59,7 +59,13 @@ final class Avatar {
     static int colorOf(String declared, String name) {
         if (declared != null && !declared.isEmpty()) {
             try {
-                return Color.parseColor(declared);
+                // NOTE: CalDAV writes the alpha last (#RRGGBBAA, Apple's
+                // calendar-color), the platform first.
+                String color = declared.trim();
+                if (color.length() == 9 && color.charAt(0) == '#') {
+                    color = "#" + color.substring(7) + color.substring(1, 7);
+                }
+                return Color.parseColor(color);
             } catch (IllegalArgumentException error) {
                 // NOTE: servers send colours the platform cannot read
                 // (named CSS colours, `#rgb`, an empty element); the

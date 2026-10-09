@@ -399,6 +399,59 @@ fn update_event(
     }
 }
 
+/// `Native.projectEvent`: one calendar object as the phone's calendar
+/// provider carries it (docs/calendar-mapping.md), `now` a UTC stamp
+/// placing the window a series the provider cannot show is listed over.
+/// Pure computation, no transport. Returns `{uid, master, overrides,
+/// listed}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_projectEvent<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    ical: JString<'local>,
+    now: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let ical = read_string(env, &ical);
+        let now = read_string(env, &now);
+
+        let json = match crate::calendar::phone::project(&ical, &now) {
+            Ok(view) => to_string(&view).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.applyEvent`: patches a view the phone edited onto the object,
+/// the fields it changed alone, so everything else survives byte for
+/// byte; an empty object becomes a new one. Pure computation, no
+/// transport. Returns the object itself, or a JSON error object.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_applyEvent<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    ical: JString<'local>,
+    edit: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let ical = read_string(env, &ical);
+        let edit = read_string(env, &edit);
+
+        // NOTE: told apart from an error as `writeEvent`'s reply is: no
+        // calendar object opens on a brace.
+        let json = match crate::calendar::phone::apply(&ical, &edit) {
+            Ok(written) => written,
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
 /// `Native.readEvent`: one calendar object read whole, for the page that
 /// shows it: the series, or the override of the occurrence a non-empty
 /// `recurrenceId` names. Pure computation, no transport, like the

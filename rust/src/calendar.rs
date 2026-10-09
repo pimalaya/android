@@ -11,6 +11,7 @@
 
 mod conflict;
 mod occurrence;
+pub mod phone;
 mod series;
 mod zone;
 
@@ -55,6 +56,9 @@ pub use zone::{EventTime, EventTimeKind};
 /// even at `FREQ=HOURLY`; the cap is what keeps a `FREQ=SECONDLY` event
 /// from filling the agenda with a million rows.
 const MAX_OCCURRENCES: usize = 1024;
+
+/// What every object this side composes names as its producer.
+const PRODID: &str = "-//Pimalaya//Pimalaya for Android//EN";
 
 /// The components an agenda places on a day: everything RFC 5545 dates,
 /// minus the two that describe rather than schedule (VFREEBUSY reports
@@ -346,7 +350,7 @@ pub fn create(
     let object = format!(
         "BEGIN:VCALENDAR\r\n\
          VERSION:2.0\r\n\
-         PRODID:-//Pimalaya//Pimalaya for Android//EN\r\n\
+         PRODID:{PRODID}\r\n\
          {zone}\
          BEGIN:{kind}\r\n\
          UID:{uid}\r\n\

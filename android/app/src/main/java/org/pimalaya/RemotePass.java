@@ -316,6 +316,13 @@ final class RemotePass {
                 Log.w("pimalaya", "calendar list failed: " + account.email, error);
                 return error;
             }
+            // NOTE: the roster the phone's calendars hang off, its first
+            // listing included: a setup chooses before its calendars are known.
+            try {
+                CalendarRows.reconcile(context, pimdir);
+            } catch (Exception error) {
+                Log.w("pimalaya", "phone calendars failed: " + account.email, error);
+            }
 
             List<String> calendars = new ArrayList<>();
             for (EventStore.StoredCalendar calendar : events.loadCalendars()) {

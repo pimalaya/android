@@ -211,7 +211,7 @@ impl Series {
         })
     }
 
-    fn first(&self) -> Result<IcalRecurDateTime, BridgeError> {
+    pub(super) fn first(&self) -> Result<IcalRecurDateTime, BridgeError> {
         self.start
             .civil()
             .ok_or_else(|| "The series' start is unreadable".into())
@@ -822,7 +822,7 @@ fn rewrite_rules(
 }
 
 /// Replaces the value of one `RRULE` line.
-fn set_rule(line: &mut IcalLine<'static>, rule: &str) {
+pub(super) fn set_rule(line: &mut IcalLine<'static>, rule: &str) {
     let rule = IcalValue::Recur(IcalRecur(rule.to_string().into()));
     line.value = prop(IcalPropKind::RRule, Vec::new(), rule)
         .encode(Escaper::default())

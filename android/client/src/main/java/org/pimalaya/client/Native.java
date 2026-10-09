@@ -485,6 +485,23 @@ final class Native {
     static native String resolveEvent(String base, String local, String remote, String picks);
 
     /**
+     * One calendar object as the phone's calendar provider carries it
+     * (docs/calendar-mapping.md), {@code now} a UTC stamp placing the
+     * window a series the provider cannot show is listed over. Pure
+     * computation, no transport. Returns {@code {uid, master, overrides,
+     * listed}}, or a JSON error object.
+     */
+    static native String projectEvent(String ical, String now);
+
+    /**
+     * Patches a view the phone edited onto a calendar object, the fields
+     * it changed alone; an empty object becomes a new one. Pure
+     * computation, no transport. Returns the object itself, or a JSON
+     * error object.
+     */
+    static native String applyEvent(String ical, String edit);
+
+    /**
      * Pushes an edited object back to its calendar, guarded by
      * {@code etag} when one is known. Returns the new ETag as a JSON
      * string (or null), or a JSON error object.

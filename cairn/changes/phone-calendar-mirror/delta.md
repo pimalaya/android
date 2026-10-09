@@ -34,7 +34,7 @@ An event edited in a calendar app SHALL reach the store as a patch of the fields
 - THEN the stored object carries an override for that occurrence, and the server receives it at the next sync
 
 ### Requirement: Reminders fire from the phone
-An event's display and audio alarms SHALL be projected as reminders, those relative to its end, at an absolute time on a single event, or repeating converted to minutes before its start, so a calendar app handling the provider's reminders posts them; a reminder changed or removed there SHALL change or remove the alarm. Pimalaya SHALL NOT fire alarms of its own.
+An event's display and audio alarms SHALL be projected as reminders, those relative to its end, at an absolute time on a single event, or repeating converted to minutes relative to its start (after it when negative), so a calendar app handling the provider's reminders posts them; a reminder changed or removed there SHALL change or remove the alarm. Pimalaya SHALL NOT fire alarms of its own.
 
 #### Scenario: Five minutes before
 - GIVEN an event with an alarm 5 minutes before its start, in a mirrored calendar, and Etar installed
@@ -44,7 +44,7 @@ An event's display and audio alarms SHALL be projected as reminders, those relat
 #### Scenario: An alarm on the end
 - GIVEN an event of one hour with an alarm 10 minutes before its end
 - WHEN the mirror projects it
-- THEN the phone shows a reminder 50 minutes before the start, and the stored alarm keeps its end trigger while that reminder is left unchanged
+- THEN the phone shows a reminder 50 minutes after the start, and the stored alarm keeps its end trigger while that reminder is left unchanged
 
 ## MODIFIED Requirements
 

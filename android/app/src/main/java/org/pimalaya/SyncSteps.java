@@ -7,8 +7,8 @@ package org.pimalaya;
  * <p>The stages are every engine's ({@link PimdirEngine.Progress}), the
  * nouns are not: a calendar pass downloads events and a mail pass messages,
  * and a line saying contacts while the agenda syncs reads as the wrong sync
- * running. The phone steps are the contacts spoke's alone, so another
- * domain has no text for them and leaves the line as it was.
+ * running. The phone steps are the two mirrors', contacts and calendars, so
+ * mail has no text for them and leaves the line as it was.
  */
 final class SyncSteps {
     private SyncSteps() {}
@@ -34,9 +34,23 @@ final class SyncSteps {
             case PimdirEngine.Progress.STAGE_UPLOAD:
                 return R.plurals.sync_step_upload;
             case PimdirEngine.Progress.STAGE_PHONE:
-                return domain == PimDomain.CONTACTS ? R.string.sync_step_phone : 0;
+                switch (domain) {
+                    case CONTACTS:
+                        return R.string.sync_step_phone;
+                    case CALENDAR:
+                        return R.string.sync_step_phone_calendar;
+                    default:
+                        return 0;
+                }
             case PimdirEngine.Progress.STAGE_PROJECT:
-                return domain == PimDomain.CONTACTS ? R.plurals.sync_step_project : 0;
+                switch (domain) {
+                    case CONTACTS:
+                        return R.plurals.sync_step_project;
+                    case CALENDAR:
+                        return R.plurals.sync_step_project_events;
+                    default:
+                        return 0;
+                }
             case PimdirEngine.Progress.STAGE_RESOLVE:
                 return R.plurals.sync_step_resolve;
             default:

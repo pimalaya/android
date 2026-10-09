@@ -14,7 +14,7 @@ import org.robolectric.annotation.Config;
 /**
  * The sync dialog's detail line counts what the domain being synced holds:
  * events while the agenda syncs, messages while the mail does, contacts
- * while the books do; the phone steps are the contacts' alone.
+ * while the books do; the phone steps are the two mirrors'.
  */
 @RunWith(RobolectricTestRunner.class)
 public class SyncStepsTest {
@@ -56,11 +56,19 @@ public class SyncStepsTest {
     }
 
     @Test
-    public void thePhoneStepsAreTheContactsAlone() {
-        for (PimDomain domain : new PimDomain[] {PimDomain.MAIL, PimDomain.CALENDAR}) {
-            assertNull(line(domain, PimdirEngine.Progress.STAGE_PHONE, 0));
-            assertNull(line(domain, PimdirEngine.Progress.STAGE_PROJECT, 3));
-        }
+    public void theAgendaReconcilesWithThePhoneCalendar() {
+        assertEquals(
+                "Reconciling with the phone calendar",
+                line(PimDomain.CALENDAR, PimdirEngine.Progress.STAGE_PHONE, 0));
+        assertEquals(
+                "Writing 3 events to the phone",
+                line(PimDomain.CALENDAR, PimdirEngine.Progress.STAGE_PROJECT, 3));
+    }
+
+    @Test
+    public void mailHasNoPhoneSteps() {
+        assertNull(line(PimDomain.MAIL, PimdirEngine.Progress.STAGE_PHONE, 0));
+        assertNull(line(PimDomain.MAIL, PimdirEngine.Progress.STAGE_PROJECT, 3));
     }
 
     @Test

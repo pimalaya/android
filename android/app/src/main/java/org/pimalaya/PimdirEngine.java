@@ -53,8 +53,8 @@ abstract class PimdirEngine implements OfflineDriver {
      * Observes a pass's coarse steps for a progress display; steps fire on
      * the sync thread. Null when the pass runs headless.
      *
-     * <p>The first three are every domain's, the last three the contacts
-     * spoke's alone: only a book is reconciled against the phone. Each step
+     * <p>The first three are every domain's, the last three the phone
+     * spokes': books and calendars are reconciled against the phone. Each step
      * carries the domain of the engine that took it, which names what the
      * count counts ({@link SyncSteps}).
      */
@@ -65,9 +65,9 @@ abstract class PimdirEngine implements OfflineDriver {
         int STAGE_DOWNLOAD = 1;
         /** Sending `count` changes to the server. */
         int STAGE_UPLOAD = 2;
-        /** Reconciling with the phone's contacts. */
+        /** Reconciling with the phone's contacts or calendar. */
         int STAGE_PHONE = 3;
-        /** Writing `count` contacts to the phone. */
+        /** Writing `count` contacts or events to the phone. */
         int STAGE_PROJECT = 4;
         /** Resolving `count` conflicts. */
         int STAGE_RESOLVE = 5;

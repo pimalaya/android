@@ -32,4 +32,12 @@ public class AvatarTest {
         assertEquals(Avatar.colorOf(null, "Work"), Avatar.colorOf("", "Work"));
         assertNotEquals(Avatar.colorOf(null, "Work"), Avatar.colorOf(null, "Personal"));
     }
+
+    @Test
+    public void aCalDavColourCarriesItsAlphaLast() {
+        // NOTE: Apple's calendar-color, which Nextcloud and iCloud send: an
+        // opaque blue read as #RRGGBBAA, never as a transparent yellow.
+        assertEquals(0xff3366cc, Avatar.colorOf("#3366CCFF", "Work"));
+        assertEquals(0x803366cc, Avatar.colorOf("#3366cc80", "Work"));
+    }
 }
