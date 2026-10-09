@@ -4,9 +4,12 @@ import android.accounts.Account;
 import android.accounts.AccountManager;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.database.Cursor;
 import android.os.Bundle;
 import android.provider.ContactsContract;
+import android.provider.ContactsContract.RawContacts;
 import java.util.List;
+import java.util.Locale;
 import org.pimalaya.client.Addressbook;
 
 /**
@@ -22,6 +25,9 @@ final class Accounts {
     static final String TYPE = "org.pimalaya";
 
     private static final String DATA_URL = "url";
+
+    /** Set once the account's content trigger was turned on; the user's choice stands after. */
+    private static final String DATA_AUTO = "auto";
 
     private Accounts() {}
 
@@ -52,11 +58,14 @@ final class Accounts {
                 Bundle data = new Bundle();
                 data.putString(DATA_URL, book.book.url);
                 manager.addAccountExplicitly(account, null, data);
+            }
 
-                // NOTE: only the default content-trigger state, off since
-                // sync is manual; a later user choice in system settings
-                // is never reset by reconcile.
-                ContentResolver.setSyncAutomatically(account, ContactsContract.AUTHORITY, false);
+            // NOTE: on, so a Contacts-app edit makes Android run the phone
+            // pass (SyncService). Once per account, accounts from earlier
+            // builds included, so a later choice in system settings stands.
+            if (manager.getUserData(account, DATA_AUTO) == null) {
+                ContentResolver.setSyncAutomatically(account, ContactsContract.AUTHORITY, true);
+                manager.setUserData(account, DATA_AUTO, "1");
             }
 
             // NOTE: contacts apps only list accounts syncable for the
@@ -65,6 +74,38 @@ final class Accounts {
             if (ContentResolver.getIsSyncable(account, ContactsContract.AUTHORITY) <= 0) {
                 ContentResolver.setIsSyncable(account, ContactsContract.AUTHORITY, 1);
             }
+        }
+    }
+
+    /**
+     * Whether the phone's contacts already hold raw contacts of the address
+     * under another app's account type (Google's own sync, DAVx5), so that
+     * mirroring its books would show everyone twice. One provider query;
+     * false without the contacts permission.
+     *
+     * <p>Our own accounts never match: they are named by the book, not by
+     * the address.
+     */
+    static boolean elsewhere(Context context, String address) {
+        if (!PhoneMirror.CONTACTS.granted(context)) {
+            return false;
+        }
+        // NOTE: account names are addresses as each app spelled them, most
+        // lowercased; the address as typed is tried beside its lowercase.
+        try (Cursor cursor =
+                context.getContentResolver()
+                        .query(
+                                RawContacts.CONTENT_URI,
+                                new String[] {RawContacts._ID},
+                                RawContacts.ACCOUNT_NAME
+                                        + " IN (?, ?) AND "
+                                        + RawContacts.ACCOUNT_TYPE
+                                        + " != ? AND "
+                                        + RawContacts.DELETED
+                                        + " = 0",
+                                new String[] {address, address.toLowerCase(Locale.ROOT), TYPE},
+                                null)) {
+            return cursor != null && cursor.moveToFirst();
         }
     }
 

@@ -1,6 +1,5 @@
 package org.pimalaya;
 
-import android.Manifest;
 import android.app.AlertDialog;
 import android.util.Log;
 import android.util.TypedValue;
@@ -108,6 +107,22 @@ final class OnboardingFlow {
 
     /** Whether the one password is being tried against the servers. */
     private boolean verifying;
+
+    /**
+     * Whether the books show in the phone's Contacts app, the switch under
+     * the contacts in both setups. On by default; a refused permission turns
+     * it off.
+     */
+    private boolean phoneContacts = true;
+
+    /** The switch drawn for it, which a refusal turns off. */
+    private android.widget.Switch phoneSwitch;
+
+    /**
+     * Whether another app already fills the phone's Contacts app with this
+     * address ({@link Accounts#elsewhere}), which keeps the books off it.
+     */
+    private boolean elsewhere;
 
     OnboardingFlow(MainActivity host, OauthFlow oauth) {
         this.host = host;
@@ -232,6 +247,8 @@ final class OnboardingFlow {
         verifying = false;
         connecting = false;
         signInPage = false;
+        phoneContacts = true;
+        elsewhere = false;
         authSteps = null;
         pendingStep = null;
         setups.clear();
@@ -795,6 +812,9 @@ final class OnboardingFlow {
                             ? host.getString(R.string.domain_connected)
                             : null;
             LinearLayout row = domainRow(setup.domain, status, false, tick);
+            // NOTE: the phone's switch under the contacts, shown while they
+            // are ticked.
+            View phone = setup.domain == PimDomain.CONTACTS ? phoneRow() : null;
             row.setOnClickListener(
                     view -> {
                         if (verifying) {
@@ -802,11 +822,65 @@ final class OnboardingFlow {
                         }
                         setup.enabled = !setup.enabled;
                         tick.setChecked(setup.enabled);
+                        if (phone != null) {
+                            phone.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
+                        }
                         resetSetupContinue();
                     });
             card.addView(row);
+            if (phone != null) {
+                phone.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
+                card.addView(phone);
+            }
         }
         return card;
+    }
+
+    /**
+     * The contacts' switch putting the books in the phone's Contacts app,
+     * under a hairline, its line saying what that brings. Continue asks the
+     * contacts permission while it is on.
+     */
+    private View phoneRow() {
+        LinearLayout item = new LinearLayout(host);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.addView(rowDivider());
+
+        android.widget.Switch toggle = new android.widget.Switch(host);
+        toggle.setChecked(phoneContacts);
+        toggle.setOnCheckedChangeListener((view, checked) -> phoneContacts = checked);
+        phoneSwitch = toggle;
+
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(host.ui.dp(56));
+        row.setPadding(host.ui.dp(60), host.ui.dp(8), host.ui.dp(8), host.ui.dp(8));
+        TypedValue ripple = new TypedValue();
+        host.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
+        row.setForeground(host.getDrawable(ripple.resourceId));
+
+        LinearLayout text = new LinearLayout(host);
+        text.setOrientation(LinearLayout.VERTICAL);
+        TextView title = new TextView(host);
+        title.setText(R.string.phone_contacts);
+        title.setTextSize(16);
+        title.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
+        text.addView(title);
+        TextView line = new TextView(host);
+        line.setText(R.string.phone_contacts_note);
+        line.setTextSize(13);
+        line.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
+        text.addView(line);
+        LinearLayout.LayoutParams textParams =
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        textParams.setMarginEnd(host.ui.dp(12));
+        row.addView(text, textParams);
+        row.addView(toggle);
+        row.setOnClickListener(view -> toggle.toggle());
+
+        item.addView(row);
+        return item;
     }
 
     /**
@@ -1036,6 +1110,10 @@ final class OnboardingFlow {
 
         if (setup.domain == PimDomain.MAIL) {
             addSubmission(body, setup);
+        } else if (setup.domain == PimDomain.CONTACTS) {
+            // NOTE: for every book ticked on the books page; the page itself
+            // only picks them.
+            body.addView(phoneRow());
         }
 
         renderSection(setup);
@@ -2351,6 +2429,28 @@ final class OnboardingFlow {
      */
     private void confirmSetup() {
         host.hideKeyboard();
+
+        // NOTE: the phone's permissions are asked here, as the setup
+        // continues with a mirror switched on, and nowhere else in it. A
+        // refusal turns the switch off and the setup carries on.
+        Set<PhoneMirror> wanted = java.util.EnumSet.noneOf(PhoneMirror.class);
+        if (phoneContacts && setups.get(PimDomain.CONTACTS).enabled) {
+            wanted.add(PhoneMirror.CONTACTS);
+        }
+        host.askMirrors(
+                wanted,
+                granted -> {
+                    if (wanted.contains(PhoneMirror.CONTACTS)
+                            && !granted.contains(PhoneMirror.CONTACTS)) {
+                        phoneContacts = false;
+                        phoneSwitch.setChecked(false);
+                    }
+                    signIn();
+                });
+    }
+
+    /** The setup's sign-ins, once the phone's permissions are settled. */
+    private void signIn() {
         connectedEmail = pendingEmail;
         for (DomainSetup setup : setups.values()) {
             setup.credential = null;
@@ -2492,6 +2592,7 @@ final class OnboardingFlow {
      */
     private void showResult(List<DomainSetup> shared, Map<PimDomain, Exception> refused) {
         ((TextView) host.findViewById(R.id.result_email)).setText(pendingEmail);
+        ((TextView) host.findViewById(R.id.result_title)).setText(R.string.result_title);
 
         List<String> names = new ArrayList<>();
         for (PimDomain domain : refused.keySet()) {
@@ -2500,24 +2601,11 @@ final class OnboardingFlow {
         String named = String.join(", ", names);
         ((TextView) host.findViewById(R.id.result_message))
                 .setText(host.getString(R.string.result_message, named));
+        host.findViewById(R.id.result_note).setVisibility(View.VISIBLE);
 
-        LinearLayout container = host.findViewById(R.id.result_container);
-        container.removeAllViews();
-        LinearLayout card = new LinearLayout(host);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackgroundResource(R.drawable.card_group);
-        card.setClipToOutline(true);
+        LinearLayout card = resultCard();
         for (DomainSetup setup : shared) {
             Exception failure = refused.get(setup.domain);
-            android.widget.ImageView mark = new android.widget.ImageView(host);
-            mark.setImageResource(failure == null ? R.drawable.ic_check : R.drawable.ic_error);
-            mark.setImageTintList(
-                    android.content.res.ColorStateList.valueOf(
-                            host.ui.resolveColor(
-                                    failure == null
-                                            ? android.R.attr.colorAccent
-                                            : android.R.attr.colorError)));
-            mark.setPadding(host.ui.dp(12), 0, host.ui.dp(12), 0);
             String status;
             if (failure == null) {
                 status = host.getString(R.string.result_connected);
@@ -2526,12 +2614,8 @@ final class OnboardingFlow {
             } else {
                 status = host.getString(R.string.connect_failed);
             }
-            if (card.getChildCount() > 0) {
-                card.addView(rowDivider());
-            }
-            card.addView(domainRow(setup.domain, status, failure != null, mark));
+            addResult(card, setup.domain, status, failure != null);
         }
-        container.addView(card);
 
         Button onward = host.findViewById(R.id.result_continue);
         onward.setText(host.getString(R.string.result_continue, named));
@@ -2551,6 +2635,7 @@ final class OnboardingFlow {
                 });
 
         Button advancedLink = host.findViewById(R.id.result_advanced);
+        advancedLink.setVisibility(View.VISIBLE);
         advancedLink.setText(host.getString(R.string.result_advanced, named));
         advancedLink.setOnClickListener(
                 view -> {
@@ -2561,6 +2646,68 @@ final class OnboardingFlow {
                 });
 
         host.showAuth(MainActivity.STEP_RESULT);
+    }
+
+    /**
+     * The standard setup's result once every domain signed in, when another
+     * app already fills the phone's Contacts app with the address: a row per
+     * domain connected, the contacts saying they stay off the phone, and
+     * Continue, which commits the books unmirrored.
+     */
+    private void showElsewhere(String email) {
+        ((TextView) host.findViewById(R.id.result_email)).setText(pendingEmail);
+        ((TextView) host.findViewById(R.id.result_title)).setText(R.string.result_elsewhere_title);
+        ((TextView) host.findViewById(R.id.result_message)).setText(R.string.phone_elsewhere_note);
+        host.findViewById(R.id.result_note).setVisibility(View.GONE);
+
+        LinearLayout card = resultCard();
+        for (DomainSetup setup : setups.values()) {
+            if (setup.credential == null) {
+                continue;
+            }
+            addResult(
+                    card,
+                    setup.domain,
+                    host.getString(
+                            setup.domain == PimDomain.CONTACTS
+                                    ? R.string.phone_elsewhere
+                                    : R.string.result_connected),
+                    false);
+        }
+
+        Button onward = host.findViewById(R.id.result_continue);
+        onward.setText(R.string.email_submit);
+        onward.setOnClickListener(view -> confirmAllBooks(email));
+        host.findViewById(R.id.result_advanced).setVisibility(View.GONE);
+
+        host.showAuth(MainActivity.STEP_RESULT);
+    }
+
+    /** The result step's card, emptied of an earlier result. */
+    private LinearLayout resultCard() {
+        LinearLayout container = host.findViewById(R.id.result_container);
+        container.removeAllViews();
+        LinearLayout card = new LinearLayout(host);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.card_group);
+        card.setClipToOutline(true);
+        container.addView(card);
+        return card;
+    }
+
+    /** One domain's row on the result step: connected with a check, or not. */
+    private void addResult(LinearLayout card, PimDomain domain, String status, boolean failed) {
+        android.widget.ImageView mark = new android.widget.ImageView(host);
+        mark.setImageResource(failed ? R.drawable.ic_error : R.drawable.ic_check);
+        mark.setImageTintList(
+                android.content.res.ColorStateList.valueOf(
+                        host.ui.resolveColor(
+                                failed ? android.R.attr.colorError : android.R.attr.colorAccent)));
+        mark.setPadding(host.ui.dp(12), 0, host.ui.dp(12), 0);
+        if (card.getChildCount() > 0) {
+            card.addView(rowDivider());
+        }
+        card.addView(domainRow(domain, status, failed, mark));
     }
 
     /**
@@ -2610,6 +2757,7 @@ final class OnboardingFlow {
 
         busy();
         String email = connectedEmail;
+        boolean phone = phoneContacts;
         host.io.execute(
                 () -> {
                     try {
@@ -2617,14 +2765,21 @@ final class OnboardingFlow {
                         try (Transport transport = new Transport()) {
                             fetched = host.client.listAddressbooks(transport, contacts);
                         }
+                        // NOTE: one provider query, the permission granted
+                        // as the setup continued; what it finds is said
+                        // rather than guessed at beforehand.
+                        boolean found = phone && Accounts.elsewhere(host, email);
                         host.main.post(
                                 () -> {
                                     resetConfigContinue();
                                     pendingBooks = fetched;
-                                    if (simpleSetup()) {
-                                        confirmAllBooks(email);
-                                    } else {
+                                    elsewhere = found;
+                                    if (!simpleSetup()) {
                                         openBooksSelection(email, fetched);
+                                    } else if (found) {
+                                        showElsewhere(email);
+                                    } else {
+                                        confirmAllBooks(email);
                                     }
                                 });
                     } catch (Exception error) {
@@ -2640,9 +2795,10 @@ final class OnboardingFlow {
 
     /**
      * The addressbooks step: one card with a row per book, its name and a
-     * checkbox, every one ticked to begin with. Phone-contacts mirroring is
-     * turned on for every subscribed book; the drawer's per-book settings let
-     * the user turn it off later.
+     * checkbox, every one ticked to begin with. The phone's switch, on the
+     * page before, applies to every book ticked; the account's settings
+     * change it per book later. A note says when another app already fills
+     * the phone's Contacts app with the address, the books staying off it.
      */
     private void openBooksSelection(String email, List<Addressbook> books) {
         connectedEmail = email;
@@ -2651,6 +2807,7 @@ final class OnboardingFlow {
         ((TextView) host.findViewById(R.id.books_line))
                 .setText(host.getString(R.string.books_signed, email));
         ((TextView) host.findViewById(R.id.books_message)).setText(R.string.books_description);
+        host.findViewById(R.id.books_note).setVisibility(elsewhere ? View.VISIBLE : View.GONE);
 
         LinearLayout container = host.findViewById(R.id.books_container);
         container.removeAllViews();
@@ -2743,7 +2900,7 @@ final class OnboardingFlow {
 
     /**
      * The standard setup's commit, selection-free: every addressbook
-     * subscribed with phone mirroring, then the first sync straight to the contacts list.
+     * subscribed, then the first sync straight to the contacts list.
      */
     private void confirmAllBooks(String email) {
         connectedEmail = email;
@@ -2757,9 +2914,10 @@ final class OnboardingFlow {
     /**
      * The flow's real commit, shared by the books step's Continue and
      * the standard setup: persists the connected account and its
-     * addressbooks, subscribes the given ones with phone mirroring on
-     * by default, asks the contacts permission that setup needs, then runs
-     * the account's first sync.
+     * addressbooks, subscribes the given ones, in the phone's Contacts app
+     * when the switch says so and no other app fills it with the address
+     * already, creates their Android accounts, then runs the account's
+     * first sync, which projects them.
      */
     private void commitBooks(java.util.Set<String> subscribed) {
         host.base.replaceAddressbooks(connectedEmail, pendingBooks);
@@ -2769,19 +2927,14 @@ final class OnboardingFlow {
                         PimdirSummary.CONTACT,
                         PimdirCollections.of(connectedEmail, pendingBooks));
 
+        // NOTE: the permission was asked as the setup continued; refused,
+        // the switch is off.
+        boolean phone = phoneContacts && !elsewhere;
         for (Addressbook book : pendingBooks) {
             boolean on = subscribed.contains(book.url);
-            host.base.setBookState(book.url, on, on, on);
+            host.base.setBookState(book.url, on, on, on && phone);
         }
-
-        // NOTE: subscribed books mirror into the Contacts app.
-        if (!host.hasContactsPermission()) {
-            host.requestPermissions(
-                    new String[] {
-                        Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS
-                    },
-                    MainActivity.REQUEST_CONTACTS);
-        }
+        host.reconcilePhone();
 
         finishOnboarding();
     }

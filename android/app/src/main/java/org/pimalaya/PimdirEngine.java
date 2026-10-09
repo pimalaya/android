@@ -403,7 +403,7 @@ abstract class PimdirEngine implements OfflineDriver {
         mutation.put("op", "setFlags");
         mutation.put("handle", handle);
         mutation.put("flags", flags);
-        client.offlineMutate(this, collection, mutation);
+        mutate(collection, mutation);
     }
 
     /**
@@ -414,7 +414,7 @@ abstract class PimdirEngine implements OfflineDriver {
         JSONObject mutation = new JSONObject();
         mutation.put("op", "remove");
         mutation.put("handle", handle);
-        client.offlineMutate(this, collection, mutation);
+        mutate(collection, mutation);
     }
 
     /**
@@ -427,7 +427,8 @@ abstract class PimdirEngine implements OfflineDriver {
         mutation.put("op", "move");
         mutation.put("handle", handle);
         mutation.put("target", target);
-        client.offlineMutate(this, collection, mutation);
+        mutate(collection, mutation);
+        staged(target);
     }
 
     /**
@@ -439,7 +440,8 @@ abstract class PimdirEngine implements OfflineDriver {
         mutation.put("op", "copy");
         mutation.put("handle", handle);
         mutation.put("target", target);
-        client.offlineMutate(this, collection, mutation);
+        mutate(collection, mutation);
+        staged(target);
     }
 
     /**
@@ -458,7 +460,7 @@ abstract class PimdirEngine implements OfflineDriver {
         // NOTE: an edit that changes what the key is derived from has to say
         // so, or the item keeps the position its old one gave it.
         mutation.put("sortKey", sortKey);
-        client.offlineMutate(this, collection, mutation);
+        mutate(collection, mutation);
     }
 
     /**
@@ -476,7 +478,7 @@ abstract class PimdirEngine implements OfflineDriver {
         mutation.put("body", body);
         mutation.put("summary", summary);
         mutation.put("sortKey", sortKey);
-        client.offlineMutate(this, collection, mutation);
+        mutate(collection, mutation);
     }
 
     /**
@@ -495,8 +497,17 @@ abstract class PimdirEngine implements OfflineDriver {
         mutation.put("bodyBase64", Base64.getEncoder().encodeToString(body));
         mutation.put("summary", summary);
         mutation.put("sortKey", sortKey);
-        client.offlineMutate(this, collection, mutation);
+        mutate(collection, mutation);
     }
+
+    /** Stages one mutation through the engine, then tells the driver. */
+    private void mutate(String collection, JSONObject mutation) {
+        client.offlineMutate(this, collection, mutation);
+        staged(collection);
+    }
+
+    /** A mutation was staged on the collection, for a driver that follows writes. */
+    protected void staged(String collection) {}
 
     /**
      * A change the remote refuses for good: rejected as any other is, and

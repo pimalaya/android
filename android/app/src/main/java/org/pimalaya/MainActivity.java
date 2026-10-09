@@ -28,9 +28,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.json.JSONObject;
 import org.pimalaya.client.Cards;
@@ -107,7 +109,7 @@ public class MainActivity extends Activity {
     /** Whether an auth step's main button is loading, the step frozen. */
     private boolean authBusy;
 
-    static final int REQUEST_CONTACTS = 1;
+    private static final int REQUEST_MIRRORS = 1;
     private static final int REQUEST_NOTIFICATIONS = 4;
     private static final int REQUEST_IMPORT = 2;
     private static final int REQUEST_EXPORT = 3;
@@ -143,6 +145,9 @@ public class MainActivity extends Activity {
 
     /** The background run this activity last reloaded after. */
     private long reloadedRun = BackgroundJob.ran;
+
+    /** The Contacts-app edit {@link SyncService} brought in that the list last reloaded after. */
+    private volatile long reloadedIngest = SyncService.ingested;
 
     /** Each domain's filter, read once from where it was last left. */
     private final Map<PimDomain, MergedFilter> filters = new java.util.EnumMap<>(PimDomain.class);
@@ -229,8 +234,10 @@ public class MainActivity extends Activity {
     /** The contacts screen: list, adapter, search and selection. */
     private ContactsList contactsList;
 
-    /** Sync to re-run once the contacts permission is granted, if any. */
-    private Runnable afterContactsPermission;
+    /** The phone mirrors a permission prompt is up for, and who takes the answer. */
+    private Set<PhoneMirror> askedMirrors;
+
+    private Consumer<Set<PhoneMirror>> afterMirrors;
 
     /** The editor's working state, replaced blank when it leaves. */
     EditSession edit = new EditSession();
@@ -375,6 +382,11 @@ public class MainActivity extends Activity {
         BackgroundCheck.schedule(this);
         BackgroundJob.onEnd = () -> main.post(this::backgroundEnded);
 
+        // NOTE: the phone's contacts follow the store by events: a pass after
+        // each write (PhoneQueue), Android's upload sync, the app's return.
+        PhoneQueue.start(this);
+        reconcilePhone();
+
         goHome();
 
         // NOTE: a summary is written, never derived, so a store filled by a
@@ -389,12 +401,10 @@ public class MainActivity extends Activity {
                     }
                 });
 
-        // NOTE: adb-only hooks, so syncs can be driven headlessly:
-        // am start ... --ez syncRemote true / --ez syncLocal true
+        // NOTE: adb-only hook, so a sync can be driven headlessly:
+        // am start ... --ez syncRemote true
         if (getIntent().getBooleanExtra("syncRemote", false)) {
             syncRemote();
-        } else if (getIntent().getBooleanExtra("syncLocal", false)) {
-            syncLocal();
         }
 
         // NOTE: an OAuth redirect lands here rather than in onNewIntent
@@ -809,6 +819,7 @@ public class MainActivity extends Activity {
 
         onScreen = true;
         afterBackgroundRun();
+        phoneReturn();
         if (BackgroundJob.running && !syncing) {
             showBackgroundStrip();
         }
@@ -1159,23 +1170,38 @@ public class MainActivity extends Activity {
         accountSettings.open(email);
     }
 
-    /** Runs the pending contacts-sync retry once the permission lands. */
-    @Override
-    public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
-        if (request == REQUEST_CONTACTS && hasContactsPermission()) {
-            Runnable retry = afterContactsPermission;
-            afterContactsPermission = null;
-            if (retry != null) {
-                retry.run();
-            }
+    /**
+     * Asks, in one prompt, the permissions of the phone mirrors wanted, then
+     * hands {@code done} the ones granted (main thread). Asks nothing when
+     * they all are. The setups' switches and a book's settings switch are
+     * the only callers: a mirror is asked for when it is turned on.
+     */
+    void askMirrors(Set<PhoneMirror> wanted, Consumer<Set<PhoneMirror>> done) {
+        String[] missing = PhoneMirror.missing(wanted, this::permitted);
+        if (missing.length == 0) {
+            done.accept(PhoneMirror.granted(wanted, this::permitted));
+            return;
         }
+        askedMirrors = wanted;
+        afterMirrors = done;
+        requestPermissions(missing, REQUEST_MIRRORS);
     }
 
-    boolean hasContactsPermission() {
-        return checkSelfPermission(Manifest.permission.WRITE_CONTACTS)
-                        == PackageManager.PERMISSION_GRANTED
-                && checkSelfPermission(Manifest.permission.READ_CONTACTS)
-                        == PackageManager.PERMISSION_GRANTED;
+    /** Hands a mirrors' prompt its answer. */
+    @Override
+    public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        if (request != REQUEST_MIRRORS || afterMirrors == null) {
+            return;
+        }
+        Consumer<Set<PhoneMirror>> done = afterMirrors;
+        Set<PhoneMirror> wanted = askedMirrors;
+        afterMirrors = null;
+        askedMirrors = null;
+        done.accept(PhoneMirror.granted(wanted, this::permitted));
+    }
+
+    private boolean permitted(String permission) {
+        return checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
     }
 
     /** True while the merged contacts list is the shown screen (the
@@ -1371,28 +1397,17 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Surfaces a sync outcome: an error dialog, or one report toast per
-     * axis: a Local toast (cards in, out and changed against the phone's
-     * Contacts app) first when any synced book mirrors there, then the
-     * Remote toast, carrying the pending-conflicts line when contacts
-     * wait for manual resolution.
+     * Surfaces a sync outcome: an error dialog, or the report toast (cards
+     * in, out and changed against the servers), carrying the
+     * pending-conflicts line when contacts wait for manual resolution. The
+     * phone's contacts are a view of the store, not a sync, and are not
+     * reported.
      */
     private void reportSync(SyncRunner.Outcome outcome) {
         if (outcome.failure != null) {
             // NOTE: the last sync's store keeps failing addressbooks usable.
             showError(outcome.failure, R.string.sync_failed);
             return;
-        }
-
-        // NOTE: toasts queue, so the local report shows first and the
-        // remote one takes its place.
-        if (outcome.local) {
-            toast(
-                    getString(
-                            R.string.sync_line_local,
-                            outcome.localIn.size(),
-                            outcome.localOut.size(),
-                            outcome.localChanged.size()));
         }
 
         StringBuilder message =
@@ -2057,14 +2072,12 @@ public class MainActivity extends Activity {
 
     /**
      * The contacts list's pull: the addressbooks the filter shows,
-     * reconciled with their servers, then the phone's own pass. The
-     * drawer's sync is the one that takes every domain and everything.
+     * reconciled with their servers, each book's phone passes around its
+     * server one. The drawer's sync is the one that takes every domain and
+     * everything.
      */
     void syncContacts() {
         if (syncing) {
-            return;
-        }
-        if (!phoneSyncedBooks().isEmpty() && !ensureContactsPermission(this::syncContacts)) {
             return;
         }
 
@@ -2075,13 +2088,6 @@ public class MainActivity extends Activity {
         io.execute(
                 () -> {
                     SyncRunner.Outcome outcome = runner.syncRemote(filterOf(PimDomain.CONTACTS));
-                    OfflineEngine.Report report = new OfflineEngine.Report();
-                    Exception failure = runner.syncLocal(report);
-                    outcome.absorb(report);
-                    outcome.local |= !runner.phoneSyncedBooks().isEmpty();
-                    if (outcome.failure == null) {
-                        outcome.failure = failure;
-                    }
                     postAlive(
                             () -> {
                                 setSyncing(false);
@@ -2101,11 +2107,6 @@ public class MainActivity extends Activity {
         if (syncing) {
             return;
         }
-        // NOTE: only the phone passes need the contacts permission;
-        // reconciling the Android accounts runs regardless.
-        if (!phoneSyncedBooks().isEmpty() && !ensureContactsPermission(this::syncAll)) {
-            return;
-        }
 
         syncAccount(null);
         if (!startSync()) {
@@ -2114,14 +2115,6 @@ public class MainActivity extends Activity {
         io.execute(
                 () -> {
                     SyncRunner.Outcome outcome = runner.syncRemote();
-                    OfflineEngine.Report report = new OfflineEngine.Report();
-                    Exception failure = runner.syncLocal(report);
-                    outcome.absorb(report);
-                    outcome.local |= !runner.phoneSyncedBooks().isEmpty();
-                    if (outcome.failure == null) {
-                        outcome.failure = failure;
-                    }
-
                     RemotePass.MailPass sent = remote.mailPass(SyncScope.all(this));
                     Exception calendars = remote.calendarPass(SyncScope.all(this));
                     Exception other = sent.failure != null ? sent.failure : calendars;
@@ -2142,70 +2135,115 @@ public class MainActivity extends Activity {
                 });
     }
 
-    /**
-     * The phone spoke alone, in-process: reconciles the per-addressbook
-     * Android accounts, then runs the two-way phone engine pass per
-     * subscribed book right here, behind the same spinner as the remote
-     * sync (SyncService keeps serving the syncs the OS schedules on its
-     * own). Needs the contacts
-     * permission, requested on first use; the full sync's own phone
-     * passes stay silently off until this ran once.
-     */
-    private void syncLocal() {
-        if (syncing) {
-            return;
-        }
-        if (!ensureContactsPermission(this::syncLocal)) {
-            return;
-        }
-
-        syncAccount(null);
-        if (!startSync()) {
-            return;
-        }
-        io.execute(
-                () -> {
-                    OfflineEngine.Report report = new OfflineEngine.Report();
-                    Exception failure = runner.syncLocal(report);
-                    postAlive(
-                            () -> {
-                                setSyncing(false);
-                                if (failure != null) {
-                                    showError(failure, R.string.accounts_failed);
-                                } else {
-                                    toast(
-                                            getString(
-                                                    R.string.sync_line_local,
-                                                    report.localIn.size(),
-                                                    report.localOut.size(),
-                                                    report.localChanged.size()));
-                                    reloadContacts();
-                                }
-                            });
-                });
-    }
-
     /** The subscribed addressbooks set to mirror into the phone. */
     List<BookEntry> phoneSyncedBooks() {
         return runner.phoneSyncedBooks();
     }
 
     /**
-     * Ensures the contacts permission before a phone-touching sync;
-     * when it must be requested, remembers `retry` to run once granted
-     * and returns false.
+     * Brings the books' Android accounts in line with the books the phone
+     * mirrors, creating the missing ones and removing the rest, off the
+     * main thread: at startup and once a setup committed its books.
      */
-    private boolean ensureContactsPermission(Runnable retry) {
-        if (hasContactsPermission()) {
-            return true;
+    void reconcilePhone() {
+        io.execute(
+                () -> {
+                    try {
+                        Accounts.reconcile(this, runner.phoneSyncedBooks());
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "phone accounts failed", error);
+                    }
+                });
+    }
+
+    /**
+     * The app back in the foreground: the phone pass of every mirrored book
+     * whose raw contacts changed meanwhile, so a Contacts-app edit shows at
+     * once whatever Android's own batching does, then a reload when that pass
+     * or Android's upload sync ({@link SyncService}) brought one in. Silent,
+     * and not a sync: the process's lock is not taken.
+     */
+    private void phoneReturn() {
+        io.execute(
+                () -> {
+                    OfflineEngine.Report report = new OfflineEngine.Report();
+                    Exception failure = runner.syncPhone(report);
+                    if (failure != null) {
+                        Log.w("pimalaya", "phone pass on return failed", failure);
+                    }
+                    long ingested = SyncService.ingested;
+                    boolean changed =
+                            !report.localIn.isEmpty()
+                                    || !report.localOut.isEmpty()
+                                    || !report.localChanged.isEmpty();
+                    if (changed || ingested != reloadedIngest) {
+                        reloadedIngest = ingested;
+                        postAlive(this::reloadContacts);
+                    }
+                });
+    }
+
+    /**
+     * A book's phone switch turned on, its permission granted: its Android
+     * account, then its first projection, under the lists' strip ("Writing
+     * 120 contacts to the phone") unless a sync holds the strip. The
+     * process's lock is not taken, the book's own lock being the pass's.
+     */
+    void showOnPhone(String url) {
+        io.execute(
+                () -> {
+                    try {
+                        Accounts.reconcile(this, runner.phoneSyncedBooks());
+                        OfflineEngine engine =
+                                new OfflineEngine(base, pimdir, client, null, null, this);
+                        engine.progress =
+                                (domain, stage, count) -> {
+                                    String text =
+                                            SyncSteps.text(getResources(), domain, stage, count);
+                                    if (text != null) {
+                                        postAlive(() -> phoneStrip(text));
+                                    }
+                                };
+                        engine.syncPhone(url, new OfflineEngine.Report());
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "first projection failed for " + url, error);
+                    }
+                    postAlive(() -> phoneStrip(null));
+                });
+    }
+
+    /** The strip's line during a first projection, null once it ended. */
+    private void phoneStrip(String text) {
+        if (syncing || BackgroundJob.running) {
+            return;
         }
-        afterContactsPermission = retry;
-        requestPermissions(
-                new String[] {
-                    Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS,
-                },
-                REQUEST_CONTACTS);
-        return false;
+        for (int panel : new int[] {PANEL_MAIL, PANEL_CONTACTS, PANEL_CALENDAR}) {
+            if (text == null) {
+                headerOf(panel).synced();
+            } else {
+                headerOf(panel).sync(null, text, 0, 0);
+            }
+        }
+    }
+
+    /**
+     * A book's phone switch turned off: one last phone pass, so a
+     * Contacts-app edit not yet brought in is not lost, then its Android
+     * account goes, which takes its raw contacts with it. The contacts stay
+     * in the store.
+     */
+    void hideFromPhone(String url) {
+        io.execute(
+                () -> {
+                    try {
+                        new OfflineEngine(base, pimdir, client, null, null, this)
+                                .syncPhone(url, new OfflineEngine.Report());
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "last phone pass failed for " + url, error);
+                    }
+                    Accounts.remove(this, url);
+                    postAlive(this::reloadContacts);
+                });
     }
 
     /**

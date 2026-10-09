@@ -84,6 +84,19 @@
                 android:layout_marginTop="20dp"
                 android:orientation="vertical" />
 
+            <!-- Another app already fills the phone's Contacts app with
+                 the address, so the books stay off it. -->
+            <TextView
+                android:id="@+id/books_note"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:lineSpacingExtra="4dp"
+                android:text="@string/phone_elsewhere_note"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="14sp"
+                android:visibility="gone" />
+
         </LinearLayout>
 
     </ScrollView>

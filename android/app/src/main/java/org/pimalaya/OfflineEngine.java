@@ -240,8 +240,8 @@ final class OfflineEngine extends PimdirEngine {
      * one: reconcile the hub with the book's raw contacts, hydrate the
      * bodies the phone round brought, resolve divergences by the same
      * three-way merge. Skipped silently when the spoke is unavailable
-     * (no contacts permission, or no Android account yet: "Sync local"
-     * creates them).
+     * (no contacts permission, or no Android account: the book is not
+     * mirrored).
      */
     void syncPhone(String url, Report report) throws JSONException {
         if (phone == null || !phone.available(url)) {
@@ -381,6 +381,18 @@ final class OfflineEngine extends PimdirEngine {
                 vcard,
                 index.optJSONObject("summary"),
                 index.optString("sortKey"));
+    }
+
+    /**
+     * A write to a book reaches the phone's contacts within a second
+     * ({@link PhoneQueue}); a write to the phone collection is a phone
+     * pass's own conflict resolution, pushed by that pass.
+     */
+    @Override
+    protected void staged(String collection) {
+        if (!CardStore.isPhoneCollection(collection)) {
+            PhoneQueue.written(collection);
+        }
     }
 
     @Override
