@@ -34,7 +34,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added a merged contact view with UID-based deduplication, manual link and unlink, a merge flow, a semi-automatic duplicate remover, search, vCard import and export, and a divergence flag opening a conflict-resolution form.
 - Added lossless round-trips for Google People and Microsoft Graph: vCard lines with no native slot are stashed server-side and restored verbatim, and provider-only fields ride the vCard as read-only vendor properties.
 - Added a next-birthday peek computed from the merged cards.
-- Added a Google Play support prompt with one-time pay-what-you-want tiers; the FOSS builds ship free and ungated.
 - Added the packaging: a Nix flake pinning the toolchain and a release workflow assembling one signed APK per ABI plus a universal one.
 - Set the minimum supported Android version to 8.0 (API 26).
 

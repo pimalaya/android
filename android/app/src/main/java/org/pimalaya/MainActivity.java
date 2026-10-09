@@ -404,9 +404,9 @@ public class MainActivity extends Activity {
                     }
                 });
 
-        // NOTE: adb-only hook, so a sync can be driven headlessly:
-        // am start ... --ez syncRemote true
-        if (getIntent().getBooleanExtra("syncRemote", false)) {
+        // NOTE: adb-only hook, debug builds only, so a sync can be driven
+        // headlessly: am start ... --ez syncRemote true
+        if (BuildConfig.DEBUG && getIntent().getBooleanExtra("syncRemote", false)) {
             syncRemote();
         }
 

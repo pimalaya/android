@@ -23,7 +23,7 @@ io-jmap = { version = "0.5", default-features = false }
 io-msgraph = { version = "0.5", default-features = false, features = ["ical", "vcard"] }
 io-oauth = { version = "0.3", default-features = false }
 io-pim-discovery = { version = "0.9", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
-io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "be03184246e1ad7e45bd657de5076d99a1b34922", default-features = false }
+io-pimdir = { version = "0.7", default-features = false }
 io-smtp = { version = "0.5", default-features = false }
 io-webdav = { version = "0.5", default-features = false }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
@@ -42,9 +42,5 @@ vcard-rs = { version = "0.5", default-features = false, features = ["parser", "j
 [dev-dependencies]
 # NOTE: the std store, for the Graph listing's tests to run the real sync
 # engine and store over a fake Graph; the bridge itself compiles no SQLite.
-io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "be03184246e1ad7e45bd657de5076d99a1b34922", features = ["client", "vendored"] }
+io-pimdir = { version = "0.7", features = ["client", "vendored"] }
 tempfile = { version = "3", default-features = false }
-
-# NOTE: temporary until io-pimdir is pushed
-[patch."https://github.com/pimalaya/io-pimdir"]
-io-pimdir = { path = "../../io-pimdir" }

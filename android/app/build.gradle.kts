@@ -5,7 +5,8 @@ plugins {
 // Release signing is driven entirely by the environment so no keystore or
 // password ever lands in the repo (CI decodes a base64 secret to a file).
 // When PIMALAYA_KEYSTORE is unset (local debug, forks without secrets) the
-// release APK is simply left unsigned.
+// release APK is simply left unsigned. PIMALAYA_KEYSTORE_PASSWORD unlocks
+// it, PIMALAYA_KEYSTORE_ALIAS names the key (pimalaya when unset).
 val releaseKeystore = System.getenv("PIMALAYA_KEYSTORE")?.let { file(it) }
 
 android {
@@ -27,6 +28,11 @@ android {
         versionName = "0.1.0"
     }
 
+    buildFeatures {
+        // BuildConfig.DEBUG gates the adb-only hooks out of release.
+        buildConfig = true
+    }
+
     signingConfigs {
         if (releaseKeystore != null) {
             create("release") {
@@ -35,7 +41,7 @@ android {
                 val password = System.getenv("PIMALAYA_KEYSTORE_PASSWORD")
                 storeFile = releaseKeystore
                 storePassword = password
-                keyAlias = "pimalaya"
+                keyAlias = System.getenv("PIMALAYA_KEYSTORE_ALIAS") ?: "pimalaya"
                 keyPassword = password
             }
         }

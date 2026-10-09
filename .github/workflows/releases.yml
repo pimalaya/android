@@ -11,7 +11,11 @@ jobs:
   apk:
     runs-on: ubuntu-24.04
     env:
-      CARDAMUM_KEYSTORE_PASSWORD: ${{ secrets.CARDAMUM_KEYSTORE_PASSWORD }}
+      # The repository's signing secrets keep the app's former name: they
+      # hold the keystore the cardamum builds were signed with, whose key
+      # alias is cardamum. android/app/build.gradle.kts reads PIMALAYA_*.
+      PIMALAYA_KEYSTORE_PASSWORD: ${{ secrets.CARDAMUM_KEYSTORE_PASSWORD }}
+      PIMALAYA_KEYSTORE_ALIAS: cardamum
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
@@ -29,8 +33,8 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.CARDAMUM_KEYSTORE_BASE64 }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/cardamum.jks"
-            echo "CARDAMUM_KEYSTORE=$RUNNER_TEMP/cardamum.jks" >> "$GITHUB_ENV"
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/pimalaya.jks"
+            echo "PIMALAYA_KEYSTORE=$RUNNER_TEMP/pimalaya.jks" >> "$GITHUB_ENV"
           fi
       - name: Assemble release APKs
         run: nix develop --command bash -c 'cd android && gradle :app:assembleRelease'
@@ -39,36 +43,36 @@ jobs:
       - name: Collect the APKs
         run: |
           out=android/app/build/outputs/apk/release
-          cp "$out"/app-universal-release*.apk cardamum.apk
+          cp "$out"/app-universal-release*.apk pimalaya.apk
           for abi in arm64-v8a armeabi-v7a x86_64 x86; do
-            cp "$out/app-$abi-release"*.apk "cardamum-$abi.apk"
+            cp "$out/app-$abi-release"*.apk "pimalaya-$abi.apk"
           done
       - uses: actions/upload-artifact@v4
         with:
-          name: cardamum
-          path: cardamum.apk
+          name: pimalaya
+          path: pimalaya.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: cardamum-arm64-v8a
-          path: cardamum-arm64-v8a.apk
+          name: pimalaya-arm64-v8a
+          path: pimalaya-arm64-v8a.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: cardamum-armeabi-v7a
-          path: cardamum-armeabi-v7a.apk
+          name: pimalaya-armeabi-v7a
+          path: pimalaya-armeabi-v7a.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: cardamum-x86_64
-          path: cardamum-x86_64.apk
+          name: pimalaya-x86_64
+          path: pimalaya-x86_64.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: cardamum-x86
-          path: cardamum-x86.apk
+          name: pimalaya-x86
+          path: pimalaya-x86.apk
       - uses: softprops/action-gh-release@v2
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         with:
           files: |
-            cardamum.apk
-            cardamum-arm64-v8a.apk
-            cardamum-armeabi-v7a.apk
-            cardamum-x86_64.apk
-            cardamum-x86.apk
+            pimalaya.apk
+            pimalaya-arm64-v8a.apk
+            pimalaya-armeabi-v7a.apk
+            pimalaya-x86_64.apk
+            pimalaya-x86.apk
