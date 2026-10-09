@@ -19,6 +19,7 @@ Each step ends with a commit on master (no push until the end, no `Co-Authored-B
 4. **`calendar-conflict-form`**: calendar conflicts triaged by `IcalMerge`, the rest settled in a form like contacts'.
 5. **Calendar mapping research**: agents study DAVx5 (synctools, ical4android), AOSP `CalendarProvider` and Etar, ICSx⁵ and Fossify Calendar against docs/calendar-mapping.md; the supervisor revises and settles the contract (delegated by the user, 2026-10-09).
 6. **`phone-calendar-mirror`**: Rust projection and patch, `CalendarMapping`, `CalendarRemote`, accounts and the calendar sync adapter, triggers, the switch.
+6b. **`calendar-occurrence-writes`** (found while building step 2): Graph and Google write one occurrence as an instance, so overrides and `EXDATE`s reach every backend, not only CalDAV.
 7. **Release and push** at the end: ical-rs released and pinned, every repository modified during the session pushed.
 
 ## Decisions (2026-10-09)
