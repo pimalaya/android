@@ -18,16 +18,24 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.EventDetail;
+import org.pimalaya.client.EventSplit;
+import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
+import org.pimalaya.client.PimalayaClient;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import java.util.TimeZone;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * The page one agenda row opens onto: what the entry is, and the form
@@ -46,12 +54,12 @@ import java.util.UUID;
  * a day and has neither. Offering a to-do an end would be offering to
  * write a property RFC 5545 does not give it.
  *
- * <p>It edits the stored <em>component</em>, not the occurrence that was
- * tapped: changing one date of a repeating entry means writing an
- * override with its own RECURRENCE-ID, and until that exists an edit is
- * honestly an edit of the whole series. What the page shows of the
- * occurrence (when this one falls, how far off it is) is read-only for
- * the same reason.
+ * <p>Opened on an occurrence of a series, it shows and edits that
+ * occurrence, and asks on save and on delete whether the change is for
+ * this occurrence, this and following, or all of them: an override and
+ * an {@code EXDATE}, a split series, or the series itself. Its dates
+ * show at the reader's time and are written back in the zone they were
+ * in.
  */
 final class EventView {
     /** What an event's STATUS may be (RFC 5545 3.8.1.11). */
@@ -107,6 +115,18 @@ final class EventView {
     private static final String EVENT = EventDetail.EVENT;
     private static final String TODO = EventDetail.TODO;
     private static final String JOURNAL = EventDetail.JOURNAL;
+
+    /** Which occurrences a change applies to, as the bridge names them. */
+    private static final String[] SCOPES = {"this", "following", "all"};
+
+    /** The dates a page edits, as the bridge's edit object keys them. */
+    private static final String[] DATES = {"start", "end", "due", "completed"};
+
+    /** The text fields, likewise. */
+    private static final String[] TEXTS = {
+        "summary", "description", "location", "url", "status", "categories", "priority",
+        "percentComplete",
+    };
 
     /**
      * Every property the page can edit, in the order its sections draw
@@ -209,6 +229,18 @@ final class EventView {
     /** The working values, keyed as the bridge's edit object keys them. */
     private JSONObject model = new JSONObject();
 
+    /** The working dates, each with the zone it is in; absent when unset. */
+    private final Map<String, EventTime> times = new HashMap<>();
+
+    /**
+     * The values and dates as the page opened, so a save sends only what
+     * changed: a date it does not touch keeps its line byte for byte, and
+     * an edit of a whole series moves only the dates that moved.
+     */
+    private JSONObject opened = new JSONObject();
+
+    private final Map<String, EventTime> openedTimes = new HashMap<>();
+
     /** Fields the user added this session, so their empty row stays. */
     private final Set<String> revealed = new HashSet<>();
 
@@ -238,18 +270,28 @@ final class EventView {
      * needs the least correcting: an entry started now is rarely for
      * now, and every other default (midnight, this exact minute) is
      * further from what the user then types.
+     *
+     * <p>In the device's zone, by its IANA name and with the definition
+     * RFC 5545 3.2.19 wants beside it: a floating start would follow
+     * whichever zone each reader is in, which no server or other client
+     * takes as meant.
      */
     void compose(EventStore.StoredCalendar calendar) {
         String uid = UUID.randomUUID().toString();
-
-        Calendar start = Calendar.getInstance();
-        start.add(Calendar.HOUR_OF_DAY, 1);
-        start.set(Calendar.MINUTE, 0);
-        start.set(Calendar.SECOND, 0);
+        ZoneId zone = ZoneId.systemDefault();
+        LocalDateTime start =
+                LocalDateTime.now(zone).truncatedTo(ChronoUnit.HOURS).plusHours(1);
 
         String ical;
         try {
-            ical = host.client.newEvent(EVENT, uid, now(), format(start, false, false));
+            ical =
+                    host.client.newEvent(
+                            EVENT,
+                            uid,
+                            now(),
+                            Zones.stamp(start, false),
+                            zone.getId(),
+                            Zones.vtimezone(zone, System.currentTimeMillis()));
         } catch (Exception error) {
             Log.w("pimalaya", "new event failed", error);
             host.showError(error, R.string.event_save_failed);
@@ -285,6 +327,7 @@ final class EventView {
         this.detail = detailOf(event);
 
         model = new JSONObject();
+        times.clear();
         revealed.clear();
         if (detail != null) {
             put("summary", detail.summary);
@@ -294,16 +337,47 @@ final class EventView {
             put("status", detail.status);
             put("categories", detail.categories);
             put("priority", detail.priority);
-            put("start", detail.start);
-            put("end", detail.end);
-            put("due", detail.due);
-            put("completed", detail.completed);
             put("percentComplete", detail.percentComplete);
             put("allDay", detail.allDay);
+            times.put("start", detail.start);
+            times.put("end", detail.end);
+            times.put("due", detail.due);
+            times.put("completed", detail.completed);
+            if (series()) {
+                occurrenceDates();
+            }
         }
+        opened = copy(model);
+        openedTimes.clear();
+        openedTimes.putAll(times);
 
         render();
         host.show(MainActivity.PANEL_EVENT_VIEW);
+    }
+
+    /**
+     * The dates of the occurrence that was opened rather than its
+     * series': the start where it falls, and the end or due date it runs
+     * to. A to-do placed by its due date alone has no start to move, so
+     * its due date is where it falls.
+     */
+    private void occurrenceDates() {
+        if (detail.start == null && detail.due != null) {
+            times.put("due", occurrence.start);
+            return;
+        }
+        times.put("start", occurrence.start);
+        if (detail.end != null) {
+            times.put("end", occurrence.end);
+        }
+        if (detail.due != null) {
+            times.put("due", occurrence.end);
+        }
+    }
+
+    /** Whether the page is on one occurrence of a series. */
+    private boolean series() {
+        return occurrence != null && occurrence.recurrenceId != null;
     }
 
     /** Whether the object could be read at all: nothing is editable
@@ -363,21 +437,20 @@ final class EventView {
 
         if (!detail.recurrence.isEmpty()) {
             rows.add(sections.value(detail.recurrence, R.string.event_field_repeats));
-            // The occurrence is one instance of the rule above, and the
-            // rule is what an edit here changes, so this says which
-            // instance was opened without pretending it can be moved.
-            if (occurrence != null) {
-                rows.add(
-                        sections.value(
-                                moment(occurrence.start, occurrence.allDay),
-                                R.string.event_field_this_one));
-            }
         }
-        // NOTE: both of the rows above describe the occurrence that was
-        // tapped, and an entry being composed was tapped from nowhere: it
-        // is not placed until it is saved, so there is no instance to name
-        // and nothing to count down to. The page is the same page, and
-        // these are the two rows it cannot fill.
+        // An occurrence an override moved says where its series had it,
+        // which is the instance an edit of it alone is written against.
+        if (series()
+                && Zones.instant(occurrence.recurrenceId) != Zones.instant(occurrence.start)) {
+            rows.add(
+                    sections.value(
+                            moment(occurrence.recurrenceId), R.string.event_field_originally));
+        }
+        // NOTE: the row above and the countdown below describe the
+        // occurrence that was tapped, and an entry being composed was
+        // tapped from nowhere: it is not placed until it is saved, so there
+        // is no instance to name and nothing to count down to. The page is
+        // the same page, and these are the two rows it cannot fill.
         if (occurrence != null) {
             rows.add(
                     sections.value(
@@ -412,7 +485,11 @@ final class EventView {
     }
 
     private boolean shown(Field field) {
-        return !value(field.key).isEmpty() || revealed.contains(field.key);
+        boolean set =
+                field.kind == Kind.DATE
+                        ? times.get(field.key) != null
+                        : !value(field.key).isEmpty();
+        return set || revealed.contains(field.key);
     }
 
     /** Who is on it, read-only: an attendee list is a negotiation
@@ -528,7 +605,7 @@ final class EventView {
 
     private View row(Field field) {
         CharSequence shown =
-                field.kind == Kind.DATE ? moment(value(field.key), allDay()) : value(field.key);
+                field.kind == Kind.DATE ? moment(times.get(field.key)) : value(field.key);
         return sections.row(
                 host.getString(field.label),
                 shown.length() == 0 ? host.getString(R.string.event_unset) : shown,
@@ -537,7 +614,7 @@ final class EventView {
     }
 
     private View dateRow(String key, int label) {
-        String shown = moment(value(key), allDay());
+        String shown = moment(times.get(key));
         return sections.row(
                 host.getString(label),
                 shown.isEmpty() ? host.getString(R.string.event_unset) : shown,
@@ -561,13 +638,13 @@ final class EventView {
         }
     }
 
-    /** A civil stamp as the page shows it, or empty when unset. */
-    private String moment(String civil, boolean allDay) {
-        if (civil.isEmpty()) {
+    /** A date as the page shows it, at the reader's time, or empty when unset. */
+    private String moment(EventTime time) {
+        if (time == null) {
             return "";
         }
-        long stamp = stampOf(civil);
-        return allDay ? Dates.date(host, stamp) : Dates.full(host, stamp);
+        long stamp = Zones.instant(time);
+        return time.isDate() ? Dates.date(host, stamp) : Dates.full(host, stamp);
     }
 
     // ---- the dialogs ------------------------------------------------------
@@ -635,12 +712,11 @@ final class EventView {
      * whole point.
      */
     private void editDate(String key) {
-        String current = value(key);
+        EventTime current = times.get(key);
         Calendar moment = Calendar.getInstance();
-        if (!current.isEmpty()) {
-            moment.setTimeInMillis(stampOf(current));
+        if (current != null) {
+            moment.setTimeInMillis(Zones.instant(current));
         }
-        boolean utc = current.endsWith("Z");
 
         new DatePickerDialog(
                         host,
@@ -648,11 +724,13 @@ final class EventView {
                             moment.set(Calendar.YEAR, year);
                             moment.set(Calendar.MONTH, month);
                             moment.set(Calendar.DAY_OF_MONTH, day);
-                            if (allDay()) {
-                                put(key, format(moment, true, false));
+                            // NOTE: a completion is a UTC moment whatever the
+                            // entry is (RFC 5545 3.8.2.1), so it keeps its time.
+                            if (allDay() && !"completed".equals(key)) {
+                                times.put(key, at(moment.getTimeInMillis(), key, true));
                                 render();
                             } else {
-                                editTime(key, moment, utc);
+                                editTime(key, moment);
                             }
                         },
                         moment.get(Calendar.YEAR),
@@ -661,14 +739,14 @@ final class EventView {
                 .show();
     }
 
-    private void editTime(String key, Calendar moment, boolean utc) {
+    private void editTime(String key, Calendar moment) {
         new TimePickerDialog(
                         host,
                         (view, hour, minute) -> {
                             moment.set(Calendar.HOUR_OF_DAY, hour);
                             moment.set(Calendar.MINUTE, minute);
                             moment.set(Calendar.SECOND, 0);
-                            put(key, format(moment, false, utc));
+                            times.put(key, at(moment.getTimeInMillis(), key, false));
                             render();
                         },
                         moment.get(Calendar.HOUR_OF_DAY),
@@ -677,18 +755,53 @@ final class EventView {
                 .show();
     }
 
-    /** Flips all-day, dropping the times the dates no longer carry. */
+    /**
+     * A moment the reader picked, as the date a property writes: a day,
+     * or a time in the zone the property was in, so an event at 09:00
+     * New York moved by a reader in Paris stays in New York. A date that
+     * had none takes the start's zone, else the device's.
+     */
+    private EventTime at(long instant, String key, boolean date) {
+        ZoneId reader = ZoneId.systemDefault();
+        if (date) {
+            return Zones.at(instant, new EventTime("", EventTime.DATE, "", null), reader);
+        }
+        if ("completed".equals(key)) {
+            return Zones.at(instant, new EventTime("", EventTime.UTC, "", null), reader);
+        }
+
+        EventTime like = times.get(key);
+        if (like == null || like.isDate()) {
+            like = times.get("start");
+        }
+        if (like == null || like.isDate()) {
+            like = new EventTime("", EventTime.ZONED, reader.getId(), null);
+        }
+        return Zones.at(instant, like, reader);
+    }
+
+    /**
+     * Flips all-day: a time becomes the day it falls on for the reader,
+     * a day the midnight opening it in the device's zone. An all-day end
+     * is the day after the last one (RFC 5545 3.6.1), so one landing on
+     * its start's day moves a day on.
+     */
     private void toggleAllDay() {
         boolean allDay = !allDay();
         put("allDay", allDay);
 
         for (String key : new String[] {"start", "end", "due"}) {
-            String current = value(key);
-            if (!current.isEmpty()) {
-                Calendar moment = Calendar.getInstance();
-                moment.setTimeInMillis(stampOf(current));
-                put(key, format(moment, allDay, false));
+            EventTime current = times.get(key);
+            if (current != null) {
+                times.put(key, at(Zones.instant(current), key, allDay));
             }
+        }
+
+        EventTime start = times.get("start");
+        EventTime end = times.get("end");
+        if (allDay && start != null && end != null && end.time.compareTo(start.time) <= 0) {
+            LocalDateTime next = Zones.civil(start.time).plusDays(1);
+            times.put("end", new EventTime(Zones.stamp(next, true), EventTime.DATE, "", null));
         }
         render();
     }
@@ -729,82 +842,85 @@ final class EventView {
         return model.optBoolean("allDay");
     }
 
+    private static JSONObject copy(JSONObject values) {
+        try {
+            return new JSONObject(values.toString());
+        } catch (JSONException error) {
+            return new JSONObject();
+        }
+    }
+
     /**
      * The stored object's properties, or null when it cannot be read:
      * the agenda placed the row from the same object, so a page saying
-     * only what the row said beats a page that fails.
+     * only what the row said beats a page that fails. Opened on an
+     * occurrence an override replaces, the override's.
      */
     private EventDetail detailOf(EventStore.StoredEvent event) {
         try {
-            return host.client.readEvent(event.ical);
+            return host.client.readEvent(
+                    event.ical, series() ? occurrence.recurrenceId.time : null);
         } catch (Exception error) {
             Log.w("pimalaya", "event read failed: " + event.id, error);
             return null;
         }
     }
 
-    // ---- civil stamps -----------------------------------------------------
-
     /**
-     * The instant a stored stamp names, read in UTC when it says so and
-     * in the device's zone otherwise.
+     * What the page changed, as the bridge's edit object: the fields that
+     * differ from how the page opened, and nothing else.
      *
-     * <p>The agenda reads every stamp as wall-clock, which is right for
-     * placing a recurrence; an edit cannot afford it, because writing a
-     * UTC moment back without its Z would move the entry by the offset.
+     * <p>A date carries the zone it is in only when that is not the zone
+     * its property already had, so a date edited where it was keeps its
+     * line's {@code TZID} and {@code VALUE}; one in a zone the object may
+     * not define brings that zone's {@code VTIMEZONE}.
      */
-    static long stampOf(String civil) {
-        if (!civil.endsWith("Z")) {
-            return CalendarList.stampOf(civil);
+    private JSONObject edited() throws JSONException {
+        JSONObject edit = new JSONObject();
+        for (String key : TEXTS) {
+            if (!value(key).equals(opened.optString(key))) {
+                edit.put(key, value(key));
+            }
         }
 
-        Calendar moment = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-        moment.clear();
-        moment.set(
-                Integer.parseInt(civil.substring(0, 4)),
-                Integer.parseInt(civil.substring(4, 6)) - 1,
-                Integer.parseInt(civil.substring(6, 8)));
-        if (civil.length() >= 15) {
-            moment.set(Calendar.HOUR_OF_DAY, Integer.parseInt(civil.substring(9, 11)));
-            moment.set(Calendar.MINUTE, Integer.parseInt(civil.substring(11, 13)));
-            moment.set(Calendar.SECOND, Integer.parseInt(civil.substring(13, 15)));
+        for (String key : DATES) {
+            EventTime now = times.get(key);
+            EventTime was = openedTimes.get(key);
+            if (same(now, was)) {
+                continue;
+            }
+
+            JSONObject date = new JSONObject();
+            date.put("time", now == null ? "" : now.time);
+            if (now != null && (was == null || !sameZone(now, was))) {
+                date.put("kind", now.kind);
+                date.put("tzid", now.tzid);
+                ZoneId zone = EventTime.ZONED.equals(now.kind) ? Zones.zoneOf(now.tzid) : null;
+                if (zone != null && !edit.has("vtimezone")) {
+                    edit.put("vtimezone", Zones.vtimezone(zone, Zones.instant(now)));
+                }
+            }
+            edit.put(key, date);
         }
-        return moment.getTimeInMillis();
+
+        edit.put("stamp", now());
+        return edit;
     }
 
-    /** A moment as the stamp the object stores: a date, a local
-     *  wall-clock time, or a UTC one when that is what it was. */
-    static String format(Calendar moment, boolean allDay, boolean utc) {
-        Calendar shown = moment;
-        if (utc) {
-            shown = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
-            shown.setTimeInMillis(moment.getTimeInMillis());
+    private static boolean same(EventTime left, EventTime right) {
+        if (left == null || right == null) {
+            return left == right;
         }
+        return left.time.equals(right.time) && sameZone(left, right);
+    }
 
-        String date =
-                String.format(
-                        Locale.US,
-                        "%04d%02d%02d",
-                        shown.get(Calendar.YEAR),
-                        shown.get(Calendar.MONTH) + 1,
-                        shown.get(Calendar.DAY_OF_MONTH));
-        if (allDay) {
-            return date;
-        }
-
-        return date
-                + String.format(
-                        Locale.US,
-                        "T%02d%02d%02d",
-                        shown.get(Calendar.HOUR_OF_DAY),
-                        shown.get(Calendar.MINUTE),
-                        shown.get(Calendar.SECOND))
-                + (utc ? "Z" : "");
+    private static boolean sameZone(EventTime left, EventTime right) {
+        return left.kind.equals(right.kind) && Objects.equals(left.tzid, right.tzid);
     }
 
     /** Now, as the UTC stamp DTSTAMP and LAST-MODIFIED are written in. */
     private static String now() {
-        return format(Calendar.getInstance(), false, true);
+        return Zones.utc(System.currentTimeMillis());
     }
 
     // ---- saving -----------------------------------------------------------
@@ -818,15 +934,71 @@ final class EventView {
      * against the ETag the entry was read at, so the push that follows is
      * conditioned on the state the edit was made against rather than on
      * whatever arrived since.
+     *
+     * <p>On an occurrence of a series it first asks which occurrences
+     * the edit is for.
      */
     void save() {
         if (detail == null) {
             host.toast(host.getString(R.string.event_unreadable));
             return;
         }
+        if (creating || !series()) {
+            save("all");
+            return;
+        }
+        scope(
+                R.string.event_scope_save,
+                PimalayaClient.writesOverrides(calendar.url),
+                this::save);
+    }
 
-        put("stamp", now());
-        String edited = model.toString();
+    /**
+     * Asks which occurrences of the series a change is for.
+     *
+     * <p>This occurrence alone is offered only where the calendar's push
+     * carries it: Graph and Google take an occurrence through the instance
+     * itself rather than through the object, so offering it there would
+     * stage a change the server never sees.
+     */
+    private void scope(int title, boolean one, Consumer<String> then) {
+        List<String> scopes = new ArrayList<>();
+        List<String> labels = new ArrayList<>();
+        int[] names = {
+            R.string.event_scope_this, R.string.event_scope_following, R.string.event_scope_all,
+        };
+        for (int index = one ? 0 : 1; index < SCOPES.length; index++) {
+            scopes.add(SCOPES[index]);
+            labels.add(host.getString(names[index]));
+        }
+
+        new AlertDialog.Builder(host)
+                .setTitle(title)
+                .setItems(
+                        labels.toArray(new String[0]),
+                        (dialog, which) -> then.accept(scopes.get(which)))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * Saves for one scope: the series or the lone entry, one occurrence
+     * through its override, or this and following by splitting the
+     * series, which stages two writes: the new series' create, then the
+     * shortened series' edit, in that order so a failure between them
+     * leaves an occurrence twice rather than none.
+     */
+    private void save(String scope) {
+        JSONObject edit;
+        try {
+            edit = scoped(edited(), scope);
+        } catch (JSONException error) {
+            host.showError(error, R.string.event_save_failed);
+            return;
+        }
+
+        String edited = edit.toString();
+        String uid = edit.optString("uid");
         EventStore.StoredEvent target = event;
         EventStore.StoredCalendar collection = calendar;
         boolean isNew = creating;
@@ -836,17 +1008,36 @@ final class EventView {
                 () -> {
                     Exception failure = null;
                     try {
-                        String written = host.client.writeEvent(target.ical, edited);
                         CalendarEngine engine = host.calendarEngine(collection.accountEmail);
-                        if (isNew) {
-                            // NOTE: no summary and no key. What an agenda row
-                            // shows needs the recurrence expansion, which
-                            // happens at render time against the window being
-                            // shown, so there is nothing to write here.
-                            engine.mutateAdd(
-                                    collection.id, target.id, written, new JSONArray(), null, "");
+                        // NOTE: no summary and no key. What an agenda row
+                        // shows needs the recurrence expansion, which
+                        // happens at render time against the window being
+                        // shown, so there is nothing to write here.
+                        if ("following".equals(scope)) {
+                            EventSplit split = host.client.splitEvent(target.ical, edited);
+                            if (split.series != null) {
+                                engine.mutateAdd(
+                                        collection.id,
+                                        uid + ".ics",
+                                        split.series,
+                                        new JSONArray(),
+                                        null,
+                                        "");
+                            }
+                            engine.mutateEdit(collection.id, target.handle, split.master, null, "");
                         } else {
-                            engine.mutateEdit(collection.id, target.handle, written, null, "");
+                            String written = host.client.writeEvent(target.ical, edited);
+                            if (isNew) {
+                                engine.mutateAdd(
+                                        collection.id,
+                                        target.id,
+                                        written,
+                                        new JSONArray(),
+                                        null,
+                                        "");
+                            } else {
+                                engine.mutateEdit(collection.id, target.handle, written, null, "");
+                            }
                         }
                     } catch (Exception error) {
                         Log.w("pimalaya", "event save failed: " + target.id, error);
@@ -868,26 +1059,67 @@ final class EventView {
                 });
     }
 
-    /** Asks before deleting: an entry is one tap from being gone. */
+    /**
+     * An edit made on the occurrence the page is on, for one scope: which
+     * instance it is, the instant a split ends the series before, and the
+     * new series' UID.
+     */
+    private JSONObject scoped(JSONObject edit, String scope) throws JSONException {
+        edit.put("scope", scope);
+        if (series()) {
+            edit.put("recurrenceId", occurrence.recurrenceId.time);
+            edit.put("recurrenceInstant", Zones.utc(Zones.instant(occurrence.recurrenceId)));
+        }
+        if ("following".equals(scope)) {
+            edit.put("uid", UUID.randomUUID().toString());
+        }
+        return edit;
+    }
+
+    /**
+     * Asks before deleting: an entry is one tap from being gone. On an
+     * occurrence of a series, the question is which occurrences.
+     */
     void confirmDelete() {
+        if (!creating && series()) {
+            scope(
+                    R.string.event_scope_delete,
+                    PimalayaClient.writesExdates(calendar.url),
+                    this::delete);
+            return;
+        }
         new AlertDialog.Builder(host)
                 .setMessage(R.string.event_delete_confirm)
-                .setPositiveButton(R.string.event_delete, (dialog, which) -> delete())
+                .setPositiveButton(R.string.event_delete, (dialog, which) -> delete("all"))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
 
     /**
-     * Stages the entry's removal and leaves the page; the next sync
-     * deletes it, guarded by the ETag it was read at.
+     * Stages the removal and leaves the page; the next sync tells the
+     * server, guarded by the ETag the entry was read at.
+     *
+     * <p>All occurrences remove the entry. One becomes an {@code EXDATE}
+     * on its series and this and following ends the series before it,
+     * both edits of the entry, unless nothing of the series is left.
      *
      * <p>An entry that was never saved is only ever on this screen, so its
      * delete is the page closing: there is nothing staged to withdraw and
      * nothing anywhere to tell about it.
      */
-    private void delete() {
+    private void delete(String scope) {
         if (creating) {
             host.showBack(MainActivity.PANEL_CALENDAR);
+            return;
+        }
+
+        String edit;
+        try {
+            JSONObject stamped = new JSONObject();
+            stamped.put("stamp", now());
+            edit = scoped(stamped, scope).toString();
+        } catch (JSONException error) {
+            host.showError(error, R.string.event_delete_failed);
             return;
         }
 
@@ -899,8 +1131,16 @@ final class EventView {
                 () -> {
                     Exception failure = null;
                     try {
-                        host.calendarEngine(collection.accountEmail)
-                                .mutateRemove(collection.id, target.handle);
+                        CalendarEngine engine = host.calendarEngine(collection.accountEmail);
+                        String left =
+                                "all".equals(scope)
+                                        ? null
+                                        : host.client.removeEvent(target.ical, edit);
+                        if (left == null) {
+                            engine.mutateRemove(collection.id, target.handle);
+                        } else {
+                            engine.mutateEdit(collection.id, target.handle, left, null, "");
+                        }
                     } catch (Exception error) {
                         Log.w("pimalaya", "event delete failed: " + target.id, error);
                         failure = error;
@@ -919,5 +1159,4 @@ final class EventView {
                             });
                 });
     }
-
 }

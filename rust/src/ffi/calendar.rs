@@ -18,7 +18,7 @@ use jni::{
     errors::{Error, LogErrorAndDefault},
     objects::{JClass, JObject, JString},
 };
-use serde_json::{from_str, to_string};
+use serde_json::{from_str, json, to_string};
 
 use crate::{
     account::{self, Backend},
@@ -197,13 +197,14 @@ fn list_calendars(
     }
 }
 
-/// `Native.expandEvent`: the occurrences one VEVENT denotes inside a
-/// civil window, recurrence expanded (RFC 5545 3.3.10 through ical-rs's
-/// `recur` feature). Pure computation, no transport.
+/// `Native.expandEvent`: the occurrences one calendar object denotes
+/// inside a civil window, its recurrence set composed (RFC 5545 3.8.5
+/// through ical-rs). Pure computation, no transport.
 ///
-/// Returns a JSON array of `{start, end, summary, location, allDay}`
-/// objects, each start and end a `YYYYMMDDTHHMMSS` civil stamp. A
-/// non-recurring event yields at most one.
+/// Returns a JSON array of `{component, start, end, recurrenceId,
+/// summary, location, allDay}` objects, each time a `{time, kind, tzid,
+/// offset}` the Java side makes an instant of. A non-recurring event
+/// yields at most one.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_expandEvent<'local>(
     mut env: EnvUnowned<'local>,
@@ -250,6 +251,60 @@ pub extern "system" fn Java_org_pimalaya_client_Native_writeEvent<'local>(
         // a brace.
         let json = match crate::calendar::write(&ical, &edit) {
             Ok(written) => written,
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.splitEvent`: splits a series at the occurrence an edit
+/// names, the series ended before it and a new one carrying the edit
+/// from it on. Pure computation, no transport. Returns
+/// `{master, series}`, `series` null when the occurrence was the
+/// series' first and the edit one of all of it.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_splitEvent<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    ical: JString<'local>,
+    edit: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let ical = read_string(env, &ical);
+        let edit = read_string(env, &edit);
+
+        let json = match crate::calendar::split(&ical, &edit) {
+            Ok((master, series)) => to_string(&json!({ "master": master, "series": series }))
+                .unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.removeEvent`: removes the occurrences an edit's scope names
+/// from a series and returns the iCalendar left, or an empty string
+/// when nothing is and the entry itself goes. Pure computation, no
+/// transport.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_removeEvent<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    ical: JString<'local>,
+    edit: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let ical = read_string(env, &ical);
+        let edit = read_string(env, &edit);
+
+        // NOTE: told apart from an error the way `writeEvent`'s reply is,
+        // and from a removal by being empty.
+        let json = match crate::calendar::remove(&ical, &edit) {
+            Ok(left) => left.unwrap_or_default(),
             Err(err) => error_json(err),
         };
 
@@ -344,19 +399,22 @@ fn update_event(
     }
 }
 
-/// `Native.readEvent`: one calendar object's first scheduled component
-/// read whole, for the page that shows it. Pure computation, no
-/// transport, like the expansion beside it.
+/// `Native.readEvent`: one calendar object read whole, for the page that
+/// shows it: the series, or the override of the occurrence a non-empty
+/// `recurrenceId` names. Pure computation, no transport, like the
+/// expansion beside it.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_readEvent<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     ical: JString<'local>,
+    recurrence_id: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let ical = read_string(env, &ical);
+        let recurrence_id = read_string(env, &recurrence_id);
 
-        let json = match crate::calendar::read(&ical) {
+        let json = match crate::calendar::read(&ical, &recurrence_id) {
             Ok(detail) => to_string(&detail).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
@@ -367,8 +425,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_readEvent<'local>(
 }
 
 /// `Native.newEvent`: the object a new entry starts from, as iCalendar
-/// text. Pure computation, no transport: the id and the two stamps are
-/// the caller's.
+/// text. Pure computation, no transport: the id, the two stamps and the
+/// start's zone with its `VTIMEZONE` are the caller's.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_newEvent<'local>(
     mut env: EnvUnowned<'local>,
@@ -377,20 +435,25 @@ pub extern "system" fn Java_org_pimalaya_client_Native_newEvent<'local>(
     uid: JString<'local>,
     stamp: JString<'local>,
     start: JString<'local>,
+    tzid: JString<'local>,
+    vtimezone: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let component = read_string(env, &component);
         let uid = read_string(env, &uid);
         let stamp = read_string(env, &stamp);
         let start = read_string(env, &start);
+        let tzid = read_string(env, &tzid);
+        let vtimezone = read_string(env, &vtimezone);
 
         // NOTE: the reply is the iCalendar itself rather than a JSON
         // wrapper, as `writeEvent`'s is, and told apart the same way: an
         // object is an error, and no calendar object opens on a brace.
-        let json = match crate::calendar::create(&component, &uid, &stamp, &start) {
-            Ok(created) => created,
-            Err(err) => error_json(err),
-        };
+        let json =
+            match crate::calendar::create(&component, &uid, &stamp, &start, &tzid, &vtimezone) {
+                Ok(created) => created,
+                Err(err) => error_json(err),
+            };
 
         Ok(env.new_string(json)?.into())
     })

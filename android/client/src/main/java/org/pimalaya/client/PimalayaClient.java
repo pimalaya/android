@@ -330,6 +330,20 @@ public class PimalayaClient {
         return info(url).optBoolean("accountLevel");
     }
 
+    /**
+     * True when a write to the calendar behind the URL carries an override
+     * of one occurrence to the server: CalDAV's does, Graph's and Google's
+     * write the series alone.
+     */
+    public static boolean writesOverrides(String url) {
+        return info(url).optBoolean("writesOverrides");
+    }
+
+    /** True when a write to the calendar behind the URL carries an {@code EXDATE}. */
+    public static boolean writesExdates(String url) {
+        return info(url).optBoolean("writesExdates");
+    }
+
     /** True when the URL belongs to a plain CardDAV backend. */
     public static boolean isCarddav(String url) {
         return "carddav".equals(info(url).optString("backend"));
@@ -799,10 +813,11 @@ public class PimalayaClient {
     }
 
     /**
-     * Expands one calendar object into the occurrences falling inside
-     * {@code [windowStart, windowEnd)}, both civil stamps. Recurrence
-     * is RFC 5545 complete (ical-rs); a non-recurring event yields at
-     * most one occurrence, and one outside the window yields none.
+     * Expands one calendar object into the occurrences starting inside
+     * {@code [windowStart, windowEnd)}, both civil stamps compared with
+     * each start as written. Its recurrence set is RFC 5545 complete
+     * (ical-rs): exceptions out, overrides in their instance's place. A
+     * non-recurring event yields at most one occurrence.
      */
     public List<Occurrence> expandEvent(String ical, String windowStart, String windowEnd) {
         JSONArray reply = array(Native.expandEvent(ical, windowStart, windowEnd));
@@ -813,8 +828,9 @@ public class PimalayaClient {
             occurrences.add(
                     new Occurrence(
                             string(occurrence, "component"),
-                            string(occurrence, "start"),
-                            string(occurrence, "end"),
+                            eventTime(occurrence.optJSONObject("start")),
+                            eventTime(occurrence.optJSONObject("end")),
+                            eventTime(occurrence.optJSONObject("recurrenceId")),
                             string(occurrence, "summary"),
                             string(occurrence, "location"),
                             occurrence.optBoolean("allDay")));
@@ -822,13 +838,28 @@ public class PimalayaClient {
         return occurrences;
     }
 
+    /** One time of a reply, null for a missing one. */
+    private static EventTime eventTime(JSONObject time) {
+        if (time == null) {
+            return null;
+        }
+        return new EventTime(
+                time.optString("time"),
+                time.optString("kind"),
+                time.optString("tzid"),
+                time.isNull("offset") ? null : time.optInt("offset"));
+    }
+
     /**
-     * Reads one calendar object's first scheduled component whole, for
-     * the page that shows it. Pure computation, like the expansion
-     * beside it: no transport, no account.
+     * Reads one calendar object whole, for the page that shows it: the
+     * series, or the override of the occurrence {@code recurrenceId}
+     * names when the object holds one (null or empty for the series).
+     * Pure computation, like the expansion beside it: no transport, no
+     * account.
      */
-    public EventDetail readEvent(String ical) {
-        JSONObject reply = object(Native.readEvent(ical));
+    public EventDetail readEvent(String ical, String recurrenceId) {
+        JSONObject reply =
+                object(Native.readEvent(ical, recurrenceId == null ? "" : recurrenceId));
 
         JSONArray listed = reply.optJSONArray("attendees");
         List<EventDetail.Attendee> attendees = new ArrayList<>(listed == null ? 0 : listed.length());
@@ -850,10 +881,10 @@ public class PimalayaClient {
                 reply.optString("url"),
                 reply.optString("status"),
                 reply.optString("categories"),
-                reply.optString("start"),
-                reply.optString("end"),
-                reply.optString("due"),
-                reply.optString("completed"),
+                eventTime(reply.optJSONObject("start")),
+                eventTime(reply.optJSONObject("end")),
+                eventTime(reply.optJSONObject("due")),
+                eventTime(reply.optJSONObject("completed")),
                 reply.optBoolean("allDay"),
                 reply.optString("recurrence"),
                 reply.optString("priority"),
@@ -884,6 +915,35 @@ public class PimalayaClient {
             throw new PimalayaException("Unreadable bridge reply: expected an object");
         }
         return written;
+    }
+
+    /**
+     * Splits a series at the occurrence {@code edit} names, its scope
+     * {@code following}: the series ended before it, and a new one under
+     * the edit's {@code uid} carrying the edit from it on. Pure
+     * computation, no transport.
+     */
+    public EventSplit splitEvent(String ical, String edit) {
+        JSONObject reply = object(Native.splitEvent(ical, edit));
+        return new EventSplit(string(reply, "master"), optString(reply, "series"));
+    }
+
+    /**
+     * Removes the occurrences {@code edit}'s scope names from a series:
+     * one becomes an {@code EXDATE}, this and following ends the series
+     * before it. Returns the object left, or null when nothing is and the
+     * entry itself goes. Pure computation, no transport.
+     */
+    public String removeEvent(String ical, String edit) {
+        String left = Native.removeEvent(ical, edit).trim();
+
+        // NOTE: an object is the bridge's error shape here too, for the
+        // same reason it is in writeEvent.
+        if (left.startsWith("{")) {
+            object(left);
+            throw new PimalayaException("Unreadable bridge reply: expected an object");
+        }
+        return left.isEmpty() ? null : left;
     }
 
     /**
@@ -918,11 +978,19 @@ public class PimalayaClient {
 
     /**
      * The object a new calendar entry starts from: one component
-     * carrying the identity, the composition stamp and the day it is
-     * placed on, and nothing else. Pure computation, no transport.
+     * carrying the identity, the composition stamp and its start, in the
+     * zone {@code tzid} names with that zone's {@code vtimezone} (both
+     * empty for a date or a floating start). Pure computation, no
+     * transport.
      */
-    public String newEvent(String component, String uid, String stamp, String start) {
-        String created = Native.newEvent(component, uid, stamp, start).trim();
+    public String newEvent(
+            String component,
+            String uid,
+            String stamp,
+            String start,
+            String tzid,
+            String vtimezone) {
+        String created = Native.newEvent(component, uid, stamp, start, tzid, vtimezone).trim();
 
         // NOTE: an object is the bridge's error shape here too, for the
         // same reason it is in writeEvent.

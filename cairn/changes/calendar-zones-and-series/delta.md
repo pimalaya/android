@@ -24,7 +24,7 @@ The agenda SHALL place a recurring entry's occurrences as its recurrence set def
 - THEN the agenda shows it on Wednesday alone
 
 ### Requirement: One occurrence of a series can be changed
-The entry page, opened from an occurrence of a series, SHALL ask whether a save or a delete applies to that occurrence or to all of them. One occurrence edited SHALL be written as an override of it, one occurrence deleted as an `EXDATE`.
+The entry page, opened from an occurrence of a series, SHALL show that occurrence's dates and ask whether a save or a delete applies to that occurrence, to it and the following ones, or to all of them. One occurrence edited SHALL be written as an override of it, one occurrence deleted as an `EXDATE`, and this and following as the series ended before it plus a new series from it. An edit of all occurrences SHALL move the series by as much as the occurrence was moved. That occurrence alone SHALL be offered only where the calendar's write carries it: an override on CalDAV, an `EXDATE` on CalDAV and Google.
 
 #### Scenario: From next week on
 - GIVEN a weekly series opened from next week's occurrence

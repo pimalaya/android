@@ -12,8 +12,11 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
 
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
@@ -32,10 +35,12 @@ import java.util.Set;
  * time, because what an event renders as depends on the week being
  * shown, and the week moves while the stored object does not.
  *
- * <p>Everything here is civil time. The window bounds, the stamps the
- * bridge returns and the comparisons between them are all wall-clock,
- * with no offset resolved anywhere, which is exactly how RFC 5545
- * defines recurrence.
+ * <p>The bridge expands on civil time, which is how RFC 5545 defines
+ * recurrence, and hands each occurrence over with what it is civil in;
+ * the rows are placed and labelled at the instant that names, in the
+ * device's zone ({@link Zones}). A meeting at 09:00 New York shows at
+ * 15:00 for a reader in Paris, and a Graph event stored in UTC at the
+ * reader's hour.
  */
 final class CalendarList {
     /** Seconds in a day, the threshold a length is told in days past. */
@@ -82,6 +87,9 @@ final class CalendarList {
         final EventStore.StoredEvent event;
         final EventStore.StoredCalendar calendar;
 
+        /** The instant it starts at, which orders and places the row. */
+        final long start;
+
         Row(
                 Occurrence occurrence,
                 EventStore.StoredEvent event,
@@ -89,6 +97,7 @@ final class CalendarList {
             this.occurrence = occurrence;
             this.event = event;
             this.calendar = calendar;
+            this.start = Zones.instant(occurrence.start);
         }
     }
 
@@ -137,11 +146,13 @@ final class CalendarList {
      * the shown week and dropping what the merged filter hides.
      */
     void reload() {
-        // NOTE: the shown week alone: the agenda never lists past it, and
-        // a picked day is always one of its seven, since moving the week
-        // clears the pick.
-        String from = shownWeek(today());
-        String until = plusDays(from, 7);
+        // NOTE: the shown week alone, since the agenda never lists past it
+        // and moving the week clears a picked day, and a day more either
+        // side: the bridge compares the window with each start as written,
+        // a start in another zone can fall a day off the reader's, and
+        // render keeps the week by instant.
+        String from = plusDays(shownWeek(today()), -1);
+        String until = plusDays(from, 9);
 
         Map<String, EventStore.StoredCalendar> byCollection = new HashMap<>();
         for (EventStore.StoredCalendar calendar : store.loadCalendars()) {
@@ -172,7 +183,7 @@ final class CalendarList {
             }
         }
 
-        rows.sort((left, right) -> left.occurrence.start.compareTo(right.occurrence.start));
+        rows.sort((left, right) -> Long.compare(left.start, right.start));
         render();
     }
 
@@ -212,10 +223,18 @@ final class CalendarList {
         return day.compareTo(weekFirst) >= 0 && day.compareTo(plusDays(weekFirst, 7)) < 0;
     }
 
-    /** The civil day an occurrence starts on. */
+    /**
+     * The day an occurrence starts on, where the device is: an all-day
+     * one on its date, which is in no zone, anything else on the day its
+     * instant falls on.
+     */
     private static String dayOf(Row row) {
-        String start = row.occurrence.start;
-        return start.length() >= 8 ? start.substring(0, 8) : start;
+        if (row.occurrence.start.isDate()) {
+            return row.occurrence.start.time.substring(0, 8);
+        }
+        return Zones.stamp(
+                Instant.ofEpochMilli(row.start).atZone(ZoneId.systemDefault()).toLocalDateTime(),
+                true);
     }
 
     /**
@@ -371,11 +390,11 @@ final class CalendarList {
     }
 
     /** When an occurrence starts, as its card's leading column says it. */
-    private String startLabel(Occurrence occurrence) {
-        if (occurrence.allDay) {
+    private String startLabel(Row row) {
+        if (row.occurrence.allDay) {
             return host.getString(R.string.event_all_day);
         }
-        return DateFormat.getTimeFormat(host).format(new Date(stampOf(occurrence.start)));
+        return DateFormat.getTimeFormat(host).format(new Date(row.start));
     }
 
     /** Today as a civil `YYYYMMDD` stamp, in the device's own zone. */
@@ -411,36 +430,22 @@ final class CalendarList {
         return moment;
     }
 
-    /**
-     * The instant a civil `YYYYMMDDTHHMMSS` stamp names, read in the
-     * device's zone.
-     *
-     * <p>Resolving an offset here is not a contradiction of the civil
-     * expansion above: the stamp is already the wall-clock moment the
-     * rule produced, and this only hands it to the platform formatter,
-     * which speaks instants. Nothing compares the result to anything.
-     */
-    static long stampOf(String civil) {
-        if (civil == null || civil.length() < 8) {
-            return 0;
-        }
-        java.util.Calendar moment = java.util.Calendar.getInstance();
-        moment.clear();
-        moment.set(
-                Integer.parseInt(civil.substring(0, 4)),
-                Integer.parseInt(civil.substring(4, 6)) - 1,
-                Integer.parseInt(civil.substring(6, 8)));
-        if (civil.length() >= 15) {
-            moment.set(java.util.Calendar.HOUR_OF_DAY, Integer.parseInt(civil.substring(9, 11)));
-            moment.set(java.util.Calendar.MINUTE, Integer.parseInt(civil.substring(11, 13)));
-            moment.set(java.util.Calendar.SECOND, Integer.parseInt(civil.substring(13, 15)));
-        }
-        return moment.getTimeInMillis();
+    /** Midnight opening a civil `YYYYMMDD` day, in the device's zone. */
+    static long stampOf(String day) {
+        return Zones.civil(day)
+                .toLocalDate()
+                .atStartOfDay(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli();
     }
 
-    /** The seconds between two civil stamps, never negative. */
-    static long secondsBetween(String start, String end) {
-        long length = (stampOf(end) - stampOf(start)) / 1000;
+    /**
+     * The seconds an occurrence runs, never negative: between the
+     * instants its ends name, so an event starting in one zone and ending
+     * in another (a flight) is as long as it is.
+     */
+    static long secondsBetween(EventTime start, EventTime end) {
+        long length = (Zones.instant(end) - Zones.instant(start)) / 1000;
         return Math.max(length, 0);
     }
 
@@ -483,7 +488,7 @@ final class CalendarList {
      * would be nonsense.
      */
     static String countdownLabel(Context context, Occurrence occurrence) {
-        long stamp = stampOf(occurrence.start);
+        long stamp = Zones.instant(occurrence.start);
         return occurrence.allDay
                 ? Dates.relativeDays(context, stamp)
                 : Dates.relative(context, stamp);
@@ -562,7 +567,7 @@ final class CalendarList {
                             occurrence.summary.isEmpty()
                                     ? host.getString(R.string.event_untitled)
                                     : occurrence.summary);
-            ((TextView) view.findViewById(R.id.event_start)).setText(startLabel(occurrence));
+            ((TextView) view.findViewById(R.id.event_start)).setText(startLabel(row));
             // What kind of entry it is, by name, then how long it runs.
             String kind = host.getString(componentName(occurrence.component));
             String duration = durationLabel(host, occurrence);

@@ -430,19 +430,21 @@ final class Native {
 
     /**
      * The occurrences one calendar object denotes inside a civil
-     * window, recurrence expanded. Pure computation, no transport, so
-     * no {@link Transport} argument. Returns a JSON array of
-     * {@code {component, start, end, summary, location, allDay}}.
+     * window, its recurrence set composed. Pure computation, no
+     * transport, so no {@link Transport} argument. Returns a JSON array
+     * of {@code {component, start, end, recurrenceId, summary, location,
+     * allDay}}, each time a {@code {time, kind, tzid, offset}}.
      */
     static native String expandEvent(String ical, String windowStart, String windowEnd);
 
     /**
-     * One calendar object's first scheduled component read whole, for
-     * the page that shows it. Pure computation, no transport, like the
-     * expansion beside it. Returns a JSON object of the component's
+     * One calendar object read whole, for the page that shows it: the
+     * series, or the override of the occurrence a non-empty
+     * {@code recurrenceId} names. Pure computation, no transport, like
+     * the expansion beside it. Returns a JSON object of the component's
      * properties.
      */
-    static native String readEvent(String ical);
+    static native String readEvent(String ical, String recurrenceId);
 
     /**
      * Applies one edit to a calendar object and returns the new
@@ -451,6 +453,20 @@ final class Native {
      * transport. Returns the object itself, or a JSON error object.
      */
     static native String writeEvent(String ical, String edit);
+
+    /**
+     * Splits a series at the occurrence an edit names. Pure computation,
+     * no transport. Returns {@code {master, series}}, {@code series}
+     * null when the occurrence was the first, or a JSON error object.
+     */
+    static native String splitEvent(String ical, String edit);
+
+    /**
+     * Removes the occurrences an edit's scope names from a series. Pure
+     * computation, no transport. Returns the object left, an empty
+     * string when nothing is, or a JSON error object.
+     */
+    static native String removeEvent(String ical, String edit);
 
     /**
      * Pushes an edited object back to its calendar, guarded by
@@ -469,11 +485,18 @@ final class Native {
 
     /**
      * The object a new calendar entry starts from, carrying the three
-     * properties RFC 5545 requires of its component and nothing else.
-     * Pure computation, no transport. Returns the object itself, or a
-     * JSON error object.
+     * properties RFC 5545 requires of its component, its start in the
+     * zone {@code tzid} names (none for a date or a floating time) with
+     * that zone's {@code vtimezone}. Pure computation, no transport.
+     * Returns the object itself, or a JSON error object.
      */
-    static native String newEvent(String component, String uid, String stamp, String start);
+    static native String newEvent(
+            String component,
+            String uid,
+            String stamp,
+            String start,
+            String tzid,
+            String vtimezone);
 
     /**
      * Files a new object in a calendar, guarded on the resource not

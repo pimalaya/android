@@ -432,7 +432,12 @@
     <string name="contacts_no_book">No address book to put it in</string>
     <string name="event_unreadable">This entry could not be read</string>
     <string name="event_nothing_to_add">Nothing left to add</string>
-    <string name="event_field_this_one">This occurrence</string>
+    <string name="event_field_originally">Originally</string>
+    <string name="event_scope_save">Save which occurrences?</string>
+    <string name="event_scope_delete">Delete which occurrences?</string>
+    <string name="event_scope_this">This occurrence</string>
+    <string name="event_scope_following">This and following</string>
+    <string name="event_scope_all">All occurrences</string>
     <string name="yes">Yes</string>
     <string name="no">No</string>
 
