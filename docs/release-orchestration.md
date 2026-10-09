@@ -9,6 +9,12 @@ The handoff for the session that builds what was planned on 2026-10-09. That ses
 - **Planned, not started:** the changes below.
 - **Abandoned:** `quiet-first-sync` (archived) and docs/release-plan.md (removed).
 
+## State at the end of the session (2026-10-09)
+
+- **Landed on master, device test owed, change left active:** `phone-contacts-mirror`, `calendar-zones-and-series`, `calendar-conflict-form`, `calendar-occurrence-writes`, `phone-calendar-mirror`, `jmap-release-readiness`, `ical-rs-0-6`, beside the four of the handoff.
+- **Released:** ical-rs 0.6.0, io-jmap 0.5.0, io-msgraph 0.5.0, io-gcal 0.2.0, pinned here. The io-pimdir path patch stays (the CI blocker of docs/production-review.md).
+- **Open:** JMAP calendar writes (io-jmap `CalendarEvent/set`, then the app); vcard-rs has no `REV` settlement twin to ical-rs's bookkeeping rule (the app settles `REV` itself); calendula's workarounds of the RFC 5545 fixes can go now that ical-rs 0.6 is out.
+
 ## Order
 
 Each step ends with a commit on master (no push until the end, no `Co-Authored-By` or AI trailer). Steps 1, 2, 3 and 5 run in parallel, each Android change in its own worktree beside this one (~/code/pimalaya/android-<id>, so the `../../` path patches resolve), squashed onto master:
