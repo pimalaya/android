@@ -1423,9 +1423,9 @@ final class EventView {
      * Asks which occurrences of the series a change is for.
      *
      * <p>This occurrence alone is offered only where the calendar's push
-     * carries it: Graph and Google take an occurrence through the instance
-     * itself rather than through the object, so offering it there would
-     * stage a change the server never sees.
+     * carries it: CalDAV, Graph and Google do, and a JMAP calendar takes no
+     * write yet, so offering it there would stage a change the server never
+     * sees.
      */
     private void scope(int title, boolean one, Consumer<String> then) {
         List<String> scopes = new ArrayList<>();

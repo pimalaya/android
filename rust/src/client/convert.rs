@@ -91,11 +91,76 @@ pub(crate) fn rejected(reference: String, error: String) -> PushOutcome {
     }
 }
 
+/// The status a write answers when the server refused part of it for
+/// good: 422, the request understood and never to be taken as it is.
+pub(crate) const REFUSED: u16 = 422;
+
+/// Whether a failed write is one the server will refuse every time: a
+/// 4xx naming the request itself, not a precondition (409, 412), a
+/// throttle (429, a 403 naming a rate or a quota), the token (401) or an
+/// event gone (404, 410), which a later pass may well see through.
+pub(crate) fn refused_for_good(err: &BridgeError) -> bool {
+    let message = err.message.to_ascii_lowercase();
+    let throttled = ["rate limit", "ratelimit", "quota", "usage limit"]
+        .iter()
+        .any(|limit| message.contains(limit));
+
+    match err.status {
+        Some(403) => !throttled,
+        Some(401 | 404 | 409 | 410 | 412 | 429) => false,
+        Some(status) => (400..500).contains(&status),
+        None => false,
+    }
+}
+
+/// What a write of several parts answers for the parts that did not
+/// land: a failure a later pass may see through keeps the whole write
+/// waiting (412), and only refusals for good make it refused
+/// ([`REFUSED`]); [`None`] when every part landed.
+pub(crate) fn parts_failure(failures: Vec<BridgeError>) -> Option<BridgeError> {
+    let refused = failures.iter().all(refused_for_good);
+    let first = failures
+        .iter()
+        .find(|err| !refused_for_good(err))
+        .or(failures.first())?;
+
+    Some(BridgeError {
+        message: first.message.clone(),
+        status: Some(if refused { REFUSED } else { 412 }),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use io_jmap::rfc8620::{send::JmapSendError, session_get::JmapSessionGetError};
 
-    use super::coroutine_error;
+    use crate::types::BridgeError;
+
+    use super::{coroutine_error, refused_for_good};
+
+    #[test]
+    fn only_a_request_refused_as_such_is_refused_for_good() {
+        let failed = |status, message: &str| BridgeError {
+            message: message.into(),
+            status: Some(status),
+        };
+
+        assert!(refused_for_good(&failed(
+            400,
+            "ErrorOccurrenceCrossingBoundary"
+        )));
+        assert!(refused_for_good(&failed(403, "ErrorAccessDenied")));
+        assert!(refused_for_good(&failed(422, "Unprocessable")));
+        assert!(!refused_for_good(&failed(403, "Rate Limit Exceeded")));
+        assert!(!refused_for_good(&failed(
+            403,
+            "Calendar usage limits exceeded."
+        )));
+        for status in [401, 404, 409, 410, 412, 429, 500, 503] {
+            assert!(!refused_for_good(&failed(status, "")), "{status}");
+        }
+        assert!(!refused_for_good(&BridgeError::from("No connection")));
+    }
 
     #[test]
     fn a_status_the_failure_carries_itself_still_crosses() {

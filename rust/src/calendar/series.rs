@@ -11,7 +11,7 @@
 
 use ical::{
     component::IcalComponent,
-    prop::IcalPropKind,
+    prop::{IcalProp, IcalPropKind},
     recur::{
         IcalRecurDateTime, IcalRecurFreq, IcalRecurRule,
         expand::IcalRecurExpand,
@@ -24,6 +24,7 @@ use ical::{
         value::cursor::IcalValueCursor,
     },
     value::{IcalValue, recur::IcalRecur},
+    version::IcalVersion,
 };
 
 use crate::types::BridgeError;
@@ -81,8 +82,8 @@ pub(super) fn set_of<'c>(
             .collect();
     }
 
-    set.dates = dates_of(master, IcalPropKind::RDate, start, zones);
-    set.exdates = dates_of(master, IcalPropKind::ExDate, start, zones);
+    set.dates = dates_of(props(master, IcalPropKind::RDate), start, zones);
+    set.exdates = dates_of(props(master, IcalPropKind::ExDate), start, zones);
 
     let mut replaced = Vec::new();
     for over in overrides {
@@ -120,17 +121,16 @@ fn utc_until(rule: &str) -> bool {
     })
 }
 
-/// Every date of the `RDATE`s or `EXDATE`s of a component, told in the
-/// series' zone. A period contributes its start.
-fn dates_of(
-    component: &IcalComponent,
-    kind: IcalPropKind,
+/// Every date of some `RDATE`s or `EXDATE`s, told in the series' zone. A
+/// period contributes its start.
+fn dates_of<'p>(
+    props: impl Iterator<Item = &'p IcalProp<'p>>,
     start: &EventTime,
     zones: &Zones,
 ) -> Vec<IcalRecurDateTime> {
     let mut dates = Vec::new();
 
-    for prop in props(component, kind) {
+    for prop in props {
         let Some(zone) = EventTime::of_prop(prop) else {
             continue;
         };
@@ -157,21 +157,21 @@ fn dates_of(
 }
 
 /// One series located in an object's syntax tree.
-struct Series {
+pub(super) struct Series {
     /// Where its own component sits among the calendar's items.
-    master: usize,
+    pub(super) master: usize,
     /// The property its start is read from: `DTSTART`, or the `DUE` of a
     /// to-do carrying none.
     anchor: &'static str,
-    start: EventTime,
-    zones: Zones,
+    pub(super) start: EventTime,
+    pub(super) zones: Zones,
     /// Every override of it, by where it sits and the identity it
     /// replaces, in the series' zone.
-    overrides: Vec<(usize, IcalRecurDateTime)>,
+    pub(super) overrides: Vec<(usize, IcalRecurDateTime)>,
 }
 
 impl Series {
-    fn of(cst: &IcalCst<'static>) -> Result<Self, BridgeError> {
+    pub(super) fn of(cst: &IcalCst<'static>) -> Result<Self, BridgeError> {
         let zones = Zones::of_cst(cst);
         let components = scheduled(cst);
 
@@ -218,11 +218,27 @@ impl Series {
     }
 
     /// Where the override of one instance sits, when there is one.
-    fn replaced(&self, id: IcalRecurDateTime) -> Option<usize> {
+    pub(super) fn replaced(&self, id: IcalRecurDateTime) -> Option<usize> {
         self.overrides
             .iter()
             .find(|(_, over)| *over == id)
             .map(|(index, _)| *index)
+    }
+
+    /// The instances the series' `EXDATE`s remove, in its zone.
+    pub(super) fn exdates(&self, cst: &IcalCst<'static>) -> Vec<IcalRecurDateTime> {
+        let exdates: Vec<IcalProp> = child(cst, self.master)
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case("EXDATE") => {
+                    Some(line.decode(IcalVersion::V2_0))
+                }
+                _ => None,
+            })
+            .collect();
+
+        dates_of(exdates.iter(), &self.start, &self.zones)
     }
 
     /// The dates the occurrence at `id` has before an edit: its
@@ -289,7 +305,11 @@ impl Series {
 
     /// A new override of the instance at `id`: the series' component
     /// carried to it, with nothing that repeats.
-    fn instance(&self, cst: &IcalCst<'static>, id: IcalRecurDateTime) -> IcalCst<'static> {
+    pub(super) fn instance(
+        &self,
+        cst: &IcalCst<'static>,
+        id: IcalRecurDateTime,
+    ) -> IcalCst<'static> {
         let mut over = child(cst, self.master).clone();
 
         for name in ["RRULE", "RDATE", "EXDATE", "EXRULE"] {

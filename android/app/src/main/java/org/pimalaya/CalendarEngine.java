@@ -300,6 +300,16 @@ final class CalendarEngine extends PimdirEngine {
                     if (isPreconditionFailure(failure)) {
                         return result(handle, false, null, null);
                     }
+                    // A 422 is a part of the edit the server refuses for
+                    // good, whatever else of it landed: rejected, and the
+                    // row says so rather than waiting.
+                    if (Integer.valueOf(422).equals(status(failure))) {
+                        String linkId;
+                        synchronized (STORE) {
+                            linkId = offline.linkOfHandle(collection, handle);
+                        }
+                        return refuse(collection, linkId, handle);
+                    }
                     throw failure;
                 }
             }

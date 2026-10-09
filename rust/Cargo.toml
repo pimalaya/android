@@ -48,3 +48,11 @@ tempfile = { version = "3", default-features = false }
 # NOTE: temporary until io-pimdir is pushed
 [patch."https://github.com/pimalaya/io-pimdir"]
 io-pimdir = { path = "../../io-pimdir" }
+
+# NOTE: temporary until io-msgraph is released
+[patch."https://github.com/pimalaya/io-msgraph"]
+io-msgraph = { path = "../../io-msgraph" }
+
+# NOTE: temporary until io-gcal is released
+[patch.crates-io]
+io-gcal = { path = "../../io-gcal" }

@@ -10,6 +10,7 @@
 //! object defines for itself ([`zone`]).
 
 mod conflict;
+mod occurrence;
 mod series;
 mod zone;
 
@@ -41,6 +42,9 @@ use serde::{Deserialize, Serialize};
 use crate::types::BridgeError;
 
 pub use conflict::{merge, resolve};
+pub use occurrence::{
+    OccurrenceChange, OccurrenceWrite, occurrence_changes, occurrence_window, occurrences,
+};
 pub use series::{remove, split};
 use zone::Zones;
 pub use zone::{EventTime, EventTimeKind};
