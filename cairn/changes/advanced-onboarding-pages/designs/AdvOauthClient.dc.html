@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Advanced: your own OAuth client</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#EEEEEE;--fg:#1C1B1F;--fg2:#5E5E62;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1C1E21;--surface:#2A2A2A;--fg:#E6E1E5;--fg2:#AEAAAE}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.tbtn{width:40px;height:40px;margin:4px;border-radius:999px;background:var(--surface);color:var(--fg);display:flex;align-items:center;justify-content:center;flex:none;text-decoration:none}
+.f{border-radius:999px;background:var(--surface);border:2px solid transparent;display:flex;flex-direction:column;justify-content:center;height:60px;padding:0 24px}
+.f.focus{border-color:var(--accent)}
+.f .k{font-size:12px;color:var(--fg2)}
+.f input{border:0;background:none;font:inherit;font-size:16px;color:var(--fg);outline:none;padding:0;min-width:0}
+.f input::placeholder{color:var(--fg2)}
+.f.empty{flex-direction:row;align-items:center}
+.primary{height:56px;border-radius:999px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;text-decoration:none}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div style="min-height: 60px; padding: 0 8px; display: flex; align-items: center; flex: none">
+    <a class="tbtn" href="AdvSignInMixed.dc.html" aria-label="Back"><svg class="ico" viewBox="0 -960 960 960"><path d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"/></svg></a>
+  </div>
+  <div style="flex: 1; min-height: 0; overflow: hidden; padding: 8px 24px 0">
+    <div style="font-size: 14px; color: var(--fg2)">Calendar · cal.example.net</div>
+    <div style="margin-top: 8px; font-size: 28px; font-weight: 700; line-height: 34px">Your OAuth client</div>
+    <div style="margin-top: 8px; font-size: 14px; line-height: 20px; color: var(--fg2)">The server does not register apps on its own. Enter the client you registered there.</div>
+    <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 20px">
+      <label class="f empty focus"><input placeholder="Client ID" style="flex: 1"></label>
+      <label class="f empty"><input placeholder="Client secret (optional)" style="flex: 1"></label>
+      <label class="f"><span class="k">Authorization endpoint</span><input value="https://cal.example.net/oauth/authorize"></label>
+      <label class="f"><span class="k">Token endpoint</span><input value="https://cal.example.net/oauth/token"></label>
+      <label class="f"><span class="k">Scope</span><input value="calendars"></label>
+      <label class="f"><span class="k">Redirect URI</span><input value="http://127.0.0.1:48213"></label>
+    </div>
+  </div>
+  <div style="padding: 12px 24px 16px; flex: none; background: var(--bg)">
+    <a class="primary" href="AdvSignInMixed.dc.html">Continue in browser</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#00696F","options":["#00696F","#4F5BD5","#8E4585","#9A5B00"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var accent = this.props.accent ?? '#00696F';
+    if (dark && accent === '#00696F') accent = '#80DEEA';
+    var h = accent.replace('#', '');
+    var r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+    var onAccent = (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#000000' : '#FFFFFF';
+    return { theme: dark ? 'app dark' : 'app', vars: '--accent:' + accent + ';--on-accent:' + onAccent };
+  }
+}
+</script>
+</body>
+</html>

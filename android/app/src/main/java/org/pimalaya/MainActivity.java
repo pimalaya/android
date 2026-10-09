@@ -101,6 +101,12 @@ public class MainActivity extends Activity {
     /** The standard setup's outcome when some servers refused the password. */
     static final int STEP_RESULT = 4;
 
+    /** The advanced setup's sign-ins, one card per server and login. */
+    static final int STEP_SIGNIN = 5;
+
+    /** The OAuth client a server registers none of. */
+    static final int STEP_OAUTH = 6;
+
     /** Whether an auth step's main button is loading, the step frozen. */
     private boolean authBusy;
 
@@ -251,7 +257,8 @@ public class MainActivity extends Activity {
         oauth = new OauthFlow(this);
         onboarding = new OnboardingFlow(this, oauth);
         oauth.onConnected = onboarding::connect;
-        oauth.onAborted = onboarding::abortAuthSteps;
+        oauth.onAborted = onboarding::grantAborted;
+        oauth.onBusy = onboarding::busy;
         flipper = findViewById(R.id.flipper);
         authFlipper = findViewById(R.id.auth_flipper);
         form = new ContactForm(this);
@@ -427,22 +434,14 @@ public class MainActivity extends Activity {
         int step = authFlipper.getDisplayedChild();
         // NOTE: a first run opens on the address alone, with nothing to
         // leave for and the page's own headline in place of a title; the
-        // domain and result steps carry a round back button of their own.
-        boolean bare =
-                (step == STEP_EMAIL && !hasRealAccount())
-                        || step == STEP_DOMAIN
-                        || step == STEP_RESULT;
+        // steps after it carry a round back button of their own.
+        boolean bare = step != STEP_CONFIG && (step != STEP_EMAIL || !hasRealAccount());
         findViewById(R.id.auth_bar).setVisibility(bare ? View.GONE : View.VISIBLE);
         TextView title = findViewById(R.id.auth_title);
         if (step == STEP_EMAIL) {
             title.setText(hasRealAccount() ? R.string.add_account : R.string.auth_step_email);
         } else if (step == STEP_CONFIG) {
             title.setText(R.string.auth_step_config);
-        } else if (step == STEP_BOOKS) {
-            title.setText(R.string.auth_step_books);
-        } else {
-            // NOTE: the domain and result steps carry their own headline.
-            title.setText("");
         }
     }
 
@@ -457,12 +456,12 @@ public class MainActivity extends Activity {
             return;
         }
         int step = authFlipper.getDisplayedChild();
-        if (step == STEP_RESULT) {
+        if (step == STEP_RESULT || step == STEP_SIGNIN) {
             onboarding.abortAuthSteps();
-        } else if (step == STEP_BOOKS) {
+        } else if (step == STEP_OAUTH || step == STEP_BOOKS) {
             // NOTE: nothing persists before the selection confirms, so
             // the books step steps back like any other.
-            showAuthBack(STEP_CONFIG);
+            onboarding.backToSignIn();
         } else if (step == STEP_CONFIG) {
             showAuthBack(STEP_DOMAIN);
         } else if (step == STEP_DOMAIN) {
@@ -647,7 +646,9 @@ public class MainActivity extends Activity {
     private void setUpEmailPanel() {
         EditText email = findViewById(R.id.email_input);
         findViewById(R.id.auth_back).setOnClickListener(view -> authBack());
-        findViewById(R.id.domain_back).setOnClickListener(view -> authBack());
+        for (int back : new int[] {R.id.domain_back, R.id.signin_back, R.id.oauth_back, R.id.books_back}) {
+            findViewById(back).setOnClickListener(view -> authBack());
+        }
         findViewById(R.id.result_back).setOnClickListener(view -> authBack());
         findViewById(R.id.auth_cancel).setOnClickListener(view -> cancelAuth());
 
@@ -690,16 +691,25 @@ public class MainActivity extends Activity {
             // NOTE: and nothing else on the step answers until it is done,
             // the way back included.
             authBusy = loading;
-            int[] controls =
-                    buttonId == R.id.email_continue
-                            ? new int[] {R.id.email_input, R.id.email_advanced}
-                            : new int[] {
-                                R.id.domain_back,
-                                R.id.domain_advanced,
-                                R.id.domain_password,
-                                R.id.domain_password_toggle,
-                                R.id.domain_container
-                            };
+            int[] controls;
+            if (buttonId == R.id.email_continue) {
+                controls = new int[] {R.id.email_input, R.id.email_advanced};
+            } else if (buttonId == R.id.signin_continue) {
+                controls = new int[] {R.id.signin_back, R.id.signin_container};
+            } else if (buttonId == R.id.oauth_continue) {
+                controls = new int[] {R.id.oauth_back, R.id.oauth_container};
+            } else if (buttonId == R.id.books_continue) {
+                controls = new int[] {R.id.books_back, R.id.books_container};
+            } else {
+                controls =
+                        new int[] {
+                            R.id.domain_back,
+                            R.id.domain_advanced,
+                            R.id.domain_password,
+                            R.id.domain_password_toggle,
+                            R.id.domain_container
+                        };
+            }
             for (int control : controls) {
                 enableTree(findViewById(control), !loading);
             }
@@ -753,7 +763,7 @@ public class MainActivity extends Activity {
         // a real redirect re-enters loading right after.
         if (flipper != null
                 && screen == PANEL_AUTH
-                && authFlipper.getDisplayedChild() == STEP_DOMAIN) {
+                && authFlipper.getDisplayedChild() != STEP_EMAIL) {
             onboarding.resetConfigContinue();
         }
 
@@ -3552,21 +3562,11 @@ public class MainActivity extends Activity {
         auth.ownBar = true;
         auth.chrome =
                 () -> {
-                    // NOTE: the shared FAB is the books step's alone; the
-                    // other steps carry their own full-width buttons.
-                    int step = authFlipper.getDisplayedChild();
-                    if (step == STEP_BOOKS || step == STEP_CONFIG) {
-                        android.widget.ImageButton fab = findViewById(R.id.fab);
-                        fab.setImageResource(R.drawable.ic_arrow_forward);
-                        fab.setContentDescription(getString(R.string.email_submit));
-                        fab.setVisibility(View.VISIBLE);
-                        setFabEnabled(R.id.fab, onboarding.stepReady(step));
-                    } else {
-                        onboarding.refreshStep(step);
-                    }
+                    // NOTE: no shared FAB here: every step carries its own
+                    // full-width button.
+                    onboarding.refreshStep(authFlipper.getDisplayedChild());
                     applyAuthChrome();
                 };
-        auth.fab = () -> onboarding.continueStep(authFlipper.getDisplayedChild());
         auth.systemBack = this::authBack;
         screens.put(PANEL_AUTH, auth);
 
@@ -3816,7 +3816,6 @@ public class MainActivity extends Activity {
         // it needs none.
         padBottom(R.id.drawer_actions, 8, bottom);
         padBottom(R.id.config_container, 88, bottom);
-        padBottom(R.id.books_container, 88, bottom);
         padBottom(R.id.advanced_container, 24, bottom);
         padBottom(R.id.filter_content, 24, bottom);
         padBottom(R.id.deleted_list, 24, bottom);
@@ -3824,6 +3823,9 @@ public class MainActivity extends Activity {
         padBottom(R.id.email_actions, 16, bottom);
         padBottom(R.id.domain_actions, 16, bottom);
         padBottom(R.id.result_actions, 16, bottom);
+        padBottom(R.id.signin_actions, 16, bottom);
+        padBottom(R.id.oauth_actions, 16, bottom);
+        padBottom(R.id.books_actions, 16, bottom);
         padBottom(R.id.message_view_replies, 12, bottom);
     }
 

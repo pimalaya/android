@@ -23,15 +23,13 @@
     <string name="result_advanced">Configurer %1$s en mode avancé</string>
     <string name="email_hint">Adresse e-mail</string>
     <string name="auth_step_email">Bienvenue</string>
-    <string name="auth_step_domain">Que connecter</string>
     <string name="auth_step_config">Configuration</string>
-    <string name="auth_step_books">Sélection</string>
     <string name="email_submit">Continuer</string>
     <string name="email_invalid">Saisissez une adresse e-mail valide</string>
     <string name="discover_failed">Impossible de trouver les paramètres de votre serveur</string>
 
-    <string name="domain_title">Que souhaitez-vous connecter ?</string>
-    <string name="domain_message">Choisissez comment connecter chaque domaine. Désactivez ce que vous ne voulez pas sur cet appareil ; vous pourrez l\'ajouter plus tard.</string>
+    <string name="domain_title">Comment connecter chacun ?</string>
+    <string name="domain_message">Choisissez un serveur et une connexion pour chacun. Désactivez ce que vous ne voulez pas sur ce téléphone.</string>
     <string name="domain_none">Rien n\'a été trouvé pour cette adresse. Vous pouvez saisir les paramètres du serveur vous-même.</string>
     <string name="domain_manual">Saisir les paramètres manuellement</string>
     <string name="domain_connected">Déjà connecté</string>
@@ -143,12 +141,7 @@
     <string name="message_attachment_chip">Pièce jointe</string>
     <string name="compose_from_label">De</string>
     <string name="compose_copies_short">Cc/Cci</string>
-    <string name="setup_step_title">Étape %1$d/%2$d · %3$s · %4$s</string>
-    <string name="setup_step_one">%1$s · Connexion</string>
-    <string name="setup_step_domain">%1$s · Étape %2$d/%3$d</string>
 
-    <string name="manual_title">Paramètres du serveur</string>
-    <string name="manual_message">Rien n\'a été découvert pour %1$s. Saisissez le serveur vous-même et Pimalaya continuera normalement.</string>
     <string name="manual_mail_server">Serveur de messagerie (hôte ou hôte:port)</string>
     <string name="manual_dav_url">URL du serveur</string>
     <string name="manual_submit_server">Serveur d\'envoi (hôte ou hôte:port)</string>
@@ -164,31 +157,41 @@
     <string name="config_oauth">Se connecter avec le navigateur</string>
     <string name="custom_login">Identifiant</string>
 
-    <string name="oauth_custom_title">Client OAuth 2.0</string>
-    <string name="oauth_shipped_hint">Connexion via le client intégré de l\'application. N\'activez la configuration avancée que pour utiliser votre propre client OAuth.</string>
-    <string name="oauth_advanced">Configuration avancée</string>
     <string name="oauth_client_id">Identifiant client</string>
     <string name="oauth_client_secret">Secret client (facultatif)</string>
     <string name="oauth_authorization_endpoint">Point de terminaison d\'autorisation</string>
     <string name="oauth_token_endpoint">Point de terminaison du jeton</string>
     <string name="oauth_scope">Portée</string>
     <string name="oauth_redirect">URI de redirection</string>
-    <string name="oauth_client_id_empty">Saisissez l\'identifiant client</string>
     <string name="oauth_redirect_invalid">Saisissez une URL de rebouclage http://127.0.0.1, ou org.pimalaya:/oauth2redirect</string>
     <string name="oauth_port_taken">Impossible d\'utiliser le port de rebouclage ; essayez-en un autre</string>
     <string name="oauth_loopback_done">Connexion réussie. Vous pouvez fermer cet onglet et revenir à Pimalaya.</string>
     <string name="oauth_metadata_incomplete">Il manque un point de terminaison dans les métadonnées OAuth du serveur</string>
 
     <string name="password_title">Connexion</string>
-    <string name="password_server">%1$s sur %2$s</string>
     <string name="password_hint">Mot de passe</string>
     <string name="password_submit">Se connecter</string>
-    <string name="password_empty">Saisissez votre mot de passe</string>
     <string name="error_title">Erreur</string>
     <string name="connect_failed">Impossible de se connecter</string>
 
-    <string name="books_title">Choisissez des carnets d\'adresses</string>
-    <string name="books_description">Choisissez les carnets d\'adresses à synchroniser sur cet appareil. Vous pourrez modifier ce choix plus tard depuis l\'écran d\'accueil.</string>
+    <string name="books_title">Quels carnets d\'adresses ?</string>
+    <string name="books_description">Ceux que vous choisissez se synchronisent sur ce téléphone. Vous pourrez changer ce choix plus tard dans les réglages du compte.</string>
+    <string name="send_mail_advanced">Envoi</string>
+    <string name="books_signed">Connecté · %1$s</string>
+    <string name="books_finish">Terminer</string>
+    <string name="domain_manual_detail">Serveur, identifiant et mot de passe</string>
+    <string name="signin_message">Une connexion par serveur. Les domaines qui partagent un serveur la partagent.</string>
+    <string name="signin_same">Même identifiant et mot de passe que %1$s</string>
+    <string name="signin_browser">Se connecter avec le navigateur</string>
+    <string name="signin_own_client">Utiliser mon propre client OAuth</string>
+    <string name="signin_signed">Connecté</string>
+    <string name="signin_manual">Saisi manuellement</string>
+    <string name="signin_sends">%1$s, envoie par %2$s</string>
+    <string name="hint_token">Collez votre jeton d\'API</string>
+    <string name="token_refused">Jeton refusé</string>
+    <string name="oauth_title">Votre client OAuth</string>
+    <string name="oauth_message">Le serveur n\'enregistre pas les applications de lui-même. Saisissez le client que vous y avez enregistré.</string>
+    <string name="oauth_message_own">Saisissez le client que vous avez enregistré auprès de ce serveur.</string>
     <string name="books_none">Ce compte n\'a aucun carnet d\'adresses.</string>
     <string name="subscriptions_title">Comptes</string>
     <string name="subscriptions_save">Enregistrer</string>

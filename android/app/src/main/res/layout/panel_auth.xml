@@ -77,6 +77,10 @@
 
         <include layout="@layout/panel_result" />
 
+        <include layout="@layout/panel_signin" />
+
+        <include layout="@layout/panel_oauth" />
+
     </ViewFlipper>
 
 </LinearLayout>

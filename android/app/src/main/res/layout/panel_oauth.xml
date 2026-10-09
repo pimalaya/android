@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Which addressbooks: one card of checkbox rows, every book ticked to begin with, and Finish. -->
+<!-- The OAuth client a server needs when it registers none on its own, or when the user brings their own: six round fields, then the browser. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -12,7 +12,7 @@
         android:paddingEnd="@dimen/app_bar_padding">
 
         <ImageButton
-            android:id="@+id/books_back"
+            android:id="@+id/oauth_back"
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:layout_gravity="center_vertical"
@@ -25,7 +25,7 @@
     </FrameLayout>
 
     <ScrollView
-        android:id="@+id/books_scroll"
+        android:id="@+id/oauth_scroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
@@ -39,37 +39,20 @@
             android:paddingEnd="24dp"
             android:paddingBottom="24dp">
 
-            <LinearLayout
+            <TextView
+                android:id="@+id/oauth_line"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <ImageView
-                    android:layout_width="18dp"
-                    android:layout_height="18dp"
-                    android:layout_marginEnd="6dp"
-                    android:importantForAccessibility="no"
-                    android:src="@drawable/ic_check"
-                    android:tint="?android:attr/colorAccent" />
-
-                <TextView
-                    android:id="@+id/books_line"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:textSize="14sp" />
-
-            </LinearLayout>
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="14sp" />
 
             <TextView
                 style="@style/PageTitle"
                 android:layout_marginTop="8dp"
-                android:text="@string/books_title" />
+                android:text="@string/oauth_title" />
 
             <TextView
-                android:id="@+id/books_message"
+                android:id="@+id/oauth_message"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
@@ -78,7 +61,7 @@
                 android:textSize="14sp" />
 
             <LinearLayout
-                android:id="@+id/books_container"
+                android:id="@+id/oauth_container"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="20dp"
@@ -89,7 +72,7 @@
     </ScrollView>
 
     <LinearLayout
-        android:id="@+id/books_actions"
+        android:id="@+id/oauth_actions"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
@@ -103,12 +86,12 @@
             android:layout_height="wrap_content">
 
             <Button
-                android:id="@+id/books_continue"
+                android:id="@+id/oauth_continue"
                 style="@style/PrimaryButton"
-                android:text="@string/books_finish" />
+                android:text="@string/browser_continue" />
 
             <ProgressBar
-                android:id="@+id/books_progress"
+                android:id="@+id/oauth_progress"
                 android:layout_width="24dp"
                 android:layout_height="24dp"
                 android:layout_gravity="end|center_vertical"

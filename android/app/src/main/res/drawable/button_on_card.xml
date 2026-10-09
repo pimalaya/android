@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A tonal pill inside a card: the page tone under a bounded ripple,
+     the card's own surface being the tone around it. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?android:attr/colorControlHighlight">
+    <item>
+        <shape>
+            <solid android:color="?android:attr/colorBackground" />
+            <corners android:radius="1000dp" />
+        </shape>
+    </item>
+</ripple>

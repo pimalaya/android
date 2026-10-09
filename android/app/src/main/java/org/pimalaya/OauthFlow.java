@@ -1,14 +1,9 @@
 package org.pimalaya;
 
-import android.app.AlertDialog;
 import android.content.Intent;
 import android.net.Uri;
 import android.util.Log;
-import android.view.View;
-import android.widget.CheckBox;
-import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import java.net.InetAddress;
 import org.json.JSONException;
@@ -54,6 +49,9 @@ final class OauthFlow {
 
     /** Resets the config screen's continue when a grant aborts. */
     Runnable onAborted;
+
+    /** Puts the running step's button on its loader while a grant starts. */
+    Runnable onBusy;
 
     /** The in-flight grant: the PKCE session and the account material
      *  the redeem needs (all null or empty when no grant runs). */
@@ -106,7 +104,7 @@ final class OauthFlow {
         try {
             String url = pendingOauth.authorizeUrl(Oauth.GOOGLE_AUTH_ENDPOINT, extras);
             persistPendingOauth(Oauth.GOOGLE_CLIENT_ID, Oauth.GOOGLE_REDIRECT_URI);
-            host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
+            onBusy.run();
             host.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
         } catch (Exception error) {
             abort(error);
@@ -142,7 +140,7 @@ final class OauthFlow {
         try {
             String url = pendingOauth.authorizeUrl(Oauth.MICROSOFT_AUTH_ENDPOINT, extras);
             persistPendingOauth(Oauth.MICROSOFT_CLIENT_ID, Oauth.MICROSOFT_REDIRECT_URI);
-            host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
+            onBusy.run();
             host.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
         } catch (Exception error) {
             abort(error);
@@ -223,15 +221,17 @@ final class OauthFlow {
     }
 
     /**
-     * Prompts for the OAuth 2.0 client of a grant, every field
-     * prefilled with the best-known values; a hint paragraph tells
-     * users to leave them alone unless they bring their own client.
-     * Submitting a shipped client id unchanged runs its dedicated flow.
-     * Any other client runs the custom grant against the given redirect
-     * URI: an http loopback URL serves the redirect on a local
-     * listener, and the app's own org.pimalaya:/oauth2redirect
-     * scheme rides the OS intent route instead (for servers that reject
-     * loopback redirects).
+     * Opens the OAuth client page: the client ID and its optional secret
+     * empty, the endpoints, the scope and the redirect prefilled with the
+     * best-known values. Continue runs the custom grant against the given
+     * redirect URI: an http loopback URL serves the redirect on a local
+     * listener, and the app's own org.pimalaya:/oauth2redirect scheme rides
+     * the OS intent route instead (for servers that reject loopback
+     * redirects). Back returns to the sign-in page with nothing lost.
+     *
+     * @param heading what the client is for, the page's first line
+     * @param own whether the user asked for it, rather than the server
+     *     refusing to register one
      */
     void promptOauthClient(
             String email,
@@ -240,115 +240,84 @@ final class OauthFlow {
             String tokenEndpoint,
             String scope,
             String resource,
-            String defaultClientId,
-            String defaultRedirect,
-            Runnable defaultFlow) {
-        String prefilledRedirect =
-                defaultRedirect != null ? defaultRedirect : "http://127.0.0.1:" + freePort();
+            String heading,
+            boolean own) {
+        ((TextView) host.findViewById(R.id.oauth_line)).setText(heading);
+        ((TextView) host.findViewById(R.id.oauth_message))
+                .setText(own ? R.string.oauth_message_own : R.string.oauth_message);
 
-        EditText clientId =
-                host.ui.field(
-                        R.string.oauth_client_id, defaultClientId == null ? "" : defaultClientId);
-        EditText clientSecret = host.ui.field(R.string.oauth_client_secret, "");
-        EditText authField = host.ui.field(R.string.oauth_authorization_endpoint, authEndpoint);
-        EditText tokenField = host.ui.field(R.string.oauth_token_endpoint, tokenEndpoint);
-        EditText scopeField = host.ui.field(R.string.oauth_scope, scope == null ? "" : scope);
-        EditText redirectField = host.ui.field(R.string.oauth_redirect, prefilledRedirect);
+        PillField clientId = PillField.of(host, R.string.oauth_client_id, "", false, false);
+        PillField clientSecret =
+                PillField.of(host, R.string.oauth_client_secret, "", true, false);
+        PillField authField =
+                PillField.of(host, R.string.oauth_authorization_endpoint, authEndpoint, false, false);
+        PillField tokenField =
+                PillField.of(host, R.string.oauth_token_endpoint, tokenEndpoint, false, false);
+        PillField scopeField = PillField.of(host, R.string.oauth_scope, scope, false, false);
+        PillField redirectField =
+                PillField.of(
+                        host,
+                        R.string.oauth_redirect,
+                        "http://127.0.0.1:" + freePort(),
+                        false,
+                        false);
 
-        LinearLayout fields = new LinearLayout(host);
-        fields.setOrientation(LinearLayout.VERTICAL);
-        fields.setPadding(host.ui.dp(24), host.ui.dp(8), host.ui.dp(24), 0);
-        for (EditText field : new EditText[] {
-            clientId, clientSecret, authField, tokenField, scopeField, redirectField
-        }) {
-            fields.addView(field);
+        LinearLayout container = host.findViewById(R.id.oauth_container);
+        container.removeAllViews();
+        for (PillField field :
+                new PillField[] {
+                    clientId, clientSecret, authField, tokenField, scopeField, redirectField
+                }) {
+            container.addView(field.view);
         }
 
-        boolean shipped = defaultFlow != null;
+        android.widget.Button submit = host.findViewById(R.id.oauth_continue);
+        Runnable ready = () -> host.setFabEnabled(R.id.oauth_continue, !clientId.text().isEmpty());
+        clientId.input.addTextChangedListener(
+                new android.text.TextWatcher() {
+                    @Override
+                    public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
 
-        LinearLayout content = new LinearLayout(host);
-        content.setOrientation(LinearLayout.VERTICAL);
-        if (shipped) {
-            // NOTE: the paragraph rides in the content view (not
-            // setMessage), so it, the checkbox and the fields share the
-            // same 24dp inset instead of the dialog's message padding.
-            TextView hint = new TextView(host);
-            hint.setText(R.string.oauth_shipped_hint);
-            hint.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
-            hint.setPadding(host.ui.dp(24), host.ui.dp(8), host.ui.dp(24), host.ui.dp(8));
-            content.addView(hint);
+                    @Override
+                    public void onTextChanged(CharSequence s, int a, int b, int c) {}
 
-            CheckBox advanced = new CheckBox(host);
-            advanced.setText(R.string.oauth_advanced);
-            // NOTE: a CheckBox's box ignores its own left padding, so the
-            // 24dp indent must come from a start margin instead.
-            advanced.setPadding(0, host.ui.dp(8), host.ui.dp(24), host.ui.dp(8));
-            LinearLayout.LayoutParams advancedParams =
-                    new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
-                            LinearLayout.LayoutParams.WRAP_CONTENT);
-            advancedParams.setMarginStart(host.ui.dp(24));
-            fields.setVisibility(View.GONE);
-            advanced.setOnCheckedChangeListener(
-                    (view, checked) ->
-                            fields.setVisibility(checked ? View.VISIBLE : View.GONE));
-            content.addView(advanced, advancedParams);
-        }
-        content.addView(fields);
+                    @Override
+                    public void afterTextChanged(android.text.Editable s) {
+                        ready.run();
+                    }
+                });
+        submit.setOnClickListener(
+                view -> {
+                    host.hideKeyboard();
+                    String id = clientId.text();
+                    String secret = clientSecret.text();
+                    String auth = authField.text();
+                    String token = tokenField.text();
+                    String scopes = scopeField.text();
+                    String redirect = redirectField.text();
 
-        ScrollView scroll = new ScrollView(host);
-        scroll.addView(content);
+                    if (redirect.startsWith("http://")) {
+                        startLoopbackOauth(
+                                email, id, secret, auth, token, scopes, baseUrl, redirect,
+                                resource);
+                    } else if (redirect.startsWith("org.pimalaya:")) {
+                        launchSchemeGrant(
+                                email,
+                                baseUrl,
+                                id,
+                                secret.isEmpty() ? null : secret,
+                                auth,
+                                token,
+                                scopes,
+                                resource);
+                    } else {
+                        host.toast(host.getString(R.string.oauth_redirect_invalid));
+                    }
+                });
 
-        AlertDialog.Builder builder =
-                new AlertDialog.Builder(host).setTitle(R.string.oauth_custom_title);
-
-        builder.setView(scroll)
-                .setPositiveButton(
-                        R.string.email_submit,
-                        (dialog, which) -> {
-                            String id = clientId.getText().toString().trim();
-                            if (id.isEmpty()) {
-                                host.toast(host.getString(R.string.oauth_client_id_empty));
-                                return;
-                            }
-                            if (defaultFlow != null && id.equals(defaultClientId)) {
-                                defaultFlow.run();
-                                return;
-                            }
-
-                            String secret = clientSecret.getText().toString().trim();
-                            String auth = authField.getText().toString().trim();
-                            String token = tokenField.getText().toString().trim();
-                            String scopes = scopeField.getText().toString().trim();
-                            String redirect = redirectField.getText().toString().trim();
-
-                            if (redirect.startsWith("http://")) {
-                                startLoopbackOauth(
-                                        email,
-                                        id,
-                                        secret,
-                                        auth,
-                                        token,
-                                        scopes,
-                                        baseUrl,
-                                        redirect,
-                                        resource);
-                            } else if (redirect.startsWith("org.pimalaya:")) {
-                                launchSchemeGrant(
-                                        email,
-                                        baseUrl,
-                                        id,
-                                        secret.isEmpty() ? null : secret,
-                                        auth,
-                                        token,
-                                        scopes,
-                                        resource);
-                            } else {
-                                host.toast(host.getString(R.string.oauth_redirect_invalid));
-                            }
-                        })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        host.showAuth(MainActivity.STEP_OAUTH);
+        host.setAuthLoading(R.id.oauth_continue, R.id.oauth_progress, false);
+        ready.run();
     }
 
     /**
@@ -359,13 +328,19 @@ final class OauthFlow {
      * custom-scheme redirect (the servers that support registration,
      * fastmail and Stalwart, reject a loopback http redirect but accept
      * the private-use scheme, RFC 8252 §7.1). When the server publishes
-     * no registration endpoint, falls back to the custom-client prompt
-     * with the endpoints prefilled, so the user can paste a
-     * self-registered client id instead.
+     * no registration endpoint, or the user asked for their own client
+     * ({@code own}), opens the OAuth client page with the endpoints
+     * prefilled, so a self-registered client id can be pasted instead.
      */
     void startIssuerOauth(
-            String email, String baseUrl, String issuer, String resource, String domains) {
-        host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
+            String email,
+            String baseUrl,
+            String issuer,
+            String resource,
+            String domains,
+            String heading,
+            boolean own) {
+        onBusy.run();
 
         host.io.execute(
                 () -> {
@@ -380,10 +355,9 @@ final class OauthFlow {
                                     host.getString(R.string.oauth_metadata_incomplete));
                         }
 
-                        if (!metadata.supportsDynamicRegistration()) {
-                            // No dynamic registration: let the user bring
-                            // a self-registered client id, endpoints
-                            // prefilled.
+                        if (own || !metadata.supportsDynamicRegistration()) {
+                            // No dynamic registration, or the user's own
+                            // client: endpoints prefilled.
                             host.main.post(
                                     () -> {
                                         onAborted.run();
@@ -392,11 +366,10 @@ final class OauthFlow {
                                                 baseUrl,
                                                 metadata.authorizationEndpoint,
                                                 metadata.tokenEndpoint,
-                                                metadata.scopesSupported,
+                                                metadata.domainScope(domains),
                                                 resource,
-                                                null,
-                                                null,
-                                                null);
+                                                heading,
+                                                own);
                                     });
                             return;
                         }
@@ -579,7 +552,7 @@ final class OauthFlow {
                         String authUrl = session.authorizeUrl(authEndpoint, extras);
                         host.main.post(
                                 () -> {
-                                    host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
+                                    onBusy.run();
                                     host.startActivity(
                                             new Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)));
                                 });

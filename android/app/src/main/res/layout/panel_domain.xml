@@ -99,6 +99,7 @@
 
                 <LinearLayout
                     android:id="@+id/domain_password_frame"
+                    android:addStatesFromChildren="true"
                     android:layout_width="match_parent"
                     android:layout_height="56dp"
                     android:background="@drawable/field_background"
