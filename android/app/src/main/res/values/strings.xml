@@ -20,7 +20,7 @@
 
     <string name="domain_title">What would you like to connect?</string>
     <string name="domain_message">Pick how to connect each one. Switch off anything you do not want on this device; you can add it later.</string>
-    <string name="domain_message_simple">Switch on what you want on this device. Pimalaya picks the settings and asks for your password; you can add the rest later.</string>
+    <string name="domain_message_simple">Switch on what you want on this device. Pimalaya picks the settings and signs you in; you can add the rest later.</string>
     <string name="domain_none">Nothing was found for this address. You can enter the server settings yourself.</string>
     <string name="domain_manual">Enter settings manually</string>
     <string name="domain_connected">Already connected</string>
@@ -41,7 +41,7 @@
     <string name="manual_submit_message">Where this account sends through. Implicit TLS, port 465 unless you say otherwise.</string>
 
     <string name="setup_choice_title">Account setup</string>
-    <string name="setup_choice_message">Pimalaya can set everything up with your password, or let you choose the servers, the sign-in and what to synchronize.</string>
+    <string name="setup_choice_message">Pimalaya can set everything up for you, or let you choose the servers, the sign-in and what to synchronize.</string>
     <string name="setup_simple">Recommended</string>
     <string name="setup_advanced">Advanced</string>
     <string name="setup_simple_unavailable">This address signs in a way the recommended setup does not cover. The advanced setup can connect it.</string>
@@ -129,6 +129,7 @@
     <string name="delete_account_confirm">Are you sure you want to remove this account? Its contacts will stay on this device.</string>
 
     <string name="sync_title">Synchronizing</string>
+    <string name="sync_heading" translatable="false">%1$s · %2$s</string>
     <string name="sync_addressbooks">Fetching addressbooks</string>
     <string name="sync_push">Pushing changes of %1$s</string>
     <string name="sync_cards">Fetching contacts of %1$s</string>
@@ -233,6 +234,7 @@
     <string name="deleted_title">Deleted items</string>
     <string name="deleted_close">Close deleted items</string>
     <string name="deleted_free">Free space</string>
+    <string name="deleted_free_amount">Free %1$s</string>
     <plurals name="deleted_summary">
         <item quantity="one">%1$d item, %2$s kept on this device</item>
         <item quantity="other">%1$d items, %2$s kept on this device</item>
@@ -308,6 +310,10 @@
         <item quantity="one">Delete this message?</item>
         <item quantity="other">Delete these %d messages?</item>
     </plurals>
+    <plurals name="messages_delete_unrestorable">
+        <item quantity="one">%d of them is not on this phone, so it cannot be restored once deleted. Opening it, or downloading the trash from the filter, keeps it restorable.</item>
+        <item quantity="other">%d of them are not on this phone, so they cannot be restored once deleted. Opening them, or downloading the trash from the filter, keeps them restorable.</item>
+    </plurals>
     <string name="contacts_conflicts">To review</string>
     <string name="date_tomorrow">Tomorrow</string>
     <string name="contacts_new_short">New contact</string>
@@ -372,7 +378,7 @@
     <string name="message_flag">Mark important</string>
     <string name="message_unflag">Unmark important</string>
     <string name="message_delete">Delete</string>
-    <string name="message_delete_confirm">Delete this message?</string>
+    <string name="message_delete_unrestorable">This message is not on this phone, so it cannot be restored once deleted. Opening it keeps it restorable.</string>
     <string name="message_deleted">Moved to %s</string>
     <string name="message_deleted_in_place">Marked deleted; it stays where it is</string>
     <string name="message_deleted_for_good">Deleted for good</string>

@@ -610,8 +610,8 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 
     /// Sends one RFC 5322 message, Gmail filing the copy under `SENT`
-    /// itself.
-    pub fn send_gmail_message(&mut self, token: &str, raw: &[u8]) -> Result<(), BridgeError> {
+    /// itself. Returns the id of that copy.
+    pub fn send_gmail_message(&mut self, token: &str, raw: &[u8]) -> Result<String, BridgeError> {
         let auth = HttpAuthBearer::new(token);
         let message = GmailMessage {
             raw: Some(encode_raw(raw)),
@@ -619,8 +619,8 @@ impl<'a, 'local> Client<'a, 'local> {
         };
         let coroutine =
             GmailMessageSend::new(&auth, "me", &message).map_err(|err| err.to_string())?;
-        self.run_gmail(units::MESSAGES_SEND, coroutine)?;
-        Ok(())
+        let sent = self.run_gmail(units::MESSAGES_SEND, coroutine)?;
+        Ok(sent.id)
     }
 
     /// Runs one Gmail API coroutine costing `units` quota units to

@@ -24,11 +24,21 @@ The connection flow SHALL ask, once the address is entered, whether to set the a
 - WHEN the advanced setup is chosen
 - THEN each switched-on domain lists its configurations, manual entry among them
 
-### Requirement: The standard setup connects with a password alone
-The standard setup SHALL connect a domain with the best-ranked discovered configuration that signs in with a login and a password, and SHALL NOT connect one any other way. A domain offering no password sign-in SHALL be shown switched off and unswitchable, naming the setup that can connect it. An address offering none for any domain SHALL send the flow to the advanced setup rather than to an empty screen. Every credential prompt it opens SHALL name the domains it signs in for, and SHALL say how far along the sequence is whenever that sequence has more than one step.
+### Requirement: The standard setup connects with the best sign-in found
+The standard setup SHALL connect a domain without asking how: at Google and Microsoft, with their own APIs (Gmail, Google Calendar, the People API, Graph) signed in through the app's OAuth registration; elsewhere with the best-ranked discovered configuration, JMAP over IMAP, SMTP, CardDAV and CalDAV, then OAuth over an API token over a password. The user SHALL choose only which domains to connect. A domain offering no sign-in at all SHALL be shown switched off and unswitchable, naming the setup that can connect it. An address offering none for any domain SHALL send the flow to the advanced setup rather than to an empty screen. Every credential prompt it opens SHALL name the domains it signs in for, and SHALL say how far along the sequence is whenever that sequence has more than one step.
 
-#### Scenario: A password sign-in exists
-- GIVEN an address whose mail is discovered with a password sign-in
+#### Scenario: A Google address
+- GIVEN an address hosted at Google, custom domain included
+- WHEN the standard setup switches mail, contacts and calendars on
+- THEN they connect over Gmail, the People API and Google Calendar, through one Google consent
+
+#### Scenario: A JMAP server offering OAuth and a password
+- GIVEN an address whose server offers JMAP with OAuth and with a password, and IMAP with a password
+- WHEN the standard setup switches mail on
+- THEN mail connects over JMAP through OAuth
+
+#### Scenario: A password sign-in alone
+- GIVEN an address whose mail is discovered with a password sign-in only
 - WHEN the standard setup switches mail on
 - THEN the credential prompt asks for a login and a password
 - AND names mail in its title
@@ -39,13 +49,8 @@ The standard setup SHALL connect a domain with the best-ranked discovered config
 - THEN each names its own domain and its place in the sequence
 - AND none of them names a protocol or an authentication method
 
-#### Scenario: One domain is out of reach
-- GIVEN an address whose contacts are only offered behind a browser grant
-- WHEN the standard setup is shown
-- THEN the contacts switch is off, unswitchable, and says the advanced setup can connect it
-
 #### Scenario: Nothing is in reach
-- GIVEN an address offering no password sign-in at all
+- GIVEN an address offering no sign-in this client drives
 - WHEN the standard setup is shown
 - THEN the flow offers the advanced setup instead
 

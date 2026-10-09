@@ -565,7 +565,9 @@ public class PimalayaClient {
     }
 
     /**
-     * Hands one stored message over.
+     * Hands one stored message over, answering the {@code Message-ID} the
+     * provider filed its sent copy under when it stamped one of its own
+     * (Gmail), else null.
      *
      * <p>The submission alone: the copy the sender keeps is a create staged
      * in the sent mailbox when the message was queued, and the sync carries
@@ -574,7 +576,7 @@ public class PimalayaClient {
      * @throws SubmissionRefused when the server refused the message for
      *     good, which is what parks it rather than queueing it again.
      */
-    public void submitMessage(MailSession session, byte[] source) {
+    public String submitMessage(MailSession session, byte[] source) {
         String submitUrl = session.account().submitUrl;
         // NOTE: run once, never retried, unlike every other verb on a
         // session. Sending is the one thing here that is not idempotent:
@@ -596,6 +598,7 @@ public class PimalayaClient {
                     ? new SubmissionRefused(error)
                     : new PimalayaException(error);
         }
+        return reply.isNull("messageId") ? null : reply.optString("messageId", null);
     }
 
     /** Moves one message from {@code mailbox} into {@code target}. */

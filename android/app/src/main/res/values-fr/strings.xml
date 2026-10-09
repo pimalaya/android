@@ -17,7 +17,7 @@
 
     <string name="domain_title">Que souhaitez-vous connecter ?</string>
     <string name="domain_message">Choisissez comment connecter chaque domaine. Désactivez ce que vous ne voulez pas sur cet appareil ; vous pourrez l\'ajouter plus tard.</string>
-    <string name="domain_message_simple">Activez ce que vous voulez sur cet appareil. Pimalaya choisit les réglages et vous demande votre mot de passe ; vous pourrez ajouter le reste plus tard.</string>
+    <string name="domain_message_simple">Activez ce que vous voulez sur cet appareil. Pimalaya choisit les réglages et vous connecte ; vous pourrez ajouter le reste plus tard.</string>
     <string name="domain_none">Rien n\'a été trouvé pour cette adresse. Vous pouvez saisir les paramètres du serveur vous-même.</string>
     <string name="domain_manual">Saisir les paramètres manuellement</string>
     <string name="domain_connected">Déjà connecté</string>
@@ -78,6 +78,7 @@
     <string name="deleted_title">Éléments supprimés</string>
     <string name="deleted_close">Fermer les éléments supprimés</string>
     <string name="deleted_free">Libérer de l\'espace</string>
+    <string name="deleted_free_amount">Libérer %1$s</string>
     <plurals name="deleted_summary">
         <item quantity="one">%1$d élément, %2$s conservés sur cet appareil</item>
         <item quantity="other">%1$d éléments, %2$s conservés sur cet appareil</item>
@@ -121,6 +122,10 @@
         <item quantity="one">Supprimer ce message ?</item>
         <item quantity="other">Supprimer ces %d messages ?</item>
     </plurals>
+    <plurals name="messages_delete_unrestorable">
+        <item quantity="one">%d d\'entre eux n\'est pas sur ce téléphone : il ne pourra pas être restauré une fois supprimé. L\'ouvrir, ou télécharger la corbeille depuis le filtre, permet de le restaurer.</item>
+        <item quantity="other">%d d\'entre eux ne sont pas sur ce téléphone : ils ne pourront pas être restaurés une fois supprimés. Les ouvrir, ou télécharger la corbeille depuis le filtre, permet de les restaurer.</item>
+    </plurals>
     <string name="contacts_conflicts">À vérifier</string>
     <string name="contacts_new_short">Nouveau contact</string>
     <string name="message_attachment_chip">Pièce jointe</string>
@@ -138,7 +143,7 @@
     <string name="manual_submit_message">Le serveur par lequel ce compte envoie. TLS implicite, port 465 sauf indication contraire.</string>
 
     <string name="setup_choice_title">Configuration du compte</string>
-    <string name="setup_choice_message">Pimalaya peut tout configurer avec votre mot de passe, ou vous laisser choisir les serveurs, la connexion et ce qui est synchronisé.</string>
+    <string name="setup_choice_message">Pimalaya peut tout configurer pour vous, ou vous laisser choisir les serveurs, la connexion et ce qui est synchronisé.</string>
     <string name="setup_simple">Standard</string>
     <string name="setup_advanced">Avancé</string>
     <string name="setup_simple_unavailable">Cette adresse se connecte d\'une manière que la configuration standard ne couvre pas. La configuration avancée peut la connecter.</string>
@@ -453,7 +458,7 @@
     <string name="message_flag">Marquer comme important</string>
     <string name="message_unflag">Ne plus marquer comme important</string>
     <string name="message_delete">Supprimer</string>
-    <string name="message_delete_confirm">Supprimer ce message ?</string>
+    <string name="message_delete_unrestorable">Ce message n\'est pas sur ce téléphone : il ne pourra pas être restauré une fois supprimé. L\'ouvrir permet de le restaurer.</string>
     <string name="message_deleted">Déplacé vers %s</string>
     <string name="message_deleted_in_place">Marqué supprimé ; il reste où il est</string>
     <string name="message_deleted_for_good">Supprimé définitivement</string>

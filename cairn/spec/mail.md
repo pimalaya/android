@@ -29,6 +29,14 @@ A message row SHALL lead the sender's line with the replied mark and end it with
 - WHEN it is drawn
 - THEN the sender's line opens with the replied mark and ends with the time and the dot, and the subject's line ends with the yellow star and the paperclip under that dot
 
+### Requirement: A mailbox with a role is shown under the role's name
+Wherever a mailbox is named to the reader (a row, the reader, the filter page, deleted items), a mailbox whose source states a role a chip names (inbox, sent, drafts, trash, junk, archive) SHALL be shown under that chip's name in the reader's language, and any other under its own name. Servers name those mailboxes in their own words, IMAP's `INBOX` and Gmail's system labels `SENT`, `DRAFT`, `TRASH` and `SPAM` among them. The name the server knows the mailbox by stays its address.
+
+#### Scenario: Gmail's sent mail
+- GIVEN a Gmail account, whose sent mail is the system label `SENT`
+- WHEN one of its messages is listed on a phone set to French
+- THEN its row names the mailbox *Envoyés*
+
 ### Requirement: The mail list narrows what it shows
 The mail list SHALL list every stored message of every mailbox the filter lets through, and SHALL offer a search over the sender and the subject, the role chips, an unread chip and an attachments chip, all answered by the store over every stored message. None of these SHALL change what syncs, which the filter alone decides.
 
@@ -118,11 +126,18 @@ Deleting a message outside the trash SHALL stage a move into the mailbox the acc
 
 Deleting a message in the trash SHALL stage a removal, pushed as a permanent delete: on IMAP `\Deleted` then `UID EXPUNGE` (RFC 4315); on Graph `permanentDelete`; on Gmail `messages.delete`; on JMAP `Email/set` destroy. Where an IMAP account records no trash, or the message sits in the trash of an account whose last session announced no `UIDPLUS` (an expunge without it is mailbox-wide), a delete SHALL stage `\Deleted` in place: the row stays, its line saying it is marked deleted, and the toast says so. An account no session recorded yet SHALL read as announcing it. A JMAP account recording none SHALL refuse the delete outright: RFC 8621 has no counterpart to `\Deleted`. Deleting a message still in the outbox SHALL cancel its submission and withdraw its staged sent copy, there being nothing on the server to tell.
 
+Deleting SHALL ask first, from the reader and from a selection alike. Where the delete removes messages for good and the phone holds no body of some of them, the question SHALL say how many: Deleted items keeps only what was stored, so those cannot be restored, and it SHALL say that opening them or downloading the trash keeps them restorable.
+
 #### Scenario: An account with a trash
 - GIVEN an account recording a mailbox marked `\Trash`
 - WHEN a message is deleted
 - THEN the row leaves the list and shows in the trash at once, marked pending
 - AND the next sync moves it there
+
+#### Scenario: Emptying a trash never opened
+- GIVEN a selection of 12 messages in the trash, 9 of them never opened
+- WHEN delete is pressed
+- THEN the question says 9 of them are not on this phone and cannot be restored once deleted
 
 #### Scenario: A message already in the trash
 - GIVEN a message in the trash of a server announcing `UIDPLUS`
@@ -490,7 +505,7 @@ A mail pass, the first-sync dialog, the scroll widening and the background fill 
 - THEN one write lands whole before the other begins
 
 ### Requirement: A sent message is in Sent at once
-Sending SHALL stage the message as composed into the mailbox the account marks as its sent mail, beside its submission, so Sent shows it before any sync, marked pending. Gmail and Graph file sent mail themselves: before a page reaches the engine, an arrival carrying the `Message-ID` of a pending create in that mailbox SHALL be named by the create's key, so the listing lands the staged copy and nothing is pushed there. On IMAP the staged copy's push SHALL be the append, made only once the submission went (A message is submitted and a copy is kept). A JMAP account, which sends nothing yet, and an account marking no sent mailbox SHALL stage none. While the submission is in the outbox, a list showing the outbox SHALL list its outbox row alone, not the staged copy; discarding the outbox row SHALL withdraw the copy with it.
+Sending SHALL stage the message as composed into the mailbox the account marks as its sent mail, beside its submission, so Sent shows it before any sync, marked pending. Gmail and Graph file sent mail themselves: before a page reaches the engine, an arrival carrying the `Message-ID` of a pending create in that mailbox SHALL be named by the create's key, so the listing lands the staged copy and nothing is pushed there. Gmail stamps a `Message-ID` of its own on what it sends: the submission SHALL read Gmail's sent copy back for it, and an arrival carrying that one SHALL be named by the create staged under the composed one. On IMAP the staged copy's push SHALL be the append, made only once the submission went (A message is submitted and a copy is kept). A JMAP account, which sends nothing yet, and an account marking no sent mailbox SHALL stage none. While the submission is in the outbox, a list showing the outbox SHALL list its outbox row alone, not the staged copy; discarding the outbox row SHALL withdraw the copy with it.
 
 #### Scenario: Sent offline
 - GIVEN a message sent with no network
@@ -501,6 +516,11 @@ Sending SHALL stage the message as composed into the mailbox the account marks a
 - GIVEN a message sent from a Graph account
 - WHEN the next sync lists `Sent Items`
 - THEN the staged copy is landed on Graph's own copy, and Sent holds one
+
+#### Scenario: Gmail renaming what it sends
+- GIVEN a message sent from a Gmail account, which Gmail sends under a `Message-ID` of its own
+- WHEN the next sync lists `SENT`
+- THEN the staged copy is landed on Gmail's copy, and Sent holds one
 
 ### Requirement: An account chooses which bodies it keeps offline
 A mail account's settings SHALL offer three offline policies: bodies on open (the default), where a body is fetched when its message is opened; bodies in the background; and whole mailbox, which sets the account's bound to all mail and holds it there, the bound's choice dimmed, and downloads bodies in the background. The settings SHALL also offer a switch, off by default, to download bodies on a metered network. Both SHALL be committed when picked. The bound SHALL be the only limit on what is kept: there is no storage cap, space being freed from Deleted items and by narrowing the bound.

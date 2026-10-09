@@ -993,6 +993,11 @@ public class MainActivity extends Activity {
             }
 
             @Override
+            public void account(String email) {
+                syncTitle(R.string.contacts_title, email);
+            }
+
+            @Override
             public void accountRefreshed(AccountEntry updated) {
                 main.post(
                         () -> {
@@ -1035,7 +1040,7 @@ public class MainActivity extends Activity {
         // pass has a round trip or two to make before it can name what it
         // is on, and a dialog that shows one line for that long is a
         // different dialog, laid out differently, that then jumps.
-        ((TextView) content.findViewById(R.id.sync_dialog_title)).setText(syncDomain);
+        ((TextView) content.findViewById(R.id.sync_dialog_title)).setText(syncHeading());
         ((TextView) content.findViewById(R.id.sync_dialog_detail))
                 .setText(R.string.sync_overlay_preparing);
         syncDialog =
@@ -1046,21 +1051,41 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * The domain the sync dialog names: the title is which of the three a
-     * pass is on, the detail line what it is doing there.
+     * The domain the sync dialog names, and the account a pass is on when
+     * it has reached one: the title is which of the three a pass is on and
+     * for whom, the detail line what it is doing there.
      */
     private volatile int syncDomain = R.string.contacts_title;
 
+    private volatile String syncAccount;
+
     /** Names the domain a pass moved on to (callable off the main thread). */
     private void syncTitle(int domain) {
+        syncTitle(domain, null);
+    }
+
+    /**
+     * Names the domain and the account a pass moved on to (callable off the
+     * main thread), so a pass over several accounts says whose it is on.
+     */
+    private void syncTitle(int domain, String accountEmail) {
         syncDomain = domain;
+        syncAccount = accountEmail;
+        String heading = syncHeading();
         main.post(
                 () -> {
                     if (syncDialog != null) {
                         ((TextView) syncDialog.findViewById(R.id.sync_dialog_title))
-                                .setText(domain);
+                                .setText(heading);
                     }
                 });
+    }
+
+    /** The sync dialog's title: the account, when known, then the domain. */
+    private String syncHeading() {
+        String domain = getString(syncDomain);
+        String account = syncAccount;
+        return account == null ? domain : getString(R.string.sync_heading, account, domain);
     }
 
     /**
@@ -1112,7 +1137,7 @@ public class MainActivity extends Activity {
      * on screen.
      */
     void syncRemote() {
-        syncDomain = R.string.contacts_title;
+        syncTitle(R.string.contacts_title);
         setSyncing(true);
 
         io.execute(
@@ -1178,7 +1203,7 @@ public class MainActivity extends Activity {
      * happened to share them.
      */
     void syncMail() {
-        syncDomain = R.string.mail_title;
+        syncTitle(R.string.mail_title);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1215,6 +1240,7 @@ public class MainActivity extends Activity {
             if (!scope.account(account.email)) {
                 continue;
             }
+            syncTitle(R.string.mail_title, account.email);
             // One connection for the account's whole pass: the drain, the
             // walk and every marker the reader moved go out on it rather
             // than on one apiece.
@@ -1276,8 +1302,9 @@ public class MainActivity extends Activity {
     private int drainOutbox(AccountEntry account, MailSession session) throws Exception {
         int sent = 0;
         for (MailStore.Outgoing waiting : mail.outgoing(account.email)) {
+            String filed;
             try {
-                client.submitMessage(session, waiting.source);
+                filed = client.submitMessage(session, waiting.source);
             } catch (SubmissionRefused refused) {
                 Log.w("pimalaya", "submission refused: " + account.email, refused);
                 mail.parkOutgoing(waiting.id, refused.getMessage());
@@ -1285,6 +1312,9 @@ public class MainActivity extends Activity {
             } catch (Exception error) {
                 mail.retryOutgoing(waiting.id);
                 throw error;
+            }
+            if (filed != null) {
+                mail.aliasSentCopy(waiting.messageId, filed);
             }
             mail.acknowledge(waiting.id);
             sent += 1;
@@ -1336,7 +1366,7 @@ public class MainActivity extends Activity {
      * calendar's objects, so this is one round trip per calendar.
      */
     void syncCalendars() {
-        syncDomain = R.string.calendar_title;
+        syncTitle(R.string.calendar_title);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1393,6 +1423,7 @@ public class MainActivity extends Activity {
      * what the pass reports.
      */
     private Exception fetchMail(AccountEntry account, MailSession session, SyncScope scope) {
+        syncTitle(R.string.mail_title, account.email);
         String accountId = accountIdOf(account.email);
         List<String> collections = new ArrayList<>();
         try {
@@ -1452,6 +1483,7 @@ public class MainActivity extends Activity {
      * fails leaves the ones beside it alone.
      */
     private Exception fetchCalendars(AccountEntry account, SyncScope scope) {
+        syncTitle(R.string.calendar_title, account.email);
         // NOTE: one session for the whole account, so the listing and every
         // event round after it share the token a refresh may have replaced
         // part-way; the listing's transport is then the first calendar
@@ -1629,7 +1661,7 @@ public class MainActivity extends Activity {
      * rest once it closes.
      */
     private void firstMail(List<AccountEntry> owing) {
-        syncDomain = R.string.mail_title;
+        syncTitle(R.string.mail_title);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1666,7 +1698,7 @@ public class MainActivity extends Activity {
      * book, the books the owing accounts just subscribed among them.
      */
     private void firstContacts(List<AccountEntry> owing) {
-        syncDomain = R.string.contacts_title;
+        syncTitle(R.string.contacts_title);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1687,7 +1719,7 @@ public class MainActivity extends Activity {
 
     /** The calendar tab's first sync: every owing account's calendars. */
     private void firstCalendars(List<AccountEntry> owing) {
-        syncDomain = R.string.calendar_title;
+        syncTitle(R.string.calendar_title);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -2090,7 +2122,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        syncDomain = R.string.contacts_title;
+        syncTitle(R.string.contacts_title);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -2124,7 +2156,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        syncDomain = R.string.contacts_title;
+        syncTitle(R.string.contacts_title);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -2171,7 +2203,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        syncDomain = R.string.contacts_title;
+        syncTitle(R.string.contacts_title);
         setSyncing(true);
         io.execute(
                 () -> {

@@ -144,7 +144,9 @@ final class FilterPage {
                                 : null;
                 content.addView(
                         row(
-                                collection.name,
+                                domain == PimDomain.MAIL
+                                        ? host.mail.mailboxLabel(collection)
+                                        : collection.name,
                                 detail,
                                 host.dp(24),
                                 ticked ? MergedFilter.Tick.ON : MergedFilter.Tick.OFF,
@@ -175,7 +177,7 @@ final class FilterPage {
         }
         new android.app.AlertDialog.Builder(host)
                 .setTitle(R.string.filter_download_title)
-                .setMessage(host.getString(R.string.filter_download_message, collection.name))
+                .setMessage(host.getString(R.string.filter_download_message, host.mail.mailboxLabel(collection)))
                 .setPositiveButton(
                         R.string.filter_download,
                         (dialog, which) -> {
