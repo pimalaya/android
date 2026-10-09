@@ -4,8 +4,10 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -343,6 +345,22 @@ public class PimalayaClient {
     /** True when a write to the calendar behind the URL carries an {@code EXDATE}. */
     public static boolean writesExdates(String url) {
         return info(url).optBoolean("writesExdates");
+    }
+
+    /**
+     * True when the calendar behind the URL takes event writes at all: every backend but JMAP,
+     * whose {@code CalendarEvent/set} is not written yet.
+     */
+    public static boolean writesEvents(String url) {
+        return info(url).optBoolean("writesEvents");
+    }
+
+    /**
+     * True when the account's mail submits through the session it reads from (JMAP, Graph,
+     * Gmail), needing no submit endpoint of its own.
+     */
+    public static boolean submitsOverSession(Account account) {
+        return account != null && info(account.baseUrl).optBoolean("submitsOverSession");
     }
 
     /** True when the URL belongs to a plain CardDAV backend. */
@@ -717,6 +735,23 @@ public class PimalayaClient {
             session.reopen();
             return verb.run(session);
         }
+    }
+
+    /**
+     * The capability URNs a JMAP account's session serves an account for, read afresh: what
+     * the connection flow connects a domain over JMAP by.
+     */
+    public Set<String> jmapCapabilities(Transport transport, Account account) {
+        JSONArray reply =
+                array(
+                        Native.jmapCapabilities(
+                                transport, account.baseUrl, account.login, account.password));
+
+        Set<String> urns = new LinkedHashSet<>();
+        for (int index = 0; index < reply.length(); index++) {
+            urns.add(reply.optString(index));
+        }
+        return urns;
     }
 
     /** Lists the account's calendars: the CalDAV discovery walk. */

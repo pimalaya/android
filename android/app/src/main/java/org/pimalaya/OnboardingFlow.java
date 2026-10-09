@@ -985,9 +985,9 @@ final class OnboardingFlow {
      * The standard setup's way into one domain, or null when it offers none.
      *
      * <p>Google's and Microsoft's own APIs first, which sign in through the
-     * app's registration at either; elsewhere the best-ranked configuration
-     * found, JMAP over the rest, then OAuth over an API token over a
-     * password. The user picks the domains and the setup picks the rest.
+     * app's registration at either; elsewhere the configuration ranked best
+     * for the domain ({@link PimDomain#rank}), then OAuth over an API token
+     * over a password. The user picks the domains and the setup picks the rest.
      */
     private SetupOption standardOption(DomainSetup setup) {
         SetupOption best = null;
@@ -995,16 +995,17 @@ final class OnboardingFlow {
             if (option.method == null) {
                 continue;
             }
-            if (best == null || standardRank(option) < standardRank(best)) {
+            if (best == null
+                    || standardRank(setup.domain, option) < standardRank(setup.domain, best)) {
                 best = option;
             }
         }
         return best;
     }
 
-    /** The standard setup's order: the service first, then the sign-in. */
-    private int standardRank(SetupOption option) {
-        int service = proprietary(option) ? 0 : 1 + serviceRank(option.service);
+    /** The standard setup's order: the service for the domain first, then the sign-in. */
+    private int standardRank(PimDomain domain, SetupOption option) {
+        int service = proprietary(option) ? 0 : 1 + domain.rank(option.service);
         return service * 10 + authRank(option.method.type);
     }
 
@@ -1494,7 +1495,7 @@ final class OnboardingFlow {
         java.util.Collections.sort(
                 configs,
                 (left, right) ->
-                        Integer.compare(serviceRank(left.service), serviceRank(right.service)));
+                        Integer.compare(domain.rank(left.service), domain.rank(right.service)));
 
         for (ServiceConfig config : configs) {
             String baseUrl = endpointUrl(config);
@@ -1659,19 +1660,6 @@ final class OnboardingFlow {
             return endpoint.getProtocol() + "://" + endpoint.getHost() + port + "/";
         } catch (Exception error) {
             return null;
-        }
-    }
-
-    /** Protocol preference: JMAP, then the DAVs, then the rest. */
-    private static int serviceRank(String service) {
-        switch (service) {
-            case "jmap":
-                return 0;
-            case "carddav":
-            case "caldav":
-                return 1;
-            default:
-                return 2;
         }
     }
 
@@ -2184,10 +2172,20 @@ final class OnboardingFlow {
         verifying = false;
 
         Map<AuthStep, Exception> refused = new java.util.HashMap<>();
+        Set<PimDomain> unserved = java.util.EnumSet.noneOf(PimDomain.class);
         for (Probe probe : probes) {
             Exception failure = failures.get(probe);
-            if (failure != null) {
+            if (failure instanceof NotServed) {
+                unserved.add(probe.domain);
+            } else if (failure != null) {
                 refused.putIfAbsent(probe.step, failure);
+            }
+        }
+        // NOTE: a card whose every domain the server does not serve signed in
+        // to nothing, which is its refusal; one serving some connects those.
+        for (Probe probe : probes) {
+            if (unserved.containsAll(probe.step.domains)) {
+                refused.putIfAbsent(probe.step, failures.get(probe));
             }
         }
         for (Probe probe : probes) {
@@ -2196,13 +2194,19 @@ final class OnboardingFlow {
             }
             probe.step.signed = true;
             DomainSetup setup = setups.get(probe.domain);
+            if (unserved.contains(probe.domain)) {
+                setup.enabled = false;
+                continue;
+            }
             setup.baseUrl = probe.baseUrl;
             setup.credential = AccountCredential.password(probe.login, probe.secret);
         }
         for (Map.Entry<AuthStep, Exception> entry : refused.entrySet()) {
             Exception failure = entry.getValue();
             String text;
-            if (!wrongPassword(failure)) {
+            if (failure instanceof NotServed) {
+                text = failure.getMessage();
+            } else if (!wrongPassword(failure)) {
                 text = host.getString(R.string.connect_failed);
             } else if (entry.getKey().password()) {
                 text = host.getString(R.string.result_refused);
@@ -2212,6 +2216,9 @@ final class OnboardingFlow {
             status(entry.getKey(), text, true);
         }
 
+        if (!unserved.isEmpty()) {
+            host.toast(notServed(unserved));
+        }
         if (!refused.isEmpty()) {
             resetConfigContinue();
             return;
@@ -2413,6 +2420,8 @@ final class OnboardingFlow {
                                 clientSecret,
                                 scope);
 
+        List<PimDomain> overJmap = new ArrayList<>();
+        Account jmap = null;
         for (java.util.Map.Entry<PimDomain, String> granted : oauthGroup.entrySet()) {
             DomainSetup setup = setups.get(granted.getKey());
             if (setup == null) {
@@ -2420,6 +2429,11 @@ final class OnboardingFlow {
             }
             setup.baseUrl = granted.getValue();
             setup.credential = credential;
+            Account server = new Account(setup.baseUrl, candidate.login, candidate.password);
+            if (PimalayaClient.isJmap(server)) {
+                overJmap.add(setup.domain);
+                jmap = server;
+            }
         }
         oauthGroup.clear();
         if (pendingStep != null) {
@@ -2430,6 +2444,48 @@ final class OnboardingFlow {
         if (signInPage && host.authStep() == MainActivity.STEP_OAUTH) {
             host.showAuth(MainActivity.STEP_SIGNIN);
         }
+        if (jmap == null) {
+            granted();
+            return;
+        }
+
+        // NOTE: a grant probes nothing, so the JMAP session is read here,
+        // for the domains it serves no account for to be left out alone.
+        Account session = jmap;
+        host.io.execute(
+                () -> {
+                    Set<PimDomain> served = null;
+                    try (Transport transport = new Transport()) {
+                        served =
+                                PimDomain.servedByJmap(
+                                        host.client.jmapCapabilities(transport, session));
+                    } catch (Exception error) {
+                        // NOTE: unread rather than refused: the grant stands,
+                        // and the first sync says what the session cannot do.
+                        Log.w("pimalaya", "jmap session unread after the grant", error);
+                    }
+                    Set<PimDomain> read = served;
+                    host.postAlive(
+                            () -> {
+                                List<PimDomain> left = new ArrayList<>();
+                                for (PimDomain domain : overJmap) {
+                                    if (read != null && !read.contains(domain)) {
+                                        DomainSetup setup = setups.get(domain);
+                                        setup.credential = null;
+                                        setup.enabled = false;
+                                        left.add(domain);
+                                    }
+                                }
+                                if (!left.isEmpty()) {
+                                    host.toast(notServed(left));
+                                }
+                                granted();
+                            });
+                });
+    }
+
+    /** Carries on once a grant landed: the next one, or the plan's continue. */
+    private void granted() {
         if (connecting) {
             nextGrant();
         } else {
@@ -2571,9 +2627,22 @@ final class OnboardingFlow {
      * Signs in to one domain the way its first sync will, and reports what
      * went wrong, null when nothing did: the mail session opens and
      * authenticates, the address books and calendars list.
+     *
+     * <p>Over JMAP, the session is read first: a domain it serves no account
+     * for is {@link NotServed}, on its own, whatever the other domains of the
+     * same sign-in answer.
      */
     private Exception probe(PimDomain domain, Account account) {
         try {
+            if (PimalayaClient.isJmap(account)) {
+                Set<String> capabilities;
+                try (Transport transport = new Transport()) {
+                    capabilities = host.client.jmapCapabilities(transport, account);
+                }
+                if (!PimDomain.servedByJmap(capabilities).contains(domain)) {
+                    return new NotServed(notServed(List.of(domain)));
+                }
+            }
             switch (domain) {
                 case MAIL:
                     try (org.pimalaya.client.MailSession session =
@@ -2595,6 +2664,22 @@ final class OnboardingFlow {
             Log.w("pimalaya", "password check failed for " + domain.id, error);
             return error;
         }
+    }
+
+    /** A domain the JMAP session serves no account for, said in the user's words. */
+    private static final class NotServed extends Exception {
+        NotServed(String message) {
+            super(message);
+        }
+    }
+
+    /** The line saying which domains this server does not offer. */
+    private String notServed(java.util.Collection<PimDomain> domains) {
+        List<String> names = new ArrayList<>();
+        for (PimDomain domain : domains) {
+            names.add(host.getString(domain.label).toLowerCase(java.util.Locale.getDefault()));
+        }
+        return host.getString(R.string.domains_not_served, String.join(", ", names));
     }
 
     /** Whether a failure is the server refusing the credential. */
@@ -2630,6 +2715,8 @@ final class OnboardingFlow {
             String status;
             if (failure == null) {
                 status = host.getString(R.string.result_connected);
+            } else if (failure instanceof NotServed) {
+                status = host.getString(R.string.result_not_served);
             } else if (wrongPassword(failure)) {
                 status = host.getString(R.string.result_refused);
             } else {

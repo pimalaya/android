@@ -17,6 +17,11 @@ import java.util.Set;
  * connect, and a spurious one is an option that leads to an empty screen.
  */
 public class PimDomainTest {
+    private static final String MAIL_URN = "urn:ietf:params:jmap:mail";
+    private static final String SUBMISSION_URN = "urn:ietf:params:jmap:submission";
+    private static final String CONTACTS_URN = "urn:ietf:params:jmap:contacts";
+    private static final String CALENDARS_URN = "urn:ietf:params:jmap:calendars";
+
     @Test
     public void eachProtocolServesTheDomainItIsFor() {
         assertEquals(Set.of(PimDomain.MAIL), PimDomain.servedBy("imap"));
@@ -26,15 +31,49 @@ public class PimDomainTest {
 
     @Test
     public void jmapIsOfferedOnlyWhereThereIsSomethingToReadItWith() {
-        // One JMAP session serves all three and the app now reads all three,
-        // so the mapping is complete. It was not always: offering a domain
-        // with no reader made an account that connected and was then never
-        // read. The assertion stays exhaustive rather than becoming a
-        // contains-check, so a fourth domain cannot be mapped here without
-        // someone stating that its reader exists.
+        // Every domain JMAP has a capability for and the app reads, offered
+        // before sign-in since only the session says which it serves. It was
+        // not always so: offering a domain with no reader made an account that
+        // connected and was then never read. The assertion stays exhaustive
+        // rather than becoming a contains-check, so a fourth domain cannot be
+        // mapped here without someone stating that its reader exists.
         assertEquals(
                 Set.of(PimDomain.MAIL, PimDomain.CONTACTS, PimDomain.CALENDAR),
                 PimDomain.servedBy("jmap"));
+    }
+
+    @Test
+    public void aJmapSessionServesTheDomainsItAdvertises() {
+        // A session a mail-scoped token reads: contacts and calendars are left
+        // out alone rather than failing the sign-in.
+        assertEquals(
+                Set.of(PimDomain.MAIL),
+                PimDomain.servedByJmap(Set.of(MAIL_URN, SUBMISSION_URN)));
+        assertEquals(
+                Set.of(PimDomain.MAIL, PimDomain.CONTACTS, PimDomain.CALENDAR),
+                PimDomain.servedByJmap(
+                        Set.of(MAIL_URN, SUBMISSION_URN, CONTACTS_URN, CALENDARS_URN)));
+        assertTrue(PimDomain.servedByJmap(Set.of()).isEmpty());
+    }
+
+    @Test
+    public void jmapMailIsServedOnlyWithSendingBesideIt() {
+        // An account that reads and cannot answer is not what connecting mail
+        // asks for, and its compose button would refuse every message.
+        assertEquals(
+                Set.of(PimDomain.CONTACTS),
+                PimDomain.servedByJmap(Set.of(MAIL_URN, CONTACTS_URN)));
+    }
+
+    @Test
+    public void eachDomainRanksWhatTheAppCanDoOverIt() {
+        // JMAP mail sends now and JMAP contacts write, so JMAP leads both.
+        assertTrue(PimDomain.MAIL.rank("jmap") < PimDomain.MAIL.rank("imap"));
+        assertTrue(PimDomain.CONTACTS.rank("jmap") < PimDomain.CONTACTS.rank("carddav"));
+        // A JMAP calendar is read only, so CalDAV leads while it is there.
+        assertTrue(PimDomain.CALENDAR.rank("caldav") < PimDomain.CALENDAR.rank("jmap"));
+        // The rest come last, a provider sign-in naming no service among them.
+        assertTrue(PimDomain.CALENDAR.rank("jmap") < PimDomain.CALENDAR.rank(null));
     }
 
     @Test

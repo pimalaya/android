@@ -21,6 +21,7 @@ use serde_json::{from_str, json, to_string};
 use crate::{
     client::{
         self, Client,
+        convert::REFUSED,
         gmail_sync::{self, LiveGmail},
         listing::{Floor, FloorReply, MailPage, MailRequest, Named},
     },
@@ -765,13 +766,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// Composes one draft, refusing what no backend here could ever send.
-///
-/// The refusal is here rather than at the submission because the outbox
-/// is where the sender is still looking: a JMAP account submits through
-/// `EmailSubmission/set` (RFC 8621 section 7), which is a different shape
-/// entirely, and queueing a message nothing could hand over would only
-/// fail later, out of sight.
+/// Composes one draft into the message the outbox holds, the same bytes
+/// whichever backend hands it over.
 fn compose_message(draft: &str) -> Result<Vec<u8>, BridgeError> {
     let draft: Draft = from_str(draft).map_err(|err| format!("Invalid draft: {err}"))?;
     mail::compose(&draft)
@@ -812,9 +808,16 @@ fn submit_message(
 ) -> Result<Option<String>, Refused> {
     let session = unsafe { session::borrow(handle) }.map_err(Refused::transient)?;
     if session.is_jmap() {
-        return Err(Refused::transient(
-            "Sending from a JMAP account is not supported yet",
-        ));
+        // NOTE: JMAP submits through the session it reads from, and the
+        // server files the copy in Sent once it accepts the message.
+        let url = session.jmap_url().map_err(Refused::transient)?;
+        client
+            .send_jmap_message(&url, &session.credentials(), raw)
+            .map_err(|err| Refused {
+                permanent: matches!(err.status, Some(413 | REFUSED)),
+                message: err.to_string(),
+            })?;
+        return Ok(None);
     }
     if session.is_graph() || session.is_gmail() {
         // NOTE: Graph and Gmail submit through the session they read from

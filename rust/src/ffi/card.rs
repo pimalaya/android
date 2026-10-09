@@ -11,16 +11,18 @@ use crate::{
     account::{self, Backend},
     client::Client,
     ffi::{error_json, parse_books, parse_strings, parse_url, read_string},
-    types::{CardDelta, Credentials, PushChange},
+    types::{BridgeError, CardDelta, Credentials, PushChange},
 };
 
 /// `Native.accountInfo`: the backend behind an account base URL
 /// (`carddav`, `graph`, `jmap`, `google`, or `local` for the built-in
 /// on-device account) and whether its cards are account-level resources
 /// with m:n addressbook memberships, and which occurrences of a series
-/// its calendar writes carry on their own; pure computation, no
-/// transport. Returns `{"backend": "..", "accountLevel": bool,
-/// "writesOverrides": bool, "writesExdates": bool}`.
+/// its calendar writes carry on their own, whether its calendars take
+/// writes at all, and whether its mail submits over the session it reads
+/// from; pure computation, no transport. Returns `{"backend": "..",
+/// "accountLevel": bool, "writesOverrides": bool, "writesExdates": bool,
+/// "writesEvents": bool, "submitsOverSession": bool}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
     mut env: EnvUnowned<'local>,
@@ -39,6 +41,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
                 "accountLevel": false,
                 "writesOverrides": false,
                 "writesExdates": false,
+                "writesEvents": false,
+                "submitsOverSession": false,
             })
         } else {
             let backend = Backend::of(&base_url);
@@ -47,6 +51,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
                 "accountLevel": backend.account_level(),
                 "writesOverrides": backend.writes_overrides(),
                 "writesExdates": backend.writes_exdates(),
+                "writesEvents": backend.writes_events(),
+                "submitsOverSession": backend.submits_over_session(),
             })
         }
         .to_string();
@@ -73,6 +79,42 @@ pub extern "system" fn Java_org_pimalaya_client_Native_accountBase<'local>(
 
         let json = match account::base_url(&kind, &value) {
             Ok(url) => json!({ "url": url }).to_string(),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.jmapCapabilities`: the capability URNs a JMAP account's
+/// session serves an account for, among mail, submission, contacts and
+/// calendars, read from a fresh session fetch. Returns a JSON array of
+/// URNs.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_jmapCapabilities<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    base_url: JString<'local>,
+    login: JString<'local>,
+    password: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let base_url = read_string(env, &base_url);
+        let login = read_string(env, &login);
+        let password = read_string(env, &password);
+        let credentials = Credentials {
+            login: &login,
+            password: &password,
+        };
+
+        let mut client = Client::new(env, &transport);
+        let served = account::jmap_session_url(&base_url)
+            .map_err(BridgeError::from)
+            .and_then(|url| client.jmap_capabilities(&url, &credentials));
+        let json = match served {
+            Ok(urns) => to_string(&urns).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
         };
 

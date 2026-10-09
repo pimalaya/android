@@ -496,6 +496,16 @@ final class EventView {
         return detail != null;
     }
 
+    /** Whether the page may write its entry back: read, on a calendar taking writes. */
+    boolean editable() {
+        return readable() && writes();
+    }
+
+    /** Whether the calendar's backend takes event writes, which a JMAP one does not yet. */
+    private boolean writes() {
+        return PimalayaClient.writesEvents(calendar.url);
+    }
+
     /** The component on the page, an event when nothing was read. */
     private String component() {
         return detail == null ? EVENT : detail.component;
@@ -697,6 +707,9 @@ final class EventView {
                 sections.value(
                         host.getString(CalendarList.componentName(component())),
                         R.string.event_field_kind));
+        if (!writes()) {
+            rows.add(sections.row(host.getString(R.string.event_read_only), null, null, null));
+        }
 
         sections.section(
                 R.string.event_section_calendar,
@@ -1394,6 +1407,10 @@ final class EventView {
             host.toast(host.getString(R.string.event_unreadable));
             return;
         }
+        if (!writes()) {
+            host.toast(host.getString(R.string.event_read_only));
+            return;
+        }
         if (!settled()) {
             host.toast(host.getString(R.string.contact_diverged_pending));
             return;
@@ -1572,6 +1589,10 @@ final class EventView {
      * occurrence of a series, the question is which occurrences.
      */
     void confirmDelete() {
+        if (!writes()) {
+            host.toast(host.getString(R.string.event_read_only));
+            return;
+        }
         if (!creating && series()) {
             scope(
                     R.string.event_scope_delete,

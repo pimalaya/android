@@ -22,17 +22,24 @@ use serde_json::{from_str, json, to_string};
 
 use crate::{
     account::{self, Backend},
-    client::Client,
+    client::{Client, convert::REFUSED},
     ffi::{error_json, parse_url, read_string},
     types::{BridgeError, Calendar, Credentials, Event, EventRef},
 };
 
-/// Why the three write verbs refuse a JMAP calendar.
+/// Why the three write verbs refuse a JMAP calendar, for good.
 ///
 /// They take `CalendarEvent/set` in JSCalendar, which is the conversion
 /// the read path does in the other direction and is not written yet.
-/// Refusing beats a silent no-op that looks like a save.
-const JMAP_UNSUPPORTED: &str = "Writing to a JMAP calendar is not supported yet";
+/// Refusing beats a silent no-op that looks like a save, and refusing
+/// with [`REFUSED`] has an edit staged by an earlier build shown as
+/// refused rather than failing every pass of its calendar.
+fn jmap_unsupported() -> BridgeError {
+    BridgeError {
+        message: "JMAP calendars are read only for now".into(),
+        status: Some(REFUSED),
+    }
+}
 
 /// `Native.listCalendars`: lists the account's calendars off its base
 /// URL. Returns a JSON array of calendars carrying the collection URL
@@ -372,7 +379,7 @@ fn update_event(
     etag: &str,
 ) -> Result<Option<String>, BridgeError> {
     match Backend::of(base_url) {
-        Backend::Jmap => Err(JMAP_UNSUPPORTED.into()),
+        Backend::Jmap => Err(jmap_unsupported()),
         Backend::Graph => client.update_graph_event(
             credentials.password,
             id,
@@ -671,7 +678,7 @@ fn create_event(
     ical: &str,
 ) -> Result<EventRef, BridgeError> {
     match Backend::of(base_url) {
-        Backend::Jmap => Err(JMAP_UNSUPPORTED.into()),
+        Backend::Jmap => Err(jmap_unsupported()),
         Backend::Graph => client.create_graph_event(
             credentials.password,
             account::book_segment(base_url, calendar_url),
@@ -703,7 +710,7 @@ fn delete_event(
     etag: &str,
 ) -> Result<(), BridgeError> {
     match Backend::of(base_url) {
-        Backend::Jmap => Err(JMAP_UNSUPPORTED.into()),
+        Backend::Jmap => Err(jmap_unsupported()),
         Backend::Graph => client.delete_graph_event(
             credentials.password,
             id,

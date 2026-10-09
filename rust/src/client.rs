@@ -18,7 +18,7 @@
 
 mod caldav;
 mod carddav;
-mod convert;
+pub(crate) mod convert;
 mod discovery;
 mod dispatch;
 mod gcal;

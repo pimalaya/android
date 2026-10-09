@@ -181,8 +181,10 @@ final class Native {
      * The backend behind an account base URL ({@code carddav},
      * {@code graph}, {@code jmap} or {@code google}) and whether its
      * cards are account-level resources with m:n addressbook
-     * memberships; pure computation, no transport. Returns
-     * {@code {"backend": "..", "accountLevel": bool}}.
+     * memberships, with the calendar and mail traits beside it; pure
+     * computation, no transport. Returns {@code {"backend": "..",
+     * "accountLevel": bool, "writesOverrides": bool, "writesExdates": bool,
+     * "writesEvents": bool, "submitsOverSession": bool}}.
      */
     static native String accountInfo(String baseUrl);
 
@@ -193,6 +195,14 @@ final class Native {
      * pure computation, no transport. Returns {@code {"url": ".."}}.
      */
     static native String accountBase(String kind, String value);
+
+    /**
+     * The capability URNs a JMAP account's session serves an account
+     * for, among mail, submission, contacts and calendars, from a fresh
+     * session fetch. Returns a JSON array of URNs.
+     */
+    static native String jmapCapabilities(
+            Transport transport, String baseUrl, String login, String password);
 
     /**
      * Lists the account's addressbooks, the backend dispatched from

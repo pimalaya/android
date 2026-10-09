@@ -56,3 +56,6 @@ io-msgraph = { path = "../../io-msgraph" }
 # NOTE: temporary until io-gcal is released
 [patch.crates-io]
 io-gcal = { path = "../../io-gcal" }
+# NOTE: temporary until io-jmap is released with the core capability,
+# the URL templates and the submission refusals
+io-jmap = { path = "../../io-jmap" }
