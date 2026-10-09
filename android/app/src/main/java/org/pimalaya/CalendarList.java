@@ -1,6 +1,7 @@
 package org.pimalaya;
 
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.text.format.DateFormat;
 import android.text.format.DateUtils;
 import android.util.Log;
@@ -8,6 +9,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
@@ -568,6 +570,14 @@ final class CalendarList {
                                     ? host.getString(R.string.event_untitled)
                                     : occurrence.summary);
             ((TextView) view.findViewById(R.id.event_start)).setText(startLabel(row));
+            // The warning flag of an entry both sides edited, the contact
+            // row's, on every occurrence of it: the page any of them opens
+            // asks every question the entry has.
+            ImageView conflicted = view.findViewById(R.id.event_conflicted);
+            conflicted.setImageTintList(
+                    ColorStateList.valueOf(
+                            host.ui.resolveColor(android.R.attr.colorError)));
+            conflicted.setVisibility(row.event.conflicted ? View.VISIBLE : View.GONE);
             // What kind of entry it is, by name, then how long it runs.
             String kind = host.getString(componentName(occurrence.component));
             String duration = durationLabel(host, occurrence);

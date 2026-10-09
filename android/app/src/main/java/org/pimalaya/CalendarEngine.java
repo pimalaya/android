@@ -8,6 +8,7 @@ import org.json.JSONObject;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Event;
 import org.pimalaya.client.EventDelta;
+import org.pimalaya.client.EventMerge;
 import org.pimalaya.client.EventRef;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
@@ -59,7 +60,9 @@ final class CalendarEngine extends PimdirEngine {
 
     /**
      * Reconciles one calendar with its server: pull what changed, push
-     * what is staged, then read back the bodies the pull dropped.
+     * what is staged, then read back the bodies the pull dropped, and
+     * settle the conflicts the merge can ({@link #triage}), which a second
+     * exchange pushes.
      *
      * <p>What changed and not what there is. The enumerate asks the
      * collection for the members that moved since the cursor the last
@@ -79,6 +82,51 @@ final class CalendarEngine extends PimdirEngine {
                 "calendar sync " + collection + ": "
                         + client.offlineSync(this, collection, false));
         hydrate(collection);
+
+        if (triage(collection) > 0) {
+            client.offlineSync(this, collection, false);
+            hydrate(collection);
+        }
+    }
+
+    /**
+     * Settles what the merge can of one source's conflicted entries, and
+     * leaves the rest for the entry page (spec/conflicts.md).
+     *
+     * <p>The triage step of a calendar pass, on any source: the calendar's
+     * own id for its server, its phone source's for the phone's. Each
+     * conflicted entry is merged three ways from the store alone, its base,
+     * the body staged here and the one the source holds, and a merge with
+     * nothing to ask is staged on the binding that conflicted, for the
+     * caller's next exchange to push. A collision stays marked, for the
+     * page. Answers how many it settled.
+     */
+    int triage(String collection) {
+        List<EventStore.StoredConflict> conflicts;
+        synchronized (STORE) {
+            conflicts = EventStore.conflictsOf(offline, collection);
+        }
+        if (conflicts.isEmpty()) {
+            return 0;
+        }
+
+        step(Progress.STAGE_RESOLVE, conflicts.size());
+        int settled = 0;
+        for (EventStore.StoredConflict conflict : conflicts) {
+            try {
+                EventMerge merge =
+                        client.mergeEvent(conflict.base, conflict.local, conflict.remote);
+                if (merge.resolved) {
+                    mutateEdit(collection, conflict.handle, merge.ical, null, "");
+                    settled += 1;
+                }
+            } catch (RuntimeException | JSONException failure) {
+                // NOTE: one entry the merge cannot read stays conflicted
+                // rather than taking the rest of the pass down.
+                Log.w("pimalaya", "calendar triage failed: " + conflict.handle, failure);
+            }
+        }
+        return settled;
     }
 
     /**

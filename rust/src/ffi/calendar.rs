@@ -424,6 +424,62 @@ pub extern "system" fn Java_org_pimalaya_client_Native_readEvent<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
+/// `Native.mergeEvent`: three-way merges a conflicted calendar object,
+/// the body staged here and the one its source holds against their base
+/// (empty when none was agreed). Pure computation, no transport. Returns
+/// `{ical, resolved, conflicts}`, `ical` the resolution when `resolved`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_mergeEvent<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    base: JString<'local>,
+    local: JString<'local>,
+    remote: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let base = read_string(env, &base);
+        let local = read_string(env, &local);
+        let remote = read_string(env, &remote);
+
+        let json = match crate::calendar::merge(&base, &local, &remote) {
+            Ok(merged) => to_string(&merged).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.resolveEvent`: the resolution of a conflicted calendar object,
+/// its merge with each conflict `picks` names taking that side. Pure
+/// computation, no transport. Returns the iCalendar text, told apart from
+/// an error the way `writeEvent`'s reply is.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_resolveEvent<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    base: JString<'local>,
+    local: JString<'local>,
+    remote: JString<'local>,
+    picks: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let base = read_string(env, &base);
+        let local = read_string(env, &local);
+        let remote = read_string(env, &remote);
+        let picks = read_string(env, &picks);
+
+        let json = match crate::calendar::resolve(&base, &local, &remote, &picks) {
+            Ok(resolved) => resolved,
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
 /// `Native.newEvent`: the object a new entry starts from, as iCalendar
 /// text. Pure computation, no transport: the id, the two stamps and the
 /// start's zone with its `VTIMEZONE` are the caller's.

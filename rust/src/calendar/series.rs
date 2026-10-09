@@ -30,8 +30,8 @@ use crate::types::BridgeError;
 
 use super::{
     DateEdit, EventEdit, EventScope, EventTime, EventTimeKind, Zones, child, child_mut, date_prop,
-    define_zone, insert, line, line_mut, patch, prop, props, remove_named, scheduled, text, touch,
-    zone::stamp,
+    define_zone, insert, line, line_mut, patch, place, prop, props, remove_named, scheduled, text,
+    touch, zone::stamp,
 };
 
 /// Seconds in a day.
@@ -599,6 +599,52 @@ pub(super) fn this(cst: &mut IcalCst<'static>, edit: &EventEdit) -> Result<(), B
 
     patch(child_mut(cst, index), edit);
     Ok(())
+}
+
+/// The override an occurrence of the series has before anyone edits it,
+/// under the `RECURRENCE-ID` line a side wrote it with: what two
+/// overrides of one occurrence, written apart, both started from. None
+/// when the object's series is not the one `uid` names.
+pub(super) fn instance_of(
+    cst: &IcalCst<'static>,
+    uid: &str,
+    id: &IcalLine<'static>,
+) -> Option<IcalCst<'static>> {
+    let series = Series::of(cst).ok()?;
+    if line(child(cst, series.master), "UID")?.raw_value_str() != uid {
+        return None;
+    }
+
+    let raw = EventTime::of_line(id)?;
+    let at = series.zones.convert(raw.civil()?, &raw, &series.start);
+    let mut over = series.instance(cst, at);
+    remove_named(&mut over, "RECURRENCE-ID");
+    place(&mut over, IcalItem::Prop(id.clone()));
+    Some(over)
+}
+
+/// Puts the occurrence a `RECURRENCE-ID` line names back into the series
+/// `uid` names, dropping the `EXDATE` that excluded it. Answers whether
+/// one did.
+pub(super) fn restore(cst: &mut IcalCst<'static>, uid: &str, id: &IcalLine<'static>) -> bool {
+    let Ok(series) = Series::of(cst) else {
+        return false;
+    };
+    let master = child_mut(cst, series.master);
+    let (Some(raw), true) = (
+        EventTime::of_line(id),
+        line(master, "UID").is_some_and(|line| line.raw_value_str() == uid),
+    ) else {
+        return false;
+    };
+    let Some(civil) = raw.civil() else {
+        return false;
+    };
+
+    let at = series.zones.convert(civil, &raw, &series.start);
+    let before = master.to_string();
+    series.keep_dates(master, "EXDATE", |date| date != at, 0);
+    master.to_string() != before
 }
 
 /// Splits a series at the occurrence an edit names: the series ended

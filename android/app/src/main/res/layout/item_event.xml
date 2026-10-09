@@ -69,6 +69,15 @@
                         android:textColor="?android:attr/textColorPrimary"
                         android:textSize="16sp" />
 
+                    <ImageView
+                        android:id="@+id/event_conflicted"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_marginStart="8dp"
+                        android:contentDescription="@string/contact_diverged"
+                        android:src="@drawable/ic_diverged"
+                        android:visibility="gone" />
+
                     <TextView
                         android:id="@+id/event_start"
                         android:layout_width="wrap_content"

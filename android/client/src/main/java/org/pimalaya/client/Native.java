@@ -469,6 +469,22 @@ final class Native {
     static native String removeEvent(String ical, String edit);
 
     /**
+     * Three-way merges a conflicted calendar object, the body staged here
+     * and the one its source holds against their base (empty when none
+     * was agreed). Pure computation, no transport. Returns
+     * {@code {ical, resolved, conflicts}}, or a JSON error object.
+     */
+    static native String mergeEvent(String base, String local, String remote);
+
+    /**
+     * The resolution of a conflicted calendar object: its merge, each
+     * conflict {@code picks} names (a JSON object of side by conflict id)
+     * taking that side. Pure computation, no transport. Returns the
+     * object itself, or a JSON error object.
+     */
+    static native String resolveEvent(String base, String local, String remote, String picks);
+
+    /**
      * Pushes an edited object back to its calendar, guarded by
      * {@code etag} when one is known. Returns the new ETag as a JSON
      * string (or null), or a JSON error object.

@@ -3,11 +3,16 @@ package org.pimalaya;
 import android.content.Context;
 import android.database.Cursor;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.Event;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * The calendar side of the pimdir store: calendars as collections of kind
@@ -17,8 +22,7 @@ import java.util.List;
  * that read-only events had no use for the contacts schema's merge model, which
  * was true and is now moot, because pimdir's model is not the contacts one. A
  * calendar is a collection like any other and an event is an item like any
- * other; what mail and contacts add on top (bindings, staged edits, conflicts)
- * is simply unused here, at the cost of nothing.
+ * other, bindings, staged edits and conflicts included.
  *
  * <p>Events are stored as the iCalendar text the server sent, unparsed: what an
  * event renders as depends on the window being shown, so the expansion happens
@@ -38,6 +42,7 @@ import java.util.List;
  */
 final class EventStore {
     private final PimdirItems items;
+    private final PimdirStorage storage;
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
     private final Context context;
@@ -45,6 +50,7 @@ final class EventStore {
     EventStore(Context context, PimdirDb store) {
         this.context = context;
         this.items = new PimdirItems(store);
+        this.storage = new PimdirStorage(store);
         this.collections = new PimdirCollections(store, context);
         this.accounts = new PimdirAccount(context);
     }
@@ -161,8 +167,11 @@ final class EventStore {
         /** Whether the server refused that change for good. */
         final boolean refused;
 
+        /** Whether a source holds it changed differently since their base. */
+        final boolean conflicted;
+
         StoredEvent(String collectionId, String id, String handle, String ical, String etag) {
-            this(collectionId, id, handle, ical, etag, false, false);
+            this(collectionId, id, handle, ical, etag, false, false, false);
         }
 
         StoredEvent(
@@ -172,7 +181,8 @@ final class EventStore {
                 String ical,
                 String etag,
                 boolean unsynced,
-                boolean refused) {
+                boolean refused,
+                boolean conflicted) {
             this.collectionId = collectionId;
             this.id = id;
             this.handle = handle;
@@ -180,11 +190,13 @@ final class EventStore {
             this.etag = etag;
             this.unsynced = unsynced;
             this.refused = refused;
+            this.conflicted = conflicted;
         }
     }
 
     List<StoredEvent> loadEvents() {
         List<StoredEvent> events = new ArrayList<>();
+        Set<String> conflicted = conflicted();
         try (Cursor cursor =
                 items.readable()
                         .rawQuery(
@@ -214,9 +226,124 @@ final class EventStore {
                                 items.body(cursor.getString(2)),
                                 cursor.isNull(3) ? "" : cursor.getString(3),
                                 unsynced,
-                                unsynced && Refusals.refused(context, cursor.getString(0), id)));
+                                unsynced && Refusals.refused(context, cursor.getString(0), id),
+                                conflicted.contains(cursor.getString(0) + "\n" + id)));
             }
         }
         return events;
+    }
+
+    /** How many entries a source holds changed differently, left for their page. */
+    int conflictCount() {
+        return conflicted().size();
+    }
+
+    /**
+     * The entries conflicted on any source of any calendar, as their
+     * collection and link id, which the agenda marks.
+     */
+    private Set<String> conflicted() {
+        Set<String> conflicted = new HashSet<>();
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.CALENDAR)) {
+            for (String source : sourcesOf(stored.id)) {
+                for (StoredConflict conflict : conflictsOf(storage, source)) {
+                    conflicted.add(stored.id + "\n" + conflict.linkId);
+                }
+            }
+        }
+        return conflicted;
+    }
+
+    /**
+     * One entry conflicted on one source of its calendar: both sides
+     * edited it since the base they agreed on, and the three bodies its
+     * merge reads, from the store alone (spec/conflicts.md).
+     */
+    static final class StoredConflict {
+        /**
+         * The engine collection the conflicted binding is on: the
+         * calendar's own id for its server, its phone source's otherwise.
+         * A resolution is staged there.
+         */
+        final String collection;
+
+        /** How that source addresses the entry. */
+        final String handle;
+
+        final String linkId;
+
+        /** The body both sides last agreed on, empty when they agreed on none. */
+        final String base;
+
+        /** The body staged here. */
+        final String local;
+
+        /** The body the source holds, recorded when the conflict was. */
+        final String remote;
+
+        StoredConflict(
+                String collection,
+                String handle,
+                String linkId,
+                String base,
+                String local,
+                String remote) {
+            this.collection = collection;
+            this.handle = handle;
+            this.linkId = linkId;
+            this.base = base;
+            this.local = local;
+            this.remote = remote;
+        }
+    }
+
+    /**
+     * The engine collections one calendar is reconciled under: its server,
+     * then its phone source, whose binding conflicts the same way.
+     */
+    static List<String> sourcesOf(String collectionId) {
+        return List.of(collectionId, PimdirStorage.phoneCollection(collectionId));
+    }
+
+    /**
+     * The conflict an agenda row stands for, on the first of its sources
+     * holding one; null when none does.
+     */
+    StoredConflict conflictOf(StoredEvent event) {
+        for (String source : sourcesOf(event.collectionId)) {
+            for (StoredConflict conflict : conflictsOf(storage, source)) {
+                if (conflict.linkId.equals(event.id)) {
+                    return conflict;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * One source's conflicted entries whose diverging body has landed, the
+     * only ones a merge can read ({@link PimdirStorage#loadConflicts}).
+     */
+    static List<StoredConflict> conflictsOf(PimdirStorage storage, String engineCollection) {
+        List<StoredConflict> conflicts = new ArrayList<>();
+        try {
+            for (JSONObject conflict : storage.loadConflicts(engineCollection)) {
+                String local = conflict.optString("vcard");
+                if (local.isEmpty()) {
+                    continue;
+                }
+                conflicts.add(
+                        new StoredConflict(
+                                engineCollection,
+                                conflict.getString("handle"),
+                                conflict.getString("id"),
+                                conflict.optString("baseVcard"),
+                                local,
+                                conflict.getString("remoteVcard")));
+            }
+        } catch (JSONException error) {
+            throw new IllegalStateException(error);
+        }
+        return conflicts;
     }
 }

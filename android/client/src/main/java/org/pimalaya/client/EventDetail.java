@@ -70,6 +70,12 @@ public final class EventDetail {
     public final String created;
     public final String lastModified;
 
+    /**
+     * The {@code RECURRENCE-ID} of the override read, null when what was
+     * read is the series or an entry that does not recur.
+     */
+    public final EventTime recurrenceId;
+
     public EventDetail(
             String component,
             String uid,
@@ -90,7 +96,8 @@ public final class EventDetail {
             String organizer,
             List<Attendee> attendees,
             String created,
-            String lastModified) {
+            String lastModified,
+            EventTime recurrenceId) {
         this.component = component;
         this.uid = uid;
         this.summary = summary;
@@ -111,6 +118,7 @@ public final class EventDetail {
         this.attendees = attendees;
         this.created = created;
         this.lastModified = lastModified;
+        this.recurrenceId = recurrenceId;
     }
 
     /** One attendee of a component: who, and where they stand. */
