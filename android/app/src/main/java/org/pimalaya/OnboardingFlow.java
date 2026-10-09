@@ -142,6 +142,17 @@ final class OnboardingFlow {
                     return true;
                 });
 
+        // NOTE: a password input type sets a monospace face; the field
+        // keeps the address field's.
+        password.setTypeface(android.graphics.Typeface.DEFAULT);
+        password.setOnFocusChangeListener(
+                (view, focused) -> {
+                    if (focused) {
+                        revealPassword();
+                    }
+                });
+        password.setOnClickListener(view -> revealPassword());
+
         host.findViewById(R.id.domain_connect).setOnClickListener(view -> confirmSetup());
         host.findViewById(R.id.domain_advanced).setOnClickListener(view -> switchToAdvanced());
         password.setOnEditorActionListener(
@@ -184,6 +195,17 @@ final class OnboardingFlow {
                     toggle.setContentDescription(
                             host.getString(shown ? R.string.password_hide : R.string.password_show));
                 });
+    }
+
+    /**
+     * Scrolls the domain step to its end, so the password field and its
+     * note sit above the keyboard. Delayed past the keyboard's resize of
+     * the window, which would otherwise clip the scroll it answers.
+     */
+    private void revealPassword() {
+        android.widget.ScrollView scroll = host.findViewById(R.id.domain_scroll);
+        scroll.postDelayed(
+                () -> scroll.smoothScrollTo(0, scroll.getChildAt(0).getHeight()), 300);
     }
 
     /** Resets the flow to its first step and shows it. */

@@ -8,7 +8,29 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- No bar on this step: a round back button alone, the page
+         carrying its own headline. -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/app_bar_height"
+        android:paddingStart="@dimen/app_bar_padding"
+        android:paddingEnd="@dimen/app_bar_padding">
+
+        <ImageButton
+            android:id="@+id/domain_back"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_gravity="center_vertical"
+            android:layout_margin="4dp"
+            android:background="@drawable/button_tonal"
+            android:contentDescription="@string/back"
+            android:src="@drawable/ic_arrow_back"
+            android:tint="?android:attr/textColorPrimary" />
+
+    </FrameLayout>
+
     <ScrollView
+        android:id="@+id/domain_scroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">
@@ -22,12 +44,29 @@
             android:paddingEnd="24dp"
             android:paddingBottom="24dp">
 
-            <TextView
-                android:id="@+id/domain_email"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="?android:attr/textColorSecondary"
-                android:textSize="14sp" />
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:layout_marginEnd="6dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_check"
+                    android:tint="?android:attr/colorAccent" />
+
+                <TextView
+                    android:id="@+id/domain_email"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="14sp" />
+
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/domain_heading"
@@ -58,11 +97,6 @@
                 android:orientation="vertical"
                 android:visibility="gone">
 
-                <TextView
-                    style="@style/FieldLabel"
-                    android:labelFor="@id/domain_password"
-                    android:text="@string/password_hint" />
-
                 <LinearLayout
                     android:id="@+id/domain_password_frame"
                     android:layout_width="match_parent"
@@ -70,7 +104,7 @@
                     android:background="@drawable/field_background"
                     android:gravity="center_vertical"
                     android:orientation="horizontal"
-                    android:paddingStart="16dp"
+                    android:paddingStart="24dp"
                     android:paddingEnd="4dp">
 
                     <EditText
@@ -80,6 +114,7 @@
                         android:layout_weight="1"
                         android:autofillHints="password"
                         android:background="@null"
+                        android:hint="@string/password_hint"
                         android:imeOptions="actionGo"
                         android:importantForAutofill="yes"
                         android:inputType="textPassword"
@@ -100,7 +135,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
-                    android:paddingStart="16dp"
+                    android:paddingStart="24dp"
                     android:text="@string/password_shared"
                     android:textColor="?android:attr/textColorSecondary"
                     android:textSize="13sp" />
@@ -144,7 +179,8 @@
                 android:id="@+id/domain_progress"
                 android:layout_width="24dp"
                 android:layout_height="24dp"
-                android:layout_gravity="center"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginEnd="16dp"
                 android:elevation="4dp"
                 android:visibility="gone" />
 

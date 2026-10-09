@@ -101,6 +101,9 @@ public class MainActivity extends Activity {
     /** The standard setup's outcome when some servers refused the password. */
     static final int STEP_RESULT = 4;
 
+    /** Whether an auth step's main button is loading, the step frozen. */
+    private boolean authBusy;
+
     static final int REQUEST_CONTACTS = 1;
     private static final int REQUEST_IMPORT = 2;
     private static final int REQUEST_EXPORT = 3;
@@ -426,9 +429,13 @@ public class MainActivity extends Activity {
     private void applyAuthChrome() {
         int step = authFlipper.getDisplayedChild();
         // NOTE: a first run opens on the address alone, with nothing to
-        // leave for and the page's own headline in place of a title.
-        findViewById(R.id.auth_bar)
-                .setVisibility(step == STEP_EMAIL && !hasRealAccount() ? View.GONE : View.VISIBLE);
+        // leave for and the page's own headline in place of a title; the
+        // domain and result steps carry a round back button of their own.
+        boolean bare =
+                (step == STEP_EMAIL && !hasRealAccount())
+                        || step == STEP_DOMAIN
+                        || step == STEP_RESULT;
+        findViewById(R.id.auth_bar).setVisibility(bare ? View.GONE : View.VISIBLE);
         TextView title = findViewById(R.id.auth_title);
         if (step == STEP_EMAIL) {
             title.setText(hasRealAccount() ? R.string.add_account : R.string.auth_step_email);
@@ -449,6 +456,9 @@ public class MainActivity extends Activity {
 
     /** The auth bar's back arrow, per step. */
     private void authBack() {
+        if (authBusy) {
+            return;
+        }
         int step = authFlipper.getDisplayedChild();
         if (step == STEP_RESULT) {
             onboarding.abortAuthSteps();
@@ -644,6 +654,8 @@ public class MainActivity extends Activity {
     private void setUpEmailPanel() {
         EditText email = findViewById(R.id.email_input);
         findViewById(R.id.auth_back).setOnClickListener(view -> authBack());
+        findViewById(R.id.domain_back).setOnClickListener(view -> authBack());
+        findViewById(R.id.result_back).setOnClickListener(view -> authBack());
         findViewById(R.id.auth_cancel).setOnClickListener(view -> cancelAuth());
 
         onboarding.bind();
@@ -678,14 +690,42 @@ public class MainActivity extends Activity {
             setFabEnabled(buttonId, !loading);
             ((android.widget.ImageButton) button).setImageAlpha(loading ? 0 : 255);
         } else {
-            // NOTE: a pill keeps its full tone under the loader, its
-            // label hidden rather than dimmed.
+            // NOTE: a pill keeps its full tone and its label, the loader
+            // turning at its end in the label's colour.
             button.setEnabled(!loading);
             button.setAlpha(1f);
-            ((TextView) button)
-                    .setTextColor(loading ? android.graphics.Color.TRANSPARENT : accentContrast());
+            // NOTE: and nothing else on the step answers until it is done,
+            // the way back included.
+            authBusy = loading;
+            int[] controls =
+                    buttonId == R.id.email_continue
+                            ? new int[] {R.id.email_input, R.id.email_advanced}
+                            : new int[] {
+                                R.id.domain_back,
+                                R.id.domain_advanced,
+                                R.id.domain_password,
+                                R.id.domain_password_toggle,
+                                R.id.domain_container
+                            };
+            for (int control : controls) {
+                enableTree(findViewById(control), !loading);
+            }
+            ((android.widget.ProgressBar) findViewById(progressId))
+                    .setIndeterminateTintList(
+                            android.content.res.ColorStateList.valueOf(accentContrast()));
         }
         findViewById(progressId).setVisibility(loading ? View.VISIBLE : View.GONE);
+    }
+
+    /** Enables or disables a view and everything inside it. */
+    private static void enableTree(View view, boolean enabled) {
+        view.setEnabled(enabled);
+        if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) view;
+            for (int index = 0; index < group.getChildCount(); index++) {
+                enableTree(group.getChildAt(index), enabled);
+            }
+        }
     }
 
     /** Enables or disables an auth continue FAB, dimming its disc. */
