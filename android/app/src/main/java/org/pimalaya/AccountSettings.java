@@ -52,6 +52,9 @@ final class AccountSettings {
      */
     private boolean elsewhere;
 
+    /** The same for the phone's calendars ({@link Accounts#calendarsElsewhere}). */
+    private boolean calendarsElsewhere;
+
     AccountSettings(MainActivity host) {
         this.host = host;
     }
@@ -87,17 +90,20 @@ final class AccountSettings {
         host.findViewById(R.id.account_title).setAlpha(0f);
         host.findViewById(R.id.account_scroll).scrollTo(0, 0);
         elsewhere = false;
+        calendarsElsewhere = false;
         render();
         host.openOverlay(MainActivity.PANEL_ACCOUNT);
 
-        // NOTE: one provider query, off the main thread.
+        // NOTE: one provider query each, off the main thread.
         host.io.execute(
                 () -> {
                     boolean found = Accounts.elsewhere(host, email);
+                    boolean calendars = Accounts.calendarsElsewhere(host, email);
                     host.postAlive(
                             () -> {
-                                if (found && email.equals(settingsEmail)) {
-                                    elsewhere = true;
+                                if ((found || calendars) && email.equals(settingsEmail)) {
+                                    elsewhere = found;
+                                    calendarsElsewhere = calendars;
                                     render();
                                 }
                             });
@@ -121,6 +127,9 @@ final class AccountSettings {
         }
         addBackground(sections, account);
         addBooks(sections, email);
+        if (account.covers(PimDomain.CALENDAR)) {
+            addCalendars(sections, email);
+        }
         addServers(sections, account);
 
         boolean contactsOnly =
@@ -415,12 +424,7 @@ final class AccountSettings {
     private void addBooks(Sections sections, String email) {
         List<View> rows = new ArrayList<>();
         if (elsewhere) {
-            TextView note = new TextView(host);
-            note.setText(R.string.phone_elsewhere);
-            note.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-            note.setTextColor(host.resolveColor(android.R.attr.textColorSecondary));
-            note.setPadding(host.dp(16), host.dp(12), host.dp(16), host.dp(12));
-            rows.add(note);
+            rows.add(note(R.string.phone_elsewhere));
         }
         for (BookEntry entry : host.base.loadAllAddressbooks()) {
             if (!entry.accountEmail.equals(email)) {
@@ -515,6 +519,82 @@ final class AccountSettings {
         host.reloadContacts();
         host.filterChanged();
         render();
+    }
+
+    /**
+     * The calendars card: a row per calendar, its filter state under its
+     * name and whether it shows in the phone's calendar under that, led by a
+     * line when another app already fills the phone's calendar with the
+     * address. The switch still shows it there then.
+     */
+    private void addCalendars(Sections sections, String email) {
+        List<View> rows = new ArrayList<>();
+        if (calendarsElsewhere) {
+            rows.add(note(R.string.phone_calendar_elsewhere));
+        }
+        List<String> ids = new ArrayList<>();
+        List<PimdirCollections.Stored> calendars = new ArrayList<>();
+        for (PimdirCollections.Stored calendar : host.collectionsOf(PimDomain.CALENDAR)) {
+            if (calendar.accountEmail.equals(email)) {
+                ids.add(calendar.id);
+                calendars.add(calendar);
+            }
+        }
+        MergedFilter filter = host.filterOf(PimDomain.CALENDAR);
+        for (PimdirCollections.Stored calendar : calendars) {
+            LinearLayout item = new LinearLayout(host);
+            item.setOrientation(LinearLayout.VERTICAL);
+            item.addView(
+                    sections.row(
+                            calendar.name,
+                            host.getString(
+                                    filter.ticked(email, calendar.id)
+                                            ? R.string.calendar_filter_shown
+                                            : R.string.calendar_filter_hidden),
+                            null,
+                            null));
+            View phone =
+                    bookOption(
+                            R.string.calendar_phone,
+                            PhoneCalendars.shown(host, email, calendar.id),
+                            checked -> setCalendar(email, calendar.id, checked, ids));
+            phone.setPadding(phone.getPaddingLeft(), 0, phone.getPaddingRight(), host.dp(6));
+            item.addView(phone);
+            rows.add(item);
+        }
+        sections.section(R.string.calendar_title, R.drawable.ic_domain_calendar, rows, null, false);
+    }
+
+    /**
+     * A calendar's phone switch. Turned on, the calendar permission is asked
+     * first, and refused leaves the calendar off the phone; turned off, its
+     * row goes after one last pass. The phone's calendars follow either way.
+     */
+    private void setCalendar(String email, String calendar, boolean on, List<String> siblings) {
+        if (!on) {
+            PhoneCalendars.set(host, email, calendar, false, siblings);
+            host.reconcileCalendars();
+            return;
+        }
+        host.askMirrors(
+                java.util.EnumSet.of(PhoneMirror.CALENDAR),
+                granted -> {
+                    if (granted.contains(PhoneMirror.CALENDAR)) {
+                        PhoneCalendars.set(host, email, calendar, true, siblings);
+                        host.reconcileCalendars();
+                    }
+                    render();
+                });
+    }
+
+    /** A line leading a card, saying another app already shows the address. */
+    private TextView note(int text) {
+        TextView note = new TextView(host);
+        note.setText(text);
+        note.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        note.setTextColor(host.resolveColor(android.R.attr.textColorSecondary));
+        note.setPadding(host.dp(16), host.dp(12), host.dp(16), host.dp(12));
+        return note;
     }
 
     /**
@@ -810,8 +890,15 @@ final class AccountSettings {
                 urls.add(entry.book.url);
             }
         }
+        List<String> calendars = new ArrayList<>();
+        for (PimdirCollections.Stored calendar : host.collectionsOf(PimDomain.CALENDAR)) {
+            if (calendar.accountEmail.equals(email)) {
+                calendars.add(calendar.id);
+            }
+        }
         // NOTE: before its collections go, which is what names them.
         host.forgetViews(email);
+        PhoneCalendars.forget(host, email, calendars);
 
         // NOTE: the account and every domain it covered. The screen shows the
         // contacts side, but the user is deleting the account they see, and
@@ -851,5 +938,8 @@ final class AccountSettings {
                 Log.w("pimalaya", "account purge failed for " + email + ": " + error);
             }
         });
+        // NOTE: its calendar account goes the same way, the store having
+        // forgotten its calendars.
+        host.reconcileCalendars();
     }
 }

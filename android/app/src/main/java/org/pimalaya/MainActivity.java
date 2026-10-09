@@ -149,6 +149,9 @@ public class MainActivity extends Activity {
     /** The Contacts-app edit {@link SyncService} brought in that the list last reloaded after. */
     private volatile long reloadedIngest = SyncService.ingested;
 
+    /** The calendar-app edit {@link CalendarSyncService} brought in, the agenda reloaded after. */
+    private volatile long reloadedCalendarIngest = CalendarSyncService.ingested;
+
     /** Each domain's filter, read once from where it was last left. */
     private final Map<PimDomain, MergedFilter> filters = new java.util.EnumMap<>(PimDomain.class);
 
@@ -1179,8 +1182,9 @@ public class MainActivity extends Activity {
     /**
      * Asks, in one prompt, the permissions of the phone mirrors wanted, then
      * hands {@code done} the ones granted (main thread). Asks nothing when
-     * they all are. The setups' switches and a book's settings switch are
-     * the only callers: a mirror is asked for when it is turned on.
+     * they all are. The setups' switches and a book's or a calendar's
+     * settings switch are the only callers: a mirror is asked for when it is
+     * turned on.
      */
     void askMirrors(Set<PhoneMirror> wanted, Consumer<Set<PhoneMirror>> done) {
         String[] missing = PhoneMirror.missing(wanted, this::permitted);
@@ -2163,8 +2167,9 @@ public class MainActivity extends Activity {
 
     /**
      * Brings the books' Android accounts in line with the books the phone
-     * mirrors, creating the missing ones and removing the rest, off the
-     * main thread: at startup and once a setup committed its books.
+     * mirrors, creating the missing ones and removing the rest, then the
+     * calendars' ({@link #reconcileCalendars}), off the main thread: at
+     * startup and once a setup committed its books.
      */
     void reconcilePhone() {
         io.execute(
@@ -2175,14 +2180,32 @@ public class MainActivity extends Activity {
                         Log.w("pimalaya", "phone accounts failed", error);
                     }
                 });
+        reconcileCalendars();
+    }
+
+    /**
+     * Brings the phone's calendars in line with those it shows
+     * ({@link CalendarRows}), off the main thread: with the books, and when a
+     * calendar's switch or the account roster changes.
+     */
+    void reconcileCalendars() {
+        io.execute(
+                () -> {
+                    try {
+                        CalendarRows.reconcile(this, pimdir);
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "phone calendars failed", error);
+                    }
+                });
     }
 
     /**
      * The app back in the foreground: the phone pass of every mirrored book
-     * whose raw contacts changed meanwhile, so a Contacts-app edit shows at
-     * once whatever Android's own batching does, then a reload when that pass
-     * or Android's upload sync ({@link SyncService}) brought one in. Silent,
-     * and not a sync: the process's lock is not taken.
+     * and calendar whose rows changed meanwhile, so a Contacts-app or a
+     * calendar-app edit shows at once whatever Android's own batching does,
+     * then a reload when that pass or Android's upload sync ({@link
+     * SyncService}, {@link CalendarSyncService}) brought one in. Silent, and
+     * not a sync: the process's lock is not taken.
      */
     private void phoneReturn() {
         io.execute(
@@ -2200,6 +2223,13 @@ public class MainActivity extends Activity {
                     if (changed || ingested != reloadedIngest) {
                         reloadedIngest = ingested;
                         postAlive(this::reloadContacts);
+                    }
+
+                    boolean events = runner.syncPhoneCalendars();
+                    long calendarIngested = CalendarSyncService.ingested;
+                    if (events || calendarIngested != reloadedCalendarIngest) {
+                        reloadedCalendarIngest = calendarIngested;
+                        postAlive(calendarList::reload);
                     }
                 });
     }

@@ -213,6 +213,11 @@ final class PimdirStorage {
                 if (cursor.isNull(5) && cursor.isNull(2)) {
                     continue;
                 }
+                // NOTE: nor is a removal this source already carried out,
+                // waiting on another source: it is no create here.
+                if (cursor.isNull(5) && cursor.getInt(13) == 1) {
+                    continue;
+                }
                 placements.put(placementOf(collection, cursor));
             }
         }
@@ -1058,7 +1063,17 @@ final class PimdirStorage {
                             + " retained_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),"
                             + " retained_by = ? WHERE collection = ? AND link_id = ?",
                     new Object[] {source, collection, linkId});
+            return;
         }
+
+        // NOTE: another source still holds it, the server of a book or a
+        // calendar the phone deleted from, or the phone of one the server
+        // did: a tombstone there, which its next pass pushes as a removal,
+        // the last of them retiring the item. Left live, the other source
+        // would keep it and hand it back as a create.
+        db.execSQL(
+                "UPDATE items SET deleted = 1 WHERE collection = ? AND link_id = ?",
+                new Object[] {collection, linkId});
     }
 
     /**
@@ -1424,6 +1439,34 @@ final class PimdirStorage {
                                 + " OR b.base_object <> i.object_hash))))",
                         new String[] {source, collection})) {
             return cursor.moveToFirst() && cursor.getInt(0) == 1;
+        }
+    }
+
+    /**
+     * Forgets what one source holds of a collection: every binding it has
+     * dropped as superseded, never as a removal, so the items stay and the
+     * next pass of that source hands each one over again as a create.
+     *
+     * <p>For a source whose members went with something other than a sync:
+     * the phone's calendar provider deletes a calendar's events with its row,
+     * and a binding left behind would read them as still there.
+     */
+    void forget(String engineCollection) throws JSONException {
+        JSONArray placements = loadCollection(engineCollection, null).optJSONArray("placements");
+        JSONArray drops = new JSONArray();
+        for (int index = 0; placements != null && index < placements.length(); index++) {
+            String handle = placements.getJSONObject(index).getString("handle");
+            if (!handle.startsWith(PROVISIONAL)) {
+                drops.put(
+                        new JSONObject()
+                                .put("op", "drop")
+                                .put("collection", engineCollection)
+                                .put("handle", handle)
+                                .put("reason", "superseded"));
+            }
+        }
+        if (drops.length() > 0) {
+            applyWrites(drops);
         }
     }
 

@@ -28,6 +28,10 @@
     <string name="phone_contacts_note">The dialer and messaging apps see them, and edits there come back here.</string>
     <string name="phone_elsewhere">Already in the phone\'s contacts through another app</string>
     <string name="phone_elsewhere_note">Another app already fills the phone\'s Contacts app with this address, so its contacts are not added a second time. The account\'s settings can still add them.</string>
+    <string name="phone_calendar">Also in the phone\'s Calendar app</string>
+    <string name="phone_calendar_note">Widgets and other apps see the events, and edits there come back here.</string>
+    <string name="phone_calendar_elsewhere">Already in the phone\'s calendar through another app</string>
+    <string name="phone_apps_elsewhere_note">Another app already shows this address in the phone\'s apps, so it is not added there a second time. The account\'s settings can still add it.</string>
     <string name="email_hint">Email address</string>
     <string name="auth_step_email">Welcome</string>
     <string name="auth_step_config">Configuration</string>
@@ -153,6 +157,11 @@
     <plurals name="sync_step_project">
         <item quantity="one">Writing %1$d contact to the phone</item>
         <item quantity="other">Writing %1$d contacts to the phone</item>
+    </plurals>
+    <string name="sync_step_phone_calendar">Reconciling with the phone calendar</string>
+    <plurals name="sync_step_project_events">
+        <item quantity="one">Writing %1$d event to the phone</item>
+        <item quantity="other">Writing %1$d events to the phone</item>
     </plurals>
     <plurals name="sync_step_resolve">
         <item quantity="one">Resolving %1$d conflict</item>
@@ -668,6 +677,9 @@
     <string name="book_remote_sync">Sync with the server</string>
     <string name="book_local_sync">Show in the phone\'s contacts</string>
     <string name="book_off">Off: not synced, not shown</string>
+    <string name="calendar_phone">Show in the phone\'s calendar</string>
+    <string name="calendar_filter_shown">Shown in the list</string>
+    <string name="calendar_filter_hidden">Hidden by the filter</string>
     <string name="account_servers">Servers</string>
     <string name="server_oauth" translatable="false">OAuth</string>
     <string name="server_token">Token</string>

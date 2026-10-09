@@ -16,12 +16,33 @@ import java.util.function.Predicate;
  * asks their permissions in one prompt ({@link MainActivity#askMirrors}).
  */
 enum PhoneMirror {
-    CONTACTS(Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS);
+    CONTACTS(
+            PimDomain.CONTACTS,
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.WRITE_CONTACTS),
+    CALENDAR(
+            PimDomain.CALENDAR,
+            Manifest.permission.READ_CALENDAR,
+            Manifest.permission.WRITE_CALENDAR);
+
+    /** The domain whose collections it shows. */
+    final PimDomain domain;
 
     private final String[] permissions;
 
-    PhoneMirror(String... permissions) {
+    PhoneMirror(PimDomain domain, String... permissions) {
+        this.domain = domain;
         this.permissions = permissions;
+    }
+
+    /** The mirror showing the domain's collections, null for mail. */
+    static PhoneMirror of(PimDomain domain) {
+        for (PhoneMirror mirror : values()) {
+            if (mirror.domain == domain) {
+                return mirror;
+            }
+        }
+        return null;
     }
 
     /** Whether every permission the mirror takes is granted. */

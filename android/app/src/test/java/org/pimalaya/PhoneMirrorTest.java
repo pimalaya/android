@@ -14,7 +14,8 @@ import java.util.Set;
 /**
  * A phone mirror is granted only whole: the prompt asks every permission of
  * a mirror not yet fully granted, and a mirror counts as granted once every
- * one of its permissions is, so a half answer leaves its switch off.
+ * one of its permissions is, so a half answer leaves its switch off. Several
+ * wanted are asked together, and each is granted on its own.
  */
 public class PhoneMirrorTest {
     private static final Set<PhoneMirror> CONTACTS = EnumSet.of(PhoneMirror.CONTACTS);
@@ -47,5 +48,31 @@ public class PhoneMirrorTest {
         Set<PhoneMirror> none = EnumSet.noneOf(PhoneMirror.class);
         assertEquals(0, PhoneMirror.missing(none, permission -> false).length);
         assertTrue(PhoneMirror.granted(none, permission -> true).isEmpty());
+    }
+
+    @Test
+    public void bothWantedAskBothPairsInOnePrompt() {
+        Set<PhoneMirror> both = EnumSet.of(PhoneMirror.CONTACTS, PhoneMirror.CALENDAR);
+        assertArrayEquals(
+                new String[] {
+                    Manifest.permission.READ_CONTACTS,
+                    Manifest.permission.WRITE_CONTACTS,
+                    Manifest.permission.READ_CALENDAR,
+                    Manifest.permission.WRITE_CALENDAR
+                },
+                PhoneMirror.missing(both, permission -> false));
+    }
+
+    @Test
+    public void bothWantedOneGrantedAsksTheOtherAndGrantsTheOne() {
+        Set<PhoneMirror> both = EnumSet.of(PhoneMirror.CONTACTS, PhoneMirror.CALENDAR);
+        Set<String> contacts =
+                Set.of(Manifest.permission.READ_CONTACTS, Manifest.permission.WRITE_CONTACTS);
+        assertArrayEquals(
+                new String[] {
+                    Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR
+                },
+                PhoneMirror.missing(both, contacts::contains));
+        assertEquals(CONTACTS, PhoneMirror.granted(both, contacts::contains));
     }
 }

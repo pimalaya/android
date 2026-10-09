@@ -213,7 +213,7 @@ impl Zones {
     }
 
     /// The civil moment an instant is in a time's zone.
-    fn local(&self, zone: &EventTime, instant: i64) -> Option<IcalRecurDateTime> {
+    pub fn local(&self, zone: &EventTime, instant: i64) -> Option<IcalRecurDateTime> {
         match zone.kind {
             EventTimeKind::Utc => Some(IcalRecurDateTime::from_seconds(instant)),
             EventTimeKind::Zoned => {

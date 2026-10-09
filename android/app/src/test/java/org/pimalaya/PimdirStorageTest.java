@@ -644,6 +644,46 @@ public class PimdirStorageTest {
     }
 
     @Test
+    public void aRemovalOnOneSourceIsAStagedRemovalOnTheOther() throws Exception {
+        String phone = PimdirStorage.phoneCollection("acct/Contacts");
+        JSONObject projected =
+                new JSONObject(upsert("raw-5", "uid-v", "ca11", "val")
+                        .getJSONObject("placement").toString());
+        projected.put("collection", phone);
+        projected.put("base", new JSONObject().put("object", "ca11"));
+        JSONObject op = new JSONObject();
+        op.put("op", "upsert");
+        op.put("placement", projected);
+        storage.applyWrites(
+                batch(storeObject("ca11", "BODY"), upsert("v.vcf", "uid-v", "ca11", "val"), op));
+
+        // The phone deletes it: the server still holds it, so it is the
+        // server's to remove, not the phone's to be handed back.
+        JSONObject drop = new JSONObject();
+        drop.put("op", "drop");
+        drop.put("collection", phone);
+        drop.put("handle", "raw-5");
+        drop.put("reason", "deleted");
+        storage.applyWrites(batch(drop));
+
+        assertEquals(0, storage.loadCollection(phone, null).getJSONArray("placements").length());
+        JSONObject server =
+                storage.loadCollection("acct/Contacts", null)
+                        .getJSONArray("placements")
+                        .getJSONObject(0);
+        assertEquals("tombstone", server.getString("status"));
+        assertTrue(storage.pending("acct/Contacts"));
+
+        JSONObject gone = new JSONObject(drop.toString());
+        gone.put("collection", "acct/Contacts");
+        gone.put("handle", "v.vcf");
+        storage.applyWrites(batch(gone));
+        assertEquals("the last source retires it", 1,
+                scalar("SELECT count(*) FROM items WHERE link_id = 'uid-v'"
+                        + " AND retained_at IS NOT NULL"));
+    }
+
+    @Test
     public void aSupersededDropRetiresNothing() throws Exception {
         storage.applyWrites(
                 batch(storeObject("ba10", "body"), upsert("temp-2", "uid-u", "ba10", "ugo")));

@@ -109,20 +109,24 @@ final class OnboardingFlow {
     private boolean verifying;
 
     /**
-     * Whether the books show in the phone's Contacts app, the switch under
-     * the contacts in both setups. On by default; a refused permission turns
-     * it off.
+     * The phone apps the books and the calendars show in, the switches under
+     * the contacts and the calendars in both setups. On by default; a refused
+     * permission turns its switch off.
      */
-    private boolean phoneContacts = true;
+    private final Set<PhoneMirror> mirrors = java.util.EnumSet.allOf(PhoneMirror.class);
 
-    /** The switch drawn for it, which a refusal turns off. */
-    private android.widget.Switch phoneSwitch;
+    /** The switches drawn for them, which a refusal turns off. */
+    private final Map<PhoneMirror, android.widget.Switch> mirrorSwitches =
+            new java.util.EnumMap<>(PhoneMirror.class);
 
     /**
      * Whether another app already fills the phone's Contacts app with this
      * address ({@link Accounts#elsewhere}), which keeps the books off it.
      */
     private boolean elsewhere;
+
+    /** The same for the phone's calendars ({@link Accounts#calendarsElsewhere}). */
+    private boolean calendarsElsewhere;
 
     OnboardingFlow(MainActivity host, OauthFlow oauth) {
         this.host = host;
@@ -247,8 +251,9 @@ final class OnboardingFlow {
         verifying = false;
         connecting = false;
         signInPage = false;
-        phoneContacts = true;
+        mirrors.addAll(java.util.EnumSet.allOf(PhoneMirror.class));
         elsewhere = false;
+        calendarsElsewhere = false;
         authSteps = null;
         pendingStep = null;
         setups.clear();
@@ -812,9 +817,10 @@ final class OnboardingFlow {
                             ? host.getString(R.string.domain_connected)
                             : null;
             LinearLayout row = domainRow(setup.domain, status, false, tick);
-            // NOTE: the phone's switch under the contacts, shown while they
-            // are ticked.
-            View phone = setup.domain == PimDomain.CONTACTS ? phoneRow() : null;
+            // NOTE: the phone's switch under the contacts and the calendars,
+            // shown while they are ticked.
+            PhoneMirror mirror = PhoneMirror.of(setup.domain);
+            View phone = mirror == null ? null : phoneRow(mirror);
             row.setOnClickListener(
                     view -> {
                         if (verifying) {
@@ -837,19 +843,27 @@ final class OnboardingFlow {
     }
 
     /**
-     * The contacts' switch putting the books in the phone's Contacts app,
-     * under a hairline, its line saying what that brings. Continue asks the
-     * contacts permission while it is on.
+     * The switch putting the books in the phone's Contacts app, or the
+     * calendars in its Calendar app, under a hairline, its line saying what
+     * that brings. Continue asks the mirror's permissions while it is on.
      */
-    private View phoneRow() {
+    private View phoneRow(PhoneMirror mirror) {
         LinearLayout item = new LinearLayout(host);
         item.setOrientation(LinearLayout.VERTICAL);
         item.addView(rowDivider());
 
         android.widget.Switch toggle = new android.widget.Switch(host);
-        toggle.setChecked(phoneContacts);
-        toggle.setOnCheckedChangeListener((view, checked) -> phoneContacts = checked);
-        phoneSwitch = toggle;
+        toggle.setChecked(mirrors.contains(mirror));
+        toggle.setOnCheckedChangeListener(
+                (view, checked) -> {
+                    if (checked) {
+                        mirrors.add(mirror);
+                    } else {
+                        mirrors.remove(mirror);
+                    }
+                });
+        mirrorSwitches.put(mirror, toggle);
+        boolean contacts = mirror == PhoneMirror.CONTACTS;
 
         LinearLayout row = new LinearLayout(host);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -863,12 +877,12 @@ final class OnboardingFlow {
         LinearLayout text = new LinearLayout(host);
         text.setOrientation(LinearLayout.VERTICAL);
         TextView title = new TextView(host);
-        title.setText(R.string.phone_contacts);
+        title.setText(contacts ? R.string.phone_contacts : R.string.phone_calendar);
         title.setTextSize(16);
         title.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
         text.addView(title);
         TextView line = new TextView(host);
-        line.setText(R.string.phone_contacts_note);
+        line.setText(contacts ? R.string.phone_contacts_note : R.string.phone_calendar_note);
         line.setTextSize(13);
         line.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
         text.addView(line);
@@ -1110,10 +1124,10 @@ final class OnboardingFlow {
 
         if (setup.domain == PimDomain.MAIL) {
             addSubmission(body, setup);
-        } else if (setup.domain == PimDomain.CONTACTS) {
-            // NOTE: for every book ticked on the books page; the page itself
-            // only picks them.
-            body.addView(phoneRow());
+        } else {
+            // NOTE: for every book ticked on the books page, which only
+            // picks them, and every calendar the first sync lists.
+            body.addView(phoneRow(PhoneMirror.of(setup.domain)));
         }
 
         renderSection(setup);
@@ -2434,16 +2448,23 @@ final class OnboardingFlow {
         // continues with a mirror switched on, and nowhere else in it. A
         // refusal turns the switch off and the setup carries on.
         Set<PhoneMirror> wanted = java.util.EnumSet.noneOf(PhoneMirror.class);
-        if (phoneContacts && setups.get(PimDomain.CONTACTS).enabled) {
-            wanted.add(PhoneMirror.CONTACTS);
+        for (PhoneMirror mirror : mirrors) {
+            DomainSetup setup = setups.get(mirror.domain);
+            if (setup != null && setup.enabled) {
+                wanted.add(mirror);
+            }
         }
         host.askMirrors(
                 wanted,
                 granted -> {
-                    if (wanted.contains(PhoneMirror.CONTACTS)
-                            && !granted.contains(PhoneMirror.CONTACTS)) {
-                        phoneContacts = false;
-                        phoneSwitch.setChecked(false);
+                    for (PhoneMirror mirror : wanted) {
+                        if (!granted.contains(mirror)) {
+                            mirrors.remove(mirror);
+                            android.widget.Switch toggle = mirrorSwitches.get(mirror);
+                            if (toggle != null) {
+                                toggle.setChecked(false);
+                            }
+                        }
                     }
                     signIn();
                 });
@@ -2649,15 +2670,21 @@ final class OnboardingFlow {
     }
 
     /**
-     * The standard setup's result once every domain signed in, when another
-     * app already fills the phone's Contacts app with the address: a row per
-     * domain connected, the contacts saying they stay off the phone, and
-     * Continue, which commits the books unmirrored.
+     * The result once every domain signed in, when another app already fills
+     * the phone's Contacts or Calendar app with the address: a row per domain
+     * connected, the contacts or the calendars saying they stay off the
+     * phone, and Continue, which goes on unmirrored. The standard setup's,
+     * and the advanced one's for the calendars, which have no page of their
+     * own to say it on.
      */
     private void showElsewhere(String email) {
         ((TextView) host.findViewById(R.id.result_email)).setText(pendingEmail);
         ((TextView) host.findViewById(R.id.result_title)).setText(R.string.result_elsewhere_title);
-        ((TextView) host.findViewById(R.id.result_message)).setText(R.string.phone_elsewhere_note);
+        ((TextView) host.findViewById(R.id.result_message))
+                .setText(
+                        calendarsElsewhere
+                                ? R.string.phone_apps_elsewhere_note
+                                : R.string.phone_elsewhere_note);
         host.findViewById(R.id.result_note).setVisibility(View.GONE);
 
         LinearLayout card = resultCard();
@@ -2665,22 +2692,37 @@ final class OnboardingFlow {
             if (setup.credential == null) {
                 continue;
             }
-            addResult(
-                    card,
-                    setup.domain,
-                    host.getString(
-                            setup.domain == PimDomain.CONTACTS
-                                    ? R.string.phone_elsewhere
-                                    : R.string.result_connected),
-                    false);
+            int status = R.string.result_connected;
+            if (setup.domain == PimDomain.CONTACTS && elsewhere) {
+                status = R.string.phone_elsewhere;
+            } else if (setup.domain == PimDomain.CALENDAR && calendarsElsewhere) {
+                status = R.string.phone_calendar_elsewhere;
+            }
+            addResult(card, setup.domain, host.getString(status), false);
         }
 
         Button onward = host.findViewById(R.id.result_continue);
         onward.setText(R.string.email_submit);
-        onward.setOnClickListener(view -> confirmAllBooks(email));
+        onward.setOnClickListener(view -> connected(email));
         host.findViewById(R.id.result_advanced).setVisibility(View.GONE);
 
         host.showAuth(MainActivity.STEP_RESULT);
+    }
+
+    /**
+     * Onward once the setup's sign-ins are connected and what the phone
+     * already shows is said: the books page in the advanced setup, every
+     * book in the standard one, and straight to the first sync without
+     * contacts.
+     */
+    private void connected(String email) {
+        if (pendingBooks == null) {
+            finishOnboarding();
+        } else if (!simpleSetup()) {
+            openBooksSelection(email, pendingBooks);
+        } else {
+            confirmAllBooks(email);
+        }
     }
 
     /** The result step's card, emptied of an earlier result. */
@@ -2750,36 +2792,47 @@ final class OnboardingFlow {
         }
 
         Account contacts = connectedAccount.server(PimDomain.CONTACTS);
-        if (contacts == null) {
+        boolean calendars =
+                mirrors.contains(PhoneMirror.CALENDAR)
+                        && connectedAccount.server(PimDomain.CALENDAR) != null;
+        pendingBooks = null;
+        if (contacts == null && !calendars) {
             finishOnboarding();
             return;
         }
 
         busy();
         String email = connectedEmail;
-        boolean phone = phoneContacts;
+        boolean phone = mirrors.contains(PhoneMirror.CONTACTS);
         host.io.execute(
                 () -> {
                     try {
-                        List<Addressbook> fetched;
-                        try (Transport transport = new Transport()) {
-                            fetched = host.client.listAddressbooks(transport, contacts);
+                        List<Addressbook> fetched = null;
+                        if (contacts != null) {
+                            try (Transport transport = new Transport()) {
+                                fetched = host.client.listAddressbooks(transport, contacts);
+                            }
                         }
-                        // NOTE: one provider query, the permission granted
-                        // as the setup continued; what it finds is said
-                        // rather than guessed at beforehand.
-                        boolean found = phone && Accounts.elsewhere(host, email);
+                        // NOTE: one provider query each, the permissions
+                        // granted as the setup continued; what they find is
+                        // said rather than guessed at beforehand.
+                        boolean found =
+                                phone && contacts != null && Accounts.elsewhere(host, email);
+                        boolean calendarsFound =
+                                calendars && Accounts.calendarsElsewhere(host, email);
+                        List<Addressbook> books = fetched;
                         host.main.post(
                                 () -> {
                                     resetConfigContinue();
-                                    pendingBooks = fetched;
+                                    pendingBooks = books;
                                     elsewhere = found;
-                                    if (!simpleSetup()) {
-                                        openBooksSelection(email, fetched);
-                                    } else if (found) {
+                                    calendarsElsewhere = calendarsFound;
+                                    // NOTE: the advanced setup says it of
+                                    // the contacts on its books page.
+                                    if (calendarsFound || (found && simpleSetup())) {
                                         showElsewhere(email);
                                     } else {
-                                        confirmAllBooks(email);
+                                        connected(email);
                                     }
                                 });
                     } catch (Exception error) {
@@ -2929,7 +2982,7 @@ final class OnboardingFlow {
 
         // NOTE: the permission was asked as the setup continued; refused,
         // the switch is off.
-        boolean phone = phoneContacts && !elsewhere;
+        boolean phone = mirrors.contains(PhoneMirror.CONTACTS) && !elsewhere;
         for (Addressbook book : pendingBooks) {
             boolean on = subscribed.contains(book.url);
             host.base.setBookState(book.url, on, on, on && phone);
@@ -2955,6 +3008,15 @@ final class OnboardingFlow {
 
         AccountEntry connected = connectedAccount;
         connectedAccount = null;
+
+        // NOTE: the calendar switch is kept for the account, its calendars
+        // being listed by the first sync, which shows them on the phone.
+        if (connected.server(PimDomain.CALENDAR) != null) {
+            PhoneCalendars.setAccount(
+                    host,
+                    connected.email,
+                    mirrors.contains(PhoneMirror.CALENDAR) && !calendarsElsewhere);
+        }
 
         // NOTE: merged into whatever the address already had, so connecting a
         // domain onto an existing account keeps the domains it already covers

@@ -14,10 +14,14 @@ import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
 
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * The calendar half of the engine: one driver per account, servicing the
- * remote yields of every calendar it holds.
+ * remote yields of every calendar it holds, against its server or, for a
+ * calendar's phone collection, against its rows in the phone's calendar
+ * provider through the {@link CalendarRemote} adapter.
  *
  * <p>It asks what changed. The enumerate is an RFC 6578 `sync-collection`
  * from the cursor the last pass stored, answering hrefs and ETags, and
@@ -38,6 +42,16 @@ import java.util.List;
  * cost too.
  */
 final class CalendarEngine extends PimdirEngine {
+    /**
+     * One lock per calendar, process-wide, as {@link OfflineEngine} holds one
+     * per book: the in-app sync, the background run, Android's upload sync
+     * and the pass after a write can each reconcile the same calendar with
+     * the phone, and a pass spans many store transactions. Reentrant, so a
+     * calendar pass's own phone passes nest under its hold.
+     */
+    private static final ConcurrentHashMap<String, ReentrantLock> SYNC_LOCKS =
+            new ConcurrentHashMap<>();
+
     private final Account account;
 
     /** The pass's sockets; null on a driver that only stages. */
@@ -45,6 +59,12 @@ final class CalendarEngine extends PimdirEngine {
 
     /** What the account's collection ids are namespaced under. */
     private final String accountId;
+
+    /** The phone spoke's adapter: the calendar's rows in CalendarContract. */
+    private final CalendarRemote phone;
+
+    /** Whether a phone pass of this driver wrote anything into the store. */
+    private boolean ingested;
 
     CalendarEngine(
             PimdirDb pimdir,
@@ -56,13 +76,27 @@ final class CalendarEngine extends PimdirEngine {
         this.transport = transport;
         this.account = account;
         this.accountId = accountId;
+        this.phone = new CalendarRemote(pimdir.context(), pimdir);
     }
 
     /**
-     * Reconciles one calendar with its server: pull what changed, push
-     * what is staged, then read back the bodies the pull dropped, and
-     * settle the conflicts the merge can ({@link #triage}), which a second
-     * exchange pushes.
+     * The phone pass of one calendar on its own, offline: its calendar-app
+     * edits brought into the store and the store's projected onto it. What
+     * the triggers outside a sync run ({@link CalendarRows#phonePass}).
+     * Answers whether it wrote anything into the store.
+     */
+    static boolean phonePass(PimdirDb pimdir, String collection) {
+        CalendarEngine engine = new CalendarEngine(pimdir, new PimalayaClient(), null, null, null);
+        engine.phoneSide(collection);
+        return engine.ingested;
+    }
+
+    /**
+     * Reconciles one calendar, three passes: the phone's edits pulled into
+     * the store, the exchange with the server (what the phone changed going
+     * out with it), then what the server brought projected onto the phone.
+     * Between them, the conflicts the merge can settle are settled on both
+     * sources ({@link #triage}), which a second exchange pushes.
      *
      * <p>What changed and not what there is. The enumerate asks the
      * collection for the members that moved since the cursor the last
@@ -76,16 +110,33 @@ final class CalendarEngine extends PimdirEngine {
      * the calendar until something else refetched it, which nothing does.
      */
     void sync(String collection) {
-        step(Progress.STAGE_SERVER, 0);
-        Log.d(
-                "pimalaya",
-                "calendar sync " + collection + ": "
-                        + client.offlineSync(this, collection, false));
-        hydrate(collection);
-
-        if (triage(collection) > 0) {
-            client.offlineSync(this, collection, false);
+        ReentrantLock lock = lock(collection);
+        lock.lock();
+        try {
+            phoneSide(collection);
+            step(Progress.STAGE_SERVER, 0);
+            Log.d(
+                    "pimalaya",
+                    "calendar sync " + collection + ": "
+                            + client.offlineSync(this, collection, false));
             hydrate(collection);
+
+            if (triage(collection) > 0) {
+                client.offlineSync(this, collection, false);
+                hydrate(collection);
+            }
+            phoneSide(collection);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** A phone pass that a failing provider fails alone, never the sync around it. */
+    private void phoneSide(String collection) {
+        try {
+            syncPhone(collection);
+        } catch (RuntimeException failure) {
+            Log.w("pimalaya", "calendar phone pass failed for " + collection, failure);
         }
     }
 
@@ -130,6 +181,87 @@ final class CalendarEngine extends PimdirEngine {
     }
 
     /**
+     * The calendar's phone pass, the server pass's shape: the store
+     * reconciled with the calendar's rows, the bodies the round brought
+     * hydrated. Skipped when the phone does not show the calendar or the
+     * permission is gone, and on the quiet path: nothing changed on the
+     * phone, nothing staged for it, and as many objects on both sides, three
+     * cheap checks where CalendarContract has no changes token.
+     *
+     * <p>Tasks and journal entries take part as objects that show nothing:
+     * the provider holds events alone ({@link CalendarRemote}).
+     */
+    void syncPhone(String collection) {
+        String spoke = PimdirStorage.phoneCollection(collection);
+        if (!phone.available(spoke)) {
+            return;
+        }
+
+        ReentrantLock lock = lock(collection);
+        lock.lock();
+        try {
+            if (!phone.changed(spoke)
+                    && !offline.pending(spoke)
+                    && phone.count(spoke) == offline.memberCount(spoke)) {
+                return;
+            }
+
+            step(Progress.STAGE_PHONE, 0);
+            Log.d(
+                    "pimalaya",
+                    "calendar phone sync " + collection + ": "
+                            + client.offlineSync(this, spoke, false));
+            hydrate(spoke);
+
+            // NOTE: a phone binding both sides changed goes through the same
+            // triage as the server's: what the merge settles is pushed to
+            // the phone at once, a collision is left to the form.
+            if (triage(spoke) > 0) {
+                client.offlineSync(this, spoke, false);
+                hydrate(spoke);
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** The calendar's process-wide sync lock, keyed by its collection id. */
+    private static ReentrantLock lock(String collection) {
+        return SYNC_LOCKS.computeIfAbsent(collection, key -> new ReentrantLock());
+    }
+
+    /**
+     * Announces a hydrate, unless it is the phone spoke's: projecting a
+     * calendar onto the device downloads nothing.
+     */
+    @Override
+    protected void hydrating(String collection, int count) {
+        if (!PimdirStorage.isPhoneCollection(collection)) {
+            step(Progress.STAGE_DOWNLOAD, count);
+        }
+    }
+
+    /**
+     * A write to a calendar reaches the phone's calendar within a second
+     * ({@link PhoneQueue}); a write to the phone collection is a phone
+     * pass's own, pushed by that pass.
+     */
+    @Override
+    protected void staged(String collection) {
+        if (!PimdirStorage.isPhoneCollection(collection)) {
+            PhoneQueue.calendarWritten(collection);
+        }
+    }
+
+    @Override
+    protected void applied(JSONArray effects) throws JSONException {
+        for (int index = 0; index < effects.length(); index++) {
+            ingested |= PimdirStorage.isPhoneCollection(
+                    effects.getJSONObject(index).getString("collection"));
+        }
+    }
+
+    /**
      * The calendar's address behind a collection id, which is what every
      * request names it by.
      */
@@ -149,6 +281,9 @@ final class CalendarEngine extends PimdirEngine {
     @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
+        if (PimdirStorage.isPhoneCollection(collection)) {
+            return phone.enumerate(collection);
+        }
         String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");
         long asked = System.nanoTime();
         EventDelta delta = client.syncEvents(transport, account, urlOf(collection), cursor);
@@ -191,6 +326,9 @@ final class CalendarEngine extends PimdirEngine {
     @Override
     protected JSONObject fetch(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
+        if (PimdirStorage.isPhoneCollection(collection)) {
+            return phone.fetch(collection, yielded.getJSONArray("handles"));
+        }
         List<String> handles = stringsOf(yielded.getJSONArray("handles"));
 
         long asked = System.nanoTime();
@@ -232,6 +370,10 @@ final class CalendarEngine extends PimdirEngine {
     protected JSONObject push(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
         JSONArray changes = yielded.getJSONArray("changes");
+        if (PimdirStorage.isPhoneCollection(collection)) {
+            step(Progress.STAGE_PROJECT, changes.length());
+            return phone.push(collection, changes);
+        }
         step(Progress.STAGE_UPLOAD, changes.length());
 
         JSONArray results = new JSONArray();

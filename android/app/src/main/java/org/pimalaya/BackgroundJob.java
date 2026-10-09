@@ -118,6 +118,9 @@ public class BackgroundJob extends JobService {
         if (failure != null) {
             Log.w("pimalaya", "background phone sync failed", failure);
         }
+        // NOTE: the same net for every calendar the phone shows, which is
+        // also what moves the window of a series listed instance by instance.
+        runner.syncPhoneCalendars();
         if (stopped) {
             return;
         }

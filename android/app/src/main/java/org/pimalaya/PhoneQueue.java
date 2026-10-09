@@ -14,16 +14,18 @@ import java.util.function.Consumer;
 import org.pimalaya.client.PimalayaClient;
 
 /**
- * The store's writes reaching the phone's contacts without a sync: a write
- * to a book queues its phone pass a second later, so a burst (an import, a
- * merge) coalesces into one pass per book.
+ * The store's writes reaching the phone's contacts and calendars without a
+ * sync: a write to a book or a calendar queues its phone pass a second
+ * later, so a burst (an import, a merge, a series split) coalesces into one
+ * pass per collection.
  *
  * <p>Process-wide, on a thread of its own rather than the activity's, so a
  * pass queued just before the app is left still runs. No network and no
- * report; each pass takes its book's lock ({@link OfflineEngine}) and never
- * the process's {@link SyncLock}, so the mirror keeps up while a background
- * sync runs. A book the phone does not mirror has no Android account, and
- * its pass returns at once.
+ * report; each pass takes its collection's lock ({@link OfflineEngine},
+ * {@link CalendarEngine}) and never the process's {@link SyncLock}, so the
+ * mirror keeps up while a background sync runs. A collection the phone does
+ * not mirror has no Android account or calendar row, and its pass returns at
+ * once.
  */
 final class PhoneQueue {
     /** How long a write waits for the ones following it. */
@@ -34,17 +36,20 @@ final class PhoneQueue {
 
     private final Handler main;
     private final Executor runner;
-    private final Consumer<String> pass;
+    private final Consumer<String> book;
+    private final Consumer<String> calendar;
 
-    /** The books written since the last pass started. */
-    private final Set<String> pending = new LinkedHashSet<>();
+    /** The books and the calendars written since the last pass started. */
+    private final Set<String> books = new LinkedHashSet<>();
+    private final Set<String> calendars = new LinkedHashSet<>();
 
     private final Runnable flush = this::flush;
 
-    PhoneQueue(Handler main, Executor runner, Consumer<String> pass) {
+    PhoneQueue(Handler main, Executor runner, Consumer<String> book, Consumer<String> calendar) {
         this.main = main;
         this.runner = runner;
-        this.pass = pass;
+        this.book = book;
+        this.calendar = calendar;
     }
 
     /** Starts the process's queue, once. */
@@ -68,7 +73,8 @@ final class PhoneQueue {
                             } catch (Exception error) {
                                 Log.w("pimalaya", "phone pass failed for " + url, error);
                             }
-                        });
+                        },
+                        collection -> CalendarEngine.phonePass(pimdir, collection));
     }
 
     /** A book was written; nothing before the app started the queue. */
@@ -79,11 +85,28 @@ final class PhoneQueue {
         }
     }
 
+    /** A calendar was written; nothing before the app started the queue. */
+    static void calendarWritten(String collection) {
+        PhoneQueue queue = shared;
+        if (queue != null) {
+            queue.queueCalendar(collection);
+        }
+    }
+
     /** Queues the book's pass, the first write of a burst timing it. */
     void queue(String url) {
-        synchronized (pending) {
-            boolean first = pending.isEmpty();
-            pending.add(url);
+        queue(books, url);
+    }
+
+    /** Queues the calendar's pass, the same way. */
+    void queueCalendar(String collection) {
+        queue(calendars, collection);
+    }
+
+    private void queue(Set<String> pending, String id) {
+        synchronized (books) {
+            boolean first = books.isEmpty() && calendars.isEmpty();
+            pending.add(id);
             if (!first) {
                 return;
             }
@@ -92,19 +115,25 @@ final class PhoneQueue {
     }
 
     /**
-     * Runs the pending passes. The set drains when the runner gets to it,
+     * Runs the pending passes. The sets drain when the runner gets to them,
      * so a write landing while the task waits joins this round.
      */
     private void flush() {
         runner.execute(
                 () -> {
                     List<String> urls;
-                    synchronized (pending) {
-                        urls = new ArrayList<>(pending);
-                        pending.clear();
+                    List<String> collections;
+                    synchronized (books) {
+                        urls = new ArrayList<>(books);
+                        collections = new ArrayList<>(calendars);
+                        books.clear();
+                        calendars.clear();
                     }
                     for (String url : urls) {
-                        pass.accept(url);
+                        book.accept(url);
+                    }
+                    for (String collection : collections) {
+                        calendar.accept(collection);
                     }
                 });
     }

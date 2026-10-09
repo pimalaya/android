@@ -18,9 +18,10 @@ import java.util.List;
 import java.util.concurrent.Executor;
 
 /**
- * A write to a book reaches the phone a second later, in one pass per book
- * however many writes the second saw, and a write landing while the pass
- * waits for its thread joins it rather than queueing another.
+ * A write to a book or a calendar reaches the phone a second later, in one
+ * pass per collection however many writes the second saw, and a write
+ * landing while the pass waits for its thread joins it rather than queueing
+ * another.
  */
 @RunWith(RobolectricTestRunner.class)
 public class PhoneQueueTest {
@@ -33,7 +34,12 @@ public class PhoneQueueTest {
         // NOTE: the runner holds its tasks, so a test says when the pass
         // thread gets to them.
         Executor runner = waiting::add;
-        queue = new PhoneQueue(new Handler(Looper.getMainLooper()), runner, passes::add);
+        queue =
+                new PhoneQueue(
+                        new Handler(Looper.getMainLooper()),
+                        runner,
+                        passes::add,
+                        collection -> passes.add("calendar " + collection));
     }
 
     private void idle(long millis) {
@@ -88,5 +94,17 @@ public class PhoneQueueTest {
         idle(PhoneQueue.DELAY);
         runWaiting();
         assertEquals(List.of("book-a", "book-a"), passes);
+    }
+
+    @Test
+    public void booksAndCalendarsWrittenTogetherShareOneRound() {
+        queue.queueCalendar("acct/Work");
+        queue.queue("book-a");
+        queue.queueCalendar("acct/Work");
+
+        idle(PhoneQueue.DELAY);
+        assertEquals("one timer for both", 1, waiting.size());
+        runWaiting();
+        assertEquals(List.of("book-a", "calendar acct/Work"), passes);
     }
 }

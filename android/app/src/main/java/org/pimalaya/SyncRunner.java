@@ -206,6 +206,23 @@ final class SyncRunner {
         return null;
     }
 
+    /**
+     * The calendars' phone spoke alone, offline and silent: the phone pass of
+     * every calendar the phone shows, each skipping on its quiet path.
+     * Answers whether any brought a calendar-app edit in. Nothing without the
+     * calendar permission.
+     */
+    boolean syncPhoneCalendars() {
+        if (!PhoneMirror.CALENDAR.granted(context)) {
+            return false;
+        }
+        boolean changed = false;
+        for (String collection : CalendarRows.shown(context)) {
+            changed |= CalendarRows.phonePass(pimdir, collection);
+        }
+        return changed;
+    }
+
     /** The subscribed books set to mirror into the phone's contacts. */
     List<BookEntry> phoneSyncedBooks() {
         List<BookEntry> phone = new ArrayList<>();
