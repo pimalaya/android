@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A text field inside a card: a page-tone pill, so it reads against
+     the card's surface, ringed in the accent while it has focus. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true">
+        <shape>
+            <solid android:color="?android:attr/colorBackground" />
+            <stroke
+                android:width="2dp"
+                android:color="?android:attr/colorAccent" />
+            <corners android:radius="1000dp" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <solid android:color="?android:attr/colorBackground" />
+            <stroke
+                android:width="2dp"
+                android:color="@android:color/transparent" />
+            <corners android:radius="1000dp" />
+        </shape>
+    </item>
+</selector>

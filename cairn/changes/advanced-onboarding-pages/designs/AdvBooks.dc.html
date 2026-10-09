@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Advanced: addressbooks</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#EEEEEE;--divl:#E0E0E0;--fg:#1C1B1F;--fg2:#5E5E62;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1C1E21;--surface:#2A2A2A;--divl:#363636;--fg:#E6E1E5;--fg2:#AEAAAE}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.tbtn{width:40px;height:40px;margin:4px;border-radius:999px;background:var(--surface);color:var(--fg);display:flex;align-items:center;justify-content:center;flex:none;text-decoration:none}
+.card{background:var(--surface);border-radius:22px;overflow:hidden}
+.br{display:flex;align-items:center;gap:14px;min-height:60px;padding:0 8px 0 20px;position:relative;font-size:16px}
+.br+.br::before{content:"";position:absolute;top:0;left:20px;right:0;height:1px;background:var(--divl)}
+.br .n{flex:1}
+.cb{width:48px;height:48px;display:flex;align-items:center;justify-content:center;color:var(--accent)}
+.cb.off{color:var(--fg2)}
+.primary{height:56px;border-radius:999px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;text-decoration:none}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div style="min-height: 60px; padding: 0 8px; display: flex; align-items: center; flex: none">
+    <a class="tbtn" href="AdvSignIn.dc.html" aria-label="Back"><svg class="ico" viewBox="0 -960 960 960"><path d="m313-440 224 224-57 56-320-320 320-320 57 56-224 224h487v80H313Z"/></svg></a>
+  </div>
+  <div style="flex: 1; min-height: 0; overflow: hidden; padding: 8px 24px 0">
+    <div style="display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--fg2)"><svg class="ico" style="width: 18px; height: 18px; color: var(--accent)" viewBox="0 -960 960 960"><path d="M382-240 154-468l57-57 171 171 367-367 57 57-424 424Z"/></svg>Signed in · alex@fastmail.example</div>
+    <div style="margin-top: 8px; font-size: 28px; font-weight: 700; line-height: 34px">Which addressbooks?</div>
+    <div style="margin-top: 8px; font-size: 14px; line-height: 20px; color: var(--fg2)">The ones you pick sync to this phone. You can change this later in the account’s settings.</div>
+    <div class="card" style="margin-top: 20px">
+      <label class="br"><span class="n">Personal</span><span class="cb"><svg class="ico" viewBox="0 -960 960 960"><path d="m424-312 282-282-56-56-226 226-114-114-56 56 170 170ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Zm0-560v560-560Z"/></svg></span></label>
+      <label class="br"><span class="n">Work</span><span class="cb"><svg class="ico" viewBox="0 -960 960 960"><path d="m424-312 282-282-56-56-226 226-114-114-56 56 170 170ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Zm0-560v560-560Z"/></svg></span></label>
+      <label class="br"><span class="n">Shared with family</span><span class="cb off"><svg class="ico" viewBox="0 -960 960 960"><path d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Z"/></svg></span></label>
+    </div>
+  </div>
+  <div style="padding: 12px 24px 16px; flex: none">
+    <a class="primary" href="NewArrive.dc.html">Finish</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#00696F","options":["#00696F","#4F5BD5","#8E4585","#9A5B00"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var accent = this.props.accent ?? '#00696F';
+    if (dark && accent === '#00696F') accent = '#80DEEA';
+    var h = accent.replace('#', '');
+    var r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+    var onAccent = (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#000000' : '#FFFFFF';
+    return { theme: dark ? 'app dark' : 'app', vars: '--accent:' + accent + ';--on-accent:' + onAccent };
+  }
+}
+</script>
+</body>
+</html>
