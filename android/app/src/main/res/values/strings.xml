@@ -654,4 +654,22 @@
     <string name="delete_account_confirm">Remove this account from this phone?</string>
     <string name="delete_account_contacts">Its contacts stay on this phone.</string>
     <string name="delete_account_all">Its contacts move to this phone. Its mail and events are removed.</string>
+    <!-- Background check (BackgroundCheck, BackgroundJob). -->
+    <string name="account_background">Background</string>
+    <string name="background_sync">Sync in the background</string>
+    <string name="background_sync_note">Roughly, as Android allows: an idle phone checks less often. A pull in the app syncs at once.</string>
+    <string-array name="background_intervals">
+        <item>Off</item>
+        <item>Every 15 minutes</item>
+        <item>Every 30 minutes</item>
+        <item>Every hour</item>
+        <item>Every 2 hours</item>
+    </string-array>
+    <string name="sync_background">Syncing in the background</string>
+    <string name="background_notify">Notify new mail</string>
+    <string name="sync_background_busy">A background sync is running</string>
+    <plurals name="notify_new_mail">
+        <item quantity="one">%d new message</item>
+        <item quantity="other">%d new messages</item>
+    </plurals>
 </resources>

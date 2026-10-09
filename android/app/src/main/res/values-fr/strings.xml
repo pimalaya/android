@@ -522,4 +522,22 @@
     <string name="delete_account_confirm">Retirer ce compte de ce téléphone ?</string>
     <string name="delete_account_contacts">Ses contacts restent sur ce téléphone.</string>
     <string name="delete_account_all">Ses contacts sont déplacés sur ce téléphone. Ses e-mails et événements sont supprimés.</string>
+    <!-- Vérification en arrière-plan (BackgroundCheck, BackgroundJob). -->
+    <string name="account_background">Arrière-plan</string>
+    <string name="background_sync">Synchroniser en arrière-plan</string>
+    <string name="background_sync_note">Approximativement, selon Android : un téléphone inactif vérifie moins souvent. Tirer pour actualiser synchronise immédiatement.</string>
+    <string-array name="background_intervals">
+        <item>Désactivé</item>
+        <item>Toutes les 15 minutes</item>
+        <item>Toutes les 30 minutes</item>
+        <item>Toutes les heures</item>
+        <item>Toutes les 2 heures</item>
+    </string-array>
+    <string name="sync_background">Synchronisation en arrière-plan</string>
+    <string name="background_notify">Notifier les nouveaux e-mails</string>
+    <string name="sync_background_busy">Une synchronisation en arrière-plan est en cours</string>
+    <plurals name="notify_new_mail">
+        <item quantity="one">%d nouveau message</item>
+        <item quantity="other">%d nouveaux messages</item>
+    </plurals>
 </resources>

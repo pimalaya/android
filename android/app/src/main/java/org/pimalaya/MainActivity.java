@@ -38,11 +38,8 @@ import org.pimalaya.client.Account;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.MailSession;
-import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.Transport;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
-import org.pimalaya.client.SubmissionRefused;
 
 /**
  * Single-activity host walking the app's screens through a ViewFlipper.
@@ -111,6 +108,7 @@ public class MainActivity extends Activity {
     private boolean authBusy;
 
     static final int REQUEST_CONTACTS = 1;
+    private static final int REQUEST_NOTIFICATIONS = 4;
     private static final int REQUEST_IMPORT = 2;
     private static final int REQUEST_EXPORT = 3;
 
@@ -130,12 +128,21 @@ public class MainActivity extends Activity {
     /** The contacts inside it. */
     PimdirContacts contacts;
     SyncRunner runner;
+
+    /** The mail and calendar passes, behind the sync strip. */
+    RemotePass remote;
     private ViewFlipper flipper;
     private ViewFlipper authFlipper;
     ContactForm form;
 
     /** Every connected account (multi-account). */
     final List<AccountEntry> accounts = new ArrayList<>();
+
+    /** Whether the app is on screen, which a background run leaves alone. */
+    static volatile boolean onScreen;
+
+    /** The background run this activity last reloaded after. */
+    private long reloadedRun = BackgroundJob.ran;
 
     /** Each domain's filter, read once from where it was last left. */
     private final Map<PimDomain, MergedFilter> filters = new java.util.EnumMap<>(PimDomain.class);
@@ -252,6 +259,31 @@ public class MainActivity extends Activity {
         messageView = new MessageView(this);
         compose = new MessageCompose(this);
         runner = new SyncRunner(this, base, pimdir, store, client, syncObserver());
+        remote =
+                new RemotePass(
+                        this,
+                        pimdir,
+                        client,
+                        store,
+                        mail,
+                        events,
+                        runner,
+                        new RemotePass.Progress() {
+                            @Override
+                            public void account(String email) {
+                                syncAccount(email);
+                            }
+
+                            @Override
+                            public void mailboxes(int done, int total) {
+                                syncProgress(R.string.sync_step_mailboxes, done, total);
+                            }
+
+                            @Override
+                            public void step(PimDomain domain, int stage, int count) {
+                                syncStep(domain, stage, count);
+                            }
+                        });
         // NOTE: the two flows reference each other (grants land back in
         // the wizard), so one side binds late.
         oauth = new OauthFlow(this);
@@ -330,11 +362,18 @@ public class MainActivity extends Activity {
         accounts.add(LocalBook.account());
         accounts.addAll(store.loadAll());
 
-        // NOTE: sync is manual only; an install upgraded from a build
-        // that scheduled background sync still holds its periodic jobs
-        // and their interval choices, dropped here.
-        getSystemService(JobScheduler.class).cancelAll();
+        // NOTE: an install upgraded from a build that scheduled its own
+        // background sync still holds those jobs and their interval
+        // choices, dropped here; the background check's job is kept.
+        JobScheduler jobs = getSystemService(JobScheduler.class);
+        for (android.app.job.JobInfo job : jobs.getAllPendingJobs()) {
+            if (job.getId() != BackgroundCheck.JOB) {
+                jobs.cancel(job.getId());
+            }
+        }
         deleteSharedPreferences("pimalaya.background");
+        BackgroundCheck.schedule(this);
+        BackgroundJob.onEnd = () -> main.post(this::backgroundEnded);
 
         goHome();
 
@@ -550,6 +589,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        BackgroundJob.onEnd = null;
         io.shutdownNow();
         // NOTE: shutdownNow interrupts, but a blocking accept() only
         // wakes on close; without this the OAuth loopback listener would
@@ -767,6 +807,12 @@ public class MainActivity extends Activity {
             onboarding.resetConfigContinue();
         }
 
+        onScreen = true;
+        afterBackgroundRun();
+        if (BackgroundJob.running && !syncing) {
+            showBackgroundStrip();
+        }
+
         // NOTE: the background fill stops when the app leaves the
         // foreground and picks up where its floors reached on return.
         foreground = true;
@@ -779,7 +825,102 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         foreground = false;
+        onScreen = false;
+        // NOTE: an account connected or removed while the app was open
+        // changes whether the background check has anything to do.
+        BackgroundCheck.schedule(this);
         super.onPause();
+    }
+
+    /**
+     * Catches up with the background check on return: a run may have
+     * renewed a token and written every list, and its notifications are
+     * for an app that was not open.
+     */
+    private void afterBackgroundRun() {
+        if (store == null) {
+            return;
+        }
+        getSystemService(android.app.NotificationManager.class).cancelAll();
+        askNotifications();
+        long ran = BackgroundJob.ran;
+        if (ran == reloadedRun || syncing) {
+            return;
+        }
+        reloadedRun = ran;
+        accounts.clear();
+        accounts.add(LocalBook.account());
+        accounts.addAll(store.loadAll());
+        reloadContacts();
+        mailList.reload();
+        calendarList.reload();
+        reloadHome();
+    }
+
+    /**
+     * Shows that a background run is syncing, on the strip the app's own
+     * passes use: a pull meanwhile is turned down, and this says why
+     * before it is tried.
+     */
+    private void showBackgroundStrip() {
+        for (int panel : new int[] {PANEL_MAIL, PANEL_CONTACTS, PANEL_CALENDAR}) {
+            headerOf(panel).sync(null, getString(R.string.sync_background), 0, 0);
+        }
+    }
+
+    /**
+     * A background run ended (main thread): on screen, the strip goes, the
+     * lists catch up and a first sync the run held back starts; off screen,
+     * the next return does it.
+     */
+    private void backgroundEnded() {
+        if (!onScreen || isDestroyed()) {
+            return;
+        }
+        if (!syncing) {
+            for (int panel : new int[] {PANEL_MAIL, PANEL_CONTACTS, PANEL_CALENDAR}) {
+                headerOf(panel).synced();
+            }
+        }
+        afterBackgroundRun();
+        firstSyncIfOwed(screen);
+    }
+
+    /**
+     * Asks once for the notifications permission (Android 13 on), when an
+     * account would notify new mail.
+     */
+    private void askNotifications() {
+        if (android.os.Build.VERSION.SDK_INT < 33
+                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                        == PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        android.content.SharedPreferences asked =
+                getSharedPreferences("notifications-asked", MODE_PRIVATE);
+        if (asked.getBoolean("asked", false)) {
+            return;
+        }
+        boolean wanted = false;
+        for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
+            wanted |= BackgroundCheck.syncs(this, account.email)
+                    && BackgroundCheck.notifies(this, account.email);
+        }
+        if (wanted) {
+            asked.edit().putBoolean("asked", true).apply();
+            requestNotifications();
+        }
+    }
+
+    /** Asks for the notifications permission (Android 13 on). */
+    void requestNotifications() {
+        if (android.os.Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[] {Manifest.permission.POST_NOTIFICATIONS},
+                    REQUEST_NOTIFICATIONS);
+        }
     }
 
     private void setUpHomePanel() {
@@ -1074,7 +1215,23 @@ public class MainActivity extends Activity {
 
     /** Pushes the sync flag to every subscribed element (the lists'
      *  sync strip, the drawer's inert sync row). */
+    /**
+     * Starts a pass: takes the process's sync lock, turning the pass down
+     * while a background run holds it.
+     */
+    private boolean startSync() {
+        if (!SyncLock.take()) {
+            toast(getString(R.string.sync_background_busy));
+            return false;
+        }
+        setSyncing(true);
+        return true;
+    }
+
     private void setSyncing(boolean value) {
+        if (syncing && !value) {
+            SyncLock.release();
+        }
         syncing = value;
         for (java.util.function.Consumer<Boolean> observer : syncObservers) {
             observer.accept(value);
@@ -1197,7 +1354,9 @@ public class MainActivity extends Activity {
             return;
         }
         syncAccount(null);
-        setSyncing(true);
+        if (!startSync()) {
+            return;
+        }
 
         io.execute(
                 () -> {
@@ -1266,10 +1425,12 @@ public class MainActivity extends Activity {
             return;
         }
         syncAccount(null);
-        setSyncing(true);
+        if (!startSync()) {
+            return;
+        }
         io.execute(
                 () -> {
-                    MailPass pass = mailPass(filterOf(PimDomain.MAIL));
+                    RemotePass.MailPass pass = remote.mailPass(filterOf(PimDomain.MAIL));
                     postAlive(
                             () -> {
                                 setSyncing(false);
@@ -1285,138 +1446,11 @@ public class MainActivity extends Activity {
                 });
     }
 
-    /** What one mail pass over every account came to. */
-    private static final class MailPass {
-        Exception failure;
-        int sent;
-    }
-
-    /**
-     * Every mail account's outbox drained and mailboxes synced, on the
-     * calling thread: those the scope takes.
-     */
-    private MailPass mailPass(SyncScope scope) {
-        syncAccount(null);
-        MailPass pass = new MailPass();
-        for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
-            if (!scope.account(account.email)) {
-                continue;
-            }
-            syncAccount(account.email);
-            // One connection for the account's whole pass: the drain, the
-            // walk and every marker the reader moved go out on it rather
-            // than on one apiece.
-            try (MailSession session = openMail(account)) {
-                // NOTE: the outbox first, so a message sent a moment ago is
-                // already in the sent mailbox by the time the walk beside it
-                // lists one.
-                try {
-                    if (scope.collection(account.email, mail.outboxOf(account.email))) {
-                        pass.sent += drainOutbox(account, session);
-                    }
-                } catch (Exception error) {
-                    Log.w("pimalaya", "outbox drain failed: " + account.email, error);
-                    if (pass.failure == null) {
-                        pass.failure = error;
-                    }
-                }
-
-                Exception error = fetchMail(account, session, scope);
-                if (pass.failure == null) {
-                    pass.failure = error;
-                }
-            } catch (Exception error) {
-                Log.w("pimalaya", "mail sync failed: " + account.email, error);
-                if (pass.failure == null) {
-                    pass.failure = error;
-                }
-            }
-        }
-        return pass;
-    }
-
     /** Says how many queued messages a pass sent, when it sent any. */
-    private void reportMail(MailPass pass) {
+    private void reportMail(RemotePass.MailPass pass) {
         if (pass.sent > 0) {
             toast(getResources().getQuantityString(R.plurals.outbox_sent, pass.sent, pass.sent));
         }
-    }
-
-    /**
-     * Hands over everything waiting in one account's outbox, on the
-     * calling thread, answering how many went out.
-     *
-     * <p>One at a time, in the append order the queue owes them, and the
-     * row goes only once the submission has been accepted: the message
-     * has left, so acknowledging it is what finishes the action (STORAGE
-     * section 15.5). A submission is therefore at-least-once, and a drain
-     * that dies between the handover and the acknowledgement sends the
-     * message twice, which is the trade against losing it.
-     *
-     * <p>A failure has two answers. A message the server refused for good
-     * is parked carrying what it said, and the drain carries on to the
-     * ones behind it: nothing will ever make that message acceptable, and
-     * leaving it queued would offer it again on every sync for ever.
-     * Anything else counts an attempt and stops the drain where it is,
-     * since the usual cause is that there is no network and the next
-     * message would fail too.
-     */
-    private int drainOutbox(AccountEntry account, MailSession session) throws Exception {
-        int sent = 0;
-        for (MailStore.Outgoing waiting : mail.outgoing(account.email)) {
-            String filed;
-            try {
-                filed = client.submitMessage(session, waiting.source);
-            } catch (SubmissionRefused refused) {
-                Log.w("pimalaya", "submission refused: " + account.email, refused);
-                mail.parkOutgoing(waiting.id, refused.getMessage());
-                continue;
-            } catch (Exception error) {
-                mail.retryOutgoing(waiting.id);
-                throw error;
-            }
-            if (filed != null) {
-                mail.aliasSentCopy(waiting.messageId, filed);
-            }
-            mail.acknowledge(waiting.id);
-            sent += 1;
-        }
-        return sent;
-    }
-
-    /**
-     * Opens one account's mail connection, renewing its access token once
-     * if the server refuses the sign-in.
-     *
-     * <p>The refresh belongs here rather than around each verb, because
-     * the session <em>is</em> the sign-in: a token that expired is a
-     * connection that cannot be opened, and one already open outlives the
-     * token that opened it.
-     */
-    MailSession openMail(AccountEntry account) {
-        try {
-            return PimalayaClient.openMail(account.server(PimDomain.MAIL));
-        } catch (Exception refused) {
-            AccountCredential credential = account.credential(PimDomain.MAIL);
-            if (!SyncRunner.expiredToken(refused) || !credential.renewable()) {
-                throw refused instanceof RuntimeException
-                        ? (RuntimeException) refused
-                        : new IllegalStateException(refused);
-            }
-            return PimalayaClient.openMail(
-                    runner.refreshed(account, PimDomain.MAIL).server(PimDomain.MAIL));
-        }
-    }
-
-    /** The stored accounts connected for one domain. */
-    List<AccountEntry> accountsFor(PimDomain domain) {
-        List<AccountEntry> matching = new ArrayList<>();
-        for (AccountEntry entry : store.loadAll()) {
-            if (entry.covers(domain)) {
-                matching.add(entry);
-            }
-        }
-        return matching;
     }
 
     /**
@@ -1432,10 +1466,12 @@ public class MainActivity extends Activity {
             return;
         }
         syncAccount(null);
-        setSyncing(true);
+        if (!startSync()) {
+            return;
+        }
         io.execute(
                 () -> {
-                    Exception failure = calendarPass(filterOf(PimDomain.CALENDAR));
+                    Exception failure = remote.calendarPass(filterOf(PimDomain.CALENDAR));
                     postAlive(
                             () -> {
                                 setSyncing(false);
@@ -1447,189 +1483,20 @@ public class MainActivity extends Activity {
                 });
     }
 
-    /**
-     * Every calendar account synced, on the calling thread: those the
-     * scope takes. Answers the first failure.
-     */
-    private Exception calendarPass(SyncScope scope) {
-        syncAccount(null);
-        Exception failure = null;
-        // NOTE: the calendar accounts, rather than the contacts accounts that
-        // happened to be CalDAV-shaped. That filter was the closest thing to a
-        // calendar account the app had before the connection flow could make
-        // one, and it walked a CardDAV home looking for calendars.
-        for (AccountEntry account : accountsFor(PimDomain.CALENDAR)) {
-            if (!scope.account(account.email)) {
-                continue;
-            }
-            Exception error = fetchCalendars(account, scope);
-            if (failure == null) {
-                failure = error;
-            }
-        }
-        return failure;
+    /** Opens one account's mail connection ({@link RemotePass#openMail}). */
+    MailSession openMail(AccountEntry account) {
+        return remote.openMail(account);
     }
 
-    /**
-     * One account's mail reconciled with its server, on the calling
-     * thread. Answers what went wrong, or null.
-     *
-     * <p>One walk, then one engine pass per mailbox off it: the walk is
-     * what authenticates and what says which mailboxes there are, and
-     * what a pass does instead of replacing is reconcile, which is what
-     * lets a staged marker or a staged delete survive it.
-     *
-     * <p>The mailboxes then run side by side on the account's pool
-     * ({@link MailPool}), in the pass's order, the inbox first: the wait is
-     * the network's, mailbox after mailbox, and a few sessions wait on a few
-     * mailboxes at once. The caller's session is the pool's first, so the
-     * walk, the drain before it and the first worker share one connection.
-     * One mailbox failing leaves the others running; the first failure is
-     * what the pass reports.
-     */
-    private Exception fetchMail(AccountEntry account, MailSession session, SyncScope scope) {
-        syncAccount(account.email);
-        String accountId = accountIdOf(account.email);
-        List<String> collections = new ArrayList<>();
-        try {
-            // NOTE: the step at once. Listing the mailboxes is a round trip,
-            // and a dialog over a blank line for the length of one reads as
-            // a dialog that has not started.
-            syncStep(PimDomain.MAIL, PimdirEngine.Progress.STAGE_SERVER, 0);
-
-            List<Mailbox> mailboxes =
-                    new MailEngine(pimdir, client, session, accountId).mailboxes();
-            mail.replaceMailboxes(account.email, mailboxes);
-
-            // NOTE: the inbox first, then the sent mail, rather than in the
-            // order the server lists them: a first pass lists one chunk of
-            // each, and the inbox is what the list has to show first.
-            for (Mailbox mailbox : MailEngine.ordered(mailboxes)) {
-                // NOTE: a pass scoped to the filter skips what it hides. The
-                // roster above is still read, so the filter keeps offering it.
-                String collection = mail.collectionOf(account.email, mailbox.name);
-                if (!scope.collection(account.email, collection)) {
-                    continue;
-                }
-                collections.add(collection);
-            }
-        } catch (Exception error) {
-            Log.w("pimalaya", "mail sync failed: " + account.email, error);
-            return error;
-        }
-
-        MailPool.Outcome outcome;
-        try (MailPool<MailSession> pool =
-                new MailPool<>(
-                        MailPool.sizeOf(account.server(PimDomain.MAIL)),
-                        session,
-                        () -> openMail(account))) {
-            outcome =
-                    pool.run(
-                            account.email,
-                            collections,
-                            worker -> new MailEngine(pimdir, client, worker, accountId),
-                            MailEngine::sync,
-                            (done, total) ->
-                                    syncProgress(R.string.sync_step_mailboxes, done, total));
-        }
-        for (MailPool.Failure failure : outcome.failures) {
-            Log.w("pimalaya", "mail sync failed: " + failure.collection, failure.error);
-        }
-        if (outcome.failure() == null) {
-            SyncStamps.mark(this, account.email);
-        }
-        return outcome.failure();
-    }
-
-    /**
-     * One account's calendars reconciled with its server, on the calling
-     * thread. Answers what went wrong, or null; a calendar whose pass
-     * fails leaves the ones beside it alone.
-     */
-    private Exception fetchCalendars(AccountEntry account, SyncScope scope) {
-        syncAccount(account.email);
-        // NOTE: one session for the whole account, so the listing and every
-        // event round after it share the token a refresh may have replaced
-        // part-way; the listing's transport is then the first calendar
-        // worker's.
-        SyncRunner.Session session = runner.session(account, PimDomain.CALENDAR);
-        try (Transport transport = new Transport()) {
-            try {
-                // NOTE: as the mail pass does, and for the same reason: the
-                // calendar listing is a discovery walk, and it is the
-                // slowest round trip of the pass.
-                syncStep(PimDomain.CALENDAR, PimdirEngine.Progress.STAGE_SERVER, 0);
-                events.replaceCalendars(
-                        account.email,
-                        session.call(server -> client.listCalendars(transport, server)));
-            } catch (Exception error) {
-                Log.w("pimalaya", "calendar list failed: " + account.email, error);
-                return error;
-            }
-
-            List<String> calendars = new ArrayList<>();
-            for (EventStore.StoredCalendar calendar : events.loadCalendars()) {
-                if (!calendar.accountEmail.equals(account.email)) {
-                    continue;
-                }
-                if (!scope.collection(account.email, calendar.id)) {
-                    continue;
-                }
-                calendars.add(calendar.id);
-            }
-
-            // NOTE: the calendars side by side, as the mailboxes are, the
-            // listing's transport the first worker's: the wait was the
-            // network's, one calendar after another.
-            String accountId = accountIdOf(account.email);
-            Exception failure;
-            try (CalendarPool<Transport> pool =
-                    new CalendarPool<>(CalendarPool.SIZE, transport, Transport::new)) {
-                CalendarPool.Outcome outcome =
-                        pool.run(
-                                account.email,
-                                calendars,
-                                (worker, collection, remote) ->
-                                        session.call(
-                                                server -> {
-                                                    CalendarEngine engine =
-                                                            new CalendarEngine(
-                                                                    pimdir,
-                                                                    client,
-                                                                    worker,
-                                                                    server,
-                                                                    accountId);
-                                                    engine.progress = this::syncStep;
-                                                    try {
-                                                        engine.sync(collection);
-                                                    } finally {
-                                                        remote.addAndGet(engine.remoteSoFar());
-                                                    }
-                                                    return null;
-                                                }));
-                for (CalendarPool.Failure failed : outcome.failures) {
-                    Log.w("pimalaya", "calendar sync failed: " + failed.collection, failed.error);
-                }
-                failure = outcome.failure();
-            }
-            if (failure == null) {
-                SyncStamps.mark(this, account.email);
-            }
-            return failure;
-        }
+    /** The stored accounts connected for one domain. */
+    List<AccountEntry> accountsFor(PimDomain domain) {
+        return remote.accountsFor(domain);
     }
 
     /** The store id one account's collections are namespaced under. */
     private String accountIdOf(String email) {
-        if (accountIds == null) {
-            accountIds = new PimdirAccount(this);
-        }
-        return accountIds.idOf(email);
+        return remote.accountIdOf(email);
     }
-
-    /** The account-to-store-id map, opened the first time one is asked for. */
-    private PimdirAccount accountIds;
 
     /**
      * A mail driver that only stages: no account, so it services the
@@ -1690,7 +1557,12 @@ public class MainActivity extends Activity {
      */
     private void firstSyncIfOwed(int panel) {
         PimDomain domain = domainOf(panel);
-        if (domain == null || screen != panel || syncing || isFinishing()) {
+        // NOTE: a background run holds the lock; its end calls back here.
+        if (domain == null
+                || screen != panel
+                || syncing
+                || BackgroundJob.running
+                || isFinishing()) {
             return;
         }
         List<AccountEntry> owing = new ArrayList<>();
@@ -1727,7 +1599,9 @@ public class MainActivity extends Activity {
      */
     private void firstMail(List<AccountEntry> owing) {
         syncAccount(null);
-        setSyncing(true);
+        if (!startSync()) {
+            return;
+        }
         io.execute(
                 () -> {
                     syncAccount(null);
@@ -1735,7 +1609,7 @@ public class MainActivity extends Activity {
                     for (AccountEntry account : owing) {
                         Exception error;
                         try (MailSession session = openMail(account)) {
-                            error = fetchMail(account, session, SyncScope.all(this));
+                            error = remote.fetchMail(account, session, SyncScope.all(this));
                         } catch (Exception opened) {
                             error = opened;
                         }
@@ -1764,7 +1638,9 @@ public class MainActivity extends Activity {
      */
     private void firstContacts(List<AccountEntry> owing) {
         syncAccount(null);
-        setSyncing(true);
+        if (!startSync()) {
+            return;
+        }
         io.execute(
                 () -> {
                     SyncRunner.Outcome outcome = runner.syncRemote();
@@ -1785,13 +1661,15 @@ public class MainActivity extends Activity {
     /** The calendar tab's first sync: every owing account's calendars. */
     private void firstCalendars(List<AccountEntry> owing) {
         syncAccount(null);
-        setSyncing(true);
+        if (!startSync()) {
+            return;
+        }
         io.execute(
                 () -> {
                     syncAccount(null);
                     Exception failure = null;
                     for (AccountEntry account : owing) {
-                        Exception error = fetchCalendars(account, SyncScope.all(this));
+                        Exception error = remote.fetchCalendars(account, SyncScope.all(this));
                         if (error == null) {
                             FirstSync.paid(this, account.email, PimDomain.CALENDAR);
                         } else if (failure == null) {
@@ -2191,7 +2069,9 @@ public class MainActivity extends Activity {
         }
 
         syncAccount(null);
-        setSyncing(true);
+        if (!startSync()) {
+            return;
+        }
         io.execute(
                 () -> {
                     SyncRunner.Outcome outcome = runner.syncRemote(filterOf(PimDomain.CONTACTS));
@@ -2228,7 +2108,9 @@ public class MainActivity extends Activity {
         }
 
         syncAccount(null);
-        setSyncing(true);
+        if (!startSync()) {
+            return;
+        }
         io.execute(
                 () -> {
                     SyncRunner.Outcome outcome = runner.syncRemote();
@@ -2240,8 +2122,8 @@ public class MainActivity extends Activity {
                         outcome.failure = failure;
                     }
 
-                    MailPass sent = mailPass(SyncScope.all(this));
-                    Exception calendars = calendarPass(SyncScope.all(this));
+                    RemotePass.MailPass sent = remote.mailPass(SyncScope.all(this));
+                    Exception calendars = remote.calendarPass(SyncScope.all(this));
                     Exception other = sent.failure != null ? sent.failure : calendars;
                     postAlive(
                             () -> {
@@ -2278,7 +2160,9 @@ public class MainActivity extends Activity {
         }
 
         syncAccount(null);
-        setSyncing(true);
+        if (!startSync()) {
+            return;
+        }
         io.execute(
                 () -> {
                     OfflineEngine.Report report = new OfflineEngine.Report();

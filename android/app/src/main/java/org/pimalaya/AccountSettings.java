@@ -98,6 +98,7 @@ final class AccountSettings {
         if (account.covers(PimDomain.MAIL)) {
             addMail(sections, account);
         }
+        addBackground(sections, account);
         addBooks(sections, email);
         addServers(sections, account);
 
@@ -325,6 +326,62 @@ final class AccountSettings {
         if (email.equals(settingsEmail)) {
             render();
         }
+    }
+
+    /**
+     * The background card ({@link BackgroundCheck}): how often the account
+     * syncs while the app is closed, and whether its new mail notifies,
+     * which needs the first.
+     */
+    private void addBackground(Sections sections, AccountEntry account) {
+        String email = account.email;
+        boolean syncs = BackgroundCheck.syncs(host, email);
+        List<View> rows = new ArrayList<>();
+
+        int current = 0;
+        for (int index = 0; index < BackgroundCheck.INTERVALS.length; index++) {
+            if (BackgroundCheck.INTERVALS[index] == BackgroundCheck.interval(host, email)) {
+                current = index;
+            }
+        }
+        int shown = current;
+        String[] intervals = host.getResources().getStringArray(R.array.background_intervals);
+        rows.add(
+                sections.row(
+                        host.getString(R.string.background_sync),
+                        intervals[shown],
+                        chevron(),
+                        () ->
+                                choose(
+                                        R.string.background_sync,
+                                        R.string.background_sync_note,
+                                        R.array.background_intervals,
+                                        shown,
+                                        picked -> {
+                                            BackgroundCheck.setInterval(
+                                                    host, email, BackgroundCheck.INTERVALS[picked]);
+                                            render();
+                                        })));
+
+        if (account.covers(PimDomain.MAIL)) {
+            Switch notify = new Switch(host);
+            notify.setChecked(BackgroundCheck.notifies(host, email));
+            notify.setEnabled(syncs);
+            notify.setOnCheckedChangeListener(
+                    (view, checked) -> {
+                        BackgroundCheck.setNotifies(host, email, checked);
+                        if (checked) {
+                            host.requestNotifications();
+                        }
+                    });
+            View row =
+                    switchRow(sections, host.getString(R.string.background_notify), null, notify);
+            row.setEnabled(syncs);
+            row.setAlpha(syncs ? 1f : 0.5f);
+            rows.add(row);
+        }
+
+        sections.section(R.string.account_background, R.drawable.ic_sync, rows, null, false);
     }
 
     /**
@@ -714,6 +771,7 @@ final class AccountSettings {
         host.mail.forget(email);
         FirstSync.forget(host, email);
         SenderName.set(host, email, "");
+        BackgroundCheck.forget(host, email);
         host.events.forget(email);
         host.accounts.removeIf(entry -> entry.email.equals(email));
         host.reloadHome();
