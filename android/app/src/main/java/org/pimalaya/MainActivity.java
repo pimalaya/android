@@ -797,16 +797,7 @@ public class MainActivity extends Activity {
         findViewById(R.id.drawer_deleted).setOnClickListener(view -> deletedPage.open());
         findViewById(R.id.drawer_about).setOnClickListener(view -> showAbout());
 
-        findViewById(R.id.account_back).setOnClickListener(view -> accountSettings.leave());
-        findViewById(R.id.account_delete)
-                .setOnClickListener(view -> accountSettings.confirmDeleteCurrent());
-
-        // NOTE: the settings overlay carries its own save FAB, the
-        // shared one drawing under the drawer the overlay covers.
-        android.widget.ImageButton accountFab = findViewById(R.id.account_fab);
-        accountFab.setImageTintList(
-                android.content.res.ColorStateList.valueOf(accentContrast()));
-        accountFab.setOnClickListener(view -> accountSettings.save());
+        accountSettings.bind();
 
         // While a sync runs the row goes inert; the lists' strip carries
         // the progress.
@@ -951,13 +942,18 @@ public class MainActivity extends Activity {
         return card;
     }
 
+    /** How many bodies an account's offline setting still downloads, or null. */
+    Integer bodiesLeft(String email) {
+        return bodiesLeft.get(email);
+    }
+
     /**
      * The pill saying where an account stands: deactivated in the plain
      * tone, else how many bodies its offline setting still downloads
      * ({@code left}, null outside the body step) or when it last synced on an
      * accent tint, or that it never has in the plain tone.
      */
-    private View syncPill(boolean enabled, long stamp, Integer left) {
+    View syncPill(boolean enabled, long stamp, Integer left) {
         boolean downloading = enabled && left != null && left > 0;
         boolean synced = downloading || (enabled && stamp > 0);
         int color =
@@ -3572,10 +3568,8 @@ public class MainActivity extends Activity {
 
         Screen account = new Screen();
         account.ownBar = true;
-        // NOTE: the settings overlay draws above the drawer where the
-        // shared FAB cannot follow, so it carries its own save FAB.
+        // NOTE: every setting applies when changed, so no FAB.
         account.chrome = () -> findViewById(R.id.fab).setVisibility(View.GONE);
-        account.fab = accountSettings::save;
         screens.put(PANEL_ACCOUNT, account);
 
         Screen filterScreen = new Screen();
@@ -3803,7 +3797,7 @@ public class MainActivity extends Activity {
         // re-applying stays idempotent as the listener fires again; the
         // bottom folds in the keyboard so the FAB rides above it.
         padBottom(R.id.fab_frame, 0, bottom);
-        padBottom(R.id.account_fab_frame, 0, bottom);
+        padBottom(R.id.account_page, 24, bottom);
         // The bottom navigation takes the system bar's inset, never the
         // keyboard's, and the extended FAB rides above it.
         padBottom(R.id.bottom_nav, 0, bars.bottom);

@@ -241,6 +241,7 @@ final class MessageCompose {
             draft =
                     new JSONObject()
                             .put("from", account.email)
+                            .put("fromName", SenderName.of(host, account.email))
                             .put("to", to)
                             .put("cc", recipients(R.id.compose_cc))
                             .put("bcc", recipients(R.id.compose_bcc))

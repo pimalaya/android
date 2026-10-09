@@ -194,7 +194,6 @@
     <string name="oauth_message_own">Saisissez le client que vous avez enregistré auprès de ce serveur.</string>
     <string name="books_none">Ce compte n\'a aucun carnet d\'adresses.</string>
     <string name="subscriptions_title">Comptes</string>
-    <string name="subscriptions_save">Enregistrer</string>
     <string name="accounts_failed">Impossible de créer les comptes</string>
     <string name="add_account">Ajouter un compte</string>
     <string name="sync_accounts">Synchroniser les comptes</string>
@@ -205,30 +204,7 @@
     <string name="report_bug">Signaler un bug</string>
     <string name="local_account">Cette application</string>
     <string name="local_book">Contacts locaux</string>
-    <string name="delete_account">Supprimer le compte</string>
-    <string name="account_enable">Activer ce compte</string>
-    <string name="account_send">Envoyer les e-mails via %1$s</string>
-    <string name="account_send_none">aucun serveur</string>
-    <string-array name="mail_scopes">
-        <item>Synchroniser tous les e-mails</item>
-        <item>Synchroniser le dernier mois</item>
-        <item>Synchroniser les 3 derniers mois</item>
-        <item>Synchroniser les 6 derniers mois</item>
-        <item>Synchroniser la dernière année</item>
-        <item>Synchroniser les 2 dernières années</item>
-    </string-array>
-    <string-array name="mail_offline_policies">
-        <item>Télécharger les messages à l\'ouverture</item>
-        <item>Télécharger les messages en arrière-plan</item>
-        <item>Télécharger les boîtes entières (synchronisation complète)</item>
-    </string-array>
-    <string name="mail_offline_metered">Télécharger aussi les messages sur un réseau facturé à l\'usage</string>
-    <string name="account_advanced">Activer les paramètres avancés par carnet d\'adresses</string>
-    <string name="book_enable">Activer ce carnet d\'adresses</string>
-    <string name="book_remote_sync">Synchroniser à distance</string>
-    <string name="book_local_sync">Synchroniser localement</string>
     <string name="home_empty">Aucun compte pour l\'instant. Ajoutez-en un pour commencer.</string>
-    <string name="delete_account_confirm">Voulez-vous vraiment retirer ce compte ? Ses contacts resteront sur cet appareil.</string>
 
     <string name="sync_title">Synchronisation</string>
     <string name="sync_addressbooks">Récupération des carnets d\'adresses</string>
@@ -317,7 +293,6 @@
     <string name="delete_selected">Supprimer les contacts sélectionnés</string>
     <string name="cancel_selection">Annuler la sélection</string>
     <string name="select_all">Tout sélectionner</string>
-    <string name="settings_title">Paramètres</string>
     <string name="selected_count">%1$d sélectionné(s)</string>
     <string name="delete_selected_confirm">Supprimer les contacts sélectionnés ?</string>
     <string name="contact_new">Nouveau contact</string>
@@ -510,4 +485,41 @@
     <string name="event_target_title">Ajouter au calendrier</string>
     <string name="contacts_no_book">Aucun carnet d\'adresses où le placer</string>
 
+    <!-- Paramètres du compte (AccountSettings). -->
+    <string name="account_enable">Utiliser ce compte</string>
+    <string name="account_enable_note">Désactivé : rien ne se synchronise et les listes l\'ignorent. Ses données restent sur ce téléphone.</string>
+    <string name="sender_name">Votre nom</string>
+    <string name="sender_name_none">Non défini</string>
+    <string name="sender_name_message">Affiché aux destinataires à côté de votre adresse.</string>
+    <string name="mail_scope_title">Période synchronisée</string>
+    <string name="mail_scope_message">Les e-mails plus anciens restent sur le serveur. Réduire la période libère de l\'espace immédiatement.</string>
+    <string-array name="mail_scopes">
+        <item>Tous les e-mails</item>
+        <item>Le dernier mois</item>
+        <item>Les 3 derniers mois</item>
+        <item>Les 6 derniers mois</item>
+        <item>La dernière année</item>
+        <item>Les 2 dernières années</item>
+    </string-array>
+    <string name="mail_offline_title">Télécharger les messages</string>
+    <string name="mail_offline_message">Les messages téléchargés s\'ouvrent sans connexion.</string>
+    <string-array name="mail_offline_policies">
+        <item>À l\'ouverture</item>
+        <item>En arrière-plan</item>
+        <item>Boîtes entières (synchronisation complète)</item>
+    </string-array>
+    <string name="mail_offline_metered">Aussi sur les données mobiles</string>
+    <string name="mail_offline_metered_note">Sinon, les téléchargements en arrière-plan attendent le Wi-Fi</string>
+    <string name="account_send">Envoyer via</string>
+    <string name="account_send_none">Aucun serveur</string>
+    <string name="account_books">Carnets d\'adresses</string>
+    <string name="book_remote_sync">Synchroniser avec le serveur</string>
+    <string name="book_local_sync">Afficher dans les contacts du téléphone</string>
+    <string name="book_off">Désactivé : ni synchronisé, ni affiché</string>
+    <string name="account_servers">Serveurs</string>
+    <string name="server_token">Jeton</string>
+    <string name="delete_account">Retirer ce compte</string>
+    <string name="delete_account_confirm">Retirer ce compte de ce téléphone ?</string>
+    <string name="delete_account_contacts">Ses contacts restent sur ce téléphone.</string>
+    <string name="delete_account_all">Ses contacts sont déplacés sur ce téléphone. Ses e-mails et événements sont supprimés.</string>
 </resources>

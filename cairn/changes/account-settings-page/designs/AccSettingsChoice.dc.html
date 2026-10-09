@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Account settings, picking a value (proposed)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#EEEEEE;--fg:#1C1B1F;--fg2:#5E5E62;--dlg:#F4F4F4;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif}
+.app.dark{--bg:#1C1E21;--surface:#2A2A2A;--fg:#E6E1E5;--fg2:#AEAAAE;--dlg:#2B2D31}
+.app *{box-sizing:border-box}
+.ph{margin:12px 12px 0;background:var(--surface);border-radius:22px}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:0 24px}
+.dlg{width:100%;background:var(--dlg);border-radius:28px;padding:24px 0 12px;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+.opt{display:flex;align-items:center;gap:16px;min-height:52px;padding:0 24px;font-size:16px;text-decoration:none}
+.rd{width:20px;height:20px;border-radius:50%;border:2px solid var(--fg2);flex:none}
+.rd.on{border-color:var(--accent);box-shadow:inset 0 0 0 3px var(--dlg);background:var(--accent)}
+.dbtn{border:0;background:none;color:var(--accent);font:inherit;font-size:14px;font-weight:500;padding:10px 12px;border-radius:999px;text-decoration:none}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div style="padding: 64px 24px 8px; display: flex; align-items: center; gap: 14px">
+    <div style="width: 52px; height: 52px; border-radius: 50%; background: hsl(190, 25%, 44%)"></div>
+    <div style="font-size: 22px; font-weight: 700">alex@example.org</div>
+  </div>
+  <div class="ph" style="height: 80px; margin-top: 50px"></div>
+  <div class="ph" style="height: 290px"></div>
+  <div class="scrim">
+    <div class="dlg" role="dialog" aria-label="Sync period">
+      <div style="font-size: 22px; line-height: 28px; padding: 0 24px 4px">Sync period</div>
+      <div style="font-size: 14px; line-height: 20px; color: var(--fg2); padding: 0 24px 12px">Older mail stays on the server. Narrowing frees space now.</div>
+      <a class="opt" href="AccSettings.dc.html"><span class="rd"></span>All mail</a>
+      <a class="opt" href="AccSettings.dc.html"><span class="rd"></span>The last month</a>
+      <a class="opt" href="AccSettings.dc.html"><span class="rd on"></span>The last 3 months</a>
+      <a class="opt" href="AccSettings.dc.html"><span class="rd"></span>The last 6 months</a>
+      <a class="opt" href="AccSettings.dc.html"><span class="rd"></span>The last year</a>
+      <a class="opt" href="AccSettings.dc.html"><span class="rd"></span>The last 2 years</a>
+      <div style="display: flex; justify-content: flex-end; padding: 8px 12px 0"><a class="dbtn" href="AccSettings.dc.html">Cancel</a></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#00696F","options":["#00696F","#4F5BD5","#8E4585","#9A5B00"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var accent = this.props.accent ?? '#00696F';
+    if (dark && accent === '#00696F') accent = '#80DEEA';
+    var h = accent.replace('#', '');
+    var r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+    var onAccent = (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#000000' : '#FFFFFF';
+    return { theme: dark ? 'app dark' : 'app', vars: '--accent:' + accent + ';--on-accent:' + onAccent };
+  }
+}
+</script>
+</body>
+</html>
