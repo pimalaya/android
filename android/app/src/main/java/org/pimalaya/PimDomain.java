@@ -24,13 +24,25 @@ import java.util.Set;
  * <p>JMAP is what settles it. RFC 8620 has one session resource behind one
  * authentication, and each account in it advertises which domains it serves
  * through capability URNs. Three accounts there would be three sessions to the
- * same URL with the same token, so it is offered under every domain and the
- * ticked domains decide what the one account syncs.
+ * same URL with the same token, so it is offered under every domain it has a
+ * capability for, and once signed in the session's capabilities decide which of
+ * the ticked domains the one account syncs ({@link #servedByJmap}).
  */
 enum PimDomain {
-    MAIL("mail", R.string.domain_mail, R.drawable.ic_domain_mail),
-    CONTACTS("contacts", R.string.domain_contacts, R.drawable.ic_domain_contacts),
-    CALENDAR("calendar", R.string.domain_calendar, R.drawable.ic_domain_calendar);
+    MAIL("mail", R.string.domain_mail, R.drawable.ic_domain_mail, "urn:ietf:params:jmap:mail"),
+    CONTACTS(
+            "contacts",
+            R.string.domain_contacts,
+            R.drawable.ic_domain_contacts,
+            "urn:ietf:params:jmap:contacts"),
+    CALENDAR(
+            "calendar",
+            R.string.domain_calendar,
+            R.drawable.ic_domain_calendar,
+            "urn:ietf:params:jmap:calendars");
+
+    /** The capability JMAP mail is sent with (RFC 8621 section 1.3.2). */
+    static final String JMAP_SUBMISSION = "urn:ietf:params:jmap:submission";
 
     /** The stored spelling; the enum name is not persisted. */
     final String id;
@@ -41,10 +53,14 @@ enum PimDomain {
     /** The glyph beside that label, the one the domain bar draws. */
     final int icon;
 
-    PimDomain(String id, int label, int icon) {
+    /** The JMAP capability URN the domain is read with. */
+    final String jmapCapability;
+
+    PimDomain(String id, int label, int icon, String jmapCapability) {
         this.id = id;
         this.label = label;
         this.icon = icon;
+        this.jmapCapability = jmapCapability;
     }
 
     /** The domain a stored id names, contacts when it names none. */
@@ -91,21 +107,61 @@ enum PimDomain {
             case "gcal":
                 domains.add(CALENDAR);
                 break;
-            // NOTE: all three, and only because all three have a reader now.
-            // One JMAP session has always served them; offering a domain
-            // without the client to read it produced an account that
-            // connected, saved, and was then never read, which is worse than
-            // an absent option and is why SMTP is not here either. The rule
-            // this line follows is the mapping never leads the reader.
+            // NOTE: every domain with a capability to be read by, which a
+            // session may or may not advertise: that is only known once
+            // signed in, and the probe drops what it does not serve. The
+            // rule this follows is the mapping never leads the reader: a
+            // domain with no client to read it produced an account that
+            // connected, saved, and was then never read.
             case "jmap":
-                domains.add(MAIL);
-                domains.add(CONTACTS);
-                domains.add(CALENDAR);
+                for (PimDomain domain : values()) {
+                    if (domain.jmapCapability != null) {
+                        domains.add(domain);
+                    }
+                }
                 break;
             default:
                 break;
         }
         return domains;
+    }
+
+    /**
+     * The domains a JMAP session serves, by the capability URNs it advertises
+     * with an account to use them in: mail only with submission beside it,
+     * since a mail account that cannot answer is not what connecting mail
+     * asks for.
+     */
+    static Set<PimDomain> servedByJmap(Set<String> capabilities) {
+        Set<PimDomain> served = new LinkedHashSet<>();
+        for (PimDomain domain : servedBy("jmap")) {
+            if (capabilities.contains(domain.jmapCapability)
+                    && (domain != MAIL || capabilities.contains(JMAP_SUBMISSION))) {
+                served.add(domain);
+            }
+        }
+        return served;
+    }
+
+    /**
+     * Where a discovered service ranks for this domain, lower first, by what
+     * the app can do over it here: JMAP first for mail, which it reads and
+     * sends, and for contacts; CalDAV over JMAP for calendars, a JMAP calendar
+     * being read only until its writes exist; the DAVs over the rest.
+     */
+    int rank(String service) {
+        if (service == null) {
+            return 2;
+        }
+        switch (service) {
+            case "jmap":
+                return this == CALENDAR ? 1 : 0;
+            case "carddav":
+            case "caldav":
+                return this == CALENDAR ? 0 : 1;
+            default:
+                return 2;
+        }
     }
 
     /** The discovered configs that can serve this domain, in discovery order. */

@@ -2476,15 +2476,24 @@ public class MainActivity extends Activity {
      */
     private void composeEvent() {
         Map<String, EventStore.StoredCalendar> byId = new HashMap<>();
+        boolean readOnlyBackend = false;
         for (EventStore.StoredCalendar calendar : events.loadCalendars()) {
             byId.put(calendar.id, calendar);
+            readOnlyBackend |= !PimalayaClient.writesEvents(calendar.url);
+        }
+        List<PimdirCollections.Stored> collections = collectionsOf(PimDomain.CALENDAR);
+        // NOTE: a JMAP calendar lists as read only, and the line for no
+        // calendar at all would leave its owner guessing why.
+        if (readOnlyBackend && DefaultCollection.writable(collections).isEmpty()) {
+            toast(getString(R.string.event_read_only));
+            return;
         }
         target(
                 PimDomain.CALENDAR,
                 PimdirSummary.CALENDAR,
                 R.string.event_target_title,
                 R.string.event_no_calendar,
-                collectionsOf(PimDomain.CALENDAR),
+                collections,
                 calendar -> eventView.compose(byId.get(calendar.id)));
     }
 
@@ -3460,7 +3469,7 @@ public class MainActivity extends Activity {
                 () -> {
                     ((TextView) findViewById(R.id.bar_title)).setText(eventView.title());
                     findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
-                    if (eventView.readable()) {
+                    if (eventView.editable()) {
                         findViewById(R.id.contact_add_field).setVisibility(View.VISIBLE);
                         findViewById(R.id.bar_delete).setVisibility(View.VISIBLE);
                         addFab(R.drawable.ic_save, R.string.event_save);

@@ -95,12 +95,14 @@ final class MessageCompose {
     void open(Prefill prefill) {
         List<AccountEntry> accounts = new ArrayList<>();
         for (AccountEntry candidate : host.accountsFor(PimDomain.MAIL)) {
-            // NOTE: an account with nowhere to submit is not offered
-            // rather than offered and refused at the send: that is a JMAP
-            // account, whose EmailSubmission is not wired, or one
-            // connected before submission was discovered at all.
+            // NOTE: an account with nowhere to submit is not offered rather
+            // than offered and refused at the send: one connected before
+            // submission was discovered at all. JMAP, Graph and Gmail submit
+            // over the session they read from, whatever endpoint is stored.
             Account server = candidate.server(PimDomain.MAIL);
-            if (server != null && server.submitUrl != null && !server.submitUrl.isEmpty()) {
+            boolean endpoint =
+                    server != null && server.submitUrl != null && !server.submitUrl.isEmpty();
+            if (endpoint || PimalayaClient.submitsOverSession(server)) {
                 accounts.add(candidate);
             }
         }
@@ -319,12 +321,11 @@ final class MessageCompose {
     /**
      * Stages the copy the sender keeps in the account's sent mailbox beside
      * the submission, so it shows there at once. The sync carries it out:
-     * the provider filing sent mail itself (Gmail, Graph), its listing
+     * the provider filing sent mail itself (Gmail, Graph, JMAP), its listing
      * lands the copy by the `Message-ID`; elsewhere the copy is appended
      * once the submission went (pimdir SYNC §5).
      *
-     * <p>None for a JMAP account, which sends nothing yet, or one marking no
-     * sent mailbox.
+     * <p>None for an account marking no sent mailbox.
      */
     private void stageSentCopy(
             AccountEntry sender,
@@ -335,7 +336,7 @@ final class MessageCompose {
             byte[] source)
             throws JSONException {
         String sent = host.mail.sentOf(sender.email);
-        if (sent == null || PimalayaClient.isJmap(sender.server(PimDomain.MAIL))) {
+        if (sent == null) {
             return;
         }
         host.mailEngine(sender.email)

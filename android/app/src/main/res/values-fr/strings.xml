@@ -18,6 +18,8 @@
     <string name="result_message">Non connecté : %1$s.</string>
     <string name="result_connected">Connecté</string>
     <string name="result_refused">Mot de passe refusé</string>
+    <string name="result_not_served">Non proposé par ce serveur</string>
+    <string name="domains_not_served">Non proposé par ce serveur, laissé de côté : %1$s</string>
     <string name="result_later">Vous pourrez connecter le reste plus tard en ajoutant de nouveau cette adresse.</string>
     <string name="result_continue">Continuer sans %1$s</string>
     <string name="result_advanced">Configurer %1$s en mode avancé</string>
@@ -495,6 +497,7 @@
     <string name="event_delete_conflict_confirm">Cette entrée a aussi été modifiée ailleurs. La supprimer, avec la version modifiée là-bas ?</string>
     <string name="event_delete_failed">Impossible de supprimer l\'entrée</string>
     <string name="event_no_calendar">Aucun calendrier où la placer</string>
+    <string name="event_read_only">Les calendriers JMAP sont en lecture seule pour l\'instant</string>
     <string name="event_target_title">Ajouter au calendrier</string>
     <string name="event_section_conflicts">Conflits</string>
     <string name="event_conflict_occurrence">Occurrence</string>

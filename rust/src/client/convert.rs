@@ -8,7 +8,9 @@ use core::error::Error as StdError;
 use io_gcal::v3::send::GcalSendError;
 use io_gmail::v1::send::GmailSendError;
 use io_gpeople::v1::send::GpeopleSendError;
-use io_jmap::rfc8620::{send::JmapSendError, session_get::JmapSessionGetError};
+use io_jmap::rfc8620::{
+    blob_upload::JmapBlobUploadError, send::JmapSendError, session_get::JmapSessionGetError,
+};
 use io_msgraph::v1::send::MsgraphSendError;
 use io_webdav::rfc4918::{follow_redirects::WebdavFollowRedirectsError, send::WebdavSendError};
 
@@ -35,7 +37,8 @@ pub(crate) fn coroutine_error(err: &(impl StdError + 'static)) -> BridgeError {
 /// name. JMAP's session fetch is one, and missing it cost every JMAP
 /// account its token refresh, since a session get is the first call of
 /// every JMAP round and a 401 that reports no status is a 401 nothing
-/// can retry.
+/// can retry. A blob upload is another, whose 413 is a message too large
+/// for good.
 fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
     let mut cause = Some(err);
 
@@ -50,6 +53,9 @@ fn http_status(err: &(dyn StdError + 'static)) -> Option<u16> {
             return Some(*status);
         }
         if let Some(JmapSessionGetError::HttpStatus(status)) = err.downcast_ref() {
+            return Some(*status);
+        }
+        if let Some(JmapBlobUploadError::HttpStatus(status)) = err.downcast_ref() {
             return Some(*status);
         }
         if let Some(send) = err.downcast_ref::<MsgraphSendError>() {
@@ -132,7 +138,9 @@ pub(crate) fn parts_failure(failures: Vec<BridgeError>) -> Option<BridgeError> {
 
 #[cfg(test)]
 mod tests {
-    use io_jmap::rfc8620::{send::JmapSendError, session_get::JmapSessionGetError};
+    use io_jmap::rfc8620::{
+        blob_upload::JmapBlobUploadError, send::JmapSendError, session_get::JmapSessionGetError,
+    };
 
     use crate::types::BridgeError;
 
@@ -173,6 +181,11 @@ mod tests {
         let session = coroutine_error(&JmapSessionGetError::HttpStatus(401));
         assert_eq!(session.status, Some(401));
         assert!(session.message.contains("401"));
+
+        // A blob upload checks its status the same way, and a 413 there is
+        // a message the outbox parks rather than offers again.
+        let upload = coroutine_error(&JmapBlobUploadError::HttpStatus(413));
+        assert_eq!(upload.status, Some(413));
 
         // The ordinary path, where the status is on the send error.
         assert_eq!(

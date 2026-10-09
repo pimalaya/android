@@ -5,7 +5,6 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.client.Account;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
@@ -757,9 +756,9 @@ class MailEngine extends PimdirEngine {
      * <p>Three wait, rejected and so kept pending. A move's target is
      * delivered by its source's removal, which relocates it. A sent copy
      * waits for its submission, a copy filed for a message that was not
-     * sent being a lie the sender reads as a sent one. And off IMAP a
-     * create with no origin is a sent copy the provider files itself,
-     * which its listing lands.
+     * sent being a lie the sender reads as a sent one. And on an account
+     * submitting over its session a create with no origin is a sent copy
+     * the provider files itself, which its listing lands.
      */
     private JSONObject pushAdd(String collection, String mailbox, String handle, JSONObject change)
             throws JSONException {
@@ -783,10 +782,7 @@ class MailEngine extends PimdirEngine {
             return result(handle, true, null, null);
         }
 
-        Account server = session.account();
-        if (PimalayaClient.isGraph(server)
-                || PimalayaClient.isGoogle(server)
-                || PimalayaClient.isJmap(server)) {
+        if (PimalayaClient.submitsOverSession(session.account())) {
             return "sent".equals(mail().roles().get(collection))
                     ? result(handle, false, null, null)
                     : refuse(collection, linkId, handle);

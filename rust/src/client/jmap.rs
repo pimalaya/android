@@ -1,15 +1,20 @@
 //! JMAP operations: the RFC 9610 AddressBook and ContactCard verbs, the
 //! ContactCard/set push and the ContactCard/changes sync round, the RFC
-//! 8621 Mailbox and Email reads behind the account-wide mail walk, and
-//! the draft-ietf-jmap-calendars Calendar and CalendarEvent reads.
+//! 8621 Mailbox and Email reads behind the account-wide mail walk and the
+//! RFC 8621 section 7 submission, and the draft-ietf-jmap-calendars
+//! Calendar and CalendarEvent reads.
 //!
 //! One JMAP session serves all three domains, which is why they share a
-//! file: the session fetch, the auth header and the resume loops are the
-//! same code whichever capability a verb declares.
+//! file: the session fetch and its cache, the auth header and the resume
+//! loops are the same code whichever capability a verb declares.
 
 use core::error::Error as StdError;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::{Mutex, MutexGuard},
+    time::{Duration, Instant},
+};
 
 use ical::ical::Ical;
 use io_http::{rfc6750::bearer::HttpAuthBearer, rfc7617::basic::HttpAuthBasic};
@@ -21,19 +26,26 @@ use io_jmap::{
     },
     coroutine::{JmapCoroutine, JmapCoroutineState, JmapYield},
     rfc8620::{
-        blob_download::JmapBlobDownload, changes::*, coroutine::JmapRedirectYield,
-        error::JmapMethodError, filter::JmapFilter, session::JmapSession, session_get::*,
+        blob_download::JmapBlobDownload, blob_upload::JmapBlobUpload, changes::*,
+        coroutine::JmapRedirectYield, error::JmapMethodError, filter::JmapFilter,
+        session::JmapSession, session_get::*,
     },
     rfc8621::{
         JMAP_MAIL_CAPABILITY,
         email::{
-            JMAP_KEYWORD_ANSWERED, JMAP_KEYWORD_FLAGGED, JMAP_KEYWORD_SEEN, JmapEmail,
-            JmapEmailAddress, JmapEmailProperty,
+            JMAP_KEYWORD_ANSWERED, JMAP_KEYWORD_DRAFT, JMAP_KEYWORD_FLAGGED, JMAP_KEYWORD_SEEN,
+            JmapEmail, JmapEmailAddress, JmapEmailProperty,
             changes::{JmapEmailChanges, JmapEmailChangesError, JmapEmailChangesOptions},
             get::*,
+            import::*,
             query::*,
             set::*,
         },
+        email_submission::{
+            JMAP_SUBMISSION_CAPABILITY, JmapEmailAddressWithParameters,
+            JmapEmailSubmissionSetItemError, JmapEnvelope, set::*,
+        },
+        identity::{JmapIdentity, get::*},
         mailbox::{JmapMailbox, JmapMailboxRole, get::*},
     },
     rfc9610::{
@@ -46,20 +58,23 @@ use io_pimdir::summary::{
     PimdirAddress,
     mail::{PimdirMailSummary, decode},
 };
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use url::Url;
 
 use crate::{
+    account::Backend,
     client::{
         Client,
-        convert::{coroutine_error, rejected, required},
+        convert::{REFUSED, coroutine_error, rejected, required},
         listing::{
             Floor, JMAP_PAGE, Listing, MailPage, MailRequest, Named, RECEIVED_MARGIN_DAYS, Scope,
             flags, utc,
         },
     },
     jmap,
+    mail::{self, Composed},
     types::{
         Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, Mailbox,
         PushChange, PushOutcome, default_role,
@@ -120,23 +135,16 @@ impl<'a, 'local> Client<'a, 'local> {
     /// Lists the account's ContactCards across every AddressBook, each
     /// converted to a vCard document; the ContactCard id is the
     /// addressing key, a JSON hash the ETag, and the addressBookIds
-    /// the card's books (natively m:n).
+    /// the card's books (natively m:n). Paged as [`list_cards`] says.
     pub fn list_jmap_cards(
         &mut self,
         session_url: &Url,
         credentials: &Credentials,
     ) -> Result<Vec<Card>, BridgeError> {
-        let auth = jmap_auth(credentials);
-        let session = self.jmap_session(session_url, &auth)?;
-        let api_url = session.api_url.clone();
+        let mut calls = self.jmap_calls(session_url, credentials)?;
+        let limit = page_size(&calls.session);
 
-        let opts = JmapContactCardQueryOptions::default();
-        let coroutine =
-            JmapContactCardQuery::new(&session, &auth, opts).map_err(|err| err.to_string())?;
-        let out = self.run_jmap(&api_url, coroutine)?;
-
-        let cards: Result<Vec<Card>, String> = out.cards.into_iter().map(jmap::to_card).collect();
-        Ok(cards?)
+        Ok(list_cards(&mut calls, limit)?.0)
     }
 
     /// Creates the vCard as a ContactCard in the AddressBook
@@ -171,7 +179,7 @@ impl<'a, 'local> Client<'a, 'local> {
         let out = self.run_jmap(&api_url, coroutine)?;
 
         if let Some(err) = out.not_created.into_values().next() {
-            return Err(format!("JMAP ContactCard create rejected: {err:?}").into());
+            return Err(format!("The server refused the new contact: {err}").into());
         }
         let id = out
             .created
@@ -217,91 +225,18 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(jmap::to_card(card)?)
     }
 
-    /// Lists the ContactCard changes since `since_state` (RFC 8620
-    /// `/changes`), the changed cards fetched in full so their
-    /// JSON-hash ETag doubles as the content revision; without a
-    /// state, the initial round gets every card plus the state to
-    /// delta from next time. Returns [`None`] when the server can no
-    /// longer compute changes from the state, so the caller falls
-    /// back to an initial round.
+    /// Lists the ContactCard changes since `since_state`, as
+    /// [`card_delta`] says.
     pub fn changes_jmap_cards(
         &mut self,
         session_url: &Url,
         credentials: &Credentials,
         since_state: Option<&str>,
     ) -> Result<Option<CardDelta>, BridgeError> {
-        let auth = jmap_auth(credentials);
-        let session = self.jmap_session(session_url, &auth)?;
-        let api_url = session.api_url.clone();
+        let mut calls = self.jmap_calls(session_url, credentials)?;
+        let limit = page_size(&calls.session);
 
-        let Some(since) = since_state else {
-            let opts = JmapContactCardGetOptions::default();
-            let coroutine =
-                JmapContactCardGet::new(&session, &auth, opts).map_err(|err| err.to_string())?;
-            let out = self.run_jmap(&api_url, coroutine)?;
-
-            let changed: Vec<Card> = out
-                .cards
-                .into_iter()
-                .map(jmap::to_card)
-                .collect::<Result<_, _>>()?;
-            return Ok(Some(CardDelta {
-                changed,
-                vanished: Vec::new(),
-                token: Some(out.new_state),
-                complete: false,
-            }));
-        };
-
-        let mut cursor = since.to_string();
-        let mut changed_ids = BTreeSet::new();
-        let mut vanished = BTreeSet::new();
-
-        loop {
-            let opts = JmapContactCardChangesOptions::default();
-            let coroutine = JmapContactCardChanges::new(&session, &auth, cursor.clone(), opts)
-                .map_err(|err| err.to_string())?;
-            let out = match self.run_jmap_changes(&api_url, coroutine)? {
-                Some(out) => out,
-                None => return Ok(None),
-            };
-
-            changed_ids.extend(out.created);
-            changed_ids.extend(out.updated);
-            vanished.extend(out.destroyed);
-            cursor = out.new_state;
-
-            if !out.has_more_changes {
-                break;
-            }
-        }
-
-        // NOTE: a card created and destroyed within the window is in
-        // both lists; the destroy wins.
-        changed_ids.retain(|id| !vanished.contains(id));
-
-        let mut changed = Vec::new();
-        if !changed_ids.is_empty() {
-            let opts = JmapContactCardGetOptions {
-                ids: Some(changed_ids.into_iter().collect()),
-                ..Default::default()
-            };
-            let coroutine =
-                JmapContactCardGet::new(&session, &auth, opts).map_err(|err| err.to_string())?;
-            let out = self.run_jmap(&api_url, coroutine)?;
-            changed = out
-                .cards
-                .into_iter()
-                .map(jmap::to_card)
-                .collect::<Result<_, _>>()?;
-        }
-
-        Ok(Some(CardDelta {
-            changed,
-            vanished: vanished.into_iter().collect(),
-            token: Some(cursor),
-            complete: false,
-        }))
+        card_delta(&mut calls, since_state, limit)
     }
 
     /// Updates the ContactCard `id` from the vCard. With a base vCard
@@ -332,7 +267,7 @@ impl<'a, 'local> Client<'a, 'local> {
         let out = self.run_jmap(&api_url, coroutine)?;
 
         if let Some(err) = out.not_updated.into_values().next() {
-            return Err(format!("JMAP ContactCard update rejected: {err:?}").into());
+            return Err(format!("The server refused the contact change: {err}").into());
         }
 
         Ok(Card {
@@ -364,7 +299,7 @@ impl<'a, 'local> Client<'a, 'local> {
         let out = self.run_jmap(&api_url, coroutine)?;
 
         if let Some(err) = out.not_destroyed.into_values().next() {
-            return Err(format!("JMAP ContactCard destroy rejected: {err:?}").into());
+            return Err(format!("The server refused to delete the contact: {err}").into());
         }
 
         Ok(())
@@ -403,7 +338,7 @@ impl<'a, 'local> Client<'a, 'local> {
         let out = self.run_jmap(&api_url, coroutine)?;
 
         if let Some(err) = out.not_updated.into_values().next() {
-            return Err(format!("JMAP membership update rejected: {err:?}").into());
+            return Err(format!("The server refused the address book change: {err}").into());
         }
 
         Ok(())
@@ -489,7 +424,7 @@ impl<'a, 'local> Client<'a, 'local> {
 
             for (key, reference) in create_refs {
                 if let Some(err) = out.not_created.get(&key) {
-                    outcomes.push(rejected(reference, format!("{err:?}")));
+                    outcomes.push(rejected(reference, err.to_string()));
                 } else if let Some(id) = out.created.get(&key).and_then(|card| card.id.clone()) {
                     outcomes.push(PushOutcome {
                         reference,
@@ -503,7 +438,7 @@ impl<'a, 'local> Client<'a, 'local> {
             }
             for (id, reference) in update_refs {
                 match out.not_updated.get(&id) {
-                    Some(err) => outcomes.push(rejected(reference, format!("{err:?}"))),
+                    Some(err) => outcomes.push(rejected(reference, err.to_string())),
                     None => outcomes.push(PushOutcome {
                         reference,
                         accepted: true,
@@ -522,7 +457,7 @@ impl<'a, 'local> Client<'a, 'local> {
                             ..Default::default()
                         })
                     }
-                    Some(err) => outcomes.push(rejected(reference, format!("{err:?}"))),
+                    Some(err) => outcomes.push(rejected(reference, err.to_string())),
                 }
             }
         }
@@ -604,7 +539,7 @@ impl<'a, 'local> Client<'a, 'local> {
             _ => None,
         };
 
-        let limit = JMAP_PAGE.min(max_objects_in_get(&session));
+        let limit = page_size(&session);
         let filter = JmapEmailFilter {
             in_mailbox: Some(mailbox_id.to_string()),
             after: scope
@@ -748,7 +683,7 @@ impl<'a, 'local> Client<'a, 'local> {
         touched.dedup();
 
         let mut items = Vec::new();
-        let chunk = JMAP_PAGE.min(max_objects_in_get(session)).max(1) as usize;
+        let chunk = page_size(session).max(1) as usize;
         for ids in touched.chunks(chunk) {
             let opts = JmapEmailGetOptions {
                 properties: Some(SUMMARY_PROPERTIES.to_vec()),
@@ -791,7 +726,10 @@ impl<'a, 'local> Client<'a, 'local> {
                 JmapCoroutineState::Complete(Err(JmapEmailChangesError::Changes(
                     JmapChangesError::Method(JmapMethodError::CannotCalculateChanges { .. }),
                 ))) => return Ok(None),
-                JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
+                JmapCoroutineState::Complete(Err(err)) => {
+                    sessions().forget(api_url);
+                    return Err(coroutine_error(&err));
+                }
                 JmapCoroutineState::Yielded(JmapYield::WantsRead) => {
                     arg = Some(self.http_read(api_url.as_str())?);
                 }
@@ -885,42 +823,8 @@ impl<'a, 'local> Client<'a, 'local> {
             .ok_or_else(|| BridgeError::from(format!("No message `{id}`")))?;
 
         let url = download_url(&session, &blob)?;
-        self.run_jmap_download(&auth, &url)
-    }
-
-    /// Downloads one blob, following the redirects the download URL may
-    /// answer with, and returns its bytes.
-    fn run_jmap_download(
-        &mut self,
-        auth: &SecretString,
-        download_url: &Url,
-    ) -> Result<Vec<u8>, BridgeError> {
-        let mut target = download_url.clone();
-
-        loop {
-            let mut coroutine = JmapBlobDownload::new(auth, &target);
-            let mut arg: Option<Vec<u8>> = None;
-
-            loop {
-                match coroutine.resume(arg.as_deref()) {
-                    JmapCoroutineState::Complete(Ok(out)) => return Ok(out.data),
-                    JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
-                    JmapCoroutineState::Yielded(JmapRedirectYield::WantsWrite(bytes)) => {
-                        self.http_write(target.as_str(), &bytes)?;
-                        arg = None;
-                    }
-                    JmapCoroutineState::Yielded(JmapRedirectYield::WantsRead) => {
-                        arg = Some(self.http_read(target.as_str())?);
-                    }
-                    JmapCoroutineState::Yielded(JmapRedirectYield::WantsRedirect {
-                        url, ..
-                    }) => {
-                        target = url;
-                        break;
-                    }
-                }
-            }
-        }
+        let out = self.run_jmap_redirect(&url, |target| JmapBlobDownload::new(&auth, target))?;
+        Ok(out.data)
     }
 
     /// Adds or removes one keyword on one message.
@@ -1006,6 +910,10 @@ impl<'a, 'local> Client<'a, 'local> {
     /// error it is: the method itself succeeds while refusing the one
     /// change it was given, so a bare `Ok` would claim a write nobody
     /// made.
+    ///
+    /// A message the server no longer finds is the exception: whatever
+    /// the change was, there is nothing left for it to apply to, so it
+    /// converged, as a destroyed ContactCard does.
     fn run_email_set(
         &mut self,
         session: &JmapSession,
@@ -1018,8 +926,8 @@ impl<'a, 'local> Client<'a, 'local> {
         let out = self.run_jmap(api_url, coroutine)?;
 
         match out.not_updated.get(id).or(out.not_destroyed.get(id)) {
-            Some(refused) => Err(format!("The server refused the change: {refused:?}").into()),
-            None => Ok(()),
+            Some(JmapEmailSetItemError::NotFound { .. }) | None => Ok(()),
+            Some(refused) => Err(format!("The server refused the change: {refused}").into()),
         }
     }
 }
@@ -1091,7 +999,8 @@ impl<'a, 'local> Client<'a, 'local> {
             .collect())
     }
 
-    /// Lists a JMAP Calendar's events, each converted to iCalendar.
+    /// Lists a JMAP Calendar's events, each converted to iCalendar, and
+    /// whether the listing reached its end ([`list_events`]).
     ///
     /// Recurrence is left folded: the server could expand it here (that
     /// is the whole point of `CalendarEvent/query`), but the agenda
@@ -1104,24 +1013,37 @@ impl<'a, 'local> Client<'a, 'local> {
         session_url: &Url,
         credentials: &Credentials,
         calendar_id: &str,
-    ) -> Result<Vec<Event>, BridgeError> {
-        let auth = jmap_auth(credentials);
-        let session = self.jmap_session(session_url, &auth)?;
-        let api_url = session.api_url.clone();
+    ) -> Result<(Vec<Event>, bool), BridgeError> {
+        let mut calls = self.jmap_calls(session_url, credentials)?;
+        let limit = page_size(&calls.session);
 
-        let opts = JmapCalendarEventQueryOptions {
-            filter: Some(JmapCalendarEventFilter {
-                in_calendar: Some(calendar_id.to_string()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        let coroutine =
-            JmapCalendarEventQuery::new(&session, &auth, opts).map_err(|err| err.to_string())?;
-        let out = self.run_jmap(&api_url, coroutine)?;
+        list_events(&mut calls, calendar_id, limit)
+    }
+}
 
-        let events: Result<Vec<Event>, String> = out.events.into_iter().map(jmap_event).collect();
-        Ok(events?)
+/// JMAP submission: the RFC 8621 section 7 send of one stored message.
+impl<'a, 'local> Client<'a, 'local> {
+    /// Sends one stored message over the session, as [`send`] says.
+    ///
+    /// A session advertising no submission is refused for good before
+    /// anything is written: no later pass changes what the server offers.
+    pub fn send_jmap_message(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        raw: &[u8],
+    ) -> Result<(), BridgeError> {
+        let mut calls = self.jmap_calls(session_url, credentials)?;
+        if !calls
+            .session
+            .capabilities
+            .contains_key(JMAP_SUBMISSION_CAPABILITY)
+        {
+            return Err(refused("This server does not offer sending over JMAP"));
+        }
+        let max_upload = calls.session.core_capability().max_size_upload;
+
+        send(&mut calls, raw, max_upload)
     }
 }
 
@@ -1129,35 +1051,98 @@ impl<'a, 'local> Client<'a, 'local> {
 /// that pump a JMAP method coroutine, routing every yield to the
 /// transport stream opened on the session's API URL.
 impl<'a, 'local> Client<'a, 'local> {
-    /// Fetches the JMAP session (RFC 8620 §2) from the session URL
-    /// (a bare origin triggers /.well-known/jmap discovery), rebuilding
-    /// the coroutine whenever the server answers 3xx.
-    /// Fetches the session resource and discards it, so a credential that
-    /// cannot sign in fails where the connection is opened rather than on
-    /// whichever verb happens to run first.
+    /// Fetches the session resource afresh, so a credential that cannot
+    /// sign in fails where the connection is opened rather than on
+    /// whichever verb happens to run first, and the verbs after it read
+    /// the session this fetch cached.
     pub fn jmap_session_check(
         &mut self,
         session_url: &Url,
         credentials: &Credentials,
     ) -> Result<(), BridgeError> {
         let auth = jmap_auth(credentials);
-        self.jmap_session(session_url, &auth).map(|_| ())
+        self.fetch_jmap_session(session_url, &auth).map(|_| ())
     }
 
+    /// The capability URNs the session serves an account for (see
+    /// [`served_capabilities`]), from a fresh fetch: what the connection
+    /// flow decides which domains to connect by.
+    pub fn jmap_capabilities(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+    ) -> Result<Vec<&'static str>, BridgeError> {
+        let auth = jmap_auth(credentials);
+        let session = self.fetch_jmap_session(session_url, &auth)?;
+        Ok(served_capabilities(&session))
+    }
+
+    /// The verbs' calls over the session, cached or fetched.
+    fn jmap_calls<'c>(
+        &'c mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+    ) -> Result<JmapCalls<'c, 'a, 'local>, BridgeError> {
+        let auth = jmap_auth(credentials);
+        let session = self.jmap_session(session_url, &auth)?;
+        Ok(JmapCalls {
+            client: self,
+            session,
+            auth,
+        })
+    }
+
+    /// The session resource (RFC 8620 §2), from the cache when it holds
+    /// one for this URL and credential ([`SessionCache`]), fetched
+    /// otherwise.
     fn jmap_session(
         &mut self,
         session_url: &Url,
         http_auth: &SecretString,
     ) -> Result<JmapSession, BridgeError> {
-        let mut target = session_url.clone();
+        let key = session_key(session_url, http_auth);
+        let cached = sessions().get(&key, Instant::now());
+        match cached {
+            Some(session) => Ok(session),
+            None => self.fetch_jmap_session(session_url, http_auth),
+        }
+    }
+
+    /// Fetches the session resource from the session URL (a bare origin
+    /// triggers /.well-known/jmap discovery), following redirects, and
+    /// caches it.
+    fn fetch_jmap_session(
+        &mut self,
+        session_url: &Url,
+        http_auth: &SecretString,
+    ) -> Result<JmapSession, BridgeError> {
+        let out =
+            self.run_jmap_redirect(session_url, |target| JmapSessionGet::new(http_auth, target))?;
+        let key = session_key(session_url, http_auth);
+        sessions().put(key, Instant::now(), out.session.clone());
+        Ok(out.session)
+    }
+
+    /// Runs a coroutine that may answer 3xx, rebuilding it against the
+    /// new target each time.
+    fn run_jmap_redirect<C, T, E>(
+        &mut self,
+        start: &Url,
+        make: impl Fn(&Url) -> C,
+    ) -> Result<T, BridgeError>
+    where
+        C: JmapCoroutine<Yield = JmapRedirectYield, Return = Result<T, E>>,
+        E: StdError + 'static,
+    {
+        let mut target = start.clone();
 
         loop {
-            let mut coroutine = JmapSessionGet::new(http_auth, &target);
+            let mut coroutine = make(&target);
             let mut arg: Option<Vec<u8>> = None;
 
             loop {
                 match coroutine.resume(arg.as_deref()) {
-                    JmapCoroutineState::Complete(Ok(out)) => return Ok(out.session),
+                    JmapCoroutineState::Complete(Ok(out)) => return Ok(out),
                     JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
                     JmapCoroutineState::Yielded(JmapRedirectYield::WantsWrite(bytes)) => {
                         self.http_write(target.as_str(), &bytes)?;
@@ -1178,7 +1163,9 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 
     /// Runs a JMAP method coroutine to completion, routing every yield
-    /// to the transport stream opened on the session's API URL.
+    /// to the transport stream opened on the session's API URL. A
+    /// failure drops the sessions cached for that API, so the next verb
+    /// reads the session again rather than trusting a stale one.
     fn run_jmap<C, T, E>(&mut self, api_url: &Url, mut coroutine: C) -> Result<T, BridgeError>
     where
         C: JmapCoroutine<Yield = JmapYield, Return = Result<T, E>>,
@@ -1189,7 +1176,10 @@ impl<'a, 'local> Client<'a, 'local> {
         loop {
             match coroutine.resume(arg.as_deref()) {
                 JmapCoroutineState::Complete(Ok(value)) => return Ok(value),
-                JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
+                JmapCoroutineState::Complete(Err(err)) => {
+                    sessions().forget(api_url);
+                    return Err(coroutine_error(&err));
+                }
                 JmapCoroutineState::Yielded(JmapYield::WantsRead) => {
                     arg = Some(self.http_read(api_url.as_str())?);
                 }
@@ -1217,7 +1207,10 @@ impl<'a, 'local> Client<'a, 'local> {
                 JmapCoroutineState::Complete(Err(JmapContactCardChangesError::Changes(
                     JmapChangesError::Method(JmapMethodError::CannotCalculateChanges { .. }),
                 ))) => return Ok(None),
-                JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
+                JmapCoroutineState::Complete(Err(err)) => {
+                    sessions().forget(api_url);
+                    return Err(coroutine_error(&err));
+                }
                 JmapCoroutineState::Yielded(JmapYield::WantsRead) => {
                     arg = Some(self.http_read(api_url.as_str())?);
                 }
@@ -1228,6 +1221,565 @@ impl<'a, 'local> Client<'a, 'local> {
             }
         }
     }
+}
+
+/// How long a cached session resource is trusted.
+///
+/// The session's `state` would say when it changed, but io-jmap's method
+/// outputs do not surface the `sessionState` each response carries, so
+/// the cache is bounded by age instead, by any call failing on it, and by
+/// every mail session opening afresh.
+const SESSION_TTL: Duration = Duration::from_secs(15 * 60);
+
+/// The session resources fetched so far, by session URL and credential:
+/// one fetch serves every verb of a pass, and the passes of every domain
+/// the account's one session covers.
+struct SessionCache {
+    entries: BTreeMap<String, (Instant, JmapSession)>,
+}
+
+impl SessionCache {
+    /// The session cached under `key`, unless it is older than
+    /// [`SESSION_TTL`].
+    fn get(&mut self, key: &str, now: Instant) -> Option<JmapSession> {
+        let (at, session) = self.entries.get(key)?;
+        if now.duration_since(*at) < SESSION_TTL {
+            return Some(session.clone());
+        }
+        self.entries.remove(key);
+        None
+    }
+
+    /// Caches one session, dropping those past [`SESSION_TTL`]: a refreshed
+    /// token is a new key, and the old one would stay for good otherwise.
+    fn put(&mut self, key: String, now: Instant, session: JmapSession) {
+        self.entries
+            .retain(|_, (at, _)| now.duration_since(*at) < SESSION_TTL);
+        self.entries.insert(key, (now, session));
+    }
+
+    /// Drops every session reached through `api_url`.
+    fn forget(&mut self, api_url: &Url) {
+        self.entries
+            .retain(|_, (_, session)| session.api_url != *api_url);
+    }
+}
+
+/// The process's session cache.
+fn sessions() -> MutexGuard<'static, SessionCache> {
+    static SESSIONS: Mutex<SessionCache> = Mutex::new(SessionCache {
+        entries: BTreeMap::new(),
+    });
+    SESSIONS.lock().unwrap_or_else(|err| err.into_inner())
+}
+
+/// The cache key of one session: its URL and a digest of the credential,
+/// so a refreshed token or another login never reads a session another
+/// one fetched.
+fn session_key(session_url: &Url, auth: &SecretString) -> String {
+    let digest = Sha256::digest(auth.expose_secret().as_bytes());
+    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("{session_url} {hex}")
+}
+
+/// The requests of one JMAP verb over one native call's transport, apart
+/// so the verb's logic can run over a fake.
+struct JmapCalls<'c, 'a, 'local> {
+    client: &'c mut Client<'a, 'local>,
+    session: JmapSession,
+    auth: SecretString,
+}
+
+/// The request a calendar listing sends: one `CalendarEvent/query` page,
+/// its events read with it.
+trait JmapEventPages {
+    /// One page of a calendar's events from `position`, `limit` at most.
+    fn events(
+        &mut self,
+        calendar_id: &str,
+        position: u64,
+        limit: u64,
+    ) -> Result<JmapCalendarEventQueryOutput, BridgeError>;
+}
+
+impl JmapEventPages for JmapCalls<'_, '_, '_> {
+    fn events(
+        &mut self,
+        calendar_id: &str,
+        position: u64,
+        limit: u64,
+    ) -> Result<JmapCalendarEventQueryOutput, BridgeError> {
+        let opts = JmapCalendarEventQueryOptions {
+            filter: Some(JmapCalendarEventFilter {
+                in_calendar: Some(calendar_id.to_string()),
+                ..Default::default()
+            }),
+            position: Some(position),
+            limit: Some(limit),
+            ..Default::default()
+        };
+        let coroutine = JmapCalendarEventQuery::new(&self.session, &self.auth, opts)
+            .map_err(|err| err.to_string())?;
+        self.client.run_jmap(&self.session.api_url, coroutine)
+    }
+}
+
+/// The requests a contacts round sends: the `ContactCard` state, one
+/// `ContactCard/query` page with its cards, named cards, and one
+/// `ContactCard/changes` page.
+trait JmapCardReads {
+    /// The account's `ContactCard` state, what a delta lists from.
+    fn state(&mut self) -> Result<String, BridgeError>;
+
+    /// One page of the account's cards from `position`, `limit` at most.
+    fn page(
+        &mut self,
+        position: u64,
+        limit: u64,
+    ) -> Result<JmapContactCardQueryOutput, BridgeError>;
+
+    /// The cards named.
+    fn cards(&mut self, ids: Vec<String>) -> Result<Vec<JmapContactCard>, BridgeError>;
+
+    /// One page of changes since `state`; [`None`] when the server can no
+    /// longer compute changes from it.
+    fn changes(&mut self, state: &str) -> Result<Option<JmapChangesOutput>, BridgeError>;
+}
+
+impl JmapCardReads for JmapCalls<'_, '_, '_> {
+    fn state(&mut self) -> Result<String, BridgeError> {
+        let opts = JmapContactCardGetOptions {
+            ids: Some(Vec::new()),
+            ..Default::default()
+        };
+        let coroutine = JmapContactCardGet::new(&self.session, &self.auth, opts)
+            .map_err(|err| err.to_string())?;
+        Ok(self
+            .client
+            .run_jmap(&self.session.api_url, coroutine)?
+            .new_state)
+    }
+
+    fn page(
+        &mut self,
+        position: u64,
+        limit: u64,
+    ) -> Result<JmapContactCardQueryOutput, BridgeError> {
+        let opts = JmapContactCardQueryOptions {
+            position: Some(position),
+            limit: Some(limit),
+            ..Default::default()
+        };
+        let coroutine = JmapContactCardQuery::new(&self.session, &self.auth, opts)
+            .map_err(|err| err.to_string())?;
+        self.client.run_jmap(&self.session.api_url, coroutine)
+    }
+
+    fn cards(&mut self, ids: Vec<String>) -> Result<Vec<JmapContactCard>, BridgeError> {
+        let opts = JmapContactCardGetOptions {
+            ids: Some(ids),
+            ..Default::default()
+        };
+        let coroutine = JmapContactCardGet::new(&self.session, &self.auth, opts)
+            .map_err(|err| err.to_string())?;
+        Ok(self
+            .client
+            .run_jmap(&self.session.api_url, coroutine)?
+            .cards)
+    }
+
+    fn changes(&mut self, state: &str) -> Result<Option<JmapChangesOutput>, BridgeError> {
+        let opts = JmapContactCardChangesOptions::default();
+        let coroutine =
+            JmapContactCardChanges::new(&self.session, &self.auth, state.to_string(), opts)
+                .map_err(|err| err.to_string())?;
+        self.client
+            .run_jmap_changes(&self.session.api_url, coroutine)
+    }
+}
+
+/// The requests a submission sends (RFC 8621 sections 4.8, 6.1, 7.5 and
+/// RFC 8620 section 6.1).
+trait JmapSubmit {
+    /// The identities the account may send as.
+    fn identities(&mut self) -> Result<Vec<JmapIdentity>, BridgeError>;
+
+    /// The account's mailboxes as `(id, path, role)` triples.
+    fn mailboxes(&mut self) -> Result<Vec<(String, String, String)>, BridgeError>;
+
+    /// Uploads one message, answering its blob id.
+    fn upload(&mut self, message: Vec<u8>) -> Result<String, BridgeError>;
+
+    /// Imports the blob into the mailbox `drafts` as a draft, seen.
+    fn import(&mut self, blob_id: &str, drafts: &str)
+    -> Result<JmapEmailImportOutput, BridgeError>;
+
+    /// Runs one `EmailSubmission/set`.
+    fn submit(
+        &mut self,
+        args: JmapEmailSubmissionSetArgs,
+    ) -> Result<JmapEmailSubmissionSetOutput, BridgeError>;
+
+    /// Destroys one email.
+    fn destroy(&mut self, id: &str) -> Result<(), BridgeError>;
+}
+
+impl JmapSubmit for JmapCalls<'_, '_, '_> {
+    fn identities(&mut self) -> Result<Vec<JmapIdentity>, BridgeError> {
+        let opts = JmapIdentityGetOptions::default();
+        let coroutine =
+            JmapIdentityGet::new(&self.session, &self.auth, opts).map_err(|err| err.to_string())?;
+        Ok(self
+            .client
+            .run_jmap(&self.session.api_url, coroutine)?
+            .identities)
+    }
+
+    fn mailboxes(&mut self) -> Result<Vec<(String, String, String)>, BridgeError> {
+        self.client
+            .list_jmap_mailboxes(&self.session, &self.auth, &self.session.api_url)
+    }
+
+    fn upload(&mut self, message: Vec<u8>) -> Result<String, BridgeError> {
+        let account = self.session.primary_account_id_for(JMAP_MAIL_CAPABILITY);
+        let url = self
+            .session
+            .resolve_upload_url(&account)
+            .map_err(|err| format!("Invalid upload URL: {err}"))?;
+        let auth = &self.auth;
+        let out = self.client.run_jmap_redirect(&url, |target| {
+            JmapBlobUpload::new(auth, target, "message/rfc822", message.clone())
+        })?;
+        Ok(out.blob_id)
+    }
+
+    fn import(
+        &mut self,
+        blob_id: &str,
+        drafts: &str,
+    ) -> Result<JmapEmailImportOutput, BridgeError> {
+        let import = JmapEmailImportArgs {
+            blob_id: blob_id.to_string(),
+            mailbox_ids: BTreeMap::from([(drafts.to_string(), true)]),
+            keywords: Some(BTreeMap::from([
+                (JMAP_KEYWORD_DRAFT.to_string(), true),
+                (JMAP_KEYWORD_SEEN.to_string(), true),
+            ])),
+            received_at: None,
+        };
+        let emails = BTreeMap::from([("m0".to_string(), import)]);
+        let coroutine = JmapEmailImport::new(&self.session, &self.auth, emails)
+            .map_err(|err| err.to_string())?;
+        self.client.run_jmap(&self.session.api_url, coroutine)
+    }
+
+    fn submit(
+        &mut self,
+        args: JmapEmailSubmissionSetArgs,
+    ) -> Result<JmapEmailSubmissionSetOutput, BridgeError> {
+        let coroutine = JmapEmailSubmissionSet::new(&self.session, &self.auth, args)
+            .map_err(|err| err.to_string())?;
+        self.client.run_jmap(&self.session.api_url, coroutine)
+    }
+
+    fn destroy(&mut self, id: &str) -> Result<(), BridgeError> {
+        self.client.run_email_set(
+            &self.session,
+            &self.auth,
+            &self.session.api_url,
+            destroy_args(id),
+            id,
+        )
+    }
+}
+
+/// Reads a query a page at a time from position 0, `page` answering one
+/// page's objects, the total the server stated and the position the page
+/// starts at; answers what was read and whether that is everything.
+///
+/// Everything once the stated total is reached, or once a page comes
+/// back empty from a server stating none. A page that comes back empty
+/// short of the total, or that does not move past the last one, is a
+/// server capping the listing: it ends there, incomplete, so nothing it
+/// left out reads as removed.
+fn paged<T>(
+    mut page: impl FnMut(u64) -> Result<(Vec<T>, Option<u64>, u64), BridgeError>,
+) -> Result<(Vec<T>, bool), BridgeError> {
+    let mut read = Vec::new();
+    let mut position = 0;
+
+    loop {
+        let (objects, total, at) = page(position)?;
+        let count = objects.len() as u64;
+        read.extend(objects);
+        let reached = at + count;
+        if total.is_some_and(|total| reached >= total) {
+            return Ok((read, true));
+        }
+        if count == 0 || reached <= position {
+            return Ok((read, total.is_none() && count == 0));
+        }
+        position = reached;
+    }
+}
+
+/// Lists one calendar's events a page of `limit` at a time ([`paged`]),
+/// each converted to iCalendar, once each.
+fn list_events(
+    calls: &mut impl JmapEventPages,
+    calendar_id: &str,
+    limit: u64,
+) -> Result<(Vec<Event>, bool), BridgeError> {
+    let (events, complete) = paged(|position| {
+        let out = calls.events(calendar_id, position, limit)?;
+        Ok((out.events, out.total, out.position))
+    })?;
+
+    let mut named = BTreeMap::new();
+    for event in events {
+        let event = jmap_event(event)?;
+        named.insert(event.id.clone(), event);
+    }
+    Ok((named.into_values().collect(), complete))
+}
+
+/// Lists the account's cards a page of `limit` at a time ([`paged`]),
+/// each converted to a vCard document, once each: RFC 8620 section 5.1
+/// lets a server refuse a `ContactCard/get` of every card past its
+/// `maxObjectsInGet`, which is what the unpaged get it replaces hit.
+fn list_cards(
+    calls: &mut impl JmapCardReads,
+    limit: u64,
+) -> Result<(Vec<Card>, bool), BridgeError> {
+    let (cards, complete) = paged(|position| {
+        let out = calls.page(position, limit)?;
+        Ok((out.cards, out.total, out.position))
+    })?;
+
+    let mut named = BTreeMap::new();
+    for card in cards {
+        let card = jmap::to_card(card)?;
+        named.insert(card.id.clone(), card);
+    }
+    Ok((named.into_values().collect(), complete))
+}
+
+/// Lists the ContactCard changes since `since` (RFC 8620 `/changes`), the
+/// changed cards read whole, `limit` to a get, so their JSON-hash ETag
+/// doubles as the content revision. Without a state, the initial round
+/// reads the state first, then every card ([`list_cards`]), so what
+/// changes while it lists is the next delta's; it is complete when the
+/// listing is. Answers [`None`] when the server can no longer compute
+/// changes from the state, for the caller to fall back to an initial
+/// round.
+fn card_delta(
+    calls: &mut impl JmapCardReads,
+    since: Option<&str>,
+    limit: u64,
+) -> Result<Option<CardDelta>, BridgeError> {
+    let Some(since) = since else {
+        let state = calls.state()?;
+        let (changed, complete) = list_cards(calls, limit)?;
+        return Ok(Some(CardDelta {
+            changed,
+            vanished: Vec::new(),
+            token: Some(state),
+            complete,
+        }));
+    };
+
+    let mut cursor = since.to_string();
+    let mut changed_ids = BTreeSet::new();
+    let mut vanished = BTreeSet::new();
+
+    loop {
+        let Some(out) = calls.changes(&cursor)? else {
+            return Ok(None);
+        };
+        changed_ids.extend(out.created);
+        changed_ids.extend(out.updated);
+        vanished.extend(out.destroyed);
+        cursor = out.new_state;
+        if !out.has_more_changes {
+            break;
+        }
+    }
+
+    // NOTE: a card created and destroyed within the window is in both
+    // lists; the destroy wins.
+    changed_ids.retain(|id| !vanished.contains(id));
+
+    let ids: Vec<String> = changed_ids.into_iter().collect();
+    let mut changed = Vec::with_capacity(ids.len());
+    for chunk in ids.chunks(limit.max(1) as usize) {
+        for card in calls.cards(chunk.to_vec())? {
+            changed.push(jmap::to_card(card)?);
+        }
+    }
+
+    Ok(Some(CardDelta {
+        changed,
+        vanished: vanished.into_iter().collect(),
+        token: Some(cursor),
+        complete: false,
+    }))
+}
+
+/// Sends one stored message over a JMAP session (RFC 8621 section 7).
+///
+/// The identity whose address is the sender ([`identity_for`]), the
+/// message with its `Bcc` header taken out ([`mail::envelope`]) uploaded
+/// and imported into Drafts as a seen draft, then submitted with the
+/// envelope its address headers name, the blind recipients among them,
+/// and moved to Sent with `$draft` unset once the server accepts it; an
+/// account with no Sent mailbox has it destroyed instead, keeping no
+/// copy, as on IMAP.
+///
+/// What no later pass would change is refused for good ([`refused`]):
+/// no identity, no Drafts mailbox, a message past `max_upload`, an
+/// import or a submission the server refuses for the message or its
+/// sender. A submission refused has its draft destroyed; one whose
+/// answer never came keeps it, since the server may have sent and moved
+/// it already.
+fn send(
+    calls: &mut impl JmapSubmit,
+    raw: &[u8],
+    max_upload: Option<u64>,
+) -> Result<(), BridgeError> {
+    let Composed {
+        message,
+        sender,
+        recipients,
+    } = mail::envelope(raw).map_err(|err| refused(err.message))?;
+
+    let identities = calls.identities()?;
+    let identity = identity_for(&identities, &sender)
+        .ok_or_else(|| refused(format!("No identity of this account sends as {sender}")))?;
+
+    let mailboxes = calls.mailboxes()?;
+    let role = |wanted: &str| {
+        mailboxes
+            .iter()
+            .find(|(_, _, role)| role == wanted)
+            .map(|(id, _, _)| id.clone())
+    };
+    let drafts =
+        role("drafts").ok_or_else(|| refused("This account has no Drafts mailbox to send from"))?;
+    let sent = role("sent");
+
+    if let Some(max) = max_upload.filter(|max| message.len() as u64 > *max) {
+        return Err(refused(format!(
+            "The message is larger than the {max} bytes the server takes"
+        )));
+    }
+
+    let blob = calls.upload(message)?;
+    let imported = calls.import(&blob, &drafts)?;
+    if let Some(err) = imported.not_created.into_values().next() {
+        let message = format!("The server refused the message: {err}");
+        return Err(match err {
+            JmapEmailImportItemError::Unknown => message.into(),
+            _ => refused(message),
+        });
+    }
+    let email = imported
+        .created
+        .into_values()
+        .next()
+        .and_then(|email| email.id)
+        .ok_or("The server imported the message under no id")?;
+
+    let address = |email: &str| JmapEmailAddressWithParameters {
+        email: email.to_string(),
+        parameters: None,
+    };
+    let create = JmapEmailSubmissionCreate {
+        identity_id: identity.id.clone(),
+        email_id: email.clone(),
+        envelope: Some(JmapEnvelope {
+            mail_from: address(&sender),
+            rcpt_to: recipients.iter().map(|to| address(to)).collect(),
+        }),
+    };
+    let filed = match &sent {
+        Some(sent) => JmapEmailPatch::default()
+            .remove_from_mailbox(&drafts)
+            .add_to_mailbox(sent)
+            .unset_keyword(JMAP_KEYWORD_DRAFT),
+        None => JmapEmailPatch::default(),
+    };
+    let args = JmapEmailSubmissionSetArgs {
+        create: BTreeMap::from([("s0".to_string(), create)]),
+        on_success_update_email: sent
+            .is_some()
+            .then(|| BTreeMap::from([("#s0".to_string(), filed)])),
+        on_success_destroy_email: sent.is_none().then(|| vec!["#s0".to_string()]),
+    };
+
+    let out = calls.submit(args)?;
+    if out.created.contains_key("s0") {
+        return Ok(());
+    }
+
+    // NOTE: never sent, so the draft imported for it is litter; one the
+    // destroy misses costs a row in Drafts and nothing else.
+    if let Err(err) = calls.destroy(&email) {
+        log::warn!("draft {email} left behind: {err}");
+    }
+    let Some(err) = out.not_created.into_values().next() else {
+        return Err("The server answered the submission with nothing".into());
+    };
+    let message = format!("The server refused to send the message: {err}");
+    Err(match err {
+        JmapEmailSubmissionSetItemError::RateLimit { .. }
+        | JmapEmailSubmissionSetItemError::NotFound { .. }
+        | JmapEmailSubmissionSetItemError::Unknown => message.into(),
+        _ => refused(message),
+    })
+}
+
+/// The identity a message from `sender` goes out as: the one with that
+/// address, else the one whose address is `*` at its domain, which RFC
+/// 8621 section 6 lets send as any address there; compared without case.
+fn identity_for<'i>(identities: &'i [JmapIdentity], sender: &str) -> Option<&'i JmapIdentity> {
+    let (_, domain) = sender.rsplit_once('@')?;
+    let wildcard = format!("*@{domain}");
+
+    identities
+        .iter()
+        .find(|identity| identity.email.eq_ignore_ascii_case(sender))
+        .or_else(|| {
+            identities
+                .iter()
+                .find(|identity| identity.email.eq_ignore_ascii_case(&wildcard))
+        })
+}
+
+/// A failure no later pass changes, answered with [`REFUSED`].
+fn refused(message: impl Into<String>) -> BridgeError {
+    BridgeError {
+        message: message.into(),
+        status: Some(REFUSED),
+    }
+}
+
+/// The capability URNs of the four this app reads that the session
+/// serves: advertised, with a primary account to use them in. Submission
+/// rides the mail account, which is the one `EmailSubmission/set` names.
+fn served_capabilities(session: &JmapSession) -> Vec<&'static str> {
+    [
+        (JMAP_MAIL_CAPABILITY, JMAP_MAIL_CAPABILITY),
+        (JMAP_SUBMISSION_CAPABILITY, JMAP_MAIL_CAPABILITY),
+        (JMAP_CONTACTS_CAPABILITY, JMAP_CONTACTS_CAPABILITY),
+        (JMAP_CALENDARS_CAPABILITY, JMAP_CALENDARS_CAPABILITY),
+    ]
+    .into_iter()
+    .filter(|(urn, account)| {
+        session.capabilities.contains_key(*urn)
+            && !session.primary_account_id_for(account).is_empty()
+    })
+    .map(|(urn, _)| urn)
+    .collect()
 }
 
 /// Authorization header value from the credentials: an empty login means
@@ -1270,51 +1822,29 @@ fn mailbox_path(named: &BTreeMap<String, JmapMailbox>, mailbox: &JmapMailbox) ->
     segments.join("/")
 }
 
-/// Where one blob is downloaded from: the session's RFC 6570 template
-/// (RFC 8620 section 6.2) with its four variables filled in.
-///
-/// Filled by substitution rather than by a template engine, because the
-/// template is specified variable by variable and there are four of
-/// them: the account the blob belongs to, the blob, a name the download
-/// is offered under, and the media type it is asked for.
+/// Where one message's blob is downloaded from: the session's RFC 8620
+/// section 6.2 template, for the mail account, offered as a message.
 fn download_url(session: &JmapSession, blob: &str) -> Result<Url, BridgeError> {
     let account = session.primary_account_id_for(JMAP_MAIL_CAPABILITY);
-    let filled = session
-        .download_url
-        .replace("{accountId}", &encode(&account))
-        .replace("{blobId}", &encode(blob))
-        .replace("{name}", &encode("message.eml"))
-        .replace("{type}", &encode("message/rfc822"));
-
-    Url::parse(&filled).map_err(|err| BridgeError::from(format!("Invalid download URL: {err}")))
-}
-
-/// One template variable as a URL path or query component: everything
-/// outside the RFC 3986 unreserved set percent-encoded, a blob id being
-/// opaque and free to carry anything.
-fn encode(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                encoded.push(char::from(byte))
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
+    session
+        .resolve_download_url(&account, blob, "message.eml", "message/rfc822")
+        .map_err(|err| BridgeError::from(format!("Invalid download URL: {err}")))
 }
 
 /// The server's `maxObjectsInGet` (RFC 8620 §2), the ceiling of one
 /// page; the page size itself when the server states none.
 fn max_objects_in_get(session: &JmapSession) -> u64 {
     session
-        .capabilities
-        .get("urn:ietf:params:jmap:core")
-        .and_then(|core| core.get("maxObjectsInGet"))
-        .and_then(Value::as_u64)
+        .core_capability()
+        .max_objects_in_get
         .filter(|max| *max > 0)
         .unwrap_or(JMAP_PAGE)
+}
+
+/// One page of a listing: [`JMAP_PAGE`], capped by the server's
+/// `maxObjectsInGet`.
+fn page_size(session: &JmapSession) -> u64 {
+    JMAP_PAGE.min(max_objects_in_get(session))
 }
 
 /// One JMAP Email, named by the summary its properties read, when its
@@ -1393,6 +1923,10 @@ fn display_name(address: &JmapEmailAddress) -> String {
 
 /// io-jmap Calendar to the JNI-facing shape, the twin of
 /// [`jmap_addressbook`] down to the account-scoped URL.
+///
+/// Not writable whatever the rights say while the backend takes no event
+/// write ([`Backend::writes_events`]): the agenda then offers it nothing
+/// to stage, and the phone shows it read only.
 fn jmap_calendar(session: &JmapSession, calendar: JmapCalendar) -> Calendar {
     let id = calendar.id.unwrap_or_default();
 
@@ -1403,7 +1937,7 @@ fn jmap_calendar(session: &JmapSession, calendar: JmapCalendar) -> Calendar {
         description: calendar.description,
         color: calendar.color,
         role: default_role(calendar.is_default),
-        writable: writable_calendar(&calendar.my_rights),
+        writable: Backend::Jmap.writes_events() && writable_calendar(&calendar.my_rights),
     }
 }
 
@@ -1486,6 +2020,10 @@ fn jmap_collection_path(session: &JmapSession, capability: &str, id: &str) -> St
 }
 
 #[cfg(test)]
+#[path = "jmap_tests.rs"]
+mod fake_tests;
+
+#[cfg(test)]
 mod tests {
     use io_jmap::{rfc8620::session::JmapSession, rfc8621::JMAP_MAIL_CAPABILITY};
     use std::collections::BTreeMap;
@@ -1495,6 +2033,7 @@ mod tests {
 
     use super::{
         copy_args, destroy_args, download_url, jmap_addressbook, jmap_calendar, relocation_args,
+        writable_calendar,
     };
 
     fn session(template: &str) -> JmapSession {
@@ -1570,26 +2109,27 @@ mod tests {
 
     /// `isDefault` names the default; a calendar or a book shared read
     /// only takes nothing, and rights the server left unsaid say nothing.
+    /// A calendar takes nothing at all while JMAP event writes do not
+    /// exist, whatever its rights.
     #[test]
     fn the_default_is_the_one_jmap_names() {
         let session = session("");
         let calendar = |value| jmap_calendar(&session, from_value(value).unwrap());
         let book = |value| jmap_addressbook(&session, from_value(value).unwrap());
+        let may_write = |value| writable_calendar(&from_value(value).unwrap());
 
         let default = calendar(json!({
             "id": "c1", "isDefault": true,
             "myRights": { "mayReadItems": true, "mayWriteAll": true },
         }));
-        let shared = calendar(json!({
-            "id": "c2", "isDefault": false, "myRights": { "mayReadItems": true },
-        }));
-        let unsaid = calendar(json!({ "id": "c3" }));
 
         assert_eq!(default.role, "default");
-        assert!(default.writable);
-        assert_eq!(shared.role, "");
-        assert!(!shared.writable);
-        assert!(unsaid.writable);
+        assert!(!default.writable);
+        assert!(may_write(
+            json!({ "mayReadItems": true, "mayWriteAll": true })
+        ));
+        assert!(!may_write(json!({ "mayReadItems": true })));
+        assert!(may_write(json!({})));
 
         let rights = |write| json!({ "mayRead": true, "mayWrite": write, "mayShare": false, "mayDelete": false });
         let default = book(json!({ "id": "b1", "isDefault": true, "myRights": rights(true) }));

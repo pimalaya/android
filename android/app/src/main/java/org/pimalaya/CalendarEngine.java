@@ -425,6 +425,9 @@ final class CalendarEngine extends PimdirEngine {
                     if (isPreconditionFailure(failure)) {
                         return result(handle, false, null, null);
                     }
+                    if (isRefusal(failure)) {
+                        return refuse(collection, change.optString("linkId", null), handle);
+                    }
                     throw failure;
                 }
             }
@@ -445,7 +448,7 @@ final class CalendarEngine extends PimdirEngine {
                     // A 422 is a part of the edit the server refuses for
                     // good, whatever else of it landed: rejected, and the
                     // row says so rather than waiting.
-                    if (Integer.valueOf(422).equals(status(failure))) {
+                    if (isRefusal(failure)) {
                         String linkId;
                         synchronized (STORE) {
                             linkId = offline.linkOfHandle(collection, handle);
@@ -469,6 +472,8 @@ final class CalendarEngine extends PimdirEngine {
                         // Already gone upstream: the removal converged.
                     } else if (isPreconditionFailure(failure)) {
                         return result(handle, false, null, null);
+                    } else if (isRefusal(failure)) {
+                        return refuse(collection, change.optString("linkId", null), handle);
                     } else {
                         throw failure;
                     }
@@ -479,5 +484,13 @@ final class CalendarEngine extends PimdirEngine {
                 // nothing to carry rather than something to refuse.
                 return result(handle, true, null, null);
         }
+    }
+
+    /**
+     * Whether the server, or the bridge for a backend that takes no such
+     * write (a JMAP calendar), refused the change for good: a 422.
+     */
+    private static boolean isRefusal(Exception failure) {
+        return Integer.valueOf(422).equals(status(failure));
     }
 }

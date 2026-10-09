@@ -20,6 +20,8 @@
     <string name="result_message">Not connected: %1$s.</string>
     <string name="result_connected">Connected</string>
     <string name="result_refused">Password not accepted</string>
+    <string name="result_not_served">Not offered by this server</string>
+    <string name="domains_not_served">Not offered by this server, left out: %1$s</string>
     <string name="result_later">You can connect the rest later by adding this address again.</string>
     <string name="result_continue">Continue without %1$s</string>
     <string name="result_advanced">Set up %1$s in advanced setup</string>
@@ -439,6 +441,7 @@
     <string name="event_delete_conflict_confirm">This entry was also changed elsewhere. Delete it, and the version changed there with it?</string>
     <string name="event_delete_failed">Could not delete the entry</string>
     <string name="event_no_calendar">No calendar to put it in</string>
+    <string name="event_read_only">JMAP calendars are read only for now</string>
     <string name="event_target_title">Add to calendar</string>
     <string name="contacts_no_book">No address book to put it in</string>
     <string name="event_unreadable">This entry could not be read</string>

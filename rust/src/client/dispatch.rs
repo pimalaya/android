@@ -124,10 +124,15 @@ impl<'a, 'local> Client<'a, 'local> {
         credentials: &Credentials,
         cursor: Option<&str>,
     ) -> Result<CardDelta, BridgeError> {
+        // NOTE: a JMAP initial round is paged, and only it knows whether
+        // its listing reached the end; its deltas are never complete.
+        let paged = Backend::of(base_url) == Backend::Jmap;
         let delta = self.sync_cards_round(base_url, addressbook_url, credentials, cursor)?;
 
         if let Some(mut delta) = delta {
-            delta.complete = cursor.is_none();
+            if !paged {
+                delta.complete = cursor.is_none();
+            }
             return Ok(delta);
         }
 
@@ -136,7 +141,9 @@ impl<'a, 'local> Client<'a, 'local> {
         // collection (that would look remote-deleted).
         match self.sync_cards_round(base_url, addressbook_url, credentials, None)? {
             Some(mut delta) => {
-                delta.complete = true;
+                if !paged {
+                    delta.complete = true;
+                }
                 Ok(delta)
             }
             None => Err(format!("Initial sync round rejected for {addressbook_url}").into()),
@@ -455,7 +462,11 @@ impl Client<'_, '_> {
         if let Some(mut delta) =
             self.sync_events_round(base_url, calendar_url, credentials, cursor)?
         {
-            delta.complete = cursor.is_none();
+            // NOTE: a JMAP round has no cursor and lists in full, and only
+            // it knows whether the listing reached its end.
+            if Backend::of(base_url) != Backend::Jmap {
+                delta.complete = cursor.is_none();
+            }
             return Ok(delta);
         }
 
@@ -471,9 +482,10 @@ impl Client<'_, '_> {
     /// One round against the backend behind the base URL; [`None`] when
     /// the server rejected the cursor.
     ///
-    /// A JMAP calendar has no incremental read wired, so it answers a
-    /// complete round every time and carries no cursor: the draft's
-    /// `CalendarEvent/changes` is what would go here.
+    /// A JMAP calendar has no incremental read wired, so it lists in full
+    /// every time and carries no cursor, complete unless the server
+    /// capped the listing: the draft's `CalendarEvent/changes` is what
+    /// would go here.
     fn sync_events_round(
         &mut self,
         base_url: &str,
@@ -485,9 +497,10 @@ impl Client<'_, '_> {
             Backend::Jmap => {
                 let session_url = account::jmap_session_url(base_url)?;
                 let calendar_id = account::jmap_collection_id(calendar_url);
-                let events = self.list_jmap_events(&session_url, credentials, calendar_id)?;
+                let (events, complete) =
+                    self.list_jmap_events(&session_url, credentials, calendar_id)?;
 
-                Ok(Some(listed(events)))
+                Ok(Some(listed(events, complete)))
             }
             // NOTE: Graph's event delta runs over a time window only, and
             // an event leaving the window would read as deleted, so every
@@ -534,7 +547,7 @@ impl Client<'_, '_> {
             Backend::Jmap => {
                 let session_url = account::jmap_session_url(base_url)?;
                 let calendar_id = account::jmap_collection_id(calendar_url);
-                let events = self.list_jmap_events(&session_url, credentials, calendar_id)?;
+                let (events, _) = self.list_jmap_events(&session_url, credentials, calendar_id)?;
 
                 Ok(events
                     .into_iter()
@@ -582,9 +595,9 @@ fn into_event_delta(delta: WebdavSyncDelta) -> EventDelta {
     }
 }
 
-/// A complete round that listed every event whole: their names and
-/// revisions, and the bodies with them.
-fn listed(events: Vec<Event>) -> EventDelta {
+/// A round that listed events whole: their names and revisions, the
+/// bodies with them, and whether the listing reached its end.
+fn listed(events: Vec<Event>, complete: bool) -> EventDelta {
     EventDelta {
         changed: events
             .iter()
@@ -596,6 +609,6 @@ fn listed(events: Vec<Event>) -> EventDelta {
         bodies: events,
         vanished: Vec::new(),
         token: None,
-        complete: true,
+        complete,
     }
 }

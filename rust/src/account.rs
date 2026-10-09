@@ -89,6 +89,20 @@ impl Backend {
         matches!(self, Self::Carddav | Self::Graph | Self::Google)
     }
 
+    /// True when a calendar of this backend takes event writes: every one
+    /// but JMAP, whose `CalendarEvent/set` is not written yet.
+    pub fn writes_events(self) -> bool {
+        !matches!(self, Self::Jmap)
+    }
+
+    /// True when a mail account of this backend submits through the
+    /// session it reads from (RFC 8621 section 7, Graph `sendMail`, Gmail
+    /// `messages.send`), needing no submit endpoint of its own; an IMAP
+    /// account submits over SMTP.
+    pub fn submits_over_session(self) -> bool {
+        matches!(self, Self::Jmap | Self::Graph | Self::Google)
+    }
+
     /// The backend tag on the JNI wire.
     pub fn name(self) -> &'static str {
         match self {
@@ -218,6 +232,26 @@ mod tests {
         }
         assert!(!Backend::Jmap.writes_overrides());
         assert!(!Backend::Jmap.writes_exdates());
+    }
+
+    /// A JMAP calendar takes no write until `CalendarEvent/set` exists,
+    /// so nothing may be staged on one.
+    #[test]
+    fn only_jmap_calendars_refuse_writes() {
+        for backend in [Backend::Carddav, Backend::Google, Backend::Graph] {
+            assert!(backend.writes_events());
+        }
+        assert!(!Backend::Jmap.writes_events());
+    }
+
+    /// The backends reading mail over an API send over it; an IMAP base
+    /// URL reads as the CardDAV default and needs SMTP.
+    #[test]
+    fn mail_submits_over_the_session_on_every_api_backend() {
+        assert!(Backend::of("jmap://api.fastmail.com").submits_over_session());
+        assert!(Backend::of("msgraph://user@outlook.com").submits_over_session());
+        assert!(Backend::of("google://user@gmail.com").submits_over_session());
+        assert!(!Backend::of("imaps://imap.example.com:993").submits_over_session());
     }
 
     /// Every base URL kind builds its documented shape; the jmap kind

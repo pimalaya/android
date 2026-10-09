@@ -270,10 +270,10 @@ final class AccountSettings {
                         host.getString(R.string.mail_offline_metered_note),
                         metered));
 
-        // NOTE: Graph and Gmail submit through the account they read from,
-        // so there is no server of its own to change.
+        // NOTE: JMAP, Graph and Gmail submit through the account they read
+        // from, so there is no server of its own to change.
         Account mail = account.server(PimDomain.MAIL);
-        if (mail != null && !PimalayaClient.isGraph(mail) && !PimalayaClient.isGoogle(mail)) {
+        if (mail != null && !PimalayaClient.submitsOverSession(mail)) {
             String current = mail.submitUrl;
             boolean none = current == null || current.isEmpty();
             rows.add(
