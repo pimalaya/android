@@ -14,6 +14,11 @@
     <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
     <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
 
+    <!-- The background check (BackgroundJob): kept across reboots, and
+         notifying the new mail it brings. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
@@ -91,6 +96,12 @@
                 android:name="android.provider.CONTACTS_STRUCTURE"
                 android:resource="@xml/contacts" />
         </service>
+
+        <!-- The background check, run by JobScheduler (BackgroundCheck). -->
+        <service
+            android:name=".BackgroundJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
     </application>
 
