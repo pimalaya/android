@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A filled text field: the surface tone at 16dp, ringed in the accent
+<!-- A filled text field: a surface-tone pill like the search bar, ringed in the accent
      while it has focus. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
@@ -8,7 +8,7 @@
             <stroke
                 android:width="2dp"
                 android:color="?android:attr/colorAccent" />
-            <corners android:radius="16dp" />
+            <corners android:radius="1000dp" />
         </shape>
     </item>
     <item>
@@ -17,7 +17,7 @@
             <stroke
                 android:width="2dp"
                 android:color="@android:color/transparent" />
-            <corners android:radius="16dp" />
+            <corners android:radius="1000dp" />
         </shape>
     </item>
 </selector>

@@ -7,7 +7,29 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- No bar on this step: a round back button alone, the page
+         carrying its own headline. -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/app_bar_height"
+        android:paddingStart="@dimen/app_bar_padding"
+        android:paddingEnd="@dimen/app_bar_padding">
+
+        <ImageButton
+            android:id="@+id/result_back"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_gravity="center_vertical"
+            android:layout_margin="4dp"
+            android:background="@drawable/button_tonal"
+            android:contentDescription="@string/back"
+            android:src="@drawable/ic_arrow_back"
+            android:tint="?android:attr/textColorPrimary" />
+
+    </FrameLayout>
+
     <ScrollView
+        android:id="@+id/result_scroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">

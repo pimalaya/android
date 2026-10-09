@@ -56,17 +56,6 @@
         <item name="android:textSize">15sp</item>
     </style>
 
-    <!-- A field's label above it, in from the field's rounded edge. -->
-    <style name="FieldLabel">
-        <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">wrap_content</item>
-        <item name="android:paddingStart">16dp</item>
-        <item name="android:layout_marginBottom">6dp</item>
-        <item name="android:textColor">?android:attr/textColorSecondary</item>
-        <item name="android:textSize">13sp</item>
-        <item name="android:fontFamily">sans-serif-medium</item>
-    </style>
-
     <!-- The onboarding pages' headline. -->
     <style name="PageTitle">
         <item name="android:layout_width">match_parent</item>

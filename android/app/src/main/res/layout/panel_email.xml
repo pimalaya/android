@@ -48,23 +48,19 @@
                 android:textColor="?android:attr/textColorSecondary"
                 android:textSize="16sp" />
 
-            <TextView
-                style="@style/FieldLabel"
-                android:layout_marginTop="32dp"
-                android:labelFor="@id/email_input"
-                android:text="@string/email_hint" />
-
             <EditText
                 android:id="@+id/email_input"
                 android:layout_width="match_parent"
                 android:layout_height="56dp"
+                android:layout_marginTop="32dp"
+                android:hint="@string/email_hint"
                 android:background="@drawable/field_background"
                 android:importantForAutofill="yes"
                 android:autofillHints="emailAddress"
                 android:imeOptions="actionGo"
                 android:inputType="textEmailAddress"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
+                android:paddingStart="24dp"
+                android:paddingEnd="24dp"
                 android:textSize="17sp" />
 
         </LinearLayout>
@@ -93,7 +89,8 @@
                 android:id="@+id/email_progress"
                 android:layout_width="24dp"
                 android:layout_height="24dp"
-                android:layout_gravity="center"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginEnd="16dp"
                 android:elevation="4dp"
                 android:visibility="gone" />
 
