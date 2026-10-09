@@ -54,7 +54,7 @@ final class ContactsList {
     /** Wires the list, its bar buttons, the header search and the pull-down. */
     void setUp() {
         // Pull-to-refresh runs the same syncAll as the drawer; its own
-        // spinner retracts right away, the modal dialog carries the wait.
+        // spinner retracts right away, the sync strip carries the wait.
         androidx.swiperefreshlayout.widget.SwipeRefreshLayout refresh =
                 host.findViewById(R.id.contacts_refresh);
         refresh.setColorSchemeColors(host.ui.resolveColor(android.R.attr.colorAccent));

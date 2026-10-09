@@ -55,13 +55,13 @@ The standard setup SHALL connect a domain without asking how: at Google and Micr
 - THEN the flow offers the advanced setup instead
 
 ### Requirement: A connected account is synchronised before the app shows it
-Finishing the connection flow SHALL land on the list of the first domain the account covers, mail first, and each domain the account covers SHALL owe its first sync to the first time its tab is reached: that tab SHALL sync that domain alone, behind the modal dialog, before showing it. A first sync that failed SHALL stay owed, tried again on the next visit. The user SHALL NOT have to refresh a domain to see what was just connected.
+Finishing the connection flow SHALL land on the list of the first domain the account covers, mail first, and each domain the account covers SHALL owe its first sync to the first time its tab is reached: that tab SHALL sync that domain alone, under the list's sync strip. A first sync that failed SHALL stay owed, tried again on the next visit. The user SHALL NOT have to refresh a domain to see what was just connected.
 
 #### Scenario: An account covering three domains
 - GIVEN a connection flow that connected mail, contacts and calendars
 - WHEN it finishes
-- THEN the app lands on the mail list, whose dialog syncs the newest chunk of each mailbox and nothing else
-- AND the contacts and the calendars sync, each behind its dialog, the first time their tab is opened
+- THEN the app lands on the mail list, whose first sync fetches the newest chunk of each mailbox and nothing else
+- AND the contacts and the calendars sync, each under its strip, the first time their tab is opened
 
 #### Scenario: One domain fails
 - GIVEN a first calendar sync that fails

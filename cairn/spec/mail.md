@@ -335,7 +335,7 @@ A mail round SHALL list every message of a mailbox within its scope (its floor, 
 #### Scenario: A first pass over a large mailbox
 - GIVEN a mailbox of 100k messages and an empty store
 - WHEN it is synced
-- THEN its newest chunk is listed with its subject, sender and date before the dialog closes
+- THEN its newest chunk is listed with its subject, sender and date before the first sync ends
 - AND the rest is listed behind it, a chunk at a time
 
 #### Scenario: An interrupted first pass
@@ -414,7 +414,7 @@ A Graph mailbox SHALL keep one message delta link made with no filter, selecting
 
 #### Scenario: The first chunk does not wait on the link
 - GIVEN a Graph inbox of 50,000 messages never listed
-- WHEN the first dialog syncs it
+- WHEN the first sync fetches it
 - THEN its 50 newest are listed by `/messages` and no delta is asked for
 - AND the next pass names the 50,000 by id once and keeps the link
 
@@ -470,7 +470,7 @@ After a mail tab's first sync, and on every return to the app or pass after it, 
 
 #### Scenario: A metered network
 - GIVEN a phone on mobile data
-- WHEN the first dialog closes
+- WHEN the first sync ends
 - THEN only the first chunks are stored, until an unmetered network is back
 
 ### Requirement: Each page's time is logged
@@ -487,12 +487,12 @@ A mail pass SHALL log, page by page, how many messages a page listed and the tim
 - THEN the log names how many ran on how many sessions, the wall time and the network time summed
 
 ### Requirement: An account's mailboxes sync side by side
-A mail pass, the first-sync dialog, the scroll widening and the background fill SHALL run an account's mailboxes concurrently on a pool of sessions, four for Graph and JMAP, three for IMAP, two for Gmail, each worker on a session of its own that no other worker uses while it runs, the workers taking the mailboxes in the pass's order. Every storage load, lookup and write SHALL be answered by one writer at a time, so only the network overlaps. A mailbox that fails SHALL leave the others running, the pass reporting the first failure. The first-sync dialog SHALL close once every mailbox's first chunk has landed, saying how many of the account's mailboxes have.
+A mail pass, the first sync, the scroll widening and the background fill SHALL run an account's mailboxes concurrently on a pool of sessions, four for Graph and JMAP, three for IMAP, two for Gmail, each worker on a session of its own that no other worker uses while it runs, the workers taking the mailboxes in the pass's order. Every storage load, lookup and write SHALL be answered by one writer at a time, so only the network overlaps. A mailbox that fails SHALL leave the others running, the pass reporting the first failure. The first sync SHALL end once every mailbox's first chunk has landed, its strip saying how many of the account's mailboxes have.
 
 #### Scenario: A first sync of twelve mailboxes on Graph
 - GIVEN a Graph account of twelve mailboxes never listed
 - WHEN its first sync runs
-- THEN four mailboxes are listed at once, the inbox begun first, and the dialog closes once all twelve chunks have landed
+- THEN four mailboxes are listed at once, the inbox begun first, and the first sync ends once all twelve chunks have landed
 
 #### Scenario: One mailbox refused
 - GIVEN a pass over five mailboxes, one of which the server refuses

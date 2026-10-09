@@ -536,6 +536,11 @@ final class AccountSettings {
      * leaving its settings screen for the drawer underneath.
      */
     private void confirmDeleteAccount(String email) {
+        // NOTE: a running pass would write the account back as it goes.
+        if (host.isSyncing()) {
+            host.toast(host.getString(R.string.sync_busy));
+            return;
+        }
         new AlertDialog.Builder(host)
                 .setTitle(R.string.delete_account)
                 .setMessage(R.string.delete_account_confirm)

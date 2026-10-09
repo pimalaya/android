@@ -137,7 +137,6 @@
     <string name="delete_account_confirm">Are you sure you want to remove this account? Its contacts will stay on this device.</string>
 
     <string name="sync_title">Synchronizing</string>
-    <string name="sync_heading" translatable="false">%1$s · %2$s</string>
     <string name="sync_addressbooks">Fetching addressbooks</string>
     <string name="sync_push">Pushing changes of %1$s</string>
     <string name="sync_cards">Fetching contacts of %1$s</string>
@@ -148,6 +147,7 @@
     <string name="conflict_auto_resolved">Conflict resolved automatically; changes push on the next sync</string>
     <string name="contact_diverged_pending">Diverged fields await review</string>
     <string name="sync_local_requested">Local sync scheduled</string>
+    <string name="sync_busy">Wait for the sync to finish</string>
     <string name="sync_overlay_preparing">Preparing synchronization</string>
     <string name="sync_step_server">Checking the server for changes</string>
     <!-- A counted step names what the domain being synced holds. -->
