@@ -7,7 +7,7 @@ change: phone-calendar-mirror
 
 ## Phase 0
 - [ ] Research agents: DAVx5 (synctools, ical4android), AOSP CalendarProvider and Etar, ICSx⁵, Fossify Calendar; revise the contract from their findings
-- [ ] Agree on `docs/calendar-mapping.md` with the user
+- [ ] Settle `docs/calendar-mapping.md` (delegated to the supervisor, 2026-10-09)
 
 ## Phase 1: Rust
 - [ ] `projectEvent`: master, overrides, rule set, alarms, attendees, zones

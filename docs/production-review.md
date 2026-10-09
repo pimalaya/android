@@ -26,7 +26,7 @@ Two read-only reviews run before the first public release: what is missing or ri
 - [ ] **Debug logs in release.** No `-assumenosideeffects` for `Log.d/v`: OAuth authorize URLs with state and PKCE challenge (OauthFlow.java:509), client ids and scopes (:421), the redirect URL (:196), addresses (AccountSettings.java:341, SyncService.java:60), raw engine replies (OfflineEngine.java:217,268; MailEngine.java:252,552).
 - [ ] **adb hooks live in release.** `syncRemote`/`syncLocal` extras on the exported launcher (MainActivity.java:345-348): gate on `BuildConfig.DEBUG`.
 - [ ] **Stale texts.** CHANGELOG.md:37 still announces Play pay-what-you-want tiers; the `WRITE_SYNC_SETTINGS` comment (AndroidManifest.xml:12-15) mentions a background sync choice.
-- [ ] **Open release-plan items.** google-sync live checks, device measure and fold (cairn/changes/google-sync/tasks.md); quiet-first-sync still draft; local-first-actions live checks.
+- [ ] **Open release items.** google-sync live checks, device measure and fold (cairn/changes/google-sync/tasks.md); local-first-actions live checks.
 - [ ] **No new-mail notifications, no event reminders.** Decided; say so in the store listing and README.
 - [ ] **Versioning.** `versionCode = 7`, `versionName = "0.1.0"` hand-set (build.gradle.kts:26-27); ABI splits need distinct codes for Play and F-Droid.
 

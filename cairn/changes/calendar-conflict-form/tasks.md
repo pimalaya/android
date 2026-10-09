@@ -5,7 +5,7 @@ change: calendar-conflict-form
 
 # Tasks
 
-- [ ] ical-rs: land `a-conflict-names-its-sides` and `a-removed-component-comes-back-for-an-edit` (in ~/code/pimalaya/ical, its own cairn); path dependency here until released, no version bump
+- [x] ical-rs: `a-conflict-names-its-sides` and `a-removed-component-comes-back-for-an-edit` already shipped in 0.5.0 and 0.5.1, which the app builds against
 - [ ] Rust bridge: merge three objects, answer the merged object or the conflicts by field and occurrence
 - [ ] Triage in the calendar pass, server and phone bindings; clean merges staged
 - [ ] Agenda: the conflicted mark; entry page conflict mode with chips per field, per occurrence
