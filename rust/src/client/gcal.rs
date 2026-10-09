@@ -16,9 +16,13 @@
 //! instance), and a token Google expired (410) starts the calendar over
 //! in full.
 //!
-//! Writes go to the master alone, with Google's own `If-Match` on its
-//! ETag, after the folded revision the edit was staged against is
-//! checked: a moved entry answers 412 like a CalDAV server would.
+//! Writes go to the master, with Google's own `If-Match` on its ETag,
+//! after the folded revision the edit was staged against is checked: a
+//! moved entry answers 412 like a CalDAV server would. Each occurrence the
+//! object holds otherwise goes to its instance after it: replaced from an
+//! override, deleted for an `EXDATE` or a cancelled override, replaced
+//! back with the series for an override the edit removed, Google having
+//! no reset of an exception.
 
 use std::collections::BTreeMap;
 
@@ -36,6 +40,7 @@ use io_gcal::{
                 delete::GcalEventDelete,
                 get::GcalEventGet,
                 import::{GcalEventImport, GcalEventImportParams},
+                instances::{GcalEventInstances, GcalEventInstancesParams},
                 list::{GcalEventsList, GcalEventsListParams},
                 update::{GcalEventUpdate, GcalEventUpdateParams},
             },
@@ -47,7 +52,13 @@ use io_http::rfc6750::bearer::HttpAuthBearer;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    client::{Client, convert::coroutine_error},
+    calendar::{
+        OccurrenceChange, OccurrenceWrite, occurrence_changes, occurrence_window, occurrences,
+    },
+    client::{
+        Client,
+        convert::{REFUSED, coroutine_error, parts_failure},
+    },
     types::{BridgeError, Calendar, Event, EventDelta, EventRef, default_role},
 };
 
@@ -139,8 +150,8 @@ impl<'a, 'local> Client<'a, 'local> {
         })
     }
 
-    /// Replaces a series master from an iCalendar object, merged onto the
-    /// server copy so what the projection does not model survives.
+    /// Writes an entry from an iCalendar object: its master, and each
+    /// occurrence the object holds otherwise than Google ([`update_entry`]).
     pub fn update_gcal_event(
         &mut self,
         token: &str,
@@ -150,25 +161,13 @@ impl<'a, 'local> Client<'a, 'local> {
         if_match: Option<&str>,
     ) -> Result<Option<String>, BridgeError> {
         let auth = HttpAuthBearer::new(token);
-        let (current, instances) = self.gcal_series(&auth, calendar, id)?;
-        check_revision(id, &current, &instances, if_match)?;
-
-        let projected = GcalEvent::from_ical(ical.as_bytes()).map_err(|err| err.to_string())?;
-        let event = projected.merge(&current);
-
-        let params = GcalEventUpdateParams::default();
-        let coroutine = GcalEventUpdate::new(
-            &auth,
-            &calendar_path(calendar),
+        update_entry(
+            &mut GcalCalls::new(self, &auth),
+            calendar,
             id,
-            &event,
-            &params,
-            current.etag.as_deref(),
+            ical,
+            if_match,
         )
-        .map_err(|err| err.to_string())?;
-        let updated = self.run_gcal(coroutine)?;
-
-        Ok(revision(&updated, &instances))
     }
 
     /// Deletes an event, the whole series for a master, conditionally on
@@ -284,6 +283,240 @@ impl GcalReads for GcalCalls<'_, '_, '_> {
         let coroutine = GcalEventGet::new(self.auth, &calendar_path(calendar), id, None, None)
             .map_err(|err| err.to_string())?;
         self.client.run_gcal(coroutine)
+    }
+}
+
+/// The requests an entry write sends beside its reads, apart so the write
+/// can run over a fake: a window of a series' instances, and one event
+/// replaced or deleted, each on its ETag.
+pub(super) trait GcalWrites: GcalReads {
+    /// Lists the instances of a series starting between two instants, at
+    /// most one page: a window of days holds fewer than a page.
+    fn instances(
+        &mut self,
+        calendar: &str,
+        id: &str,
+        start: &str,
+        end: &str,
+    ) -> Result<Vec<GcalEvent>, BridgeError>;
+
+    /// Replaces one event, answering it as replaced.
+    fn update(
+        &mut self,
+        calendar: &str,
+        id: &str,
+        event: &GcalEvent,
+        if_match: Option<&str>,
+    ) -> Result<GcalEvent, BridgeError>;
+
+    /// Deletes one event.
+    fn delete(
+        &mut self,
+        calendar: &str,
+        id: &str,
+        if_match: Option<&str>,
+    ) -> Result<(), BridgeError>;
+}
+
+impl GcalWrites for GcalCalls<'_, '_, '_> {
+    fn instances(
+        &mut self,
+        calendar: &str,
+        id: &str,
+        start: &str,
+        end: &str,
+    ) -> Result<Vec<GcalEvent>, BridgeError> {
+        let params = GcalEventInstancesParams {
+            time_min: Some(start),
+            time_max: Some(end),
+            max_results: Some(PAGE_SIZE),
+            ..Default::default()
+        };
+        let coroutine = GcalEventInstances::new(self.auth, &calendar_path(calendar), id, &params)
+            .map_err(|err| err.to_string())?;
+        Ok(self.client.run_gcal(coroutine)?.items)
+    }
+
+    fn update(
+        &mut self,
+        calendar: &str,
+        id: &str,
+        event: &GcalEvent,
+        if_match: Option<&str>,
+    ) -> Result<GcalEvent, BridgeError> {
+        let params = GcalEventUpdateParams::default();
+        let coroutine = GcalEventUpdate::new(
+            self.auth,
+            &calendar_path(calendar),
+            id,
+            event,
+            &params,
+            if_match,
+        )
+        .map_err(|err| err.to_string())?;
+        self.client.run_gcal(coroutine)
+    }
+
+    fn delete(
+        &mut self,
+        calendar: &str,
+        id: &str,
+        if_match: Option<&str>,
+    ) -> Result<(), BridgeError> {
+        let coroutine =
+            GcalEventDelete::new(self.auth, &calendar_path(calendar), id, None, if_match)
+                .map_err(|err| err.to_string())?;
+        self.client.run_gcal(coroutine)?;
+        Ok(())
+    }
+}
+
+/// Writes one entry: its master, merged onto the server copy so what the
+/// projection does not model survives, then each occurrence the object
+/// holds otherwise, through its instance.
+///
+/// The occurrences are diffed against the series as the master's write
+/// left it, read again when there was one, since that write can change
+/// its instances. An occurrence that does not land fails the write with a
+/// 412 once the others are written, the master standing: the entry moved
+/// under the edit, which stays staged, and the next pass reconciles it as
+/// any entry that moved.
+/// Occurrences the server refuses for good, and nothing else failing,
+/// answer [`REFUSED`] instead, which the engine records as a refusal of
+/// the edit rather than a wait.
+pub(super) fn update_entry<W: GcalWrites>(
+    writes: &mut W,
+    calendar: &str,
+    id: &str,
+    ical: &str,
+    if_match: Option<&str>,
+) -> Result<Option<String>, BridgeError> {
+    let (current, instances) = series(writes, calendar, id)?;
+    check_revision(id, &current, &instances, if_match)?;
+
+    let base = entry(current.clone(), &instances).ical;
+    let pending = occurrence_changes(ical, &base)?;
+    let projected = GcalEvent::from_ical(ical.as_bytes()).map_err(|err| err.to_string())?;
+    let held = GcalEvent::from_ical(base.as_bytes()).map_err(|err| err.to_string())?;
+
+    // NOTE: an edit of occurrences alone leaves the master as it is.
+    let wrote = projected != held;
+    let mut written = revision(&current, &instances);
+    if wrote {
+        let event = projected.merge(&current);
+        let updated = writes.update(calendar, id, &event, current.etag.as_deref())?;
+        written = revision(&updated, &instances);
+    }
+    if pending.is_empty() {
+        return Ok(written);
+    }
+
+    let read = (!wrote).then_some((current, instances));
+    write_occurrences(writes, calendar, id, ical, read).map_err(|err| match err.status {
+        Some(REFUSED) => BridgeError {
+            message: format!("Google refuses an occurrence of event {id} for good: {err}"),
+            status: Some(REFUSED),
+        },
+        _ => BridgeError {
+            message: format!("Event {id} was written to Google without all its occurrences: {err}"),
+            status: Some(412),
+        },
+    })
+}
+
+/// Writes every occurrence an object holds otherwise than its series on
+/// Google, each on its own, answering the entry's revision once all
+/// landed and the first failure otherwise. The series is the one `read`,
+/// unless the master was written since, which can change its instances.
+fn write_occurrences<W: GcalWrites>(
+    writes: &mut W,
+    calendar: &str,
+    id: &str,
+    ical: &str,
+    read: Option<(GcalEvent, Vec<GcalEvent>)>,
+) -> Result<Option<String>, BridgeError> {
+    let (master, instances) = match read {
+        Some(read) => read,
+        None => series(writes, calendar, id)?,
+    };
+    let server = entry(master.clone(), &instances).ical;
+
+    let mut failures = Vec::new();
+    for change in occurrence_changes(ical, &server)? {
+        if let Err(err) = write_occurrence(writes, calendar, id, &master, &instances, &change) {
+            log::warn!(
+                "cannot write occurrence {} of event {id}: {err}",
+                change.stamp()
+            );
+            failures.push(err);
+        }
+    }
+
+    if let Some(err) = parts_failure(failures) {
+        return Err(err);
+    }
+    let (master, instances) = series(writes, calendar, id)?;
+    Ok(revision(&master, &instances))
+}
+
+/// Writes one occurrence through its instance: among the changed and
+/// cancelled ones read with the series, else among the instances of a
+/// window around it, each told by the identity its projection gives it.
+fn write_occurrence<W: GcalWrites>(
+    writes: &mut W,
+    calendar: &str,
+    id: &str,
+    master: &GcalEvent,
+    instances: &[GcalEvent],
+    change: &OccurrenceChange,
+) -> Result<(), BridgeError> {
+    let told = |instance: &GcalEvent| {
+        occurrences(&master.to_ical_series(&[instance]))
+            .is_ok_and(|ids| ids.first() == Some(&change.id))
+    };
+
+    let instance = match instances.iter().find(|instance| told(instance)) {
+        Some(instance) => Some(instance.clone()),
+        None => {
+            let (start, end) = occurrence_window(change.id);
+            writes
+                .instances(calendar, id, &start, &end)?
+                .into_iter()
+                .find(|instance| told(instance))
+        }
+    };
+
+    // NOTE: an occurrence with no instance is gone already, which is all
+    // a removal asks, or an override of no occurrence the series has,
+    // which Google has nowhere to keep.
+    let Some(instance) = instance.filter(|instance| instance.id.is_some()) else {
+        if change.write != OccurrenceWrite::Delete {
+            log::warn!(
+                "occurrence {} of event {id} is no instance on Google, left out",
+                change.stamp()
+            );
+        }
+        return Ok(());
+    };
+    let handle = instance.id.as_deref().unwrap_or_default();
+    let etag = instance.etag.as_deref();
+
+    match &change.write {
+        OccurrenceWrite::Delete if instance.status == Some(GcalEventStatus::Cancelled) => Ok(()),
+        OccurrenceWrite::Delete => match writes.delete(calendar, handle, etag) {
+            Err(err) if matches!(err.status, Some(404 | 410)) => Ok(()),
+            deleted => deleted,
+        },
+        OccurrenceWrite::Update { staged, server } => {
+            let projected =
+                GcalEvent::from_ical(staged.as_bytes()).map_err(|err| err.to_string())?;
+            let held = GcalEvent::from_ical(server.as_bytes()).map_err(|err| err.to_string())?;
+            if projected == held {
+                return Ok(());
+            }
+            let event = projected.merge(&instance);
+            writes.update(calendar, handle, &event, etag).map(drop)
+        }
     }
 }
 
@@ -622,7 +855,9 @@ fn gcal_calendar(entry: GcalCalendarListEntry) -> Option<Calendar> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, from_value, json};
+    use serde_json::{Value, from_value, json, to_value};
+
+    use crate::calendar;
 
     use super::*;
 
@@ -744,6 +979,15 @@ mod tests {
         listings: Vec<(Option<String>, Option<String>)>,
         /// Events read alone.
         gets: usize,
+        /// The instances a window listing answers, every occurrence of the
+        /// series as it would be were none changed.
+        occurrences: Vec<GcalEvent>,
+        /// Every write, its method, the event it names, its body and its
+        /// ETag.
+        sent: Vec<(&'static str, String, Value, Option<String>)>,
+        /// The event whose write Google refuses, with the status and the
+        /// message it answers.
+        failing: Option<(String, u16, &'static str)>,
     }
 
     fn series_event(id: &str, etag: &str) -> GcalEvent {
@@ -1017,5 +1261,295 @@ mod tests {
                 .is_none()
         );
         assert_eq!(calendar.listings.len(), 1);
+    }
+
+    impl FakeCalendar {
+        fn written(
+            &mut self,
+            method: &'static str,
+            id: &str,
+            body: Value,
+            if_match: Option<&str>,
+        ) -> Result<(), BridgeError> {
+            self.sent
+                .push((method, id.to_string(), body, if_match.map(str::to_string)));
+            match &self.failing {
+                Some((failing, status, message)) if failing == id => Err(BridgeError {
+                    message: message.to_string(),
+                    status: Some(*status),
+                }),
+                _ => Ok(()),
+            }
+        }
+
+        fn writes(&self) -> Vec<(&'static str, &str)> {
+            self.sent
+                .iter()
+                .map(|(method, id, _, _)| (*method, id.as_str()))
+                .collect()
+        }
+
+        /// The entry as a read hands it over.
+        fn ical(&mut self) -> String {
+            let (master, instances) = series(self, "jane@example.com", "m").unwrap();
+            entry(master, &instances).ical
+        }
+    }
+
+    impl GcalWrites for FakeCalendar {
+        fn instances(
+            &mut self,
+            _: &str,
+            id: &str,
+            start: &str,
+            end: &str,
+        ) -> Result<Vec<GcalEvent>, BridgeError> {
+            assert_eq!(id, "m");
+            Ok(self
+                .occurrences
+                .iter()
+                .map(|plain| {
+                    self.events
+                        .iter()
+                        .find(|event| event.id == plain.id)
+                        .unwrap_or(plain)
+                        .clone()
+                })
+                .filter(|instance| {
+                    let original = instance.original_start_time.as_ref().unwrap();
+                    let original = original.date_time.as_deref().unwrap();
+                    original >= start && original < end
+                })
+                .collect())
+        }
+
+        fn update(
+            &mut self,
+            _: &str,
+            id: &str,
+            event: &GcalEvent,
+            if_match: Option<&str>,
+        ) -> Result<GcalEvent, BridgeError> {
+            self.written("PUT", id, to_value(event).unwrap(), if_match)?;
+            Ok(GcalEvent {
+                etag: Some(format!("\"{}\"", self.sent.len() + 1)),
+                ..event.clone()
+            })
+        }
+
+        fn delete(&mut self, _: &str, id: &str, if_match: Option<&str>) -> Result<(), BridgeError> {
+            self.written("DELETE", id, Value::Null, if_match)
+        }
+    }
+
+    const MONDAYS: [&str; 6] = [
+        "2026-10-05",
+        "2026-10-12",
+        "2026-10-19",
+        "2026-10-26",
+        "2026-11-02",
+        "2026-11-09",
+    ];
+
+    /// The occurrence of the series `m` on `day` at `hour`, under
+    /// `summary`.
+    fn occurrence(day: &str, hour: &str, summary: &str) -> GcalEvent {
+        let stamp = day.replace('-', "");
+        from_value(json!({
+            "id": format!("m_{stamp}T090000Z"),
+            "etag": format!("\"{stamp}\""),
+            "iCalUID": "uid-m",
+            "recurringEventId": "m",
+            "originalStartTime": {"dateTime": format!("{day}T09:00:00Z"), "timeZone": "UTC"},
+            "summary": summary,
+            "start": {"dateTime": format!("{day}T{hour}:00:00Z"), "timeZone": "UTC"},
+            "end": {"dateTime": format!("{day}T{hour}:30:00Z"), "timeZone": "UTC"},
+        }))
+        .unwrap()
+    }
+
+    /// A weekly series of six Mondays at 09:00 UTC, from 5 October 2026,
+    /// with `exceptions` among its instances.
+    fn weekly(exceptions: Vec<GcalEvent>) -> FakeCalendar {
+        let master = from_value(json!({
+            "id": "m",
+            "etag": "\"1\"",
+            "iCalUID": "uid-m",
+            "summary": "Series",
+            "start": {"dateTime": "2026-10-05T09:00:00Z", "timeZone": "UTC"},
+            "end": {"dateTime": "2026-10-05T09:30:00Z", "timeZone": "UTC"},
+            "recurrence": ["RRULE:FREQ=WEEKLY;COUNT=6"],
+        }))
+        .unwrap();
+
+        let mut events = vec![master];
+        events.extend(exceptions);
+        FakeCalendar {
+            events,
+            occurrences: MONDAYS
+                .iter()
+                .map(|day| occurrence(day, "09", "Series"))
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn this(day: &str, edit: Value) -> String {
+        let mut edit = edit;
+        edit["scope"] = json!("this");
+        edit["recurrenceId"] = json!(format!("{}T090000", day.replace('-', "")));
+        edit.to_string()
+    }
+
+    fn moved(day: &str, hour: &str) -> String {
+        let stamp = day.replace('-', "");
+        this(
+            day,
+            json!({
+                "start": {"time": format!("{stamp}T{hour}0000")},
+                "end": {"time": format!("{stamp}T{hour}3000")},
+            }),
+        )
+    }
+
+    #[test]
+    fn an_occurrence_moved_alone_replaces_its_instance_alone() {
+        let mut calendar = weekly(Vec::new());
+        let staged = calendar::write(&calendar.ical(), &moved("2026-10-19", "10")).unwrap();
+
+        let revision = update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            Some("\"1\""),
+        )
+        .unwrap();
+
+        assert_eq!(calendar.writes(), [("PUT", "m_20261019T090000Z")]);
+        let (_, _, body, if_match) = &calendar.sent[0];
+        assert_eq!(if_match.as_deref(), Some("\"20261019\""));
+        assert_eq!(body["start"]["dateTime"], "2026-10-19T10:00:00Z");
+        assert_eq!(body["recurringEventId"], "m");
+        assert_eq!(
+            body["originalStartTime"]["dateTime"],
+            "2026-10-19T09:00:00Z"
+        );
+        assert_eq!(body["summary"], "Series");
+        assert!(body.get("recurrence").is_none(), "{body}");
+        assert!(revision.is_some());
+    }
+
+    /// Google takes the `EXDATE` in the master's recurrence, and the
+    /// instance a listing still shows is deleted besides: a removal
+    /// Google already made answers 410, which counts as done.
+    #[test]
+    fn an_occurrence_deleted_alone_deletes_its_instance() {
+        let mut calendar = weekly(Vec::new());
+        let staged = calendar::remove(&calendar.ical(), &this("2026-10-26", json!({})))
+            .unwrap()
+            .unwrap();
+
+        update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            Some("\"1\""),
+        )
+        .unwrap();
+
+        assert_eq!(
+            calendar.writes(),
+            [("PUT", "m"), ("DELETE", "m_20261026T090000Z")]
+        );
+        assert!(
+            calendar.sent[0].2["recurrence"][1]
+                .as_str()
+                .unwrap()
+                .starts_with("EXDATE")
+        );
+    }
+
+    #[test]
+    fn an_exception_reverted_is_replaced_back_with_the_series() {
+        let moved = occurrence("2026-10-12", "10", "Moved");
+        let mut calendar = weekly(vec![moved.clone()]);
+        let base = calendar.ical();
+        let revision = revision(&calendar.events[0], &[moved]);
+        let staged = calendar.events[0].to_ical();
+        assert_ne!(staged, base);
+
+        update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            revision.as_deref(),
+        )
+        .unwrap();
+
+        assert_eq!(calendar.writes(), [("PUT", "m_20261012T090000Z")]);
+        let body = &calendar.sent[0].2;
+        assert_eq!(body["summary"], "Series");
+        assert_eq!(body["start"]["dateTime"], "2026-10-12T09:00:00Z");
+    }
+
+    #[test]
+    fn a_cancelled_instance_is_not_deleted_again() {
+        let gone = cancelled(occurrence("2026-10-12", "09", "Series"));
+        let mut calendar = weekly(vec![gone.clone()]);
+        let revision = revision(&calendar.events[0], &[gone]);
+        let staged = calendar.ical();
+
+        update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            revision.as_deref(),
+        )
+        .unwrap();
+
+        assert!(calendar.sent.is_empty(), "{:?}", calendar.writes());
+    }
+
+    /// Two occurrences moved, Google answering the first's write with
+    /// `status` and `message`: what the write answers, the second
+    /// occurrence landed either way.
+    fn refused_with(status: u16, message: &'static str) -> BridgeError {
+        let mut calendar = weekly(Vec::new());
+        calendar.failing = Some(("m_20261019T090000Z".into(), status, message));
+        let first = calendar::write(&calendar.ical(), &moved("2026-10-19", "10")).unwrap();
+        let staged = calendar::write(&first, &moved("2026-11-02", "11")).unwrap();
+
+        let refused = update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            Some("\"1\""),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            calendar.writes(),
+            [("PUT", "m_20261019T090000Z"), ("PUT", "m_20261102T090000Z")],
+            "the other occurrence still lands"
+        );
+        refused
+    }
+
+    #[test]
+    fn an_occurrence_google_fails_leaves_the_edit_staged() {
+        assert_eq!(refused_with(503, "Backend Error").status, Some(412));
+        assert_eq!(refused_with(403, "Rate Limit Exceeded").status, Some(412));
+        assert_eq!(refused_with(412, "Precondition Failed").status, Some(412));
+    }
+
+    #[test]
+    fn an_occurrence_google_refuses_for_good_refuses_the_edit() {
+        assert_eq!(refused_with(400, "Invalid start time.").status, Some(422));
+        assert_eq!(refused_with(403, "Forbidden").status, Some(422));
     }
 }

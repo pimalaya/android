@@ -75,18 +75,18 @@ impl Backend {
     }
 
     /// True when a calendar write carries an override of one occurrence
-    /// (RFC 5545 3.8.4.4) to the server. CalDAV puts the whole object;
-    /// Google's write projects the series' own event and Graph's the
-    /// series master alone, each taking an occurrence only through the
-    /// instance itself, and a JMAP calendar takes no write yet.
+    /// (RFC 5545 3.8.4.4) to the server: CalDAV's puts the whole object,
+    /// Graph's and Google's write the occurrence through its instance
+    /// after the series, and a JMAP calendar takes no write yet.
     pub fn writes_overrides(self) -> bool {
-        matches!(self, Self::Carddav)
+        matches!(self, Self::Carddav | Self::Graph | Self::Google)
     }
 
-    /// True when a calendar write carries an `EXDATE` to the server:
-    /// Google's does, inside the series' recurrence, Graph's does not.
+    /// True when a calendar write carries an `EXDATE` to the server, the
+    /// occurrence deleted through its instance where it is not the whole
+    /// object; a JMAP calendar takes no write yet.
     pub fn writes_exdates(self) -> bool {
-        matches!(self, Self::Carddav | Self::Google)
+        matches!(self, Self::Carddav | Self::Graph | Self::Google)
     }
 
     /// The backend tag on the JNI wire.
@@ -209,15 +209,14 @@ mod tests {
     }
 
     /// Only a push that carries an occurrence on its own can be asked to:
-    /// an override reaches CalDAV alone, an EXDATE CalDAV and Google.
+    /// every backend that writes calendars does, JMAP none yet.
     #[test]
     fn occurrence_writes_follow_what_each_push_carries() {
-        assert!(Backend::Carddav.writes_overrides());
-        assert!(!Backend::Google.writes_overrides());
-        assert!(!Backend::Graph.writes_overrides());
+        for backend in [Backend::Carddav, Backend::Google, Backend::Graph] {
+            assert!(backend.writes_overrides());
+            assert!(backend.writes_exdates());
+        }
         assert!(!Backend::Jmap.writes_overrides());
-        assert!(Backend::Google.writes_exdates());
-        assert!(!Backend::Graph.writes_exdates());
         assert!(!Backend::Jmap.writes_exdates());
     }
 

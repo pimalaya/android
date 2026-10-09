@@ -19,8 +19,11 @@
 //!
 //! Graph has no conditional write for events, so the revision an edit was
 //! staged against is checked against the server's right before the write,
-//! and a moved event answers 412 like a CalDAV server would. Only the
-//! series master is written: an exception edited here does not push.
+//! and a moved event answers 412 like a CalDAV server would. A series is
+//! written as its master, then each occurrence the object holds otherwise
+//! as its instance: patched from an override, deleted for an `EXDATE` or
+//! a cancelled override, patched back to the series for an override the
+//! edit removed, Graph having no reset of an exception.
 
 use std::collections::BTreeMap;
 
@@ -54,8 +57,12 @@ use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
 use url::Url;
 
 use crate::{
+    calendar::{
+        OccurrenceChange, OccurrenceWrite, occurrence_changes, occurrence_window, occurrences,
+    },
     client::{
         Client,
+        convert::{REFUSED, parts_failure},
         graph::{alone, batched, graph_url, parse_graph_url},
     },
     types::{BridgeError, Calendar, Event, EventRef, default_role},
@@ -193,9 +200,8 @@ impl<'a, 'local> Client<'a, 'local> {
         })
     }
 
-    /// Replaces a series master from an iCalendar object, sending only what
-    /// changed against the server copy, which also serves the `if_match`
-    /// check.
+    /// Writes an entry from an iCalendar object: its master, and each
+    /// occurrence the object holds otherwise than Graph ([`update_entry`]).
     pub fn update_graph_event(
         &mut self,
         token: &str,
@@ -203,20 +209,12 @@ impl<'a, 'local> Client<'a, 'local> {
         ical: &str,
         if_match: Option<&str>,
     ) -> Result<Option<String>, BridgeError> {
-        let auth = HttpAuthBearer::new(token);
-        let (current, exceptions) = self.graph_series(&auth, id)?;
-        check_revision(id, &current, if_match)?;
+        let mut writes = GraphCalls {
+            client: self,
+            auth: HttpAuthBearer::new(token),
+        };
 
-        let exceptions: Vec<&MsgraphEvent> = exceptions.iter().collect();
-        let base = current.to_ical_series(&exceptions);
-        let patch = MsgraphEvent::update_from_ical(ical.as_bytes(), base.as_bytes())
-            .map_err(|err| err.to_string())?;
-
-        let coroutine =
-            MsgraphEventUpdate::new(&auth, "me", id, &patch).map_err(|err| err.to_string())?;
-        let updated = self.run_msgraph(coroutine)?;
-
-        Ok(updated.change_key)
+        update_entry(&mut writes, id, ical, if_match)
     }
 
     /// Deletes an event, the whole series for a master, conditionally on
@@ -368,6 +366,215 @@ impl GraphReads for GraphCalls<'_, '_, '_> {
             .run_msgraph(MsgraphSend::<MsgraphEventsListResponse>::get(
                 &self.auth, url,
             ))
+    }
+}
+
+/// The requests an entry write sends, apart so the write can run over a
+/// fake: the entry read whole, its master alone, a window of its
+/// instances, and one event patched or deleted.
+pub(super) trait GraphWrites {
+    /// Reads one entry: the event, and the exceptions of a series.
+    fn series(&mut self, id: &str) -> Result<(MsgraphEvent, Vec<MsgraphEvent>), BridgeError>;
+
+    /// Reads one event, everything the projection reads.
+    fn master(&mut self, id: &str) -> Result<MsgraphEvent, BridgeError>;
+
+    /// Lists the instances of a series between two instants, every page.
+    fn instances(
+        &mut self,
+        id: &str,
+        start: &str,
+        end: &str,
+    ) -> Result<Vec<MsgraphEvent>, BridgeError>;
+
+    /// Patches one event, answering it as patched.
+    fn update(&mut self, id: &str, patch: &MsgraphEvent) -> Result<MsgraphEvent, BridgeError>;
+
+    /// Deletes one event.
+    fn delete(&mut self, id: &str) -> Result<(), BridgeError>;
+}
+
+impl GraphWrites for GraphCalls<'_, '_, '_> {
+    fn series(&mut self, id: &str) -> Result<(MsgraphEvent, Vec<MsgraphEvent>), BridgeError> {
+        self.client.graph_series(&self.auth, id)
+    }
+
+    fn master(&mut self, id: &str) -> Result<MsgraphEvent, BridgeError> {
+        self.client.graph_event(&self.auth, id)
+    }
+
+    fn instances(
+        &mut self,
+        id: &str,
+        start: &str,
+        end: &str,
+    ) -> Result<Vec<MsgraphEvent>, BridgeError> {
+        let params = MsgraphEventsListParams {
+            top: Some(PAGE_SIZE),
+            // NOTE: an instance is told by its originalStart, which the
+            // default listing leaves out.
+            select: Some(MSGRAPH_EVENT_ICAL_SELECT),
+            ..Default::default()
+        };
+        let coroutine = MsgraphEventInstances::new(&self.auth, "me", id, start, end, &params)
+            .map_err(|err| err.to_string())?;
+        self.client.graph_event_pages(&self.auth, coroutine)
+    }
+
+    fn update(&mut self, id: &str, patch: &MsgraphEvent) -> Result<MsgraphEvent, BridgeError> {
+        let coroutine =
+            MsgraphEventUpdate::new(&self.auth, "me", id, patch).map_err(|err| err.to_string())?;
+        self.client.run_msgraph(coroutine)
+    }
+
+    fn delete(&mut self, id: &str) -> Result<(), BridgeError> {
+        let coroutine =
+            MsgraphEventDelete::new(&self.auth, "me", id).map_err(|err| err.to_string())?;
+        self.client.run_msgraph(coroutine)?;
+        Ok(())
+    }
+}
+
+/// Writes one entry: its master, patched with what changed against the
+/// server copy, which also serves the `if_match` check, then each
+/// occurrence the object holds otherwise, through its instance.
+///
+/// The occurrences are diffed against the series as the master's write
+/// left it, read again when there was one: that write can change the
+/// exceptions, Exchange discarding them when a series' pattern moves. An
+/// occurrence that does not land fails the write with a 412 once the
+/// others are written, the master standing: the entry moved under the
+/// edit, which stays staged, and the next pass reconciles it as any entry
+/// that moved.
+/// Occurrences the server refuses for good, and nothing else failing,
+/// answer [`REFUSED`] instead, which the engine records as a refusal of
+/// the edit rather than a wait.
+pub(super) fn update_entry<W: GraphWrites>(
+    writes: &mut W,
+    id: &str,
+    ical: &str,
+    if_match: Option<&str>,
+) -> Result<Option<String>, BridgeError> {
+    let (current, exceptions) = writes.series(id)?;
+    check_revision(id, &current, if_match)?;
+
+    let held: Vec<&MsgraphEvent> = exceptions.iter().collect();
+    let base = current.to_ical_series(&held);
+    let patch = MsgraphEvent::update_from_ical(ical.as_bytes(), base.as_bytes())
+        .map_err(|err| err.to_string())?;
+    let pending = occurrence_changes(ical, &base)?;
+
+    // NOTE: an edit of occurrences alone leaves the master as it is.
+    let wrote = patch != MsgraphEvent::default();
+    let mut change_key = current.change_key.clone();
+    if wrote {
+        change_key = writes.update(id, &patch)?.change_key;
+    }
+    if pending.is_empty() {
+        return Ok(change_key);
+    }
+
+    let read = (!wrote).then_some((current, exceptions));
+    write_occurrences(writes, id, ical, read).map_err(|err| match err.status {
+        Some(REFUSED) => BridgeError {
+            message: format!("Graph refuses an occurrence of event {id} for good: {err}"),
+            status: Some(REFUSED),
+        },
+        _ => BridgeError {
+            message: format!("Event {id} was written to Graph without all its occurrences: {err}"),
+            status: Some(412),
+        },
+    })
+}
+
+/// Writes every occurrence an object holds otherwise than its series on
+/// Graph, each on its own, answering the master's revision once all
+/// landed and the first failure otherwise. The series is the one `read`,
+/// unless the master was written since, which can change its exceptions.
+fn write_occurrences<W: GraphWrites>(
+    writes: &mut W,
+    id: &str,
+    ical: &str,
+    read: Option<(MsgraphEvent, Vec<MsgraphEvent>)>,
+) -> Result<Option<String>, BridgeError> {
+    let (master, exceptions) = match read {
+        Some(read) => read,
+        None => writes.series(id)?,
+    };
+    let held: Vec<&MsgraphEvent> = exceptions.iter().collect();
+    let server = master.to_ical_series(&held);
+
+    let mut failures = Vec::new();
+    for change in occurrence_changes(ical, &server)? {
+        if let Err(err) = write_occurrence(writes, id, &master, &exceptions, &change) {
+            log::warn!(
+                "cannot write occurrence {} of event {id}: {err}",
+                change.stamp()
+            );
+            failures.push(err);
+        }
+    }
+
+    match parts_failure(failures) {
+        None => Ok(writes.master(id)?.change_key),
+        Some(err) => Err(err),
+    }
+}
+
+/// Writes one occurrence through its instance: among the exceptions read
+/// with the series, else among the instances of a window around it, each
+/// told by the identity its projection gives it.
+fn write_occurrence<W: GraphWrites>(
+    writes: &mut W,
+    id: &str,
+    master: &MsgraphEvent,
+    exceptions: &[MsgraphEvent],
+    change: &OccurrenceChange,
+) -> Result<(), BridgeError> {
+    let told = |instance: &MsgraphEvent| {
+        occurrences(&master.to_ical_series(&[instance]))
+            .is_ok_and(|ids| ids.first() == Some(&change.id))
+    };
+
+    let instance = match exceptions.iter().find(|instance| told(instance)) {
+        Some(instance) => Some(instance.id.clone()),
+        None => {
+            let (start, end) = occurrence_window(change.id);
+            writes
+                .instances(id, &start, &end)?
+                .into_iter()
+                .find(|instance| told(instance))
+                .map(|instance| instance.id)
+        }
+    };
+
+    // NOTE: an occurrence with no instance is gone already, which is all
+    // a removal asks, or an override of no occurrence the series has,
+    // which Graph has nowhere to keep.
+    let Some(instance) = instance else {
+        if change.write != OccurrenceWrite::Delete {
+            log::warn!(
+                "occurrence {} of event {id} is no instance on Graph, left out",
+                change.stamp()
+            );
+        }
+        return Ok(());
+    };
+
+    match &change.write {
+        OccurrenceWrite::Delete => match writes.delete(&instance) {
+            Err(err) if err.status == Some(404) => Ok(()),
+            deleted => deleted,
+        },
+        OccurrenceWrite::Update { staged, server } => {
+            let patch =
+                MsgraphEvent::instance_update_from_ical(staged.as_bytes(), server.as_bytes())
+                    .map_err(|err| err.to_string())?;
+            match patch {
+                Some(patch) => writes.update(&instance, &patch).map(drop),
+                None => Ok(()),
+            }
+        }
     }
 }
 
@@ -614,6 +821,10 @@ fn check_revision(
 #[cfg(test)]
 #[path = "graph_calendar_tests.rs"]
 mod batch_tests;
+
+#[cfg(test)]
+#[path = "graph_calendar_write_tests.rs"]
+mod write_tests;
 
 #[cfg(test)]
 mod tests {

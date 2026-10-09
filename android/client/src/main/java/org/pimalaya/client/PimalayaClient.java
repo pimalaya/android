@@ -332,8 +332,9 @@ public class PimalayaClient {
 
     /**
      * True when a write to the calendar behind the URL carries an override
-     * of one occurrence to the server: CalDAV's does, Graph's and Google's
-     * write the series alone.
+     * of one occurrence to the server: CalDAV's in the object, Graph's and
+     * Google's through the occurrence's instance; a JMAP calendar takes no
+     * write yet.
      */
     public static boolean writesOverrides(String url) {
         return info(url).optBoolean("writesOverrides");
