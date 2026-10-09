@@ -181,7 +181,7 @@ public class MainActivity extends Activity {
 
     /**
      * The shared sync state: true while a sync runs. Every UI element
-     * that reflects it (the modal loader, the drawer's sync row)
+     * that reflects it (the lists' sync strip, the drawer's sync row)
      * subscribes through {@link #observeSync}, and {@link #setSyncing}
      * pushes the flag to all of them at once.
      */
@@ -209,9 +209,6 @@ public class MainActivity extends Activity {
     private final Map<String, Integer> bodiesLeft = new java.util.concurrent.ConcurrentHashMap<>();
 
     private final List<java.util.function.Consumer<Boolean>> syncObservers = new ArrayList<>();
-
-    /** The modal sync dialog, up while the syncing flag is (showSyncDialog). */
-    private AlertDialog syncDialog;
 
     /** The pool's loader and bridge grouping (built in onCreate). */
     ContactPool pool;
@@ -309,9 +306,9 @@ public class MainActivity extends Activity {
         ((TextView) findViewById(R.id.nav_mail_badge)).setTextColor(accentContrast());
         findViewById(R.id.bar_filter).setOnClickListener(view -> openFilter());
 
-        // The modal dialog binds once here and covers every sync entry
+        // The sync strip binds once here and covers every sync entry
         // point through the shared syncing flag.
-        observeSync(this::showSyncDialog);
+        observeSync(this::showSyncStrip);
 
         // NOTE: the built-in local book is always present and
         // subscribed, so the app opens usable with no account:
@@ -571,10 +568,6 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        // The sync loader is modal: back waits with the rest.
-        if (syncing) {
-            return;
-        }
         // The account settings overlay sits above the open drawer, so
         // back peels it off first.
         if (screen == PANEL_ACCOUNT) {
@@ -690,10 +683,10 @@ public class MainActivity extends Activity {
             setFabEnabled(buttonId, !loading);
             ((android.widget.ImageButton) button).setImageAlpha(loading ? 0 : 255);
         } else {
-            // NOTE: a pill keeps its full tone and its label, the loader
-            // turning at its end in the label's colour.
+            // NOTE: a pill dims as when disabled and keeps its label, the
+            // loader turning at its end in the label's colour.
             button.setEnabled(!loading);
-            button.setAlpha(1f);
+            button.setAlpha(loading ? 0.4f : 1f);
             // NOTE: and nothing else on the step answers until it is done,
             // the way back included.
             authBusy = loading;
@@ -780,7 +773,7 @@ public class MainActivity extends Activity {
     }
 
     private void setUpHomePanel() {
-        // Sync slides the drawer shut on its way in, so the modal dialog
+        // Sync slides the drawer shut on its way in, so the sync strip
         // and its outcome toasts land over the refreshed contacts list.
         findViewById(R.id.drawer_close)
                 .setOnClickListener(view -> drawer.closeDrawer(Gravity.START));
@@ -805,8 +798,8 @@ public class MainActivity extends Activity {
                 android.content.res.ColorStateList.valueOf(accentContrast()));
         accountFab.setOnClickListener(view -> accountSettings.save());
 
-        // While a sync runs the row goes inert; the modal dialog carries
-        // the only spinner.
+        // While a sync runs the row goes inert; the lists' strip carries
+        // the progress.
         observeSync(
                 active -> {
                     View row = findViewById(R.id.drawer_sync);
@@ -1059,7 +1052,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void account(String email) {
-                syncTitle(R.string.contacts_title, email);
+                syncAccount(email);
             }
 
             @Override
@@ -1073,8 +1066,8 @@ public class MainActivity extends Activity {
         };
     }
 
-    /** Pushes the sync flag to every subscribed element (the modal
-     *  loader, the drawer's inert sync row). */
+    /** Pushes the sync flag to every subscribed element (the lists'
+     *  sync strip, the drawer's inert sync row). */
     private void setSyncing(boolean value) {
         syncing = value;
         for (java.util.function.Consumer<Boolean> observer : syncObservers) {
@@ -1083,106 +1076,97 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Shows or hides the modal sync dialog: non-cancelable (no outside
-     * tap, no back), so the wait is explicit instead of an ambiguous
-     * spinner, while the screen behind stays fully visible. The title
-     * carries the domain, the detail the current engine step, and the
-     * screen stays on for the duration.
+     * Shows or hides the sync strip under every list's large title: whose
+     * and which domain the pass is on with the step it stands at, over a
+     * thin bar. The lists stay usable behind it, and the screen stays on
+     * for the duration.
      */
-    private void showSyncDialog(boolean active) {
-        if (!active) {
-            getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            if (syncDialog != null) {
-                syncDialog.dismiss();
-                syncDialog = null;
-            }
+    private void showSyncStrip(boolean active) {
+        if (active) {
+            getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            // NOTE: a line from the first frame. A pass has a round trip
+            // or two to make before it can name what it is on, and a strip
+            // that shows nothing for that long reads as nothing running.
+            syncLine = getString(R.string.sync_overlay_preparing);
+            syncDone = 0;
+            syncTotal = 0;
+            renderSyncStrip();
             return;
         }
-
-        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        View content = getLayoutInflater().inflate(R.layout.dialog_sync, null);
-        // NOTE: both lines from the first frame, never the title alone. A
-        // pass has a round trip or two to make before it can name what it
-        // is on, and a dialog that shows one line for that long is a
-        // different dialog, laid out differently, that then jumps.
-        ((TextView) content.findViewById(R.id.sync_dialog_title)).setText(syncHeading());
-        ((TextView) content.findViewById(R.id.sync_dialog_detail))
-                .setText(R.string.sync_overlay_preparing);
-        syncDialog =
-                new AlertDialog.Builder(this)
-                        .setView(content)
-                        .setCancelable(false)
-                        .show();
+        getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        for (int panel : new int[] {PANEL_MAIL, PANEL_CONTACTS, PANEL_CALENDAR}) {
+            headerOf(panel).synced();
+        }
+        // NOTE: an account connected while this pass ran owes its first
+        // sync to the tab it landed on, which the pass kept from starting.
+        main.post(() -> firstSyncIfOwed(screen));
     }
 
-    /**
-     * The domain the sync dialog names, and the account a pass is on when
-     * it has reached one: the title is which of the three a pass is on and
-     * for whom, the detail line what it is doing there.
-     */
-    private volatile int syncDomain = R.string.contacts_title;
+    /** Draws the strip's current state on every list (main thread). */
+    private void renderSyncStrip() {
+        if (!syncing) {
+            return;
+        }
+        String account = syncAccount;
+        for (int panel : new int[] {PANEL_MAIL, PANEL_CONTACTS, PANEL_CALENDAR}) {
+            headerOf(panel).sync(account, syncLine, syncDone, syncTotal);
+        }
+    }
 
+    /** The account a pass is on, null until it reaches one. */
     private volatile String syncAccount;
 
-    /** Names the domain a pass moved on to (callable off the main thread). */
-    private void syncTitle(int domain) {
-        syncTitle(domain, null);
-    }
+    /** The step the pass stands at, and how far it is when it can count. */
+    private volatile String syncLine = "";
+
+    private volatile int syncDone;
+
+    private volatile int syncTotal;
 
     /**
-     * Names the domain and the account a pass moved on to (callable off the
-     * main thread), so a pass over several accounts says whose it is on.
+     * Names the account a pass moved on to, null between accounts (callable
+     * off the main thread), so a pass over several says whose it is on. The
+     * count starts over: it was the previous step's.
      */
-    private void syncTitle(int domain, String accountEmail) {
-        syncDomain = domain;
+    private void syncAccount(String accountEmail) {
         syncAccount = accountEmail;
-        String heading = syncHeading();
-        main.post(
-                () -> {
-                    if (syncDialog != null) {
-                        ((TextView) syncDialog.findViewById(R.id.sync_dialog_title))
-                                .setText(heading);
-                    }
-                });
-    }
-
-    /** The sync dialog's title: the account, when known, then the domain. */
-    private String syncHeading() {
-        String domain = getString(syncDomain);
-        String account = syncAccount;
-        return account == null ? domain : getString(R.string.sync_heading, account, domain);
+        syncTotal = 0;
+        main.post(this::renderSyncStrip);
     }
 
     /**
-     * Sets the loader's step line from an engine stage of a domain (any
-     * thread), in that domain's words: events while the agenda syncs,
-     * messages while the mail does.
+     * Sets the strip's step from an engine stage of a domain (any thread),
+     * in that domain's words: events while the agenda syncs, messages while
+     * the mail does.
      */
     private void syncStep(PimDomain domain, int stage, int count) {
         String text = SyncSteps.text(getResources(), domain, stage, count);
         if (text != null) {
+            syncTotal = 0;
             syncDetail(text);
         }
     }
 
     /**
-     * Sets the loader's step line to a count of a whole (any thread): how
-     * many of an account's mailboxes have landed, where they land side by
-     * side and no one engine's step says how far the pass is.
+     * Sets the strip's step to a count of a whole (any thread), filling its
+     * bar: how many of an account's mailboxes have landed, where they land
+     * side by side and no one engine's step says how far the pass is.
      */
     private void syncProgress(int string, int done, int total) {
+        syncDone = done;
+        syncTotal = total;
         syncDetail(getString(string, done, total));
     }
 
-    /** Sets the loader's step line (any thread). */
+    /** Sets the strip's step line (any thread). */
     private void syncDetail(String text) {
-        main.post(
-                () -> {
-                    if (syncDialog != null) {
-                        ((TextView) syncDialog.findViewById(R.id.sync_dialog_detail))
-                                .setText(text);
-                    }
-                });
+        syncLine = text;
+        main.post(this::renderSyncStrip);
+    }
+
+    /** Whether a sync pass is running. */
+    boolean isSyncing() {
+        return syncing;
     }
 
     /**
@@ -1198,11 +1182,15 @@ public class MainActivity extends Activity {
      * Store-to-remote spoke: per addressbook, fetches the remote into
      * the store, pushes the staged local changes, and re-fetches the
      * pushed state. The phone is not touched; that is the local sync.
-     * The shared syncing state drives the modal loader over whatever is
-     * on screen.
+     * The shared syncing state drives the strip under the lists' titles.
      */
     void syncRemote() {
-        syncTitle(R.string.contacts_title);
+        // NOTE: one pass at a time; the lists stay usable while it runs,
+        // so a pull or the drawer can ask for another meanwhile.
+        if (syncing) {
+            return;
+        }
+        syncAccount(null);
         setSyncing(true);
 
         io.execute(
@@ -1268,7 +1256,10 @@ public class MainActivity extends Activity {
      * happened to share them.
      */
     void syncMail() {
-        syncTitle(R.string.mail_title);
+        if (syncing) {
+            return;
+        }
+        syncAccount(null);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1299,13 +1290,13 @@ public class MainActivity extends Activity {
      * calling thread: those the scope takes.
      */
     private MailPass mailPass(SyncScope scope) {
-        syncTitle(R.string.mail_title);
+        syncAccount(null);
         MailPass pass = new MailPass();
         for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
             if (!scope.account(account.email)) {
                 continue;
             }
-            syncTitle(R.string.mail_title, account.email);
+            syncAccount(account.email);
             // One connection for the account's whole pass: the drain, the
             // walk and every marker the reader moved go out on it rather
             // than on one apiece.
@@ -1431,7 +1422,10 @@ public class MainActivity extends Activity {
      * calendar's objects, so this is one round trip per calendar.
      */
     void syncCalendars() {
-        syncTitle(R.string.calendar_title);
+        if (syncing) {
+            return;
+        }
+        syncAccount(null);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1452,7 +1446,7 @@ public class MainActivity extends Activity {
      * scope takes. Answers the first failure.
      */
     private Exception calendarPass(SyncScope scope) {
-        syncTitle(R.string.calendar_title);
+        syncAccount(null);
         Exception failure = null;
         // NOTE: the calendar accounts, rather than the contacts accounts that
         // happened to be CalDAV-shaped. That filter was the closest thing to a
@@ -1488,7 +1482,7 @@ public class MainActivity extends Activity {
      * what the pass reports.
      */
     private Exception fetchMail(AccountEntry account, MailSession session, SyncScope scope) {
-        syncTitle(R.string.mail_title, account.email);
+        syncAccount(account.email);
         String accountId = accountIdOf(account.email);
         List<String> collections = new ArrayList<>();
         try {
@@ -1548,7 +1542,7 @@ public class MainActivity extends Activity {
      * fails leaves the ones beside it alone.
      */
     private Exception fetchCalendars(AccountEntry account, SyncScope scope) {
-        syncTitle(R.string.calendar_title, account.email);
+        syncAccount(account.email);
         // NOTE: one session for the whole account, so the listing and every
         // event round after it share the token a refresh may have replaced
         // part-way; the listing's transport is then the first calendar
@@ -1685,8 +1679,8 @@ public class MainActivity extends Activity {
 
     /**
      * Runs the first sync a domain's tab owes, the first time it is reached
-     * after an account was connected: that domain alone, behind the modal
-     * dialog. Nothing when no account owes it, or while a sync runs.
+     * after an account was connected: that domain alone, under the
+     * list's sync strip. Nothing when no account owes it, or while a sync runs.
      */
     private void firstSyncIfOwed(int panel) {
         PimDomain domain = domainOf(panel);
@@ -1726,11 +1720,11 @@ public class MainActivity extends Activity {
      * rest once it closes.
      */
     private void firstMail(List<AccountEntry> owing) {
-        syncTitle(R.string.mail_title);
+        syncAccount(null);
         setSyncing(true);
         io.execute(
                 () -> {
-                    syncTitle(R.string.mail_title);
+                    syncAccount(null);
                     Exception failure = null;
                     for (AccountEntry account : owing) {
                         Exception error;
@@ -1763,7 +1757,7 @@ public class MainActivity extends Activity {
      * book, the books the owing accounts just subscribed among them.
      */
     private void firstContacts(List<AccountEntry> owing) {
-        syncTitle(R.string.contacts_title);
+        syncAccount(null);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -1784,11 +1778,11 @@ public class MainActivity extends Activity {
 
     /** The calendar tab's first sync: every owing account's calendars. */
     private void firstCalendars(List<AccountEntry> owing) {
-        syncTitle(R.string.calendar_title);
+        syncAccount(null);
         setSyncing(true);
         io.execute(
                 () -> {
-                    syncTitle(R.string.calendar_title);
+                    syncAccount(null);
                     Exception failure = null;
                     for (AccountEntry account : owing) {
                         Exception error = fetchCalendars(account, SyncScope.all(this));
@@ -2183,11 +2177,14 @@ public class MainActivity extends Activity {
      * drawer's sync is the one that takes every domain and everything.
      */
     void syncContacts() {
+        if (syncing) {
+            return;
+        }
         if (!phoneSyncedBooks().isEmpty() && !ensureContactsPermission(this::syncContacts)) {
             return;
         }
 
-        syncTitle(R.string.contacts_title);
+        syncAccount(null);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -2215,13 +2212,16 @@ public class MainActivity extends Activity {
      * where a list's pull takes its own domain within its filter.
      */
     void syncAll() {
+        if (syncing) {
+            return;
+        }
         // NOTE: only the phone passes need the contacts permission;
         // reconciling the Android accounts runs regardless.
         if (!phoneSyncedBooks().isEmpty() && !ensureContactsPermission(this::syncAll)) {
             return;
         }
 
-        syncTitle(R.string.contacts_title);
+        syncAccount(null);
         setSyncing(true);
         io.execute(
                 () -> {
@@ -2264,11 +2264,14 @@ public class MainActivity extends Activity {
      * passes stay silently off until this ran once.
      */
     private void syncLocal() {
+        if (syncing) {
+            return;
+        }
         if (!ensureContactsPermission(this::syncLocal)) {
             return;
         }
 
-        syncTitle(R.string.contacts_title);
+        syncAccount(null);
         setSyncing(true);
         io.execute(
                 () -> {

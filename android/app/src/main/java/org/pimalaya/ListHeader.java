@@ -8,6 +8,7 @@ import android.widget.AbsListView;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import java.util.function.Consumer;
@@ -94,6 +95,31 @@ final class ListHeader {
 
     void meta(String meta) {
         ((TextView) view.findViewById(R.id.header_meta)).setText(meta);
+    }
+
+    /**
+     * Shows the sync strip in place of the meta line: the account the pass
+     * is on (none before it reaches one), the step it stands at, over a bar filled to {@code done} of {@code total}, or running
+     * indeterminate while the pass cannot count (a total of zero).
+     */
+    void sync(String account, String detail, int done, int total) {
+        TextView whose = view.findViewById(R.id.header_sync_account);
+        whose.setText(account);
+        whose.setVisibility(account == null ? View.GONE : View.VISIBLE);
+        view.findViewById(R.id.header_meta).setVisibility(View.GONE);
+        view.findViewById(R.id.header_sync).setVisibility(View.VISIBLE);
+        ((TextView) view.findViewById(R.id.header_sync_detail)).setText(detail);
+        ProgressBar bar = view.findViewById(R.id.header_sync_bar);
+        bar.setIndeterminate(total <= 0);
+        if (total > 0) {
+            bar.setProgress(done * bar.getMax() / total);
+        }
+    }
+
+    /** Puts the meta line back once the sync is over. */
+    void synced() {
+        view.findViewById(R.id.header_sync).setVisibility(View.GONE);
+        view.findViewById(R.id.header_meta).setVisibility(View.VISIBLE);
     }
 
     /** Whether the bar should carry the title, the large one being gone. */

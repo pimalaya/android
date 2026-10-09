@@ -1,7 +1,7 @@
 package org.pimalaya;
 
 /**
- * What the sync dialog's detail line says for one engine stage, in the
+ * What the sync strip's step line says for one engine stage, in the
  * words of the domain being synced.
  *
  * <p>The stages are every engine's ({@link PimdirEngine.Progress}), the

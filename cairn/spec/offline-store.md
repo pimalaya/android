@@ -227,34 +227,39 @@ Submitting a message SHALL NOT be retried: a submission whose reply was lost is 
 - THEN nothing is sent a second time
 
 ### Requirement: A sync says what it is working on, in every domain
-The modal sync dialog SHALL name what the pass is on and what it is doing: the domain being reconciled as its title (*Emails*, *Contacts*, *Calendars*), led by the account once the pass reaches one (*me@example.org · Emails*), and the step it stands at as its detail line. The three domains SHALL report both, so a wait reads the same whichever one is being synced. A counted step SHALL count what the domain holds: messages for mail, events for calendars, contacts for the books, singular or plural as the count asks; the steps against the phone SHALL be the contacts' alone.
+A running sync SHALL show, under the large title of every list, a strip naming what the pass is on and what it is doing, over a thin bar: the account on a first line once the pass reaches one (*me@example.org*), the step it stands at on the line below (*Mailboxes synced: 3 of 12*). The bar SHALL fill as a counted whole lands (an account's mailboxes) and SHALL run indeterminate otherwise. The three domains SHALL report alike, so a wait reads the same whichever one is being synced. A counted step SHALL count what the domain holds: messages for mail, events for calendars, contacts for the books, singular or plural as the count asks; the steps against the phone SHALL be the contacts' alone.
 
-Neither line SHALL ever be empty while the dialog is up. It SHALL open naming the first domain the pass reaches over a line saying it is preparing, and SHALL replace the title as the pass moves to the next account or domain and the detail line as it steps.
+The strip SHALL NOT block the app: the lists, the reader and the composer stay usable while it runs, the lists refreshing when the pass ends. One pass SHALL run at a time, a pull or the drawer's sync asked for meanwhile doing nothing, and an account SHALL NOT be deleted while a pass runs. The strip's line SHALL never be empty: it SHALL open on a step saying it is preparing, and SHALL follow the pass as it moves to the next account and as it steps.
 
 #### Scenario: A pass over every domain
 - GIVEN the drawer's sync
 - WHEN it moves from contacts to mail to calendars
-- THEN the title's domain reads *Contacts*, then *Emails*, then *Calendars*
+- THEN the strip's step speaks of contacts, then of mail, then of events
 
 #### Scenario: A pass over several accounts
 - GIVEN two mail accounts
 - WHEN the mail pass moves from the first to the second
-- THEN the title names the first account then the second, each before *Emails*
+- THEN the strip's first line names the first account then the second
 
 #### Scenario: The roster round
 - GIVEN a pass that has to list an account's mailboxes or calendars first
 - WHEN it starts
-- THEN the detail line is set before that round, never a title over a blank line
+- THEN the step is set before that round, never an empty line
 
 #### Scenario: The first frame
 - GIVEN a sync the user has just asked for
-- WHEN the dialog opens, before any round trip
-- THEN it names the domain being synced over a line saying it is preparing, rather than one line over an empty one
+- WHEN the strip shows, before any round trip
+- THEN its step says it is preparing
 
 #### Scenario: The agenda's bodies
 - GIVEN a calendar pass reading 23 entries
-- WHEN the dialog steps to the download
-- THEN the detail line reads *Downloading 23 events*, never contacts
+- WHEN the strip steps to the download
+- THEN its step reads *Downloading 23 events*, never contacts
+
+#### Scenario: Reading while it runs
+- GIVEN a sync running
+- WHEN a message is opened, or a sync pulled for
+- THEN the message opens, and no second pass starts
 
 ### Requirement: The drawer's sync covers every domain
 The drawer's sync SHALL reconcile contacts, then mail, then calendars, and SHALL report one failure at most, the contacts one first.

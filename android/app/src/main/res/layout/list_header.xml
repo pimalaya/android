@@ -32,6 +32,53 @@
         android:textColor="?android:attr/textColorSecondary"
         android:textSize="14sp" />
 
+    <!-- While a sync runs: whose account, then the step, over a thin bar,
+         determinate once the pass can count. In place of the meta line,
+         which ListHeader hides meanwhile. -->
+    <LinearLayout
+        android:id="@+id/header_sync"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="20dp"
+        android:layout_marginEnd="20dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/header_sync_account"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="14sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/header_sync_detail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="14sp" />
+
+        <ProgressBar
+            android:id="@+id/header_sync_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="12dp"
+            android:indeterminateTint="?android:attr/colorAccent"
+            android:max="1000"
+            android:maxHeight="4dp"
+            android:minHeight="4dp"
+            android:progressDrawable="@drawable/sync_bar" />
+
+    </LinearLayout>
+
     <!-- The search field: a tonal pill with a clear cross once it holds
          something. -->
     <LinearLayout
