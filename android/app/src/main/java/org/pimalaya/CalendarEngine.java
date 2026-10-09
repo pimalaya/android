@@ -487,8 +487,8 @@ final class CalendarEngine extends PimdirEngine {
     }
 
     /**
-     * Whether the server, or the bridge for a backend that takes no such
-     * write (a JMAP calendar), refused the change for good: a 422.
+     * Whether the server, or the bridge for an object no write of the
+     * backend can carry, refused the change for good: a 422.
      */
     private static boolean isRefusal(Exception failure) {
         return Integer.valueOf(422).equals(status(failure));

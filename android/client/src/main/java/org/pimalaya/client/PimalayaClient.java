@@ -335,8 +335,8 @@ public class PimalayaClient {
     /**
      * True when a write to the calendar behind the URL carries an override
      * of one occurrence to the server: CalDAV's in the object, Graph's and
-     * Google's through the occurrence's instance; a JMAP calendar takes no
-     * write yet.
+     * Google's through the occurrence's instance, JMAP's inside the event's
+     * {@code recurrenceOverrides}.
      */
     public static boolean writesOverrides(String url) {
         return info(url).optBoolean("writesOverrides");
@@ -348,8 +348,8 @@ public class PimalayaClient {
     }
 
     /**
-     * True when the calendar behind the URL takes event writes at all: every backend but JMAP,
-     * whose {@code CalendarEvent/set} is not written yet.
+     * True when the calendar behind the URL takes event writes at all: every backend's does, the
+     * local account's none.
      */
     public static boolean writesEvents(String url) {
         return info(url).optBoolean("writesEvents");

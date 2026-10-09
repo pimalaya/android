@@ -70,7 +70,8 @@ public class PimDomainTest {
         // JMAP mail sends now and JMAP contacts write, so JMAP leads both.
         assertTrue(PimDomain.MAIL.rank("jmap") < PimDomain.MAIL.rank("imap"));
         assertTrue(PimDomain.CONTACTS.rank("jmap") < PimDomain.CONTACTS.rank("carddav"));
-        // A JMAP calendar is read only, so CalDAV leads while it is there.
+        // Whether a JMAP session serves calendars is known only once signed in,
+        // and the probe drops what it does not serve, so CalDAV leads.
         assertTrue(PimDomain.CALENDAR.rank("caldav") < PimDomain.CALENDAR.rank("jmap"));
         // The rest come last, a provider sign-in naming no service among them.
         assertTrue(PimDomain.CALENDAR.rank("jmap") < PimDomain.CALENDAR.rank(null));

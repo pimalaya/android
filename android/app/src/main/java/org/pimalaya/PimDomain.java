@@ -146,8 +146,10 @@ enum PimDomain {
     /**
      * Where a discovered service ranks for this domain, lower first, by what
      * the app can do over it here: JMAP first for mail, which it reads and
-     * sends, and for contacts; CalDAV over JMAP for calendars, a JMAP calendar
-     * being read only until its writes exist; the DAVs over the rest.
+     * sends, and for contacts; CalDAV over JMAP for calendars, since whether a
+     * JMAP session serves calendars is known only once signed in, and the
+     * probe then drops the domain rather than falling back to CalDAV; the DAVs
+     * over the rest.
      */
     int rank(String service) {
         if (service == null) {

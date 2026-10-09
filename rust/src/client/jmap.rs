@@ -2,7 +2,7 @@
 //! ContactCard/set push and the ContactCard/changes sync round, the RFC
 //! 8621 Mailbox and Email reads behind the account-wide mail walk and the
 //! RFC 8621 section 7 submission, and the draft-ietf-jmap-calendars
-//! Calendar and CalendarEvent reads.
+//! Calendar and CalendarEvent reads and the CalendarEvent/set writes.
 //!
 //! One JMAP session serves all three domains, which is why they share a
 //! file: the session fetch and its cache, the auth header and the resume
@@ -22,13 +22,13 @@ use io_jmap::{
     calendars::{
         JMAP_CALENDARS_CAPABILITY,
         calendar::{JmapCalendar, JmapCalendarRights, get::*},
-        calendar_event::{JmapCalendarEvent, query::*},
+        calendar_event::{JmapCalendarEvent, get::*, query::*, set::*},
     },
     coroutine::{JmapCoroutine, JmapCoroutineState, JmapYield},
     rfc8620::{
         blob_download::JmapBlobDownload, blob_upload::JmapBlobUpload, changes::*,
         coroutine::JmapRedirectYield, error::JmapMethodError, filter::JmapFilter,
-        session::JmapSession, session_get::*,
+        session::JmapSession, session_get::*, set::JmapSetError,
     },
     rfc8621::{
         JMAP_MAIL_CAPABILITY,
@@ -64,7 +64,6 @@ use sha2::{Digest, Sha256};
 use url::Url;
 
 use crate::{
-    account::Backend,
     client::{
         Client,
         convert::{REFUSED, coroutine_error, rejected, required},
@@ -76,7 +75,7 @@ use crate::{
     jmap,
     mail::{self, Composed},
     types::{
-        Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, Mailbox,
+        Addressbook, BridgeError, Calendar, Card, CardDelta, Credentials, Event, EventRef, Mailbox,
         PushChange, PushOutcome, default_role,
     },
 };
@@ -1021,6 +1020,50 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 }
 
+/// JMAP calendar writes: draft-ietf-jmap-calendars `CalendarEvent/set`,
+/// an override or an `EXDATE` travelling inside its event as a
+/// `recurrenceOverrides` entry rather than as a write of its own.
+impl<'a, 'local> Client<'a, 'local> {
+    /// Files one object in the calendar `calendar_id`, as [`create_event`]
+    /// says.
+    pub fn create_jmap_event(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        calendar_id: &str,
+        ical: &str,
+    ) -> Result<EventRef, BridgeError> {
+        let mut calls = self.jmap_calls(session_url, credentials)?;
+        create_event(&mut calls, calendar_id, ical)
+    }
+
+    /// Writes one edited object over the event `id`, as [`update_event`]
+    /// says, answering its new revision.
+    pub fn update_jmap_event(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        id: &str,
+        ical: &str,
+        if_match: Option<&str>,
+    ) -> Result<Option<String>, BridgeError> {
+        let mut calls = self.jmap_calls(session_url, credentials)?;
+        update_event(&mut calls, id, ical, if_match)
+    }
+
+    /// Destroys the event `id`, as [`destroy_event`] says.
+    pub fn delete_jmap_event(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        id: &str,
+        if_match: Option<&str>,
+    ) -> Result<(), BridgeError> {
+        let mut calls = self.jmap_calls(session_url, credentials)?;
+        destroy_event(&mut calls, id, if_match)
+    }
+}
+
 /// JMAP submission: the RFC 8621 section 7 send of one stored message.
 impl<'a, 'local> Client<'a, 'local> {
     /// Sends one stored message over the session, as [`send`] says.
@@ -1166,29 +1209,15 @@ impl<'a, 'local> Client<'a, 'local> {
     /// to the transport stream opened on the session's API URL. A
     /// failure drops the sessions cached for that API, so the next verb
     /// reads the session again rather than trusting a stale one.
-    fn run_jmap<C, T, E>(&mut self, api_url: &Url, mut coroutine: C) -> Result<T, BridgeError>
+    fn run_jmap<C, T, E>(&mut self, api_url: &Url, coroutine: C) -> Result<T, BridgeError>
     where
         C: JmapCoroutine<Yield = JmapYield, Return = Result<T, E>>,
         E: StdError + 'static,
     {
-        let mut arg: Option<Vec<u8>> = None;
-
-        loop {
-            match coroutine.resume(arg.as_deref()) {
-                JmapCoroutineState::Complete(Ok(value)) => return Ok(value),
-                JmapCoroutineState::Complete(Err(err)) => {
-                    sessions().forget(api_url);
-                    return Err(coroutine_error(&err));
-                }
-                JmapCoroutineState::Yielded(JmapYield::WantsRead) => {
-                    arg = Some(self.http_read(api_url.as_str())?);
-                }
-                JmapCoroutineState::Yielded(JmapYield::WantsWrite(bytes)) => {
-                    self.http_write(api_url.as_str(), &bytes)?;
-                    arg = None;
-                }
-            }
-        }
+        self.resume_jmap(api_url, coroutine)?.map_err(|err| {
+            sessions().forget(api_url);
+            coroutine_error(&err)
+        })
     }
 
     /// Drives one JMAP `ContactCard/changes` round, surfacing an
@@ -1197,20 +1226,50 @@ impl<'a, 'local> Client<'a, 'local> {
     fn run_jmap_changes(
         &mut self,
         api_url: &Url,
-        mut coroutine: JmapContactCardChanges,
+        coroutine: JmapContactCardChanges,
     ) -> Result<Option<JmapChangesOutput>, BridgeError> {
+        match self.resume_jmap(api_url, coroutine)? {
+            Ok(out) => Ok(Some(out)),
+            Err(JmapContactCardChangesError::Changes(JmapChangesError::Method(
+                JmapMethodError::CannotCalculateChanges { .. },
+            ))) => Ok(None),
+            Err(err) => {
+                sessions().forget(api_url);
+                Err(coroutine_error(&err))
+            }
+        }
+    }
+
+    /// Runs one `CalendarEvent/set`, a call refused for its `ifInState`
+    /// answering 412 ([`set_failure`]) rather than a bare error.
+    fn run_jmap_event_set(
+        &mut self,
+        api_url: &Url,
+        coroutine: JmapCalendarEventSet,
+    ) -> Result<JmapCalendarEventSetOutput, BridgeError> {
+        self.resume_jmap(api_url, coroutine)?.map_err(|err| {
+            sessions().forget(api_url);
+            set_failure(&err)
+        })
+    }
+
+    /// Resumes a JMAP method coroutine to completion, routing every yield
+    /// to the transport stream opened on the session's API URL: the
+    /// transport's failures as the outer error, the coroutine's own result
+    /// as it completed, for the runners above to read.
+    fn resume_jmap<C, T, E>(
+        &mut self,
+        api_url: &Url,
+        mut coroutine: C,
+    ) -> Result<Result<T, E>, BridgeError>
+    where
+        C: JmapCoroutine<Yield = JmapYield, Return = Result<T, E>>,
+    {
         let mut arg: Option<Vec<u8>> = None;
 
         loop {
             match coroutine.resume(arg.as_deref()) {
-                JmapCoroutineState::Complete(Ok(out)) => return Ok(Some(out)),
-                JmapCoroutineState::Complete(Err(JmapContactCardChangesError::Changes(
-                    JmapChangesError::Method(JmapMethodError::CannotCalculateChanges { .. }),
-                ))) => return Ok(None),
-                JmapCoroutineState::Complete(Err(err)) => {
-                    sessions().forget(api_url);
-                    return Err(coroutine_error(&err));
-                }
+                JmapCoroutineState::Complete(result) => return Ok(result),
                 JmapCoroutineState::Yielded(JmapYield::WantsRead) => {
                     arg = Some(self.http_read(api_url.as_str())?);
                 }
@@ -1321,6 +1380,44 @@ impl JmapEventPages for JmapCalls<'_, '_, '_> {
         let coroutine = JmapCalendarEventQuery::new(&self.session, &self.auth, opts)
             .map_err(|err| err.to_string())?;
         self.client.run_jmap(&self.session.api_url, coroutine)
+    }
+}
+
+/// The requests a calendar write sends: one event read with the state
+/// the account's events stand at, and one `CalendarEvent/set`.
+trait JmapEventWrites {
+    /// The event `id`, [`None`] when the server holds none, and the
+    /// `CalendarEvent` state it was read at.
+    fn event(&mut self, id: &str) -> Result<(Option<JmapCalendarEvent>, String), BridgeError>;
+
+    /// Runs one `CalendarEvent/set`, one refused for its `ifInState`
+    /// answering 412.
+    fn set(
+        &mut self,
+        args: JmapCalendarEventSetArgs,
+    ) -> Result<JmapCalendarEventSetOutput, BridgeError>;
+}
+
+impl JmapEventWrites for JmapCalls<'_, '_, '_> {
+    fn event(&mut self, id: &str) -> Result<(Option<JmapCalendarEvent>, String), BridgeError> {
+        let opts = JmapCalendarEventGetOptions {
+            ids: Some(vec![id.to_string()]),
+            ..Default::default()
+        };
+        let coroutine = JmapCalendarEventGet::new(&self.session, &self.auth, opts)
+            .map_err(|err| err.to_string())?;
+        let out = self.client.run_jmap(&self.session.api_url, coroutine)?;
+        Ok((out.events.into_iter().next(), out.new_state))
+    }
+
+    fn set(
+        &mut self,
+        args: JmapCalendarEventSetArgs,
+    ) -> Result<JmapCalendarEventSetOutput, BridgeError> {
+        let coroutine = JmapCalendarEventSet::new(&self.session, &self.auth, args)
+            .map_err(|err| err.to_string())?;
+        self.client
+            .run_jmap_event_set(&self.session.api_url, coroutine)
     }
 }
 
@@ -1541,6 +1638,185 @@ fn list_events(
         named.insert(event.id.clone(), event);
     }
     Ok((named.into_values().collect(), complete))
+}
+
+/// Files one object in the calendar as a new CalendarEvent: its one
+/// JSCalendar entry ([`jmap::to_jscalendar_event`]) created in the
+/// calendar, under the id the server gives it, then read back for the
+/// revision the next edit is staged against.
+fn create_event(
+    calls: &mut impl JmapEventWrites,
+    calendar_id: &str,
+    ical: &str,
+) -> Result<EventRef, BridgeError> {
+    let event = JmapCalendarEvent {
+        calendar_ids: BTreeMap::from([(calendar_id.to_string(), true)]),
+        event: jmap::to_jscalendar_event(ical).map_err(refused)?,
+        ..Default::default()
+    };
+    let args = JmapCalendarEventSetArgs {
+        create: Some(BTreeMap::from([("e0".to_string(), event)])),
+        ..Default::default()
+    };
+
+    let out = calls.set(args)?;
+    if let Some(err) = out.not_created.get("e0") {
+        return Err(item_failure("The server refused the new event", err));
+    }
+    let id = out
+        .created
+        .get("e0")
+        .and_then(|created| created.id.clone())
+        .ok_or("The server created the event under no id")?;
+
+    Ok(EventRef {
+        etag: written_revision(calls, &id),
+        id,
+    })
+}
+
+/// Writes one edited object over the event `id`, answering its new
+/// revision.
+///
+/// The event is read first: one gone, or whose revision moved since
+/// `if_match`, answers 412, the edit staged against something the server
+/// no longer holds. The patch is what differs between the staged object
+/// and the server copy as the app sees it, converted to iCalendar and
+/// back ([`jmap::to_event_patch`]), so a member the conversion cannot
+/// carry compares equal on both sides and is never sent: the write
+/// changes what the edit changed and nothing the app never had. It goes
+/// under `ifInState`, the state that read answered, so nothing lands
+/// between the check and the write where the server honours it (Stalwart
+/// 0.16 ignores it, the revision check standing alone there).
+fn update_event(
+    calls: &mut impl JmapEventWrites,
+    id: &str,
+    ical: &str,
+    if_match: Option<&str>,
+) -> Result<Option<String>, BridgeError> {
+    let (current, state) = calls.event(id)?;
+    let Some(current) = current else {
+        return Err(moved(format!("Event {id} is gone from the server")));
+    };
+    let revision = jmap::etag(&current);
+    if if_match.is_some_and(|expected| revision.as_deref() != Some(expected)) {
+        return Err(moved(format!(
+            "Event {id} changed on the server since it was read"
+        )));
+    }
+
+    let held = jmap_event(current)?;
+    let base = jmap::to_jscalendar_event(&held.ical).map_err(refused)?;
+    let staged = jmap::to_jscalendar_event(ical).map_err(refused)?;
+    let patch = jmap::to_event_patch(&staged, &base);
+    if patch.is_empty() {
+        return Ok(revision);
+    }
+
+    let args = JmapCalendarEventSetArgs {
+        if_in_state: Some(state),
+        update: Some(BTreeMap::from([(
+            id.to_string(),
+            JmapCalendarEventPatch(patch),
+        )])),
+        ..Default::default()
+    };
+    let out = calls.set(args)?;
+    if let Some(err) = out.not_updated.get(id) {
+        return Err(item_failure("The server refused the event change", err));
+    }
+
+    Ok(written_revision(calls, id))
+}
+
+/// The revision of an event just written, read back; none when the read
+/// fails, the write having landed: failing it would push it again, and
+/// the next listing names the revision anyway.
+fn written_revision(calls: &mut impl JmapEventWrites, id: &str) -> Option<String> {
+    match calls.event(id) {
+        Ok((stored, _)) => stored.as_ref().and_then(jmap::etag),
+        Err(err) => {
+            log::warn!("event {id} written, its revision unread: {err}");
+            None
+        }
+    }
+}
+
+/// Destroys the event `id`. Staged against a revision, the event is read
+/// first, as [`update_event`] does: one gone already converged, one moved
+/// answers 412, and the destroy goes under the state that read answered.
+/// One the server no longer finds converged as well.
+fn destroy_event(
+    calls: &mut impl JmapEventWrites,
+    id: &str,
+    if_match: Option<&str>,
+) -> Result<(), BridgeError> {
+    let mut if_in_state = None;
+    if let Some(expected) = if_match {
+        let (current, state) = calls.event(id)?;
+        let Some(current) = current else {
+            return Ok(());
+        };
+        if jmap::etag(&current).as_deref() != Some(expected) {
+            return Err(moved(format!(
+                "Event {id} changed on the server since it was read"
+            )));
+        }
+        if_in_state = Some(state);
+    }
+
+    let args = JmapCalendarEventSetArgs {
+        if_in_state,
+        destroy: Some(vec![id.to_string()]),
+        ..Default::default()
+    };
+    match calls.set(args)?.not_destroyed.get(id) {
+        None | Some(JmapCalendarEventSetItemError::NotFound { .. }) => Ok(()),
+        Some(err) => Err(item_failure("The server refused to delete the event", err)),
+    }
+}
+
+/// What one event a `CalendarEvent/set` refused answers: refused for good
+/// ([`REFUSED`]) when the server objects to the change itself, which no
+/// later pass changes; 412 otherwise, the change kept staged for a pass
+/// that reads the event again (an event gone, a rate limit, anything this
+/// app does not know).
+fn item_failure(what: &str, err: &JmapCalendarEventSetItemError) -> BridgeError {
+    let message = format!("{what}: {err}");
+    match err {
+        JmapCalendarEventSetItemError::Forbidden { .. }
+        | JmapCalendarEventSetItemError::InvalidProperties { .. }
+        | JmapCalendarEventSetItemError::InvalidPatch { .. }
+        | JmapCalendarEventSetItemError::TooLarge { .. }
+        | JmapCalendarEventSetItemError::OverQuota { .. }
+        | JmapCalendarEventSetItemError::Singleton { .. }
+        | JmapCalendarEventSetItemError::NoSupportedScheduleMethods { .. } => refused(message),
+        JmapCalendarEventSetItemError::NotFound { .. }
+        | JmapCalendarEventSetItemError::RateLimit { .. }
+        | JmapCalendarEventSetItemError::WillDestroy { .. }
+        | JmapCalendarEventSetItemError::Unknown => moved(message),
+    }
+}
+
+/// A `CalendarEvent/set` that failed as a whole: refused for its
+/// `ifInState` (RFC 8620 section 5.3), the account's events moved between
+/// the read and the write, it answers 412 as a moved event does.
+fn set_failure(err: &JmapCalendarEventSetError) -> BridgeError {
+    match err {
+        JmapCalendarEventSetError::Set(JmapSetError::Method(JmapMethodError::StateMismatch {
+            ..
+        })) => moved("The calendar changed on the server since the event was read"),
+        err => coroutine_error(err),
+    }
+}
+
+/// A write staged against something the server no longer holds: 412, as
+/// a CalDAV server answers a failed precondition, the change kept staged.
+fn moved(message: impl Into<String>) -> BridgeError {
+    BridgeError {
+        message: message.into(),
+        status: Some(412),
+    }
 }
 
 /// Lists the account's cards a page of `limit` at a time ([`paged`]),
@@ -1922,11 +2198,8 @@ fn display_name(address: &JmapEmailAddress) -> String {
 }
 
 /// io-jmap Calendar to the JNI-facing shape, the twin of
-/// [`jmap_addressbook`] down to the account-scoped URL.
-///
-/// Not writable whatever the rights say while the backend takes no event
-/// write ([`Backend::writes_events`]): the agenda then offers it nothing
-/// to stage, and the phone shows it read only.
+/// [`jmap_addressbook`] down to the account-scoped URL, writable by its
+/// rights ([`writable_calendar`]).
 fn jmap_calendar(session: &JmapSession, calendar: JmapCalendar) -> Calendar {
     let id = calendar.id.unwrap_or_default();
 
@@ -1937,7 +2210,7 @@ fn jmap_calendar(session: &JmapSession, calendar: JmapCalendar) -> Calendar {
         description: calendar.description,
         color: calendar.color,
         role: default_role(calendar.is_default),
-        writable: Backend::Jmap.writes_events() && writable_calendar(&calendar.my_rights),
+        writable: writable_calendar(&calendar.my_rights),
     }
 }
 
@@ -1957,9 +2230,11 @@ fn writable_calendar(rights: &JmapCalendarRights) -> bool {
 /// reader of the agenda. The fidelity of the conversion is ical-rs's
 /// problem, which is where it belongs.
 ///
-/// There is no ETag: JMAP has no per-object one, and the store does not
-/// read the field for calendar items.
+/// JMAP has no per-object ETag, so the revision is a hash of the
+/// CalendarEvent JSON, as a card's is: what an edit is staged against,
+/// and what a write checks the server copy against first.
 fn jmap_event(event: JmapCalendarEvent) -> Result<Event, String> {
+    let etag = jmap::etag(&event);
     let id = event.id.unwrap_or_default();
     let mut payload = event.event;
 
@@ -1969,6 +2244,7 @@ fn jmap_event(event: JmapCalendarEvent) -> Result<Event, String> {
     payload
         .entry("@type")
         .or_insert_with(|| Value::from("Event"));
+    jmap::from_jscalendarbis(&mut payload);
 
     let payload = Value::Object(payload);
     let ical = Ical::from_jscalendar(&payload)
@@ -1976,7 +2252,7 @@ fn jmap_event(event: JmapCalendarEvent) -> Result<Event, String> {
 
     Ok(Event {
         id,
-        etag: None,
+        etag,
         ical: ical.to_string(),
     })
 }
@@ -2109,8 +2385,6 @@ mod tests {
 
     /// `isDefault` names the default; a calendar or a book shared read
     /// only takes nothing, and rights the server left unsaid say nothing.
-    /// A calendar takes nothing at all while JMAP event writes do not
-    /// exist, whatever its rights.
     #[test]
     fn the_default_is_the_one_jmap_names() {
         let session = session("");
@@ -2122,9 +2396,11 @@ mod tests {
             "id": "c1", "isDefault": true,
             "myRights": { "mayReadItems": true, "mayWriteAll": true },
         }));
+        let shared = calendar(json!({ "id": "c2", "myRights": { "mayReadItems": true } }));
 
         assert_eq!(default.role, "default");
-        assert!(!default.writable);
+        assert!(default.writable);
+        assert!(!shared.writable);
         assert!(may_write(
             json!({ "mayReadItems": true, "mayWriteAll": true })
         ));

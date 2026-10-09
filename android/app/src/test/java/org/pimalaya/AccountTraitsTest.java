@@ -30,8 +30,11 @@ public class AccountTraitsTest {
     }
 
     @Test
-    public void aJmapCalendarTakesNoEventWrite() {
-        assertFalse(PimalayaClient.writesEvents("jmap://api.fastmail.com/jmap/session/u1/c1"));
+    public void aJmapCalendarTakesEventWritesAndOccurrences() {
+        String jmap = "jmap://api.fastmail.com/jmap/session/u1/c1";
+        assertTrue(PimalayaClient.writesEvents(jmap));
+        assertTrue(PimalayaClient.writesOverrides(jmap));
+        assertTrue(PimalayaClient.writesExdates(jmap));
         assertTrue(PimalayaClient.writesEvents("https://dav.example.com/calendars/jane/home/"));
         assertTrue(PimalayaClient.writesEvents("msgraph://jane@outlook.com/c1"));
     }

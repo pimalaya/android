@@ -494,7 +494,7 @@
     <string name="event_delete_conflict_confirm">Cette entrée a aussi été modifiée ailleurs. La supprimer, avec la version modifiée là-bas ?</string>
     <string name="event_delete_failed">Impossible de supprimer l\'entrée</string>
     <string name="event_no_calendar">Aucun calendrier où la placer</string>
-    <string name="event_read_only">Les calendriers JMAP sont en lecture seule pour l\'instant</string>
+    <string name="event_read_only">Ce calendrier n\'accepte aucune modification depuis l\'application</string>
     <string name="event_target_title">Ajouter au calendrier</string>
     <string name="event_section_conflicts">Conflits</string>
     <string name="event_conflict_occurrence">Occurrence</string>
