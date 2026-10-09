@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Account settings, scrolled down (proposed)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#EEEEEE;--divl:#E0E0E0;--fg:#1C1B1F;--fg2:#5E5E62;--track:#BDBDBD;--error:#B3261E;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1C1E21;--surface:#2A2A2A;--divl:#363636;--fg:#E6E1E5;--fg2:#AEAAAE;--track:#5A5A5A;--error:#F2B8B5}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.tbtn{width:40px;height:40px;margin:4px;border-radius:999px;background:var(--surface);color:var(--fg);display:flex;align-items:center;justify-content:center;flex:none;text-decoration:none}
+.sec{margin:12px 12px 0;background:var(--surface);border-radius:22px;overflow:hidden}
+.sech{min-height:44px;display:flex;align-items:center;gap:8px;padding:6px 16px 0;color:var(--fg2);font-size:13px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
+.sech .ico{width:16px;height:16px}
+.prow{display:flex;align-items:center;gap:12px;padding:12px 16px;position:relative;width:100%;border:0;background:none;font:inherit;color:inherit;text-align:left}
+.prow.top::before{content:"";position:absolute;top:0;left:16px;right:0;height:1px;background:var(--divl)}
+.sub{display:flex;align-items:center;gap:12px;min-height:44px;padding:0 16px 0 36px;font-size:15px}
+.sub .cb{color:var(--accent)}
+.pt{font-size:16px;line-height:20px}
+.ps{font-size:13px;line-height:17px;color:var(--fg2)}
+.grow{flex:1;min-width:0}
+.tg{width:44px;height:24px;border-radius:12px;background:color-mix(in srgb, var(--accent) 45%, transparent);position:relative;flex:none}
+.tg::after{content:"";position:absolute;right:0;top:0;width:24px;height:24px;border-radius:50%;background:var(--accent);box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.tg.off{background:var(--track)}
+.tg.off::after{left:0;right:auto;background:#FAFAFA}
+.chev{width:20px;height:20px;color:var(--fg2)}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div style="min-height: 60px; padding: 0 8px; display: flex; align-items: center; flex: none">
+    <a class="tbtn" href="Drawer.dc.html" aria-label="Close"><svg class="ico" viewBox="0 -960 960 960"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></a>
+    <div style="flex: 1; padding: 0 4px; font-size: 20px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">alex@example.org</div>
+  </div>
+  <div style="flex: 1; min-height: 0; overflow: hidden">
+    <div class="sec" style="margin-top: 0">
+      <div class="sech"><svg class="ico" viewBox="0 -960 960 960"><path d="M40-160v-112q0-34 17.5-62.5T104-378q62-31 126-46.5T360-440q66 0 130 15.5T616-378q29 15 46.5 43.5T680-272v112H40Zm720 0v-120q0-44-24.5-84.5T666-434q51 6 96 20.5t84 35.5q36 20 55 44.5t19 53.5v120H760ZM360-480q-66 0-113-47t-47-113q0-66 47-113t113-47q66 0 113 47t47 113q0 66-47 113t-113 47Zm400-160q0 66-47 113t-113 47q-11 0-28-2.5t-28-5.5q27-32 41.5-71t14.5-81q0-42-14.5-81T544-792q14-5 28-6.5t28-1.5q66 0 113 47t47 113ZM120-240h480v-32q0-11-5.5-20T580-306q-54-27-109-40.5T360-360q-56 0-111 13.5T140-306q-9 5-14.5 14t-5.5 20v32Zm240-320q33 0 56.5-23.5T440-640q0-33-23.5-56.5T360-720q-33 0-56.5 23.5T280-640q0 33 23.5 56.5T360-560Zm0 320Zm0-400Z"/></svg>Addressbooks</div>
+      <label class="prow"><div class="grow"><div class="pt">Personal</div></div><span class="tg"></span></label>
+      <label class="sub"><svg class="ico cb" viewBox="0 -960 960 960"><path d="m424-312 282-282-56-56-226 226-114-114-56 56 170 170ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Zm0-560v560-560Z"/></svg>Sync with the server</label>
+      <label class="sub" style="padding-bottom: 6px"><svg class="ico cb" viewBox="0 -960 960 960"><path d="m424-312 282-282-56-56-226 226-114-114-56 56 170 170ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Zm0-560v560-560Z"/></svg>Show in the phone's contacts</label>
+      <label class="prow top"><div class="grow"><div class="pt">Work</div><div class="ps">Not on this phone</div></div><span class="tg off"></span></label>
+    </div>
+    <div class="sec">
+      <div class="sech"><svg class="ico" viewBox="0 -960 960 960"><path d="M160-120q-33 0-56.5-23.5T80-200v-440q0-33 23.5-56.5T160-720h160v-80q0-33 23.5-56.5T400-880h160q33 0 56.5 23.5T640-800v80h160q33 0 56.5 23.5T880-640v440q0 33-23.5 56.5T800-120H160Zm0-80h640v-440H160v440Zm240-520h160v-80H400v80ZM160-200v-440 440Z"/></svg>Servers</div>
+      <div class="prow"><div class="grow"><div class="pt">imap.example.org</div><div class="ps">Mail · IMAP · Password</div></div></div>
+      <div class="prow top"><div class="grow"><div class="pt">dav.example.org</div><div class="ps">Contacts, Calendar · CardDAV, CalDAV · Password</div></div></div>    </div>
+    <div style="padding: 24px 24px 0">
+      <button style="width: 100%; height: 56px; border: 0; border-radius: 999px; background: var(--surface); color: var(--error); font: inherit; font-size: 16px; font-weight: 700">Remove this account</button>
+      <div style="margin-top: 8px; text-align: center; font-size: 13px; color: var(--fg2)">Its contacts stay on this phone.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#00696F","options":["#00696F","#4F5BD5","#8E4585","#9A5B00"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var accent = this.props.accent ?? '#00696F';
+    if (dark && accent === '#00696F') accent = '#80DEEA';
+    var h = accent.replace('#', '');
+    var r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+    var onAccent = (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#000000' : '#FFFFFF';
+    return { theme: dark ? 'app dark' : 'app', vars: '--accent:' + accent + ';--on-accent:' + onAccent };
+  }
+}
+</script>
+</body>
+</html>

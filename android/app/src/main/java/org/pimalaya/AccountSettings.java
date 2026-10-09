@@ -1,47 +1,41 @@
 package org.pimalaya;
 
 import android.app.AlertDialog;
+import android.text.InputType;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.CheckBox;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.Spinner;
+import android.widget.RadioButton;
+import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.IntConsumer;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
 
 /**
- * The full-screen account settings controller behind the drawer: it
- * opens one account's settings screen over the drawer, stages the
- * account's activation and the per-addressbook switches (an advanced
- * fold exposing the per-book sections), commits them to the base on save, and
- * confirms then removes the account and everything under it. It reaches
- * the base, store and io executor through the host, which keeps the
- * overlay navigation and calls in through {@link #open}, {@link #save},
- * {@link #leave} and {@link #confirmDeleteCurrent}.
+ * The full-screen account settings controller behind the drawer: one
+ * account's page, opened over the drawer, as {@link Sections} cards under
+ * the account's identity. Every change applies when it is made, so the
+ * page always says what the account does. It reaches the base, store and
+ * io executor through the host, which keeps the overlay navigation and
+ * calls in through {@link #open} and {@link #leave}.
  */
 final class AccountSettings {
     private final MainActivity host;
 
     /** The account whose settings screen is open (null outside it). */
     private String settingsEmail;
-
-    /** The open settings screen's addressbooks, in store order. */
-    private List<BookEntry> settingsBooks = new ArrayList<>();
-
-    /** Staged switches per addressbook URL; the FAB commits them. */
-    private final Map<String, BookSettings> bookSettings = new java.util.LinkedHashMap<>();
-
-    /** Whether the settings screen's advanced sections are unfolded. */
-    private boolean settingsAdvancedOpen;
-
-    /** The staged account switch ({@link AccountActivation}); the FAB commits it. */
-    private boolean accountEnabled;
 
     /**
      * The list screen the drawer was raised over, restored on the way
@@ -55,383 +49,548 @@ final class AccountSettings {
         this.host = host;
     }
 
-    /** One addressbook's staged switches on the account settings screen. */
-    private static final class BookSettings {
-        boolean enabled;
-        boolean remote;
-        boolean local;
+    /** Wires the page's bar, scroll and remove button, once laid out. */
+    void bind() {
+        // NOTE: the address moves into the bar once the identity block's
+        // own address has scrolled under it, as the lists hand over their
+        // large title.
+        ScrollView scroll = host.findViewById(R.id.account_scroll);
+        scroll.setOnScrollChangeListener(
+                (view, x, y, oldX, oldY) -> {
+                    View address = host.findViewById(R.id.account_address);
+                    View identity = host.findViewById(R.id.account_identity);
+                    boolean gone = y >= identity.getTop() + address.getBottom();
+                    View title = host.findViewById(R.id.account_title);
+                    float alpha = gone ? 1f : 0f;
+                    if (title.getAlpha() != alpha) {
+                        title.animate().alpha(alpha).setDuration(150);
+                    }
+                });
+        host.findViewById(R.id.account_back).setOnClickListener(view -> leave());
+        host.findViewById(R.id.account_delete)
+                .setOnClickListener(view -> confirmDeleteAccount(settingsEmail));
     }
 
-    /**
-     * Opens one account's settings screen: the staged switches load
-     * from the store, the screen fades in over the drawer it came
-     * from, which stays open underneath for the return. The activate
-     * switch is the account's; Advanced unfolds the per-book sections.
-     */
+    /** Opens one account's settings screen, fading in over the drawer. */
     void open(String email) {
         settingsEmail = email;
         cameFrom = host.screen;
-        settingsBooks = new ArrayList<>();
-        bookSettings.clear();
-        for (BookEntry entry : host.base.loadAllAddressbooks()) {
-            if (entry.accountEmail.equals(email)) {
-                settingsBooks.add(entry);
-                BookSettings staged = new BookSettings();
-                staged.enabled = entry.subscribed;
-                staged.remote = entry.remoteSynced;
-                staged.local = entry.phoneSynced;
-                bookSettings.put(entry.book.url, staged);
-            }
-        }
-        settingsAdvancedOpen = false;
-        accountEnabled = AccountActivation.enabled(host, email);
 
         ((TextView) host.findViewById(R.id.account_title)).setText(email);
-        renderAccountSettings();
+        host.findViewById(R.id.account_title).setAlpha(0f);
+        host.findViewById(R.id.account_scroll).scrollTo(0, 0);
+        render();
         host.openOverlay(MainActivity.PANEL_ACCOUNT);
     }
 
-    /**
-     * Rebuilds the settings screen from the staged switches; every bulk
-     * change re-renders, so the simple pair, the advanced sections and
-     * the dimming always agree.
-     */
-    private void renderAccountSettings() {
-        LinearLayout content = host.findViewById(R.id.account_content);
-        content.removeAllViews();
-
-        LinearLayout.LayoutParams rowParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT);
-
-        addSubmission(content, rowParams);
-        addMailScope(content);
-        addMailOffline(content, rowParams);
-
-        // The account switch: off, the account syncs nothing and the lists
-        // and their filters leave it out. The books keep their own switches.
-        CheckBox activate = new CheckBox(host);
-        activate.setChecked(accountEnabled);
-        content.addView(optionRow(R.string.account_enable, activate), rowParams);
-        activate.setOnCheckedChangeListener((view, checked) -> accountEnabled = checked);
-
-        // A 1dp separator between the account switch and the advanced fold.
-        View line = new View(host);
-        line.setBackgroundColor(host.getColor(R.color.surface));
-        LinearLayout.LayoutParams lineParams =
-                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, host.dp(1));
-        lineParams.setMargins(0, host.dp(12), 0, host.dp(12));
-        content.addView(line, lineParams);
-
-        // The per-addressbook sections below only matter on multi-book
-        // accounts or for spoke-level tuning, so they hide behind a fold.
-        CheckBox advanced = new CheckBox(host);
-        advanced.setChecked(settingsAdvancedOpen);
-        content.addView(optionRow(R.string.account_advanced, advanced), rowParams);
-        advanced.setOnCheckedChangeListener(
-                (view, checked) -> {
-                    settingsAdvancedOpen = checked;
-                    renderAccountSettings();
-                });
-
-        if (!settingsAdvancedOpen) {
-            return;
-        }
-
-        for (BookEntry entry : settingsBooks) {
-            BookSettings staged = bookSettings.get(entry.book.url);
-
-            TextView header = new TextView(host);
-            header.setText(entry.book.name);
-            header.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-            header.setTextColor(host.resolveColor(android.R.attr.textColorPrimary));
-            header.setSingleLine(true);
-            header.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            header.setGravity(Gravity.CENTER_VERTICAL);
-            header.setMinimumHeight(host.dp(48));
-            header.setPadding(host.dp(16), 0, host.dp(16), 0);
-            content.addView(header, rowParams);
-
-            LinearLayout rows = new LinearLayout(host);
-            rows.setOrientation(LinearLayout.VERTICAL);
-            rows.setPadding(host.dp(12), 0, 0, 0);
-            content.addView(rows, rowParams);
-
-            CheckBox enable = new CheckBox(host);
-            enable.setChecked(staged.enabled);
-            rows.addView(optionRow(R.string.book_enable, enable), rowParams);
-            enable.setOnCheckedChangeListener(
-                    (view, checked) -> {
-                        staged.enabled = checked;
-                        staged.remote = checked;
-                        staged.local = checked;
-                        renderAccountSettings();
-                    });
-
-            // The spoke switches need the book on, so their rows dim
-            // with it.
-            CheckBox remote = new CheckBox(host);
-            remote.setChecked(staged.remote);
-            remote.setEnabled(staged.enabled);
-            View remoteRow = optionRow(R.string.book_remote_sync, remote);
-            remoteRow.setAlpha(staged.enabled ? 1f : 0.5f);
-            rows.addView(remoteRow, rowParams);
-            remote.setOnCheckedChangeListener((view, checked) -> staged.remote = checked);
-
-            CheckBox local = new CheckBox(host);
-            local.setChecked(staged.local);
-            local.setEnabled(staged.enabled);
-            View localRow = optionRow(R.string.book_local_sync, local);
-            localRow.setAlpha(staged.enabled ? 1f : 0.5f);
-            rows.addView(localRow, rowParams);
-            local.setOnCheckedChangeListener((view, checked) -> staged.local = checked);
-        }
-    }
-
-    /**
-     * Wires a spinner's user picks, swallowing the selection callback
-     * Android fires on layout for the initial value.
-     */
-    private void onPicked(Spinner spinner, java.util.function.IntConsumer picked) {
-        spinner.setOnItemSelectedListener(
-                new android.widget.AdapterView.OnItemSelectedListener() {
-                    private boolean initial = true;
-
-                    @Override
-                    public void onItemSelected(
-                            android.widget.AdapterView<?> parent,
-                            View view,
-                            int position,
-                            long id) {
-                        if (initial) {
-                            initial = false;
-                            return;
-                        }
-                        picked.accept(position);
-                    }
-
-                    @Override
-                    public void onNothingSelected(android.widget.AdapterView<?> parent) {}
-                });
-    }
-
-    /** Commits the staged switches and returns to the drawer. */
-    void save() {
-        AccountActivation.set(host, settingsEmail, accountEnabled);
-        for (Map.Entry<String, BookSettings> staged : bookSettings.entrySet()) {
-            BookSettings state = staged.getValue();
-            host.base.setBookState(staged.getKey(), state.enabled, state.remote, state.local);
-        }
-
-        // The subscription switches move what the contacts root shows.
-        host.reloadContacts();
-        host.filterChanged();
-        leave();
-    }
-
-    /**
-     * Where this account sends, and a way to change it.
-     *
-     * <p>The one setting on this screen an account can be missing
-     * outright: a mail account connected before submission was asked
-     * about, or one whose address published nothing to send through, has
-     * no sender and no way to become one. Without this the repair is
-     * deleting the account and hoping discovery goes differently.
-     *
-     * <p>Committed when the dialog closes rather than staged for the
-     * FAB, which commits the addressbook switches: this is one endpoint,
-     * it is entered and it is done, and holding it back would make the
-     * screen say something the account does not.
-     */
-    private void addSubmission(LinearLayout content, LinearLayout.LayoutParams rowParams) {
-        AccountEntry account = host.accountFor(settingsEmail);
-        if (account == null || !account.covers(PimDomain.MAIL)) {
-            return;
-        }
-        // NOTE: Graph and Gmail submit through the account they read from,
-        // so there is no server of its own to change.
-        Account mail = account.server(PimDomain.MAIL);
-        if (PimalayaClient.isGraph(mail) || PimalayaClient.isGoogle(mail)) {
-            return;
-        }
-
-        String current = account.server(PimDomain.MAIL).submitUrl;
-        String value =
-                current == null || current.isEmpty()
-                        ? host.getString(R.string.account_send_none)
-                        : hostOf(current);
-
-        TextView row = new TextView(host);
-        row.setText(host.getString(R.string.account_send, value));
-        row.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        row.setTextColor(host.resolveColor(android.R.attr.textColorPrimary));
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(host.dp(48));
-        row.setPadding(host.dp(16), 0, host.dp(16), 0);
-        row.setOnClickListener(view -> promptSubmission(current));
-        content.addView(row, rowParams);
-
-        View line = new View(host);
-        line.setBackgroundColor(host.getColor(R.color.surface));
-        LinearLayout.LayoutParams lineParams =
-                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, host.dp(1));
-        lineParams.setMargins(0, host.dp(12), 0, host.dp(12));
-        content.addView(line, lineParams);
-    }
-
-    /**
-     * How much of this account's mail syncs: all of it, or the last N
-     * months.
-     *
-     * <p>Committed when picked rather than staged for the FAB, as the
-     * sending server is. A narrower bound frees what falls below it at
-     * once, the messages staying on the server; a wider one is listed by
-     * the next sync.
-     */
-    private void addMailScope(LinearLayout content) {
-        AccountEntry account = host.accountFor(settingsEmail);
-        if (account == null || !account.covers(PimDomain.MAIL)) {
-            return;
-        }
+    /** Rebuilds the page from what the account holds now. */
+    private void render() {
         String email = settingsEmail;
+        AccountEntry account = host.accountFor(email);
+        if (account == null) {
+            return;
+        }
+        renderIdentity(account);
 
-        Spinner scope = new Spinner(host);
-        android.widget.ArrayAdapter<CharSequence> choices =
-                android.widget.ArrayAdapter.createFromResource(
-                        host, R.array.mail_scopes, R.layout.spinner_form_item);
-        choices.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        scope.setAdapter(choices);
-        scope.setPadding(0, 0, scope.getPaddingRight(), 0);
-        scope.setMinimumHeight(host.dp(48));
+        Sections sections = new Sections(host, host.findViewById(R.id.account_content));
+        sections.clear();
+        addActivation(sections, email);
+        if (account.covers(PimDomain.MAIL)) {
+            addMail(sections, account);
+        }
+        addBooks(sections, email);
+        addServers(sections, account);
 
-        int months = host.mail.monthsOf(email);
-        int shown = 0;
-        for (int index = 0; index < MailScope.MONTHS.length; index++) {
-            if (MailScope.MONTHS[index] == months) {
-                shown = index;
+        boolean contactsOnly =
+                !account.covers(PimDomain.MAIL) && !account.covers(PimDomain.CALENDAR);
+        ((TextView) host.findViewById(R.id.account_delete_note))
+                .setText(
+                        contactsOnly
+                                ? R.string.delete_account_contacts
+                                : R.string.delete_account_all);
+    }
+
+    /** The disc, the address, what it covers and where it stands. */
+    private void renderIdentity(AccountEntry account) {
+        String email = account.email;
+        TextView avatar = host.findViewById(R.id.account_avatar);
+        avatar.setText(Avatar.letter(email));
+        avatar.setBackground(Avatar.circle(host, email));
+        ((TextView) host.findViewById(R.id.account_address)).setText(email);
+
+        List<String> covered = new ArrayList<>();
+        for (PimDomain domain : PimDomain.values()) {
+            if (account.covers(domain)) {
+                covered.add(host.getString(domain.label));
             }
         }
-        scope.setSelection(shown);
-        // NOTE: a whole mailbox is all of it, which the offline setting says.
-        boolean whole =
-                MailOffline.policy(host, host.mail.accountIdOf(email))
-                        == MailOffline.Policy.WHOLE;
-        scope.setEnabled(!whole);
-        scope.setAlpha(whole ? 0.5f : 1f);
+        ((TextView) host.findViewById(R.id.account_domains))
+                .setText(android.text.TextUtils.join(" · ", covered));
 
-        LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT);
-        // NOTE: the framework caret renders further in than the checkbox
-        // glyph, so the spinner stops 8dp short of the rows' end padding
-        // to line the caret up with the boxes.
-        params.setMarginStart(host.dp(16));
-        params.setMarginEnd(host.dp(4));
-        content.addView(scope, params);
-        onPicked(
-                scope,
-                position -> {
-                    int picked = MailScope.MONTHS[position];
-                    host.io.execute(
-                            () -> {
-                                try {
-                                    int collected = host.mail.bound(email, picked);
-                                    Log.d(
-                                            "pimalaya",
-                                            "mail of " + email + " bounded to " + picked
-                                                    + " months, " + collected + " collected");
-                                } catch (Exception error) {
-                                    Log.w("pimalaya", "mail bound failed for " + email, error);
-                                }
-                                host.postAlive(host.mailList::reload);
-                            });
-                });
-
-        View line = new View(host);
-        line.setBackgroundColor(host.getColor(R.color.surface));
-        LinearLayout.LayoutParams lineParams =
-                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, host.dp(1));
-        lineParams.setMargins(0, host.dp(12), 0, host.dp(12));
-        content.addView(line, lineParams);
+        FrameLayout pill = host.findViewById(R.id.account_pill);
+        pill.removeAllViews();
+        pill.addView(
+                host.syncPill(
+                        AccountActivation.enabled(host, email),
+                        SyncStamps.at(host, email),
+                        host.bodiesLeft(email)),
+                new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT));
     }
 
     /**
-     * Which bodies this account downloads before they are opened, and
-     * whether on a metered network too ({@link MailOffline}).
-     *
-     * <p>Committed when picked, as the bound is. Whole mailbox sets the
-     * bound to all mail, which the scope above then shows and holds; the
-     * body step runs after each pass and fill step while the app is open,
-     * and a change here starts or replans it.
+     * The account switch: off, the account syncs nothing and the lists and
+     * their filters leave it out ({@link AccountActivation}).
      */
-    private void addMailOffline(LinearLayout content, LinearLayout.LayoutParams rowParams) {
-        AccountEntry account = host.accountFor(settingsEmail);
-        if (account == null || !account.covers(PimDomain.MAIL)) {
-            return;
-        }
-        String email = settingsEmail;
-        String accountId = host.mail.accountIdOf(email);
-
-        Spinner policy = new Spinner(host);
-        android.widget.ArrayAdapter<CharSequence> choices =
-                android.widget.ArrayAdapter.createFromResource(
-                        host, R.array.mail_offline_policies, R.layout.spinner_form_item);
-        choices.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        policy.setAdapter(choices);
-        policy.setPadding(0, 0, policy.getPaddingRight(), 0);
-        policy.setMinimumHeight(host.dp(48));
-        policy.setSelection(MailOffline.policy(host, accountId).ordinal());
-
-        LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.setMarginStart(host.dp(16));
-        params.setMarginEnd(host.dp(4));
-        content.addView(policy, params);
-        onPicked(
-                policy,
-                position -> {
-                    MailOffline.Policy picked = MailOffline.Policy.values()[position];
-                    MailOffline.setPolicy(host, accountId, picked);
-                    if (picked != MailOffline.Policy.WHOLE) {
-                        renderAccountSettings();
-                        host.fillMail();
-                        return;
-                    }
-                    host.io.execute(
-                            () -> {
-                                try {
-                                    host.mail.bound(email, 0);
-                                } catch (Exception error) {
-                                    Log.w("pimalaya", "mail bound failed for " + email, error);
-                                }
-                                host.postAlive(
-                                        () -> {
-                                            renderAccountSettings();
-                                            host.mailList.reload();
-                                            host.fillMail();
-                                        });
-                            });
+    private void addActivation(Sections sections, String email) {
+        Switch toggle = new Switch(host);
+        toggle.setChecked(AccountActivation.enabled(host, email));
+        toggle.setOnCheckedChangeListener(
+                (view, checked) -> {
+                    AccountActivation.set(host, email, checked);
+                    host.reloadContacts();
+                    host.filterChanged();
+                    render();
                 });
+        sections.section(
+                0,
+                0,
+                List.of(
+                        switchRow(
+                                sections,
+                                host.getString(R.string.account_enable),
+                                host.getString(R.string.account_enable_note),
+                                toggle)),
+                null,
+                false);
+    }
 
-        CheckBox metered = new CheckBox(host);
+    /**
+     * The mail card: the name mail goes out under, how far back it syncs,
+     * which bodies download ahead and on which networks, and where it
+     * sends through.
+     */
+    private void addMail(Sections sections, AccountEntry account) {
+        String email = account.email;
+        String accountId = host.mail.accountIdOf(email);
+        List<View> rows = new ArrayList<>();
+
+        String name = SenderName.of(host, email);
+        rows.add(
+                sections.row(
+                        host.getString(R.string.sender_name),
+                        name.isEmpty() ? host.getString(R.string.sender_name_none) : name,
+                        chevron(),
+                        () -> promptSenderName(email)));
+
+        // NOTE: a whole mailbox is all of it, which the download setting
+        // says, so the period holds at all mail and dims.
+        MailOffline.Policy policy = MailOffline.policy(host, accountId);
+        boolean whole = policy == MailOffline.Policy.WHOLE;
+        String[] scopes = host.getResources().getStringArray(R.array.mail_scopes);
+        int scope = whole ? 0 : scopeIndex(host.mail.monthsOf(email));
+        View period =
+                sections.row(
+                        host.getString(R.string.mail_scope_title),
+                        scopes[scope],
+                        chevron(),
+                        whole
+                                ? null
+                                : () ->
+                                        choose(
+                                                R.string.mail_scope_title,
+                                                R.string.mail_scope_message,
+                                                R.array.mail_scopes,
+                                                scope,
+                                                picked -> bound(email, MailScope.MONTHS[picked])));
+        period.setAlpha(whole ? 0.5f : 1f);
+        rows.add(period);
+
+        String[] policies = host.getResources().getStringArray(R.array.mail_offline_policies);
+        rows.add(
+                sections.row(
+                        host.getString(R.string.mail_offline_title),
+                        policies[policy.ordinal()],
+                        chevron(),
+                        () ->
+                                choose(
+                                        R.string.mail_offline_title,
+                                        R.string.mail_offline_message,
+                                        R.array.mail_offline_policies,
+                                        policy.ordinal(),
+                                        picked ->
+                                                setPolicy(
+                                                        email,
+                                                        accountId,
+                                                        MailOffline.Policy.values()[picked]))));
+
+        Switch metered = new Switch(host);
         metered.setChecked(MailOffline.metered(host, accountId));
-        content.addView(optionRow(R.string.mail_offline_metered, metered), rowParams);
         metered.setOnCheckedChangeListener(
                 (view, checked) -> {
                     MailOffline.setMetered(host, accountId, checked);
                     host.fillMail();
                 });
+        rows.add(
+                switchRow(
+                        sections,
+                        host.getString(R.string.mail_offline_metered),
+                        host.getString(R.string.mail_offline_metered_note),
+                        metered));
 
-        View line = new View(host);
-        line.setBackgroundColor(host.getColor(R.color.surface));
-        LinearLayout.LayoutParams lineParams =
-                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, host.dp(1));
-        lineParams.setMargins(0, host.dp(12), 0, host.dp(12));
-        content.addView(line, lineParams);
+        // NOTE: Graph and Gmail submit through the account they read from,
+        // so there is no server of its own to change.
+        Account mail = account.server(PimDomain.MAIL);
+        if (mail != null && !PimalayaClient.isGraph(mail) && !PimalayaClient.isGoogle(mail)) {
+            String current = mail.submitUrl;
+            boolean none = current == null || current.isEmpty();
+            rows.add(
+                    sections.row(
+                            host.getString(R.string.account_send),
+                            none ? host.getString(R.string.account_send_none) : hostOf(current),
+                            chevron(),
+                            () -> promptSubmission(none ? null : current)));
+        }
+
+        sections.section(PimDomain.MAIL.label, R.drawable.ic_section_mail, rows, null, false);
+    }
+
+    /** Where a number of months stands in the period choices. */
+    private static int scopeIndex(int months) {
+        for (int index = 0; index < MailScope.MONTHS.length; index++) {
+            if (MailScope.MONTHS[index] == months) {
+                return index;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Bounds the account's mail: a narrower bound frees what falls below it
+     * at once, the messages staying on the server; a wider one is listed by
+     * the next sync.
+     */
+    private void bound(String email, int months) {
+        host.io.execute(
+                () -> {
+                    try {
+                        int collected = host.mail.bound(email, months);
+                        Log.d(
+                                "pimalaya",
+                                "mail of " + email + " bounded to " + months + " months, "
+                                        + collected + " collected");
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "mail bound failed for " + email, error);
+                    }
+                    host.postAlive(
+                            () -> {
+                                host.mailList.reload();
+                                renderIfOpen(email);
+                            });
+                });
+        render();
+    }
+
+    /**
+     * Sets which bodies download ahead ({@link MailOffline}). Whole mailbox
+     * sets the bound to all mail, and the body step starts or replans.
+     */
+    private void setPolicy(String email, String accountId, MailOffline.Policy picked) {
+        MailOffline.setPolicy(host, accountId, picked);
+        if (picked != MailOffline.Policy.WHOLE) {
+            render();
+            host.fillMail();
+            return;
+        }
+        host.io.execute(
+                () -> {
+                    try {
+                        host.mail.bound(email, 0);
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "mail bound failed for " + email, error);
+                    }
+                    host.postAlive(
+                            () -> {
+                                renderIfOpen(email);
+                                host.mailList.reload();
+                                host.fillMail();
+                            });
+                });
+        render();
+    }
+
+    /** Re-renders after background work, unless the page moved on. */
+    private void renderIfOpen(String email) {
+        if (email.equals(settingsEmail)) {
+            render();
+        }
+    }
+
+    /**
+     * The addressbooks card: a switch per book, and under a book that is on
+     * whether it syncs with the server and shows in the phone's contacts.
+     */
+    private void addBooks(Sections sections, String email) {
+        List<View> rows = new ArrayList<>();
+        for (BookEntry entry : host.base.loadAllAddressbooks()) {
+            if (!entry.accountEmail.equals(email)) {
+                continue;
+            }
+            String url = entry.book.url;
+
+            LinearLayout item = new LinearLayout(host);
+            item.setOrientation(LinearLayout.VERTICAL);
+
+            Switch enable = new Switch(host);
+            enable.setChecked(entry.subscribed);
+            enable.setOnCheckedChangeListener(
+                    (view, checked) -> setBook(url, checked, checked, checked));
+            item.addView(
+                    switchRow(
+                            sections,
+                            entry.book.name,
+                            entry.subscribed ? null : host.getString(R.string.book_off),
+                            enable));
+
+            if (entry.subscribed) {
+                item.addView(
+                        bookOption(
+                                R.string.book_remote_sync,
+                                entry.remoteSynced,
+                                checked -> setBook(url, true, checked, entry.phoneSynced)));
+                View local =
+                        bookOption(
+                                R.string.book_local_sync,
+                                entry.phoneSynced,
+                                checked -> setBook(url, true, entry.remoteSynced, checked));
+                local.setPadding(
+                        local.getPaddingLeft(), 0, local.getPaddingRight(), host.dp(6));
+                item.addView(local);
+            }
+            rows.add(item);
+        }
+        sections.section(R.string.account_books, R.drawable.ic_addressbooks, rows, null, false);
+    }
+
+    /** One of a book's two options, a checkbox indented under it. */
+    private View bookOption(int label, boolean checked, java.util.function.Consumer<Boolean> set) {
+        CheckBox box = new CheckBox(host);
+        box.setText(label);
+        box.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        box.setTextColor(host.resolveColor(android.R.attr.textColorPrimary));
+        box.setChecked(checked);
+        box.setMinHeight(host.dp(44));
+        box.setOnCheckedChangeListener((view, value) -> set.accept(value));
+
+        LinearLayout row = new LinearLayout(host);
+        row.setPadding(host.dp(28), 0, host.dp(16), 0);
+        row.addView(
+                box,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+        return row;
+    }
+
+    /** Writes a book's switches; the contacts root follows them. */
+    private void setBook(String url, boolean enabled, boolean remote, boolean local) {
+        host.base.setBookState(url, enabled, remote, local);
+        host.reloadContacts();
+        host.filterChanged();
+        render();
+    }
+
+    /**
+     * The servers card, read only: one row per host, naming the domains it
+     * serves, over which protocols and how it signs in.
+     */
+    private void addServers(Sections sections, AccountEntry account) {
+        Map<String, Server> servers = new LinkedHashMap<>();
+        for (PimDomain domain : PimDomain.values()) {
+            Account server = account.server(domain);
+            AccountCredential credential = account.credential(domain);
+            if (server == null || credential == null) {
+                continue;
+            }
+            servers.computeIfAbsent(serverHost(server.baseUrl), key -> new Server())
+                    .add(domain, protocolOf(domain, server), methodOf(credential));
+            if (domain == PimDomain.MAIL
+                    && server.submitUrl != null
+                    && !server.submitUrl.isEmpty()) {
+                servers.computeIfAbsent(hostOf(server.submitUrl), key -> new Server())
+                        .add(
+                                domain,
+                                host.getString(R.string.config_smtp),
+                                methodOf(credential));
+            }
+        }
+
+        List<View> rows = new ArrayList<>();
+        for (Map.Entry<String, Server> server : servers.entrySet()) {
+            Server named = server.getValue();
+            List<String> domains = new ArrayList<>();
+            for (PimDomain domain : named.domains) {
+                domains.add(host.getString(domain.label));
+            }
+            String line =
+                    String.join(", ", domains)
+                            + " · " + String.join(", ", named.protocols)
+                            + " · " + String.join(", ", named.methods);
+            rows.add(sections.row(server.getKey(), line, null, null));
+        }
+        sections.section(R.string.account_servers, R.drawable.ic_section_work, rows, null, false);
+    }
+
+    /** One server row's pieces, in the order the domains came. */
+    private static final class Server {
+        final Set<PimDomain> domains = new LinkedHashSet<>();
+        final Set<String> protocols = new LinkedHashSet<>();
+        final Set<String> methods = new LinkedHashSet<>();
+
+        void add(PimDomain domain, String protocol, String method) {
+            domains.add(domain);
+            protocols.add(protocol);
+            methods.add(method);
+        }
+    }
+
+    /** The host a base URL reaches, the providers' APIs by their name. */
+    private static String serverHost(String url) {
+        if (url.startsWith("msgraph://")) {
+            return "graph.microsoft.com";
+        }
+        if (url.startsWith("google://")) {
+            return "googleapis.com";
+        }
+        if (url.startsWith("jmap://")) {
+            return hostOf("https://" + url.substring("jmap://".length()));
+        }
+        return hostOf(url);
+    }
+
+    /** The protocol one domain speaks to its server. */
+    private String protocolOf(PimDomain domain, Account server) {
+        if (PimalayaClient.isGraph(server)) {
+            return host.getString(R.string.config_msgraph);
+        }
+        if (PimalayaClient.isJmap(server)) {
+            return host.getString(R.string.config_jmap);
+        }
+        boolean google = PimalayaClient.isGoogle(server);
+        switch (domain) {
+            case MAIL:
+                return host.getString(google ? R.string.config_gmail : R.string.config_imap);
+            case CALENDAR:
+                return host.getString(google ? R.string.config_gcal : R.string.config_caldav);
+            default:
+                return host.getString(
+                        google ? R.string.config_google_api : R.string.config_carddav);
+        }
+    }
+
+    /** How a credential signs in: a renewable grant, a token or a password. */
+    private String methodOf(AccountCredential credential) {
+        if (credential.renewable()) {
+            return host.getString(R.string.server_oauth);
+        }
+        return host.getString(
+                credential.login == null || credential.login.isEmpty()
+                        ? R.string.server_token
+                        : R.string.config_password);
+    }
+
+    /** A row ending in a switch, the row as a whole toggling it. */
+    private View switchRow(Sections sections, String title, String line, Switch toggle) {
+        LinearLayout row = (LinearLayout) sections.row(title, line, null, toggle::toggle);
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.setMarginStart(host.dp(12));
+        row.addView(toggle, params);
+        return row;
+    }
+
+    /** The trailing chevron of a row opening a choice. */
+    private View chevron() {
+        android.widget.ImageView glyph = new android.widget.ImageView(host);
+        glyph.setImageResource(R.drawable.ic_chevron_right);
+        glyph.setImageTintList(
+                android.content.res.ColorStateList.valueOf(
+                        host.resolveColor(android.R.attr.textColorSecondary)));
+        return glyph;
+    }
+
+    /**
+     * A single-choice dialog: its title, a line of context and the choices
+     * as radio rows. A tap applies and closes; Cancel leaves it as it was.
+     */
+    private void choose(int title, int message, int choices, int current, IntConsumer picked) {
+        LinearLayout content = new LinearLayout(host);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(0, host.dp(4), 0, 0);
+
+        TextView context = new TextView(host);
+        context.setText(message);
+        context.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        context.setTextColor(host.resolveColor(android.R.attr.textColorSecondary));
+        context.setPadding(host.dp(24), 0, host.dp(24), host.dp(12));
+        content.addView(context);
+
+        AlertDialog dialog =
+                new AlertDialog.Builder(host)
+                        .setTitle(title)
+                        .setView(content)
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .create();
+
+        String[] labels = host.getResources().getStringArray(choices);
+        for (int index = 0; index < labels.length; index++) {
+            int choice = index;
+            RadioButton radio = new RadioButton(host);
+            radio.setText(labels[index]);
+            radio.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+            radio.setTextColor(host.resolveColor(android.R.attr.textColorPrimary));
+            radio.setChecked(index == current);
+            radio.setMinHeight(host.dp(52));
+            radio.setGravity(Gravity.CENTER_VERTICAL);
+            radio.setPadding(host.dp(12), 0, 0, 0);
+            radio.setOnClickListener(
+                    view -> {
+                        dialog.dismiss();
+                        if (choice != current) {
+                            picked.accept(choice);
+                        }
+                    });
+            LinearLayout.LayoutParams params =
+                    new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            LinearLayout.LayoutParams.WRAP_CONTENT);
+            params.setMarginStart(host.dp(20));
+            params.setMarginEnd(host.dp(24));
+            content.addView(radio, params);
+        }
+        dialog.show();
+    }
+
+    /** Asks for the name the account's mail goes out under. */
+    private void promptSenderName(String email) {
+        PillField field =
+                PillField.of(host, R.string.sender_name, SenderName.of(host, email), false, true);
+        field.input.setInputType(
+                InputType.TYPE_CLASS_TEXT
+                        | InputType.TYPE_TEXT_VARIATION_PERSON_NAME
+                        | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        field.input.setTypeface(android.graphics.Typeface.DEFAULT);
+        prompt(
+                R.string.sender_name,
+                R.string.sender_name_message,
+                field,
+                () -> {
+                    SenderName.set(host, email, field.text());
+                    render();
+                });
     }
 
     /**
@@ -444,39 +603,46 @@ final class AccountSettings {
      */
     private void promptSubmission(String current) {
         String email = settingsEmail;
-        android.widget.EditText field =
-                host.ui.field(R.string.manual_submit_server, current == null ? "" : hostOf(current));
-
-        LinearLayout fields = new LinearLayout(host);
-        fields.setOrientation(LinearLayout.VERTICAL);
-        fields.setPadding(host.dp(24), host.dp(8), host.dp(24), 0);
-        fields.addView(field);
-
-        new AlertDialog.Builder(host)
-                .setTitle(R.string.send_mail)
-                .setMessage(R.string.manual_submit_message)
-                .setView(fields)
-                .setPositiveButton(
-                        R.string.password_submit,
-                        (dialog, which) -> {
-                            String entered = field.getText().toString().trim();
-                            host.store.submitThrough(
-                                    email, entered.isEmpty() ? null : submitUrl(entered));
-                            renderAccountSettings();
-                        })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        PillField field =
+                PillField.of(
+                        host,
+                        R.string.manual_submit_server,
+                        current == null ? "" : hostOf(current),
+                        false,
+                        true);
+        prompt(
+                R.string.send_mail,
+                R.string.manual_submit_message,
+                field,
+                () -> {
+                    String entered = field.text();
+                    host.store.submitThrough(
+                            email, entered.isEmpty() ? null : PimalayaClient.submitUrl(entered));
+                    render();
+                });
     }
 
-    /** What was typed, as the endpoint a submission opens. */
-    private static String submitUrl(String entered) {
-        return PimalayaClient.submitUrl(entered);
+    /** A one-field dialog: title, message, the field, Cancel and Save. */
+    private void prompt(int title, int message, PillField field, Runnable save) {
+        LinearLayout fields = new LinearLayout(host);
+        fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(host.dp(24), 0, host.dp(24), 0);
+        fields.addView(field.view);
+
+        new AlertDialog.Builder(host)
+                .setTitle(title)
+                .setMessage(message)
+                .setView(fields)
+                .setPositiveButton(R.string.password_submit, (dialog, which) -> save.run())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     /** The host part of an endpoint, the endpoint itself when it has none. */
     private static String hostOf(String url) {
         try {
-            return java.net.URI.create(url).getHost();
+            String named = java.net.URI.create(url).getHost();
+            return named == null ? url : named;
         } catch (Exception error) {
             return url;
         }
@@ -494,44 +660,6 @@ final class AccountSettings {
     }
 
     /**
-     * One settings row: the label on the left, the checkbox at the end,
-     * vertically centred on a shared height; tapping anywhere on the row
-     * toggles the box (while it is enabled). Pads itself like the edit
-     * form's rows (the container stays unpadded for the separators);
-     * the 12dp end centres the checkbox glyph under the bar's 48dp
-     * buttons (4dp bar padding + 24 = 28dp centreline, the glyph
-     * sitting 16dp in from the widget's end).
-     */
-    private View optionRow(int label, CheckBox box) {
-        TextView text = new TextView(host);
-        text.setText(label);
-        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        text.setTextColor(host.resolveColor(android.R.attr.textColorPrimary));
-        text.setLayoutParams(
-                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-        LinearLayout row = new LinearLayout(host);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(host.dp(48));
-        row.setPadding(host.dp(16), 0, host.dp(12), 0);
-        row.addView(text);
-        row.addView(box);
-        row.setOnClickListener(
-                view -> {
-                    if (box.isEnabled()) {
-                        box.toggle();
-                    }
-                });
-        return row;
-    }
-
-    /** Confirms deletion of the account whose settings screen is open. */
-    void confirmDeleteCurrent() {
-        confirmDeleteAccount(settingsEmail);
-    }
-
-    /**
      * Confirms, then removes the account and everything under it,
      * leaving its settings screen for the drawer underneath.
      */
@@ -542,10 +670,11 @@ final class AccountSettings {
             return;
         }
         new AlertDialog.Builder(host)
-                .setTitle(R.string.delete_account)
-                .setMessage(R.string.delete_account_confirm)
+                .setTitle(R.string.delete_account_confirm)
+                .setMessage(
+                        ((TextView) host.findViewById(R.id.account_delete_note)).getText())
                 .setPositiveButton(
-                        android.R.string.ok,
+                        R.string.delete_account,
                         (dialog, which) -> {
                             deleteAccount(email);
                             if (host.screen == MainActivity.PANEL_ACCOUNT) {
@@ -584,6 +713,7 @@ final class AccountSettings {
         // filter no longer offers to hide.
         host.mail.forget(email);
         FirstSync.forget(host, email);
+        SenderName.set(host, email, "");
         host.events.forget(email);
         host.accounts.removeIf(entry -> entry.email.equals(email));
         host.reloadHome();

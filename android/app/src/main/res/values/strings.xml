@@ -100,7 +100,6 @@
     <string name="oauth_message_own">Enter the client you registered with this server.</string>
     <string name="books_none">This account has no addressbook</string>
     <string name="subscriptions_title">Accounts</string>
-    <string name="subscriptions_save">Save</string>
     <string name="accounts_failed">Could not create the accounts</string>
     <string name="add_account">Add account</string>
     <string name="sync_accounts">Synchronize accounts</string>
@@ -111,32 +110,9 @@
     <string name="report_bug">Report a bug</string>
     <string name="local_account">Pimalaya</string>
     <string name="local_book">Local app contacts</string>
-    <string name="delete_account">Delete account</string>
-    <string name="account_enable">Enable this account</string>
-    <string name="account_send">Send mail through %1$s</string>
-    <string name="account_send_none">no server</string>
     <!-- The account's mail bound: what a sync lists and what the store keeps. -->
-    <string-array name="mail_scopes">
-        <item>Sync all mail</item>
-        <item>Sync the last month</item>
-        <item>Sync the last 3 months</item>
-        <item>Sync the last 6 months</item>
-        <item>Sync the last year</item>
-        <item>Sync the last 2 years</item>
-    </string-array>
     <!-- Which bodies an account downloads before they are opened (MailOffline). -->
-    <string-array name="mail_offline_policies">
-        <item>Download messages when opened</item>
-        <item>Download messages in the background</item>
-        <item>Download whole mailboxes (full sync)</item>
-    </string-array>
-    <string name="mail_offline_metered">Download messages on metered networks too</string>
-    <string name="account_advanced">Enable advanced settings per addressbook</string>
-    <string name="book_enable">Enable this addressbook</string>
-    <string name="book_remote_sync">Sync remotely</string>
-    <string name="book_local_sync">Sync locally</string>
     <string name="home_empty">No account yet. Add one to get started.</string>
-    <string name="delete_account_confirm">Are you sure you want to remove this account? Its contacts will stay on this device.</string>
 
     <string name="sync_title">Synchronizing</string>
     <string name="sync_addressbooks">Fetching addressbooks</string>
@@ -492,7 +468,6 @@
     <string name="delete_selected">Delete selected contacts</string>
     <string name="cancel_selection">Cancel selection</string>
     <string name="select_all">Select all</string>
-    <string name="settings_title">Settings</string>
     <string name="selected_count">%1$d selected</string>
     <string name="delete_selected_confirm">Delete the selected contacts?</string>
     <string name="contact_new">New contact</string>
@@ -641,4 +616,42 @@
         <item>Unknown</item>
     </string-array>
 
+    <!-- Account settings (AccountSettings). -->
+    <string name="account_enable">Use this account</string>
+    <string name="account_enable_note">Off: nothing syncs and the lists leave it out. Its data stays on this phone.</string>
+    <string name="sender_name">Your name</string>
+    <string name="sender_name_none">Not set</string>
+    <string name="sender_name_message">Shown to recipients beside your address.</string>
+    <string name="mail_scope_title">Sync period</string>
+    <string name="mail_scope_message">Older mail stays on the server. Narrowing frees space now.</string>
+    <string-array name="mail_scopes">
+        <item>All mail</item>
+        <item>The last month</item>
+        <item>The last 3 months</item>
+        <item>The last 6 months</item>
+        <item>The last year</item>
+        <item>The last 2 years</item>
+    </string-array>
+    <string name="mail_offline_title">Download messages</string>
+    <string name="mail_offline_message">Downloaded messages open without a connection.</string>
+    <string-array name="mail_offline_policies">
+        <item>When opened</item>
+        <item>In the background</item>
+        <item>Whole mailboxes (full sync)</item>
+    </string-array>
+    <string name="mail_offline_metered">Also on mobile data</string>
+    <string name="mail_offline_metered_note">Background downloads wait for Wi-Fi otherwise</string>
+    <string name="account_send">Send through</string>
+    <string name="account_send_none">No server</string>
+    <string name="account_books">Addressbooks</string>
+    <string name="book_remote_sync">Sync with the server</string>
+    <string name="book_local_sync">Show in the phone\'s contacts</string>
+    <string name="book_off">Off: not synced, not shown</string>
+    <string name="account_servers">Servers</string>
+    <string name="server_oauth" translatable="false">OAuth</string>
+    <string name="server_token">Token</string>
+    <string name="delete_account">Remove this account</string>
+    <string name="delete_account_confirm">Remove this account from this phone?</string>
+    <string name="delete_account_contacts">Its contacts stay on this phone.</string>
+    <string name="delete_account_all">Its contacts move to this phone. Its mail and events are removed.</string>
 </resources>

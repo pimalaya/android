@@ -53,37 +53,11 @@ final class Sections {
      * Adds a section as one card: its icon and label, an optional
      * right-aligned action on the label's line, then its items. An empty
      * section vanishes unless the caller keeps it, as a card of its
-     * label alone.
+     * label alone. A title of 0 draws the card without a header.
      */
     void section(int title, int icon, List<View> items, View action, boolean keepEmpty) {
         if (items.isEmpty() && !keepEmpty) {
             return;
-        }
-
-        ImageView iconView = new ImageView(activity);
-        iconView.setImageResource(icon);
-        iconView.setImageTintList(ColorStateList.valueOf(labelColor));
-
-        TextView label = new TextView(activity);
-        label.setText(title);
-        label.setTextColor(labelColor);
-        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        label.setTypeface(null, Typeface.BOLD);
-        label.setAllCaps(true);
-        label.setLetterSpacing(0.02f);
-        LinearLayout.LayoutParams labelParams =
-                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        labelParams.setMarginStart(dp(8));
-
-        LinearLayout header = new LinearLayout(activity);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(16), dp(6), dp(6), items.isEmpty() ? dp(6) : 0);
-        header.setMinimumHeight(dp(44));
-        header.addView(iconView, new LinearLayout.LayoutParams(dp(16), dp(16)));
-        header.addView(label, labelParams);
-        if (action != null) {
-            header.addView(action);
         }
 
         // NOTE: the card clips to its outline, so a row's ripple rounds
@@ -92,7 +66,9 @@ final class Sections {
         card.setOrientation(LinearLayout.VERTICAL);
         card.setBackgroundResource(R.drawable.card_group);
         card.setClipToOutline(true);
-        card.addView(header);
+        if (title != 0) {
+            card.addView(header(title, icon, action, items.isEmpty()));
+        }
         for (int index = 0; index < items.size(); index++) {
             if (index > 0) {
                 View line = new View(activity);
@@ -115,6 +91,36 @@ final class Sections {
         cardParams.setMarginEnd(gutter);
         cardParams.topMargin = container.getChildCount() == 0 ? dp(8) : gutter;
         container.addView(card, cardParams);
+    }
+
+    /** A card's header: its icon, its label and the optional action. */
+    private View header(int title, int icon, View action, boolean alone) {
+        ImageView iconView = new ImageView(activity);
+        iconView.setImageResource(icon);
+        iconView.setImageTintList(ColorStateList.valueOf(labelColor));
+
+        TextView label = new TextView(activity);
+        label.setText(title);
+        label.setTextColor(labelColor);
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        label.setTypeface(null, Typeface.BOLD);
+        label.setAllCaps(true);
+        label.setLetterSpacing(0.02f);
+        LinearLayout.LayoutParams labelParams =
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        labelParams.setMarginStart(dp(8));
+
+        LinearLayout header = new LinearLayout(activity);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(16), dp(6), dp(6), alone ? dp(6) : 0);
+        header.setMinimumHeight(dp(44));
+        header.addView(iconView, new LinearLayout.LayoutParams(dp(16), dp(16)));
+        header.addView(label, labelParams);
+        if (action != null) {
+            header.addView(action);
+        }
+        return header;
     }
 
     /**

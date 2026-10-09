@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Account settings (proposed)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#EEEEEE;--divl:#E0E0E0;--fg:#1C1B1F;--fg2:#5E5E62;--track:#BDBDBD;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1C1E21;--surface:#2A2A2A;--divl:#363636;--fg:#E6E1E5;--fg2:#AEAAAE;--track:#5A5A5A}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.tbtn{width:40px;height:40px;margin:4px;border-radius:999px;background:var(--surface);color:var(--fg);display:flex;align-items:center;justify-content:center;flex:none;text-decoration:none}
+.sec{margin:12px 12px 0;background:var(--surface);border-radius:22px;overflow:hidden}
+.sech{min-height:44px;display:flex;align-items:center;gap:8px;padding:6px 16px 0;color:var(--fg2);font-size:13px;font-weight:700;letter-spacing:.02em;text-transform:uppercase}
+.sech .ico{width:16px;height:16px}
+.prow{display:flex;align-items:center;gap:12px;padding:12px 16px;position:relative;width:100%;border:0;background:none;font:inherit;color:inherit;text-align:left;text-decoration:none}
+.prow+.prow::before{content:"";position:absolute;top:0;left:16px;right:0;height:1px;background:var(--divl)}
+.pt{font-size:16px;line-height:20px}
+.ps{font-size:13px;line-height:17px;color:var(--fg2)}
+.grow{flex:1;min-width:0}
+.tg{width:44px;height:24px;border-radius:12px;background:color-mix(in srgb, var(--accent) 45%, transparent);position:relative;flex:none}
+.tg::after{content:"";position:absolute;right:0;top:0;width:24px;height:24px;border-radius:50%;background:var(--accent);box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.tg.off{background:var(--track)}
+.tg.off::after{left:0;right:auto;background:#FAFAFA}
+.chev{width:20px;height:20px;color:var(--fg2)}
+.pill{align-self:flex-start;height:30px;border-radius:15px;display:flex;align-items:center;gap:8px;padding:0 12px 0 8px;font-size:13px;font-weight:700;color:var(--accent);background:color-mix(in srgb, var(--accent) 14%, transparent)}
+.pill .ico{width:16px;height:16px}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div style="min-height: 60px; padding: 0 8px; display: flex; align-items: center; flex: none">
+    <a class="tbtn" href="Drawer.dc.html" aria-label="Close"><svg class="ico" viewBox="0 -960 960 960"><path d="m256-200-56-56 224-224-224-224 56-56 224 224 224-224 56 56-224 224 224 224-56 56-224-224-224 224Z"/></svg></a>
+  </div>
+  <div style="flex: 1; min-height: 0; overflow: hidden">
+    <div style="padding: 4px 24px 8px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; align-items: center; gap: 14px">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: hsl(190, 25%, 44%); color: #fff; font-size: 22px; display: flex; align-items: center; justify-content: center; flex: none">A</div>
+        <div style="min-width: 0">
+          <div style="font-size: 22px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">alex@example.org</div>
+          <div style="font-size: 14px; color: var(--fg2)">Mail · Contacts · Calendar</div>
+        </div>
+      </div>
+      <span class="pill"><svg class="ico" viewBox="0 -960 960 960"><path d="M160-160v-80h110l-16-14q-52-46-73-105t-21-119q0-111 66.5-197.5T400-790v84q-72 26-116 88.5T240-478q0 45 17 87.5t53 78.5l10 10v-98h80v240H160Zm400-10v-84q72-26 116-88.5T720-482q0-45-17-87.5T650-648l-10-10v98h-80v-240h240v80H690l16 14q49 49 71.5 106.5T800-482q0 111-66.5 197.5T560-170Z"/></svg>Synced 5 minutes ago</span>
+    </div>
+    <div class="sec">
+      <label class="prow"><div class="grow"><div class="pt">Use this account</div><div class="ps">Off: nothing syncs and the lists leave it out. Its data stays on this phone.</div></div><span class="tg"></span></label>
+    </div>
+    <div class="sec">
+      <div class="sech"><svg class="ico" viewBox="0 -960 960 960"><path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm320-280L160-640v400h640v-400L480-440Zm0-80 320-200H160l320 200ZM160-640v-80 480-400Z"/></svg>Mail</div>
+      <a class="prow" href="AccSettingsChoice.dc.html"><div class="grow"><div class="pt">Sync period</div><div class="ps">The last 3 months</div></div><svg class="ico chev" viewBox="0 -960 960 960"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></a>
+      <a class="prow" href="AccSettingsChoice.dc.html"><div class="grow"><div class="pt">Download messages</div><div class="ps">When opened</div></div><svg class="ico chev" viewBox="0 -960 960 960"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></a>
+      <label class="prow"><div class="grow"><div class="pt">Also on mobile data</div><div class="ps">Background downloads wait for Wi-Fi otherwise</div></div><span class="tg off"></span></label>
+      <button class="prow"><div class="grow"><div class="pt">Send through</div><div class="ps">smtp.example.org</div></div><svg class="ico chev" viewBox="0 -960 960 960"><path d="M504-480 320-664l56-56 240 240-240 240-56-56 184-184Z"/></svg></button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#00696F","options":["#00696F","#4F5BD5","#8E4585","#9A5B00"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var accent = this.props.accent ?? '#00696F';
+    if (dark && accent === '#00696F') accent = '#80DEEA';
+    var h = accent.replace('#', '');
+    var r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+    var onAccent = (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#000000' : '#FFFFFF';
+    return { theme: dark ? 'app dark' : 'app', vars: '--accent:' + accent + ';--on-accent:' + onAccent };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,114 +1,165 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- One account's settings, a whole-frame overlay fading in (with a
      slight zoom) over the open drawer (it sits above the DrawerLayout
-     in activity_main), its own bar included: the closing cross lands
-     back on the drawer, the title carries the account's email, the
-     trash deletes the account after confirmation. The content is built
-     by MainActivity (openAccountSettings): uniform checkbox rows
-     (enable the account, the cadence dropdown, enable advanced
-     settings) then the per-addressbook advanced sections. Nothing
-     persists until the overlay's own FAB (check) commits the staged
-     switches; the shared FAB cannot serve here since it draws under
-     the drawer. Invisible rather than gone, so it is measured from the
-     first layout pass and the entrance zoom pivots on its centre from
-     the very first show. -->
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+     in activity_main): the round cross lands back on the drawer, the
+     address fades into the bar once the identity block scrolls away.
+     The content is built by AccountSettings, as Sections cards; every
+     change applies when made. Invisible rather than gone, so it is
+     measured from the first layout pass and the entrance zoom pivots
+     on its centre from the very first show. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/overlay_account"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?android:attr/colorBackground"
     android:clickable="true"
-    android:clipChildren="false"
-    android:clipToPadding="false"
+    android:orientation="vertical"
     android:visibility="invisible">
 
     <LinearLayout
+        android:id="@+id/account_bar"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical">
+        android:layout_height="@dimen/app_bar_height"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="@dimen/app_bar_padding"
+        android:paddingEnd="@dimen/app_bar_padding">
+
+        <ImageButton
+            android:id="@+id/account_back"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_margin="4dp"
+            android:background="@drawable/button_tonal"
+            android:contentDescription="@string/drawer_close"
+            android:src="@drawable/ic_close"
+            android:tint="?android:attr/textColorPrimary" />
+
+        <TextView
+            android:id="@+id/account_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:alpha="0"
+            android:ellipsize="end"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:singleLine="true"
+            android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
+            android:textColor="?android:attr/textColorPrimary" />
+
+    </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/account_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
         <LinearLayout
-            android:id="@+id/account_bar"
+            android:id="@+id/account_page"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:background="@color/surface"
-            android:gravity="center_vertical"
-            android:minHeight="@dimen/app_bar_height"
-            android:orientation="horizontal"
-            android:paddingStart="@dimen/app_bar_padding"
-            android:paddingEnd="@dimen/app_bar_padding">
+            android:orientation="vertical"
+            android:paddingBottom="24dp">
 
-            <ImageButton
-                android:id="@+id/account_back"
-                android:layout_width="@dimen/app_bar_button"
-                android:layout_height="@dimen/app_bar_button"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/drawer_close"
-                android:src="@drawable/ic_close"
-                android:tint="?android:attr/textColorPrimary" />
-
-            <TextView
-                android:id="@+id/account_title"
-                android:layout_width="0dp"
+            <LinearLayout
+                android:id="@+id/account_identity"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:paddingStart="@dimen/app_bar_title_padding"
-                android:paddingEnd="@dimen/app_bar_title_padding"
-                android:singleLine="true"
-                android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
-                android:textColor="?android:attr/textColorPrimary" />
+                android:orientation="vertical"
+                android:paddingStart="24dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="24dp"
+                android:paddingBottom="8dp">
 
-            <ImageButton
-                android:id="@+id/account_delete"
-                android:layout_width="@dimen/app_bar_button"
-                android:layout_height="@dimen/app_bar_button"
-                android:background="@drawable/ripple_circle"
-                android:contentDescription="@string/delete_account"
-                android:src="@drawable/ic_delete_bar"
-                android:tint="?android:attr/textColorPrimary" />
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
 
-        </LinearLayout>
+                    <TextView
+                        android:id="@+id/account_avatar"
+                        android:layout_width="52dp"
+                        android:layout_height="52dp"
+                        android:gravity="center"
+                        android:textColor="@android:color/white"
+                        android:textSize="22sp" />
 
-        <ScrollView
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1">
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="14dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
 
-            <!-- Unpadded horizontally: each row pads itself 16dp like the
-                 edit form's, so separators run edge to edge. -->
+                        <TextView
+                            android:id="@+id/account_address"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:ellipsize="end"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorPrimary"
+                            android:textSize="22sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/account_domains"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:ellipsize="end"
+                            android:singleLine="true"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:textSize="14sp" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
+                <FrameLayout
+                    android:id="@+id/account_pill"
+                    android:layout_width="wrap_content"
+                    android:layout_height="30dp"
+                    android:layout_marginTop="12dp" />
+
+            </LinearLayout>
+
+            <!-- The Sections cards. -->
             <LinearLayout
                 android:id="@+id/account_content"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingTop="8dp"
-                android:paddingBottom="88dp" />
+                android:orientation="vertical" />
 
-        </ScrollView>
+            <Button
+                android:id="@+id/account_delete"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginStart="24dp"
+                android:layout_marginTop="24dp"
+                android:layout_marginEnd="24dp"
+                android:background="@drawable/button_tonal"
+                android:stateListAnimator="@null"
+                android:text="@string/delete_account"
+                android:textAllCaps="false"
+                android:textColor="?android:attr/colorError"
+                android:textSize="16sp"
+                android:textStyle="bold" />
 
-    </LinearLayout>
+            <TextView
+                android:id="@+id/account_delete_note"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginEnd="24dp"
+                android:gravity="center"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="13sp" />
 
-    <!-- The overlay's save action, mirroring the shared FAB's shape;
-         its frame takes the bottom inset exactly like fab_frame. -->
-    <FrameLayout
-        android:id="@+id/account_fab_frame"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="@dimen/fab_margin"
-        android:clipChildren="false"
-        android:clipToPadding="false">
+        </LinearLayout>
 
-        <ImageButton
-            android:id="@+id/account_fab"
-            android:layout_width="@dimen/fab"
-            android:layout_height="@dimen/fab"
-            android:background="@drawable/fab_background"
-            android:contentDescription="@string/subscriptions_save"
-            android:elevation="@dimen/fab_elevation"
-            android:src="@drawable/ic_check" />
+    </ScrollView>
 
-    </FrameLayout>
-
-</FrameLayout>
+</LinearLayout>
