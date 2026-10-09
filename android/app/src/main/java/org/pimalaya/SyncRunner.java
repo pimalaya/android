@@ -40,29 +40,20 @@ final class SyncRunner {
 
     /**
      * Outcome of a remote run: what was pulled from the server, pushed
-     * to it, merged on the phone axis, and left conflicted awaiting the
-     * user's manual resolution, plus the first failure.
+     * to it, and left conflicted awaiting the user's manual resolution,
+     * plus the first failure. The phone passes it ran are not reported:
+     * the phone is a view of the store, not a sync.
      */
     static final class Outcome {
-        final Set<String> localIn = new HashSet<>();
-        final Set<String> localOut = new HashSet<>();
-        final Set<String> localChanged = new HashSet<>();
         final Set<String> remoteIn = new HashSet<>();
         final Set<String> remoteOut = new HashSet<>();
         final Set<String> remoteChanged = new HashSet<>();
         int conflicts;
 
-        /** Whether any synced book mirrors into the phone's Contacts
-         *  app, which is what earns the report its Local line. */
-        boolean local;
-
         Exception failure;
 
         /** Folds one book's report in; the sets dedupe across passes. */
         void absorb(OfflineEngine.Report report) {
-            localIn.addAll(report.localIn);
-            localOut.addAll(report.localOut);
-            localChanged.addAll(report.localChanged);
             remoteIn.addAll(report.remoteIn);
             remoteOut.addAll(report.remoteOut);
             remoteChanged.addAll(report.remoteChanged);
@@ -197,28 +188,21 @@ final class SyncRunner {
     }
 
     /**
-     * The phone spoke alone: reconciles the per-addressbook Android
-     * accounts (which also purges a book just switched off), then runs
-     * the two-way phone engine pass per phone-synced book, tallying
-     * into the report. Returns a failure, or null. Needs the contacts
-     * permission; the caller gates on it.
+     * The phone spoke alone, offline and silent (no progress steps): the
+     * two-way phone pass of every mirrored book, tallying into the report,
+     * each skipping on its quiet path when neither side changed. Returns a
+     * failure, or null. A book with no Android account or no contacts
+     * permission is skipped.
      */
-    Exception syncLocal(OfflineEngine.Report report) {
-        List<BookEntry> phoneBooks = phoneSyncedBooks();
-
+    Exception syncPhone(OfflineEngine.Report report) {
         try {
-            // NOTE: pass the full phone-synced set at once; reconcile
-            // purges the Android accounts of books no longer mirrored.
-            Accounts.reconcile(context, phoneBooks);
-
-            OfflineEngine engine = engine(null, null);
-            for (BookEntry entry : phoneBooks) {
+            OfflineEngine engine = new OfflineEngine(base, pimdir, client, null, null, context);
+            for (BookEntry entry : phoneSyncedBooks()) {
                 engine.syncPhone(entry.book.url, report);
             }
         } catch (Exception error) {
             return error;
         }
-
         return null;
     }
 
@@ -268,7 +252,6 @@ final class SyncRunner {
 
             for (BookEntry entry : books) {
                 outcome.absorb(engine.syncBook(entry.book.url, entry.remoteSynced));
-                outcome.local |= entry.phoneSynced;
             }
         }
     }

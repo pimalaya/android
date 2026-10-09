@@ -20,13 +20,16 @@ import org.pimalaya.client.PimalayaClient;
  * Registering it also associates Pimalaya's account type with the
  * contacts authority, and its CONTACTS_STRUCTURE meta-data is what makes
  * contacts apps list the accounts and allow editing their raw contacts.
- * Serves only the syncs the OS schedules itself (the per-account "sync
- * now" and the upload syncs after edits on our raw contacts); in-app
- * actions run the same pass directly.
+ * Serves only the syncs the OS schedules itself: the upload sync after
+ * an edit on our raw contacts (the accounts sync automatically), and the
+ * per-account "sync now"; the app runs the same pass directly.
  */
 public class SyncService extends Service {
     private static final Object LOCK = new Object();
     private static Adapter adapter;
+
+    /** When a pass last brought a Contacts-app edit in, for the app to reload. */
+    static volatile long ingested;
 
     @Override
     public void onCreate() {
@@ -74,6 +77,11 @@ public class SyncService extends Service {
                         "phone sync done: " + report.localIn.size() + " in, "
                                 + report.localOut.size() + " out, "
                                 + report.localChanged.size() + " changed");
+                if (!report.localIn.isEmpty()
+                        || !report.localOut.isEmpty()
+                        || !report.localChanged.isEmpty()) {
+                    ingested = System.currentTimeMillis();
+                }
             } catch (Exception error) {
                 Log.w("pimalaya", "phone sync failed for " + account.name + ": " + error);
                 result.stats.numIoExceptions++;

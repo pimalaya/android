@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The standard setup's outcome when the one password was refused by
      some servers and not others: a row per domain, connected or not,
-     and the two ways on. -->
+     and the two ways on. Also its word, every domain connected, that
+     another app already fills the phone's Contacts app with the
+     address. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -51,6 +53,7 @@
                 android:textSize="14sp" />
 
             <TextView
+                android:id="@+id/result_title"
                 style="@style/PageTitle"
                 android:layout_marginTop="8dp"
                 android:text="@string/result_title" />

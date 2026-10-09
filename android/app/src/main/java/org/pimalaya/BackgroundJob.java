@@ -111,12 +111,12 @@ public class BackgroundJob extends JobService {
         }
 
         runner.syncRemote(scope(context, PimDomain.CONTACTS, due));
-        if (granted(context, Manifest.permission.READ_CONTACTS)
-                && granted(context, Manifest.permission.WRITE_CONTACTS)) {
-            Exception failure = runner.syncLocal(new OfflineEngine.Report());
-            if (failure != null) {
-                Log.w("pimalaya", "background phone sync failed", failure);
-            }
+        // NOTE: the last net under the phone's own triggers (a pass after
+        // each write, Android's upload sync, the app's return), for every
+        // mirrored book whether its account is due or not.
+        Exception failure = runner.syncPhone(new OfflineEngine.Report());
+        if (failure != null) {
+            Log.w("pimalaya", "background phone sync failed", failure);
         }
         if (stopped) {
             return;

@@ -45,6 +45,13 @@ final class AccountSettings {
      */
     private int cameFrom = MainActivity.PANEL_MAIL;
 
+    /**
+     * Whether another app already fills the phone's Contacts app with the
+     * open account's address ({@link Accounts#elsewhere}), looked for as the
+     * page opens.
+     */
+    private boolean elsewhere;
+
     AccountSettings(MainActivity host) {
         this.host = host;
     }
@@ -79,8 +86,22 @@ final class AccountSettings {
         ((TextView) host.findViewById(R.id.account_title)).setText(email);
         host.findViewById(R.id.account_title).setAlpha(0f);
         host.findViewById(R.id.account_scroll).scrollTo(0, 0);
+        elsewhere = false;
         render();
         host.openOverlay(MainActivity.PANEL_ACCOUNT);
+
+        // NOTE: one provider query, off the main thread.
+        host.io.execute(
+                () -> {
+                    boolean found = Accounts.elsewhere(host, email);
+                    host.postAlive(
+                            () -> {
+                                if (found && email.equals(settingsEmail)) {
+                                    elsewhere = true;
+                                    render();
+                                }
+                            });
+                });
     }
 
     /** Rebuilds the page from what the account holds now. */
@@ -386,10 +407,21 @@ final class AccountSettings {
 
     /**
      * The addressbooks card: a switch per book, and under a book that is on
-     * whether it syncs with the server and shows in the phone's contacts.
+     * whether it syncs with the server and shows in the phone's contacts,
+     * led by a line when another app already fills the phone's Contacts app
+     * with the address. Turning a book on shows it on the phone too, unless
+     * another app does already.
      */
     private void addBooks(Sections sections, String email) {
         List<View> rows = new ArrayList<>();
+        if (elsewhere) {
+            TextView note = new TextView(host);
+            note.setText(R.string.phone_elsewhere);
+            note.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            note.setTextColor(host.resolveColor(android.R.attr.textColorSecondary));
+            note.setPadding(host.dp(16), host.dp(12), host.dp(16), host.dp(12));
+            rows.add(note);
+        }
         for (BookEntry entry : host.base.loadAllAddressbooks()) {
             if (!entry.accountEmail.equals(email)) {
                 continue;
@@ -402,7 +434,7 @@ final class AccountSettings {
             Switch enable = new Switch(host);
             enable.setChecked(entry.subscribed);
             enable.setOnCheckedChangeListener(
-                    (view, checked) -> setBook(url, checked, checked, checked));
+                    (view, checked) -> setBook(entry, checked, checked, checked && !elsewhere));
             item.addView(
                     switchRow(
                             sections,
@@ -415,12 +447,12 @@ final class AccountSettings {
                         bookOption(
                                 R.string.book_remote_sync,
                                 entry.remoteSynced,
-                                checked -> setBook(url, true, checked, entry.phoneSynced)));
+                                checked -> setBook(entry, true, checked, entry.phoneSynced)));
                 View local =
                         bookOption(
                                 R.string.book_local_sync,
                                 entry.phoneSynced,
-                                checked -> setBook(url, true, entry.remoteSynced, checked));
+                                checked -> setBook(entry, true, entry.remoteSynced, checked));
                 local.setPadding(
                         local.getPaddingLeft(), 0, local.getPaddingRight(), host.dp(6));
                 item.addView(local);
@@ -450,8 +482,35 @@ final class AccountSettings {
         return row;
     }
 
-    /** Writes a book's switches; the contacts root follows them. */
-    private void setBook(String url, boolean enabled, boolean remote, boolean local) {
+    /**
+     * Writes a book's switches; the contacts root and the phone follow them.
+     * Turned on for the phone, the contacts permission is asked first, and
+     * refused leaves the book off it; the projection follows on the strip.
+     * Turned off, the phone's copy goes after one last pass.
+     */
+    private void setBook(BookEntry entry, boolean enabled, boolean remote, boolean local) {
+        String url = entry.book.url;
+        boolean shown = entry.subscribed && entry.phoneSynced;
+        if (!local || shown) {
+            writeBook(url, enabled, remote, local);
+            if (shown && !local) {
+                host.hideFromPhone(url);
+            }
+            return;
+        }
+        host.askMirrors(
+                java.util.EnumSet.of(PhoneMirror.CONTACTS),
+                granted -> {
+                    boolean phone = granted.contains(PhoneMirror.CONTACTS);
+                    writeBook(url, enabled, remote, phone);
+                    if (phone) {
+                        host.showOnPhone(url);
+                    }
+                });
+    }
+
+    /** Writes a book's switches as they are; the contacts root follows them. */
+    private void writeBook(String url, boolean enabled, boolean remote, boolean local) {
         host.base.setBookState(url, enabled, remote, local);
         host.reloadContacts();
         host.filterChanged();

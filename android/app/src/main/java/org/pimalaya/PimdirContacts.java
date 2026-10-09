@@ -345,6 +345,9 @@ final class PimdirContacts {
         } finally {
             db.endTransaction();
         }
+        // NOTE: written past the engine, whose staging queues the phone
+        // pass of every other write.
+        PhoneQueue.written(target);
     }
 
     /**
@@ -375,6 +378,7 @@ final class PimdirContacts {
         } finally {
             db.endTransaction();
         }
+        PhoneQueue.written(local);
     }
 
     // ---- helpers ----------------------------------------------------------

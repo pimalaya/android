@@ -55,15 +55,11 @@ final class PhoneRemote {
     /**
      * Whether the spoke can serve this addressbook: the contacts
      * permission is granted and the book's Android account exists (the
-     * user ran "Sync local" at least once). Callers skip the phone
-     * passes otherwise; the server spoke never depends on it.
+     * book is mirrored, {@link Accounts#reconcile}). Callers skip the
+     * phone passes otherwise; the server spoke never depends on it.
      */
     boolean available(String url) {
-        return context.checkSelfPermission(android.Manifest.permission.READ_CONTACTS)
-                        == android.content.pm.PackageManager.PERMISSION_GRANTED
-                && context.checkSelfPermission(android.Manifest.permission.WRITE_CONTACTS)
-                        == android.content.pm.PackageManager.PERMISSION_GRANTED
-                && account(url) != null;
+        return PhoneMirror.CONTACTS.granted(context) && account(url) != null;
     }
 
     /**
