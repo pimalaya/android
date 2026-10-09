@@ -106,7 +106,7 @@ final class OauthFlow {
         try {
             String url = pendingOauth.authorizeUrl(Oauth.GOOGLE_AUTH_ENDPOINT, extras);
             persistPendingOauth(Oauth.GOOGLE_CLIENT_ID, Oauth.GOOGLE_REDIRECT_URI);
-            host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+            host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
             host.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
         } catch (Exception error) {
             abort(error);
@@ -142,7 +142,7 @@ final class OauthFlow {
         try {
             String url = pendingOauth.authorizeUrl(Oauth.MICROSOFT_AUTH_ENDPOINT, extras);
             persistPendingOauth(Oauth.MICROSOFT_CLIENT_ID, Oauth.MICROSOFT_REDIRECT_URI);
-            host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+            host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
             host.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
         } catch (Exception error) {
             abort(error);
@@ -365,7 +365,7 @@ final class OauthFlow {
      */
     void startIssuerOauth(
             String email, String baseUrl, String issuer, String resource, String domains) {
-        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
 
         host.io.execute(
                 () -> {
@@ -579,7 +579,7 @@ final class OauthFlow {
                         String authUrl = session.authorizeUrl(authEndpoint, extras);
                         host.main.post(
                                 () -> {
-                                    host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+                                    host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
                                     host.startActivity(
                                             new Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)));
                                 });

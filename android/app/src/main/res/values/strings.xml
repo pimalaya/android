@@ -5,10 +5,24 @@
 
     <string name="new_account">New account</string>
     <string name="cancel_auth">Cancel</string>
-    <string name="welcome" translatable="false">Pimalaya</string>
-    <string name="welcome_value_1">All your mail, contacts and calendars</string>
-    <string name="welcome_value_2">accessible offline, in a shared view</string>
-    <string name="welcome_description">Pimalaya finds your server settings automatically, just enter your email address</string>
+    <string name="welcome_title">Your mail, contacts and calendars, offline.</string>
+    <string name="welcome_description">Enter your email address. Pimalaya finds your server settings for you.</string>
+    <string name="setup_advanced_link">Advanced setup</string>
+    <string name="setup_advanced_different">Different passwords? Advanced setup</string>
+    <string name="domain_title_simple">What do you want on this phone?</string>
+    <string name="password_show">Show password</string>
+    <string name="password_hide">Hide password</string>
+    <string name="password_shared">Used for everything you picked above.</string>
+    <string name="password_wrong">Wrong password</string>
+    <string name="browser_note">Your provider signs you in on its own page. You approve once, for everything you picked.</string>
+    <string name="browser_continue">Continue in browser</string>
+    <string name="result_title">Almost there</string>
+    <string name="result_message">Not connected: %1$s.</string>
+    <string name="result_connected">Connected</string>
+    <string name="result_refused">Password not accepted</string>
+    <string name="result_later">You can connect the rest later by adding this address again.</string>
+    <string name="result_continue">Continue without %1$s</string>
+    <string name="result_advanced">Set up %1$s in advanced setup</string>
     <string name="email_hint">Email address</string>
     <string name="auth_step_email">Welcome</string>
     <string name="auth_step_domain">What to connect</string>
@@ -20,15 +34,12 @@
 
     <string name="domain_title">What would you like to connect?</string>
     <string name="domain_message">Pick how to connect each one. Switch off anything you do not want on this device; you can add it later.</string>
-    <string name="domain_message_simple">Switch on what you want on this device. Pimalaya picks the settings and signs you in; you can add the rest later.</string>
     <string name="domain_none">Nothing was found for this address. You can enter the server settings yourself.</string>
     <string name="domain_manual">Enter settings manually</string>
     <string name="domain_connected">Already connected</string>
-    <string name="domain_advanced_only">Needs the advanced setup</string>
     <string name="send_mail">Send mail</string>
     <string name="send_mail_advanced">Submission</string>
     <string name="send_mail_none">Do not send from this account</string>
-    <string name="send_mail_advanced_only">Nothing was found to send through; the advanced setup can enter one</string>
     <string name="setup_step_title">Step %1$d/%2$d · %3$s · %4$s</string>
     <string name="setup_step_one">%1$s · Sign in</string>
     <string name="setup_step_domain">%1$s · Step %2$d/%3$d</string>
@@ -40,11 +51,8 @@
     <string name="manual_submit_server">Sending server (host or host:port)</string>
     <string name="manual_submit_message">Where this account sends through. Implicit TLS, port 465 unless you say otherwise.</string>
 
-    <string name="setup_choice_title">Account setup</string>
-    <string name="setup_choice_message">Pimalaya can set everything up for you, or let you choose the servers, the sign-in and what to synchronize.</string>
-    <string name="setup_simple">Recommended</string>
     <string name="setup_advanced">Advanced</string>
-    <string name="setup_simple_unavailable">This address signs in a way the recommended setup does not cover. The advanced setup can connect it.</string>
+    <string name="setup_simple_unavailable">This address signs in a way the standard setup does not cover. The advanced setup can connect it.</string>
 
     <string name="config_title">Choose a configuration</string>
     <string name="config_carddav" translatable="false">CardDAV</string>

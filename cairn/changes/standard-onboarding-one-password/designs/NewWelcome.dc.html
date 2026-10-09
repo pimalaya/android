@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Proposed: email</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#EEEEEE;--fg:#1C1B1F;--fg2:#5E5E62;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1C1E21;--surface:#2A2A2A;--fg:#E6E1E5;--fg2:#AEAAAE}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.field{display:flex;flex-direction:column;gap:6px}
+.field .lab{font-size:13px;font-weight:500;color:var(--fg2);padding-left:16px}
+.inp{height:56px;border-radius:16px;background:var(--surface);border:2px solid var(--accent);padding:0 16px;font:inherit;font-size:17px;color:var(--fg);outline:none;width:100%}
+.primary{height:56px;border-radius:999px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;text-decoration:none;width:100%}
+.text{height:48px;display:flex;align-items:center;justify-content:center;color:var(--accent);font-size:15px;font-weight:500;text-decoration:none}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 24px">
+    <svg width="56" height="56" viewBox="0 0 1000 1000" aria-label="Pimalaya"><defs><linearGradient id="lg" gradientUnits="userSpaceOnUse" x1="254.18" y1="564.76" x2="254.18" y2="141.44"><stop offset="0" stop-color="#f193b6"/><stop offset="0.59" stop-color="#e267a3"/><stop offset="1" stop-color="#bf1e83"/></linearGradient></defs><g transform="translate(0.1 0) scale(1.5787)" fill="url(#lg)"><path d="M445.013 229.29c0-34.01-27.57-61.58-61.58-61.58h-163.14c-66.54 0-120.47 53.94-120.47 120.47v286.6c0 32.33 26.21 58.54 58.54 58.54h6.06c32.33 0 58.54-26.21 58.54-58.54V351.67c0-33.58 27.22-60.81 60.81-60.81h99.66c34.01 0 61.58-27.57 61.58-61.58z"/><path d="M487.373 208.71h126.66c.61 0 1.1-.53 1.04-1.14C604.453 91.35 506.503 0 387.553 0H78.993c-33.55 0-60.75 27.2-60.75 60.75v6.17c0 33.55 27.2 60.75 60.75 60.75h308.56c48.51 0 89.11 34.43 98.71 80.13.11.53.57.91 1.12.91z"/><path d="M486.453 249.54c-.15 0-.28.11-.31.25-9.79 45.45-50.26 79.63-98.59 79.63h-62.34c-33.73 0-61.08 27.35-61.08 61.08v5.51c0 33.73 27.35 61.08 61.08 61.08h62.34c118.82 0 216.7-91.15 227.51-207.19a.334.334 0 0 0-.33-.36h-128.27z"/></g></svg>
+    <div style="margin-top: 24px; font-size: 32px; font-weight: 700; line-height: 38px">Your mail, contacts and calendars, offline.</div>
+    <div style="margin-top: 12px; font-size: 16px; line-height: 24px; color: var(--fg2)">Enter your email address. Pimalaya finds your server settings for you.</div>
+    <div class="field" style="margin-top: 32px">
+      <label class="lab" for="email">Email address</label>
+      <input id="email" class="inp" type="email" value="alex@example.org">
+    </div>
+  </div>
+  <div style="padding: 0 24px 16px; display: flex; flex-direction: column; gap: 4px">
+    <a class="primary" href="NewConnect.dc.html">Continue</a>
+    <a class="text" href="Welcome.dc.html">Advanced setup</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#00696F","options":["#00696F","#4F5BD5","#8E4585","#9A5B00"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var accent = this.props.accent ?? '#00696F';
+    if (dark && accent === '#00696F') accent = '#80DEEA';
+    var h = accent.replace('#', '');
+    var r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+    var onAccent = (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#000000' : '#FFFFFF';
+    return { theme: dark ? 'app dark' : 'app', vars: '--accent:' + accent + ';--on-accent:' + onAccent };
+  }
+}
+</script>
+</body>
+</html>

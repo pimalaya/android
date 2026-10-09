@@ -1,38 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- What to connect: the address, the question, then the domains (one
+     card of ticks in the standard setup, a section of configurations
+     per domain in the advanced one), the one password or the browser
+     note, and the step's own buttons. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical">
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:paddingStart="24dp"
-        android:paddingTop="24dp"
-        android:paddingEnd="24dp"
-        android:text="@string/domain_title"
-        android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
-        android:textColor="?android:attr/textColorPrimary" />
-
-    <TextView
-        android:id="@+id/domain_email"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:paddingStart="24dp"
-        android:paddingEnd="24dp"
-        android:textColor="?android:attr/textColorSecondary" />
-
-    <TextView
-        android:id="@+id/domain_message"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:layout_marginBottom="8dp"
-        android:paddingStart="24dp"
-        android:paddingEnd="24dp"
-        android:text="@string/domain_message"
-        android:textColor="?android:attr/textColorSecondary" />
 
     <ScrollView
         android:layout_width="match_parent"
@@ -40,14 +14,148 @@
         android:layout_weight="1">
 
         <LinearLayout
-            android:id="@+id/domain_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:paddingStart="24dp"
+            android:paddingTop="8dp"
             android:paddingEnd="24dp"
-            android:paddingBottom="88dp" />
+            android:paddingBottom="24dp">
+
+            <TextView
+                android:id="@+id/domain_email"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/domain_heading"
+                style="@style/PageTitle"
+                android:layout_marginTop="8dp"
+                android:text="@string/domain_title_simple" />
+
+            <TextView
+                android:id="@+id/domain_message"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/domain_message"
+                android:textColor="?android:attr/textColorSecondary" />
+
+            <LinearLayout
+                android:id="@+id/domain_container"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:orientation="vertical" />
+
+            <LinearLayout
+                android:id="@+id/domain_password_block"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    style="@style/FieldLabel"
+                    android:labelFor="@id/domain_password"
+                    android:text="@string/password_hint" />
+
+                <LinearLayout
+                    android:id="@+id/domain_password_frame"
+                    android:layout_width="match_parent"
+                    android:layout_height="56dp"
+                    android:background="@drawable/field_background"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="4dp">
+
+                    <EditText
+                        android:id="@+id/domain_password"
+                        android:layout_width="0dp"
+                        android:layout_height="match_parent"
+                        android:layout_weight="1"
+                        android:autofillHints="password"
+                        android:background="@null"
+                        android:imeOptions="actionGo"
+                        android:importantForAutofill="yes"
+                        android:inputType="textPassword"
+                        android:textSize="17sp" />
+
+                    <ImageButton
+                        android:id="@+id/domain_password_toggle"
+                        android:layout_width="48dp"
+                        android:layout_height="48dp"
+                        android:background="@drawable/ripple_circle"
+                        android:contentDescription="@string/password_show"
+                        android:src="@drawable/ic_visibility" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/domain_password_note"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:paddingStart="16dp"
+                    android:text="@string/password_shared"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="13sp" />
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/domain_browser_note"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:lineSpacingExtra="4dp"
+                android:text="@string/browser_note"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="15sp"
+                android:visibility="gone" />
+
+        </LinearLayout>
 
     </ScrollView>
+
+    <LinearLayout
+        android:id="@+id/domain_actions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingBottom="16dp">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <Button
+                android:id="@+id/domain_connect"
+                style="@style/PrimaryButton"
+                android:text="@string/password_submit" />
+
+            <ProgressBar
+                android:id="@+id/domain_progress"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_gravity="center"
+                android:elevation="4dp"
+                android:visibility="gone" />
+
+        </FrameLayout>
+
+        <Button
+            android:id="@+id/domain_advanced"
+            style="@style/TextLink"
+            android:layout_marginTop="4dp"
+            android:text="@string/setup_advanced_link" />
+
+    </LinearLayout>
 
 </LinearLayout>

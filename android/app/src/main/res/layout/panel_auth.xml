@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The auth flow, a whole-frame overlay fading in (with a slight
      zoom) over the current screen, its own bar included, over an
-     inner flipper holding the steps (email, config, books): navigating
-     the flow slides only the step content. The shared FAB is the
-     step's continue action. The arrow steps back (leaving from the
+     inner flipper holding the steps (email, domains, config, books,
+     result): navigating the flow slides only the step content. The
+     email, domain and result steps carry their own buttons; the shared
+     FAB is the books step's continue. The arrow steps back (leaving from the
      welcome step), the cross always leaves; both land on the drawer,
      empty or not. Invisible rather than gone, so it is measured from
      the first layout pass and the entrance zoom pivots on its centre
@@ -73,6 +74,8 @@
         <include layout="@layout/panel_config" />
 
         <include layout="@layout/panel_books" />
+
+        <include layout="@layout/panel_result" />
 
     </ViewFlipper>
 

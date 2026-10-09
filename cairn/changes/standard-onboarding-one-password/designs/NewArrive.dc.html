@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Proposed: straight to the inbox</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.app{--bg:#FFFFFF;--surface:#EEEEEE;--divl:#E0E0E0;--fg:#1C1B1F;--fg2:#5E5E62;--faint:rgba(28,27,31,.14);--skel:#DCDCDC;width:390px;height:844px;overflow:hidden;position:relative;background:var(--bg);color:var(--fg);font-family:Roboto,system-ui,sans-serif;display:flex;flex-direction:column}
+.app.dark{--bg:#1C1E21;--surface:#2A2A2A;--divl:#363636;--fg:#E6E1E5;--fg2:#AEAAAE;--faint:rgba(230,225,229,.14);--skel:#3A3A3A}
+.app *{box-sizing:border-box}
+.ico{width:24px;height:24px;fill:currentColor;flex:none}
+.bar{min-height:60px;padding:0 8px;display:flex;align-items:center;flex:none}
+.tbtn{width:40px;height:40px;margin:4px;border-radius:999px;background:var(--surface);color:var(--fg);display:flex;align-items:center;justify-content:center;flex:none;text-decoration:none}
+.ibtn{width:48px;height:48px;border-radius:999px;color:var(--fg);display:flex;align-items:center;justify-content:center;flex:none;text-decoration:none}
+.content{flex:1;min-height:0;overflow:hidden}
+.sh{padding:20px 16px 8px 20px;font-size:13px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:var(--fg2)}
+.card{margin:0 12px;background:var(--surface);border-radius:22px;overflow:hidden}
+.row{display:flex;padding-left:14px;text-decoration:none;color:inherit}
+.av{width:38px;height:38px;margin:14px 14px 0 2px;border-radius:50%;color:#fff;font-size:17px;display:flex;align-items:center;justify-content:center;flex:none}
+.rb{flex:1;min-width:0;border-top:1px solid var(--divl);padding:12px 16px 12px 0}
+.row:first-child .rb{border-top:0}
+.l1{display:flex;align-items:center;font-size:16px;line-height:22px}
+.l2{display:flex;align-items:center;height:20px;margin-top:1px;font-size:15px}
+.l3{font-size:14px;line-height:20px;color:var(--fg2)}
+.tr{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.b{font-weight:700}
+.time{margin-left:8px;font-size:13px;color:var(--accent);font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--accent);margin:0 4px 0 10px;flex:none}
+.sk{height:12px;border-radius:6px;background:var(--skel)}
+.nav{display:flex;background:var(--surface);flex:none}
+.ni{flex:1;height:80px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--fg2);text-decoration:none;font-size:12px}
+.ind{width:64px;height:32px;border-radius:999px;display:flex;align-items:center;justify-content:center}
+.ni.on{color:var(--fg);font-weight:700}
+.ni.on .ind{background:var(--faint)}
+</style>
+</helmet>
+<div class="{{theme}}" style="{{vars}}">
+  <div class="bar">
+    <a class="tbtn" href="Drawer.dc.html" aria-label="Accounts"><svg class="ico" viewBox="0 -960 960 960"><path d="M120-240v-80h720v80H120Zm0-200v-80h720v80H120Zm0-200v-80h720v80H120Z"/></svg></a>
+    <div style="flex: 1"></div>
+    <a class="ibtn" href="Filter.dc.html" aria-label="Filter"><svg class="ico" viewBox="0 -960 960 960"><path d="M400-240v-80h160v80H400ZM240-440v-80h480v80H240ZM120-640v-80h720v80H120Z"/></svg></a>
+  </div>
+  <div class="content">
+    <div style="padding: 8px 0 4px">
+      <div style="margin: 0 20px; font-size: 32px; font-weight: 700; line-height: 38px">Emails</div>
+      <div style="margin: 2px 20px 0; font-size: 14px; color: var(--fg2)">Fetching your inbox…</div>
+      <div style="margin: 12px 20px 0; height: 4px; border-radius: 2px; background: var(--surface); overflow: hidden"><div style="width: 35%; height: 100%; border-radius: 2px; background: var(--accent)"></div></div>
+    </div>
+    <div class="sh">Today</div>
+    <div class="card">
+      <a class="row" href="Message.dc.html">
+        <div class="av" style="background: hsl(205, 25%, 44%)">M</div>
+        <div class="rb">
+          <div class="l1"><span class="tr b">Matrix digest</span><span class="time">11:58</span><span class="dot"></span></div>
+          <div class="l2"><span class="tr b">5 new messages in #pimalaya</span></div>
+          <div class="l3">Inbox · alex@example.org</div>
+        </div>
+      </a>
+      <a class="row" href="Message.dc.html">
+        <div class="av" style="background: hsl(32, 25%, 44%)">L</div>
+        <div class="rb">
+          <div class="l1"><span class="tr b">Léa Martin</span><span class="time">10:42</span><span class="dot"></span></div>
+          <div class="l2"><span class="tr b">Notes from Thursday's planning session</span></div>
+          <div class="l3">Inbox · alex@example.org</div>
+        </div>
+      </a>
+      <div class="row" aria-hidden="true">
+        <div class="av" style="background: var(--skel)"></div>
+        <div class="rb" style="display: flex; flex-direction: column; gap: 10px; padding-top: 18px">
+          <div class="sk" style="width: 45%"></div>
+          <div class="sk" style="width: 80%"></div>
+          <div class="sk" style="width: 55%"></div>
+        </div>
+      </div>
+    </div>
+    <div class="sh">Yesterday</div>
+    <div class="card" aria-hidden="true">
+      <div class="row">
+        <div class="av" style="background: var(--skel)"></div>
+        <div class="rb" style="display: flex; flex-direction: column; gap: 10px; padding-top: 18px; padding-bottom: 18px">
+          <div class="sk" style="width: 38%"></div>
+          <div class="sk" style="width: 72%"></div>
+          <div class="sk" style="width: 50%"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <nav class="nav">
+    <a class="ni on" href="Main.dc.html"><span class="ind"><svg class="ico" viewBox="0 -960 960 960"><path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm320-280L160-640v400h640v-400L480-440Zm0-80 320-200H160l320 200ZM160-640v-80 480-400Z"/></svg></span>Mail</a>
+    <a class="ni" href="Contacts.dc.html"><span class="ind"><svg class="ico" viewBox="0 -960 960 960"><path d="M40-160v-112q0-34 17.5-62.5T104-378q62-31 126-46.5T360-440q66 0 130 15.5T616-378q29 15 46.5 43.5T680-272v112H40Zm720 0v-120q0-44-24.5-84.5T666-434q51 6 96 20.5t84 35.5q36 20 55 44.5t19 53.5v120H760ZM360-480q-66 0-113-47t-47-113q0-66 47-113t113-47q66 0 113 47t47 113q0 66-47 113t-113 47Zm400-160q0 66-47 113t-113 47q-11 0-28-2.5t-28-5.5q27-32 41.5-71t14.5-81q0-42-14.5-81T544-792q14-5 28-6.5t28-1.5q66 0 113 47t47 113ZM120-240h480v-32q0-11-5.5-20T580-306q-54-27-109-40.5T360-360q-56 0-111 13.5T140-306q-9 5-14.5 14t-5.5 20v32Zm240-320q33 0 56.5-23.5T440-640q0-33-23.5-56.5T360-720q-33 0-56.5 23.5T280-640q0 33 23.5 56.5T360-560Zm0 320Zm0-400Z"/></svg></span>Contacts</a>
+    <a class="ni" href="Calendar.dc.html"><span class="ind"><svg class="ico" viewBox="0 -960 960 960"><path d="M180-80q-24 0-42-18t-18-42v-620q0-24 18-42t42-18h65v-60h65v60h340v-60h65v60h65q24 0 42 18t18 42v620q0 24-18 42t-42 18H180Zm0-60h600v-430H180v430Zm0-490h600v-130H180v130Z"/></svg></span>Calendar</a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#00696F","options":["#00696F","#4F5BD5","#8E4585","#9A5B00"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var dark = this.props.dark ?? false;
+    var accent = this.props.accent ?? '#00696F';
+    if (dark && accent === '#00696F') accent = '#80DEEA';
+    var h = accent.replace('#', '');
+    var r = parseInt(h.substr(0, 2), 16), g = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+    var onAccent = (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#000000' : '#FFFFFF';
+    return { theme: dark ? 'app dark' : 'app', vars: '--accent:' + accent + ';--on-accent:' + onAccent };
+  }
+}
+</script>
+</body>
+</html>

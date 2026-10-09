@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The rounded square a row's glyph sits on inside a card: the page
+     tone, so it reads against the card's surface. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="?android:attr/colorBackground" />
+    <corners android:radius="10dp" />
+</shape>
