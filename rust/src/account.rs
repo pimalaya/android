@@ -74,6 +74,21 @@ impl Backend {
         matches!(self, Self::Jmap | Self::Google)
     }
 
+    /// True when a calendar write carries an override of one occurrence
+    /// (RFC 5545 3.8.4.4) to the server. CalDAV puts the whole object;
+    /// Google's write projects the series' own event and Graph's the
+    /// series master alone, each taking an occurrence only through the
+    /// instance itself, and a JMAP calendar takes no write yet.
+    pub fn writes_overrides(self) -> bool {
+        matches!(self, Self::Carddav)
+    }
+
+    /// True when a calendar write carries an `EXDATE` to the server:
+    /// Google's does, inside the series' recurrence, Graph's does not.
+    pub fn writes_exdates(self) -> bool {
+        matches!(self, Self::Carddav | Self::Google)
+    }
+
     /// The backend tag on the JNI wire.
     pub fn name(self) -> &'static str {
         match self {
@@ -191,6 +206,19 @@ mod tests {
         assert!(Backend::Google.account_level());
         assert!(!Backend::Carddav.account_level());
         assert!(!Backend::Graph.account_level());
+    }
+
+    /// Only a push that carries an occurrence on its own can be asked to:
+    /// an override reaches CalDAV alone, an EXDATE CalDAV and Google.
+    #[test]
+    fn occurrence_writes_follow_what_each_push_carries() {
+        assert!(Backend::Carddav.writes_overrides());
+        assert!(!Backend::Google.writes_overrides());
+        assert!(!Backend::Graph.writes_overrides());
+        assert!(!Backend::Jmap.writes_overrides());
+        assert!(Backend::Google.writes_exdates());
+        assert!(!Backend::Graph.writes_exdates());
+        assert!(!Backend::Jmap.writes_exdates());
     }
 
     /// Every base URL kind builds its documented shape; the jmap kind

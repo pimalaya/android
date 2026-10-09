@@ -8,6 +8,7 @@ import java.util.Locale;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.EventTime;
 import org.robolectric.RobolectricTestRunner;
 
 /**
@@ -19,31 +20,44 @@ import org.robolectric.RobolectricTestRunner;
  */
 @RunWith(RobolectricTestRunner.class)
 public class CalendarListTest {
+    /** A floating time, read on the device's clock. */
+    private static EventTime local(String time) {
+        return new EventTime(time, EventTime.FLOATING, "", null);
+    }
+
     @Test
-    public void aLengthIsTheSecondsBetweenTwoCivilStamps() {
-        assertEquals(3600, CalendarList.secondsBetween("20260105T090000", "20260105T100000"));
+    public void aLengthIsTheSecondsBetweenTwoTimes() {
+        assertEquals(
+                3600,
+                CalendarList.secondsBetween(local("20260105T090000"), local("20260105T100000")));
         assertEquals(
                 "one crossing midnight is still its own length",
                 5400,
-                CalendarList.secondsBetween("20260105T233000", "20260106T010000"));
+                CalendarList.secondsBetween(local("20260105T233000"), local("20260106T010000")));
+        // A flight leaving New York at 18:00 and landing in Paris at 07:30
+        // the next morning runs seven and a half hours, not thirteen.
+        assertEquals(
+                27000,
+                CalendarList.secondsBetween(
+                        new EventTime("20260105T180000", EventTime.ZONED, "America/New_York", null),
+                        new EventTime("20260106T073000", EventTime.ZONED, "Europe/Paris", null)));
     }
 
     @Test
     public void aMomentHasNoLengthAndNothingHasANegativeOne() {
-        assertEquals(0, CalendarList.secondsBetween("20260105T090000", "20260105T090000"));
+        assertEquals(
+                0, CalendarList.secondsBetween(local("20260105T090000"), local("20260105T090000")));
         // An end before its start is a broken object, not a row that
         // counts backwards: every journal entry ends where it starts, so
         // the floor is what keeps a bad one from printing a negative.
-        assertEquals(0, CalendarList.secondsBetween("20260105T100000", "20260105T090000"));
+        assertEquals(
+                0, CalendarList.secondsBetween(local("20260105T100000"), local("20260105T090000")));
     }
 
     @Test
-    public void aDateOnlyStampIsReadAtMidnight() {
-        // The bridge widens an all-day DTSTART to T000000, but a stamp
-        // arriving as the bare date must still land on the same day
-        // rather than on whatever time the calendar was constructed at.
+    public void aDayIsReadAtItsMidnight() {
         assertEquals(
-                CalendarList.stampOf("20260105T000000"), CalendarList.stampOf("20260105"));
+                Zones.instant(local("20260105T000000")), CalendarList.stampOf("20260105"));
     }
 
     @Test

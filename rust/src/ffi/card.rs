@@ -17,8 +17,10 @@ use crate::{
 /// `Native.accountInfo`: the backend behind an account base URL
 /// (`carddav`, `graph`, `jmap`, `google`, or `local` for the built-in
 /// on-device account) and whether its cards are account-level resources
-/// with m:n addressbook memberships; pure computation, no transport.
-/// Returns `{"backend": "..", "accountLevel": bool}`.
+/// with m:n addressbook memberships, and which occurrences of a series
+/// its calendar writes carry on their own; pure computation, no
+/// transport. Returns `{"backend": "..", "accountLevel": bool,
+/// "writesOverrides": bool, "writesExdates": bool}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
     mut env: EnvUnowned<'local>,
@@ -31,17 +33,22 @@ pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
         // NOTE: the local account has no transport, so it is not a
         // Backend; reporting it so keeps its cards non-account-level
         // (one book, per-collection keys) and out of backend matches.
-        let (backend, account_level) = if base_url.starts_with(account::LOCAL_PREFIX) {
-            ("local", false)
+        let json = if base_url.starts_with(account::LOCAL_PREFIX) {
+            json!({
+                "backend": "local",
+                "accountLevel": false,
+                "writesOverrides": false,
+                "writesExdates": false,
+            })
         } else {
             let backend = Backend::of(&base_url);
-            (backend.name(), backend.account_level())
-        };
-
-        let json = json!({
-            "backend": backend,
-            "accountLevel": account_level,
-        })
+            json!({
+                "backend": backend.name(),
+                "accountLevel": backend.account_level(),
+                "writesOverrides": backend.writes_overrides(),
+                "writesExdates": backend.writes_exdates(),
+            })
+        }
         .to_string();
 
         Ok(env.new_string(json)?.into())

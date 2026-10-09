@@ -38,22 +38,22 @@ public final class EventDetail {
     /** {@code CATEGORIES}, comma separated. */
     public final String categories;
 
-    /** {@code DTSTART}, raw; empty on a to-do carrying only a {@code DUE}. */
-    public final String start;
+    /** {@code DTSTART}, or the {@code DUE} placing a to-do carrying none; null when neither. */
+    public final EventTime start;
 
-    /** {@code DTEND}, raw; only an event has one. */
-    public final String end;
+    /** {@code DTEND}, null when absent; only an event has one. */
+    public final EventTime end;
 
-    /** {@code DUE}, raw; only a to-do has one. */
-    public final String due;
+    /** {@code DUE}, null when absent; only a to-do has one. */
+    public final EventTime due;
 
-    /** {@code COMPLETED}, raw; only a to-do has one. */
-    public final String completed;
+    /** {@code COMPLETED}, always UTC, null when absent; only a to-do has one. */
+    public final EventTime completed;
 
     /** Whether the placing date is a DATE rather than a DATE-TIME. */
     public final boolean allDay;
 
-    /** {@code RRULE}, raw, empty when it does not repeat. */
+    /** The series' {@code RRULE}, raw, empty when it does not repeat. */
     public final String recurrence;
 
     public final String priority;
@@ -79,10 +79,10 @@ public final class EventDetail {
             String url,
             String status,
             String categories,
-            String start,
-            String end,
-            String due,
-            String completed,
+            EventTime start,
+            EventTime end,
+            EventTime due,
+            EventTime completed,
             boolean allDay,
             String recurrence,
             String priority,
