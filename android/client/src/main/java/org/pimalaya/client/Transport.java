@@ -9,6 +9,8 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLPeerUnverifiedException;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
@@ -97,11 +99,7 @@ public final class Transport implements AutoCloseable {
                     "Server at " + origin + " sent data before the TLS upgrade");
         }
 
-        Socket socket =
-                ((SSLSocketFactory) SSLSocketFactory.getDefault())
-                        .createSocket(connection.socket, hostOf(uri), portOf(uri), true);
-        socket.setSoTimeout(READ_TIMEOUT_MS);
-        ((SSLSocket) socket).startHandshake();
+        Socket socket = tls(connection.socket, hostOf(uri), portOf(uri));
 
         connections.put(origin, new Connection(socket));
     }
@@ -140,12 +138,8 @@ public final class Transport implements AutoCloseable {
             case "imaps":
             case "smtps":
                 // NOTE: the host-aware overload keeps the peer host, so
-                // TLS gets SNI and the platform validates the chain.
-                socket =
-                        ((SSLSocketFactory) SSLSocketFactory.getDefault())
-                                .createSocket(plain, host, port, true);
-                socket.setSoTimeout(READ_TIMEOUT_MS);
-                ((SSLSocket) socket).startHandshake();
+                // TLS gets SNI; tls() checks the certificate names it.
+                socket = tls(plain, host, port);
                 break;
             case "http":
             case "imap":
@@ -166,6 +160,29 @@ public final class Transport implements AutoCloseable {
     /** The pool key: scheme, host and port, any userinfo left out. */
     private static String originOf(URI uri) {
         return uri.getScheme().toLowerCase(Locale.ROOT) + "://" + uri.getHost() + ":" + portOf(uri);
+    }
+
+    /**
+     * Wraps a connected socket in TLS to {@code host} and checks the
+     * certificate names that host.
+     *
+     * <p>The platform validates the chain during the handshake but not the
+     * name: an {@link SSLSocket} made from {@link SSLSocketFactory} checks no
+     * hostname, so a certificate any CA issued for any other domain would
+     * pass. The check is the platform's own HTTPS rule.
+     */
+    private static Socket tls(Socket plain, String host, int port) throws IOException {
+        SSLSocket socket =
+                (SSLSocket)
+                        ((SSLSocketFactory) SSLSocketFactory.getDefault())
+                                .createSocket(plain, host, port, true);
+        socket.setSoTimeout(READ_TIMEOUT_MS);
+        socket.startHandshake();
+        if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, socket.getSession())) {
+            socket.close();
+            throw new SSLPeerUnverifiedException("Certificate does not match " + host);
+        }
+        return socket;
     }
 
     /** The host to connect to, bare. */
