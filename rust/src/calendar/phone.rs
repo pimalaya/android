@@ -11,7 +11,7 @@
 use std::collections::VecDeque;
 
 use ical::{
-    component::{IcalComponent, IcalComponentName},
+    component::IcalComponent,
     param::IcalParam,
     prop::{IcalProp, IcalPropKind, IcalPropName},
     recur::{IcalRecurDateTime, IcalRecurFreq, IcalRecurRule, set::IcalRecurSet},
@@ -34,8 +34,8 @@ use serde::{Deserialize, Serialize};
 use crate::types::BridgeError;
 
 use super::{
-    EventTime, EventTimeKind, PRODID, Zones, address_of, child, child_mut, date_prop, insert, line,
-    line_mut, prop, raw_value, remove_named, scheduled,
+    EventTime, EventTimeKind, PRODID, Zones, address_of, child, child_mut, date_prop, decoded,
+    line, line_mut, prop, raw_value, remove_named, scheduled,
     series::{Series, set_of, set_rule},
     text,
     zone::stamp,
@@ -418,31 +418,6 @@ fn named(component: &IcalCst, name: &str) -> bool {
         .is_some_and(|begin| begin.raw_value_str().eq_ignore_ascii_case(name))
 }
 
-/// A component of the syntax tree decoded on its own.
-fn decoded<'c>(component: &'c IcalCst<'static>) -> IcalComponent<'c> {
-    let mut props = Vec::new();
-    let mut components = Vec::new();
-    for item in &component.items {
-        match item {
-            IcalItem::Prop(line) => props.push(line.decode(IcalVersion::V2_0)),
-            IcalItem::Component(nested) => components.push(decoded(nested)),
-            IcalItem::Opaque(_) => {}
-        }
-    }
-
-    IcalComponent {
-        name: IcalComponentName::from(
-            component
-                .begin
-                .as_ref()
-                .map(|begin| begin.raw_value_str())
-                .unwrap_or_default(),
-        ),
-        props,
-        components,
-    }
-}
-
 /// One component's projection, from the component at `index` of the
 /// calendar.
 fn locate(cst: &IcalCst<'static>, index: usize, zones: &Zones) -> Located {
@@ -720,7 +695,7 @@ fn instances(
         .map(|index| decoded(child(cst, *index)))
         .collect();
     let refs: Vec<&IcalComponent> = replacing.iter().collect();
-    let (set, _) = set_of(&series, start, &refs, zones);
+    let (set, _) = set_of(&series, &refs, zones);
 
     let raw: Vec<String> = series
         .props
@@ -913,10 +888,10 @@ impl Patcher<'_> {
             component.items.remove(index);
         }
         for added in later.props {
-            insert(component, added);
+            component.push(added);
         }
         for alarm in later.alarms {
-            component.items.push(IcalItem::Component(Box::new(alarm)));
+            component.push_component(alarm);
         }
 
         let texts: [(&str, IcalPropKind, &Option<String>, &Option<String>); 8] = [
@@ -1096,10 +1071,7 @@ impl Patcher<'_> {
                 .collect();
             for id in cancelled {
                 if !held.contains(&id) {
-                    insert(
-                        component,
-                        date_prop(IcalPropKind::ExDate, &series.start.at(id)),
-                    );
+                    component.push(date_prop(IcalPropKind::ExDate, &series.start.at(id)));
                 }
             }
             self.touch(component);
@@ -1208,7 +1180,9 @@ impl Patcher<'_> {
         let fresh = date_prop(kind, time).encode(Escaper::default());
         match position(component, name) {
             Some(at) => component.items[at] = IcalItem::Prop(fresh),
-            None => insert(component, date_prop(kind, time)),
+            None => {
+                component.push(date_prop(kind, time));
+            }
         }
     }
 
@@ -1325,14 +1299,11 @@ impl Patcher<'_> {
                 _ => Vec::new(),
             };
             let values = values.into_iter().map(Into::into).collect();
-            insert(
-                component,
-                prop(
-                    kind,
-                    params,
-                    IcalValue::DateTimeList(IcalDateTimeList(values)),
-                ),
-            );
+            component.push(prop(
+                kind,
+                params,
+                IcalValue::DateTimeList(IcalDateTimeList(values)),
+            ));
         }
         true
     }
@@ -1447,10 +1418,13 @@ impl Patcher<'_> {
                             .encode(Escaper::default());
                         match position(alarm, "TRIGGER") {
                             Some(at) => alarm.items[at] = IcalItem::Prop(trigger),
-                            None => insert(
-                                alarm,
-                                prop(IcalPropKind::Trigger, Vec::new(), trigger_of(minutes)),
-                            ),
+                            None => {
+                                alarm.push(prop(
+                                    IcalPropKind::Trigger,
+                                    Vec::new(),
+                                    trigger_of(minutes),
+                                ));
+                            }
                         }
                     }
                 }
@@ -1496,7 +1470,7 @@ impl Patcher<'_> {
                 if let Some(line) = line_mut(component, name) {
                     IcalValueCursor { line }.set_bytes(time.wire());
                 } else if name == "DTSTAMP" {
-                    insert(component, date_prop(IcalPropKind::DtStamp, &time));
+                    component.push(date_prop(IcalPropKind::DtStamp, &time));
                 }
             }
         }
@@ -1511,9 +1485,6 @@ impl Patcher<'_> {
             }
             None => {
                 component.push_raw("SEQUENCE:1").ok();
-                if let Some(item) = component.items.pop() {
-                    super::place(component, item);
-                }
             }
         }
     }
@@ -1626,7 +1597,9 @@ fn set_value(
     let encoded = prop(kind, Vec::new(), value.clone()).encode(Escaper::default());
     match line_mut(component, name) {
         Some(line) => line.value = encoded.value,
-        None => insert(component, prop(kind, Vec::new(), value)),
+        None => {
+            component.push(prop(kind, Vec::new(), value));
+        }
     }
 }
 
@@ -1664,14 +1637,11 @@ fn rules(
 
     remove_named(component, "RRULE");
     for rule in now {
-        insert(
-            component,
-            prop(
-                IcalPropKind::RRule,
-                Vec::new(),
-                IcalValue::Recur(IcalRecur(rule.clone().into())),
-            ),
-        );
+        component.push(prop(
+            IcalPropKind::RRule,
+            Vec::new(),
+            IcalValue::Recur(IcalRecur(rule.clone().into())),
+        ));
     }
     true
 }

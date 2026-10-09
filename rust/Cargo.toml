@@ -53,8 +53,10 @@ io-pimdir = { path = "../../io-pimdir" }
 [patch."https://github.com/pimalaya/io-msgraph"]
 io-msgraph = { path = "../../io-msgraph" }
 
-# NOTE: temporary until io-gcal is released
 [patch.crates-io]
+# NOTE: temporary until ical-rs 0.6.0 is released
+ical-rs = { path = "../../ical" }
+# NOTE: temporary until io-gcal is released
 io-gcal = { path = "../../io-gcal" }
 # NOTE: temporary until io-jmap is released with the core capability,
 # the URL templates and the submission refusals

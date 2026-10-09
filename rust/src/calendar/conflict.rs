@@ -524,10 +524,9 @@ fn latest(cst: &IcalCst<'static>) -> Option<i64> {
 /// answers the sides to offer, the held one first.
 ///
 /// An update is not replaced by a removal: the merge keeps it whichever
-/// side it came from, and so does the pre-fill. Nor is a value the merge
-/// blended from both sides held, which neither of them wrote: a time
-/// one side moved, under the zone the other gave it, names a moment
-/// nobody chose.
+/// side it came from, and so does the pre-fill. Nor is a span the merge
+/// made of one side's start and the other's end held, which neither of
+/// them wrote.
 fn choose(
     merged: &mut IcalCst<'static>,
     local: &IcalCst<'static>,
@@ -577,6 +576,8 @@ impl Settled {
             let [step] = path.as_slice() else {
                 continue;
             };
+            restamp(&mut self.merged, path, &self.local, &self.remote);
+
             let from = match side {
                 EventSide::Local => &self.local,
                 EventSide::Remote => &self.remote,
@@ -600,7 +601,6 @@ impl Settled {
             }
         }
 
-        restamp(&mut self.merged, &self.local, &self.remote);
         define_zones(&mut self.merged, [&self.local, &self.remote]);
     }
 
@@ -1056,45 +1056,39 @@ fn instances(base: &mut IcalCst<'static>, local: &IcalCst<'static>, remote: &Ica
     }
 }
 
-/// Puts the latest of each stamp on every component both sides hold:
-/// the merge keeps the left one where both wrote one, which can be the
+/// Puts the later stamp and the greater sequence of both sides on a
+/// component taken whole from one of them (RFC 5545 3.8.7, RFC 5546
+/// 2.1.4): the merge settles them so on what it merges, and a component
+/// taken whole comes with the stamps its side wrote, which can be the
 /// earlier.
-fn restamp(merged: &mut IcalCst<'static>, local: &IcalCst<'static>, remote: &IcalCst<'static>) {
-    let paths: Vec<Vec<Step>> = merged
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            IcalItem::Component(component) if keyed(component) => {
-                Some(vec![(name_of(component), identity(component, 0))])
+fn restamp(
+    merged: &mut IcalCst<'static>,
+    path: &[Step],
+    local: &IcalCst<'static>,
+    remote: &IcalCst<'static>,
+) {
+    for name in STAMPS {
+        let address = Address::Prop {
+            path: path.to_vec(),
+            name: name.into(),
+            identity: None,
+        };
+        let rank = |cst: &IcalCst<'static>| {
+            let line = *lines_of(cst, &address).first()?;
+            match name {
+                "SEQUENCE" => line.value.decode().trim().parse::<i64>().ok(),
+                _ => Some(EventTime::of_line(line)?.civil()?.seconds()),
             }
-            _ => None,
-        })
-        .collect();
+        };
 
-    for path in paths {
-        for name in STAMPS {
-            let address = Address::Prop {
-                path: path.clone(),
-                name: name.into(),
-                identity: None,
-            };
-            let rank = |cst: &IcalCst<'static>| {
-                let line = *lines_of(cst, &address).first()?;
-                match name {
-                    "SEQUENCE" => line.value.decode().trim().parse::<i64>().ok(),
-                    _ => Some(EventTime::of_line(line)?.civil()?.seconds()),
-                }
-            };
-
-            let best = [local, remote]
-                .into_iter()
-                .filter_map(|side| Some((rank(side)?, side)))
-                .max_by_key(|(rank, _)| *rank);
-            if let Some((value, side)) = best
-                && rank(merged).is_none_or(|held| held < value)
-            {
-                transplant(merged, &address, side);
-            }
+        let best = [local, remote]
+            .into_iter()
+            .filter_map(|side| Some((rank(side)?, side)))
+            .max_by_key(|(rank, _)| *rank);
+        if let Some((value, side)) = best
+            && rank(merged).is_none_or(|held| held < value)
+        {
+            transplant(merged, &address, side);
         }
     }
 }
@@ -1411,6 +1405,8 @@ mod tests {
             read(&followed, "20260112T090000").unwrap().summary,
             "Standup, moved"
         );
+        // Taken whole, it keeps the later stamp the other side wrote on it.
+        assert!(followed.contains("DTSTAMP:20260201T100000Z\r\n"));
     }
 
     #[test]

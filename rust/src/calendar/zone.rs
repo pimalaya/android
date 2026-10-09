@@ -7,8 +7,9 @@
 //! itself, through ical-rs's `IcalTz`. That is enough for the two jobs
 //! the library has to do on its own: hand the Java side an offset for a
 //! `TZID` the platform cannot name, and compare two dates spelled in
-//! different zones (a `UTC` `UNTIL` against a zoned start, an `EXDATE`
-//! in another zone than the series).
+//! different zones (a `RECURRENCE-ID` or an `EXDATE` in another zone
+//! than the series). The recurrence set does the latter on its own, its
+//! times told on its start's clock by ical-rs.
 
 use ical::{
     component::{IcalComponentKind, IcalComponentName},
@@ -17,7 +18,7 @@ use ical::{
     prop::IcalProp,
     recur::IcalRecurDateTime,
     tree::{cst::IcalCst, line::IcalLine},
-    tz::{IcalTz, IcalTzOffset},
+    tz::IcalTz,
     value::IcalValue,
     version::IcalVersion,
 };
@@ -142,7 +143,7 @@ pub fn stamp(moment: IcalRecurDateTime, date: bool) -> String {
 
 /// The zones one calendar object defines for itself.
 #[derive(Default)]
-pub struct Zones(Vec<IcalTz>);
+pub struct Zones(pub Vec<IcalTz>);
 
 impl Zones {
     /// Every `VTIMEZONE` of a decoded calendar.
@@ -171,42 +172,32 @@ impl Zones {
         self.0.iter().find(|zone| zone.id == tzid)
     }
 
-    /// The offset in force at a local time of a zone the object defines,
-    /// a gap or a fold resolved the way RFC 5545 3.3.5 resolves a
-    /// DATE-TIME.
-    ///
-    /// Not `IcalTzOffset::instant`, which answers a gap with no instant:
-    /// that is 3.3.10's answer for an instance a rule generates, and the
-    /// zoned walk has already dropped those. A literal time in a gap (a
-    /// `DTSTART`, an override's start) still happens, at the offset
-    /// before it.
-    pub fn offset(&self, tzid: &str, local: IcalRecurDateTime) -> Option<i32> {
-        Some(match self.find(tzid)?.resolve(local) {
-            IcalTzOffset::One(offset) => offset,
-            IcalTzOffset::Gap { before, .. } => before,
-            IcalTzOffset::Fold { earlier, .. } => earlier,
-        })
-    }
-
     /// A time with the offset its zone puts in force, when the object
     /// defines that zone.
+    ///
+    /// Read as RFC 5545 3.3.5 reads a written DATE-TIME, not as 3.3.10
+    /// reads a generated instance: the zoned walk has already dropped
+    /// those a gap swallows, and a literal time in a gap (a `DTSTART`, an
+    /// override's start) still happens, at the offset before it.
     pub fn resolve(&self, mut time: EventTime) -> EventTime {
         if time.kind == EventTimeKind::Zoned
             && let Some(local) = time.civil()
         {
-            time.offset = self.offset(&time.tzid, local);
+            time.offset = self
+                .find(&time.tzid)
+                .map(|zone| zone.resolve(local).literal_offset());
         }
         time
     }
 
     /// The instant a civil moment of a time's zone names, in seconds since
-    /// the epoch; none for a date, a floating time or a zone the object
-    /// does not define.
+    /// the epoch, read as a written time is; none for a date, a floating
+    /// time or a zone the object does not define.
     pub fn instant(&self, zone: &EventTime, local: IcalRecurDateTime) -> Option<i64> {
         match zone.kind {
             EventTimeKind::Utc => Some(local.seconds()),
             EventTimeKind::Zoned => {
-                Some(local.seconds() - i64::from(self.offset(&zone.tzid, local)?))
+                Some(self.find(&zone.tzid)?.resolve(local).literal_instant(local))
             }
             _ => None,
         }
@@ -216,16 +207,7 @@ impl Zones {
     pub fn local(&self, zone: &EventTime, instant: i64) -> Option<IcalRecurDateTime> {
         match zone.kind {
             EventTimeKind::Utc => Some(IcalRecurDateTime::from_seconds(instant)),
-            EventTimeKind::Zoned => {
-                // NOTE: the offset is looked up by local time, which is what
-                // is being computed: a first guess read at the instant itself
-                // is off by at most one transition, and the second read
-                // settles it.
-                let guess = self.offset(&zone.tzid, IcalRecurDateTime::from_seconds(instant))?;
-                let local = IcalRecurDateTime::from_seconds(instant + i64::from(guess));
-                let offset = self.offset(&zone.tzid, local)?;
-                Some(IcalRecurDateTime::from_seconds(instant + i64::from(offset)))
-            }
+            EventTimeKind::Zoned => Some(self.find(&zone.tzid)?.local(instant)),
             _ => None,
         }
     }
@@ -246,5 +228,34 @@ impl Zones {
         self.instant(from, local)
             .and_then(|instant| self.local(to, instant))
             .unwrap_or(local)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        super::tests::{ROMANCE, object},
+        *,
+    };
+
+    #[test]
+    fn an_instant_just_past_a_gap_reads_on_the_clock_after_it() {
+        let ical = object(ROMANCE);
+        let cst = IcalCst::parse(ical.as_str()).unwrap();
+        let zones = Zones::of_cst(&cst);
+        let paris = EventTime {
+            time: String::new(),
+            kind: EventTimeKind::Zoned,
+            tzid: "/example.org/Romance".into(),
+            offset: None,
+        };
+        let at = |stamp: &str| IcalRecurDateTime::parse(stamp).unwrap();
+
+        // 01:30 UTC on 29 March 2026 is 03:30 in Paris, the clock having
+        // skipped from 02:00 to 03:00 half an hour before.
+        assert_eq!(
+            zones.local(&paris, at("20260329T013000").seconds()),
+            Some(at("20260329T033000"))
+        );
     }
 }
