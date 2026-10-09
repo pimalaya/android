@@ -37,6 +37,7 @@ use ical::{
         text::{IcalText, IcalTextList},
         uri::IcalUri,
     },
+    version::IcalVersion,
 };
 use serde::{Deserialize, Serialize};
 
@@ -412,14 +413,11 @@ fn patch(component: &mut IcalCst<'static>, edit: &EventEdit) {
     if let Some(value) = &edit.url {
         component.remove::<URL>();
         if !value.is_empty() {
-            insert(
-                component,
-                prop(
-                    IcalPropKind::Url,
-                    Vec::new(),
-                    IcalValue::Uri(IcalUri(value.clone().into())),
-                ),
-            );
+            component.push(prop(
+                IcalPropKind::Url,
+                Vec::new(),
+                IcalValue::Uri(IcalUri(value.clone().into())),
+            ));
         }
     }
 
@@ -432,14 +430,11 @@ fn patch(component: &mut IcalCst<'static>, edit: &EventEdit) {
             .map(|item| item.to_string().into())
             .collect();
         if !items.is_empty() {
-            insert(
-                component,
-                prop(
-                    IcalPropKind::Categories,
-                    Vec::new(),
-                    IcalValue::TextList(IcalTextList(items)),
-                ),
-            );
+            component.push(prop(
+                IcalPropKind::Categories,
+                Vec::new(),
+                IcalValue::TextList(IcalTextList(items)),
+            ));
         }
     }
 
@@ -501,14 +496,11 @@ fn replace_text<L: IcalPropLens>(
 
     component.remove::<L>();
     if !value.is_empty() {
-        insert(
-            component,
-            prop(
-                kind,
-                Vec::new(),
-                IcalValue::Text(IcalText(value.clone().into())),
-            ),
-        );
+        component.push(prop(
+            kind,
+            Vec::new(),
+            IcalValue::Text(IcalText(value.clone().into())),
+        ));
     }
 }
 
@@ -525,14 +517,11 @@ fn replace_number<L: IcalPropLens>(
 
     component.remove::<L>();
     if value.parse::<i64>().is_ok() {
-        insert(
-            component,
-            prop(
-                kind,
-                Vec::new(),
-                IcalValue::Integer(IcalInteger(value.clone().into())),
-            ),
-        );
+        component.push(prop(
+            kind,
+            Vec::new(),
+            IcalValue::Integer(IcalInteger(value.clone().into())),
+        ));
     }
 }
 
@@ -575,7 +564,7 @@ fn replace_date(component: &mut IcalCst<'static>, kind: IcalPropKind, date: &Dat
         offset: None,
     };
     remove_named(component, &name);
-    insert(component, date_prop(kind, &time));
+    component.push(date_prop(kind, &time));
 }
 
 /// A date property carrying one time, with the parameters its zone
@@ -640,28 +629,6 @@ fn prop(
     }
 }
 
-/// Adds a property to a component, before its nested components.
-///
-/// Not `IcalCst::push`, which appends after them: RFC 5545 3.6.1 lists
-/// a VEVENT's properties before its VALARMs, and a strict server reads
-/// a property past an alarm as the object being malformed.
-fn insert(component: &mut IcalCst<'static>, prop: IcalProp<'static>) {
-    component.push(prop);
-    if let Some(item) = component.items.pop() {
-        place(component, item);
-    }
-}
-
-/// Puts one item before a component's nested components.
-fn place(component: &mut IcalCst<'static>, item: IcalItem<'static>) {
-    let at = component
-        .items
-        .iter()
-        .position(|item| matches!(item, IcalItem::Component(_)))
-        .unwrap_or(component.items.len());
-    component.items.insert(at, item);
-}
-
 /// Drops every line of one property from a component.
 fn remove_named(component: &mut IcalCst<'static>, name: &str) {
     component.items.retain(
@@ -723,6 +690,31 @@ fn child_mut<'c>(cst: &'c mut IcalCst<'static>, index: usize) -> &'c mut IcalCst
 /// A calendar's text.
 fn text(cst: &IcalCst) -> Result<String, BridgeError> {
     String::from_utf8(cst.to_bytes()).map_err(|err| err.to_string().into())
+}
+
+/// A component of the syntax tree decoded on its own.
+fn decoded<'c>(component: &'c IcalCst<'static>) -> IcalComponent<'c> {
+    let mut props = Vec::new();
+    let mut components = Vec::new();
+    for item in &component.items {
+        match item {
+            IcalItem::Prop(line) => props.push(line.decode(IcalVersion::V2_0)),
+            IcalItem::Component(nested) => components.push(decoded(nested)),
+            IcalItem::Opaque(_) => {}
+        }
+    }
+
+    IcalComponent {
+        name: IcalComponentName::from(
+            component
+                .begin
+                .as_ref()
+                .map(|begin| begin.raw_value_str())
+                .unwrap_or_default(),
+        ),
+        props,
+        components,
+    }
 }
 
 /// Every scheduled component of a tree, outermost first.
@@ -885,7 +877,7 @@ impl Window {
             location: text_of(source, IcalPropKind::Location).unwrap_or_default(),
         };
 
-        let (set, replaced) = series::set_of(component, &start, overrides, zones);
+        let (set, replaced) = series::set_of(component, overrides, zones);
         if set.rules.is_empty() && set.dates.is_empty() && replaced.is_empty() {
             if self.holds(first) {
                 let end = end.unwrap_or_else(|| start.clone());
@@ -897,11 +889,10 @@ impl Window {
         // NOTE: an override can move an instance into the window from
         // past it, so the walk runs on to the last identity such a move
         // comes from.
-        let cutoff = set
-            .overrides
+        let cutoff = replaced
             .iter()
-            .filter(|over| over.start < self.until)
-            .map(|over| IcalRecurDateTime::from_seconds(over.id.seconds() + 1))
+            .filter(|(_, over)| moved_of(over, kind).is_some_and(|(_, at)| at < self.until))
+            .map(|(id, _)| IcalRecurDateTime::from_seconds(id.seconds() + 1))
             .fold(self.until, IcalRecurDateTime::max);
 
         let walk = match zones.find(&start.tzid) {
@@ -911,10 +902,6 @@ impl Window {
 
         let mut placed = 0;
         for occurrence in walk.take_while(|occurrence| occurrence.id < cutoff) {
-            if !self.holds(occurrence.start) {
-                continue;
-            }
-
             let id = Some(start.at(occurrence.id));
             let over = occurrence.over.and_then(|index| {
                 let id = set.overrides[index].id;
@@ -928,16 +915,16 @@ impl Window {
                     {
                         continue;
                     }
-                    let Some(moved) = start_of(over, kind) else {
+                    let Some((moved, at)) = moved_of(over, kind).filter(|(_, at)| self.holds(*at))
+                    else {
                         continue;
                     };
                     let finish = end_of(over, kind).unwrap_or_else(|| {
-                        moved.at(IcalRecurDateTime::from_seconds(
-                            occurrence.start.seconds() + length,
-                        ))
+                        moved.at(IcalRecurDateTime::from_seconds(at.seconds() + length))
                     });
                     out.push(rendered(over, moved, finish, id));
                 }
+                None if !self.holds(occurrence.start) => continue,
                 None => {
                     let shift = occurrence.start.seconds() - first.seconds();
                     let finish = match (&end, end.as_ref().and_then(EventTime::civil)) {
@@ -956,6 +943,17 @@ impl Window {
             }
         }
     }
+}
+
+/// Where an override moved its instance to, read off its own start as
+/// written: the recurrence set tells it on the series' clock instead.
+fn moved_of(
+    over: &IcalComponent,
+    kind: IcalComponentKind,
+) -> Option<(EventTime, IcalRecurDateTime)> {
+    let moved = start_of(over, kind)?;
+    let at = moved.civil()?;
+    Some((moved, at))
 }
 
 /// The time a component's row is placed at.
@@ -1499,6 +1497,24 @@ mod tests {
         let detail = read(&written, "").unwrap();
         assert_eq!(detail.summary, "Daily standup");
         assert_eq!(detail.location, "");
+    }
+
+    #[test]
+    fn a_written_line_is_folded_and_an_untouched_one_kept() {
+        let long = "x".repeat(90);
+        let ical = object(&format!(
+            "BEGIN:VEVENT\r\nUID:42\r\nDTSTART:20260105T090000\r\nX-VENDOR:{long}\r\nEND:VEVENT\r\n"
+        ));
+        let edit = serde_json::json!({"summary": long});
+
+        let written = write(&ical, &edit.to_string()).unwrap();
+
+        // RFC 5545 3.1: 75 octets a line, the rest on a line of its own
+        // after a space.
+        let summary = format!("SUMMARY:{long}");
+        assert!(written.contains(&format!("{}\r\n {}\r\n", &summary[..75], &summary[75..])));
+        assert!(written.contains(&format!("X-VENDOR:{long}\r\n")));
+        assert_eq!(read(&written, "").unwrap().summary, long);
     }
 
     #[test]

@@ -11,7 +11,7 @@
 
 use ical::{
     component::IcalComponent,
-    prop::{IcalProp, IcalPropKind},
+    prop::{IcalProp, IcalPropKind, IcalPropName},
     recur::{
         IcalRecurDateTime, IcalRecurFreq, IcalRecurRule,
         expand::IcalRecurExpand,
@@ -24,136 +24,68 @@ use ical::{
         value::cursor::IcalValueCursor,
     },
     value::{IcalValue, recur::IcalRecur},
-    version::IcalVersion,
 };
 
 use crate::types::BridgeError;
 
 use super::{
     DateEdit, EventEdit, EventScope, EventTime, EventTimeKind, Zones, child, child_mut, date_prop,
-    define_zone, insert, line, line_mut, patch, place, prop, props, remove_named, scheduled, text,
-    touch, zone::stamp,
+    decoded, define_zone, has, line, line_mut, patch, prop, remove_named, scheduled, text, touch,
+    zone::stamp,
 };
 
 /// Seconds in a day.
 const DAY: i64 = 86_400;
 
 /// The recurrence set of one series and the overrides it holds, each
-/// by the identity it replaces.
-///
-/// `IcalRecurSet` reads every date as the civil time it spells, which
-/// is right while they share a zone and wrong when they do not: a `UTC`
-/// `UNTIL` against a start in Paris, as RFC 5545 3.3.10 requires it to
-/// be written, ends the series at the wrong hour, and an `EXDATE` or a
-/// `RECURRENCE-ID` written in another zone names no instance at all.
-/// Each is told in the series' zone here first, through the zones the
-/// object defines.
+/// by the identity it replaces, every time told on the series' clock.
 pub(super) fn set_of<'c>(
     master: &IcalComponent,
-    start: &EventTime,
     overrides: &[&'c IcalComponent<'c>],
     zones: &Zones,
 ) -> (
     IcalRecurSet,
     Vec<(IcalRecurDateTime, &'c IcalComponent<'c>)>,
 ) {
-    let mut set = IcalRecurSet::of_component(master);
-    // NOTE: a to-do placed by its DUE has no DTSTART for the set to read.
-    set.start = start.civil();
+    // NOTE: a to-do placed by its DUE has no DTSTART for the set to read,
+    // so its DUE stands in.
+    let anchored;
+    let master = match has(master, IcalPropKind::DtStart) {
+        true => master,
+        false => {
+            anchored = IcalComponent {
+                name: master.name.clone(),
+                props: master
+                    .props
+                    .iter()
+                    .map(|prop| match prop.name {
+                        IcalPropName::Kind(IcalPropKind::Due) => IcalProp {
+                            name: IcalPropName::Kind(IcalPropKind::DtStart),
+                            ..prop.clone()
+                        },
+                        _ => prop.clone(),
+                    })
+                    .collect(),
+                components: Vec::new(),
+            };
+            &anchored
+        }
+    };
 
-    if start.kind == EventTimeKind::Zoned {
-        let utc = EventTime {
-            kind: EventTimeKind::Utc,
-            ..start.clone()
-        };
-        set.rules = props(master, IcalPropKind::RRule)
-            .filter_map(|prop| {
-                let IcalValue::Recur(raw) = &prop.value else {
-                    return None;
-                };
-                let mut rule = IcalRecurRule::parse(&raw.0).ok()?;
-                if let Some(until) = rule.until
-                    && utc_until(&raw.0)
-                {
-                    rule.until = Some(zones.convert(until, &utc, start));
-                }
-                Some(rule)
-            })
-            .collect();
-    }
-
-    set.dates = dates_of(props(master, IcalPropKind::RDate), start, zones);
-    set.exdates = dates_of(props(master, IcalPropKind::ExDate), start, zones);
-
+    let mut set = IcalRecurSet::of_component_in(master, &zones.0);
     let mut replaced = Vec::new();
     for over in overrides {
-        let Some(raw) = props(over, IcalPropKind::RecurrenceId)
-            .next()
-            .and_then(EventTime::of_prop)
-        else {
+        // NOTE: one by one rather than through `with_override_in`, which
+        // keeps no trace of which component replaced which identity.
+        let Some(entry) = IcalRecurOverride::of_component(over, &set.zone, &zones.0) else {
             continue;
         };
-        let Some(civil) = raw.civil() else {
-            continue;
-        };
-
-        let mut one = IcalRecurSet::default();
-        one.with_override(over);
-        let Some(entry) = one.overrides.pop() else {
-            continue;
-        };
-
-        let id = zones.convert(civil, &raw, start);
-        set.overrides.push(IcalRecurOverride { id, ..entry });
-        replaced.push((id, *over));
+        set.overrides.push(entry);
+        replaced.push((entry.id, *over));
     }
     set.overrides.sort_unstable_by_key(|over| over.id);
 
     (set, replaced)
-}
-
-/// Whether a raw rule's `UNTIL` is a UTC time.
-fn utc_until(rule: &str) -> bool {
-    rule.split(';').any(|part| {
-        part.split_once('=').is_some_and(|(name, value)| {
-            name.trim().eq_ignore_ascii_case("UNTIL") && value.trim().ends_with(['Z', 'z'])
-        })
-    })
-}
-
-/// Every date of some `RDATE`s or `EXDATE`s, told in the series' zone. A
-/// period contributes its start.
-fn dates_of<'p>(
-    props: impl Iterator<Item = &'p IcalProp<'p>>,
-    start: &EventTime,
-    zones: &Zones,
-) -> Vec<IcalRecurDateTime> {
-    let mut dates = Vec::new();
-
-    for prop in props {
-        let Some(zone) = EventTime::of_prop(prop) else {
-            continue;
-        };
-        let values: Vec<&str> = match &prop.value {
-            IcalValue::DateTimeList(values) => {
-                values.0.iter().map(|value| value.as_ref()).collect()
-            }
-            IcalValue::DateTime(value) => vec![value.0.as_ref()],
-            IcalValue::Date(value) => vec![value.0.as_ref()],
-            _ => continue,
-        };
-
-        for value in values {
-            let value = value.split('/').next().unwrap_or(value);
-            if let Ok(civil) = IcalRecurDateTime::parse(value) {
-                dates.push(zones.convert(civil, &zone, start));
-            }
-        }
-    }
-
-    dates.sort_unstable();
-    dates.dedup();
-    dates
 }
 
 /// One series located in an object's syntax tree.
@@ -227,18 +159,9 @@ impl Series {
 
     /// The instances the series' `EXDATE`s remove, in its zone.
     pub(super) fn exdates(&self, cst: &IcalCst<'static>) -> Vec<IcalRecurDateTime> {
-        let exdates: Vec<IcalProp> = child(cst, self.master)
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case("EXDATE") => {
-                    Some(line.decode(IcalVersion::V2_0))
-                }
-                _ => None,
-            })
-            .collect();
-
-        dates_of(exdates.iter(), &self.start, &self.zones)
+        set_of(&decoded(child(cst, self.master)), &[], &self.zones)
+            .0
+            .exdates
     }
 
     /// The dates the occurrence at `id` has before an edit: its
@@ -323,7 +246,7 @@ impl Series {
         }
 
         let identity = date_prop(IcalPropKind::RecurrenceId, &self.start.at(id));
-        insert(&mut over, identity);
+        over.push(identity);
         over
     }
 
@@ -556,7 +479,7 @@ impl Series {
             .iter()
             .filter_map(|item| match item {
                 IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case("RRULE") => {
-                    Some(line.value.decode().into_owned())
+                    Some(line.raw_value_str().into_owned())
                 }
                 _ => None,
             })
@@ -639,7 +562,7 @@ pub(super) fn instance_of(
     let at = series.zones.convert(raw.civil()?, &raw, &series.start);
     let mut over = series.instance(cst, at);
     remove_named(&mut over, "RECURRENCE-ID");
-    place(&mut over, IcalItem::Prop(id.clone()));
+    over.push_line(id.clone());
     Some(over)
 }
 
@@ -714,10 +637,7 @@ pub fn remove(ical: &str, edit: &str) -> Result<Option<String>, BridgeError> {
         EventScope::Following => series.end_before(&mut cst, id, &edit)?,
         EventScope::This => {
             let master = child_mut(&mut cst, series.master);
-            insert(
-                master,
-                date_prop(IcalPropKind::ExDate, &series.start.at(id)),
-            );
+            master.push(date_prop(IcalPropKind::ExDate, &series.start.at(id)));
             touch(master, &edit);
             if let Some(index) = series.replaced(id) {
                 cst.items.remove(index);
@@ -792,7 +712,7 @@ fn rewrite_rules(
             continue;
         }
 
-        let raw = line.value.decode().into_owned();
+        let raw = line.raw_value_str().into_owned();
         let Some((until, count)) = bound(&raw) else {
             continue;
         };
@@ -852,7 +772,7 @@ fn follow_rules(
             continue;
         };
         if line.name.get().eq_ignore_ascii_case("RRULE") {
-            let rule = follow(&line.value.decode(), from, to)?;
+            let rule = follow(&line.raw_value_str(), from, to)?;
             set_rule(line, &rule);
         }
     }
