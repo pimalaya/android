@@ -126,6 +126,7 @@
     <string name="sync_failed">Could not synchronize</string>
     <string name="sync_conflicts">%1$d change(s) conflict with the server and stay local</string>
     <string name="sync_conflicts_pending">%1$d contact(s) diverged; resolve them to sync</string>
+    <string name="sync_events_conflicts_pending">%1$d calendar entry(ies) diverged; resolve them to sync</string>
     <string name="conflict_auto_resolved">Conflict resolved automatically; changes push on the next sync</string>
     <string name="contact_diverged_pending">Diverged fields await review</string>
     <string name="sync_busy">Wait for the sync to finish</string>
@@ -426,6 +427,7 @@
     <string name="event_save_failed">Could not save the entry</string>
     <string name="event_delete">Delete</string>
     <string name="event_delete_confirm">Delete this entry?</string>
+    <string name="event_delete_conflict_confirm">This entry was also changed elsewhere. Delete it, and the version changed there with it?</string>
     <string name="event_delete_failed">Could not delete the entry</string>
     <string name="event_no_calendar">No calendar to put it in</string>
     <string name="event_target_title">Add to calendar</string>
@@ -438,6 +440,18 @@
     <string name="event_scope_this">This occurrence</string>
     <string name="event_scope_following">This and following</string>
     <string name="event_scope_all">All occurrences</string>
+
+    <!-- An entry both sides edited: what each collision is called, and
+         what its choices say when a value would not. -->
+    <string name="event_section_conflicts">Conflicts</string>
+    <string name="event_conflict_occurrence">Occurrence</string>
+    <string name="event_conflict_entry">Whole entry</string>
+    <string name="event_conflict_here">As edited here</string>
+    <string name="event_conflict_there">As edited elsewhere</string>
+    <string name="event_conflict_removed">Removed</string>
+    <string name="event_conflict_follow">Follow the series</string>
+    <string name="event_conflict_keep">Keep this occurrence\'s changes</string>
+    <string name="event_conflict_other">Other value</string>
     <string name="yes">Yes</string>
     <string name="no">No</string>
 

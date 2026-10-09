@@ -5,11 +5,14 @@ import android.app.DatePickerDialog;
 import android.app.TimePickerDialog;
 import android.content.res.ColorStateList;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.Button;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -18,6 +21,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.EventDetail;
+import org.pimalaya.client.EventMerge;
 import org.pimalaya.client.EventSplit;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
@@ -60,6 +64,15 @@ import java.util.function.Consumer;
  * an {@code EXDATE}, a split series, or the series itself. Its dates
  * show at the reader's time and are written back in the zone they were
  * in.
+ *
+ * <p>An entry both sides edited opens in conflict mode, as a contact does:
+ * the same page over the merged object, each colliding field wearing the
+ * diverged glyph until reviewed and offering both sides' values as chips,
+ * the newer side pre-filled. A collision is a field of the occurrence it
+ * is on, drawn in place on that occurrence's page; every other one (another
+ * occurrence, one occurrence whole, a property the page does not edit) is
+ * a row of its own section, so no side is ever dropped unseen. Saving
+ * stages the resolution on the binding that conflicted.
  */
 final class EventView {
     /** What an event's STATUS may be (RFC 5545 3.8.1.11). */
@@ -244,6 +257,18 @@ final class EventView {
     /** Fields the user added this session, so their empty row stays. */
     private final Set<String> revealed = new HashSet<>();
 
+    /** The conflict the page settles, null outside conflict mode. */
+    private EventStore.StoredConflict conflict;
+
+    /** Its merge: the object the page opened on, and what is left to ask. */
+    private EventMerge merge;
+
+    /** The side each conflict was given, by its id; absent, the pre-filled one. */
+    private final Map<Integer, String> picks = new HashMap<>();
+
+    /** The conflicts the user has reviewed, by id, which clears their glyph. */
+    private final Set<Integer> reviewed = new HashSet<>();
+
     EventView(MainActivity host) {
         this.host = host;
         this.sections =
@@ -299,6 +324,7 @@ final class EventView {
         }
 
         String id = uid + ".ics";
+        leaveConflict();
         open(
                 null,
                 new EventStore.StoredEvent(
@@ -307,12 +333,93 @@ final class EventView {
                 true);
     }
 
-    /** Opens the page on one agenda row. */
+    /** Opens the page on one agenda row, in conflict mode when it is conflicted. */
     void open(
             Occurrence occurrence,
             EventStore.StoredEvent event,
             EventStore.StoredCalendar calendar) {
-        open(occurrence, event, calendar, false);
+        leaveConflict();
+        if (event.conflicted) {
+            openConflict(occurrence, event, calendar);
+        } else {
+            open(occurrence, event, calendar, false);
+        }
+    }
+
+    /**
+     * Opens the page on an entry both sides edited, merged from the store
+     * alone: the newer side of each collision pre-filled, both offered.
+     *
+     * <p>A merge with nothing left to ask, which the sync has not staged
+     * yet, is staged on the spot, the toast its only outcome, as a
+     * contact's is. One that cannot be merged does not open: a save from
+     * the page would settle it with the side here alone.
+     */
+    private void openConflict(
+            Occurrence occurrence,
+            EventStore.StoredEvent event,
+            EventStore.StoredCalendar calendar) {
+        EventStore.StoredConflict found;
+        EventMerge merged;
+        try {
+            found = host.events.conflictOf(event);
+            merged =
+                    found == null
+                            ? null
+                            : host.client.mergeEvent(found.base, found.local, found.remote);
+        } catch (Exception error) {
+            Log.w("pimalaya", "event merge failed: " + event.id, error);
+            host.showError(error, R.string.event_unreadable);
+            return;
+        }
+        if (merged == null) {
+            open(occurrence, event, calendar, false);
+            return;
+        }
+
+        if (merged.resolved) {
+            EventStore.StoredConflict settled = found;
+            String ical = merged.ical;
+            host.io.execute(
+                    () -> {
+                        Exception failure = null;
+                        try {
+                            host.calendarEngine(calendar.accountEmail)
+                                    .mutateEdit(settled.collection, settled.handle, ical, null, "");
+                        } catch (Exception error) {
+                            Log.w("pimalaya", "event merge failed: " + event.id, error);
+                            failure = error;
+                        }
+                        Exception outcome = failure;
+                        host.postAlive(
+                                () -> {
+                                    if (outcome != null) {
+                                        host.showError(outcome, R.string.event_save_failed);
+                                        return;
+                                    }
+                                    host.toast(host.getString(R.string.conflict_auto_resolved));
+                                    host.calendarList.reload();
+                                });
+                    });
+            return;
+        }
+
+        conflict = found;
+        merge = merged;
+        open(
+                occurrence,
+                new EventStore.StoredEvent(
+                        event.collectionId, event.id, event.handle, merged.ical, event.etag),
+                calendar,
+                false);
+    }
+
+    /** Leaves conflict mode, before the page opens on anything else. */
+    private void leaveConflict() {
+        conflict = null;
+        merge = null;
+        picks.clear();
+        reviewed.clear();
     }
 
     private void open(
@@ -343,7 +450,10 @@ final class EventView {
             times.put("end", detail.end);
             times.put("due", detail.due);
             times.put("completed", detail.completed);
-            if (series()) {
+            // NOTE: an override's own dates are its occurrence's, and in
+            // conflict mode they are the merge's rather than the row's, which
+            // was expanded from the side here.
+            if (series() && (merge == null || detail.recurrenceId == null)) {
                 occurrenceDates();
             }
         }
@@ -408,6 +518,7 @@ final class EventView {
             return;
         }
 
+        conflicts();
         when();
         section(R.string.event_section_progress, R.drawable.ic_check);
         section(R.string.event_section_where, R.drawable.ic_section_location_on);
@@ -416,6 +527,53 @@ final class EventView {
         origin();
 
         host.updateBarTitle(title());
+        if (host.screen == MainActivity.PANEL_EVENT_VIEW) {
+            gate();
+        }
+    }
+
+    /**
+     * Gates the save: live outside conflict mode, and in it once every
+     * conflict has been reviewed.
+     */
+    void gate() {
+        host.gateSave(settled(), R.drawable.ic_save, R.string.event_save);
+    }
+
+    /** Whether nothing awaits review. */
+    private boolean settled() {
+        return merge == null || reviewed.size() == merge.conflicts.size();
+    }
+
+    /**
+     * The conflicts the page cannot draw in place, each a row of its own:
+     * another occurrence's, one occurrence or the entry whole, a property
+     * the page does not edit.
+     */
+    private void conflicts() {
+        if (merge == null) {
+            return;
+        }
+
+        List<View> rows = new ArrayList<>();
+        for (EventMerge.Conflict one : merge.conflicts) {
+            if (inPlace(one)) {
+                continue;
+            }
+            String title = fieldLabel(one);
+            if (one.recurrenceId != null) {
+                title = title + " · " + moment(one.recurrenceId);
+            }
+            rows.add(
+                    sections.row(
+                            title,
+                            choiceLabel(one, picked(one)),
+                            warning(one),
+                            () -> choose(one, null)));
+        }
+
+        sections.section(
+                R.string.event_section_conflicts, R.drawable.ic_diverged, rows, null, false);
     }
 
     /**
@@ -435,7 +593,17 @@ final class EventView {
         rows.add(dateRow("start", startLabel()));
         rows.addAll(rowsOf(R.string.event_section_when));
 
-        if (!detail.recurrence.isEmpty()) {
+        // NOTE: the rule is read-only here, and a conflict on it the one way
+        // the row is tapped: to pick a side.
+        EventMerge.Conflict rule = conflictOn("recurrence");
+        if (rule != null) {
+            rows.add(
+                    sections.row(
+                            host.getString(R.string.event_field_repeats),
+                            choiceLabel(rule, picked(rule)),
+                            warning(rule),
+                            () -> choose(rule, null)));
+        } else if (!detail.recurrence.isEmpty()) {
             rows.add(sections.value(detail.recurrence, R.string.event_field_repeats));
         }
         // An occurrence an override moved says where its series had it,
@@ -484,12 +652,13 @@ final class EventView {
         return rows;
     }
 
+    /** Whether a field's row is drawn: set, added this session, or conflicted. */
     private boolean shown(Field field) {
         boolean set =
                 field.kind == Kind.DATE
                         ? times.get(field.key) != null
                         : !value(field.key).isEmpty();
-        return set || revealed.contains(field.key);
+        return set || revealed.contains(field.key) || conflictOn(field.key) != null;
     }
 
     /** Who is on it, read-only: an attendee list is a negotiation
@@ -609,20 +778,38 @@ final class EventView {
         return sections.row(
                 host.getString(field.label),
                 shown.length() == 0 ? host.getString(R.string.event_unset) : shown,
-                null,
+                warning(conflictOn(field.key)),
                 () -> edit(field));
     }
 
     private View dateRow(String key, int label) {
         String shown = moment(times.get(key));
+        EventMerge.Conflict conflicted = conflictOn(key);
         return sections.row(
                 host.getString(label),
                 shown.isEmpty() ? host.getString(R.string.event_unset) : shown,
-                null,
-                () -> editDate(key));
+                warning(conflicted),
+                () -> {
+                    if (conflicted != null) {
+                        choose(conflicted, () -> editDate(key));
+                    } else {
+                        editDate(key);
+                    }
+                });
     }
 
     private void edit(Field field) {
+        // NOTE: a conflicted date or status is picked rather than typed, the
+        // free edit one tap further; a text keeps its input, chips under it.
+        EventMerge.Conflict conflicted = conflictOn(field.key);
+        if (conflicted != null && (field.kind == Kind.DATE || field.kind == Kind.STATUS)) {
+            choose(conflicted, () -> editPlain(field));
+            return;
+        }
+        editPlain(field);
+    }
+
+    private void editPlain(Field field) {
         switch (field.kind) {
             case DATE:
                 editDate(field.key);
@@ -662,7 +849,7 @@ final class EventView {
             input.setGravity(Gravity.TOP);
         }
 
-        dialog(field.label, input, () -> put(field.key, input.getText().toString().trim()));
+        typed(field, input);
     }
 
     private void editNumber(Field field) {
@@ -674,7 +861,40 @@ final class EventView {
                         : R.string.event_percent_hint);
         input.setInputType(InputType.TYPE_CLASS_NUMBER);
 
-        dialog(field.label, input, () -> put(field.key, input.getText().toString().trim()));
+        typed(field, input);
+    }
+
+    /**
+     * The dialog of a typed field: its input, and on a conflicted one a
+     * chip per side under it, a chip filling the input in. A value that is
+     * one side's on OK picks that side; any other is an edit of its own,
+     * written over whichever side is held.
+     */
+    private void typed(Field field, EditText input) {
+        EventMerge.Conflict conflicted = conflictOn(field.key);
+        if (conflicted == null) {
+            dialog(field.label, input, () -> put(field.key, input.getText().toString().trim()));
+            return;
+        }
+
+        LinearLayout content = new LinearLayout(host);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.addView(input);
+        content.addView(chips(conflicted, choice -> input.setText(choice.value)));
+        dialog(
+                field.label,
+                content,
+                () -> {
+                    String typed = input.getText().toString().trim();
+                    for (EventMerge.Choice choice : conflicted.choices) {
+                        if (choice.value.trim().equals(typed)) {
+                            pick(conflicted, choice);
+                            return;
+                        }
+                    }
+                    reviewed.add(conflicted.id);
+                    put(field.key, typed);
+                });
     }
 
     private void editStatus(Field field) {
@@ -824,6 +1044,237 @@ final class EventView {
                 .show();
     }
 
+    // ---- conflicts --------------------------------------------------------
+
+    /** The conflict drawn in place on one of the page's rows, by its key; null when none. */
+    private EventMerge.Conflict conflictOn(String key) {
+        if (merge == null) {
+            return null;
+        }
+        for (EventMerge.Conflict one : merge.conflicts) {
+            if (one.field.equals(key) && inPlace(one)) {
+                return one;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether a conflict is drawn on one of the page's rows: a field the
+     * page edits, of the component the page shows. The series' rule is the
+     * series' row, so it is in place only on a page showing the series.
+     */
+    private boolean inPlace(EventMerge.Conflict one) {
+        if (!sameOccurrence(one.recurrenceId, detail.recurrenceId)) {
+            return false;
+        }
+        // NOTE: an occurrence of a series shows its own dates, not the
+        // series' a conflict on the series is about.
+        if (series() && one.recurrenceId == null && List.of(DATES).contains(one.field)) {
+            return false;
+        }
+        if ("start".equals(one.field) || "recurrence".equals(one.field)) {
+            return true;
+        }
+        for (Field field : CATALOG) {
+            if (field.key.equals(one.field) && field.of(component())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether two occurrence identities name one occurrence, or neither names one. */
+    static boolean sameOccurrence(EventTime left, EventTime right) {
+        if (left == null || right == null) {
+            return left == right;
+        }
+        return Zones.instant(left) == Zones.instant(right);
+    }
+
+    /** The diverged glyph of a conflict not reviewed yet; null otherwise. */
+    private View warning(EventMerge.Conflict one) {
+        if (one == null || reviewed.contains(one.id)) {
+            return null;
+        }
+        ImageView glyph = new ImageView(host);
+        glyph.setImageResource(R.drawable.ic_diverged);
+        glyph.setImageTintList(
+                ColorStateList.valueOf(host.ui.resolveColor(android.R.attr.colorError)));
+        glyph.setContentDescription(host.getString(R.string.contact_diverged));
+        return glyph;
+    }
+
+    /** One chip per side of a conflict, the contact form's. */
+    private View chips(EventMerge.Conflict one, Consumer<EventMerge.Choice> onPick) {
+        LinearLayout chips = new LinearLayout(host);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        for (EventMerge.Choice choice : one.choices) {
+            Button chip = new Button(host, null, android.R.attr.buttonStyleSmall);
+            chip.setText(choiceLabel(one, choice));
+            chip.setAllCaps(false);
+            chip.setMaxLines(3);
+            chip.setMaxWidth(host.dp(240));
+            chip.setEllipsize(TextUtils.TruncateAt.END);
+            chip.setOnClickListener(view -> onPick.accept(choice));
+            chips.addView(chip);
+        }
+
+        HorizontalScrollView scroll = new HorizontalScrollView(host);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.addView(chips);
+        return scroll;
+    }
+
+    /**
+     * Asks which side a conflict takes: the side held, then a chip per
+     * side, OK settling it. {@code other}, when given, is the free edit a
+     * date or a status leads to, which reviews the conflict too.
+     */
+    private void choose(EventMerge.Conflict one, Runnable other) {
+        EventMerge.Choice[] chosen = {picked(one)};
+        TextView shown = new TextView(host);
+        shown.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        shown.setPadding(0, host.dp(8), 0, host.dp(8));
+        shown.setText(choiceLabel(one, chosen[0]));
+
+        LinearLayout content = new LinearLayout(host);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(host.dp(24), host.dp(8), host.dp(24), 0);
+        content.addView(shown);
+        content.addView(
+                chips(
+                        one,
+                        choice -> {
+                            chosen[0] = choice;
+                            shown.setText(choiceLabel(one, choice));
+                        }));
+
+        AlertDialog.Builder dialog =
+                new AlertDialog.Builder(host)
+                        .setTitle(fieldLabel(one))
+                        .setView(content)
+                        .setPositiveButton(
+                                android.R.string.ok,
+                                (view, which) -> {
+                                    pick(one, chosen[0]);
+                                    render();
+                                })
+                        .setNegativeButton(android.R.string.cancel, null);
+        if (other != null) {
+            dialog.setNeutralButton(
+                    R.string.event_conflict_other,
+                    (view, which) -> {
+                        reviewed.add(one.id);
+                        other.run();
+                    });
+        }
+        dialog.show();
+    }
+
+    /**
+     * Gives a conflict one side: the value its row shows, and the baseline
+     * the save tells an edit from, so the side travels as the pick it is
+     * and not as an edit written over it.
+     */
+    private void pick(EventMerge.Conflict one, EventMerge.Choice choice) {
+        picks.put(one.id, choice.side);
+        reviewed.add(one.id);
+        if ("when".equals(one.field)
+                && sameOccurrence(one.recurrenceId, detail.recurrenceId)
+                && !(series() && one.recurrenceId == null)) {
+            // NOTE: the end row follows only where the page has one: a span
+            // run by a DURATION shows none.
+            String end = TODO.equals(component()) ? "due" : "end";
+            for (String key : new String[] {"start", end}) {
+                EventTime time = "start".equals(key) ? choice.time : choice.end;
+                if ("start".equals(key) || openedTimes.get(key) != null) {
+                    times.put(key, time);
+                    openedTimes.put(key, time);
+                }
+            }
+            return;
+        }
+        if (!inPlace(one)) {
+            return;
+        }
+
+        if (List.of(DATES).contains(one.field)) {
+            times.put(one.field, choice.time);
+            openedTimes.put(one.field, choice.time);
+        } else if (List.of(TEXTS).contains(one.field)) {
+            put(one.field, choice.value);
+            try {
+                opened.put(one.field, choice.value);
+            } catch (JSONException error) {
+                Log.w("pimalaya", "event field failed: " + one.field, error);
+            }
+        }
+    }
+
+    /** The side a conflict holds now: the one picked, else the pre-filled one. */
+    private EventMerge.Choice picked(EventMerge.Conflict one) {
+        String side = picks.get(one.id);
+        for (EventMerge.Choice choice : one.choices) {
+            if (choice.side.equals(side)) {
+                return choice;
+            }
+        }
+        return one.choices.get(0);
+    }
+
+    /**
+     * What a side of a conflict reads as: its value, its moment for a date,
+     * and for an occurrence or the entry whole, what keeping it means.
+     */
+    private String choiceLabel(EventMerge.Conflict one, EventMerge.Choice choice) {
+        if (EventMerge.RECURRENCE.equals(one.kind)) {
+            return host.getString(
+                    choice.side.equals(one.series)
+                            ? R.string.event_conflict_follow
+                            : R.string.event_conflict_keep);
+        }
+        if ("occurrence".equals(one.field) || "entry".equals(one.field)) {
+            if (choice.value.isEmpty()) {
+                return host.getString(R.string.event_conflict_removed);
+            }
+            return host.getString(
+                    EventMerge.LOCAL.equals(choice.side)
+                            ? R.string.event_conflict_here
+                            : R.string.event_conflict_there);
+        }
+        if ("when".equals(one.field)) {
+            return moment(choice.time) + "\n" + moment(choice.end);
+        }
+        if (choice.time != null) {
+            return moment(choice.time);
+        }
+        return choice.value.isEmpty() ? host.getString(R.string.value_not_set) : choice.value;
+    }
+
+    /** What a conflict is called: its row's label, else the property's own name. */
+    private String fieldLabel(EventMerge.Conflict one) {
+        switch (one.field) {
+            case "start":
+                return host.getString(startLabel());
+            case "recurrence":
+                return host.getString(R.string.event_field_repeats);
+            case "when":
+                return host.getString(R.string.event_section_when);
+            case "occurrence":
+                return host.getString(R.string.event_conflict_occurrence);
+            case "entry":
+                return host.getString(R.string.event_conflict_entry);
+            default:
+                for (Field field : CATALOG) {
+                    if (field.key.equals(one.field)) {
+                        return host.getString(field.label);
+                    }
+                }
+                return one.field;
+        }
+    }
+
     // ---- the model --------------------------------------------------------
 
     private void put(String key, Object value) {
@@ -943,7 +1394,13 @@ final class EventView {
             host.toast(host.getString(R.string.event_unreadable));
             return;
         }
-        if (creating || !series()) {
+        if (!settled()) {
+            host.toast(host.getString(R.string.contact_diverged_pending));
+            return;
+        }
+        // NOTE: a resolution with nothing edited beside it is one of the
+        // whole object, so there is no occurrence to ask about.
+        if (creating || !series() || merge != null && !changed()) {
             save("all");
             return;
         }
@@ -951,6 +1408,15 @@ final class EventView {
                 R.string.event_scope_save,
                 PimalayaClient.writesOverrides(calendar.url),
                 this::save);
+    }
+
+    /** Whether the page edited anything beyond the stamp every save carries. */
+    private boolean changed() {
+        try {
+            return edited().length() > 1;
+        } catch (JSONException error) {
+            return true;
+        }
     }
 
     /**
@@ -987,11 +1453,19 @@ final class EventView {
      * series, which stages two writes: the new series' create, then the
      * shortened series' edit, in that order so a failure between them
      * leaves an occurrence twice rather than none.
+     *
+     * <p>In conflict mode the edit applies to the resolution, the merge
+     * with every pick taken, and is staged on the binding that conflicted,
+     * which is what settles it; a resolution with nothing edited beside it
+     * is staged as it is.
      */
     private void save(String scope) {
         JSONObject edit;
+        boolean changed;
         try {
-            edit = scoped(edited(), scope);
+            JSONObject edits = edited();
+            changed = edits.length() > 1;
+            edit = scoped(edits, scope);
         } catch (JSONException error) {
             host.showError(error, R.string.event_save_failed);
             return;
@@ -1002,6 +1476,9 @@ final class EventView {
         EventStore.StoredEvent target = event;
         EventStore.StoredCalendar collection = calendar;
         boolean isNew = creating;
+        boolean rewritten = changed;
+        EventStore.StoredConflict settling = conflict;
+        Map<Integer, String> chosen = new HashMap<>(picks);
 
         host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
         host.io.execute(
@@ -1009,12 +1486,23 @@ final class EventView {
                     Exception failure = null;
                     try {
                         CalendarEngine engine = host.calendarEngine(collection.accountEmail);
+                        String source = target.ical;
+                        String into = collection.id;
+                        String handle = target.handle;
+                        if (settling != null) {
+                            source =
+                                    host.client.resolveEvent(
+                                            settling.base, settling.local, settling.remote, chosen);
+                            into = settling.collection;
+                            handle = settling.handle;
+                        }
+
                         // NOTE: no summary and no key. What an agenda row
                         // shows needs the recurrence expansion, which
                         // happens at render time against the window being
                         // shown, so there is nothing to write here.
                         if ("following".equals(scope)) {
-                            EventSplit split = host.client.splitEvent(target.ical, edited);
+                            EventSplit split = host.client.splitEvent(source, edited);
                             if (split.series != null) {
                                 engine.mutateAdd(
                                         collection.id,
@@ -1024,9 +1512,12 @@ final class EventView {
                                         null,
                                         "");
                             }
-                            engine.mutateEdit(collection.id, target.handle, split.master, null, "");
+                            engine.mutateEdit(into, handle, split.master, null, "");
                         } else {
-                            String written = host.client.writeEvent(target.ical, edited);
+                            String written =
+                                    settling != null && !rewritten
+                                            ? source
+                                            : host.client.writeEvent(source, edited);
                             if (isNew) {
                                 engine.mutateAdd(
                                         collection.id,
@@ -1036,7 +1527,7 @@ final class EventView {
                                         null,
                                         "");
                             } else {
-                                engine.mutateEdit(collection.id, target.handle, written, null, "");
+                                engine.mutateEdit(into, handle, written, null, "");
                             }
                         }
                     } catch (Exception error) {
@@ -1085,11 +1576,30 @@ final class EventView {
             scope(
                     R.string.event_scope_delete,
                     PimalayaClient.writesExdates(calendar.url),
-                    this::delete);
+                    scope -> {
+                        if ("all".equals(scope) && merge != null) {
+                            confirmWhole();
+                        } else {
+                            delete(scope);
+                        }
+                    });
             return;
         }
+        confirmWhole();
+    }
+
+    /**
+     * Asks before deleting the entry whole. A conflicted one says that the
+     * version changed elsewhere goes with it: the page has shown it, so
+     * the delete is the user's decision on the conflict, and it is pushed
+     * against what the source was seen to hold.
+     */
+    private void confirmWhole() {
         new AlertDialog.Builder(host)
-                .setMessage(R.string.event_delete_confirm)
+                .setMessage(
+                        merge != null
+                                ? R.string.event_delete_conflict_confirm
+                                : R.string.event_delete_confirm)
                 .setPositiveButton(R.string.event_delete, (dialog, which) -> delete("all"))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
@@ -1106,10 +1616,19 @@ final class EventView {
      * <p>An entry that was never saved is only ever on this screen, so its
      * delete is the page closing: there is nothing staged to withdraw and
      * nothing anywhere to tell about it.
+     *
+     * <p>In conflict mode an occurrence is removed from the resolution, so
+     * every conflict is reviewed first, and staged on the binding that
+     * conflicted, as a save is; the whole entry is removed there too,
+     * which the engine gates on the revision the conflict recorded.
      */
     private void delete(String scope) {
         if (creating) {
             host.showBack(MainActivity.PANEL_CALENDAR);
+            return;
+        }
+        if (!"all".equals(scope) && !settled()) {
+            host.toast(host.getString(R.string.contact_diverged_pending));
             return;
         }
 
@@ -1125,6 +1644,8 @@ final class EventView {
 
         EventStore.StoredEvent target = event;
         EventStore.StoredCalendar collection = calendar;
+        EventStore.StoredConflict settling = conflict;
+        Map<Integer, String> chosen = new HashMap<>(picks);
 
         host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
         host.io.execute(
@@ -1132,12 +1653,28 @@ final class EventView {
                     Exception failure = null;
                     try {
                         CalendarEngine engine = host.calendarEngine(collection.accountEmail);
-                        String left =
-                                "all".equals(scope)
-                                        ? null
-                                        : host.client.removeEvent(target.ical, edit);
-                        if (left == null) {
+                        String left = null;
+                        if (!"all".equals(scope)) {
+                            String source =
+                                    settling == null
+                                            ? target.ical
+                                            : host.client.resolveEvent(
+                                                    settling.base,
+                                                    settling.local,
+                                                    settling.remote,
+                                                    chosen);
+                            left = host.client.removeEvent(source, edit);
+                        }
+                        // NOTE: a removal staged on the binding that
+                        // conflicted is the decision on it: the engine
+                        // gates the delete on the revision it recorded.
+                        if (left == null && settling != null) {
+                            engine.mutateRemove(settling.collection, settling.handle);
+                        } else if (left == null) {
                             engine.mutateRemove(collection.id, target.handle);
+                        } else if (settling != null) {
+                            engine.mutateEdit(
+                                    settling.collection, settling.handle, left, null, "");
                         } else {
                             engine.mutateEdit(collection.id, target.handle, left, null, "");
                         }

@@ -569,16 +569,22 @@ public class MainActivity extends Activity {
      * in a merge only once every diverging field has been reviewed.
      */
     private void updateSaveEnabled() {
-        if (screen != PANEL_CONTACT) {
-            return;
+        if (screen == PANEL_CONTACT) {
+            gateSave(form.conflictResolved(), R.drawable.ic_check, R.string.contact_save);
         }
+    }
 
+    /**
+     * Gates a conflict form's save FAB, a contact's or a calendar entry's:
+     * the save itself once nothing awaits review, else the error disc.
+     */
+    void gateSave(boolean ready, int icon, int description) {
         android.widget.ImageButton fab = findViewById(R.id.fab);
-        if (form.conflictResolved()) {
+        if (ready) {
             fab.setBackgroundTintList(null);
-            fab.setImageResource(R.drawable.ic_check);
+            fab.setImageResource(icon);
             fab.setImageTintList(android.content.res.ColorStateList.valueOf(accentContrast()));
-            fab.setContentDescription(getString(R.string.contact_save));
+            fab.setContentDescription(getString(description));
             setFabEnabled(R.id.fab, true);
             return;
         }
@@ -1425,6 +1431,16 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * The pending-conflicts line of a calendar pass, as a contacts pass
+     * carries one: the entries left for their page to settle.
+     */
+    private void reportEventConflicts(int pending) {
+        if (pending > 0) {
+            toast(getString(R.string.sync_events_conflicts_pending, pending));
+        }
+    }
+
+    /**
      * The mail list's pull: the mail of the accounts and mailboxes the
      * filter shows, into the merged list.
      *
@@ -1487,12 +1503,15 @@ public class MainActivity extends Activity {
         io.execute(
                 () -> {
                     Exception failure = remote.calendarPass(filterOf(PimDomain.CALENDAR));
+                    int pending = events.conflictCount();
                     postAlive(
                             () -> {
                                 setSyncing(false);
                                 calendarList.reload();
                                 if (failure != null) {
                                     showError(failure, R.string.sync_failed);
+                                } else {
+                                    reportEventConflicts(pending);
                                 }
                             });
                 });
@@ -2117,6 +2136,7 @@ public class MainActivity extends Activity {
                     SyncRunner.Outcome outcome = runner.syncRemote();
                     RemotePass.MailPass sent = remote.mailPass(SyncScope.all(this));
                     Exception calendars = remote.calendarPass(SyncScope.all(this));
+                    int pending = events.conflictCount();
                     Exception other = sent.failure != null ? sent.failure : calendars;
                     postAlive(
                             () -> {
@@ -2126,6 +2146,7 @@ public class MainActivity extends Activity {
                                 calendarList.reload();
                                 reportSync(outcome);
                                 reportMail(sent);
+                                reportEventConflicts(pending);
                                 fillMail();
                                 // NOTE: one error dialog, the contacts one first.
                                 if (other != null && outcome.failure == null) {
@@ -3413,6 +3434,8 @@ public class MainActivity extends Activity {
                         findViewById(R.id.contact_add_field).setVisibility(View.VISIBLE);
                         findViewById(R.id.bar_delete).setVisibility(View.VISIBLE);
                         addFab(R.drawable.ic_save, R.string.event_save);
+                        // A conflict in it awaits review behind the error disc.
+                        eventView.gate();
                     } else {
                         findViewById(R.id.fab).setVisibility(View.GONE);
                     }

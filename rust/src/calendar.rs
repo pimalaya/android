@@ -9,6 +9,7 @@
 //! platform's time-zone database; this side resolves only the zones an
 //! object defines for itself ([`zone`]).
 
+mod conflict;
 mod series;
 mod zone;
 
@@ -39,6 +40,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::BridgeError;
 
+pub use conflict::{merge, resolve};
 pub use series::{remove, split};
 use zone::Zones;
 pub use zone::{EventTime, EventTimeKind};
@@ -139,6 +141,9 @@ pub struct EventDetail {
     pub created: String,
     /// `LAST-MODIFIED`, raw.
     pub last_modified: String,
+    /// The `RECURRENCE-ID` of the override read, absent when what was
+    /// read is the series or an entry that does not recur.
+    pub recurrence_id: Option<EventTime>,
 }
 
 /// One `ATTENDEE` of a component: who, and where they stand.
@@ -215,6 +220,8 @@ pub fn read(ical: &str, recurrence_id: &str) -> Result<EventDetail, BridgeError>
         attendees: attendees_of(component),
         created: text_of(component, IcalPropKind::Created).unwrap_or_default(),
         last_modified: text_of(component, IcalPropKind::LastModified).unwrap_or_default(),
+        recurrence_id: time_of(component, IcalPropKind::RecurrenceId)
+            .map(|time| zones.resolve(time)),
     })
 }
 
@@ -1422,8 +1429,12 @@ mod tests {
         assert_eq!(moved.start.unwrap().time, "20260112T100000");
         // The rule is the series', since an override repeats nothing.
         assert_eq!(moved.recurrence, "FREQ=WEEKLY");
+        // And it says it is the override, which a conflict on it is shown on.
+        assert_eq!(moved.recurrence_id.unwrap().time, "20260112T090000");
 
-        assert_eq!(read(&ical, "20260119T090000").unwrap().summary, "Standup");
+        let series = read(&ical, "20260119T090000").unwrap();
+        assert_eq!(series.summary, "Standup");
+        assert!(series.recurrence_id.is_none());
     }
 
     #[test]

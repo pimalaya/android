@@ -218,6 +218,7 @@
     <string name="sync_failed">Impossible de synchroniser</string>
     <string name="sync_conflicts">%1$d modification(s) en conflit avec le serveur restent locales</string>
     <string name="sync_conflicts_pending">%1$d contact(s) divergent ; résolvez-les pour synchroniser</string>
+    <string name="sync_events_conflicts_pending">%1$d entrée(s) d\'agenda divergente(s) ; résolvez-les pour synchroniser</string>
     <string name="conflict_auto_resolved">Conflit résolu automatiquement ; les modifications partent à la prochaine synchronisation</string>
     <string name="contact_diverged_pending">Des champs divergents attendent une revue</string>
     <string name="sync_busy">Attendez la fin de la synchronisation</string>
@@ -482,9 +483,19 @@
     <!-- Les deux verbes autour de l'édition d'une entrée. -->
     <string name="event_delete">Supprimer</string>
     <string name="event_delete_confirm">Supprimer cette entrée ?</string>
+    <string name="event_delete_conflict_confirm">Cette entrée a aussi été modifiée ailleurs. La supprimer, avec la version modifiée là-bas ?</string>
     <string name="event_delete_failed">Impossible de supprimer l\'entrée</string>
     <string name="event_no_calendar">Aucun calendrier où la placer</string>
     <string name="event_target_title">Ajouter au calendrier</string>
+    <string name="event_section_conflicts">Conflits</string>
+    <string name="event_conflict_occurrence">Occurrence</string>
+    <string name="event_conflict_entry">Entrée entière</string>
+    <string name="event_conflict_here">Telle que modifiée ici</string>
+    <string name="event_conflict_there">Telle que modifiée ailleurs</string>
+    <string name="event_conflict_removed">Supprimée</string>
+    <string name="event_conflict_follow">Suivre la série</string>
+    <string name="event_conflict_keep">Garder les modifications de cette occurrence</string>
+    <string name="event_conflict_other">Autre valeur</string>
     <string name="contacts_no_book">Aucun carnet d\'adresses où le placer</string>
 
     <!-- Paramètres du compte (AccountSettings). -->

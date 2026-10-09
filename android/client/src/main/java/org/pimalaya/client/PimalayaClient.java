@@ -892,7 +892,8 @@ public class PimalayaClient {
                 reply.optString("organizer"),
                 attendees,
                 reply.optString("created"),
-                reply.optString("lastModified"));
+                reply.optString("lastModified"),
+                eventTime(reply.optJSONObject("recurrenceId")));
     }
 
     /**
@@ -915,6 +916,73 @@ public class PimalayaClient {
             throw new PimalayaException("Unreadable bridge reply: expected an object");
         }
         return written;
+    }
+
+    /**
+     * Three-way merges a conflicted calendar object: the body staged here
+     * and the one its source holds, against their base (null or empty
+     * when none was agreed). Pure computation, no transport.
+     */
+    public EventMerge mergeEvent(String base, String local, String remote) {
+        JSONObject reply = object(Native.mergeEvent(base == null ? "" : base, local, remote));
+
+        JSONArray listed = reply.optJSONArray("conflicts");
+        List<EventMerge.Conflict> conflicts =
+                new ArrayList<>(listed == null ? 0 : listed.length());
+        for (int index = 0; listed != null && index < listed.length(); index++) {
+            JSONObject conflict = object(listed, index);
+            JSONArray offered = conflict.optJSONArray("choices");
+            List<EventMerge.Choice> choices =
+                    new ArrayList<>(offered == null ? 0 : offered.length());
+            for (int at = 0; offered != null && at < offered.length(); at++) {
+                JSONObject choice = object(offered, at);
+                choices.add(
+                        new EventMerge.Choice(
+                                choice.optString("side"),
+                                choice.optString("value"),
+                                eventTime(choice.optJSONObject("time")),
+                                eventTime(choice.optJSONObject("end"))));
+            }
+            conflicts.add(
+                    new EventMerge.Conflict(
+                            conflict.optInt("id"),
+                            conflict.optString("kind"),
+                            conflict.optString("component"),
+                            eventTime(conflict.optJSONObject("recurrenceId")),
+                            conflict.optString("field"),
+                            optString(conflict, "series"),
+                            choices));
+        }
+
+        return new EventMerge(string(reply, "ical"), reply.optBoolean("resolved"), conflicts);
+    }
+
+    /**
+     * The resolution of a conflicted calendar object: its merge, each
+     * conflict {@code picks} names by its id taking that side
+     * ({@link EventMerge#LOCAL} or {@link EventMerge#REMOTE}), every other
+     * the side it was pre-filled with. Pure computation, no transport.
+     */
+    public String resolveEvent(
+            String base, String local, String remote, Map<Integer, String> picks) {
+        JSONObject sides = new JSONObject();
+        try {
+            for (Map.Entry<Integer, String> pick : picks.entrySet()) {
+                sides.put(String.valueOf(pick.getKey()), pick.getValue());
+            }
+        } catch (JSONException error) {
+            throw new PimalayaException("Unwritable picks: " + error.getMessage());
+        }
+
+        String resolved =
+                Native.resolveEvent(base == null ? "" : base, local, remote, sides.toString())
+                        .trim();
+        // NOTE: an object is the bridge's error shape here, as in writeEvent.
+        if (resolved.startsWith("{")) {
+            object(resolved);
+            throw new PimalayaException("Unreadable bridge reply: expected an object");
+        }
+        return resolved;
     }
 
     /**
