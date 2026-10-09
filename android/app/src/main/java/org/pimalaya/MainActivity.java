@@ -98,6 +98,9 @@ public class MainActivity extends Activity {
     static final int STEP_CONFIG = 2;
     static final int STEP_BOOKS = 3;
 
+    /** The standard setup's outcome when some servers refused the password. */
+    static final int STEP_RESULT = 4;
+
     static final int REQUEST_CONTACTS = 1;
     private static final int REQUEST_IMPORT = 2;
     private static final int REQUEST_EXPORT = 3;
@@ -422,23 +425,34 @@ public class MainActivity extends Activity {
      */
     private void applyAuthChrome() {
         int step = authFlipper.getDisplayedChild();
-        int title;
+        // NOTE: a first run opens on the address alone, with nothing to
+        // leave for and the page's own headline in place of a title.
+        findViewById(R.id.auth_bar)
+                .setVisibility(step == STEP_EMAIL && !hasRealAccount() ? View.GONE : View.VISIBLE);
+        TextView title = findViewById(R.id.auth_title);
         if (step == STEP_EMAIL) {
-            title = hasRealAccount() ? R.string.add_account : R.string.auth_step_email;
-        } else if (step == STEP_DOMAIN) {
-            title = R.string.auth_step_domain;
+            title.setText(hasRealAccount() ? R.string.add_account : R.string.auth_step_email);
         } else if (step == STEP_CONFIG) {
-            title = R.string.auth_step_config;
+            title.setText(R.string.auth_step_config);
+        } else if (step == STEP_BOOKS) {
+            title.setText(R.string.auth_step_books);
         } else {
-            title = R.string.auth_step_books;
+            // NOTE: the domain and result steps carry their own headline.
+            title.setText("");
         }
-        ((TextView) findViewById(R.id.auth_title)).setText(title);
+    }
+
+    /** The auth flow's displayed step. */
+    int authStep() {
+        return authFlipper.getDisplayedChild();
     }
 
     /** The auth bar's back arrow, per step. */
     private void authBack() {
         int step = authFlipper.getDisplayedChild();
-        if (step == STEP_BOOKS) {
+        if (step == STEP_RESULT) {
+            onboarding.abortAuthSteps();
+        } else if (step == STEP_BOOKS) {
             // NOTE: nothing persists before the selection confirms, so
             // the books step steps back like any other.
             showAuthBack(STEP_CONFIG);
@@ -632,8 +646,10 @@ public class MainActivity extends Activity {
         findViewById(R.id.auth_back).setOnClickListener(view -> authBack());
         findViewById(R.id.auth_cancel).setOnClickListener(view -> cancelAuth());
 
-        // The continue FAB stays disabled until the field holds
-        // something plausible (an email, a server, or a connection URI).
+        onboarding.bind();
+
+        // Continue stays disabled until the field holds something
+        // plausible (an email, a server, or a connection URI).
         email.addTextChangedListener(
                 new android.text.TextWatcher() {
                     @Override
@@ -646,7 +662,7 @@ public class MainActivity extends Activity {
                     public void afterTextChanged(android.text.Editable s) {
                         if (screen == PANEL_AUTH
                                 && authFlipper.getDisplayedChild() == STEP_EMAIL) {
-                            setFabEnabled(R.id.fab, onboarding.emailSubmittable());
+                            setFabEnabled(R.id.email_continue, onboarding.emailSubmittable());
                         }
                     }
                 });
@@ -657,9 +673,18 @@ public class MainActivity extends Activity {
      * loader, the button disabled while loading.
      */
     void setAuthLoading(int buttonId, int progressId, boolean loading) {
-        android.widget.ImageButton button = findViewById(buttonId);
-        setFabEnabled(buttonId, !loading);
-        button.setImageAlpha(loading ? 0 : 255);
+        View button = findViewById(buttonId);
+        if (button instanceof android.widget.ImageButton) {
+            setFabEnabled(buttonId, !loading);
+            ((android.widget.ImageButton) button).setImageAlpha(loading ? 0 : 255);
+        } else {
+            // NOTE: a pill keeps its full tone under the loader, its
+            // label hidden rather than dimmed.
+            button.setEnabled(!loading);
+            button.setAlpha(1f);
+            ((TextView) button)
+                    .setTextColor(loading ? android.graphics.Color.TRANSPARENT : accentContrast());
+        }
         findViewById(progressId).setVisibility(loading ? View.VISIBLE : View.GONE);
     }
 
@@ -695,7 +720,7 @@ public class MainActivity extends Activity {
         // a real redirect re-enters loading right after.
         if (flipper != null
                 && screen == PANEL_AUTH
-                && authFlipper.getDisplayedChild() == STEP_CONFIG) {
+                && authFlipper.getDisplayedChild() == STEP_DOMAIN) {
             onboarding.resetConfigContinue();
         }
 
@@ -3484,13 +3509,18 @@ public class MainActivity extends Activity {
         auth.ownBar = true;
         auth.chrome =
                 () -> {
-                    android.widget.ImageButton fab = findViewById(R.id.fab);
-                    fab.setImageResource(R.drawable.ic_arrow_forward);
-                    fab.setContentDescription(getString(R.string.email_submit));
-                    fab.setVisibility(View.VISIBLE);
-                    setFabEnabled(
-                            R.id.fab,
-                            onboarding.stepReady(authFlipper.getDisplayedChild()));
+                    // NOTE: the shared FAB is the books step's alone; the
+                    // other steps carry their own full-width buttons.
+                    int step = authFlipper.getDisplayedChild();
+                    if (step == STEP_BOOKS || step == STEP_CONFIG) {
+                        android.widget.ImageButton fab = findViewById(R.id.fab);
+                        fab.setImageResource(R.drawable.ic_arrow_forward);
+                        fab.setContentDescription(getString(R.string.email_submit));
+                        fab.setVisibility(View.VISIBLE);
+                        setFabEnabled(R.id.fab, onboarding.stepReady(step));
+                    } else {
+                        onboarding.refreshStep(step);
+                    }
                     applyAuthChrome();
                 };
         auth.fab = () -> onboarding.continueStep(authFlipper.getDisplayedChild());
@@ -3748,7 +3778,9 @@ public class MainActivity extends Activity {
         padBottom(R.id.filter_content, 24, bottom);
         padBottom(R.id.deleted_list, 24, bottom);
         padBottom(R.id.source_input, 16, bottom);
-        padBottom(R.id.email_row, 16, bottom);
+        padBottom(R.id.email_actions, 16, bottom);
+        padBottom(R.id.domain_actions, 16, bottom);
+        padBottom(R.id.result_actions, 16, bottom);
         padBottom(R.id.message_view_replies, 12, bottom);
     }
 

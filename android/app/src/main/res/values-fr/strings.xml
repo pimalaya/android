@@ -3,9 +3,24 @@
 
     <string name="new_account">Nouveau compte</string>
     <string name="cancel_auth">Annuler</string>
-    <string name="welcome_value_1">Tous vos e-mails, contacts et agendas</string>
-    <string name="welcome_value_2">accessibles hors ligne, dans une vue partagée</string>
-    <string name="welcome_description">Pimalaya trouve automatiquement les paramètres de votre serveur ; saisissez simplement votre adresse e-mail</string>
+    <string name="welcome_title">Vos e-mails, contacts et agendas, hors ligne.</string>
+    <string name="welcome_description">Saisissez votre adresse e-mail. Pimalaya trouve les réglages de votre serveur pour vous.</string>
+    <string name="setup_advanced_link">Configuration avancée</string>
+    <string name="setup_advanced_different">Mots de passe différents ? Configuration avancée</string>
+    <string name="domain_title_simple">Que voulez-vous sur ce téléphone ?</string>
+    <string name="password_show">Afficher le mot de passe</string>
+    <string name="password_hide">Masquer le mot de passe</string>
+    <string name="password_shared">Utilisé pour tout ce que vous avez choisi ci-dessus.</string>
+    <string name="password_wrong">Mot de passe incorrect</string>
+    <string name="browser_note">Votre fournisseur vous connecte sur sa propre page. Vous approuvez une seule fois, pour tout ce que vous avez choisi.</string>
+    <string name="browser_continue">Continuer dans le navigateur</string>
+    <string name="result_title">Presque fini</string>
+    <string name="result_message">Non connecté : %1$s.</string>
+    <string name="result_connected">Connecté</string>
+    <string name="result_refused">Mot de passe refusé</string>
+    <string name="result_later">Vous pourrez connecter le reste plus tard en ajoutant de nouveau cette adresse.</string>
+    <string name="result_continue">Continuer sans %1$s</string>
+    <string name="result_advanced">Configurer %1$s en mode avancé</string>
     <string name="email_hint">Adresse e-mail</string>
     <string name="auth_step_email">Bienvenue</string>
     <string name="auth_step_domain">Que connecter</string>
@@ -17,14 +32,11 @@
 
     <string name="domain_title">Que souhaitez-vous connecter ?</string>
     <string name="domain_message">Choisissez comment connecter chaque domaine. Désactivez ce que vous ne voulez pas sur cet appareil ; vous pourrez l\'ajouter plus tard.</string>
-    <string name="domain_message_simple">Activez ce que vous voulez sur cet appareil. Pimalaya choisit les réglages et vous connecte ; vous pourrez ajouter le reste plus tard.</string>
     <string name="domain_none">Rien n\'a été trouvé pour cette adresse. Vous pouvez saisir les paramètres du serveur vous-même.</string>
     <string name="domain_manual">Saisir les paramètres manuellement</string>
     <string name="domain_connected">Déjà connecté</string>
-    <string name="domain_advanced_only">Nécessite la configuration avancée</string>
     <string name="send_mail">Envoyer des e-mails</string>
     <string name="send_mail_none">Ne pas envoyer depuis ce compte</string>
-    <string name="send_mail_advanced_only">Rien n\'a été trouvé pour envoyer ; la configuration avancée permet d\'en saisir un</string>
     <string name="domain_mail">E-mails</string>
     <string name="domain_contacts">Contacts</string>
     <string name="domain_calendar">Agenda</string>
@@ -142,9 +154,6 @@
     <string name="manual_submit_server">Serveur d\'envoi (hôte ou hôte:port)</string>
     <string name="manual_submit_message">Le serveur par lequel ce compte envoie. TLS implicite, port 465 sauf indication contraire.</string>
 
-    <string name="setup_choice_title">Configuration du compte</string>
-    <string name="setup_choice_message">Pimalaya peut tout configurer pour vous, ou vous laisser choisir les serveurs, la connexion et ce qui est synchronisé.</string>
-    <string name="setup_simple">Standard</string>
     <string name="setup_advanced">Avancé</string>
     <string name="setup_simple_unavailable">Cette adresse se connecte d\'une manière que la configuration standard ne couvre pas. La configuration avancée peut la connecter.</string>
 

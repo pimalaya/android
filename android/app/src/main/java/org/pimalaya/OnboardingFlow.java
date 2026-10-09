@@ -6,6 +6,8 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -82,12 +84,13 @@ final class OnboardingFlow {
      */
     private String matchedProvider;
 
-    /** The setup-mode choice: standard (true), advanced (false), or
-     *  still being asked (null). */
-    private Boolean setupMode;
-
-    /** A config step waiting on the setup-mode choice. */
-    private Runnable pendingConfigStep;
+    /**
+     * Whether the advanced setup is running: a section of configurations
+     * per domain and a prompt per sign-in. Off by default, the standard
+     * setup being the path; the links on the address and domain steps
+     * turn it on.
+     */
+    private boolean advanced;
 
     /** The just-connected account's addressbooks. */
     private List<Addressbook> pendingBooks;
@@ -98,9 +101,89 @@ final class OnboardingFlow {
     /** The books step's subscribe checkboxes. */
     private List<BookChoice> bookChoices = new ArrayList<>();
 
+    /** Whether the one password is being tried against the servers. */
+    private boolean verifying;
+
     OnboardingFlow(MainActivity host, OauthFlow oauth) {
         this.host = host;
         this.oauth = oauth;
+    }
+
+    /** Wires the steps' own buttons and fields, once the views exist. */
+    void bind() {
+        EditText email = host.findViewById(R.id.email_input);
+        EditText password = host.findViewById(R.id.domain_password);
+
+        for (int id : new int[] {R.id.email_continue, R.id.domain_connect, R.id.result_continue}) {
+            ((TextView) host.findViewById(id)).setTextColor(host.accentContrast());
+        }
+
+        host.findViewById(R.id.email_continue)
+                .setOnClickListener(
+                        view -> {
+                            advanced = false;
+                            submitEmail();
+                        });
+        host.findViewById(R.id.email_advanced)
+                .setOnClickListener(
+                        view -> {
+                            advanced = true;
+                            if (emailSubmittable()) {
+                                submitEmail();
+                            } else {
+                                email.requestFocus();
+                            }
+                        });
+        email.setOnEditorActionListener(
+                (view, action, event) -> {
+                    if (emailSubmittable()) {
+                        submitEmail();
+                    }
+                    return true;
+                });
+
+        host.findViewById(R.id.domain_connect).setOnClickListener(view -> confirmSetup());
+        host.findViewById(R.id.domain_advanced).setOnClickListener(view -> switchToAdvanced());
+        password.setOnEditorActionListener(
+                (view, action, event) -> {
+                    if (host.findViewById(R.id.domain_connect).isEnabled()) {
+                        confirmSetup();
+                    }
+                    return true;
+                });
+        password.addTextChangedListener(
+                new android.text.TextWatcher() {
+                    @Override
+                    public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+
+                    @Override
+                    public void onTextChanged(CharSequence s, int a, int b, int c) {}
+
+                    @Override
+                    public void afterTextChanged(android.text.Editable s) {
+                        showPasswordError(false);
+                        if (!verifying) {
+                            resetSetupContinue();
+                        }
+                    }
+                });
+
+        android.widget.ImageButton toggle = host.findViewById(R.id.domain_password_toggle);
+        toggle.setOnClickListener(
+                view -> {
+                    boolean shown =
+                            password.getTransformationMethod()
+                                    instanceof android.text.method.PasswordTransformationMethod;
+                    password.setTransformationMethod(
+                            shown
+                                    ? null
+                                    : android.text.method.PasswordTransformationMethod
+                                            .getInstance());
+                    password.setSelection(password.getText().length());
+                    toggle.setImageResource(shown ? R.drawable.ic_visibility_off : R.drawable.ic_visibility);
+                    toggle.setContentDescription(
+                            host.getString(shown ? R.string.password_hide : R.string.password_show));
+                });
     }
 
     /** Resets the flow to its first step and shows it. */
@@ -109,41 +192,36 @@ final class OnboardingFlow {
         searchedConfigs = new ArrayList<>();
         pendingDomain = PimDomain.CONTACTS;
         matchedProvider = null;
+        advanced = false;
+        verifying = false;
         setups.clear();
         oauthGroup.clear();
         connectedAccount = null;
         ((EditText) host.findViewById(R.id.email_input)).setText("");
+        ((EditText) host.findViewById(R.id.domain_password)).setText("");
+        host.setAuthLoading(R.id.email_continue, R.id.email_progress, false);
+        host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, false);
         host.showAuth(MainActivity.STEP_EMAIL);
     }
 
     /** The shared FAB's continue action for the given auth step. */
     void continueStep(int step) {
-        switch (step) {
-            case MainActivity.STEP_EMAIL:
-                submitEmail();
-                break;
-            case MainActivity.STEP_DOMAIN:
-                confirmSetup();
-                break;
-            case MainActivity.STEP_BOOKS:
-                confirmBooks();
-                break;
-            default:
-                break;
+        if (step == MainActivity.STEP_BOOKS) {
+            confirmBooks();
         }
     }
 
     /** Whether the given auth step's continue is available. */
     boolean stepReady(int step) {
-        switch (step) {
-            case MainActivity.STEP_EMAIL:
-                return emailSubmittable();
-            case MainActivity.STEP_DOMAIN:
-                return setupReady();
-            case MainActivity.STEP_BOOKS:
-                return booksAnyChecked();
-            default:
-                return false;
+        return step == MainActivity.STEP_BOOKS && booksAnyChecked();
+    }
+
+    /** Brings a step's own buttons in line with its state, on entering it. */
+    void refreshStep(int step) {
+        if (step == MainActivity.STEP_EMAIL) {
+            host.setFabEnabled(R.id.email_continue, emailSubmittable());
+        } else if (step == MainActivity.STEP_DOMAIN && !verifying) {
+            resetSetupContinue();
         }
     }
 
@@ -162,57 +240,21 @@ final class OnboardingFlow {
      * knows how to turn an address into servers, and when it turns up nothing
      * the manual server entry is offered from the next step, where it reads as
      * a fallback rather than as a thing to have known in advance.
+     *
+     * <p>No question about how much to ask comes first: the standard setup is
+     * the path, and the advanced one is a link beside it.
      */
     private void submitEmail() {
         host.hideKeyboard();
 
         pendingEmail =
                 ((EditText) host.findViewById(R.id.email_input)).getText().toString().trim();
-        askSetupMode();
         search();
-    }
-
-    /**
-     * Asks whether to set the account up the standard way (a switch per
-     * domain, the best sign-in of the best configuration found for
-     * it, every addressbook, phone mirroring) or step by step, while the discovery already runs
-     * behind; the flow proceeds once both the choice and the discovery
-     * are in.
-     */
-    private void askSetupMode() {
-        setupMode = null;
-        pendingConfigStep = null;
-
-        new AlertDialog.Builder(host)
-                .setTitle(R.string.setup_choice_title)
-                .setMessage(R.string.setup_choice_message)
-                .setCancelable(false)
-                .setPositiveButton(R.string.setup_simple, (dialog, which) -> chooseSetup(true))
-                .setNegativeButton(R.string.setup_advanced, (dialog, which) -> chooseSetup(false))
-                .show();
-    }
-
-    private void chooseSetup(boolean simple) {
-        setupMode = simple;
-        if (pendingConfigStep != null) {
-            Runnable step = pendingConfigStep;
-            pendingConfigStep = null;
-            step.run();
-        }
-    }
-
-    /** Runs a config step now, or once the setup choice is made. */
-    private void deliverConfigs(Runnable step) {
-        if (setupMode == null) {
-            pendingConfigStep = step;
-        } else {
-            step.run();
-        }
     }
 
     /** True inside a standard (one-tap) account setup. */
     private boolean simpleSetup() {
-        return setupMode == Boolean.TRUE;
+        return !advanced;
     }
 
     /**
@@ -228,7 +270,7 @@ final class OnboardingFlow {
      * falls back to the manual server rows.
      */
     private void search() {
-        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        host.setAuthLoading(R.id.email_continue, R.id.email_progress, true);
 
         host.io.execute(
                 () -> {
@@ -271,18 +313,16 @@ final class OnboardingFlow {
                     Exception searchFailure = failure;
                     host.main.post(
                             () -> {
-                                host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
+                                host.setAuthLoading(
+                                        R.id.email_continue, R.id.email_progress, false);
                                 if (searchFailure != null && found.isEmpty() && matched == null) {
-                                    deliverConfigs(
-                                            () ->
-                                                    host.showError(
-                                                            searchFailure,
-                                                            R.string.discover_failed));
+                                    host.showError(searchFailure, R.string.discover_failed);
                                     return;
                                 }
                                 searchedConfigs = found;
                                 matchedProvider = matched;
-                                deliverConfigs(this::showSetup);
+                                setups.clear();
+                                showSetup();
                             });
                 });
     }
@@ -516,29 +556,27 @@ final class OnboardingFlow {
     }
 
     /**
-     * Fills the setup screen: every domain this address offers, as a switch
-     * carrying the domain's name and glyph, and under it, in the advanced
-     * setup, its configurations and a button that picks one.
+     * Fills the setup screen with every domain this address offers.
      *
-     * <p>One page rather than a domain step and then a configuration step. The
-     * stepper hid what was being configured, because a screen of protocols with
-     * no domain on it could have belonged to any of them; here the domain is
-     * the heading above its own options and there is nothing to remember
-     * between screens.
+     * <p>The standard setup shows one card, a row per domain it can connect,
+     * each ticked: it answers the configuration question itself, with the best
+     * sign-in of the best configuration found ({@link #standardOption}), so
+     * what is left is what the user actually decides, which of the three to
+     * keep on this phone. A domain it cannot connect is not shown. Under the
+     * card, the one password every password domain shares, or a word on the
+     * browser hop.
      *
-     * <p>The standard setup shows the headings alone. It answers the
-     * configuration question itself, with the best sign-in of the best
-     * configuration found ({@link #standardOption}), so a screen listing
-     * protocols under each switch would be asking again the question the setup
-     * choice just declined. What is left is what the user actually decides:
-     * which of the three to keep on this device.
-     *
-     * <p>The advanced setup keeps the options: each domain takes one or none,
-     * the radio deselects, so an address that offers calendars is not obliged
-     * to connect them.
+     * <p>The advanced setup shows a switch per domain and its configurations
+     * under it: each domain takes one or none, the radio deselects, so an
+     * address that offers calendars is not obliged to connect them. Reached
+     * from the standard screen, it keeps the domains that were ticked and the
+     * configuration the standard setup picked for each.
      */
     private void showSetup() {
         ((TextView) host.findViewById(R.id.domain_email)).setText(pendingEmail);
+
+        Map<PimDomain, DomainSetup> previous = new java.util.EnumMap<>(PimDomain.class);
+        previous.putAll(setups);
 
         LinearLayout container = host.findViewById(R.id.domain_container);
         container.removeAllViews();
@@ -554,8 +592,14 @@ final class OnboardingFlow {
             discovered |= !setup.options.isEmpty();
             if (simpleSetup()) {
                 setup.selected = standardOption(setup);
+                setup.enabled = setup.selected != null;
             } else {
                 setup.options.add(manualOption());
+                DomainSetup before = previous.get(domain);
+                if (before != null && before.enabled && before.selected != null) {
+                    setup.enabled = true;
+                    setup.selected = sameOption(setup, before.selected);
+                }
             }
             if (domain == PimDomain.MAIL) {
                 setup.submitOptions.addAll(submissionOptions());
@@ -607,7 +651,9 @@ final class OnboardingFlow {
             }
             connectable |= connectable(setup);
             setups.put(domain, setup);
-            container.addView(sectionOf(setup, existing != null && existing.covers(domain)));
+            if (!simpleSetup()) {
+                container.addView(sectionOf(setup, existing != null && existing.covers(domain)));
+            }
         }
 
         if (simpleSetup() && !connectable) {
@@ -615,14 +661,144 @@ final class OnboardingFlow {
             return;
         }
 
-        int message = R.string.domain_none;
-        if (discovered) {
-            message = simpleSetup() ? R.string.domain_message_simple : R.string.domain_message;
+        TextView heading = host.findViewById(R.id.domain_heading);
+        TextView message = host.findViewById(R.id.domain_message);
+        if (simpleSetup()) {
+            heading.setText(R.string.domain_title_simple);
+            message.setVisibility(View.GONE);
+            container.addView(domainCard(existing));
+        } else {
+            heading.setText(R.string.domain_title);
+            message.setText(discovered ? R.string.domain_message : R.string.domain_none);
+            message.setVisibility(View.VISIBLE);
         }
-        ((TextView) host.findViewById(R.id.domain_message)).setText(message);
 
-        resetSetupContinue();
+        showPasswordError(false);
         host.showAuth(MainActivity.STEP_DOMAIN);
+        resetSetupContinue();
+    }
+
+    /** The option of a fresh setup reading the same as one picked before. */
+    private SetupOption sameOption(DomainSetup setup, SetupOption picked) {
+        String label = optionLabel(picked);
+        for (SetupOption option : setup.options) {
+            if (optionLabel(option).equals(label)) {
+                return option;
+            }
+        }
+        return null;
+    }
+
+    /** Leaves the standard setup for the advanced one, keeping the ticks. */
+    private void switchToAdvanced() {
+        advanced = true;
+        host.hideKeyboard();
+        showSetup();
+    }
+
+    /**
+     * The standard setup's card: a row per domain it can connect, its glyph
+     * on a tile, its name, and a tick.
+     */
+    private View domainCard(AccountEntry existing) {
+        LinearLayout card = new LinearLayout(host);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.card_group);
+        card.setClipToOutline(true);
+
+        for (DomainSetup setup : setups.values()) {
+            if (!connectable(setup)) {
+                continue;
+            }
+            if (card.getChildCount() > 0) {
+                card.addView(rowDivider());
+            }
+            CheckBox tick = new CheckBox(host);
+            tick.setChecked(setup.enabled);
+            tick.setClickable(false);
+            tick.setFocusable(false);
+
+            String status =
+                    existing != null && existing.covers(setup.domain)
+                            ? host.getString(R.string.domain_connected)
+                            : null;
+            LinearLayout row = domainRow(setup.domain, status, false, tick);
+            row.setOnClickListener(
+                    view -> {
+                        if (verifying) {
+                            return;
+                        }
+                        setup.enabled = !setup.enabled;
+                        tick.setChecked(setup.enabled);
+                        resetSetupContinue();
+                    });
+            card.addView(row);
+        }
+        return card;
+    }
+
+    /**
+     * One domain's row inside a card: its glyph on a tile, its name over an
+     * optional status line, and a trailing view.
+     */
+    private LinearLayout domainRow(PimDomain domain, String status, boolean error, View trailing) {
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(host.ui.dp(60));
+        row.setPadding(host.ui.dp(14), host.ui.dp(8), host.ui.dp(8), host.ui.dp(8));
+        TypedValue ripple = new TypedValue();
+        host.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
+        row.setForeground(host.getDrawable(ripple.resourceId));
+
+        android.widget.ImageView glyph = new android.widget.ImageView(host);
+        glyph.setImageResource(domain.icon);
+        glyph.setBackgroundResource(R.drawable.tile_page);
+        glyph.setScaleType(android.widget.ImageView.ScaleType.CENTER_INSIDE);
+        glyph.setPadding(host.ui.dp(6), host.ui.dp(6), host.ui.dp(6), host.ui.dp(6));
+        glyph.setImageTintList(
+                android.content.res.ColorStateList.valueOf(
+                        host.ui.resolveColor(android.R.attr.textColorPrimary)));
+        LinearLayout.LayoutParams glyphParams =
+                new LinearLayout.LayoutParams(host.ui.dp(32), host.ui.dp(32));
+        glyphParams.setMarginEnd(host.ui.dp(14));
+        row.addView(glyph, glyphParams);
+
+        LinearLayout text = new LinearLayout(host);
+        text.setOrientation(LinearLayout.VERTICAL);
+        TextView name = new TextView(host);
+        name.setText(domain.label);
+        name.setTextSize(16);
+        name.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
+        text.addView(name);
+        if (status != null) {
+            TextView line = new TextView(host);
+            line.setText(status);
+            line.setTextSize(13);
+            line.setTextColor(
+                    host.ui.resolveColor(
+                            error ? android.R.attr.colorError : android.R.attr.textColorSecondary));
+            text.addView(line);
+        }
+        row.addView(
+                text,
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        if (trailing != null) {
+            row.addView(trailing);
+        }
+        return row;
+    }
+
+    /** The line between two rows of a card, inset past the glyph. */
+    private View rowDivider() {
+        View divider = new View(host);
+        divider.setBackgroundResource(R.color.divider_light);
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1);
+        params.setMarginStart(host.ui.dp(60));
+        divider.setLayoutParams(params);
+        return divider;
     }
 
     /**
@@ -689,13 +865,13 @@ final class OnboardingFlow {
      */
     private void offerAdvanced() {
         new AlertDialog.Builder(host)
-                .setTitle(R.string.setup_choice_title)
+                .setTitle(R.string.setup_advanced_link)
                 .setMessage(R.string.setup_simple_unavailable)
                 .setCancelable(false)
                 .setPositiveButton(
                         R.string.setup_advanced,
                         (dialog, which) -> {
-                            setupMode = Boolean.FALSE;
+                            advanced = true;
                             showSetup();
                         })
                 // NOTE: the flow is still on the address step, which is where
@@ -705,37 +881,29 @@ final class OnboardingFlow {
     }
 
     /**
-     * One domain's section: a switch carrying its glyph and its name, and the
-     * configurations under it.
+     * One domain's section in the advanced setup: a switch carrying its glyph
+     * and its name, and the configurations under it, manual entry last.
      *
-     * <p>Switched off to begin with, because an address that offers three
-     * domains is not a request for three, and starting them all on makes the
-     * screen a list of things to switch off rather than a choice to make. A
-     * domain the running setup cannot connect is switched off for good, and
-     * says which setup can.
+     * <p>Switched off to begin with, unless the standard screen it came from
+     * had it ticked: an address that offers three domains is not a request
+     * for three.
      */
     private View sectionOf(DomainSetup setup, boolean alreadyConnected) {
         LinearLayout section = new LinearLayout(host);
         section.setOrientation(LinearLayout.VERTICAL);
         section.setPadding(0, host.ui.dp(8), 0, host.ui.dp(16));
 
-        boolean connectable = connectable(setup);
-
         android.widget.Switch toggle = new android.widget.Switch(host);
         toggle.setText(host.getString(setup.domain.label));
         toggle.setTextSize(16);
         toggle.setTypeface(toggle.getTypeface(), android.graphics.Typeface.BOLD);
         toggle.setChecked(setup.enabled);
-        toggle.setEnabled(connectable);
         toggle.setPadding(0, host.ui.dp(8), 0, host.ui.dp(4));
         toggle.setCompoundDrawablesRelativeWithIntrinsicBounds(setup.domain.icon, 0, 0, 0);
         toggle.setCompoundDrawablePadding(host.ui.dp(12));
         toggle.setCompoundDrawableTintList(
                 android.content.res.ColorStateList.valueOf(
-                        host.ui.resolveColor(
-                                connectable
-                                        ? android.R.attr.textColorPrimary
-                                        : android.R.attr.textColorSecondary)));
+                        host.ui.resolveColor(android.R.attr.textColorPrimary)));
         toggle.setOnCheckedChangeListener(
                 (view, checked) -> {
                     setup.enabled = checked;
@@ -747,30 +915,22 @@ final class OnboardingFlow {
         if (alreadyConnected) {
             section.addView(note(R.string.domain_connected));
         }
-        if (!connectable) {
-            section.addView(note(R.string.domain_advanced_only));
-        }
 
-        // NOTE: the options are the advanced setup's alone. The standard setup
-        // holds the same list, since that is where its password sign-in comes
-        // from, and puts none of it on the screen.
-        if (!simpleSetup()) {
-            for (SetupOption option : setup.options) {
-                android.widget.RadioButton button = new android.widget.RadioButton(host);
-                button.setText(optionLabel(option));
-                button.setTextSize(15);
-                button.setPadding(host.ui.dp(8), host.ui.dp(10), host.ui.dp(8), host.ui.dp(10));
-                // NOTE: not a RadioGroup, so the group can start with nothing
-                // picked; a RadioGroup has no empty state to open in.
-                button.setOnClickListener(
-                        view -> {
-                            setup.selected = option;
-                            renderSection(setup);
-                            resetSetupContinue();
-                        });
-                setup.buttons.add(button);
-                section.addView(button);
-            }
+        for (SetupOption option : setup.options) {
+            android.widget.RadioButton button = new android.widget.RadioButton(host);
+            button.setText(optionLabel(option));
+            button.setTextSize(15);
+            button.setPadding(host.ui.dp(8), host.ui.dp(10), host.ui.dp(8), host.ui.dp(10));
+            // NOTE: not a RadioGroup, so the group can start with nothing
+            // picked; a RadioGroup has no empty state to open in.
+            button.setOnClickListener(
+                    view -> {
+                        setup.selected = option;
+                        renderSection(setup);
+                        resetSetupContinue();
+                    });
+            setup.buttons.add(button);
+            section.addView(button);
         }
 
         if (setup.domain == PimDomain.MAIL) {
@@ -782,42 +942,15 @@ final class OnboardingFlow {
     }
 
     /**
-     * Draws where mail is sent from, in the words of the setup running.
+     * Draws where mail is sent from, in the advanced setup: SMTP by name,
+     * what was discovered, manual entry and a row for not sending at all.
      *
-     * <p>The standard setup says <em>send mail</em> and nothing else: it
-     * declined the protocol question, so naming SMTP here would be asking
-     * it again under a different heading. The advanced setup asked it, so
-     * it says SMTP, lists what was discovered, and offers manual entry
-     * and a row for not sending at all.
-     *
-     * <p>An address that publishes nothing to send through leaves the
-     * standard switch off and out of reach, naming the setup that can
-     * connect it: the same shape a domain out of reach already uses, and
-     * the reason it is a shape rather than an error is that reading mail
-     * still works.
+     * <p>The standard setup draws nothing: it connects the best endpoint
+     * found with mail ({@link #firstOffered}), and an address that publishes
+     * none is saved without one, a sender being addable from the account's
+     * settings.
      */
     private void addSubmission(LinearLayout section, DomainSetup setup) {
-        if (simpleSetup()) {
-            android.widget.Switch sends = new android.widget.Switch(host);
-            sends.setText(R.string.send_mail);
-            sends.setTextSize(15);
-            sends.setPadding(host.ui.dp(8), host.ui.dp(10), host.ui.dp(8), host.ui.dp(4));
-            SubmitOption best = firstOffered(setup);
-            sends.setEnabled(best != null);
-            sends.setChecked(setup.submitSelected != null);
-            sends.setOnCheckedChangeListener(
-                    (view, checked) -> setup.submitSelected = checked ? best : null);
-            setup.submitViews.add(sends);
-            section.addView(sends);
-
-            if (best == null) {
-                TextView reach = note(R.string.send_mail_advanced_only);
-                setup.submitViews.add(reach);
-                section.addView(reach);
-            }
-            return;
-        }
-
         TextView heading = note(R.string.send_mail_advanced);
         setup.submitViews.add(heading);
         section.addView(heading);
@@ -968,8 +1101,10 @@ final class OnboardingFlow {
     }
 
     /**
-     * Continue: available once at least one domain is on and every domain
-     * that is on knows what to connect to.
+     * Brings the domain step's buttons in line with the plan: Continue
+     * available once at least one domain is on and every domain that is on
+     * knows what to connect to, and, in the standard setup, the shared
+     * password typed when one is asked for.
      *
      * <p>Nothing is signed in to yet. What the screen collects is the plan,
      * and the interactions it needs are worked out from the whole plan at
@@ -977,8 +1112,36 @@ final class OnboardingFlow {
      * authorization server cost one browser hop rather than two.
      */
     private void resetSetupContinue() {
-        host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
-        host.setFabEnabled(R.id.fab, setupReady());
+        host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, false);
+
+        boolean password = !sharedPassword().isEmpty();
+        boolean browser = false;
+        for (DomainSetup setup : setups.values()) {
+            browser |= setup.ready() && setup.selected.isOauth();
+        }
+
+        boolean simple = simpleSetup();
+        host.findViewById(R.id.domain_password_block)
+                .setVisibility(simple && password ? View.VISIBLE : View.GONE);
+        host.findViewById(R.id.domain_browser_note)
+                .setVisibility(simple && !password && browser ? View.VISIBLE : View.GONE);
+
+        Button connect = host.findViewById(R.id.domain_connect);
+        if (!simple) {
+            connect.setText(R.string.email_submit);
+        } else if (!password && browser) {
+            connect.setText(R.string.browser_continue);
+        } else {
+            connect.setText(R.string.password_submit);
+        }
+
+        TextView link = host.findViewById(R.id.domain_advanced);
+        link.setVisibility(simple ? View.VISIBLE : View.GONE);
+        link.setText(password ? R.string.setup_advanced_different : R.string.setup_advanced_link);
+
+        boolean typed =
+                ((EditText) host.findViewById(R.id.domain_password)).getText().length() > 0;
+        host.setFabEnabled(R.id.domain_connect, setupReady() && (!simple || !password || typed));
     }
 
     private boolean setupReady() {
@@ -995,10 +1158,56 @@ final class OnboardingFlow {
         return any;
     }
 
-    /** The config Continue back to idle. */
+    /**
+     * Puts the running step's continue on its loader: the books step's
+     * FAB, or the domain step's button everywhere else.
+     */
+    private void busy() {
+        if (host.authStep() == MainActivity.STEP_BOOKS) {
+            host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        } else {
+            host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
+        }
+    }
+
+    /** The domain step's Continue back to idle. */
     void resetConfigContinue() {
-        host.setAuthLoading(R.id.fab, R.id.fab_progress, false);
-        host.setFabEnabled(R.id.fab, setupReady());
+        if (!verifying) {
+            resetSetupContinue();
+        }
+    }
+
+    /**
+     * The ticked domains the standard setup's one password signs in to:
+     * every one whose chosen sign-in is a password under a known login.
+     *
+     * <p>A password option with no login, as when a bare domain was typed
+     * rather than an address, keeps its own prompt in the sign-in sequence.
+     */
+    private List<DomainSetup> sharedPassword() {
+        List<DomainSetup> shared = new ArrayList<>();
+        if (!simpleSetup()) {
+            return shared;
+        }
+        for (DomainSetup setup : setups.values()) {
+            if (setup.ready()
+                    && setup.selected.method != null
+                    && setup.selected.method.type == AuthMethod.Type.PASSWORD
+                    && setup.selected.login != null
+                    && !setup.selected.login.isEmpty()) {
+                shared.add(setup);
+            }
+        }
+        return shared;
+    }
+
+    /** Shows the wrong-password line in place of the field's note, or restores it. */
+    private void showPasswordError(boolean wrong) {
+        TextView note = host.findViewById(R.id.domain_password_note);
+        note.setText(wrong ? R.string.password_wrong : R.string.password_shared);
+        note.setTextColor(
+                host.ui.resolveColor(
+                        wrong ? android.R.attr.colorError : android.R.attr.textColorSecondary));
     }
 
     /**
@@ -1281,7 +1490,9 @@ final class OnboardingFlow {
         List<AuthStep> steps = new ArrayList<>();
 
         for (DomainSetup setup : setups.values()) {
-            if (!setup.ready()) {
+            // NOTE: a domain the shared password already signed in to has
+            // nothing left to ask.
+            if (!setup.ready() || setup.credential != null) {
                 continue;
             }
             SetupOption option = setup.selected;
@@ -1320,12 +1531,13 @@ final class OnboardingFlow {
     void abortAuthSteps() {
         authSteps = null;
         authStepIndex = 0;
+        verifying = false;
         oauthGroup.clear();
         for (DomainSetup setup : setups.values()) {
             setup.credential = null;
         }
-        resetSetupContinue();
         host.showAuth(MainActivity.STEP_DOMAIN);
+        resetSetupContinue();
     }
 
     /** Runs the next planned interaction, or finishes when there are none. */
@@ -1738,13 +1950,224 @@ final class OnboardingFlow {
      * account, and the contacts domain adds its address book selection.
      */
     private void confirmSetup() {
+        host.hideKeyboard();
         connectedEmail = pendingEmail;
         for (DomainSetup setup : setups.values()) {
             setup.credential = null;
         }
+        List<DomainSetup> shared = sharedPassword();
+        if (shared.isEmpty()) {
+            runSignIns();
+        } else {
+            verifyPassword(shared);
+        }
+    }
+
+    /** Plans and runs the sign-ins the domains still owe, then commits. */
+    private void runSignIns() {
         authSteps = planAuthSteps();
         authStepIndex = 0;
         runNextAuthStep();
+    }
+
+    /**
+     * Tries the standard setup's one password against every domain it covers,
+     * side by side, and reports per domain.
+     *
+     * <p>Every server accepting moves on to whatever else the plan owes (a
+     * browser grant for a domain that signs in that way). Every server
+     * refusing it says so on the field and saves nothing. Some refusing is
+     * the result step's to settle: continue without them, or set them up in
+     * the advanced setup.
+     */
+    private void verifyPassword(List<DomainSetup> shared) {
+        String password =
+                ((EditText) host.findViewById(R.id.domain_password)).getText().toString();
+        verifying = true;
+        showPasswordError(false);
+        host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
+
+        // NOTE: a pool of its own, one thread per domain and one waiting on
+        // them: the shared io executor runs one task at a time.
+        java.util.concurrent.ExecutorService pool =
+                java.util.concurrent.Executors.newFixedThreadPool(shared.size() + 1);
+        Map<PimDomain, java.util.concurrent.Future<Exception>> probes =
+                new java.util.EnumMap<>(PimDomain.class);
+        for (DomainSetup setup : shared) {
+            Account account = new Account(setup.selected.baseUrl, setup.selected.login, password);
+            probes.put(setup.domain, pool.submit(() -> probe(setup.domain, account)));
+        }
+
+        pool.execute(
+                () -> {
+                    Map<PimDomain, Exception> refused = new java.util.EnumMap<>(PimDomain.class);
+                    for (Map.Entry<PimDomain, java.util.concurrent.Future<Exception>> probe :
+                            probes.entrySet()) {
+                        Exception failure;
+                        try {
+                            failure = probe.getValue().get();
+                        } catch (Exception error) {
+                            failure = error;
+                        }
+                        if (failure != null) {
+                            refused.put(probe.getKey(), failure);
+                        }
+                    }
+                    host.main.post(() -> verified(shared, password, refused));
+                    pool.shutdown();
+                });
+    }
+
+    /** The one password's outcome, back on the main thread. */
+    private void verified(
+            List<DomainSetup> shared, String password, Map<PimDomain, Exception> refused) {
+        if (!verifying) {
+            return;
+        }
+        verifying = false;
+
+        for (DomainSetup setup : shared) {
+            if (!refused.containsKey(setup.domain)) {
+                setup.baseUrl = setup.selected.baseUrl;
+                setup.credential = AccountCredential.password(setup.selected.login, password);
+            }
+        }
+
+        if (refused.isEmpty()) {
+            runSignIns();
+            return;
+        }
+
+        if (refused.size() == shared.size()) {
+            resetSetupContinue();
+            for (Exception failure : refused.values()) {
+                if (!wrongPassword(failure)) {
+                    host.showError(failure, R.string.connect_failed);
+                    return;
+                }
+            }
+            showPasswordError(true);
+            return;
+        }
+
+        showResult(shared, refused);
+    }
+
+    /**
+     * Signs in to one domain the way its first sync will, and reports what
+     * went wrong, null when nothing did: the mail session opens and
+     * authenticates, the address books and calendars list.
+     */
+    private Exception probe(PimDomain domain, Account account) {
+        try {
+            switch (domain) {
+                case MAIL:
+                    try (org.pimalaya.client.MailSession session =
+                            PimalayaClient.openMail(account)) {
+                        return null;
+                    }
+                case CONTACTS:
+                    try (Transport transport = new Transport()) {
+                        host.client.listAddressbooks(transport, account);
+                    }
+                    return null;
+                default:
+                    try (Transport transport = new Transport()) {
+                        host.client.listCalendars(transport, account);
+                    }
+                    return null;
+            }
+        } catch (Exception error) {
+            Log.w("pimalaya", "password check failed for " + domain.id, error);
+            return error;
+        }
+    }
+
+    /** Whether a failure is the server refusing the credential. */
+    private static boolean wrongPassword(Exception failure) {
+        if (!(failure instanceof org.pimalaya.client.PimalayaException)) {
+            return false;
+        }
+        Integer status = ((org.pimalaya.client.PimalayaException) failure).status;
+        return status != null && (status == 401 || status == 403);
+    }
+
+    /**
+     * The result step: the one password reached some domains and not
+     * others. A row per domain it was tried on, connected or not, and the
+     * two ways on.
+     */
+    private void showResult(List<DomainSetup> shared, Map<PimDomain, Exception> refused) {
+        ((TextView) host.findViewById(R.id.result_email)).setText(pendingEmail);
+
+        List<String> names = new ArrayList<>();
+        for (PimDomain domain : refused.keySet()) {
+            names.add(host.getString(domain.label).toLowerCase(java.util.Locale.getDefault()));
+        }
+        String named = String.join(", ", names);
+        ((TextView) host.findViewById(R.id.result_message))
+                .setText(host.getString(R.string.result_message, named));
+
+        LinearLayout container = host.findViewById(R.id.result_container);
+        container.removeAllViews();
+        LinearLayout card = new LinearLayout(host);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackgroundResource(R.drawable.card_group);
+        card.setClipToOutline(true);
+        for (DomainSetup setup : shared) {
+            Exception failure = refused.get(setup.domain);
+            android.widget.ImageView mark = new android.widget.ImageView(host);
+            mark.setImageResource(failure == null ? R.drawable.ic_check : R.drawable.ic_error);
+            mark.setImageTintList(
+                    android.content.res.ColorStateList.valueOf(
+                            host.ui.resolveColor(
+                                    failure == null
+                                            ? android.R.attr.colorAccent
+                                            : android.R.attr.colorError)));
+            mark.setPadding(host.ui.dp(12), 0, host.ui.dp(12), 0);
+            String status;
+            if (failure == null) {
+                status = host.getString(R.string.result_connected);
+            } else if (wrongPassword(failure)) {
+                status = host.getString(R.string.result_refused);
+            } else {
+                status = host.getString(R.string.connect_failed);
+            }
+            if (card.getChildCount() > 0) {
+                card.addView(rowDivider());
+            }
+            card.addView(domainRow(setup.domain, status, failure != null, mark));
+        }
+        container.addView(card);
+
+        Button onward = host.findViewById(R.id.result_continue);
+        onward.setText(host.getString(R.string.result_continue, named));
+        onward.setOnClickListener(
+                view -> {
+                    for (PimDomain domain : refused.keySet()) {
+                        setups.get(domain).enabled = false;
+                    }
+                    // NOTE: back on the domain step, the refused domains
+                    // unticked, while the rest of the plan runs.
+                    host.showAuth(MainActivity.STEP_DOMAIN);
+                    LinearLayout domains = host.findViewById(R.id.domain_container);
+                    domains.removeAllViews();
+                    domains.addView(domainCard(host.accountFor(pendingEmail)));
+                    host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
+                    runSignIns();
+                });
+
+        Button advancedLink = host.findViewById(R.id.result_advanced);
+        advancedLink.setText(host.getString(R.string.result_advanced, named));
+        advancedLink.setOnClickListener(
+                view -> {
+                    for (DomainSetup setup : setups.values()) {
+                        setup.credential = null;
+                    }
+                    switchToAdvanced();
+                });
+
+        host.showAuth(MainActivity.STEP_RESULT);
     }
 
     /**
@@ -1792,7 +2215,7 @@ final class OnboardingFlow {
             return;
         }
 
-        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        busy();
         String email = connectedEmail;
         host.io.execute(
                 () -> {
@@ -1991,7 +2414,7 @@ final class OnboardingFlow {
         host.accounts.removeIf(entry -> entry.email.equals(stored.email));
         host.accounts.add(stored);
 
-        host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
+        busy();
         host.syncConnected(stored);
     }
 

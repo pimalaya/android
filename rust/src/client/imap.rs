@@ -216,6 +216,9 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
                 status: Some(401),
             })?
         } else {
+            // NOTE: past the greeting, a failed login is the server refusing
+            // the password, reported as the 401 of the HTTP backends so the
+            // setup can say which domain refused it.
             self.run(ImapAuthPlain::new(
                 None::<&str>,
                 credentials.login,
@@ -225,7 +228,11 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
                     ensure_capabilities: true,
                     auto_id: None,
                 },
-            ))?
+            ))
+            .map_err(|err| BridgeError {
+                message: err.message,
+                status: Some(401),
+            })?
         };
 
         // NOTE: RFC 7162 section 3.1 requires an ENABLE before the
