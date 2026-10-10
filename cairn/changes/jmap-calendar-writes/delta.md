@@ -8,7 +8,7 @@ Folds into `spec/calendar.md` and `spec/onboarding.md`, after `jmap-release-read
 ## ADDED Requirements
 
 ### Requirement: A JMAP calendar entry is written through CalendarEvent/set
-A calendar behind the `jmap://` marker SHALL take creates, edits and deletes through draft-ietf-jmap-calendars `CalendarEvent/set`. An entry's revision SHALL be a hash of its CalendarEvent JSON. The members draft-ietf-jmap-calendars takes from jscalendarbis (`recurrenceRule`, a participant's `calendarAddress`, `organizerCalendarAddress`) SHALL read as and be written from the RFC 8984 ones the conversion carries, a series of more than one rule being refused for good. A create SHALL file the object's one JSCalendar entry in the calendar, under the id the server assigns. An edit SHALL read the event first and be refused on its precondition (412) when the revision moved since it was staged; it SHALL patch only the members that differ between the staged object and the server copy converted to iCalendar and back, `recurrenceOverrides` per recurrence id, and SHALL be sent with `ifInState` set to the state that read answered, a `stateMismatch` being a 412. A delete staged against a revision SHALL be checked the same way; one the server no longer finds SHALL converge. A refusal the server gives for the request itself (`forbidden`, `invalidProperties`, `invalidPatch`, `tooLarge`, `overQuota`, `singleton`, `noSupportedScheduleMethods`) SHALL be refused for good (422); any other SHALL keep the change staged.
+A calendar behind the `jmap://` marker SHALL take creates, edits and deletes through draft-ietf-jmap-calendars `CalendarEvent/set`. An entry's revision SHALL be a hash of its CalendarEvent JSON. An entry SHALL be written as JSCalendar 2.0, the model draft-ietf-jmap-calendars builds on, with no `method` and no `version`, a series of more than one rule being refused for good before any request, and SHALL read as JSCalendar 2.0 or RFC 8984, whichever the server holds. A create SHALL file the object's one JSCalendar entry in the calendar, under the id the server assigns. An edit SHALL read the event first and be refused on its precondition (412) when the revision moved since it was staged; it SHALL patch only the members that differ between the staged object and the server copy converted to iCalendar and back, `recurrenceOverrides` per recurrence id, and SHALL be sent with `ifInState` set to the state that read answered, a `stateMismatch` being a 412. A delete staged against a revision SHALL be checked the same way; one the server no longer finds SHALL converge. A refusal the server gives for the request itself (`forbidden`, `invalidProperties`, `invalidPatch`, `tooLarge`, `overQuota`, `singleton`, `noSupportedScheduleMethods`) SHALL be refused for good (422); any other SHALL keep the change staged.
 
 #### Scenario: A new entry on a JMAP calendar
 - GIVEN a writable JMAP calendar
@@ -35,7 +35,7 @@ A calendar behind the `jmap://` marker SHALL take creates, edits and deletes thr
 - WHEN the sync pushes it
 - THEN the edit is refused and shown so, and the calendar's other changes sync
 
-#### Scenario: A server speaking jscalendarbis
+#### Scenario: A server speaking JSCalendar 2.0
 - GIVEN a server holding a weekly series under `recurrenceRule`, its attendee under `calendarAddress`
 - WHEN the calendar syncs, and the series is edited and pushed
 - THEN the agenda shows every occurrence and the attendee's address, and the write names the rule and the attendee the way the server holds them

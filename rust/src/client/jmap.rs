@@ -2238,7 +2238,8 @@ fn writable_calendar(rights: &JmapCalendarRights) -> bool {
 }
 
 /// io-jmap CalendarEvent to the JNI-facing shape, its JSCalendar
-/// payload converted to iCalendar.
+/// payload converted to iCalendar. ical-rs reads it as JSCalendar 2.0,
+/// which the draft builds on, or as RFC 8984, whichever it is.
 ///
 /// The conversion happens here rather than downstream because the
 /// store's collection kind is a media type: `text/calendar` promises
@@ -2260,7 +2261,6 @@ fn jmap_event(event: JmapCalendarEvent) -> Result<Event, String> {
     payload
         .entry("@type")
         .or_insert_with(|| Value::from("Event"));
-    jmap::from_jscalendarbis(&mut payload);
 
     let payload = Value::Object(payload);
     let ical = Ical::from_jscalendar(&payload)
