@@ -12,8 +12,8 @@ import java.util.function.Predicate;
 /**
  * A phone app the store's items show in, and the permissions it takes.
  *
- * <p>Asked together: a setup continuing with several mirrors switched on
- * asks their permissions in one prompt ({@link MainActivity#askMirrors}).
+ * <p>Asked as a mirror's switch is turned on ({@link MainActivity#askMirrors}),
+ * its pair in one prompt.
  */
 enum PhoneMirror {
     CONTACTS(

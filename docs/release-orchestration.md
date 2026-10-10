@@ -33,7 +33,9 @@ Each step ends with a commit on master (no push until the end, no `Co-Authored-B
 
 | Question | Answer |
 |---|---|
-| Onboarding switch "Also in the phone's Contacts / Calendar app" | On by default, both setups |
+| Onboarding switch "Also in the phone's Contacts / Calendar app" | On by default, both setups. **Reversed 2026-10-10** (`onboarding-options-ask-on-switch`): "Show in phone contacts / calendar", off by default, each permission asked as its switch turns on, a refusal turning it back off |
+| Onboarding "Notify new mail" (2026-10-10) | Under Mail in both setups, off by default, `POST_NOTIFICATIONS` asked as it turns on; on, the account syncs in the background (15 minutes when it was off). Notifications off by default for every account |
+| When permissions are asked (2026-10-10) | Contacts, calendar and notifications only as their option turns on, in a setup or in an account's settings; never on Continue, on return or at startup. An option whose permission was revoked reads as off |
 | Address already on the phone through Google, DAVx5 | Not mirrored, said on the result page and in settings, settings can force it; only if the check stays one cheap provider query |
 | Single occurrences | The full feature: this occurrence, this and following (split series), all |
 | Calendar conflicts | A form like contacts', never dropping a side |

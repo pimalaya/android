@@ -21,9 +21,9 @@ All of this is kept in the app's private on-device storage.
 
 ## On your device, outside the app
 
-- **Contacts app.** When the option "Also in the phone's Contacts app" is on (it is on by default when you add an account, and can be changed per addressbook in the account's settings), each addressbook is mirrored into your device's system Contacts under a device account of its own, in both directions. Other apps you allow to read your contacts can then see them. An address the device already syncs through another app (such as Google's own sync) is not mirrored unless you turn it on.
-- **Calendar app.** When the option "Also in the phone's Calendar app" is on (on by default when you add an account, and per calendar in the account's settings), the chosen calendars are mirrored into your device's system Calendar under a device account named by the address, in both directions, reminders included. Other apps you allow to read your calendars can then see them, and your calendar app may show the reminders.
-- **Notifications.** When background sync and new-mail notifications are on for an account, the app shows a notification for each new message in its inbox, with the sender and the subject. Android's notification settings control whether they show on the lock screen.
+- **Contacts app.** When the option "Show in phone contacts" is on (off by default when you add an account, and changeable per addressbook in the account's settings), each addressbook is mirrored into your device's system Contacts under a device account of its own, in both directions. Other apps you allow to read your contacts can then see them. An address the device already syncs through another app (such as Google's own sync) is not mirrored unless you turn it on.
+- **Calendar app.** When the option "Show in phone calendar" is on (off by default when you add an account, and per calendar in the account's settings), the chosen calendars are mirrored into your device's system Calendar under a device account named by the address, in both directions, reminders included. Other apps you allow to read your calendars can then see them, and your calendar app may show the reminders.
+- **Notifications.** When new-mail notifications are on for an account (off by default, turned on when you add it or in its settings, which also turns background sync on), the app shows a notification for each new message in its inbox, with the sender and the subject. Android's notification settings control whether they show on the lock screen.
 
 Mail is never written anywhere else on the device.
 
@@ -55,10 +55,10 @@ Pimalaya's use and transfer to any other app of information received from Google
 
 ## Permissions and why the app needs them
 
-- **Contacts (`READ_CONTACTS`, `WRITE_CONTACTS`)**: to mirror your addressbooks into the device's system Contacts, in both directions, and to check whether an address is already there through another app.
-- **Calendar (`READ_CALENDAR`, `WRITE_CALENDAR`)**: to mirror your calendars into the device's system Calendar, in both directions, and to check whether an address is already there through another app.
+- **Contacts (`READ_CONTACTS`, `WRITE_CONTACTS`)**: to mirror your addressbooks into the device's system Contacts, in both directions, and to check whether an address is already there through another app. Asked only when you turn the option on.
+- **Calendar (`READ_CALENDAR`, `WRITE_CALENDAR`)**: to mirror your calendars into the device's system Calendar, in both directions, and to check whether an address is already there through another app. Asked only when you turn the option on.
 - **Sync settings (`READ_SYNC_SETTINGS`, `WRITE_SYNC_SETTINGS`)**: to register the device accounts of the mirrors so contacts and calendar apps list them, and to be told when you edit them there.
-- **Notifications (`POST_NOTIFICATIONS`)**: to notify new mail, asked only when an account has notifications on.
+- **Notifications (`POST_NOTIFICATIONS`)**: to notify new mail, asked only when you turn notifications on.
 - **Run at startup (`RECEIVE_BOOT_COMPLETED`)**: to keep the background sync scheduled after the device restarts.
 - **Network access (`INTERNET`, `ACCESS_NETWORK_STATE`)**: to reach the servers you configure and to read the active network's settings for server discovery.
 
