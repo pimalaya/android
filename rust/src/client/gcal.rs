@@ -23,6 +23,11 @@
 //! override, deleted for an `EXDATE` or a cancelled override, replaced
 //! back with the series for an override the edit removed, Google having
 //! no reset of an exception.
+//!
+//! Google mails the guests only when a write names `sendUpdates`, so
+//! every write names it: `all` when the user organizes the event with
+//! attendees ([`organized`]), `none` otherwise. A create announced so is
+//! an insert, an import inviting nobody.
 
 use std::collections::BTreeMap;
 
@@ -36,10 +41,11 @@ use io_gcal::{
                 list::{GcalCalendarListList, GcalCalendarListListParams},
             },
             events::{
-                GcalEvent, GcalEventStatus, GcalEvents,
+                GcalEvent, GcalEventStatus, GcalEvents, GcalSendUpdates,
                 delete::GcalEventDelete,
                 get::GcalEventGet,
                 import::{GcalEventImport, GcalEventImportParams},
+                insert::{GcalEventInsert, GcalEventInsertParams},
                 instances::{GcalEventInstances, GcalEventInstancesParams},
                 list::{GcalEventsList, GcalEventsListParams},
                 update::{GcalEventUpdate, GcalEventUpdateParams},
@@ -54,6 +60,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     calendar::{
         OccurrenceChange, OccurrenceWrite, occurrence_changes, occurrence_window, occurrences,
+        organized,
     },
     client::{
         Client,
@@ -124,34 +131,27 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(events)
     }
 
-    /// Creates an event from an iCalendar object in a calendar, answering
-    /// the id Google gave it and its revision.
-    ///
-    /// Imported rather than inserted: an insert mints its own `iCalUID`,
-    /// a second event for every other client, where an import keeps the
-    /// one the object carries.
+    /// Creates an event from an iCalendar object in a calendar, as
+    /// [`create_entry`] says, `address` the account's.
     pub fn create_gcal_event(
         &mut self,
         token: &str,
         calendar: &str,
         ical: &str,
+        address: &str,
     ) -> Result<EventRef, BridgeError> {
         let auth = HttpAuthBearer::new(token);
-        let event = GcalEvent::from_ical(ical.as_bytes()).map_err(|err| err.to_string())?;
-
-        let params = GcalEventImportParams::default();
-        let coroutine = GcalEventImport::new(&auth, &calendar_path(calendar), &event, &params)
-            .map_err(|err| err.to_string())?;
-        let created = self.run_gcal(coroutine)?;
-
-        Ok(EventRef {
-            etag: revision(&created, &[]),
-            id: created.id.unwrap_or_default(),
-        })
+        create_entry(
+            &mut GcalCalls::new(self, &auth),
+            calendar,
+            ical,
+            &addresses(address, calendar),
+        )
     }
 
     /// Writes an entry from an iCalendar object: its master, and each
-    /// occurrence the object holds otherwise than Google ([`update_entry`]).
+    /// occurrence the object holds otherwise than Google ([`update_entry`]),
+    /// `address` the account's.
     pub fn update_gcal_event(
         &mut self,
         token: &str,
@@ -159,6 +159,7 @@ impl<'a, 'local> Client<'a, 'local> {
         id: &str,
         ical: &str,
         if_match: Option<&str>,
+        address: &str,
     ) -> Result<Option<String>, BridgeError> {
         let auth = HttpAuthBearer::new(token);
         update_entry(
@@ -167,32 +168,28 @@ impl<'a, 'local> Client<'a, 'local> {
             id,
             ical,
             if_match,
+            &addresses(address, calendar),
         )
     }
 
-    /// Deletes an event, the whole series for a master, conditionally on
-    /// `if_match`.
+    /// Deletes an event, as [`delete_entry`] says, `address` the
+    /// account's.
     pub fn delete_gcal_event(
         &mut self,
         token: &str,
         calendar: &str,
         id: &str,
         if_match: Option<&str>,
+        address: &str,
     ) -> Result<(), BridgeError> {
         let auth = HttpAuthBearer::new(token);
-        let mut etag = None;
-        if if_match.is_some() {
-            let (current, instances) = self.gcal_series(&auth, calendar, id)?;
-            check_revision(id, &current, &instances, if_match)?;
-            etag = current.etag;
-        }
-
-        let coroutine =
-            GcalEventDelete::new(&auth, &calendar_path(calendar), id, None, etag.as_deref())
-                .map_err(|err| err.to_string())?;
-        self.run_gcal(coroutine)?;
-
-        Ok(())
+        delete_entry(
+            &mut GcalCalls::new(self, &auth),
+            calendar,
+            id,
+            if_match,
+            &addresses(address, calendar),
+        )
     }
 
     /// Reads one entry: the event, and the changed or cancelled instances
@@ -287,9 +284,21 @@ impl GcalReads for GcalCalls<'_, '_, '_> {
 }
 
 /// The requests an entry write sends beside its reads, apart so the write
-/// can run over a fake: a window of a series' instances, and one event
-/// replaced or deleted, each on its ETag.
+/// can run over a fake: one event imported or inserted, a window of a
+/// series' instances, and one event replaced or deleted, each on its ETag,
+/// each naming who Google notifies where the request has the option.
 pub(super) trait GcalWrites: GcalReads {
+    /// Imports one event, which notifies nobody.
+    fn import(&mut self, calendar: &str, event: &GcalEvent) -> Result<GcalEvent, BridgeError>;
+
+    /// Inserts one event.
+    fn insert(
+        &mut self,
+        calendar: &str,
+        event: &GcalEvent,
+        send_updates: GcalSendUpdates,
+    ) -> Result<GcalEvent, BridgeError>;
+
     /// Lists the instances of a series starting between two instants, at
     /// most one page: a window of days holds fewer than a page.
     fn instances(
@@ -307,6 +316,7 @@ pub(super) trait GcalWrites: GcalReads {
         id: &str,
         event: &GcalEvent,
         if_match: Option<&str>,
+        send_updates: GcalSendUpdates,
     ) -> Result<GcalEvent, BridgeError>;
 
     /// Deletes one event.
@@ -315,10 +325,33 @@ pub(super) trait GcalWrites: GcalReads {
         calendar: &str,
         id: &str,
         if_match: Option<&str>,
+        send_updates: GcalSendUpdates,
     ) -> Result<(), BridgeError>;
 }
 
 impl GcalWrites for GcalCalls<'_, '_, '_> {
+    fn import(&mut self, calendar: &str, event: &GcalEvent) -> Result<GcalEvent, BridgeError> {
+        let params = GcalEventImportParams::default();
+        let coroutine = GcalEventImport::new(self.auth, &calendar_path(calendar), event, &params)
+            .map_err(|err| err.to_string())?;
+        self.client.run_gcal(coroutine)
+    }
+
+    fn insert(
+        &mut self,
+        calendar: &str,
+        event: &GcalEvent,
+        send_updates: GcalSendUpdates,
+    ) -> Result<GcalEvent, BridgeError> {
+        let params = GcalEventInsertParams {
+            send_updates: Some(send_updates),
+            ..Default::default()
+        };
+        let coroutine = GcalEventInsert::new(self.auth, &calendar_path(calendar), event, &params)
+            .map_err(|err| err.to_string())?;
+        self.client.run_gcal(coroutine)
+    }
+
     fn instances(
         &mut self,
         calendar: &str,
@@ -343,8 +376,12 @@ impl GcalWrites for GcalCalls<'_, '_, '_> {
         id: &str,
         event: &GcalEvent,
         if_match: Option<&str>,
+        send_updates: GcalSendUpdates,
     ) -> Result<GcalEvent, BridgeError> {
-        let params = GcalEventUpdateParams::default();
+        let params = GcalEventUpdateParams {
+            send_updates: Some(send_updates),
+            ..Default::default()
+        };
         let coroutine = GcalEventUpdate::new(
             self.auth,
             &calendar_path(calendar),
@@ -362,13 +399,84 @@ impl GcalWrites for GcalCalls<'_, '_, '_> {
         calendar: &str,
         id: &str,
         if_match: Option<&str>,
+        send_updates: GcalSendUpdates,
     ) -> Result<(), BridgeError> {
-        let coroutine =
-            GcalEventDelete::new(self.auth, &calendar_path(calendar), id, None, if_match)
-                .map_err(|err| err.to_string())?;
+        let coroutine = GcalEventDelete::new(
+            self.auth,
+            &calendar_path(calendar),
+            id,
+            Some(send_updates),
+            if_match,
+        )
+        .map_err(|err| err.to_string())?;
         self.client.run_gcal(coroutine)?;
         Ok(())
     }
+}
+
+/// Creates an event from an iCalendar object in a calendar, answering
+/// the id Google gave it and its revision.
+///
+/// An event the user organizes with attendees is inserted, with every
+/// guest notified, under the `iCalUID` the object carries, which the
+/// API takes at creation in place of an `id`. Any other is imported,
+/// which keeps the `iCalUID` the same way and notifies nobody: an import
+/// adds a copy of an event, and has no `sendUpdates`.
+pub(super) fn create_entry<W: GcalWrites>(
+    writes: &mut W,
+    calendar: &str,
+    ical: &str,
+    addresses: &[String],
+) -> Result<EventRef, BridgeError> {
+    let event = GcalEvent::from_ical(ical.as_bytes()).map_err(|err| err.to_string())?;
+    let created = match organized(ical, addresses) {
+        true => writes.insert(calendar, &event, GcalSendUpdates::All)?,
+        false => writes.import(calendar, &event)?,
+    };
+
+    Ok(EventRef {
+        etag: revision(&created, &[]),
+        id: created.id.unwrap_or_default(),
+    })
+}
+
+/// Deletes an event, the whole series for a master, conditionally on
+/// `if_match`. The entry is read first either way: the guests hear of
+/// the deletion when the user organizes the copy it removes.
+pub(super) fn delete_entry<W: GcalWrites>(
+    writes: &mut W,
+    calendar: &str,
+    id: &str,
+    if_match: Option<&str>,
+    addresses: &[String],
+) -> Result<(), BridgeError> {
+    let (current, instances) = series(writes, calendar, id)?;
+    check_revision(id, &current, &instances, if_match)?;
+
+    let held = entry(current.clone(), &instances).ical;
+    let etag = if_match.and(current.etag.as_deref());
+    writes.delete(calendar, id, etag, notified(&[&held], addresses))
+}
+
+/// Who Google notifies of a write: every guest when the user organizes
+/// one of the objects it concerns with attendees ([`organized`]), nobody
+/// otherwise.
+fn notified(objects: &[&str], addresses: &[String]) -> GcalSendUpdates {
+    match objects.iter().any(|ical| organized(ical, addresses)) {
+        true => GcalSendUpdates::All,
+        false => GcalSendUpdates::None,
+    }
+}
+
+/// The addresses the user organizes a Google calendar's events under:
+/// the account's, and the calendar's own id, which is the organizer of
+/// an event created on a calendar other than the primary one.
+fn addresses(address: &str, calendar: &str) -> Vec<String> {
+    [address, calendar]
+        .into_iter()
+        .filter(|address| !address.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Writes one entry: its master, merged onto the server copy so what the
@@ -384,17 +492,23 @@ impl GcalWrites for GcalCalls<'_, '_, '_> {
 /// Occurrences the server refuses for good, and nothing else failing,
 /// answer [`REFUSED`] instead, which the engine records as a refusal of
 /// the edit rather than a wait.
+///
+/// Every write names who Google notifies ([`notified`]), judged by the
+/// staged object and the server copy both, so an organizer taking the
+/// attendees off still tells them.
 pub(super) fn update_entry<W: GcalWrites>(
     writes: &mut W,
     calendar: &str,
     id: &str,
     ical: &str,
     if_match: Option<&str>,
+    addresses: &[String],
 ) -> Result<Option<String>, BridgeError> {
     let (current, instances) = series(writes, calendar, id)?;
     check_revision(id, &current, &instances, if_match)?;
 
     let base = entry(current.clone(), &instances).ical;
+    let send_updates = notified(&[ical, &base], addresses);
     let pending = occurrence_changes(ical, &base)?;
     let projected = GcalEvent::from_ical(ical.as_bytes()).map_err(|err| err.to_string())?;
     let held = GcalEvent::from_ical(base.as_bytes()).map_err(|err| err.to_string())?;
@@ -404,7 +518,7 @@ pub(super) fn update_entry<W: GcalWrites>(
     let mut written = revision(&current, &instances);
     if wrote {
         let event = projected.merge(&current);
-        let updated = writes.update(calendar, id, &event, current.etag.as_deref())?;
+        let updated = writes.update(calendar, id, &event, current.etag.as_deref(), send_updates)?;
         written = revision(&updated, &instances);
     }
     if pending.is_empty() {
@@ -412,15 +526,19 @@ pub(super) fn update_entry<W: GcalWrites>(
     }
 
     let read = (!wrote).then_some((current, instances));
-    write_occurrences(writes, calendar, id, ical, read).map_err(|err| match err.status {
-        Some(REFUSED) => BridgeError {
-            message: format!("Google refuses an occurrence of event {id} for good: {err}"),
-            status: Some(REFUSED),
-        },
-        _ => BridgeError {
-            message: format!("Event {id} was written to Google without all its occurrences: {err}"),
-            status: Some(412),
-        },
+    write_occurrences(writes, calendar, id, ical, read, send_updates).map_err(|err| {
+        match err.status {
+            Some(REFUSED) => BridgeError {
+                message: format!("Google refuses an occurrence of event {id} for good: {err}"),
+                status: Some(REFUSED),
+            },
+            _ => BridgeError {
+                message: format!(
+                    "Event {id} was written to Google without all its occurrences: {err}"
+                ),
+                status: Some(412),
+            },
+        }
     })
 }
 
@@ -434,6 +552,7 @@ fn write_occurrences<W: GcalWrites>(
     id: &str,
     ical: &str,
     read: Option<(GcalEvent, Vec<GcalEvent>)>,
+    send_updates: GcalSendUpdates,
 ) -> Result<Option<String>, BridgeError> {
     let (master, instances) = match read {
         Some(read) => read,
@@ -443,7 +562,15 @@ fn write_occurrences<W: GcalWrites>(
 
     let mut failures = Vec::new();
     for change in occurrence_changes(ical, &server)? {
-        if let Err(err) = write_occurrence(writes, calendar, id, &master, &instances, &change) {
+        if let Err(err) = write_occurrence(
+            writes,
+            calendar,
+            id,
+            &master,
+            &instances,
+            &change,
+            send_updates,
+        ) {
             log::warn!(
                 "cannot write occurrence {} of event {id}: {err}",
                 change.stamp()
@@ -469,6 +596,7 @@ fn write_occurrence<W: GcalWrites>(
     master: &GcalEvent,
     instances: &[GcalEvent],
     change: &OccurrenceChange,
+    send_updates: GcalSendUpdates,
 ) -> Result<(), BridgeError> {
     let told = |instance: &GcalEvent| {
         occurrences(&master.to_ical_series(&[instance]))
@@ -503,7 +631,7 @@ fn write_occurrence<W: GcalWrites>(
 
     match &change.write {
         OccurrenceWrite::Delete if instance.status == Some(GcalEventStatus::Cancelled) => Ok(()),
-        OccurrenceWrite::Delete => match writes.delete(calendar, handle, etag) {
+        OccurrenceWrite::Delete => match writes.delete(calendar, handle, etag, send_updates) {
             Err(err) if matches!(err.status, Some(404 | 410)) => Ok(()),
             deleted => deleted,
         },
@@ -515,7 +643,9 @@ fn write_occurrence<W: GcalWrites>(
                 return Ok(());
             }
             let event = projected.merge(&instance);
-            writes.update(calendar, handle, &event, etag).map(drop)
+            writes
+                .update(calendar, handle, &event, etag, send_updates)
+                .map(drop)
         }
     }
 }
@@ -982,12 +1112,21 @@ mod tests {
         /// The instances a window listing answers, every occurrence of the
         /// series as it would be were none changed.
         occurrences: Vec<GcalEvent>,
-        /// Every write, its method, the event it names, its body and its
-        /// ETag.
-        sent: Vec<(&'static str, String, Value, Option<String>)>,
+        /// Every write, in order.
+        sent: Vec<Sent>,
         /// The event whose write Google refuses, with the status and the
         /// message it answers.
         failing: Option<(String, u16, &'static str)>,
+    }
+
+    /// One write asked of a [`FakeCalendar`]: its method, the event it
+    /// names, its body, its ETag and who it has Google notify.
+    struct Sent {
+        method: &'static str,
+        id: String,
+        body: Value,
+        if_match: Option<String>,
+        send_updates: Option<GcalSendUpdates>,
     }
 
     fn series_event(id: &str, etag: &str) -> GcalEvent {
@@ -1270,9 +1409,15 @@ mod tests {
             id: &str,
             body: Value,
             if_match: Option<&str>,
+            send_updates: Option<GcalSendUpdates>,
         ) -> Result<(), BridgeError> {
-            self.sent
-                .push((method, id.to_string(), body, if_match.map(str::to_string)));
+            self.sent.push(Sent {
+                method,
+                id: id.to_string(),
+                body,
+                if_match: if_match.map(str::to_string),
+                send_updates,
+            });
             match &self.failing {
                 Some((failing, status, message)) if failing == id => Err(BridgeError {
                     message: message.to_string(),
@@ -1285,8 +1430,13 @@ mod tests {
         fn writes(&self) -> Vec<(&'static str, &str)> {
             self.sent
                 .iter()
-                .map(|(method, id, _, _)| (*method, id.as_str()))
+                .map(|sent| (sent.method, sent.id.as_str()))
                 .collect()
+        }
+
+        /// Who each write had Google notify, in order.
+        fn notified(&self) -> Vec<Option<GcalSendUpdates>> {
+            self.sent.iter().map(|sent| sent.send_updates).collect()
         }
 
         /// The entry as a read hands it over.
@@ -1297,6 +1447,30 @@ mod tests {
     }
 
     impl GcalWrites for FakeCalendar {
+        fn import(&mut self, _: &str, event: &GcalEvent) -> Result<GcalEvent, BridgeError> {
+            self.written("IMPORT", "new", to_value(event).unwrap(), None, None)?;
+            Ok(GcalEvent {
+                id: Some("new".into()),
+                etag: Some("\"1\"".into()),
+                ..event.clone()
+            })
+        }
+
+        fn insert(
+            &mut self,
+            _: &str,
+            event: &GcalEvent,
+            send_updates: GcalSendUpdates,
+        ) -> Result<GcalEvent, BridgeError> {
+            let body = to_value(event).unwrap();
+            self.written("INSERT", "new", body, None, Some(send_updates))?;
+            Ok(GcalEvent {
+                id: Some("new".into()),
+                etag: Some("\"1\"".into()),
+                ..event.clone()
+            })
+        }
+
         fn instances(
             &mut self,
             _: &str,
@@ -1329,16 +1503,24 @@ mod tests {
             id: &str,
             event: &GcalEvent,
             if_match: Option<&str>,
+            send_updates: GcalSendUpdates,
         ) -> Result<GcalEvent, BridgeError> {
-            self.written("PUT", id, to_value(event).unwrap(), if_match)?;
+            let body = to_value(event).unwrap();
+            self.written("PUT", id, body, if_match, Some(send_updates))?;
             Ok(GcalEvent {
                 etag: Some(format!("\"{}\"", self.sent.len() + 1)),
                 ..event.clone()
             })
         }
 
-        fn delete(&mut self, _: &str, id: &str, if_match: Option<&str>) -> Result<(), BridgeError> {
-            self.written("DELETE", id, Value::Null, if_match)
+        fn delete(
+            &mut self,
+            _: &str,
+            id: &str,
+            if_match: Option<&str>,
+            send_updates: GcalSendUpdates,
+        ) -> Result<(), BridgeError> {
+            self.written("DELETE", id, Value::Null, if_match, Some(send_updates))
         }
     }
 
@@ -1423,11 +1605,12 @@ mod tests {
             "m",
             &staged,
             Some("\"1\""),
+            &[],
         )
         .unwrap();
 
         assert_eq!(calendar.writes(), [("PUT", "m_20261019T090000Z")]);
-        let (_, _, body, if_match) = &calendar.sent[0];
+        let Sent { body, if_match, .. } = &calendar.sent[0];
         assert_eq!(if_match.as_deref(), Some("\"20261019\""));
         assert_eq!(body["start"]["dateTime"], "2026-10-19T10:00:00Z");
         assert_eq!(body["recurringEventId"], "m");
@@ -1456,6 +1639,7 @@ mod tests {
             "m",
             &staged,
             Some("\"1\""),
+            &[],
         )
         .unwrap();
 
@@ -1464,7 +1648,7 @@ mod tests {
             [("PUT", "m"), ("DELETE", "m_20261026T090000Z")]
         );
         assert!(
-            calendar.sent[0].2["recurrence"][1]
+            calendar.sent[0].body["recurrence"][1]
                 .as_str()
                 .unwrap()
                 .starts_with("EXDATE")
@@ -1486,11 +1670,12 @@ mod tests {
             "m",
             &staged,
             revision.as_deref(),
+            &[],
         )
         .unwrap();
 
         assert_eq!(calendar.writes(), [("PUT", "m_20261012T090000Z")]);
-        let body = &calendar.sent[0].2;
+        let body = &calendar.sent[0].body;
         assert_eq!(body["summary"], "Series");
         assert_eq!(body["start"]["dateTime"], "2026-10-12T09:00:00Z");
     }
@@ -1508,6 +1693,7 @@ mod tests {
             "m",
             &staged,
             revision.as_deref(),
+            &[],
         )
         .unwrap();
 
@@ -1529,6 +1715,7 @@ mod tests {
             "m",
             &staged,
             Some("\"1\""),
+            &[],
         )
         .unwrap_err();
 
@@ -1551,5 +1738,254 @@ mod tests {
     fn an_occurrence_google_refuses_for_good_refuses_the_edit() {
         assert_eq!(refused_with(400, "Invalid start time.").status, Some(422));
         assert_eq!(refused_with(403, "Forbidden").status, Some(422));
+    }
+
+    /// The weekly series, organized by `organizer`, with `attendees`.
+    fn meeting(organizer: &str, attendees: Value) -> FakeCalendar {
+        let mut calendar = weekly(Vec::new());
+        let mut master = to_value(&calendar.events[0]).unwrap();
+        master["organizer"] = json!({ "email": organizer });
+        master["attendees"] = attendees;
+        calendar.events[0] = from_value(master).unwrap();
+        calendar
+    }
+
+    /// Jane's addresses on her primary calendar.
+    fn jane() -> Vec<String> {
+        addresses("jane@example.com", "jane@example.com")
+    }
+
+    /// A new event at lunch, with `people` among its lines.
+    fn lunch(people: &str) -> String {
+        format!(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Pimalaya//Android//EN\r\n\
+             BEGIN:VEVENT\r\nUID:lunch\r\nDTSTAMP:20261009T080000Z\r\n\
+             DTSTART:20261012T120000Z\r\nDTEND:20261012T130000Z\r\nSUMMARY:Lunch\r\n\
+             {people}END:VEVENT\r\nEND:VCALENDAR\r\n"
+        )
+    }
+
+    #[test]
+    fn a_new_meeting_is_inserted_with_its_guests_invited() {
+        for people in [
+            "ATTENDEE:mailto:ada@example.com\r\n",
+            "ORGANIZER:mailto:Jane@Example.com\r\nATTENDEE:mailto:ada@example.com\r\n",
+        ] {
+            let mut calendar = FakeCalendar::default();
+
+            let created =
+                create_entry(&mut calendar, "jane@example.com", &lunch(people), &jane()).unwrap();
+
+            assert_eq!(calendar.writes(), [("INSERT", "new")], "{people}");
+            assert_eq!(calendar.notified(), [Some(GcalSendUpdates::All)]);
+            assert_eq!(calendar.sent[0].body["iCalUID"], "lunch", "the UID is kept");
+            assert_eq!(created.id, "new");
+        }
+    }
+
+    #[test]
+    fn a_new_event_nobody_is_invited_to_is_imported() {
+        for people in [
+            "",
+            "ORGANIZER:mailto:jane@example.com\r\n",
+            "ORGANIZER:mailto:boss@example.com\r\nATTENDEE:mailto:jane@example.com\r\n",
+        ] {
+            let mut calendar = FakeCalendar::default();
+
+            create_entry(&mut calendar, "jane@example.com", &lunch(people), &jane()).unwrap();
+
+            assert_eq!(calendar.writes(), [("IMPORT", "new")], "{people}");
+            assert_eq!(calendar.notified(), [None]);
+        }
+    }
+
+    #[test]
+    fn every_write_of_a_meeting_the_user_organizes_tells_its_guests() {
+        let ada = json!([{ "email": "ada@example.com", "responseStatus": "needsAction" }]);
+        let all = Some(GcalSendUpdates::All);
+
+        let mut calendar = meeting("jane@example.com", ada.clone());
+        let staged = calendar.ical().replace("SUMMARY:Series", "SUMMARY:Weekly");
+        update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            None,
+            &jane(),
+        )
+        .unwrap();
+        assert_eq!(calendar.writes(), [("PUT", "m")]);
+        assert_eq!(calendar.notified(), [all]);
+
+        let mut calendar = meeting("jane@example.com", ada.clone());
+        let staged = calendar::write(&calendar.ical(), &moved("2026-10-19", "10")).unwrap();
+        update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            None,
+            &jane(),
+        )
+        .unwrap();
+        assert_eq!(calendar.writes(), [("PUT", "m_20261019T090000Z")]);
+        assert_eq!(calendar.notified(), [all]);
+
+        let mut calendar = meeting("jane@example.com", ada.clone());
+        let staged = calendar::remove(&calendar.ical(), &this("2026-10-26", json!({})))
+            .unwrap()
+            .unwrap();
+        update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            None,
+            &jane(),
+        )
+        .unwrap();
+        assert_eq!(
+            calendar.writes(),
+            [("PUT", "m"), ("DELETE", "m_20261026T090000Z")]
+        );
+        assert_eq!(calendar.notified(), [all, all]);
+
+        let mut calendar = meeting("jane@example.com", ada);
+        delete_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            Some("\"1\""),
+            &jane(),
+        )
+        .unwrap();
+        assert_eq!(calendar.writes(), [("DELETE", "m")]);
+        assert_eq!(calendar.sent[0].if_match.as_deref(), Some("\"1\""));
+        assert_eq!(calendar.notified(), [all]);
+    }
+
+    /// The guests taken off a meeting hear of it: the copy the edit
+    /// replaces had them.
+    #[test]
+    fn a_meeting_whose_guests_are_all_taken_off_still_tells_them() {
+        let ada = json!([{ "email": "ada@example.com" }]);
+        let mut calendar = meeting("jane@example.com", ada);
+        let staged: String = calendar
+            .ical()
+            .split_inclusive("\r\n")
+            .filter(|line| !line.starts_with("ATTENDEE"))
+            .collect();
+
+        update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            None,
+            &jane(),
+        )
+        .unwrap();
+
+        assert!(calendar.sent[0].body.get("attendees").is_none());
+        assert_eq!(calendar.notified(), [Some(GcalSendUpdates::All)]);
+    }
+
+    /// An event created on a secondary calendar is organized by that
+    /// calendar, which is the user's as much as their address is.
+    #[test]
+    fn a_meeting_a_secondary_calendar_organizes_tells_its_guests() {
+        let team = "team@group.calendar.google.com";
+        let mut calendar = meeting(team, json!([{ "email": "ada@example.com" }]));
+        let staged = calendar.ical().replace("SUMMARY:Series", "SUMMARY:Weekly");
+
+        let addresses = addresses("jane@example.com", team);
+        update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            None,
+            &addresses,
+        )
+        .unwrap();
+
+        assert_eq!(calendar.notified(), [Some(GcalSendUpdates::All)]);
+    }
+
+    #[test]
+    fn a_write_of_an_event_without_guests_tells_nobody() {
+        let none = Some(GcalSendUpdates::None);
+
+        let mut calendar = weekly(Vec::new());
+        let staged = calendar.ical().replace("SUMMARY:Series", "SUMMARY:Weekly");
+        update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            None,
+            &jane(),
+        )
+        .unwrap();
+        let staged = calendar::write(&calendar.ical(), &moved("2026-10-19", "10")).unwrap();
+        update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            None,
+            &jane(),
+        )
+        .unwrap();
+        delete_entry(&mut calendar, "jane@example.com", "m", None, &jane()).unwrap();
+
+        assert_eq!(
+            calendar.writes(),
+            [("PUT", "m"), ("PUT", "m_20261019T090000Z"), ("DELETE", "m")]
+        );
+        assert_eq!(calendar.notified(), [none, none, none]);
+        assert_eq!(
+            calendar.sent[2].if_match, None,
+            "an unguarded delete names no ETag"
+        );
+    }
+
+    /// Answering someone else's invitation is the attendee's own reply,
+    /// which no `sendUpdates` stands for: nobody is told anything new.
+    #[test]
+    fn an_answer_to_someone_elses_invitation_tells_nobody() {
+        let people = json!([
+            { "email": "jane@example.com", "responseStatus": "needsAction" },
+            { "email": "ada@example.com", "responseStatus": "accepted" },
+        ]);
+        let mut calendar = meeting("boss@example.com", people.clone());
+        let ical = calendar.ical();
+        let staged = ical.replace(
+            "PARTSTAT=NEEDS-ACTION;ROLE=REQ-PARTICIPANT:mailto:jane@",
+            "PARTSTAT=ACCEPTED;ROLE=REQ-PARTICIPANT:mailto:jane@",
+        );
+        assert_ne!(staged, ical);
+
+        update_entry(
+            &mut calendar,
+            "jane@example.com",
+            "m",
+            &staged,
+            None,
+            &jane(),
+        )
+        .unwrap();
+
+        assert_eq!(calendar.writes(), [("PUT", "m")]);
+        assert_eq!(
+            calendar.sent[0].body["attendees"][0]["responseStatus"],
+            "accepted"
+        );
+        assert_eq!(calendar.notified(), [Some(GcalSendUpdates::None)]);
+
+        let mut calendar = meeting("boss@example.com", people);
+        delete_entry(&mut calendar, "jane@example.com", "m", None, &jane()).unwrap();
+        assert_eq!(calendar.notified(), [Some(GcalSendUpdates::None)]);
     }
 }

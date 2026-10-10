@@ -178,7 +178,7 @@ public class CalendarPoolTest {
 
         Watched(Server server, Transport transport) {
             super(pimdir, server);
-            inner = new CalendarEngine(pimdir, server, transport, account, accountId);
+            inner = new CalendarEngine(pimdir, server, transport, account, accountId, null);
         }
 
         void sync(String collection) {

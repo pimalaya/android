@@ -60,6 +60,13 @@ final class CalendarEngine extends PimdirEngine {
     /** What the account's collection ids are namespaced under. */
     private final String accountId;
 
+    /**
+     * The account's address, the owner the phone gives its calendars: what a
+     * write tells a meeting the user organizes by. Null on a driver that only
+     * stages.
+     */
+    private final String address;
+
     /** The phone spoke's adapter: the calendar's rows in CalendarContract. */
     private final CalendarRemote phone;
 
@@ -71,11 +78,13 @@ final class CalendarEngine extends PimdirEngine {
             PimalayaClient client,
             Transport transport,
             Account account,
-            String accountId) {
+            String accountId,
+            String address) {
         super(pimdir, client);
         this.transport = transport;
         this.account = account;
         this.accountId = accountId;
+        this.address = address;
         this.phone = new CalendarRemote(pimdir.context(), pimdir);
     }
 
@@ -86,7 +95,7 @@ final class CalendarEngine extends PimdirEngine {
      * Answers whether it wrote anything into the store.
      */
     static boolean phonePass(PimdirDb pimdir, String collection) {
-        CalendarEngine engine = new CalendarEngine(pimdir, new PimalayaClient(), null, null, null);
+        CalendarEngine engine = new CalendarEngine(pimdir, new PimalayaClient(), null, null, null, null);
         engine.phoneSide(collection);
         return engine.ingested;
     }
@@ -416,7 +425,12 @@ final class CalendarEngine extends PimdirEngine {
                 try {
                     EventRef created =
                             client.createEvent(
-                                    transport, account, url, name, row.getString("vcard"));
+                                    transport,
+                                    account,
+                                    url,
+                                    name,
+                                    row.getString("vcard"),
+                                    address);
                     return result(handle, true, created.id, created.etag);
                 } catch (RuntimeException failure) {
                     // The resource is already there, which `If-None-Match: *`
@@ -439,7 +453,13 @@ final class CalendarEngine extends PimdirEngine {
                 try {
                     String etag =
                             client.updateEvent(
-                                    transport, account, url, handle, row.getString("vcard"), ifMatch);
+                                    transport,
+                                    account,
+                                    url,
+                                    handle,
+                                    row.getString("vcard"),
+                                    ifMatch,
+                                    address);
                     return result(handle, true, null, etag);
                 } catch (RuntimeException failure) {
                     if (isPreconditionFailure(failure)) {
@@ -466,7 +486,7 @@ final class CalendarEngine extends PimdirEngine {
                     return refuse(collection, change.optString("linkId", null), handle);
                 }
                 try {
-                    client.deleteEvent(transport, account, url, handle, ifMatch);
+                    client.deleteEvent(transport, account, url, handle, ifMatch, address);
                 } catch (RuntimeException failure) {
                     if (isGone(failure)) {
                         // Already gone upstream: the removal converged.

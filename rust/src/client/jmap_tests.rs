@@ -785,7 +785,7 @@ const NEW_ENTRY: &str = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Pimalaya//A
 fn a_new_entry_lands_in_its_calendar_under_the_id_the_server_gives() {
     let mut account = events(&[]);
 
-    let created = create_event(&mut account, "c1", NEW_ENTRY).unwrap();
+    let created = create_event(&mut account, "c1", NEW_ENTRY, &[]).unwrap();
 
     assert_eq!(created.id, "ev1");
     let stored = &account.events["ev1"];
@@ -808,7 +808,7 @@ fn an_edit_patches_only_what_it_changed() {
     let listed = account.listed("ev1");
     let edited = listed.ical.replace("SUMMARY:Standup", "SUMMARY:Daily");
 
-    let etag = update_event(&mut account, "ev1", &edited, listed.etag.as_deref()).unwrap();
+    let etag = update_event(&mut account, "ev1", &edited, listed.etag.as_deref(), &[]).unwrap();
 
     let patch = account.patch();
     assert_eq!(
@@ -829,7 +829,14 @@ fn an_edit_changing_nothing_writes_nothing() {
     let mut account = events(&[standup()]);
     let listed = account.listed("ev1");
 
-    let etag = update_event(&mut account, "ev1", &listed.ical, listed.etag.as_deref()).unwrap();
+    let etag = update_event(
+        &mut account,
+        "ev1",
+        &listed.ical,
+        listed.etag.as_deref(),
+        &[],
+    )
+    .unwrap();
 
     assert!(account.sets.is_empty());
     assert_eq!(etag, listed.etag);
@@ -847,7 +854,7 @@ fn one_occurrence_moved_sends_that_occurrence_alone() {
     });
     let moved = crate::calendar::write(&listed.ical, &edit.to_string()).unwrap();
 
-    update_event(&mut account, "ev1", &moved, listed.etag.as_deref()).unwrap();
+    update_event(&mut account, "ev1", &moved, listed.etag.as_deref(), &[]).unwrap();
 
     let patch = account.patch();
     assert_eq!(
@@ -869,7 +876,7 @@ fn one_occurrence_moved_sends_that_occurrence_alone() {
     });
     let again = crate::calendar::write(&listed.ical, &edit.to_string()).unwrap();
 
-    update_event(&mut account, "ev1", &again, listed.etag.as_deref()).unwrap();
+    update_event(&mut account, "ev1", &again, listed.etag.as_deref(), &[]).unwrap();
 
     let patch = account.patch();
     assert_eq!(
@@ -890,7 +897,7 @@ fn one_occurrence_deleted_is_excluded_in_the_event() {
         .unwrap()
         .unwrap();
 
-    update_event(&mut account, "ev1", &left, listed.etag.as_deref()).unwrap();
+    update_event(&mut account, "ev1", &left, listed.etag.as_deref(), &[]).unwrap();
 
     assert_eq!(
         account.events["ev1"]["recurrenceOverrides"],
@@ -922,7 +929,7 @@ fn an_override_removed_is_nulled_alone() {
     let end = start + listed.ical[start..].find("END:VEVENT\r\n").unwrap() + "END:VEVENT\r\n".len();
     let reverted = format!("{}{}", &listed.ical[..start], &listed.ical[end..]);
 
-    update_event(&mut account, "ev1", &reverted, listed.etag.as_deref()).unwrap();
+    update_event(&mut account, "ev1", &reverted, listed.etag.as_deref(), &[]).unwrap();
 
     assert_eq!(
         account.patch().clone(),
@@ -944,7 +951,7 @@ fn an_edit_of_an_event_that_moved_is_never_written() {
     account.events.get_mut("ev1").unwrap()["title"] = Value::from("Renamed elsewhere");
     let edited = listed.ical.replace("SUMMARY:Standup", "SUMMARY:Daily");
 
-    let err = update_event(&mut account, "ev1", &edited, listed.etag.as_deref()).unwrap_err();
+    let err = update_event(&mut account, "ev1", &edited, listed.etag.as_deref(), &[]).unwrap_err();
 
     assert_eq!(err.status, Some(412));
     assert!(account.sets.is_empty());
@@ -958,7 +965,7 @@ fn a_write_racing_another_client_lands_nothing_and_waits() {
     account.races = true;
     let edited = listed.ical.replace("SUMMARY:Standup", "SUMMARY:Daily");
 
-    let err = update_event(&mut account, "ev1", &edited, listed.etag.as_deref()).unwrap_err();
+    let err = update_event(&mut account, "ev1", &edited, listed.etag.as_deref(), &[]).unwrap_err();
 
     assert_eq!(err.status, Some(412), "{}", err.message);
     assert_eq!(account.events["ev1"]["title"], "Standup");
@@ -1011,7 +1018,7 @@ fn a_property_the_server_refuses_is_refused_for_good() {
     let listed = account.listed("ev1");
     let edited = listed.ical.replace("SUMMARY:Standup", "SUMMARY:Daily");
 
-    let err = update_event(&mut account, "ev1", &edited, listed.etag.as_deref()).unwrap_err();
+    let err = update_event(&mut account, "ev1", &edited, listed.etag.as_deref(), &[]).unwrap_err();
 
     assert_eq!(err.status, Some(REFUSED));
     assert!(
@@ -1028,7 +1035,7 @@ fn a_rate_limited_create_waits() {
         .refusals
         .insert("e0".into(), json!({ "type": "rateLimit" }));
 
-    let err = create_event(&mut account, "c1", NEW_ENTRY)
+    let err = create_event(&mut account, "c1", NEW_ENTRY, &[])
         .err()
         .expect("a refused create");
 
@@ -1041,7 +1048,7 @@ fn a_delete_goes_under_the_state_its_check_read() {
     let mut account = events(&[standup()]);
     let listed = account.listed("ev1");
 
-    destroy_event(&mut account, "ev1", listed.etag.as_deref()).unwrap();
+    destroy_event(&mut account, "ev1", listed.etag.as_deref(), &[]).unwrap();
 
     assert!(account.events.is_empty());
     assert_eq!(account.sets[0]["ifInState"], "s1");
@@ -1054,10 +1061,13 @@ fn a_delete_of_an_event_already_gone_converges() {
     let listed = account.listed("ev1");
     account.events.clear();
 
-    destroy_event(&mut account, "ev1", listed.etag.as_deref()).unwrap();
-    destroy_event(&mut account, "ev1", None).unwrap();
+    destroy_event(&mut account, "ev1", listed.etag.as_deref(), &[]).unwrap();
+    destroy_event(&mut account, "ev1", None, &[]).unwrap();
 
-    assert_eq!(account.sets.len(), 1, "the checked delete sends nothing");
+    assert!(
+        account.sets.is_empty(),
+        "a delete of an event gone sends nothing"
+    );
 }
 
 #[test]
@@ -1066,7 +1076,7 @@ fn a_delete_of_an_event_that_moved_is_never_sent() {
     let listed = account.listed("ev1");
     account.events.get_mut("ev1").unwrap()["title"] = Value::from("Renamed elsewhere");
 
-    let err = destroy_event(&mut account, "ev1", listed.etag.as_deref()).unwrap_err();
+    let err = destroy_event(&mut account, "ev1", listed.etag.as_deref(), &[]).unwrap_err();
 
     assert_eq!(err.status, Some(412));
     assert!(account.sets.is_empty());
@@ -1082,7 +1092,7 @@ fn an_object_of_two_events_is_refused_for_good() {
     );
     let mut account = events(&[]);
 
-    let err = create_event(&mut account, "c1", &two)
+    let err = create_event(&mut account, "c1", &two, &[])
         .err()
         .expect("a refused create");
 
@@ -1123,7 +1133,7 @@ fn a_new_series_is_written_as_jscalendarbis() {
          ORGANIZER:mailto:jane@example.com\r\nATTENDEE;CN=Ada:mailto:ada@example.com\r\n",
     );
 
-    create_event(&mut account, "c1", &series).unwrap();
+    create_event(&mut account, "c1", &series, &[]).unwrap();
 
     let stored = &account.events["ev1"];
     assert_eq!(stored["recurrenceRule"]["frequency"], "weekly", "{stored}");
@@ -1152,10 +1162,159 @@ fn a_series_of_two_rules_is_refused_for_good() {
         "SUMMARY:Lunch\r\nRRULE:FREQ=WEEKLY\r\nRRULE:FREQ=MONTHLY\r\n",
     );
 
-    let err = create_event(&mut account, "c1", &series)
+    let err = create_event(&mut account, "c1", &series, &[])
         .err()
         .expect("a refused create");
 
     assert_eq!(err.status, Some(REFUSED));
     assert!(account.sets.is_empty());
+}
+
+/// Jane's address, which organizes [`standup`].
+fn jane() -> Vec<String> {
+    vec!["jane@example.com".to_string()]
+}
+
+/// Whether the last `CalendarEvent/set` asked the server to schedule.
+fn scheduled(account: &FakeEvents) -> bool {
+    account.sets.last().unwrap()["sendSchedulingMessages"] == true
+}
+
+#[test]
+fn every_write_of_a_meeting_the_user_organizes_is_scheduled() {
+    let mut account = events(&[]);
+    let series = NEW_ENTRY.replace(
+        "SUMMARY:Lunch\r\n",
+        "SUMMARY:Lunch\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\nATTENDEE;CN=Ada:mailto:ada@example.com\r\n",
+    );
+    create_event(&mut account, "c1", &series, &jane()).unwrap();
+    assert!(
+        scheduled(&account),
+        "a meeting with no organizer is the user's"
+    );
+
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+    let edited = listed.ical.replace("SUMMARY:Standup", "SUMMARY:Daily");
+    update_event(
+        &mut account,
+        "ev1",
+        &edited,
+        listed.etag.as_deref(),
+        &jane(),
+    )
+    .unwrap();
+    assert!(scheduled(&account));
+
+    let listed = account.listed("ev1");
+    let edit = json!({
+        "scope": "this",
+        "recurrenceId": "20261008T090000",
+        "start": {"time": "20261008T100000"},
+    });
+    let moved = crate::calendar::write(&listed.ical, &edit.to_string()).unwrap();
+    update_event(&mut account, "ev1", &moved, listed.etag.as_deref(), &jane()).unwrap();
+    assert_eq!(
+        account.patch().keys().collect::<Vec<_>>(),
+        ["recurrenceOverrides"]
+    );
+    assert!(scheduled(&account));
+
+    let listed = account.listed("ev1");
+    let edit = json!({"scope": "this", "recurrenceId": "20261015T090000"});
+    let left = crate::calendar::remove(&listed.ical, &edit.to_string())
+        .unwrap()
+        .unwrap();
+    update_event(&mut account, "ev1", &left, listed.etag.as_deref(), &jane()).unwrap();
+    assert!(scheduled(&account));
+
+    let listed = account.listed("ev1");
+    destroy_event(&mut account, "ev1", listed.etag.as_deref(), &jane()).unwrap();
+    assert_eq!(account.sets.last().unwrap()["destroy"], json!(["ev1"]));
+    assert!(scheduled(&account));
+}
+
+/// The attendees taken off a meeting are cancelled: the copy the edit
+/// replaces had them.
+#[test]
+fn a_meeting_whose_attendees_are_all_taken_off_is_scheduled() {
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+    let alone: String = listed
+        .ical
+        .split_inclusive("\r\n")
+        .filter(|line| !line.starts_with("ATTENDEE"))
+        .collect();
+    assert_ne!(alone, listed.ical);
+
+    update_event(&mut account, "ev1", &alone, listed.etag.as_deref(), &jane()).unwrap();
+
+    assert!(scheduled(&account));
+}
+
+#[test]
+fn a_write_of_an_event_without_attendees_is_not_scheduled() {
+    let mut account = events(&[]);
+    let lunch = NEW_ENTRY.replace(
+        "SUMMARY:Lunch\r\n",
+        "SUMMARY:Lunch\r\nORGANIZER:mailto:jane@example.com\r\n",
+    );
+    create_event(&mut account, "c1", &lunch, &jane()).unwrap();
+    assert!(!scheduled(&account));
+
+    let listed = account.listed("ev1");
+    let edited = listed.ical.replace("SUMMARY:Lunch", "SUMMARY:Brunch");
+    update_event(
+        &mut account,
+        "ev1",
+        &edited,
+        listed.etag.as_deref(),
+        &jane(),
+    )
+    .unwrap();
+    assert!(!scheduled(&account));
+
+    destroy_event(&mut account, "ev1", None, &jane()).unwrap();
+    assert_eq!(account.sets.last().unwrap()["destroy"], json!(["ev1"]));
+    assert!(!scheduled(&account));
+}
+
+/// Answering someone else's invitation would send the organizer an iTIP
+/// `REPLY` under `sendSchedulingMessages`, a reply flow the app does not
+/// drive: nothing new is sent.
+#[test]
+fn an_answer_to_someone_elses_invitation_is_not_scheduled() {
+    let mut invitation = standup();
+    invitation["organizerCalendarAddress"] = json!("mailto:boss@example.com");
+    invitation["participants"]["p2"] = json!({
+        "@type": "Participant",
+        "calendarAddress": "mailto:jane@example.com",
+        "roles": { "attendee": true },
+        "participationStatus": "needs-action",
+    });
+    let mut account = events(&[invitation]);
+    let listed = account.listed("ev1");
+    let answered = listed
+        .ical
+        .replace("PARTSTAT=NEEDS-ACTION", "PARTSTAT=ACCEPTED");
+    assert_ne!(answered, listed.ical);
+
+    update_event(
+        &mut account,
+        "ev1",
+        &answered,
+        listed.etag.as_deref(),
+        &jane(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        account.events["ev1"]["participants"]["p2"]["participationStatus"],
+        "accepted"
+    );
+    assert!(!scheduled(&account));
+
+    let listed = account.listed("ev1");
+    destroy_event(&mut account, "ev1", listed.etag.as_deref(), &jane()).unwrap();
+    assert!(!scheduled(&account));
 }

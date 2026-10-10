@@ -64,6 +64,7 @@ use sha2::{Digest, Sha256};
 use url::Url;
 
 use crate::{
+    calendar::organized,
     client::{
         Client,
         convert::{REFUSED, coroutine_error, rejected, required},
@@ -1025,20 +1026,21 @@ impl<'a, 'local> Client<'a, 'local> {
 /// `recurrenceOverrides` entry rather than as a write of its own.
 impl<'a, 'local> Client<'a, 'local> {
     /// Files one object in the calendar `calendar_id`, as [`create_event`]
-    /// says.
+    /// says, `address` the account's.
     pub fn create_jmap_event(
         &mut self,
         session_url: &Url,
         credentials: &Credentials,
         calendar_id: &str,
         ical: &str,
+        address: &str,
     ) -> Result<EventRef, BridgeError> {
         let mut calls = self.jmap_calls(session_url, credentials)?;
-        create_event(&mut calls, calendar_id, ical)
+        create_event(&mut calls, calendar_id, ical, &[address.to_string()])
     }
 
     /// Writes one edited object over the event `id`, as [`update_event`]
-    /// says, answering its new revision.
+    /// says, answering its new revision, `address` the account's.
     pub fn update_jmap_event(
         &mut self,
         session_url: &Url,
@@ -1046,21 +1048,24 @@ impl<'a, 'local> Client<'a, 'local> {
         id: &str,
         ical: &str,
         if_match: Option<&str>,
+        address: &str,
     ) -> Result<Option<String>, BridgeError> {
         let mut calls = self.jmap_calls(session_url, credentials)?;
-        update_event(&mut calls, id, ical, if_match)
+        update_event(&mut calls, id, ical, if_match, &[address.to_string()])
     }
 
-    /// Destroys the event `id`, as [`destroy_event`] says.
+    /// Destroys the event `id`, as [`destroy_event`] says, `address` the
+    /// account's.
     pub fn delete_jmap_event(
         &mut self,
         session_url: &Url,
         credentials: &Credentials,
         id: &str,
         if_match: Option<&str>,
+        address: &str,
     ) -> Result<(), BridgeError> {
         let mut calls = self.jmap_calls(session_url, credentials)?;
-        destroy_event(&mut calls, id, if_match)
+        destroy_event(&mut calls, id, if_match, &[address.to_string()])
     }
 }
 
@@ -1643,11 +1648,13 @@ fn list_events(
 /// Files one object in the calendar as a new CalendarEvent: its one
 /// JSCalendar entry ([`jmap::to_jscalendar_event`]) created in the
 /// calendar, under the id the server gives it, then read back for the
-/// revision the next edit is staged against.
+/// revision the next edit is staged against. The server invites the
+/// attendees of an event the user organizes ([`organized`]).
 fn create_event(
     calls: &mut impl JmapEventWrites,
     calendar_id: &str,
     ical: &str,
+    addresses: &[String],
 ) -> Result<EventRef, BridgeError> {
     let event = JmapCalendarEvent {
         calendar_ids: BTreeMap::from([(calendar_id.to_string(), true)]),
@@ -1656,6 +1663,7 @@ fn create_event(
     };
     let args = JmapCalendarEventSetArgs {
         create: Some(BTreeMap::from([("e0".to_string(), event)])),
+        send_scheduling_messages: organized(ical, addresses),
         ..Default::default()
     };
 
@@ -1687,12 +1695,16 @@ fn create_event(
 /// changes what the edit changed and nothing the app never had. It goes
 /// under `ifInState`, the state that read answered, so nothing lands
 /// between the check and the write where the server honours it (Stalwart
-/// 0.16 ignores it, the revision check standing alone there).
+/// 0.16 ignores it, the revision check standing alone there). The server
+/// tells the attendees when the user organizes the event ([`organized`]),
+/// as staged or as the server holds it, so an organizer taking every
+/// attendee off still cancels them.
 fn update_event(
     calls: &mut impl JmapEventWrites,
     id: &str,
     ical: &str,
     if_match: Option<&str>,
+    addresses: &[String],
 ) -> Result<Option<String>, BridgeError> {
     let (current, state) = calls.event(id)?;
     let Some(current) = current else {
@@ -1719,6 +1731,7 @@ fn update_event(
             id.to_string(),
             JmapCalendarEventPatch(patch),
         )])),
+        send_scheduling_messages: organized(ical, addresses) || organized(&held.ical, addresses),
         ..Default::default()
     };
     let out = calls.set(args)?;
@@ -1742,32 +1755,35 @@ fn written_revision(calls: &mut impl JmapEventWrites, id: &str) -> Option<String
     }
 }
 
-/// Destroys the event `id`. Staged against a revision, the event is read
-/// first, as [`update_event`] does: one gone already converged, one moved
-/// answers 412, and the destroy goes under the state that read answered.
-/// One the server no longer finds converged as well.
+/// Destroys the event `id`. The event is read first, one gone already
+/// converged: the server cancels it for the attendees when the user
+/// organizes it ([`organized`]). Staged against a revision, one moved
+/// answers 412, as [`update_event`] does, and the destroy goes under the
+/// state that read answered. One the server no longer finds converged as
+/// well.
 fn destroy_event(
     calls: &mut impl JmapEventWrites,
     id: &str,
     if_match: Option<&str>,
+    addresses: &[String],
 ) -> Result<(), BridgeError> {
-    let mut if_in_state = None;
-    if let Some(expected) = if_match {
-        let (current, state) = calls.event(id)?;
-        let Some(current) = current else {
-            return Ok(());
-        };
-        if jmap::etag(&current).as_deref() != Some(expected) {
-            return Err(moved(format!(
-                "Event {id} changed on the server since it was read"
-            )));
-        }
-        if_in_state = Some(state);
+    let (current, state) = calls.event(id)?;
+    let Some(current) = current else {
+        return Ok(());
+    };
+    if if_match.is_some_and(|expected| jmap::etag(&current).as_deref() != Some(expected)) {
+        return Err(moved(format!(
+            "Event {id} changed on the server since it was read"
+        )));
     }
+    // NOTE: an event the conversion cannot read is deleted unannounced
+    // rather than kept.
+    let announced = jmap_event(current).is_ok_and(|held| organized(&held.ical, addresses));
 
     let args = JmapCalendarEventSetArgs {
-        if_in_state,
+        if_in_state: if_match.and(Some(state)),
         destroy: Some(vec![id.to_string()]),
+        send_scheduling_messages: announced,
         ..Default::default()
     };
     match calls.set(args)?.not_destroyed.get(id) {

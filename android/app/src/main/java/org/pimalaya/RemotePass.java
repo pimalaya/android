@@ -355,7 +355,8 @@ final class RemotePass {
                                                                     client,
                                                                     worker,
                                                                     server,
-                                                                    accountId);
+                                                                    accountId,
+                                                                    account.email);
                                                     engine.progress = progress;
                                                     try {
                                                         engine.sync(collection);

@@ -54,7 +54,8 @@ public class CalendarTriageTest {
                         new PimalayaClient(),
                         null,
                         null,
-                        new PimdirAccount(context).idOf(EMAIL));
+                        new PimdirAccount(context).idOf(EMAIL),
+                        null);
     }
 
     /** One entry, as a side writes it at {@code stamp}. */
