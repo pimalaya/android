@@ -16,11 +16,12 @@ import java.util.Map;
 /**
  * The canonical pimdir SQL, as the pimdir specification defines it.
  *
- * <p>The app runs Android's own SQLite rather than a driver of its own: the
- * platform ships one, and compiling a second engine into every ABI would work
- * against the smallest-binary goal the app is built around. So io-pimdir is
- * taken <em>without</em> its {@code client} feature, contributing the schema and
- * the statements while the execution stays on {@code android.database.sqlite}.
+ * <p>The app runs the statements on the SQLite it bundles behind the platform's
+ * own binding (the platform's engine is too old for them below Android 14), not
+ * on a driver in the bridge: compiling a second engine into every ABI would
+ * work against the smallest-binary goal the app is built around. So io-pimdir
+ * is taken <em>without</em> its {@code client} feature, contributing the schema
+ * and the statements while the execution stays on the Java side.
  *
  * <p>The statements cross the JNI boundary rather than being transcribed here.
  * Transcribing sixty of them would work exactly once: the next spec revision

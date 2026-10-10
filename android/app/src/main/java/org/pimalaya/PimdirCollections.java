@@ -2,8 +2,8 @@ package org.pimalaya;
 
 import android.content.Context;
 import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 
+import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.PimdirSql;

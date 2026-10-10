@@ -3,10 +3,10 @@ package org.pimalaya;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.SQLException;
-import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteOpenHelper;
 import android.util.Log;
 
+import io.requery.android.database.sqlite.SQLiteDatabase;
+import io.requery.android.database.sqlite.SQLiteOpenHelper;
 import org.pimalaya.client.PimdirSql;
 
 import java.io.File;
@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The pimdir store's database, on Android's own SQLite.
+ * The pimdir store's database, on the SQLite the app bundles.
  *
  * <p>The schema is not written here: it comes from io-pimdir over JNI
  * ({@link PimdirSql}), so the app runs the specification's bytes rather than a
@@ -26,9 +26,12 @@ import java.util.Set;
  * side of the contract, which the crate deliberately does not: where the file
  * lives, when it is created, and the {@code objects/} directory beside it.
  *
- * <p>io-pimdir is taken without its {@code client} feature on purpose. Android
- * ships SQLite; compiling rusqlite in would put a second engine in every ABI of
- * a binary whose first design goal is to be small.
+ * <p>The SQLite is bundled ({@code io.requery.android.database.sqlite}, the
+ * platform's binding over a newer engine): the schema needs 3.37 (STRICT
+ * tables), which the platform ships only from Android 14. io-pimdir is taken
+ * without its {@code client} feature on purpose: compiling rusqlite in as well
+ * would put a second engine in every ABI of a binary whose first design goal
+ * is to be small.
  *
  * <p>One store holds every account and every domain: {@code collections.kind}
  * carries the media type ({@code message/rfc822}, {@code text/vcard},
@@ -373,11 +376,11 @@ final class PimdirDb extends SQLiteOpenHelper {
     /**
      * Drops a column the canonical schema no longer declares, best-effort.
      *
-     * <p>{@code ALTER TABLE … DROP COLUMN} landed in SQLite 3.35, which
-     * Android ships from API 34 on, so a store on an older device keeps the
-     * column. That is why it is a log and not a failure: a column nothing
-     * reads and nothing writes decides nothing, and refusing to open a store
-     * over one would be a worse answer than carrying it.
+     * <p>SQLite refuses to drop a column an index, a constraint or a trigger
+     * still names, so such a column is kept. That is why it is a log and not a
+     * failure: a column nothing reads and nothing writes decides nothing, and
+     * refusing to open a store over one would be a worse answer than carrying
+     * it.
      */
     private static void dropColumn(SQLiteDatabase db, String table, String column) {
         try {
@@ -387,12 +390,22 @@ final class PimdirDb extends SQLiteOpenHelper {
         }
     }
 
-    /** The column names the store's table actually holds; empty when there is none. */
+    /**
+     * The column names the store's table actually holds; empty when there is
+     * none.
+     *
+     * <p>Read through a {@code SELECT}, not a bare {@code PRAGMA}: the reconcile
+     * runs outside a transaction, so a read may land on another of the pool's
+     * WAL connections, and only a statement that opens a read transaction
+     * notices the schema the primary connection has just changed. A bare
+     * pragma answers from the connection's cached schema.
+     */
     private static Set<String> columnsOf(SQLiteDatabase db, String table) {
         Set<String> columns = new LinkedHashSet<>();
-        try (Cursor cursor = db.rawQuery("PRAGMA table_info(" + table + ")", null)) {
+        try (Cursor cursor =
+                db.rawQuery("SELECT name FROM pragma_table_info(?)", new String[] {table})) {
             while (cursor.moveToNext()) {
-                columns.add(cursor.getString(1));
+                columns.add(cursor.getString(0));
             }
         }
         return columns;

@@ -1,8 +1,8 @@
 //! The canonical pimdir SQL and the Annex A derivation, handed to the
 //! Java side.
 //!
-//! Android ships SQLite and the app's storage seam already drives
-//! `android.database.sqlite`, so this app takes io-pimdir **without** its
+//! The app's storage seam drives the SQLite it bundles on the Java side,
+//! behind the platform's binding, so this app takes io-pimdir **without** its
 //! `client` feature: no rusqlite, no second SQLite engine compiled into every
 //! ABI. What the crate contributes is the schema and the statements, which
 //! cross the boundary here rather than being transcribed into Java where they

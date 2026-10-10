@@ -8,7 +8,7 @@ status: current
 
 The app keeps one pimdir store for every account and every domain: `collections.kind` carries the media type (`message/rfc822`, `text/vcard`, `text/calendar`) and `collections.account` groups by account, so the merged view's two filter axes are columns rather than three databases. Bodies live in a content-addressed blob directory beside the database, referenced by hash and refcounted.
 
-The schema is io-pimdir's, handed to Java over JNI rather than transcribed, and executed against Android's own SQLite. The crate is taken without its `client` feature: the platform ships SQLite, and compiling a second engine into every ABI would work against the app's first design goal.
+The schema is io-pimdir's, handed to Java over JNI rather than transcribed, and executed on the SQLite the app bundles (3.49, behind the platform's own binding), since the platform's is too old for the schema below Android 14. The crate is taken without its `client` feature: compiling a second engine into every ABI would work against the app's first design goal.
 
 Every collection is reconciled by io-pimdir's sync engine, so every collection carries bindings, staged writes and conflicts. A contacts collection is reconciled against two sources, the server and the phone, which the store holds as one item with one `bindings` row per source; mail and calendar have the one source each and are otherwise the same. Nothing replaces a collection's contents: a refresh reconciles it, which is what lets a write staged before it survive it.
 
@@ -31,7 +31,7 @@ The store SHALL reconcile its own shape against the canonical pimdir DDL on open
 #### Scenario: A column the draft folded out
 - GIVEN a store carrying `bindings.ambiguous_handles`, which the schema no longer declares
 - WHEN the app opens it
-- THEN the column is dropped, or kept with a log where the platform's SQLite cannot drop one
+- THEN the column is dropped, or kept with a log where SQLite refuses to drop it
 
 #### Scenario: A table the draft added
 - GIVEN a store created before the summary tables were declared
@@ -552,3 +552,11 @@ A sync that went through SHALL NOT pop up a report: no count of what came in or 
 - GIVEN a contacts pass bringing three cards and leaving one conflict
 - WHEN it ends
 - THEN no toast shows, and the conflicted contact carries its mark in the list
+
+### Requirement: The store runs on the bundled SQLite
+The app SHALL open every database it owns, the pimdir store included, on the SQLite it bundles, version 3.37 or newer with JSON1, on every Android it supports (API 26 and up), and SHALL NOT open one on the platform's `android.database.sqlite`, whose version follows the device.
+
+#### Scenario: An Android 8 device
+- GIVEN a device whose platform SQLite is 3.18
+- WHEN the app creates the store
+- THEN the `STRICT` tables are created and the `RETURNING` and `json_each` statements run, on the bundled SQLite

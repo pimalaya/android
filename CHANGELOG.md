@@ -42,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Fixed the app not working on Android 8 to 13: its store needs SQLite 3.37 or newer, which Android ships only from Android 14, so it could not be created on older phones. The app now bundles SQLite 3.49 and uses it on every Android version it supports, at the cost of about 1.9 MB per APK.
 - Fixed the agenda listing everything from today on, months ahead, while it showed this week: with no day picked, this week now lists its own seven days, from the locale's first weekday, past days included, like every other week.
 - Fixed a message with no date vanishing from the phone when older mail was loaded: a band of older mail is listed by date, which never returns an undated message, so its absence there no longer reads as a deletion.
 - Fixed older mail never loading on Microsoft 365, Gmail and JMAP accounts, the end of the list saying it needed the network while the phone was online and the background fill stopping at once: the connection opened to load it did not know the mailboxes yet. The end of the list now says older mail needs the network only when there is none, and otherwise that it could not be loaded, with a tap to try again.
