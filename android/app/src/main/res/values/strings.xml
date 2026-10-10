@@ -133,48 +133,14 @@
     <string name="sync_cards">Fetching contacts of %1$s</string>
     <string name="sync_no_addressbook">No addressbook found</string>
     <string name="sync_failed">Could not synchronize</string>
-    <string name="sync_conflicts">%1$d change(s) conflict with the server and stay local</string>
-    <string name="sync_conflicts_pending">%1$d contact(s) diverged; resolve them to sync</string>
-    <string name="sync_events_conflicts_pending">%1$d calendar entry(ies) diverged; resolve them to sync</string>
     <string name="conflict_auto_resolved">Conflict resolved automatically; changes push on the next sync</string>
     <string name="contact_diverged_pending">Diverged fields await review</string>
     <string name="sync_busy">Wait for the sync to finish</string>
     <string name="sync_overlay_preparing">Preparing synchronization</string>
-    <string name="sync_step_server">Checking the server for changes</string>
-    <!-- A counted step names what the domain being synced holds. -->
-    <plurals name="sync_step_download_mail">
-        <item quantity="one">Downloading %1$d message</item>
-        <item quantity="other">Downloading %1$d messages</item>
-    </plurals>
-    <plurals name="sync_step_download_events">
-        <item quantity="one">Downloading %1$d event</item>
-        <item quantity="other">Downloading %1$d events</item>
-    </plurals>
-    <plurals name="sync_step_download_contacts">
-        <item quantity="one">Downloading %1$d contact</item>
-        <item quantity="other">Downloading %1$d contacts</item>
-    </plurals>
-    <plurals name="sync_step_upload">
-        <item quantity="one">Sending %1$d change to the server</item>
-        <item quantity="other">Sending %1$d changes to the server</item>
-    </plurals>
-    <string name="sync_step_phone">Reconciling with the phone contacts</string>
-    <plurals name="sync_step_project">
-        <item quantity="one">Writing %1$d contact to the phone</item>
-        <item quantity="other">Writing %1$d contacts to the phone</item>
-    </plurals>
-    <string name="sync_step_phone_calendar">Reconciling with the phone calendar</string>
-    <plurals name="sync_step_project_events">
-        <item quantity="one">Writing %1$d event to the phone</item>
-        <item quantity="other">Writing %1$d events to the phone</item>
-    </plurals>
-    <plurals name="sync_step_resolve">
-        <item quantity="one">Resolving %1$d conflict</item>
-        <item quantity="other">Resolving %1$d conflicts</item>
-    </plurals>
-    <string name="sync_step_mailboxes">Mailboxes synced: %1$d of %2$d</string>
-    <string name="sync_step_books">Address books synced: %1$d of %2$d</string>
-    <string name="sync_step_calendars">Calendars synced: %1$d of %2$d</string>
+    <string name="sync_line_mail">Syncing mail</string>
+    <string name="sync_line_contacts">Syncing contacts</string>
+    <string name="sync_line_calendars">Syncing calendars</string>
+    <string name="mail_filling">Loading older mail</string>
 
     <string name="contacts_sync">Sync</string>
     <string name="birthdays_title">Next birthday</string>
@@ -192,7 +158,6 @@
         <item quantity="one">in %1$d day</item>
         <item quantity="other">in %1$d days</item>
     </plurals>
-    <string name="sync_line_remote">Remote: %1$d in, %2$d out, %3$d changed</string>
     <string name="contacts_add">Add</string>
     <string name="add_title">Add</string>
     <string name="add_contact">Add contact</string>
@@ -486,10 +451,6 @@
     <string name="compose_body">Write your message</string>
     <string name="compose_send">Send</string>
     <string name="compose_queued">In the outbox; it goes out on the next sync</string>
-    <plurals name="outbox_sent">
-        <item quantity="one">Sent one message from the outbox</item>
-        <item quantity="other">Sent %d messages from the outbox</item>
-    </plurals>
     <string name="compose_failed">Could not write the message</string>
     <string name="outbox_failed">Could not send from the outbox; the message is still there</string>
     <string name="compose_no_account">No account this app can send from: sending needs an SMTP server, which is discovered when the account is connected</string>
@@ -706,7 +667,6 @@
     </string-array>
     <string name="sync_background">Syncing in the background</string>
     <string name="background_notify">Notify new mail</string>
-    <string name="sync_background_busy">A background sync is running</string>
     <plurals name="notify_new_mail">
         <item quantity="one">%d new message</item>
         <item quantity="other">%d new messages</item>

@@ -22,15 +22,35 @@
         android:textSize="@dimen/large_title"
         android:textStyle="bold" />
 
-    <TextView
-        android:id="@+id/header_meta"
+    <!-- The meta line, and beside it, on the mail list, a glyph pulsing
+         while older mail downloads in the background. -->
+    <LinearLayout
+        android:id="@+id/header_meta_row"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginStart="20dp"
         android:layout_marginTop="2dp"
         android:layout_marginEnd="20dp"
-        android:textColor="?android:attr/textColorSecondary"
-        android:textSize="14sp" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/header_meta"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="?android:attr/textColorSecondary"
+            android:textSize="14sp" />
+
+        <ImageView
+            android:id="@+id/header_fill"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginStart="6dp"
+            android:contentDescription="@string/mail_filling"
+            android:src="@drawable/ic_download"
+            android:visibility="gone" />
+
+    </LinearLayout>
 
     <!-- While a sync runs: whose account, then the step, over a thin bar,
          determinate once the pass can count. In place of the meta line,

@@ -24,7 +24,9 @@ import android.widget.Toast;
 import android.widget.ViewFlipper;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -915,7 +917,7 @@ public class MainActivity extends Activity {
 
     private void setUpHomePanel() {
         // Sync slides the drawer shut on its way in, so the sync strip
-        // and its outcome toasts land over the refreshed contacts list.
+        // shows over the list it refreshes.
         findViewById(R.id.drawer_close)
                 .setOnClickListener(view -> drawer.closeDrawer(Gravity.START));
         findViewById(R.id.drawer_sync)
@@ -1280,13 +1282,13 @@ public class MainActivity extends Activity {
      *  sync strip, the drawer's inert sync row). */
     /**
      * Starts a pass: takes the process's sync lock, turning the pass down
-     * while a background run holds it.
+     * while a background run holds it, whose strip already says so.
      */
     private boolean startSync() {
         if (!SyncLock.take()) {
-            toast(getString(R.string.sync_background_busy));
             return false;
         }
+        resetSyncPlan();
         setSyncing(true);
         return true;
     }
@@ -1303,9 +1305,8 @@ public class MainActivity extends Activity {
 
     /**
      * Shows or hides the sync strip under every list's large title: whose
-     * and which domain the pass is on with the step it stands at, over a
-     * thin bar. The lists stay usable behind it, and the screen stays on
-     * for the duration.
+     * and which domain the pass is on, over one thin bar. The lists stay
+     * usable behind it, and the screen stays on for the duration.
      */
     private void showSyncStrip(boolean active) {
         if (active) {
@@ -1315,10 +1316,6 @@ public class MainActivity extends Activity {
             // that shows nothing for that long reads as nothing running.
             synchronized (strip) {
                 syncLine = getString(R.string.sync_overlay_preparing);
-                syncLanded = 0;
-                syncLandedOf = 0;
-                syncDone = 0;
-                syncTotal = 0;
             }
             renderSyncStrip();
             return;
@@ -1339,16 +1336,15 @@ public class MainActivity extends Activity {
         }
         String account;
         String line;
-        int done;
-        int total;
+        int shown;
         synchronized (strip) {
             account = syncAccount;
             line = syncLine;
-            done = syncDone;
-            total = syncTotal;
+            shown = syncShown;
         }
+        // NOTE: indeterminate until something is counted.
         for (int panel : new int[] {PANEL_MAIL, PANEL_CONTACTS, PANEL_CALENDAR}) {
-            headerOf(panel).sync(account, line, done, total);
+            headerOf(panel).sync(account, line, shown, shown > 0 ? 1000 : 0);
         }
     }
 
@@ -1358,51 +1354,150 @@ public class MainActivity extends Activity {
     /** The account a pass is on, null until it reaches one. */
     private String syncAccount;
 
-    /** The step the pass stands at, and how far it is when it can count. */
+    /** The domain the pass is on, said in the strip's line. */
     private String syncLine = "";
 
-    private int syncDone;
+    /**
+     * The pass's sections, one per domain and account it runs, each weighing
+     * the collections stored for it, one at least: the bar's whole is their
+     * sum, so it fills once over the pass rather than once per account.
+     */
+    private final Map<String, Integer> syncPlan = new HashMap<>();
 
-    private int syncTotal;
+    private int syncPlanned;
+
+    /** What the sections the pass left behind weigh. */
+    private int syncPassed;
+
+    /** The section under way, null before the first. */
+    private String syncSection;
 
     /**
-     * How many of the account's collections have landed, which the bar
-     * holds between the steps that count, 0 of 0 before the first.
+     * How many of the section's collections have landed, 0 of 0 until the
+     * pass knows how many there are.
      */
     private int syncLanded;
 
     private int syncLandedOf;
 
+    /** How much of the collection under way its counted steps have filled. */
+    private double syncShare;
+
+    /**
+     * The bar in thousandths, which only ever grows over a pass: a step or a
+     * section starting at nothing holds it rather than emptying it.
+     */
+    private int syncShown;
+
+    /** Forgets the last pass's plan and bar (main thread, before a pass). */
+    private void resetSyncPlan() {
+        synchronized (strip) {
+            syncPlan.clear();
+            syncPlanned = 0;
+            syncPassed = 0;
+            syncSection = null;
+            syncLanded = 0;
+            syncLandedOf = 0;
+            syncShare = 0;
+            syncShown = 0;
+        }
+    }
+
+    /**
+     * Sizes a domain's part of the pass before it runs (any thread): one
+     * section per account the pass takes, {@code only} narrowing them, each
+     * weighing the collections stored for it within the scope.
+     */
+    private void planSync(PimDomain domain, SyncScope scope, Collection<String> only) {
+        Map<String, Integer> weights = new LinkedHashMap<>();
+        if (domain == PimDomain.CONTACTS) {
+            for (BookEntry book : base.loadSubscribedAddressbooks()) {
+                if (!LocalBook.is(book.accountEmail)) {
+                    weights.put(book.accountEmail, 0);
+                }
+            }
+        } else {
+            for (AccountEntry account : remote.accountsFor(domain)) {
+                weights.put(account.email, 0);
+            }
+        }
+        weights.keySet()
+                .removeIf(email -> !scope.account(email) || (only != null && !only.contains(email)));
+        for (PimdirCollections.Stored stored : collectionsOf(domain)) {
+            Integer weight = weights.get(stored.accountEmail);
+            if (weight != null && scope.collection(stored.accountEmail, stored.id)) {
+                weights.put(stored.accountEmail, weight + 1);
+            }
+        }
+        synchronized (strip) {
+            for (Map.Entry<String, Integer> entry : weights.entrySet()) {
+                int weight = Math.max(1, entry.getValue());
+                syncPlan.put(sectionOf(domain, entry.getKey()), weight);
+                syncPlanned += weight;
+            }
+        }
+    }
+
+    private static String sectionOf(PimDomain domain, String accountEmail) {
+        return domain.id + "\n" + accountEmail;
+    }
+
+    /** The addresses of some accounts. */
+    private static List<String> emailsOf(List<AccountEntry> accounts) {
+        List<String> emails = new ArrayList<>();
+        for (AccountEntry account : accounts) {
+            emails.add(account.email);
+        }
+        return emails;
+    }
+
+    /**
+     * A section's weight, a section the plan missed weighing one and
+     * growing the whole (holding the strip).
+     */
+    private int weightOf(String section) {
+        Integer weight = syncPlan.get(section);
+        if (weight == null) {
+            syncPlan.put(section, 1);
+            syncPlanned += 1;
+            return 1;
+        }
+        return weight;
+    }
+
+    /** Moves the bar to where the pass stands, never back (holding the strip). */
+    private void syncShow() {
+        int section = SyncSteps.permille(syncLanded, syncLandedOf, syncShare);
+        int whole =
+                syncSection == null
+                        ? 0
+                        : SyncSteps.across(syncPassed, weightOf(syncSection), syncPlanned, section);
+        syncShown = Math.max(syncShown, whole);
+    }
+
     /**
      * Names the account a pass moved on to, null between accounts (callable
      * off the main thread), so a pass over several says whose it is on. The
-     * counts start over: they were the previous account's.
+     * counts start over, the bar holding what the pass came to.
      */
     private void syncAccount(String accountEmail) {
         synchronized (strip) {
             syncAccount = accountEmail;
             syncLanded = 0;
             syncLandedOf = 0;
-            syncDone = 0;
-            syncTotal = 0;
+            syncShare = 0;
         }
         main.post(this::renderSyncStrip);
     }
 
     /**
-     * Sets the strip's step from an engine stage of a domain (any thread),
-     * in that domain's words: events while the agenda syncs, messages while
-     * the mail does. The bar goes back to the account's collections.
+     * Sets the strip's line from the domain an engine step runs in (any
+     * thread).
      */
     private void syncStep(PimDomain domain, int stage, int count) {
-        String text = SyncSteps.text(getResources(), domain, stage, count);
-        if (text == null) {
-            return;
-        }
+        String line = getString(SyncSteps.lineOf(domain));
         synchronized (strip) {
-            syncLine = text;
-            syncDone = syncLanded;
-            syncTotal = syncLandedOf;
+            syncLine = line;
         }
         main.post(this::renderSyncStrip);
     }
@@ -1412,34 +1507,38 @@ public class MainActivity extends Activity {
      * contacts or events read so far, or written to the phone.
      */
     private void syncAdvance(PimDomain domain, int stage, int done, int total) {
-        String text = SyncSteps.text(getResources(), domain, stage, total);
-        if (text == null) {
-            return;
-        }
         synchronized (strip) {
-            syncLine = text;
-            syncDone = done;
-            syncTotal = total;
+            syncShare = SyncSteps.shareOf(domain, stage, done, total);
+            syncShow();
         }
         main.post(this::renderSyncStrip);
     }
 
     /**
-     * Sets the strip's step to how many of the account's collections have
-     * landed (any thread), filling its bar: its mailboxes, address books or
-     * calendars. A count overtaken by a worker beside it is dropped.
+     * Fills the bar with how many of the account's collections have landed
+     * (any thread): its mailboxes, address books or calendars. The first
+     * count of a domain and account opens its section, the one before it
+     * passed. A count overtaken by a worker beside it is dropped.
      */
     private void syncCollections(PimDomain domain, int done, int total) {
-        String text = getString(SyncSteps.collectionsOf(domain), done, total);
+        String line = getString(SyncSteps.lineOf(domain));
         synchronized (strip) {
-            if (total == syncLandedOf && done < syncLanded) {
+            String section = sectionOf(domain, syncAccount);
+            if (!section.equals(syncSection)) {
+                if (syncSection != null) {
+                    syncPassed += weightOf(syncSection);
+                }
+                syncSection = section;
+                syncLanded = 0;
+                syncLandedOf = 0;
+            } else if (total == syncLandedOf && done < syncLanded) {
                 return;
             }
+            syncLine = line;
             syncLanded = done;
             syncLandedOf = total;
-            syncLine = text;
-            syncDone = done;
-            syncTotal = total;
+            syncShare = 0;
+            syncShow();
         }
         main.post(this::renderSyncStrip);
     }
@@ -1477,6 +1576,7 @@ public class MainActivity extends Activity {
 
         io.execute(
                 () -> {
+                    planSync(PimDomain.CONTACTS, SyncScope.all(this), null);
                     SyncRunner.Outcome outcome = runner.syncRemote();
                     postAlive(
                             () -> {
@@ -1488,40 +1588,14 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Surfaces a sync outcome: an error dialog, or the report toast (cards
-     * in, out and changed against the servers), carrying the
-     * pending-conflicts line when contacts wait for manual resolution. The
-     * phone's contacts are a view of the store, not a sync, and are not
-     * reported.
+     * Surfaces a failed sync in an error dialog. A pass that went through
+     * says nothing: the lists show what it brought, and a conflict marks
+     * its own row.
      */
     private void reportSync(SyncRunner.Outcome outcome) {
         if (outcome.failure != null) {
             // NOTE: the last sync's store keeps failing addressbooks usable.
             showError(outcome.failure, R.string.sync_failed);
-            return;
-        }
-
-        StringBuilder message =
-                new StringBuilder(
-                        getString(
-                                R.string.sync_line_remote,
-                                outcome.remoteIn.size(),
-                                outcome.remoteOut.size(),
-                                outcome.remoteChanged.size()));
-        if (outcome.conflicts > 0) {
-            message.append('\n')
-                    .append(getString(R.string.sync_conflicts_pending, outcome.conflicts));
-        }
-        toast(message.toString());
-    }
-
-    /**
-     * The pending-conflicts line of a calendar pass, as a contacts pass
-     * carries one: the entries left for their page to settle.
-     */
-    private void reportEventConflicts(int pending) {
-        if (pending > 0) {
-            toast(getString(R.string.sync_events_conflicts_pending, pending));
         }
     }
 
@@ -1546,12 +1620,12 @@ public class MainActivity extends Activity {
         }
         io.execute(
                 () -> {
+                    planSync(PimDomain.MAIL, filterOf(PimDomain.MAIL), null);
                     RemotePass.MailPass pass = remote.mailPass(filterOf(PimDomain.MAIL));
                     postAlive(
                             () -> {
                                 setSyncing(false);
                                 mailList.reload();
-                                reportMail(pass);
                                 if (pass.failure != null) {
                                     showError(pass.failure, R.string.sync_failed);
                                 } else {
@@ -1560,13 +1634,6 @@ public class MainActivity extends Activity {
                                 fillMail();
                             });
                 });
-    }
-
-    /** Says how many queued messages a pass sent, when it sent any. */
-    private void reportMail(RemotePass.MailPass pass) {
-        if (pass.sent > 0) {
-            toast(getResources().getQuantityString(R.plurals.outbox_sent, pass.sent, pass.sent));
-        }
     }
 
     /**
@@ -1587,16 +1654,14 @@ public class MainActivity extends Activity {
         }
         io.execute(
                 () -> {
+                    planSync(PimDomain.CALENDAR, filterOf(PimDomain.CALENDAR), null);
                     Exception failure = remote.calendarPass(filterOf(PimDomain.CALENDAR));
-                    int pending = events.conflictCount();
                     postAlive(
                             () -> {
                                 setSyncing(false);
                                 calendarList.reload();
                                 if (failure != null) {
                                     showError(failure, R.string.sync_failed);
-                                } else {
-                                    reportEventConflicts(pending);
                                 }
                             });
                 });
@@ -1723,6 +1788,7 @@ public class MainActivity extends Activity {
         }
         io.execute(
                 () -> {
+                    planSync(PimDomain.MAIL, SyncScope.all(this), emailsOf(owing));
                     syncAccount(null);
                     Exception failure = null;
                     for (AccountEntry account : owing) {
@@ -1762,6 +1828,7 @@ public class MainActivity extends Activity {
         }
         io.execute(
                 () -> {
+                    planSync(PimDomain.CONTACTS, SyncScope.all(this), null);
                     SyncRunner.Outcome outcome = runner.syncRemote();
                     if (outcome.failure == null) {
                         for (AccountEntry account : owing) {
@@ -1785,6 +1852,7 @@ public class MainActivity extends Activity {
         }
         io.execute(
                 () -> {
+                    planSync(PimDomain.CALENDAR, SyncScope.all(this), emailsOf(owing));
                     syncAccount(null);
                     Exception failure = null;
                     for (AccountEntry account : owing) {
@@ -1852,6 +1920,9 @@ public class MainActivity extends Activity {
         Log.d("pimalaya", "mail bodies: " + body);
 
         if (step == MailFill.Step.AGAIN || body == MailBodies.Step.AGAIN) {
+            // NOTE: the glyph once a step worked, never for a loop that
+            // found nothing to do.
+            postAlive(() -> headerOf(PANEL_MAIL).filling(true));
             io.execute(this::fillStep);
             return;
         }
@@ -1859,6 +1930,7 @@ public class MainActivity extends Activity {
         bodies = null;
         fillStopped = false;
         filling = false;
+        postAlive(() -> headerOf(PANEL_MAIL).filling(false));
         if (!bodiesLeft.isEmpty()) {
             bodiesLeft.clear();
             postAlive(this::refreshDrawer);
@@ -2191,6 +2263,7 @@ public class MainActivity extends Activity {
         }
         io.execute(
                 () -> {
+                    planSync(PimDomain.CONTACTS, filterOf(PimDomain.CONTACTS), null);
                     SyncRunner.Outcome outcome = runner.syncRemote(filterOf(PimDomain.CONTACTS));
                     postAlive(
                             () -> {
@@ -2218,10 +2291,12 @@ public class MainActivity extends Activity {
         }
         io.execute(
                 () -> {
+                    planSync(PimDomain.CONTACTS, SyncScope.all(this), null);
+                    planSync(PimDomain.MAIL, SyncScope.all(this), null);
+                    planSync(PimDomain.CALENDAR, SyncScope.all(this), null);
                     SyncRunner.Outcome outcome = runner.syncRemote();
                     RemotePass.MailPass sent = remote.mailPass(SyncScope.all(this));
                     Exception calendars = remote.calendarPass(SyncScope.all(this));
-                    int pending = events.conflictCount();
                     Exception other = sent.failure != null ? sent.failure : calendars;
                     postAlive(
                             () -> {
@@ -2230,8 +2305,6 @@ public class MainActivity extends Activity {
                                 mailList.reload();
                                 calendarList.reload();
                                 reportSync(outcome);
-                                reportMail(sent);
-                                reportEventConflicts(pending);
                                 fillMail();
                                 // NOTE: one error dialog, the contacts one first.
                                 if (other != null && outcome.failure == null) {
@@ -2317,8 +2390,8 @@ public class MainActivity extends Activity {
 
     /**
      * A book's phone switch turned on, its permission granted: its Android
-     * account, then its first projection, under the lists' strip ("Writing
-     * 120 contacts to the phone") unless a sync holds the strip. The
+     * account, then its first projection, under the lists' strip, its bar
+     * filling as the contacts are written, unless a sync holds the strip. The
      * process's lock is not taken, the book's own lock being the pass's.
      */
     void showOnPhone(String url) {
@@ -2351,13 +2424,12 @@ public class MainActivity extends Activity {
 
     /**
      * Sets the strip from a first projection's stage (any thread), its bar
-     * filled to {@code done} of a counted step's {@code count}.
+     * filled to {@code done} of the projection's {@code count}.
      */
     private void phoneStep(PimDomain domain, int stage, int count, int done) {
-        String text = SyncSteps.text(getResources(), domain, stage, count);
-        if (text != null) {
-            postAlive(() -> phoneStrip(text, done, done > 0 ? count : 0));
-        }
+        String text = getString(SyncSteps.lineOf(domain));
+        boolean counted = stage == PimdirEngine.Progress.STAGE_PROJECT && done > 0;
+        postAlive(() -> phoneStrip(text, done, counted ? count : 0));
     }
 
     /** The strip during a first projection, a null line once it ended. */
@@ -3857,7 +3929,8 @@ public class MainActivity extends Activity {
         root.setPadding(bars.left, root.getPaddingTop(), bars.right, root.getPaddingBottom());
 
         // NOTE: all bars carry the top inset (the drawer header too,
-        // since the drawer runs under the status bar).
+        // since the drawer runs under the status bar, and the round back
+        // button's row of the onboarding steps that hide the auth bar).
         // NOTE: a bar's minimum height counts its padding, so each grows
         // by the inset it takes, keeping its content the full bar height
         // under the status bar.
@@ -3869,6 +3942,11 @@ public class MainActivity extends Activity {
                     R.id.account_bar,
                     R.id.filter_bar,
                     R.id.deleted_bar,
+                    R.id.domain_bar,
+                    R.id.signin_bar,
+                    R.id.oauth_bar,
+                    R.id.books_bar,
+                    R.id.result_bar,
                 }) {
             padTop(bar, bars.top);
             findViewById(bar).setMinimumHeight(dimen(R.dimen.app_bar_height) + bars.top);

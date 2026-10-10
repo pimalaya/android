@@ -681,7 +681,11 @@ final class OnboardingFlow {
             discovered |= !setup.options.isEmpty();
             if (simpleSetup()) {
                 setup.selected = standardOption(setup);
-                setup.enabled = setup.selected != null;
+                // NOTE: unticked to begin with, as the advanced setup is: each
+                // ticked domain opens its own options to read, and all three
+                // at once is a wall of them.
+                DomainSetup before = previous.get(domain);
+                setup.enabled = setup.selected != null && before != null && before.enabled;
             } else {
                 setup.options.add(manualOption());
                 DomainSetup before = previous.get(domain);
@@ -835,12 +839,12 @@ final class OnboardingFlow {
     }
 
     /**
-     * The switch putting the books in the phone's contacts, or the calendars
+     * The tick putting the books in the phone's contacts, or the calendars
      * in its calendar. Turned on, it asks the mirror's permissions, and a
      * refusal turns it back off.
      */
     private View phoneRow(PhoneMirror mirror) {
-        android.widget.Switch toggle = new android.widget.Switch(host);
+        CheckBox toggle = new CheckBox(host);
         toggle.setChecked(switches.mirrors.contains(mirror));
         toggle.setOnCheckedChangeListener(
                 (view, checked) -> {
@@ -853,18 +857,18 @@ final class OnboardingFlow {
                             granted -> toggle.setChecked(switches.mirror(mirror, true, granted)));
                 });
         boolean contacts = mirror == PhoneMirror.CONTACTS;
-        return switchRow(
+        return tickRow(
                 contacts ? R.string.phone_contacts : R.string.phone_calendar,
                 contacts ? R.string.phone_contacts_note : R.string.phone_calendar_note,
                 toggle);
     }
 
     /**
-     * The switch notifying the account's new mail. Turned on, it asks the
+     * The tick notifying the account's new mail. Turned on, it asks the
      * notifications permission, and a refusal turns it back off.
      */
     private View notifyRow() {
-        android.widget.Switch toggle = new android.widget.Switch(host);
+        CheckBox toggle = new CheckBox(host);
         toggle.setChecked(switches.notifies);
         toggle.setOnCheckedChangeListener(
                 (view, checked) -> {
@@ -875,11 +879,11 @@ final class OnboardingFlow {
                     host.askNotifications(
                             granted -> toggle.setChecked(switches.notify(true, granted)));
                 });
-        return switchRow(R.string.background_notify, R.string.notify_mail_note, toggle);
+        return tickRow(R.string.background_notify, R.string.notify_mail_note, toggle);
     }
 
-    /** An option's row under a hairline: its title over its line, then its switch. */
-    private View switchRow(int titleText, int lineText, android.widget.Switch toggle) {
+    /** An option's row under a hairline: its title over its line, then its tick. */
+    private View tickRow(int titleText, int lineText, CheckBox toggle) {
         LinearLayout item = new LinearLayout(host);
         item.setOrientation(LinearLayout.VERTICAL);
         item.addView(rowDivider());

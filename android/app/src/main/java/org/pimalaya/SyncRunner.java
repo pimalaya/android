@@ -19,7 +19,7 @@ import org.pimalaya.client.OauthTokens;
  * The one sync path behind the in-app sync: the account lookup, the
  * addressbook self-heal and the refresh-once-and-retry dance exist
  * exactly once. The caller keeps what is its alone: MainActivity the
- * loader dialog, the toasts and its in-memory account cache (fed by the
+ * sync strip and its in-memory account cache (fed by the
  * observer). Everything blocks; callers run it off the main thread.
  */
 final class SyncRunner {
@@ -266,6 +266,9 @@ final class SyncRunner {
             }
 
             OfflineEngine engine = engine(primary, account);
+            if (observer != null) {
+                observer.collections(PimDomain.CONTACTS, 0, books.size());
+            }
 
             for (int index = 0; index < books.size(); index++) {
                 BookEntry entry = books.get(index);

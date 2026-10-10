@@ -1,11 +1,14 @@
 package org.pimalaya;
 
+import android.animation.ObjectAnimator;
+import android.animation.ValueAnimator;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.AbsListView;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ProgressBar;
@@ -103,6 +106,38 @@ final class ListHeader {
     }
 
     /**
+     * Shows or hides the glyph beside the meta line saying older mail is
+     * downloading in the background. It pulses gently, and holds still when
+     * the system removes animations.
+     */
+    void filling(boolean shown) {
+        ImageView glyph = view.findViewById(R.id.header_fill);
+        if (shown == (glyph.getVisibility() == View.VISIBLE)) {
+            return;
+        }
+        if (pulse != null) {
+            pulse.cancel();
+            pulse = null;
+        }
+        glyph.setAlpha(1f);
+        glyph.setVisibility(shown ? View.VISIBLE : View.GONE);
+        if (!shown) {
+            return;
+        }
+        glyph.setTooltipText(glyph.getContentDescription());
+        if (ValueAnimator.areAnimatorsEnabled()) {
+            pulse = ObjectAnimator.ofFloat(glyph, View.ALPHA, 1f, 0.3f);
+            pulse.setDuration(900);
+            pulse.setRepeatCount(ValueAnimator.INFINITE);
+            pulse.setRepeatMode(ValueAnimator.REVERSE);
+            pulse.start();
+        }
+    }
+
+    /** The fill glyph's pulse, null while it is hidden or holds still. */
+    private ObjectAnimator pulse;
+
+    /**
      * Shows the sync strip in place of the meta line, the search field and
      * the chips: the account the pass is on (none before it reaches one),
      * the step it stands at, over a bar filled to {@code done} of {@code
@@ -114,7 +149,7 @@ final class ListHeader {
         TextView whose = view.findViewById(R.id.header_sync_account);
         whose.setText(account);
         whose.setVisibility(account == null ? View.GONE : View.VISIBLE);
-        view.findViewById(R.id.header_meta).setVisibility(View.GONE);
+        view.findViewById(R.id.header_meta_row).setVisibility(View.GONE);
         view.findViewById(R.id.header_sync).setVisibility(View.VISIBLE);
         ((TextView) view.findViewById(R.id.header_sync_detail)).setText(detail);
         ProgressBar bar = view.findViewById(R.id.header_sync_bar);
@@ -128,7 +163,7 @@ final class ListHeader {
     /** Puts the meta line, the search field and the chips back once the sync is over. */
     void synced() {
         view.findViewById(R.id.header_sync).setVisibility(View.GONE);
-        view.findViewById(R.id.header_meta).setVisibility(View.VISIBLE);
+        view.findViewById(R.id.header_meta_row).setVisibility(View.VISIBLE);
         controls(true);
     }
 
