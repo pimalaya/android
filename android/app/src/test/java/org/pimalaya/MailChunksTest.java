@@ -205,43 +205,60 @@ public class MailChunksTest {
     }
 
     @Test
-    public void theListReachesDownToTheMostRecentFloorAndWidensTheMailboxHoldingIt()
+    public void theListReachesDownToTheMergedFloorAndAReachListsTheBandToADate()
             throws Exception {
+        String accountId = new PimdirAccount(context).idOf(EMAIL);
+        MailWindow.set(context, accountId, null);
         Server inboxServer = new Server(120, 1);
         Server sentServer = new Server(120, 2);
         inboxServer.sync(inbox);
         sentServer.sync(sent);
 
         MailStore.Query query = store.query((account, name) -> true, false, false, "");
-        String floor = store.floorOf(query);
+        String floor = store.floorOf(query, store.edges());
         assertEquals("the inbox's floor is the more recent", inboxServer.dateOf(71), floor);
 
         // NOTE: the sent mail reaches further back, and its messages below
         // the inbox's floor wait for the inbox to reach them.
-        long shown = store.count(query.reaching(floor));
-        assertEquals(50 + 25, shown);
+        assertEquals(50 + 25, store.count(query.since(floor)));
         assertEquals(100, store.count(query));
 
-        List<MailStore.Edge> limiting = MailFill.limiting(store.edges(), query::holds);
-        assertEquals(1, limiting.size());
-        assertEquals(inbox, limiting.get(0).collection);
+        // NOTE: a window more recent than every floor is the list's floor.
+        MailWindow.set(context, accountId, inboxServer.dateOf(101));
+        assertEquals(inboxServer.dateOf(101), store.floorOf(query, store.edges()));
+        // NOTE: a mailbox kept whole brings no window: shown alone, it
+        // reaches down to its own floor.
+        MailOffline.setWhole(context, sent, true);
+        MailStore.Query sentAlone =
+                store.query((account, collection) -> collection.equals(sent), false, false, "");
+        assertEquals(sentServer.dateOf(71), store.floorOf(sentAlone, store.edges()));
+        MailOffline.setWhole(context, sent, false);
+        MailWindow.set(context, accountId, null);
 
-        inboxServer.widen(inbox, MailEngine.FIRST_CHUNK);
-        limiting = MailFill.limiting(store.edges(), query::holds);
-        assertEquals("the sent mail's floor limits the list now", sent, limiting.get(0).collection);
-        assertEquals(sentServer.dateOf(71), store.floorOf(query));
+        // NOTE: a window moved back to a date lists a chunk at a time, the
+        // band alone each time, and never below the date.
+        String date = inboxServer.dateOf(41);
+        assertTrue(inboxServer.widen(inbox, 10, date));
+        JSONObject band = inboxServer.asked.get(inboxServer.asked.size() - 1);
+        assertTrue(band.getJSONObject("listing").getBoolean("band"));
+        assertEquals(inboxServer.dateOf(71), band.getJSONObject("scope").getString("until"));
+        assertEquals(60, stored(inbox));
+        assertTrue(inboxServer.widen(inbox, MailEngine.FILL_CHUNK, date));
+        assertEquals(80, stored(inbox));
+        assertFalse("nothing above the date left", inboxServer.widen(inbox, 10, date));
+        assertEquals(date, store.floorOf(query, store.edges()));
 
         // NOTE: a mailbox the filter hides limits nothing.
         assertEquals(
-                inboxServer.dateOf(21),
-                store.floorOf(store.query(
-                        (account, collection) ->
-                                collection.equals(store.collectionOf(EMAIL, "INBOX")),
-                        false,
-                        false,
-                        "")));
+                inboxServer.dateOf(41),
+                store.floorOf(
+                        store.query(
+                                (account, collection) -> collection.equals(inbox),
+                                false,
+                                false,
+                                ""),
+                        store.edges()));
     }
-
     /**
      * The store's load carries a message's date for the engine to scope a
      * round by, and nothing of it is ever written back: a marker staged on a

@@ -48,14 +48,8 @@ final class MailScope {
         prefs(context).edit().remove(accountId).apply();
     }
 
-    /**
-     * The floor of an account's scope today, null for all mail, which is
-     * also the scope of an account kept whole ({@link MailOffline}).
-     */
+    /** The floor of an account's scope today, null for all mail. */
     static String sinceOf(Context context, String accountId) {
-        if (MailOffline.policy(context, accountId) == MailOffline.Policy.WHOLE) {
-            return null;
-        }
         return since(months(context, accountId), LocalDate.now(ZoneOffset.UTC));
     }
 
@@ -108,5 +102,22 @@ final class MailScope {
         }
         LocalDate floor = today.withDayOfMonth(1).minusMonths(months);
         return floor + "T00:00:00Z";
+    }
+
+    /**
+     * The narrowest bound reaching back to {@code date} on {@code today},
+     * in months, 0 (all mail) when no choice does or for no date: what a
+     * window picked below the bound widens it to.
+     */
+    static int covering(String date, LocalDate today) {
+        if (date == null) {
+            return 0;
+        }
+        for (int months : MONTHS) {
+            if (months > 0 && since(months, today).compareTo(date) <= 0) {
+                return months;
+            }
+        }
+        return 0;
     }
 }

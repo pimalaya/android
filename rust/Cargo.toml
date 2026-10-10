@@ -47,3 +47,4 @@ tempfile = { version = "3", default-features = false }
 
 [patch.crates-io]
 io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "fa73f0491295db73ba8f7326a6af8ec1f2ecc817" }
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "1030bfcc08b17ac3c126a7f78ab2130352e71756" }

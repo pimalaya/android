@@ -237,6 +237,20 @@ public class PimdirDbTest {
     }
 
     @Test
+    public void aStoreWrittenBeforeReferencesGainsThemOnOpen() {
+        db.execSQL("DROP TRIGGER items_drop_references");
+        db.execSQL("DROP TABLE item_reference");
+        store.close();
+
+        store = new PimdirDb(RuntimeEnvironment.getApplication());
+        db = store.getWritableDatabase();
+
+        assertTrue(hasColumn("item_reference", "role"));
+        assertFalse(sqlOf("item_reference_to").isEmpty());
+        assertFalse(sqlOf("items_drop_references").isEmpty());
+    }
+
+    @Test
     public void aRoundOpenedBeforeTheBandColumnReadsAsAWholeScopeRound() {
         // A store written before rounds recorded their kind (pimdir
         // 00535c1), with a round open in it: the column is added under the

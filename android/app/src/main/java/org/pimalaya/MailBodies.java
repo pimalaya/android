@@ -3,28 +3,34 @@ package org.pimalaya;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
 
 /**
  * Which bodies download without being opened, and the step that downloads
- * them: the account's policy ({@link MailOffline}) carried out after each
- * pass and fill step while the app is open, never as periodic work.
+ * them: each account's window ({@link MailWindow}) and its mailboxes kept
+ * whole ({@link MailOffline}), carried out after each pass and fill step
+ * while the app is open, never as periodic work.
  *
  * <p>A body is raised to {@code Full} through the engine's upgrade
  * ({@link MailEngine#download}), which links a body the store already holds
  * under the same link id rather than fetching it again. Newest first, the
- * shown mailboxes before the others, within each mailbox's bound: a message
- * dated below it is not downloaded, and an undated one only where nothing
- * bounds the mailbox.
+ * shown mailboxes before the others. On a metered network only bodies up to
+ * {@link #CAP} download; the others wait for an unmetered one.
  */
 final class MailBodies {
     private MailBodies() {}
 
     /** Bodies one step downloads per account, before checking it may go on. */
     static final int CHUNK = 24;
+
+    /**
+     * The largest body a metered network downloads, in bytes: enough for
+     * the text of recent mail, a guess to measure on real accounts.
+     */
+    static final long CAP = 256 * 1024;
 
     /** One stored message, as the plan reads it. */
     static final class Row {
@@ -37,49 +43,94 @@ final class MailBodies {
         /** Whether the store holds its body already. */
         final boolean bodied;
 
-        Row(String collection, String linkId, String sortKey, boolean bodied) {
+        /** Its size in bytes, null where the store does not know it. */
+        final Long size;
+
+        /** Its attachment mark: 1 with, 0 without, null never examined. */
+        final Integer attachment;
+
+        Row(
+                String collection,
+                String linkId,
+                String sortKey,
+                boolean bodied,
+                Long size,
+                Integer attachment) {
             this.collection = collection;
             this.linkId = linkId;
             this.sortKey = sortKey == null ? "" : sortKey;
             this.bodied = bodied;
+            this.size = size;
+            this.attachment = attachment;
         }
     }
 
     /**
-     * The rows of {@code newestFirst} whose body is wanted: not held yet,
-     * and within their mailbox's bound ({@code boundOf}, null for none).
+     * Whether a mailbox's bodies download: all of them for one kept whole,
+     * its window's for any other but the junk and the trash, whose mail is
+     * not worth the bytes.
      */
-    static List<Row> wanted(List<Row> newestFirst, Function<String, String> boundOf) {
+    static boolean downloads(String role, boolean whole) {
+        return whole || !("junk".equals(role) || "trash".equals(role));
+    }
+
+    /**
+     * Whether the body step takes one message: dated on or after its
+     * account's window ({@code window}, null for all mail; an undated one
+     * only then) in a mailbox it downloads, or in a mailbox kept whole.
+     */
+    static boolean takes(String sortKey, String window, String role, boolean whole) {
+        return whole
+                || (downloads(role, false)
+                        && (window == null
+                                || (!sortKey.isEmpty() && sortKey.compareTo(window) >= 0)));
+    }
+
+    /** The rows of {@code newestFirst} whose body is not held yet. */
+    static List<Row> wanted(List<Row> newestFirst) {
         List<Row> wanted = new ArrayList<>();
         for (Row row : newestFirst) {
-            if (row.bodied) {
-                continue;
+            if (!row.bodied) {
+                wanted.add(row);
             }
-            String bound = boundOf.apply(row.collection);
-            if (bound != null && (row.sortKey.isEmpty() || row.sortKey.compareTo(bound) < 0)) {
-                continue;
-            }
-            wanted.add(row);
         }
         return wanted;
     }
 
+    /** Two newest-first lists as one, newest first. */
+    static List<Row> merged(List<Row> left, List<Row> right) {
+        List<Row> merged = new ArrayList<>(left.size() + right.size());
+        int l = 0;
+        int r = 0;
+        while (l < left.size() || r < right.size()) {
+            boolean takeLeft =
+                    r == right.size()
+                            || (l < left.size()
+                                    && left.get(l).sortKey.compareTo(right.get(r).sortKey) >= 0);
+            merged.add(takeLeft ? left.get(l++) : right.get(r++));
+        }
+        return merged;
+    }
+
     /**
-     * Whether a network lets bodies download: one that is there, and not
-     * metered unless the account allows a metered one ({@link MailOffline}).
+     * Whether a body a metered network may download: one of known size up
+     * to {@link #CAP}, or of unknown size whose attachment mark says it
+     * carries none.
      */
-    static boolean networkAllows(boolean online, boolean metered, boolean meteredAllowed) {
-        return online && (!metered || meteredAllowed);
+    static boolean fits(Long size, Integer attachment) {
+        return size != null ? size <= CAP : attachment != null && attachment == 0;
     }
 
     /** What a step reaches for, so the step itself can be tested. */
     interface Host {
         /**
          * Whether an account's bodies may download now: the app in the
-         * foreground, no sync running, and a network its setting allows
-         * (unmetered, or metered where the account says so).
+         * foreground, no sync running, the account on, and a network.
          */
         boolean allowed(String accountEmail);
+
+        /** Whether the network is metered, holding the larger bodies back. */
+        boolean metered();
 
         /** Downloads some of an account's bodies, blocking until they are in. */
         void download(String accountEmail, List<Row> rows) throws Exception;
@@ -118,13 +169,16 @@ final class MailBodies {
     /**
      * One step: up to {@link #CHUNK} bodies of every account allowed now,
      * taken off the plan whether they landed or not, so a body that fails
-     * is tried again by the next run rather than at once. An account whose
-     * download fails as a whole leaves the run.
+     * is tried again by the next run rather than at once. On a metered
+     * network the larger bodies stay in the plan, an account left with
+     * those alone waiting. An account whose download fails as a whole
+     * leaves the run.
      */
     static Step step(Run run, Host host) {
         if (run.drained()) {
             return Step.DONE;
         }
+        boolean metered = host.metered();
         boolean moved = false;
         List<String> done = new ArrayList<>();
         for (Map.Entry<String, Deque<Row>> account : run.left.entrySet()) {
@@ -134,8 +188,15 @@ final class MailBodies {
             }
             Deque<Row> rows = account.getValue();
             List<Row> chunk = new ArrayList<>(CHUNK);
-            while (chunk.size() < CHUNK && !rows.isEmpty()) {
-                chunk.add(rows.poll());
+            for (Iterator<Row> next = rows.iterator(); chunk.size() < CHUNK && next.hasNext(); ) {
+                Row row = next.next();
+                if (!metered || fits(row.size, row.attachment)) {
+                    chunk.add(row);
+                    next.remove();
+                }
+            }
+            if (chunk.isEmpty()) {
+                continue;
             }
             moved = true;
             try {

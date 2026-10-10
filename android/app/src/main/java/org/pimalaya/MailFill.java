@@ -4,49 +4,22 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Predicate;
 import java.util.function.ToIntFunction;
 
 /**
- * Which mailboxes widen next, a chunk at a time: what a scroll past the
- * merged list's floor asks for, and what the background fill runs.
+ * Which mailboxes the background fill widens next, a chunk at a time.
  *
  * <p>The merged list reaches down to the most recent floor among the
  * mailboxes it shows: below it, one mailbox's older mail would be listed
- * while another's of the same days is not stored yet. So a widening takes
- * the mailboxes whose floor is that limiting one, the way a k-way merge
- * draws from the input whose head is next, and the list reaches down to
- * whichever floor limits it after them.
+ * while another's of the same days is not stored yet. So the fill takes
+ * the mailbox whose floor is that limiting one first, the way a k-way merge
+ * draws from the input whose head is next.
  *
- * <p>A chunk is a number of messages, never a span of time: a scroll widens
- * each limiting mailbox by {@link MailEngine#FIRST_CHUNK}, a step of the
- * fill by {@link MailEngine#FILL_CHUNK}.
+ * <p>A chunk is a number of messages, never a span of time: a step of the
+ * fill widens by {@link MailEngine#FILL_CHUNK}.
  */
 final class MailFill {
     private MailFill() {}
-
-    /**
-     * The mailboxes a scroll past the list's floor widens: every shown one
-     * whose floor is the most recent of the shown floors. Empty when no
-     * shown mailbox limits the list.
-     */
-    static List<MailStore.Edge> limiting(List<MailStore.Edge> edges, Predicate<String> shown) {
-        String limit = null;
-        for (MailStore.Edge edge : edges) {
-            if (shown.test(edge.collection)
-                    && edge.limit != null
-                    && (limit == null || edge.limit.compareTo(limit) > 0)) {
-                limit = edge.limit;
-            }
-        }
-        List<MailStore.Edge> limiting = new ArrayList<>();
-        for (MailStore.Edge edge : edges) {
-            if (limit != null && shown.test(edge.collection) && limit.equals(edge.limit)) {
-                limiting.add(edge);
-            }
-        }
-        return limiting;
-    }
 
     /**
      * The mailbox the background fill widens next, null once every one is

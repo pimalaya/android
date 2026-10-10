@@ -145,6 +145,7 @@ final class MessageView {
         host.io.execute(
                 () -> {
                     MessageBody loaded = null;
+                    boolean fetched = false;
                     Exception failure = null;
                     try {
                         byte[] source = host.mail.source(message);
@@ -156,6 +157,22 @@ final class MessageView {
                             // message yet to be read.
                             throw new IllegalStateException(
                                     host.getString(R.string.message_failed));
+                        }
+                        if (source == null && !host.online()) {
+                            // NOTE: not on the phone, and no network to
+                            // fetch it: within its window the body step
+                            // brings it once back online, else an open does.
+                            boolean taken =
+                                    MailBodies.takes(
+                                            message.sortKey,
+                                            host.mail.windowOf(message.accountEmail),
+                                            host.mail.roles().get(message.collection),
+                                            MailOffline.whole(host, message.collection));
+                            throw new IllegalStateException(
+                                    host.getString(
+                                            taken
+                                                    ? R.string.message_not_on_phone
+                                                    : R.string.message_not_on_phone_later));
                         }
                         if (source == null) {
                             String[] address = addressOf(message);
@@ -170,6 +187,7 @@ final class MessageView {
                                                 session, address[0], address[1]);
                             }
                             host.mail.saveSource(message.collection, message.id, source);
+                            fetched = true;
                         }
                         loaded = host.client.parseMessage(source);
                         if (!message.pending) {
@@ -184,9 +202,15 @@ final class MessageView {
                     }
 
                     MessageBody outcome = loaded;
+                    boolean stored = fetched;
                     Exception error = failure;
                     host.postAlive(
                             () -> {
+                                // NOTE: its row is on the phone now, no
+                                // longer dimmed.
+                                if (stored) {
+                                    host.mailList.reload();
+                                }
                                 // NOTE: the reader may have left while the
                                 // fetch ran, and a second message may
                                 // already be on screen.
