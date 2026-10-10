@@ -29,14 +29,14 @@ There are two kinds of sync. The in-app one (a pull, the drawer's sync, a first 
 - What is new is what the run added: the unread inbox messages present after the mail pass and not before it. Messages a fill, a widened bound or the in-app sync brought never notify, and neither does a first sync.
 - One notification per message (sender as title, subject as text), grouped per account under a summary ("3 new messages"), at most 5 per account per run, the newest. One channel per account, named by its address, so Android's settings mute one account.
 - A tap opens the app. Opening the app clears them.
-- `POST_NOTIFICATIONS` (Android 13+) is asked once a mail account with notifications on exists, and again when the switch is turned on.
+- `POST_NOTIFICATIONS` (Android 13+) is asked once a mail account with notifications on exists, and again when the switch is turned on. Revised 2026-10-10 by `onboarding-options-ask-on-switch`: asked only when a switch is turned on, in the setups or in settings.
 
 ### Settings
 
 A **Background** card on the account page, between Mail and Addressbooks:
 
 - "Sync in the background", value the interval ("Every 15 minutes", "Off"): a choice dialog, "Roughly, as Android allows: an idle phone checks less often. A pull in the app syncs at once."
-- "Notify new mail", a switch, on by default, mail accounts only, dimmed while background sync is off.
+- "Notify new mail", a switch, on by default, mail accounts only, dimmed while background sync is off. Revised 2026-10-10 by `onboarding-options-ask-on-switch`: off by default, also offered in the setups, reading off while the permission is missing.
 
 ## Out of scope
 

@@ -74,8 +74,8 @@ Before it is agreed, research agents studied how existing apps solve the same ma
 
 Exactly as `phone-contacts-mirror` does for books, which lands first:
 
-- A switch "Also in the phone's Calendar app" on the Calendar card of both setups, on by default; per calendar in the account settings, beside its filter state.
-- `READ/WRITE_CALENDAR` asked when continuing with the switch on, together with the contacts permission when both are on, so one prompt.
+- A switch "Also in the phone's Calendar app" on the Calendar card of both setups, on by default; per calendar in the account settings, beside its filter state. Revised 2026-10-10 by `onboarding-options-ask-on-switch`: "Show in phone calendar", off by default.
+- `READ/WRITE_CALENDAR` asked when continuing with the switch on, together with the contacts permission when both are on, so one prompt. Revised 2026-10-10 by `onboarding-options-ask-on-switch`: asked as the switch is turned on, on its own.
 - The same address already under another account type in `Calendars` (Google, DAVx5): not mirrored, and said.
 - A debounced phone pass after every write to a mirrored calendar; Android's upload sync for calendar-app edits, which runs only with the device's auto-sync on; a pass on return; a pass on a device zone change, re-projecting floating events; the background run's offline pass as the last net, which also moves the window of the series projected as instance lists.
 

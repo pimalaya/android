@@ -1,12 +1,16 @@
 package org.pimalaya;
 
+import android.Manifest;
 import android.app.job.JobInfo;
 import android.app.job.JobScheduler;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * How often each account syncs in the background and whether its new mail
@@ -33,7 +37,8 @@ final class BackgroundCheck {
      */
     private static final long SLACK = 5 * 60 * 1000L;
 
-    private static final String SILENT = "silent";
+    /** The accounts whose new mail notifies. */
+    private static final String NOTIFY = "notify";
 
     static final int JOB = 1;
 
@@ -68,19 +73,45 @@ final class BackgroundCheck {
         return minutes > 0 && elapsed >= minutes * 60 * 1000L - SLACK;
     }
 
-    /** Whether the account's new mail notifies. */
+    /** Whether the account's new mail notifies; off until turned on. */
     static boolean notifies(Context context, String email) {
-        return !prefs(context).getStringSet(SILENT, Set.of()).contains(email);
+        return prefs(context).getStringSet(NOTIFY, Set.of()).contains(email);
     }
 
+    /**
+     * Turns the account's new-mail notifications on or off. On, the account
+     * syncs in the background too, at the default interval when it was off:
+     * the background run is what notifies.
+     */
     static void setNotifies(Context context, String email, boolean on) {
-        put(context, SILENT, email, !on);
+        put(context, NOTIFY, email, on);
+        if (on && !syncs(context, email)) {
+            setInterval(context, email, DEFAULT);
+        }
+    }
+
+    /**
+     * The permissions notifying takes on the given SDK, those {@code has}
+     * holds left out: posting one is a runtime permission from Android 13.
+     */
+    static String[] missing(int sdk, Predicate<String> has) {
+        String permission = Manifest.permission.POST_NOTIFICATIONS;
+        return sdk >= 33 && !has.test(permission) ? new String[] {permission} : new String[0];
+    }
+
+    /** Whether the app may notify. */
+    static boolean permitted(Context context) {
+        Predicate<String> has =
+                permission ->
+                        context.checkSelfPermission(permission)
+                                == PackageManager.PERMISSION_GRANTED;
+        return missing(Build.VERSION.SDK_INT, has).length == 0;
     }
 
     /** Drops a removed account's switches. */
     static void forget(Context context, String email) {
         prefs(context).edit().remove("interval:" + email).apply();
-        put(context, SILENT, email, false);
+        put(context, NOTIFY, email, false);
         schedule(context);
     }
 

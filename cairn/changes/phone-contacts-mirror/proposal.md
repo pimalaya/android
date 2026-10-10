@@ -20,10 +20,10 @@ The store is the truth, in vCard; the phone's `ContactsContract` is a view of it
 
 ### The option
 
-- **Standard setup:** under the Contacts card of the sign-in page, a switch "Also in the phone's Contacts app", line "The dialer and messaging apps see them, and edits there come back here.", on by default.
+- **Standard setup:** under the Contacts card of the sign-in page, a switch "Also in the phone's Contacts app", line "The dialer and messaging apps see them, and edits there come back here.", on by default. Revised 2026-10-10 by `onboarding-options-ask-on-switch`: "Show in phone contacts", line "Calls and texts show their names.", off by default.
 - **Advanced setup:** the same switch under the Contacts section's card. The books page loses nothing and gains nothing: it picks books, the switch applies to every one ticked.
 - **Account settings:** per book, "Show in the phone's contacts", as today.
-- The contacts permission is asked when the setup continues with the switch on, or when the settings switch is turned on, and nowhere else. Refused, the switch goes back off and the setup carries on.
+- The contacts permission is asked when the setup continues with the switch on, or when the settings switch is turned on, and nowhere else. Refused, the switch goes back off and the setup carries on. Revised 2026-10-10 by `onboarding-options-ask-on-switch`: asked as the setup's switch is turned on, never on Continue.
 
 ### Already on this phone
 

@@ -395,14 +395,22 @@ final class AccountSettings {
 
         if (account.covers(PimDomain.MAIL)) {
             Switch notify = new Switch(host);
-            notify.setChecked(BackgroundCheck.notifies(host, email));
+            // NOTE: off while the permission is missing, revoked in the
+            // system settings included, so turning it on asks again.
+            notify.setChecked(
+                    BackgroundCheck.notifies(host, email) && BackgroundCheck.permitted(host));
             notify.setEnabled(syncs);
             notify.setOnCheckedChangeListener(
                     (view, checked) -> {
-                        BackgroundCheck.setNotifies(host, email, checked);
-                        if (checked) {
-                            host.requestNotifications();
+                        if (!checked) {
+                            BackgroundCheck.setNotifies(host, email, false);
+                            return;
                         }
+                        host.askNotifications(
+                                granted -> {
+                                    BackgroundCheck.setNotifies(host, email, granted);
+                                    notify.setChecked(granted);
+                                });
                     });
             View row =
                     switchRow(sections, host.getString(R.string.background_notify), null, notify);
@@ -418,19 +426,27 @@ final class AccountSettings {
      * The addressbooks card: a switch per book, and under a book that is on
      * whether it syncs with the server and shows in the phone's contacts,
      * led by a line when another app already fills the phone's Contacts app
-     * with the address. Turning a book on shows it on the phone too, unless
-     * another app does already.
+     * with the address. A book reads as off the phone while the contacts
+     * permission is missing. Turning a book on brings it to the phone when
+     * the account's other books are there, without asking anything.
      */
     private void addBooks(Sections sections, String email) {
         List<View> rows = new ArrayList<>();
         if (elsewhere) {
             rows.add(note(R.string.phone_elsewhere));
         }
+        boolean permitted = PhoneMirror.CONTACTS.granted(host);
+        List<BookEntry> entries = new ArrayList<>();
+        boolean accountOnPhone = false;
         for (BookEntry entry : host.base.loadAllAddressbooks()) {
-            if (!entry.accountEmail.equals(email)) {
-                continue;
+            if (entry.accountEmail.equals(email)) {
+                entries.add(entry);
+                accountOnPhone |= entry.subscribed && entry.phoneSynced;
             }
-            String url = entry.book.url;
+        }
+        boolean joins = accountOnPhone && permitted && !elsewhere;
+        for (BookEntry entry : entries) {
+            boolean onPhone = entry.phoneSynced && permitted;
 
             LinearLayout item = new LinearLayout(host);
             item.setOrientation(LinearLayout.VERTICAL);
@@ -438,7 +454,7 @@ final class AccountSettings {
             Switch enable = new Switch(host);
             enable.setChecked(entry.subscribed);
             enable.setOnCheckedChangeListener(
-                    (view, checked) -> setBook(entry, checked, checked, checked && !elsewhere));
+                    (view, checked) -> setBook(entry, checked, checked, checked && joins));
             item.addView(
                     switchRow(
                             sections,
@@ -451,11 +467,16 @@ final class AccountSettings {
                         bookOption(
                                 R.string.book_remote_sync,
                                 entry.remoteSynced,
-                                checked -> setBook(entry, true, checked, entry.phoneSynced)));
+                                checked ->
+                                        writeBook(
+                                                entry.book.url,
+                                                true,
+                                                checked,
+                                                entry.phoneSynced)));
                 View local =
                         bookOption(
-                                R.string.book_local_sync,
-                                entry.phoneSynced,
+                                R.string.phone_contacts,
+                                onPhone,
                                 checked -> setBook(entry, true, entry.remoteSynced, checked));
                 local.setPadding(
                         local.getPaddingLeft(), 0, local.getPaddingRight(), host.dp(6));
@@ -488,16 +509,17 @@ final class AccountSettings {
 
     /**
      * Writes a book's switches; the contacts root and the phone follow them.
-     * Turned on for the phone, the contacts permission is asked first, and
-     * refused leaves the book off it; the projection follows on the strip.
-     * Turned off, the phone's copy goes after one last pass.
+     * Turned on for the phone while the contacts permission is missing, it
+     * is asked first, and refused leaves the book off it; the projection
+     * follows on the strip. Turned off, the phone's copy goes after one
+     * last pass.
      */
     private void setBook(BookEntry entry, boolean enabled, boolean remote, boolean local) {
         String url = entry.book.url;
-        boolean shown = entry.subscribed && entry.phoneSynced;
-        if (!local || shown) {
+        boolean wasShown = entry.subscribed && entry.phoneSynced;
+        if (!local || wasShown && PhoneMirror.CONTACTS.granted(host)) {
             writeBook(url, enabled, remote, local);
-            if (shown && !local) {
+            if (wasShown && !local) {
                 host.hideFromPhone(url);
             }
             return;
@@ -525,7 +547,8 @@ final class AccountSettings {
      * The calendars card: a row per calendar, its filter state under its
      * name and whether it shows in the phone's calendar under that, led by a
      * line when another app already fills the phone's calendar with the
-     * address. The switch still shows it there then.
+     * address. The switch still shows it there then, and reads as off while
+     * the calendar permission is missing.
      */
     private void addCalendars(Sections sections, String email) {
         List<View> rows = new ArrayList<>();
@@ -541,6 +564,7 @@ final class AccountSettings {
             }
         }
         MergedFilter filter = host.filterOf(PimDomain.CALENDAR);
+        boolean permitted = PhoneMirror.CALENDAR.granted(host);
         for (PimdirCollections.Stored calendar : calendars) {
             LinearLayout item = new LinearLayout(host);
             item.setOrientation(LinearLayout.VERTICAL);
@@ -555,8 +579,8 @@ final class AccountSettings {
                             null));
             View phone =
                     bookOption(
-                            R.string.calendar_phone,
-                            PhoneCalendars.shown(host, email, calendar.id),
+                            R.string.phone_calendar,
+                            PhoneCalendars.shown(host, email, calendar.id) && permitted,
                             checked -> setCalendar(email, calendar.id, checked, ids));
             phone.setPadding(phone.getPaddingLeft(), 0, phone.getPaddingRight(), host.dp(6));
             item.addView(phone);

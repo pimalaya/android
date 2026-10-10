@@ -8,12 +8,12 @@ Folds into a new `spec/phone-mirror.md`, which the calendar mirror joins.
 ## ADDED Requirements
 
 ### Requirement: Showing contacts on the phone is chosen
-Both setups SHALL offer, for an account covering contacts, a switch showing its books in the phone's Contacts app, on by default, asking the contacts permission when the setup continues with it on; a refusal SHALL turn it off without stopping the setup. The permission SHALL NOT be asked elsewhere than there and on a book's settings switch.
+Both setups SHALL offer, for an account covering contacts, a switch "Show in phone contacts", off by default, asking the contacts permission when it is turned on; a refusal SHALL turn it back off. The permission SHALL NOT be asked elsewhere than there and on a book's settings option. (Revised 2026-10-10 by `onboarding-options-ask-on-switch`, which restates this requirement.)
 
 #### Scenario: Refused
-- GIVEN the standard setup with the switch on
-- WHEN the permission is refused
-- THEN the account is connected with no book shown on the phone, and its settings say so
+- GIVEN the standard setup with Contacts ticked
+- WHEN the switch is turned on and the permission refused
+- THEN the switch is off, and the account is connected with no book shown on the phone
 
 ### Requirement: A phone already showing the account is left alone
 A setup SHALL NOT mirror an account's books when the phone's contacts already hold raw contacts of the same address under another account type, and SHALL say so.

@@ -1,6 +1,5 @@
 package org.pimalaya;
 
-import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -9,7 +8,6 @@ import android.app.job.JobParameters;
 import android.app.job.JobService;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.util.Log;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -211,10 +209,7 @@ public class BackgroundJob extends JobService {
      */
     private static void notify(
             Context context, String email, List<MailStore.StoredMessage> arrived) {
-        // NOTE: a runtime permission from Android 13 on, granted before.
-        if (arrived.isEmpty()
-                || android.os.Build.VERSION.SDK_INT >= 33
-                        && !granted(context, Manifest.permission.POST_NOTIFICATIONS)) {
+        if (arrived.isEmpty() || !BackgroundCheck.permitted(context)) {
             return;
         }
         NotificationManager manager = context.getSystemService(NotificationManager.class);
@@ -273,9 +268,5 @@ public class BackgroundJob extends JobService {
         return message.fromName == null || message.fromName.isEmpty()
                 ? message.fromAddress
                 : message.fromName;
-    }
-
-    private static boolean granted(Context context, String permission) {
-        return context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
     }
 }

@@ -109,15 +109,10 @@ final class OnboardingFlow {
     private boolean verifying;
 
     /**
-     * The phone apps the books and the calendars show in, the switches under
-     * the contacts and the calendars in both setups. On by default; a refused
-     * permission turns its switch off.
+     * The options under mail, the contacts and the calendars in both setups:
+     * notifications and the phone apps, off until turned on and permitted.
      */
-    private final Set<PhoneMirror> mirrors = java.util.EnumSet.allOf(PhoneMirror.class);
-
-    /** The switches drawn for them, which a refusal turns off. */
-    private final Map<PhoneMirror, android.widget.Switch> mirrorSwitches =
-            new java.util.EnumMap<>(PhoneMirror.class);
+    private final SetupSwitches switches = new SetupSwitches();
 
     /**
      * Whether another app already fills the phone's Contacts app with this
@@ -251,7 +246,7 @@ final class OnboardingFlow {
         verifying = false;
         connecting = false;
         signInPage = false;
-        mirrors.addAll(java.util.EnumSet.allOf(PhoneMirror.class));
+        switches.reset();
         elsewhere = false;
         calendarsElsewhere = false;
         authSteps = null;
@@ -817,10 +812,11 @@ final class OnboardingFlow {
                             ? host.getString(R.string.domain_connected)
                             : null;
             LinearLayout row = domainRow(setup.domain, status, false, tick);
-            // NOTE: the phone's switch under the contacts and the calendars,
-            // shown while they are ticked.
-            PhoneMirror mirror = PhoneMirror.of(setup.domain);
-            View phone = mirror == null ? null : phoneRow(mirror);
+            // NOTE: the domain's option under it, shown while it is ticked.
+            View option =
+                    setup.domain == PimDomain.MAIL
+                            ? notifyRow()
+                            : phoneRow(PhoneMirror.of(setup.domain));
             row.setOnClickListener(
                     view -> {
                         if (verifying) {
@@ -828,42 +824,65 @@ final class OnboardingFlow {
                         }
                         setup.enabled = !setup.enabled;
                         tick.setChecked(setup.enabled);
-                        if (phone != null) {
-                            phone.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
-                        }
+                        option.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
                         resetSetupContinue();
                     });
             card.addView(row);
-            if (phone != null) {
-                phone.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
-                card.addView(phone);
-            }
+            option.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
+            card.addView(option);
         }
         return card;
     }
 
     /**
-     * The switch putting the books in the phone's Contacts app, or the
-     * calendars in its Calendar app, under a hairline, its line saying what
-     * that brings. Continue asks the mirror's permissions while it is on.
+     * The switch putting the books in the phone's contacts, or the calendars
+     * in its calendar. Turned on, it asks the mirror's permissions, and a
+     * refusal turns it back off.
      */
     private View phoneRow(PhoneMirror mirror) {
+        android.widget.Switch toggle = new android.widget.Switch(host);
+        toggle.setChecked(switches.mirrors.contains(mirror));
+        toggle.setOnCheckedChangeListener(
+                (view, checked) -> {
+                    if (!checked) {
+                        switches.mirror(mirror, false, Set.of());
+                        return;
+                    }
+                    host.askMirrors(
+                            java.util.EnumSet.of(mirror),
+                            granted -> toggle.setChecked(switches.mirror(mirror, true, granted)));
+                });
+        boolean contacts = mirror == PhoneMirror.CONTACTS;
+        return switchRow(
+                contacts ? R.string.phone_contacts : R.string.phone_calendar,
+                contacts ? R.string.phone_contacts_note : R.string.phone_calendar_note,
+                toggle);
+    }
+
+    /**
+     * The switch notifying the account's new mail. Turned on, it asks the
+     * notifications permission, and a refusal turns it back off.
+     */
+    private View notifyRow() {
+        android.widget.Switch toggle = new android.widget.Switch(host);
+        toggle.setChecked(switches.notifies);
+        toggle.setOnCheckedChangeListener(
+                (view, checked) -> {
+                    if (!checked) {
+                        switches.notify(false, false);
+                        return;
+                    }
+                    host.askNotifications(
+                            granted -> toggle.setChecked(switches.notify(true, granted)));
+                });
+        return switchRow(R.string.background_notify, R.string.notify_mail_note, toggle);
+    }
+
+    /** An option's row under a hairline: its title over its line, then its switch. */
+    private View switchRow(int titleText, int lineText, android.widget.Switch toggle) {
         LinearLayout item = new LinearLayout(host);
         item.setOrientation(LinearLayout.VERTICAL);
         item.addView(rowDivider());
-
-        android.widget.Switch toggle = new android.widget.Switch(host);
-        toggle.setChecked(mirrors.contains(mirror));
-        toggle.setOnCheckedChangeListener(
-                (view, checked) -> {
-                    if (checked) {
-                        mirrors.add(mirror);
-                    } else {
-                        mirrors.remove(mirror);
-                    }
-                });
-        mirrorSwitches.put(mirror, toggle);
-        boolean contacts = mirror == PhoneMirror.CONTACTS;
 
         LinearLayout row = new LinearLayout(host);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -877,12 +896,12 @@ final class OnboardingFlow {
         LinearLayout text = new LinearLayout(host);
         text.setOrientation(LinearLayout.VERTICAL);
         TextView title = new TextView(host);
-        title.setText(contacts ? R.string.phone_contacts : R.string.phone_calendar);
+        title.setText(titleText);
         title.setTextSize(16);
         title.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
         text.addView(title);
         TextView line = new TextView(host);
-        line.setText(contacts ? R.string.phone_contacts_note : R.string.phone_calendar_note);
+        line.setText(lineText);
         line.setTextSize(13);
         line.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
         text.addView(line);
@@ -1125,6 +1144,7 @@ final class OnboardingFlow {
 
         if (setup.domain == PimDomain.MAIL) {
             addSubmission(body, setup);
+            body.addView(notifyRow());
         } else {
             // NOTE: for every book ticked on the books page, which only
             // picks them, and every calendar the first sync lists.
@@ -2499,35 +2519,6 @@ final class OnboardingFlow {
      */
     private void confirmSetup() {
         host.hideKeyboard();
-
-        // NOTE: the phone's permissions are asked here, as the setup
-        // continues with a mirror switched on, and nowhere else in it. A
-        // refusal turns the switch off and the setup carries on.
-        Set<PhoneMirror> wanted = java.util.EnumSet.noneOf(PhoneMirror.class);
-        for (PhoneMirror mirror : mirrors) {
-            DomainSetup setup = setups.get(mirror.domain);
-            if (setup != null && setup.enabled) {
-                wanted.add(mirror);
-            }
-        }
-        host.askMirrors(
-                wanted,
-                granted -> {
-                    for (PhoneMirror mirror : wanted) {
-                        if (!granted.contains(mirror)) {
-                            mirrors.remove(mirror);
-                            android.widget.Switch toggle = mirrorSwitches.get(mirror);
-                            if (toggle != null) {
-                                toggle.setChecked(false);
-                            }
-                        }
-                    }
-                    signIn();
-                });
-    }
-
-    /** The setup's sign-ins, once the phone's permissions are settled. */
-    private void signIn() {
         connectedEmail = pendingEmail;
         for (DomainSetup setup : setups.values()) {
             setup.credential = null;
@@ -2880,7 +2871,7 @@ final class OnboardingFlow {
 
         Account contacts = connectedAccount.server(PimDomain.CONTACTS);
         boolean calendars =
-                mirrors.contains(PhoneMirror.CALENDAR)
+                switches.mirrors.contains(PhoneMirror.CALENDAR)
                         && connectedAccount.server(PimDomain.CALENDAR) != null;
         pendingBooks = null;
         if (contacts == null && !calendars) {
@@ -2890,7 +2881,7 @@ final class OnboardingFlow {
 
         busy();
         String email = connectedEmail;
-        boolean phone = mirrors.contains(PhoneMirror.CONTACTS);
+        boolean phone = switches.mirrors.contains(PhoneMirror.CONTACTS);
         host.io.execute(
                 () -> {
                     try {
@@ -2901,8 +2892,8 @@ final class OnboardingFlow {
                             }
                         }
                         // NOTE: one provider query each, the permissions
-                        // granted as the setup continued; what they find is
-                        // said rather than guessed at beforehand.
+                        // granted as the switches turned on; what they find
+                        // is said rather than guessed at beforehand.
                         boolean found =
                                 phone && contacts != null && Accounts.elsewhere(host, email);
                         boolean calendarsFound =
@@ -3067,9 +3058,7 @@ final class OnboardingFlow {
                         PimdirSummary.CONTACT,
                         PimdirCollections.of(connectedEmail, pendingBooks));
 
-        // NOTE: the permission was asked as the setup continued; refused,
-        // the switch is off.
-        boolean phone = mirrors.contains(PhoneMirror.CONTACTS) && !elsewhere;
+        boolean phone = switches.mirrors.contains(PhoneMirror.CONTACTS) && !elsewhere;
         for (Addressbook book : pendingBooks) {
             boolean on = subscribed.contains(book.url);
             host.base.setBookState(book.url, on, on, on && phone);
@@ -3102,7 +3091,7 @@ final class OnboardingFlow {
             PhoneCalendars.setAccount(
                     host,
                     connected.email,
-                    mirrors.contains(PhoneMirror.CALENDAR) && !calendarsElsewhere);
+                    switches.mirrors.contains(PhoneMirror.CALENDAR) && !calendarsElsewhere);
         }
 
         // NOTE: merged into whatever the address already had, so connecting a
@@ -3138,6 +3127,12 @@ final class OnboardingFlow {
         AccountEntry stored = merged;
         host.accounts.removeIf(entry -> entry.email.equals(stored.email));
         host.accounts.add(stored);
+
+        // NOTE: written only when on, so setting an address up again leaves
+        // its choice alone; after the save, as it may schedule the job.
+        if (switches.notifies && connected.server(PimDomain.MAIL) != null) {
+            BackgroundCheck.setNotifies(host, stored.email, true);
+        }
 
         busy();
         host.syncConnected(stored);

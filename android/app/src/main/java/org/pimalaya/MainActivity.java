@@ -1,6 +1,5 @@
 package org.pimalaya;
 
-import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.job.JobScheduler;
@@ -241,6 +240,9 @@ public class MainActivity extends Activity {
     private Set<PhoneMirror> askedMirrors;
 
     private Consumer<Set<PhoneMirror>> afterMirrors;
+
+    /** Who takes the answer of a notifications prompt that is up. */
+    private Consumer<Boolean> afterNotifications;
 
     /** The editor's working state, replaced blank when it leaves. */
     EditSession edit = new EditSession();
@@ -862,7 +864,6 @@ public class MainActivity extends Activity {
             return;
         }
         getSystemService(android.app.NotificationManager.class).cancelAll();
-        askNotifications();
         long ran = BackgroundJob.ran;
         if (ran == reloadedRun || syncing) {
             return;
@@ -904,43 +905,6 @@ public class MainActivity extends Activity {
         }
         afterBackgroundRun();
         firstSyncIfOwed(screen);
-    }
-
-    /**
-     * Asks once for the notifications permission (Android 13 on), when an
-     * account would notify new mail.
-     */
-    private void askNotifications() {
-        if (android.os.Build.VERSION.SDK_INT < 33
-                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                        == PackageManager.PERMISSION_GRANTED) {
-            return;
-        }
-        android.content.SharedPreferences asked =
-                getSharedPreferences("notifications-asked", MODE_PRIVATE);
-        if (asked.getBoolean("asked", false)) {
-            return;
-        }
-        boolean wanted = false;
-        for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
-            wanted |= BackgroundCheck.syncs(this, account.email)
-                    && BackgroundCheck.notifies(this, account.email);
-        }
-        if (wanted) {
-            asked.edit().putBoolean("asked", true).apply();
-            requestNotifications();
-        }
-    }
-
-    /** Asks for the notifications permission (Android 13 on). */
-    void requestNotifications() {
-        if (android.os.Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                        != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(
-                    new String[] {Manifest.permission.POST_NOTIFICATIONS},
-                    REQUEST_NOTIFICATIONS);
-        }
     }
 
     private void setUpHomePanel() {
@@ -1182,9 +1146,8 @@ public class MainActivity extends Activity {
     /**
      * Asks, in one prompt, the permissions of the phone mirrors wanted, then
      * hands {@code done} the ones granted (main thread). Asks nothing when
-     * they all are. The setups' switches and a book's or a calendar's
-     * settings switch are the only callers: a mirror is asked for when it is
-     * turned on.
+     * they all are. Called only as a mirror's switch is turned on, in a
+     * setup or in an account's settings.
      */
     void askMirrors(Set<PhoneMirror> wanted, Consumer<Set<PhoneMirror>> done) {
         String[] missing = PhoneMirror.missing(wanted, this::permitted);
@@ -1197,17 +1160,65 @@ public class MainActivity extends Activity {
         requestPermissions(missing, REQUEST_MIRRORS);
     }
 
-    /** Hands a mirrors' prompt its answer. */
-    @Override
-    public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
-        if (request != REQUEST_MIRRORS || afterMirrors == null) {
+    /**
+     * Asks the notifications permission where Android takes one, then hands
+     * {@code done} whether the app may notify (main thread). Called only as
+     * a notifications switch is turned on.
+     */
+    void askNotifications(Consumer<Boolean> done) {
+        String[] missing = BackgroundCheck.missing(Build.VERSION.SDK_INT, this::permitted);
+        if (missing.length == 0) {
+            done.accept(true);
             return;
         }
-        Consumer<Set<PhoneMirror>> done = afterMirrors;
-        Set<PhoneMirror> wanted = askedMirrors;
-        afterMirrors = null;
-        askedMirrors = null;
-        done.accept(PhoneMirror.granted(wanted, this::permitted));
+        afterNotifications = done;
+        requestPermissions(missing, REQUEST_NOTIFICATIONS);
+    }
+
+    /**
+     * Hands a prompt its answer. A denial Android will not prompt for again
+     * leaves the switch off and says where it can still be allowed.
+     */
+    @Override
+    public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        boolean blocked =
+                PermissionAnswer.blocked(
+                        permissions, this::permitted, this::shouldShowRequestPermissionRationale);
+        if (request == REQUEST_MIRRORS && afterMirrors != null) {
+            Consumer<Set<PhoneMirror>> done = afterMirrors;
+            Set<PhoneMirror> wanted = askedMirrors;
+            afterMirrors = null;
+            askedMirrors = null;
+            done.accept(PhoneMirror.granted(wanted, this::permitted));
+            if (blocked) {
+                showBlocked(
+                        new Intent(
+                                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.fromParts("package", getPackageName(), null)));
+            }
+        } else if (request == REQUEST_NOTIFICATIONS && afterNotifications != null) {
+            Consumer<Boolean> done = afterNotifications;
+            afterNotifications = null;
+            done.accept(BackgroundCheck.permitted(this));
+            if (blocked) {
+                showBlocked(
+                        new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(
+                                        android.provider.Settings.EXTRA_APP_PACKAGE,
+                                        getPackageName()));
+            }
+        }
+    }
+
+    /** Says a permission is now only allowed in Android's settings, opening them on demand. */
+    private void showBlocked(Intent settings) {
+        new AlertDialog.Builder(this)
+                .setMessage(R.string.permission_blocked)
+                .setPositiveButton(
+                        R.string.permission_blocked_open,
+                        (dialog, which) -> startActivity(settings))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     private boolean permitted(String permission) {
