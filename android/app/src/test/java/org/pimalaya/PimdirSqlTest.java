@@ -7,8 +7,8 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 
+import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.PimalayaException;
@@ -18,15 +18,16 @@ import org.robolectric.RobolectricTestRunner;
 import java.util.Map;
 
 /**
- * The canonical pimdir schema, applied to Android's own SQLite.
+ * The canonical pimdir schema, applied to the bundled SQLite.
  *
  * <p>The point of this suite is the seam itself: the app compiles io-pimdir
  * without its {@code client} feature, so the statements come from the crate
- * over JNI while the execution stays on {@code android.database.sqlite}. That
- * only works if the SQL the spec writes for rusqlite is accepted verbatim by
- * the platform driver, which is an assumption worth testing rather than
- * hoping for: {@code STRICT} tables, partial indexes and {@code RETURNING} are
- * all recent SQLite features, and Android's version is the device's, not ours.
+ * over JNI while the execution stays on the Java binding. That only works if
+ * the SQL the spec writes for rusqlite is accepted verbatim by that driver,
+ * which is an assumption worth testing rather than hoping for: {@code STRICT}
+ * tables, partial indexes and {@code RETURNING} are all recent SQLite
+ * features, which is why the app bundles its SQLite rather than take the
+ * device's.
  */
 @RunWith(RobolectricTestRunner.class)
 public class PimdirSqlTest {

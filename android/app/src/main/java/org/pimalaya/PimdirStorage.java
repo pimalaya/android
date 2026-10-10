@@ -2,11 +2,11 @@ package org.pimalaya;
 
 import android.content.ContentValues;
 import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteDoneException;
-import android.database.sqlite.SQLiteStatement;
 import android.util.Log;
 
+import io.requery.android.database.sqlite.SQLiteDatabase;
+import io.requery.android.database.sqlite.SQLiteStatement;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -26,7 +26,7 @@ import java.util.Set;
  * io-pimdir's storage seam over a pimdir store.
  *
  * <p>The engine runs in Rust and is I/O-free, so every storage yield arrives
- * here as a JSON envelope and is serviced against Android's own SQLite. What
+ * here as a JSON envelope and is serviced against the bundled SQLite. What
  * changes from the previous {@code OfflineStore} is only the schema underneath:
  * pimdir's generic {@code items} and {@code bindings} instead of a
  * contacts-shaped {@code card} and {@code membership}, with bodies moved out to

@@ -650,11 +650,12 @@ storage is serviced from Java over a JNI upcall, and that stays. What changes is
 the schema underneath, so the migration is narrower than P1-3 reads: the remote
 half (`enumerate` / `fetch` / `push`) is untouched entirely.
 
-**io-pimdir is taken without its `client` feature.** Android ships SQLite;
-compiling rusqlite in would put a second engine in every ABI of a binary whose
+**io-pimdir is taken without its `client` feature.** The app bundles SQLite on
+the Java side (bundled-sqlite: the platform's is too old below Android 14);
+compiling rusqlite in as well would put a second engine in every ABI of a binary whose
 first fixed decision is to be small. The crate contributes `sql` (the canonical
 schema and every statement) and `codec`; execution stays on
-`android.database.sqlite`. Dependency tree for it: io-replica and serde_json,
+`io.requery.android.database.sqlite`. Dependency tree for it: io-replica and serde_json,
 nothing else.
 
 **The SQL crosses JNI rather than being transcribed.** `Native.pimdirSql()`
@@ -674,7 +675,7 @@ android/app/.../PimdirMeta.java     per-kind meta and sort keys (the consumer's 
 android/app/.../PimdirStorage.java  the three storage ops over items/bindings/objects
 ```
 
-36 tests over the six, all Robolectric so they run the real platform driver.
+36 tests over the six, all Robolectric so they run the real Java driver.
 
 Four things worth carrying forward:
 

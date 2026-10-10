@@ -11,6 +11,11 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // The bundled SQLite (see :app) is published on JitPack only, which
+        // builds it from the tagged source; nothing else resolves there.
+        maven("https://jitpack.io") {
+            content { includeGroup("com.github.requery") }
+        }
     }
 }
 

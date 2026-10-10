@@ -6,8 +6,8 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 
+import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Before;

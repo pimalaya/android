@@ -8,8 +8,8 @@ import static org.junit.Assert.assertTrue;
 
 import android.database.Cursor;
 import android.database.sqlite.SQLiteConstraintException;
-import android.database.sqlite.SQLiteDatabase;
 
+import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -23,11 +23,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * The pimdir store on Android's own SQLite: the schema, its invariants, and the
+ * The pimdir store on the bundled SQLite: the schema, its invariants, and the
  * blob directory beside it.
  *
  * <p>What is worth testing here is not that SQLite works, but that the
- * specification's schema behaves the same way through the platform driver as it
+ * specification's schema behaves the same way through the Java binding as it
  * does through rusqlite: the foreign keys cascade, the unique indexes bite, and
  * one store really does hold several accounts and several media types at once.
  */
@@ -53,6 +53,48 @@ public class PimdirDbTest {
         db.execSQL(
                 "INSERT INTO bindings(collection, link_id, source, handle) VALUES(?, ?, 'server', ?)",
                 new Object[] {collection, linkId, linkId + ".vcf"});
+    }
+
+    /**
+     * The store's opener runs on a SQLite new enough for the schema, whatever
+     * the device: Android ships 3.18 to 3.32 below Android 14, which parses
+     * none of the features below.
+     *
+     * <p>On the host this is the bundled binding over the host build of the
+     * same amalgamation (flake.nix), not the AAR's Android library itself.
+     */
+    @Test
+    public void theStoreRunsOnASqliteNewEnoughForTheSchema() {
+        try (Cursor cursor = db.rawQuery("SELECT sqlite_version()", null)) {
+            assertTrue(cursor.moveToFirst());
+            String[] version = cursor.getString(0).split("\\.");
+            int major = Integer.parseInt(version[0]);
+            int minor = Integer.parseInt(version[1]);
+            assertTrue(cursor.getString(0), major > 3 || (major == 3 && minor >= 37));
+        }
+
+        // STRICT (3.37) enforced, not merely parsed.
+        db.execSQL("CREATE TABLE probe(id INTEGER PRIMARY KEY, n INTEGER NOT NULL) STRICT");
+        try {
+            db.execSQL("INSERT INTO probe(n) VALUES('not a number')");
+            throw new AssertionError("a STRICT table took text into an INTEGER column");
+        } catch (SQLiteConstraintException expected) {
+            // NOTE: SQLITE_CONSTRAINT_DATATYPE, the STRICT refusal.
+        }
+
+        // RETURNING (3.35).
+        try (Cursor cursor = db.rawQuery("INSERT INTO probe(n) VALUES(1) RETURNING id", null)) {
+            assertTrue(cursor.moveToFirst());
+            assertEquals(1, cursor.getLong(0));
+        }
+
+        // UPDATE ... FROM (3.33) over json_each (JSON1).
+        db.execSQL(
+                "UPDATE probe SET n = j.value FROM json_each('[41]') AS j WHERE probe.id = 1");
+        try (Cursor cursor = db.rawQuery("SELECT n FROM probe WHERE id = 1", null)) {
+            assertTrue(cursor.moveToFirst());
+            assertEquals(41, cursor.getLong(0));
+        }
     }
 
     @Test
@@ -342,12 +384,18 @@ public class PimdirDbTest {
         return false;
     }
 
-    /** The last column of an index, which is what the reshape moved. */
+    /**
+     * The last column of an index, which is what the reshape moved.
+     *
+     * <p>Through a {@code SELECT}: a bare pragma may run on a pooled
+     * connection whose cached schema predates the reconcile.
+     */
     private String indexColumns(String index) {
         String last = null;
-        try (Cursor cursor = db.rawQuery("PRAGMA index_info(" + index + ")", null)) {
+        try (Cursor cursor = db.rawQuery(
+                "SELECT name FROM pragma_index_info(?) ORDER BY seqno", new String[] {index})) {
             while (cursor.moveToNext()) {
-                last = cursor.getString(2);
+                last = cursor.getString(0);
             }
         }
         return last;

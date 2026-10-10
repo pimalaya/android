@@ -102,10 +102,25 @@ val cargoHostBuild = tasks.register<Exec>("cargoHostBuild") {
     outputs.file(hostLibrary)
 }
 
+// The bundled SQLite's .so is built for Android only, so the store tests
+// load a host build of the same binding and amalgamation, which the nix
+// devshell provides (PIMALAYA_SQLITE_HOST, see flake.nix). Without it they
+// would fail on a missing libsqlite3x, so the test task refuses to start.
+val hostSqlite = System.getenv("PIMALAYA_SQLITE_HOST")
+
 tasks.withType<Test>().configureEach {
     dependsOn(cargoHostBuild)
     inputs.file(hostLibrary)
-    systemProperty("java.library.path", file("../../rust/target/debug").absolutePath)
+    hostSqlite?.let { inputs.dir(it) }
+    doFirst {
+        if (hostSqlite == null) {
+            throw GradleException(
+                "PIMALAYA_SQLITE_HOST is unset: run the tests through `nix develop`"
+            )
+        }
+    }
+    val libraryPath = listOfNotNull(file("../../rust/target/debug").absolutePath, hostSqlite)
+    systemProperty("java.library.path", libraryPath.joinToString(File.pathSeparator))
 }
 
 dependencies {
@@ -121,6 +136,18 @@ dependencies {
     // Pull-to-refresh over the contacts list (triggers an account sync).
     // Another small, standalone AndroidX ViewGroup, no theme needed.
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+
+    // SQLite bundled for every device: the pimdir store needs 3.37+ (STRICT
+    // tables, RETURNING, json_each) and the platform's is 3.18 to 3.32 below
+    // Android 14. The AOSP android.database.sqlite code under
+    // io.requery.android.database.sqlite, SQLite 3.49.0 with JSON1. Bump it
+    // with the host build in flake.nix. It asks androidx.core 1.15, which
+    // would pull Kotlin coroutines, lifecycle and an app-startup provider
+    // into an app that has none, for androidx.core.os.CancellationSignal
+    // alone: the core the drawer already resolves (1.3) carries it.
+    implementation("com.github.requery:sqlite-android:3.49.0") {
+        exclude(group = "androidx.core", module = "core")
+    }
 
     // JVM-only test dependencies (nothing ships in the APK). The org.json
     // artifact stands in for the android.jar stubs so Mapping runs on the

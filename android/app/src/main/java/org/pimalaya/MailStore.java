@@ -3,11 +3,11 @@ package org.pimalaya;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.Cursor;
-import android.database.sqlite.SQLiteCursor;
-import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteQuery;
 import android.util.Log;
 
+import io.requery.android.database.sqlite.SQLiteCursor;
+import io.requery.android.database.sqlite.SQLiteDatabase;
+import io.requery.android.database.sqlite.SQLiteQuery;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.pimalaya.client.Mailbox;
@@ -42,7 +42,7 @@ import java.util.function.BiPredicate;
  * scroll position and sized by a count ({@link Query}): io-pimdir's canonical
  * readers ({@code count_mail}, {@code count_mail_by_day}, {@code count_unread},
  * {@code list_mail_page_filtered}, {@code search_mail}) run here over
- * Android's SQLite, the statements crossing the bridge rather than being
+ * the bundled SQLite, the statements crossing the bridge rather than being
  * transcribed. The ordering is written once, at sync time, so a listing never
  * parses a date.
  *
