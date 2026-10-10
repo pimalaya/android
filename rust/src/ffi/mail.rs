@@ -291,7 +291,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessageSource<'local
 
 /// `Native.parseMessage`: one stored message to what the reader draws.
 /// Returns a JSON object of
-/// `{subject, from, fromAddress, to, cc, date, kind, body, attachments}`.
+/// `{subject, from, fromAddress, to, cc, date, kind, body, attachments,
+/// attachmentMark}`, each attachment `{name, mime, size, part}`.
 ///
 /// No transport and no session, because there is nothing to reach for:
 /// the bytes are the argument. This is what a message opened a second
@@ -306,6 +307,30 @@ pub extern "system" fn Java_org_pimalaya_client_Native_parseMessage<'local>(
         let raw = env.convert_byte_array(&source).unwrap_or_default();
         let json = match mail::parse(&raw) {
             Ok(message) => to_string(&message).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<LogErrorAndDefault>()
+}
+
+/// `Native.messagePart`: the decoded bytes of one part of a stored
+/// message, by its IMAP section, as `{"bytes"}` base64-encoded, or
+/// `{"error": ".."}` when the message holds no such part. Pure, as
+/// [`Java_org_pimalaya_client_Native_parseMessage`] is.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_messagePart<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    source: JByteArray<'local>,
+    section: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let raw = env.convert_byte_array(&source).unwrap_or_default();
+        let section = read_string(env, &section);
+        let json = match mail::part(&raw, &section) {
+            Ok(bytes) => json!({ "bytes": mail::base64(&bytes) }).to_string(),
             Err(err) => error_json(err),
         };
 

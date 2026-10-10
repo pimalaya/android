@@ -522,6 +522,15 @@ public class PimalayaClient {
     }
 
     /**
+     * The decoded bytes of one attachment of a message, by the section
+     * {@link MessageBody.Attachment#part} names. No network.
+     */
+    public byte[] messagePart(byte[] source, String part) {
+        JSONObject reply = object(Native.messagePart(source, part));
+        return Base64.getDecoder().decode(reply.optString("bytes"));
+    }
+
+    /**
      * Resolves one message's MIME tree into what a reader draws: the
      * headers, the one body it shows, and what it carries beside it.
      *
@@ -540,7 +549,8 @@ public class PimalayaClient {
                     new MessageBody.Attachment(
                             attachment.optString("name"),
                             attachment.optString("mime"),
-                            attachment.optLong("size")));
+                            attachment.optLong("size"),
+                            attachment.optString("part")));
         }
 
         // NOTE: optString and not the null-returning helper beside it:

@@ -135,6 +135,14 @@
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 
+        <!-- The files the app opens, read by the app showing them through
+             a granted URI (OpenedFiles). -->
+        <provider
+            android:name=".OpenedFiles"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
     </application>
 
 </manifest>

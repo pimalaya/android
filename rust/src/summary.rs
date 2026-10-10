@@ -15,6 +15,7 @@ use io_pimdir::summary::{
     PimdirAddress, PimdirAddressRole, PimdirSummary,
     calendar::{PimdirEventSummary, PimdirJournalSummary, PimdirTaskSummary, PimdirTime},
     contact::PimdirContactSummary,
+    file::PimdirFileSummary,
     mail::PimdirMailSummary,
 };
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,8 @@ pub enum SummaryJson {
     Task(TaskJson),
     /// A `text/calendar` `VJOURNAL` resource (Annex A.5).
     Journal(JournalJson),
+    /// An `application/octet-stream` item (Annex A.7).
+    File(FileJson),
 }
 
 impl From<&PimdirSummary> for SummaryJson {
@@ -86,6 +89,12 @@ impl From<&PimdirSummary> for SummaryJson {
                 summary: journal.summary.clone(),
                 time: TimeJson::of(journal.dtstart.as_ref()),
                 addresses,
+            }),
+            PimdirSummary::File(file) => Self::File(FileJson {
+                name: file.name.clone(),
+                media_type: file.media_type.clone(),
+                size: file.size,
+                part: file.part.clone(),
             }),
         }
     }
@@ -145,6 +154,12 @@ impl From<SummaryJson> for PimdirSummary {
                 dtstart: journal.time.time(),
                 organizer: organizer_of(&journal.addresses),
                 attendees: role_of(&journal.addresses, PimdirAddressRole::Attendee),
+            }),
+            SummaryJson::File(file) => Self::File(PimdirFileSummary {
+                name: file.name,
+                media_type: file.media_type,
+                size: file.size,
+                part: file.part,
             }),
         }
     }
@@ -246,6 +261,19 @@ pub struct JournalJson {
     time: TimeJson,
     #[serde(default)]
     addresses: Vec<AddressJson>,
+}
+
+/// The `file_summary` row (Annex A.7); a file names no one.
+#[derive(Deserialize, Serialize)]
+pub struct FileJson {
+    #[serde(default)]
+    name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    media_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    part: Option<String>,
 }
 
 /// A `DTSTART` as its three columns: the value verbatim, its `TZID` and

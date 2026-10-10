@@ -366,6 +366,16 @@
     <string name="message_cc">Cc: %s</string>
     <string name="message_attachment_unnamed">(Unnamed)</string>
 
+    <!-- What a tap on an attachment offers. -->
+    <string name="attachment_open">Open</string>
+    <string name="attachment_save">Save to folder</string>
+    <string name="attachment_new_folder">New folder</string>
+    <string name="attachment_folder_name">Folder name</string>
+    <string name="attachment_create">Create</string>
+    <string name="attachment_saved">Saved to %1$s</string>
+    <string name="attachment_no_app">No app on this phone opens this file</string>
+    <string name="attachment_failed">Could not read the attachment</string>
+
     <!-- What the reader does to the message it has open. -->
     <string name="message_mark_unread">Mark unread</string>
     <string name="message_mark_read">Mark read</string>

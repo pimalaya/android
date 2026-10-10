@@ -46,6 +46,9 @@ final class PimdirSummary {
     /** Media type of a calendar item. */
     static final String CALENDAR = "text/calendar";
 
+    /** Media type of a file item: bytes, its own type in its summary (Annex A.7). */
+    static final String FILE = "application/octet-stream";
+
     // ---- writing ----------------------------------------------------------
 
     /**
