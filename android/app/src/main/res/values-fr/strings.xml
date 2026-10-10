@@ -322,7 +322,7 @@
     <string name="conflict_auto_resolved">Conflit résolu automatiquement ; les modifications partent à la prochaine synchronisation</string>
     <string name="contact_diverged_pending">Des champs divergents attendent une revue</string>
     <string name="sync_busy">Attendez la fin de la synchronisation</string>
-    <string name="sync_overlay_preparing">Préparation de la synchronisation</string>
+    <string name="sync_line_starting">Démarrage de la synchronisation</string>
     <string name="sync_line_mail">Synchronisation des messages</string>
     <string name="sync_line_contacts">Synchronisation des contacts</string>
     <string name="sync_line_calendars">Synchronisation des agendas</string>

@@ -64,6 +64,7 @@ mod calendar;
 mod client;
 mod ffi;
 mod jmap;
+mod logger;
 mod mail;
 mod oauth;
 mod offline;

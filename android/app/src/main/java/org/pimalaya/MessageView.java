@@ -19,6 +19,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import org.json.JSONObject;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
@@ -144,7 +145,9 @@ final class MessageView {
             return;
         }
 
-        host.io.execute(
+        // NOTE: off the io executor, which a step of the background fill or
+        // of the body download can hold for seconds: someone is waiting.
+        host.interactive.execute(
                 () -> {
                     MessageBody loaded = null;
                     boolean fetched = false;
@@ -182,10 +185,12 @@ final class MessageView {
                         }
                         loaded = host.client.parseMessage(source);
                         if (!message.pending) {
-                            host.files.recordAttachments(
-                                    host.mail.accountIdOf(message.accountEmail),
-                                    message.id,
-                                    loaded.attachments);
+                            synchronized (PimdirEngine.STORE) {
+                                host.files.recordAttachments(
+                                        host.mail.accountIdOf(message.accountEmail),
+                                        message.id,
+                                        loaded.attachments);
+                            }
                         }
                     } catch (Exception error) {
                         Log.w("pimalaya", "message fetch failed: " + message.id, error);
@@ -247,13 +252,14 @@ final class MessageView {
         try (MailSession session = host.openMail(account)) {
             source = host.client.fetchMessageSource(session, address[0], address[1]);
         }
-        host.mail.saveSource(message.collection, message.id, source);
         // NOTE: the listing read the summary without the body; the body
-        // just stored restates it.
-        host.mail.restateFromBody(
-                message.collection,
-                message.id,
-                PimdirSql.derive(PimdirSummary.MAIL, source).optJSONObject("summary"));
+        // just stored restates it. One writer: a fill or body step may be
+        // writing beside this open.
+        JSONObject summary = PimdirSql.derive(PimdirSummary.MAIL, source).optJSONObject("summary");
+        synchronized (PimdirEngine.STORE) {
+            host.mail.saveSource(message.collection, message.id, source);
+            host.mail.restateFromBody(message.collection, message.id, summary);
+        }
         return source;
     }
 

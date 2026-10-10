@@ -68,7 +68,7 @@ public class CalendarSyncService extends Service {
             }
 
             try {
-                PimdirDb pimdir = new PimdirDb(context);
+                PimdirDb pimdir = PimdirDb.shared(context);
                 for (String collection : CalendarRows.rows(context, account).keySet()) {
                     if (CalendarRows.phonePass(pimdir, collection)) {
                         ingested = System.currentTimeMillis();

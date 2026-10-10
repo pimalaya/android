@@ -2,18 +2,22 @@
 //! Google Calendar and People, CalDAV, CardDAV and JMAP.
 //!
 //! A server that throttles answers 429 or 503, often with a
-//! `Retry-After`; Google answers its per-user rate limits with a 429,
-//! or a 403 whose reason is `rateLimitExceeded` or
-//! `userRateLimitExceeded` or whose message names a per-minute quota
-//! (`Quota exceeded for quota metric … Units per minute per user`).
-//! Each of those means the request was not served, so it is sent
-//! again after a wait rather than failing the sync pass: the server's
-//! `Retry-After`, else a short back-off, or for Google's per-minute
-//! quotas the next minute.
+//! `Retry-After`; Google answers its rate limits with a 429, or a 403
+//! whose reason is `rateLimitExceeded` or `userRateLimitExceeded`. Each
+//! of those means the request was not served, so it is sent again after
+//! a wait rather than failing the sync pass: the server's `Retry-After`
+//! (or the instant Gmail's message names, `Retry after …`), else a short
+//! exponential back-off. Almost every such refusal is a per-second or a
+//! concurrency limit, gone within a second or two; only an answer that
+//! names a per-minute quota (`Quota exceeded for quota metric … Units
+//! per minute per user`) waits for the next minute.
 //!
-//! Gmail is also paced before it is asked ([`pace_gmail`]): a per-second
-//! rate and a per-minute budget of quota units, shared by every worker,
-//! so a long pass waits for its quota rather than drawing refusals.
+//! Gmail is also paced before it is asked ([`pace_gmail`]), per account:
+//! a rate of quota units per second, under Gmail's 250, and a per-minute
+//! ceiling below the project's quota, shared by every worker, the body
+//! downloads and the reader, so a long pass waits for its quota rather
+//! than drawing refusals. A request someone is waiting on (a message
+//! being opened) skips the queue the background work forms.
 //!
 //! **Why at the transport.** A coroutine is consumed by its run and
 //! cannot be rewound, and the HTTP runners number in the dozens. An
@@ -37,16 +41,17 @@
 //! or a body past the caps) is never retried, since writing again on a
 //! connection the server is closing or still talking on would desync
 //! it: it passes through untouched, bytes already read included.
+//!
+//! Every wait, a pacing one or a throttled one, is logged at debug.
 
 use std::{
-    collections::VecDeque,
-    sync::Mutex,
+    collections::{HashMap, VecDeque},
+    sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
 
-use io_gmail::v1::{batch::GMAIL_BATCH_URL, send::GmailApiError};
+use io_gmail::v1::send::GmailApiError;
 use jiff::{Timestamp, fmt::rfc2822::DateTimeParser};
-use url::Url;
 
 use crate::{client::Client, types::BridgeError};
 
@@ -82,17 +87,19 @@ const HEAD_CAP: usize = 64 * 1024;
 /// through rather than being buffered.
 const BODY_CAP: usize = 256 * 1024;
 
-/// Gmail API requests per second the account is held near. Gmail grants
-/// 250 quota units per user per second, and `messages.list` and
-/// `messages.get` cost 5 each, so about 50 reads a second (each
-/// sub-request of a batch counting on its own); pacing at 40 keeps
-/// below the limit rather than waiting for its 429s. Process-wide, so
-/// every worker of a sync pass shares it.
-pub(crate) const GMAIL_REQUESTS_PER_SECOND: u32 = 40;
+/// The longest reason a throttled answer is logged with.
+const REASON_CAP: usize = 160;
 
-/// How many Gmail requests may go out at once after a pause, on top of
-/// the one the pacing lets through.
-const GMAIL_BURST: u32 = 10;
+/// Gmail quota units per second an account is held near. Gmail grants
+/// 250 per user per second, a moving average, and a metadata read costs
+/// 5, so a batch of 50 reads already spends a whole second; pacing at a
+/// fifth below keeps clear of the limit rather than drawing its 429s.
+/// A batch is paced by the units of every call it carries.
+pub(crate) const GMAIL_UNITS_PER_SECOND: u32 = 200;
+
+/// The units an account's pacing lets through at once after a pause, on
+/// top of the request's own: a handful of small calls.
+const GMAIL_BURST_UNITS: u32 = 50;
 
 /// Gmail's per-minute quota per user, in quota units, as the Cloud
 /// console of the app's project 991810147220 states it (2026-10-09):
@@ -100,20 +107,22 @@ const GMAIL_BURST: u32 = 10;
 /// limits" page still documents, which Google calls the previous quota.
 const GMAIL_UNITS_PER_MINUTE_PER_USER: u32 = 6_000;
 
-/// The quota units Gmail requests may spend in any sixty seconds: the
-/// project's quota less a fifth, so the two sides' clocks and the
-/// requests still in flight never carry a pass over it.
+/// The quota units background Gmail requests may spend in any sixty
+/// seconds: the project's quota less a fifth, so the two sides' clocks
+/// and the requests still in flight never carry a pass over it.
 pub(crate) const GMAIL_UNITS_PER_MINUTE: u32 = GMAIL_UNITS_PER_MINUTE_PER_USER / 5 * 4;
 
-/// Where Gmail API requests go, to tell its quota refusals apart; its
-/// batches go to [`GMAIL_BATCH_URL`], on another host.
-const GMAIL_HOST: &str = "gmail.googleapis.com";
+/// The quota units urgent Gmail requests may spend in any sixty seconds:
+/// the fifth the background ceiling leaves.
+const GMAIL_URGENT_UNITS_PER_MINUTE: u32 = GMAIL_UNITS_PER_MINUTE_PER_USER - GMAIL_UNITS_PER_MINUTE;
 
-/// The Gmail pacing, shared by every worker.
-static GMAIL_PACE: Mutex<GmailPace> = Mutex::new(GmailPace {
-    next: None,
-    minute: MinuteBudget::new(),
-});
+/// How long an account's pacing is kept unused before it is dropped:
+/// past a minute, nothing it holds bears on the next request.
+const GMAIL_PACE_IDLE: Duration = Duration::from_secs(120);
+
+/// The Gmail pacing of every account, by the key its requests carry.
+static GMAIL_PACES: LazyLock<Mutex<HashMap<String, GmailPace>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The request in flight on a [`Client`]: what was written, to which
 /// URL, and whether its answer started.
@@ -143,6 +152,12 @@ pub(crate) trait Wire {
     /// The time this native call has spent waiting on throttling.
     fn waited(&mut self) -> &mut Duration;
 
+    /// The Gmail account the request in flight is paced under, none for
+    /// any other request.
+    fn paced(&self) -> Option<String> {
+        None
+    }
+
     /// Waits `delay`.
     fn sleep(&mut self, delay: Duration) {
         std::thread::sleep(delay);
@@ -170,6 +185,10 @@ impl Wire for Client<'_, '_> {
     fn waited(&mut self) -> &mut Duration {
         &mut self.waited
     }
+
+    fn paced(&self) -> Option<String> {
+        self.gmail_pace.clone()
+    }
 }
 
 /// HTTP exchange with throttling, used by every HTTP runner in place of
@@ -187,6 +206,14 @@ impl<'a, 'local> Client<'a, 'local> {
     /// throttled one, retrying that request within the bounds.
     pub(crate) fn http_read(&mut self, url: &str) -> Result<Vec<u8>, BridgeError> {
         throttled_read(self, url)
+    }
+
+    /// Paces the Gmail request about to go out under the account `key`
+    /// names, costing `units` ([`pace_gmail`]), and has its throttled
+    /// answers hold that account's pacing; answers the wait.
+    pub(crate) fn pace_gmail(&mut self, key: &str, units: u32) -> Duration {
+        self.gmail_pace = Some(key.to_string());
+        pace_gmail(key, units, self.urgent)
     }
 }
 
@@ -217,22 +244,20 @@ fn throttled_read<W: Wire>(wire: &mut W, url: &str) -> Result<Vec<u8>, BridgeErr
 
     let mut retries = 0;
     loop {
-        let (bytes, retry_after, throttle) = match read_answer(wire, url)? {
+        let refusal = match read_answer(wire, url)? {
             Answered::Passed(bytes) => return Ok(bytes),
-            Answered::Throttled {
-                bytes,
-                retry_after,
-                throttle,
-            } => (bytes, retry_after, throttle),
+            Answered::Throttled(refusal) => refusal,
         };
 
-        // NOTE: the other workers would draw the same refusal, so the
-        // shared pacing holds them a minute too.
-        if throttle == Throttle::Minute && gmail(url) {
-            gmail_quota_refused();
+        // NOTE: the account's other workers would draw the same refusal,
+        // so its pacing holds them a minute too.
+        if refusal.throttle == Throttle::Minute
+            && let Some(key) = wire.paced()
+        {
+            gmail_quota_refused(&key);
         }
 
-        let (delay, budget) = match (retry_after, throttle) {
+        let (delay, budget) = match (refusal.retry_after, refusal.throttle) {
             (Some(delay), Throttle::Minute) => (delay, QUOTA_WAIT_BUDGET),
             (Some(delay), Throttle::Burst) => (delay, WAIT_BUDGET),
             (None, Throttle::Minute) => {
@@ -245,11 +270,24 @@ fn throttled_read<W: Wire>(wire: &mut W, url: &str) -> Result<Vec<u8>, BridgeErr
         };
         let left = budget.saturating_sub(*wire.waited());
         if retries >= MAX_RETRIES || delay > left {
-            log::warn!("{url} still throttled, giving up after {retries} retries");
-            return Ok(bytes);
+            log::warn!(
+                "{} still throttled ({} {}), giving up after {retries} retries",
+                short(url),
+                refusal.status,
+                refusal.reason
+            );
+            return Ok(refusal.bytes);
         }
 
-        log::warn!("{url} throttled, retrying in {}ms", delay.as_millis());
+        log::debug!(
+            "{} throttled ({} {}), {:?} wait, retry {} in {} ms",
+            short(url),
+            refusal.status,
+            refusal.reason,
+            refusal.throttle,
+            retries + 1,
+            delay.as_millis()
+        );
         wire.sleep(delay);
         *wire.waited() += delay;
         retries += 1;
@@ -304,56 +342,119 @@ fn read_answer<W: Wire>(wire: &mut W, url: &str) -> Result<Answered, BridgeError
         }
     };
 
-    let Some(throttle) = throttled(head.status, &body, google(url)) else {
+    let Some(throttle) = throttled(head.status, &body) else {
         return Ok(Answered::Passed(bytes));
     };
 
+    let now = wire.now();
     let retry_after = head
         .retry_after
         .as_deref()
-        .and_then(|value| retry_after(value, wire.now()));
-    Ok(Answered::Throttled {
+        .and_then(|value| retry_after(value, now))
+        .or_else(|| retry_after_named(&body, now));
+    Ok(Answered::Throttled(Refusal {
+        status: head.status,
+        reason: reason(head.status, &body),
         bytes,
         retry_after,
         throttle,
-    })
+    }))
 }
 
-/// Holds one Gmail request costing `units` quota units until both its
-/// slot under [`GMAIL_REQUESTS_PER_SECOND`] and room in the last
-/// minute's [`GMAIL_UNITS_PER_MINUTE`] come.
+/// Holds one Gmail request of the account `key` names, costing `units`
+/// quota units, until both its slot under [`GMAIL_UNITS_PER_SECOND`] and
+/// room in the last minute's [`GMAIL_UNITS_PER_MINUTE`] come, and
+/// answers how long it waited. An `urgent` request takes no slot behind
+/// the others, though they wait for it, and draws on the fifth of the
+/// minute's quota the background leaves.
 ///
 /// A batch is one request but costs the units of every call it carries,
 /// so it is paced once with their sum.
-pub(crate) fn pace_gmail(units: u32) {
+pub(crate) fn pace_gmail(key: &str, units: u32, urgent: bool) -> Duration {
     let wait = {
-        let mut pace = GMAIL_PACE.lock().unwrap_or_else(|err| err.into_inner());
+        let mut paces = GMAIL_PACES.lock().unwrap_or_else(|err| err.into_inner());
         let now = Instant::now();
-        let (slot, after) = pace_slot(pace.next, now, GMAIL_REQUESTS_PER_SECOND, GMAIL_BURST);
-        pace.next = Some(after);
-        let budget = pace
-            .minute
-            .reserve(now + slot, units, GMAIL_UNITS_PER_MINUTE);
-        slot + budget
+        paces.retain(|_, pace| now.saturating_duration_since(pace.used) < GMAIL_PACE_IDLE);
+        paces
+            .entry(key.to_string())
+            .or_insert_with(GmailPace::new)
+            .book(now, units, urgent)
     };
 
     if !wait.is_zero() {
+        log::debug!(
+            "gmail paced {} ms for {units} units{}",
+            wait.as_millis(),
+            if urgent { ", urgent" } else { "" }
+        );
         std::thread::sleep(wait);
+    }
+    wait
+}
+
+/// The gate an account's metadata batches go through one at a time:
+/// each call of a batch runs side by side on Gmail's side, and two
+/// batches at once draw its per-user concurrency 429s.
+pub(crate) fn gmail_gate(key: &str) -> Arc<Mutex<()>> {
+    let mut paces = GMAIL_PACES.lock().unwrap_or_else(|err| err.into_inner());
+    let pace = paces.entry(key.to_string()).or_insert_with(GmailPace::new);
+    pace.used = Instant::now();
+    Arc::clone(&pace.gate)
+}
+
+/// Spends what is left of the minute's Gmail budget of the account `key`
+/// names: Gmail just refused a per-minute quota, so every worker holds
+/// off a minute rather than drawing the same refusal.
+fn gmail_quota_refused(key: &str) {
+    let mut paces = GMAIL_PACES.lock().unwrap_or_else(|err| err.into_inner());
+    if let Some(pace) = paces.get_mut(key) {
+        let now = Instant::now();
+        pace.minute.exhaust(now, GMAIL_UNITS_PER_MINUTE);
+        pace.urgent.exhaust(now, GMAIL_URGENT_UNITS_PER_MINUTE);
     }
 }
 
-/// Spends what is left of the minute's Gmail budget: Gmail just refused
-/// a per-minute quota, so every worker holds off a minute rather than
-/// drawing the same refusal.
-fn gmail_quota_refused() {
-    let mut pace = GMAIL_PACE.lock().unwrap_or_else(|err| err.into_inner());
-    pace.minute.exhaust(Instant::now(), GMAIL_UNITS_PER_MINUTE);
-}
-
-/// The Gmail pacing: the next per-second slot and the minute's units.
+/// One account's Gmail pacing: the next per-second slot, the minute's
+/// units, background and urgent, and the gate of its batches.
 struct GmailPace {
     next: Option<Instant>,
     minute: MinuteBudget,
+    urgent: MinuteBudget,
+    gate: Arc<Mutex<()>>,
+    used: Instant,
+}
+
+impl GmailPace {
+    fn new() -> Self {
+        Self {
+            next: None,
+            minute: MinuteBudget::new(),
+            urgent: MinuteBudget::new(),
+            gate: Arc::default(),
+            used: Instant::now(),
+        }
+    }
+
+    /// Books one request of `units` at `now`, answering how long it waits.
+    fn book(&mut self, now: Instant, units: u32, urgent: bool) -> Duration {
+        self.used = now;
+        let (slot, after) = pace_slot(
+            self.next,
+            now,
+            units,
+            GMAIL_UNITS_PER_SECOND,
+            GMAIL_BURST_UNITS,
+        );
+        self.next = Some(after);
+        if urgent {
+            return self
+                .urgent
+                .reserve(now, units, GMAIL_URGENT_UNITS_PER_MINUTE);
+        }
+        slot + self
+            .minute
+            .reserve(now + slot, units, GMAIL_UNITS_PER_MINUTE)
+    }
 }
 
 /// The quota units spent over the last minute, as a sliding window, so
@@ -413,23 +514,31 @@ impl MinuteBudget {
     }
 }
 
-/// One step of a paced stream (the generic cell rate algorithm): given
-/// the next free slot and now, how long this request waits and the
-/// slot after it. Up to `burst` requests go out at once after a pause.
-fn pace_slot(next: Option<Instant>, now: Instant, rate: u32, burst: u32) -> (Duration, Instant) {
-    let interval = Duration::from_secs(1) / rate;
-    let earliest = now.checked_sub(interval * burst).unwrap_or(now);
+/// One step of a paced stream of costs (the generic cell rate algorithm
+/// over quota units): given the next free slot and now, how long a
+/// request of `units` waits and the slot after it, `rate` units a
+/// second. Up to `burst` units more than the request's own go out at
+/// once after a pause.
+fn pace_slot(
+    next: Option<Instant>,
+    now: Instant,
+    units: u32,
+    rate: u32,
+    burst: u32,
+) -> (Duration, Instant) {
+    let per_unit = Duration::from_secs(1) / rate;
+    let earliest = now.checked_sub(per_unit * burst).unwrap_or(now);
     let slot = next.map_or(now, |next| next.max(earliest));
 
-    (slot.saturating_duration_since(now), slot + interval)
+    (slot.saturating_duration_since(now), slot + per_unit * units)
 }
 
 /// How a throttled answer is waited out when it names no `Retry-After`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Throttle {
-    /// A burst limit: a short exponential back-off.
+    /// A rate or concurrency limit: a short exponential back-off.
     Burst,
-    /// A per-minute quota, Google's: until the next minute.
+    /// A per-minute quota the answer names: until the next minute.
     Minute,
 }
 
@@ -437,34 +546,38 @@ enum Throttle {
 enum Answered {
     /// Anything but a throttled answer: handed to the coroutine as is.
     Passed(Vec<u8>),
-    /// A throttled answer, read to its end, and the wait it asked for.
-    Throttled {
-        bytes: Vec<u8>,
-        retry_after: Option<Duration>,
-        throttle: Throttle,
-    },
+    /// A throttled answer, read to its end.
+    Throttled(Refusal),
+}
+
+/// A throttled answer: its bytes, its status and reason for the log,
+/// and the wait it asked for.
+struct Refusal {
+    status: u16,
+    reason: String,
+    bytes: Vec<u8>,
+    retry_after: Option<Duration>,
+    throttle: Throttle,
 }
 
 /// Whether a complete answer says the request was throttled, and how it
 /// is waited out: a 503, a 429, or one of Google's rate-limit 403s (a
-/// 403 for anything else, a daily quota included, is no reason to
-/// wait). Google's are per-minute quotas; `google` says the request
-/// went to a Google API, whose 429s count by the minute too, and whose
-/// error envelope names its reasons, matched before the text is.
-fn throttled(status: u16, body: &[u8], google: bool) -> Option<Throttle> {
+/// 403 for anything else, and any answer naming a daily quota, is no
+/// reason to wait). Only an answer naming a per-minute quota waits for
+/// the next minute: a bare 429, Gmail's concurrency one
+/// (`Too many concurrent requests for user`) and its per-second one
+/// (`User-rate limit exceeded`) included, is gone within seconds.
+fn throttled(status: u16, body: &[u8]) -> Option<Throttle> {
     match status {
         503 => Some(Throttle::Burst),
-        429 if google || names_minute_quota(body) => Some(Throttle::Minute),
+        429 | 403 if names_daily_quota(body) => None,
+        429 | 403 if names_minute_quota(body) => Some(Throttle::Minute),
         429 => Some(Throttle::Burst),
-        403 if names_daily_quota(body) => None,
-        403 if google && GmailApiError::parse(status, body).is_rate_limited() => {
-            Some(Throttle::Minute)
-        }
-        403 if names_minute_quota(body)
+        403 if GmailApiError::parse(status, body).is_rate_limited()
             || contains(body, b"rateLimitExceeded")
             || contains(body, b"userRateLimitExceeded") =>
         {
-            Some(Throttle::Minute)
+            Some(Throttle::Burst)
         }
         _ => None,
     }
@@ -472,34 +585,47 @@ fn throttled(status: u16, body: &[u8], google: bool) -> Option<Throttle> {
 
 /// Whether a body names one of Google's per-minute quotas, as Gmail's
 /// `Quota exceeded for quota metric 'Total Query Cost' and limit 'Units
-/// per minute per user'` does.
+/// per minute per user'` does, in its message or in its `ErrorInfo`
+/// metadata (`…PerMinutePerUser`); the older APIs' hundred seconds
+/// count alike.
 fn names_minute_quota(body: &[u8]) -> bool {
     contains(body, b"per minute")
-        || contains(body, b"RATE_LIMIT_EXCEEDED")
-        || (contains(body, b"Quota exceeded for quota metric") && !names_daily_quota(body))
+        || contains(body, b"PerMinute")
+        || contains(body, b"per 100 seconds")
+        || contains(body, b"Per100Seconds")
 }
 
 /// Whether a body names a daily quota, which no wait within a sync
 /// brings back.
 fn names_daily_quota(body: &[u8]) -> bool {
-    contains(body, b"dailyLimitExceeded") || contains(body, b"per day")
+    contains(body, b"dailyLimitExceeded") || contains(body, b"per day") || contains(body, b"PerDay")
 }
 
-/// Whether a URL is Gmail's, its API or its batch endpoint, whose quota
-/// refusals hold the shared pacing.
-fn gmail(url: &str) -> bool {
-    url.starts_with(GMAIL_BATCH_URL)
-        || Url::parse(url)
-            .ok()
-            .is_some_and(|url| url.host_str() == Some(GMAIL_HOST))
+/// The reason a throttled answer gives, for the log: Google's reasons
+/// and message, or the start of any other body.
+fn reason(status: u16, body: &[u8]) -> String {
+    let error = GmailApiError::parse(status, body);
+    let mut reason = error.reasons.join(",");
+    if !error.message.is_empty() {
+        if !reason.is_empty() {
+            reason.push_str(": ");
+        }
+        reason.push_str(error.message.trim());
+    }
+    if reason.len() > REASON_CAP {
+        let mut end = REASON_CAP;
+        while !reason.is_char_boundary(end) {
+            end -= 1;
+        }
+        reason.truncate(end);
+        reason.push('…');
+    }
+    reason
 }
 
-/// Whether a URL is one of Google's APIs.
-fn google(url: &str) -> bool {
-    Url::parse(url)
-        .ok()
-        .and_then(|url| url.host_str().map(|host| host.ends_with(".googleapis.com")))
-        .unwrap_or(false)
+/// A URL without its query, for the log.
+fn short(url: &str) -> &str {
+    url.split('?').next().unwrap_or(url)
 }
 
 /// The wait from `now` to the start of the next minute, at least a
@@ -529,8 +655,31 @@ fn retry_after(value: &str, now: Timestamp) -> Option<Duration> {
 
     static PARSER: DateTimeParser = DateTimeParser::new();
     let at = PARSER.parse_timestamp(value).ok()?;
+    Some(until(at, now))
+}
+
+/// The wait a Google error message names, as Gmail's per-user rate limit
+/// does (`User-rate limit exceeded.  Retry after 2026-10-10T20:21:41.123Z`):
+/// an RFC 3339 instant after `Retry after`, a past one waiting nothing.
+fn retry_after_named(body: &[u8], now: Timestamp) -> Option<Duration> {
+    const NEEDLE: &[u8] = b"Retry after ";
+    let at = body
+        .windows(NEEDLE.len())
+        .position(|window| window == NEEDLE)?;
+    let rest = &body[at + NEEDLE.len()..];
+    let end = rest
+        .iter()
+        .position(|byte| !(byte.is_ascii_alphanumeric() || b":.-+".contains(byte)))
+        .unwrap_or(rest.len());
+    let named = std::str::from_utf8(&rest[..end]).ok()?;
+    let instant: Timestamp = named.trim_end_matches('.').parse().ok()?;
+    Some(until(instant, now))
+}
+
+/// The wait from `now` to `at`, nothing for an instant already past.
+fn until(at: Timestamp, now: Timestamp) -> Duration {
     let millis = at.as_millisecond().saturating_sub(now.as_millisecond());
-    Some(Duration::from_millis(millis.max(0) as u64))
+    Duration::from_millis(millis.max(0) as u64)
 }
 
 /// Where the head of an answer ends, past its blank line.
@@ -724,89 +873,101 @@ mod tests {
         assert!(matches!(dechunk(b"zz\r\n"), Body::Unframed));
     }
 
-    #[test]
-    fn only_google_rate_limits_make_a_403_throttled() {
-        assert_eq!(throttled(429, b"", false), Some(Throttle::Burst));
-        assert_eq!(throttled(503, b"", false), Some(Throttle::Burst));
-        assert_eq!(
-            throttled(
-                403,
-                br#"{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}"#,
-                true
-            ),
-            Some(Throttle::Minute)
-        );
-        assert_eq!(
-            throttled(403, br#"{"reason":"rateLimitExceeded"}"#, true),
-            Some(Throttle::Minute)
-        );
-        assert_eq!(
-            throttled(403, br#"{"reason":"dailyLimitExceeded"}"#, true),
-            None
-        );
-        assert_eq!(throttled(403, b"Forbidden", true), None);
-        assert_eq!(throttled(500, b"", true), None);
-    }
-
     /// The answer Gmail gave on 2026-10-07, its project number made up.
     const GMAIL_MINUTE_QUOTA: &[u8] = br#"{"error":{"code":403,"message":"Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user' of service 'gmail.googleapis.com' for consumer 'project_number:123'.","errors":[{"message":"Quota exceeded","domain":"usageLimits","reason":"rateLimitExceeded"}],"status":"PERMISSION_DENIED"}}"#;
 
+    /// Gmail's per-user concurrency limit, as it answers a request (or a
+    /// batch's inner call) sent while too many others run.
+    const GMAIL_CONCURRENCY: &[u8] = br#"{"error":{"code":429,"message":"Too many concurrent requests for user","errors":[{"message":"Too many concurrent requests for user","domain":"global","reason":"rateLimitExceeded"}],"status":"RESOURCE_EXHAUSTED"}}"#;
+
+    /// Gmail's per-user rate limit, naming when to come back.
+    const GMAIL_USER_RATE: &[u8] = br#"{"error":{"code":429,"message":"User-rate limit exceeded.  Retry after 2026-10-10T20:21:41.500Z","errors":[{"message":"User-rate limit exceeded.  Retry after 2026-10-10T20:21:41.500Z","domain":"usageLimits","reason":"rateLimitExceeded"}],"status":"RESOURCE_EXHAUSTED"}}"#;
+
     #[test]
-    fn google_quotas_count_by_the_minute_and_a_daily_one_not_at_all() {
+    fn rate_and_concurrency_limits_back_off_briefly() {
+        assert_eq!(throttled(429, b""), Some(Throttle::Burst));
+        assert_eq!(throttled(503, b""), Some(Throttle::Burst));
+        assert_eq!(throttled(429, GMAIL_CONCURRENCY), Some(Throttle::Burst));
+        assert_eq!(throttled(429, GMAIL_USER_RATE), Some(Throttle::Burst));
         assert_eq!(
-            throttled(403, GMAIL_MINUTE_QUOTA, true),
-            Some(Throttle::Minute)
-        );
-        // The message alone names the quota, whatever reasons ride along.
-        assert_eq!(
-            throttled(
-                403,
-                b"Quota exceeded for quota metric 'Queries' and limit 'Queries per minute per user'",
-                false
-            ),
-            Some(Throttle::Minute)
-        );
-        assert_eq!(
-            throttled(
-                403,
-                b"Quota exceeded for quota metric 'Queries' and limit 'Queries per day'",
-                true
-            ),
-            None
-        );
-        // A Google 429 counts by the minute; another server's is a burst.
-        assert_eq!(throttled(429, b"", true), Some(Throttle::Minute));
-        assert_eq!(
-            throttled(429, br#"{"status":"RESOURCE_EXHAUSTED"}"#, false),
+            throttled(429, br#"{"status":"RESOURCE_EXHAUSTED"}"#),
             Some(Throttle::Burst)
         );
-        // NOTE: the reasons Google's envelope names, read as reasons: a
-        // `RESOURCE_EXHAUSTED` 403 whose message names no quota at all.
         assert_eq!(
             throttled(
                 403,
-                br#"{"error":{"code":403,"message":"Too many","errors":[{"reason":"quotaExceeded"}],"status":"RESOURCE_EXHAUSTED"}}"#,
-                true
+                br#"{"error":{"errors":[{"reason":"userRateLimitExceeded"}]}}"#
+            ),
+            Some(Throttle::Burst)
+        );
+        assert_eq!(
+            throttled(403, br#"{"reason":"rateLimitExceeded"}"#),
+            Some(Throttle::Burst)
+        );
+        // NOTE: Google's envelope read as reasons: a `RESOURCE_EXHAUSTED`
+        // 403 whose message names no quota at all.
+        assert_eq!(
+            throttled(
+                403,
+                br#"{"error":{"code":403,"message":"Too many","errors":[{"reason":"quotaExceeded"}],"status":"RESOURCE_EXHAUSTED"}}"#
+            ),
+            Some(Throttle::Burst)
+        );
+    }
+
+    #[test]
+    fn only_an_answer_naming_a_minute_quota_waits_the_minute() {
+        assert_eq!(throttled(403, GMAIL_MINUTE_QUOTA), Some(Throttle::Minute));
+        assert_eq!(
+            throttled(
+                429,
+                b"Quota exceeded for quota metric 'Queries' and limit 'Queries per minute per user'"
             ),
             Some(Throttle::Minute)
         );
         assert_eq!(
             throttled(
+                429,
+                br#"{"error":{"code":429,"details":[{"reason":"RATE_LIMIT_EXCEEDED","metadata":{"quota_limit":"ReadRequestsPerMinutePerUser"}}]}}"#
+            ),
+            Some(Throttle::Minute)
+        );
+    }
+
+    #[test]
+    fn a_daily_quota_or_another_403_is_no_reason_to_wait() {
+        assert_eq!(throttled(403, br#"{"reason":"dailyLimitExceeded"}"#), None);
+        assert_eq!(
+            throttled(
                 403,
-                br#"{"error":{"code":403,"message":"No","errors":[{"reason":"insufficientPermissions"}]}}"#,
-                true
+                b"Quota exceeded for quota metric 'Queries' and limit 'Queries per day'"
             ),
             None
         );
-        assert!(gmail("https://gmail.googleapis.com/gmail/v1/"));
-        assert!(gmail(GMAIL_BATCH_URL), "the batch endpoint counts as Gmail");
-        assert!(!gmail("https://people.googleapis.com/v1/"));
-        assert!(!gmail("https://www.googleapis.com/calendar/v3/"));
-        assert!(google(GMAIL_BATCH_URL));
-        assert!(google("https://gmail.googleapis.com/gmail/v1/"));
-        assert!(google("https://people.googleapis.com/v1/"));
-        assert!(!google("https://graph.microsoft.com/v1.0/"));
-        assert!(!google("https://googleapis.com.example/"));
+        assert_eq!(throttled(429, b"limit 'Queries per day'"), None);
+        assert_eq!(throttled(403, b"Forbidden"), None);
+        assert_eq!(
+            throttled(
+                403,
+                br#"{"error":{"code":403,"message":"No","errors":[{"reason":"insufficientPermissions"}]}}"#
+            ),
+            None
+        );
+        assert_eq!(throttled(500, b""), None);
+    }
+
+    #[test]
+    fn a_refusal_is_logged_with_its_reasons_and_message() {
+        assert_eq!(
+            reason(429, GMAIL_CONCURRENCY),
+            "rateLimitExceeded: Too many concurrent requests for user"
+        );
+        let long = reason(403, &[b'x'; 400]);
+        assert!(long.len() <= REASON_CAP + '…'.len_utf8(), "{long}");
+        assert_eq!(
+            short("https://gmail.googleapis.com/gmail/v1/users/me/messages?q=after"),
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+        );
     }
 
     #[test]
@@ -887,10 +1048,11 @@ mod tests {
         bytes
     }
 
-    // NOTE: not Gmail's host, so these tests leave the process-wide
-    // pacing alone; the quota refusal reads the same on any Google API.
-    const PEOPLE: &str = "https://people.googleapis.com/v1/";
-    const REQUEST: &[u8] = b"GET /v1/people/me HTTP/1.1\r\nHost: people.googleapis.com\r\n\r\n";
+    // NOTE: a scripted wire paces no account, so these tests leave the
+    // process-wide pacing alone; a refusal reads the same on any API.
+    const URL: &str = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
+    const REQUEST: &[u8] =
+        b"GET /gmail/v1/users/me/messages HTTP/1.1\r\nHost: gmail.googleapis.com\r\n\r\n";
 
     #[test]
     fn a_minute_quota_refusal_waits_for_the_next_minute_then_succeeds() {
@@ -898,8 +1060,8 @@ mod tests {
         let served = answer("200 OK", b"{}");
         let mut wire = Scripted::new(&[&refused, &served], "2026-10-07T08:49:20Z");
 
-        throttled_write(&mut wire, PEOPLE, REQUEST).unwrap();
-        let read = throttled_read(&mut wire, PEOPLE).unwrap();
+        throttled_write(&mut wire, URL, REQUEST).unwrap();
+        let read = throttled_read(&mut wire, URL).unwrap();
 
         assert_eq!(read, served);
         assert_eq!(wire.writes, [REQUEST, REQUEST]);
@@ -917,8 +1079,8 @@ mod tests {
         let refused = answer("403 Forbidden", GMAIL_MINUTE_QUOTA);
         let mut wire = Scripted::new(&[&refused, &refused, &refused], "2026-10-07T08:49:20Z");
 
-        throttled_write(&mut wire, PEOPLE, REQUEST).unwrap();
-        let read = throttled_read(&mut wire, PEOPLE).unwrap();
+        throttled_write(&mut wire, URL, REQUEST).unwrap();
+        let read = throttled_read(&mut wire, URL).unwrap();
 
         // One wait to the next minute fits the budget, a second whole
         // minute does not: the refusal reaches the coroutine.
@@ -928,15 +1090,81 @@ mod tests {
     }
 
     #[test]
-    fn a_retry_after_on_a_google_429_is_taken_as_named() {
+    fn a_concurrency_refusal_is_retried_within_a_second() {
+        let refused = answer("429 Too Many Requests", GMAIL_CONCURRENCY);
+        let served = answer("200 OK", b"{}");
+        let mut wire = Scripted::new(&[&refused, &refused, &served], "2026-10-07T08:49:20Z");
+
+        throttled_write(&mut wire, URL, REQUEST).unwrap();
+        assert_eq!(throttled_read(&mut wire, URL).unwrap(), served);
+
+        // Two short back-offs, the second at most two seconds: never the
+        // forty seconds to the next minute.
+        assert_eq!(wire.slept.len(), 2);
+        assert!(wire.slept[0] <= Duration::from_secs(1), "{:?}", wire.slept);
+        assert!(wire.slept[1] <= Duration::from_secs(2), "{:?}", wire.slept);
+    }
+
+    #[test]
+    fn a_user_rate_refusal_waits_until_the_instant_it_names() {
+        let refused = answer("429 Too Many Requests", GMAIL_USER_RATE);
+        let served = answer("200 OK", b"{}");
+        let mut wire = Scripted::new(&[&refused, &served], "2026-10-10T20:21:40Z");
+
+        throttled_write(&mut wire, URL, REQUEST).unwrap();
+        assert_eq!(throttled_read(&mut wire, URL).unwrap(), served);
+        assert_eq!(wire.slept, [Duration::from_millis(1500)]);
+    }
+
+    #[test]
+    fn a_retry_after_on_a_429_is_taken_as_named() {
         let refused =
             b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3\r\nContent-Length: 2\r\n\r\n{}";
         let served = answer("200 OK", b"{}");
         let mut wire = Scripted::new(&[refused, &served], "2026-10-07T08:49:20Z");
 
-        throttled_write(&mut wire, PEOPLE, REQUEST).unwrap();
-        assert_eq!(throttled_read(&mut wire, PEOPLE).unwrap(), served);
+        throttled_write(&mut wire, URL, REQUEST).unwrap();
+        assert_eq!(throttled_read(&mut wire, URL).unwrap(), served);
         assert_eq!(wire.slept, [Duration::from_secs(3)]);
+    }
+
+    #[test]
+    fn retry_after_reads_seconds_dates_and_named_instants() {
+        let now: Timestamp = "2026-10-07T08:49:30Z".parse().unwrap();
+        assert_eq!(retry_after(" 120 ", now), Some(Duration::from_secs(120)));
+        assert_eq!(
+            retry_after("Wed, 07 Oct 2026 08:49:37 GMT", now),
+            Some(Duration::from_secs(7))
+        );
+        assert_eq!(
+            retry_after("Wed, 07 Oct 2026 08:00:00 GMT", now),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(retry_after("soon", now), None);
+
+        assert_eq!(
+            retry_after_named(b"\"Retry after 2026-10-07T08:49:32.250Z.\"", now),
+            Some(Duration::from_millis(2250))
+        );
+        assert_eq!(
+            retry_after_named(b"Retry after 2026-10-07T08:00:00Z", now),
+            Some(Duration::ZERO)
+        );
+        assert_eq!(retry_after_named(GMAIL_CONCURRENCY, now), None);
+        assert_eq!(retry_after_named(b"Retry after lunch", now), None);
+    }
+
+    #[test]
+    fn backoff_doubles_up_to_its_cap_and_jitters_down() {
+        assert_eq!(backoff(0, 1.0), Duration::from_secs(1));
+        assert_eq!(backoff(3, 1.0), Duration::from_secs(8));
+        assert_eq!(backoff(9, 1.0), Duration::from_secs(16));
+        assert_eq!(backoff(2, 0.5), Duration::from_secs(2));
+
+        // The worst case fits the budget, so a server that never names
+        // a wait still gets every retry.
+        let worst: Duration = (0..MAX_RETRIES).map(|n| backoff(n, 1.0)).sum();
+        assert!(worst <= WAIT_BUDGET);
     }
 
     #[test]
@@ -947,13 +1175,14 @@ mod tests {
         let mut next = None;
         let mut booked = Vec::new();
 
-        // Three minutes of metadata reads at the paced rate, a send of a
-        // hundred units every fifty reads, the clock moving with each
-        // wait as a worker's would.
+        // Three minutes of batches at the paced rate, a send of a hundred
+        // units every tenth request, the clock moving with each wait as
+        // a worker's would.
         let mut now = start;
         while now < start + Duration::from_secs(180) {
-            let units = if booked.len() % 50 == 49 { 100 } else { 5 };
-            let (slot, after) = pace_slot(next, now, GMAIL_REQUESTS_PER_SECOND, GMAIL_BURST);
+            let units = if booked.len() % 10 == 9 { 100 } else { 125 };
+            let (slot, after) =
+                pace_slot(next, now, units, GMAIL_UNITS_PER_SECOND, GMAIL_BURST_UNITS);
             next = Some(after);
             let wait = budget.reserve(now + slot, units, limit);
             now = now + slot + wait;
@@ -996,59 +1225,59 @@ mod tests {
     }
 
     #[test]
-    fn retry_after_reads_seconds_and_dates() {
-        let now: Timestamp = "2026-10-07T08:49:30Z".parse().unwrap();
-        assert_eq!(retry_after(" 120 ", now), Some(Duration::from_secs(120)));
-        assert_eq!(
-            retry_after("Wed, 07 Oct 2026 08:49:37 GMT", now),
-            Some(Duration::from_secs(7))
-        );
-        assert_eq!(
-            retry_after("Wed, 07 Oct 2026 08:00:00 GMT", now),
-            Some(Duration::ZERO)
-        );
-        assert_eq!(retry_after("soon", now), None);
-    }
-
-    #[test]
-    fn backoff_doubles_up_to_its_cap_and_jitters_down() {
-        assert_eq!(backoff(0, 1.0), Duration::from_secs(1));
-        assert_eq!(backoff(3, 1.0), Duration::from_secs(8));
-        assert_eq!(backoff(9, 1.0), Duration::from_secs(16));
-        assert_eq!(backoff(2, 0.5), Duration::from_secs(2));
-
-        // The worst case fits the budget, so a server that never names
-        // a wait still gets every retry.
-        let worst: Duration = (0..MAX_RETRIES).map(|n| backoff(n, 1.0)).sum();
-        assert!(worst <= WAIT_BUDGET);
-    }
-
-    #[test]
-    fn gmail_pacing_lets_a_burst_through_then_holds_the_rate() {
+    fn gmail_pacing_holds_quota_units_per_second() {
         let start = Instant::now();
-        let interval = Duration::from_secs(1) / GMAIL_REQUESTS_PER_SECOND;
+        let mut pace = GmailPace::new();
 
-        let mut next = None;
-        let mut waits = Vec::new();
-        for _ in 0..GMAIL_BURST + 3 {
-            let (wait, after) = pace_slot(next, start, GMAIL_REQUESTS_PER_SECOND, GMAIL_BURST);
-            waits.push(wait);
-            next = Some(after);
-        }
+        // A batch of 25 metadata reads (125 units) goes at once, the next
+        // one waits for its units to be paid at the rate, and two batches
+        // never go out in the same second's worth of units.
+        assert_eq!(pace.book(start, 125, false), Duration::ZERO);
+        let second = pace.book(start, 125, false);
+        let per_unit = Duration::from_secs(1) / GMAIL_UNITS_PER_SECOND;
+        assert_eq!(second, per_unit * 125);
+        let third = pace.book(start, 125, false);
+        assert_eq!(third, second + per_unit * 125);
 
-        // The first request goes at once, and the ones after it each
-        // wait one more interval: a stream at the rate from the start.
-        assert_eq!(waits[0], Duration::ZERO);
-        assert_eq!(waits[3], interval * 3);
-
-        // After a pause, a burst goes out at once, and no more than it.
+        // After a pause, a few small calls go out at once, then the rate.
         let later = start + Duration::from_secs(10);
         let mut free = 0;
-        for _ in 0..GMAIL_BURST * 2 {
-            let (wait, after) = pace_slot(next, later, GMAIL_REQUESTS_PER_SECOND, GMAIL_BURST);
-            free += u32::from(wait.is_zero());
-            next = Some(after);
+        for _ in 0..20 {
+            free += u32::from(pace.book(later, 5, false).is_zero());
         }
-        assert_eq!(free, GMAIL_BURST + 1);
+        assert_eq!(free, GMAIL_BURST_UNITS / 5 + 1);
+    }
+
+    #[test]
+    fn an_urgent_request_skips_the_queue_and_the_spent_minute() {
+        let start = Instant::now();
+        let mut pace = GmailPace::new();
+
+        // The background spent its whole minute and queued behind it.
+        for _ in 0..GMAIL_UNITS_PER_MINUTE / 125 {
+            pace.book(start, 125, false);
+        }
+        assert!(pace.book(start, 125, false) >= Duration::from_secs(30));
+
+        // A message opened now goes at once, and the background yields
+        // its units to it.
+        let before = pace.next.unwrap();
+        assert_eq!(pace.book(start, 5, true), Duration::ZERO);
+        assert!(pace.next.unwrap() > before);
+    }
+
+    #[test]
+    fn accounts_are_paced_apart() {
+        let first = "test-pacing-first";
+        let second = "test-pacing-second";
+        // NOTE: a large spend fills an account's minute at once; the
+        // other account's next request does not wait for it.
+        assert_eq!(
+            pace_gmail(first, GMAIL_UNITS_PER_MINUTE, false),
+            Duration::ZERO
+        );
+        assert_eq!(pace_gmail(second, 5, false), Duration::ZERO);
+        assert!(Arc::ptr_eq(&gmail_gate(first), &gmail_gate(first)));
+        assert!(!Arc::ptr_eq(&gmail_gate(first), &gmail_gate(second)));
     }
 }

@@ -38,6 +38,8 @@ use std::{
     sync::{Arc, Condvar, Mutex, MutexGuard, Weak},
 };
 
+use jiff::Timestamp;
+
 use crate::{
     client::{
         Client,
@@ -569,25 +571,69 @@ pub(crate) fn list_label<S: GmailSource>(
         Err(err) => return Err(err),
     };
 
-    let read = run.envelopes(source, &page.ids, after)?;
-    let items = page
-        .ids
-        .iter()
-        .filter_map(|id| {
+    // NOTE: read a batch at a time, newest received first, and stopped
+    // past the floor: the listing's `after:` takes two days of margin
+    // below it, mail that is almost all dated below it too.
+    let mut items = Vec::new();
+    let mut past = false;
+    for chunk in page.ids.chunks(BATCH) {
+        let read = run.envelopes(source, chunk, after)?;
+        items.extend(chunk.iter().filter_map(|id| {
             let envelope = read.get(id)?.as_ref()?;
             envelope
                 .belongs(label)
                 .then(|| envelope.named(id, scope))
                 .flatten()
-        })
-        .collect();
+        }));
+        if received_below(chunk, &read, scope) {
+            past = true;
+            break;
+        }
+    }
 
     let prefix = match account {
         true => ACCOUNT_CURSOR,
         false => LABEL_CURSOR,
     };
-    let next = page.next.map(|next| format!("{prefix}{next}"));
+    let next = match past {
+        true => None,
+        false => page.next.map(|next| format!("{prefix}{next}")),
+    };
     Ok(MailPage::round(items, next, checkpoint))
+}
+
+/// Whether a whole batch of a listing, in Gmail's order of reception,
+/// was received before the scope's floor, so that what the listing
+/// names after it is older still and dated below the floor but for a
+/// sender's clock running ahead by more than a batch of mail.
+///
+/// A message dated in the scope and received before its floor, as an
+/// import of old mail is not, comes first in its batch's reading anyway:
+/// the batch that crosses the floor is read whole.
+fn received_below(
+    chunk: &[String],
+    read: &HashMap<String, Option<GmailEnvelope>>,
+    scope: &Scope,
+) -> bool {
+    let Some(floor) = scope
+        .since
+        .as_deref()
+        .and_then(|since| since.parse::<Timestamp>().ok())
+    else {
+        return false;
+    };
+    let floor = floor.as_millisecond();
+    let mut any = false;
+    for id in chunk {
+        let Some(envelope) = read.get(id).and_then(Option::as_ref) else {
+            continue;
+        };
+        match envelope.received {
+            Some(received) if received < floor => any = true,
+            _ => return false,
+        }
+    }
+    any
 }
 
 /// Whether a full round over `scope` lists the account rather than its

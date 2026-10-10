@@ -122,6 +122,16 @@ public class MainActivity extends Activity {
      *  main-thread handler and the theme helper. */
     final PimalayaClient client = new PimalayaClient();
     final ExecutorService io = Executors.newSingleThreadExecutor();
+
+    /**
+     * The executor of what someone is waiting on, a message being opened:
+     * never queued behind a step of the background fill or of the body
+     * download, which run on {@link #io} and can hold it for seconds. What
+     * it writes to the store it writes under {@link PimdirEngine#STORE},
+     * the store keeping one writer.
+     */
+    final ExecutorService interactive = Executors.newSingleThreadExecutor();
+
     final Handler main = new Handler(Looper.getMainLooper());
     final Ui ui = new Ui(this);
 
@@ -279,8 +289,8 @@ public class MainActivity extends Activity {
         applyEdgeToEdge();
 
         store = new SecureStore(this);
-        pimdir = new PimdirDb(this);
-        base = new CardStore(this, pimdir);
+        pimdir = PimdirDb.shared(this);
+        base = CardStore.shared(this);
         contacts = new PimdirContacts(pimdir);
         pool = new ContactPool(base, contacts, accounts);
         contactsList = new ContactsList(this);
@@ -680,6 +690,7 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         BackgroundJob.onEnd = null;
         io.shutdownNow();
+        interactive.shutdownNow();
         // NOTE: shutdownNow interrupts, but a blocking accept() only
         // wakes on close; without this the OAuth loopback listener would
         // outlive the activity by up to its 300s timeout.
@@ -1368,11 +1379,8 @@ public class MainActivity extends Activity {
     private void showSyncStrip(boolean active) {
         if (active) {
             getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-            // NOTE: a line from the first frame. A pass has a round trip
-            // or two to make before it can name what it is on, and a strip
-            // that shows nothing for that long reads as nothing running.
             synchronized (strip) {
-                syncLine = getString(R.string.sync_overlay_preparing);
+                syncLine = "";
             }
             renderSyncStrip();
             return;
@@ -1399,7 +1407,12 @@ public class MainActivity extends Activity {
             line = syncLine;
             shown = syncShown;
         }
-        // NOTE: indeterminate until something is counted.
+        // NOTE: indeterminate until something is counted, saying the pass is
+        // starting rather than naming a domain it cannot count yet: a first
+        // Gmail chunk can take seconds before its first mailbox lands.
+        if (shown == 0) {
+            line = getString(R.string.sync_line_starting);
+        }
         for (int panel : new int[] {PANEL_MAIL, PANEL_CONTACTS, PANEL_CALENDAR}) {
             headerOf(panel).sync(account, line, shown, shown > 0 ? 1000 : 0);
         }
@@ -1933,7 +1946,7 @@ public class MainActivity extends Activity {
 
     /**
      * Starts the background fill when it is allowed and not running: every
-     * mailbox widened a chunk of {@link MailEngine#FILL_CHUNK} messages at a
+     * mailbox widened a chunk of {@link MailEngine#fillChunk} messages at a
      * time toward its account's bound, the inbox and the sent mail first, no
      * dialog, each page landing in the list as a pass's do.
      *
@@ -2039,7 +2052,7 @@ public class MainActivity extends Activity {
                         listAll(
                                 edges,
                                 (engine, collection) ->
-                                        engine.widen(collection, MailEngine.FILL_CHUNK),
+                                        engine.widen(collection, engine.fillChunk()),
                                 "mail fill stopped: ");
                 if (failure != null) {
                     throw failure;
@@ -2409,7 +2422,7 @@ public class MainActivity extends Activity {
      * One step of listing moved windows down to {@code date}, on the io
      * thread: every mailbox of {@code emails} {@code shown} lets through
      * whose floor is above it widened by one chunk of
-     * {@link MailEngine#FILL_CHUNK}, never below the date, side by side;
+     * {@link MailEngine#fillChunk}, never below the date, side by side;
      * the next step queued behind, so an open or a pull waits one chunk at
      * most, as with the fill. It ends once none is above the date, on a
      * failure, with no network, when a sync starts or the app leaves the
@@ -2438,7 +2451,7 @@ public class MainActivity extends Activity {
                         : listAll(
                                 above,
                                 (engine, collection) -> {
-                                    if (engine.widen(collection, MailEngine.FILL_CHUNK, date)) {
+                                    if (engine.widen(collection, engine.fillChunk(), date)) {
                                         widened.set(true);
                                     }
                                 },

@@ -91,7 +91,7 @@
             android:layout_width="match_parent"
             android:layout_height="4dp"
             android:layout_marginTop="12dp"
-            android:indeterminateTint="?android:attr/colorAccent"
+            android:indeterminateDrawable="@drawable/sync_bar_indeterminate"
             android:max="1000"
             android:maxHeight="4dp"
             android:minHeight="4dp"

@@ -60,9 +60,32 @@ final class PimdirDb extends SQLiteOpenHelper {
      */
     private static final String[] SUPERSEDED = {"events.db", "mail.db"};
 
+    /** The process's one store, null until first asked for ({@link #shared}). */
+    private static PimdirDb shared;
+
+    /** The database file this store opens. */
+    private final File file;
+
+    /**
+     * The process's one store, opened once: every screen, service and job
+     * shares it, so the store is one connection pool rather than one per
+     * caller, each holding the file open until the collector finds it.
+     * A store under another files directory (a test's) opens its own.
+     */
+    static synchronized PimdirDb shared(Context context) {
+        File file = new File(storeDir(context), DATABASE);
+        if (shared == null || !shared.file.equals(file)) {
+            shared = new PimdirDb(context.getApplicationContext() == null
+                    ? context
+                    : context.getApplicationContext());
+        }
+        return shared;
+    }
+
     PimdirDb(Context context) {
         super(context, new File(storeDir(context), DATABASE).getAbsolutePath(), null,
                 PimdirSql.version());
+        this.file = new File(storeDir(context), DATABASE);
         this.blobs = new File(storeDir(context), "objects");
         this.context = context.getApplicationContext() == null
                 ? context

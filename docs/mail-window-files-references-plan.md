@@ -29,7 +29,7 @@ Prepare now, land after A1: the spec text and log entries can be written at once
 
 Graph returns no size today (rust/src/client/graph_mail.rs:856 writes `size: None`), and Part B's info line sums sizes. Read MAPI `PidTagMessageSize` through the listing: `$expand=singleValueExtendedProperties($filter=id eq 'Integer 0x0E08')`, mapped onto `mail_summary.size`. Check the summary-agreement rule (Annex A: server-derived and body-derived summaries agree byte for byte): `size` at the `Meta` tier is already the server's (`RFC822.SIZE`), so Graph's MAPI size is the same kind of value. Test against graph_mail_tests.rs.
 
-### A4. Gmail first-sync stall (the user, later; only if a fresh account reproduces it)
+### A4. Gmail first-sync stall (done 2026-10-10: cairn change gmail-first-sync-stall)
 
 The over-a-minute indeterminate phase seen on repeated Gmail onboardings comes from inside `mailFloor` and the first `enumerate` (rust/src/client/gmail_sync.rs, rust/src/client/throttle.rs). Likely causes, in order:
 

@@ -50,6 +50,8 @@ const MOA: &str = "Label_3";
 #[derive(Clone, Debug)]
 struct Mail {
     date: String,
+    /// When Gmail received it, its `date` unless imported apart.
+    received: String,
     labels: Vec<String>,
 }
 
@@ -124,6 +126,7 @@ impl FakeGmail {
                 id(index),
                 Mail {
                     date: days_back(index as i64),
+                    received: days_back(index as i64),
                     labels: labels(index).into_iter().map(String::from).collect(),
                 },
             );
@@ -168,6 +171,7 @@ impl FakeGmail {
             id.into(),
             Mail {
                 date: days_back(days),
+                received: days_back(days),
                 labels: labels.iter().map(|label| label.to_string()).collect(),
             },
         );
@@ -228,12 +232,12 @@ impl GmailSource for FakeGmail {
                 })
             })
             .filter(|(_, mail)| {
-                let received: Timestamp = mail.date.parse().unwrap();
+                let received: Timestamp = mail.received.parse().unwrap();
                 since.is_none_or(|since| received >= since)
                     && until.is_none_or(|until| received < until)
             })
             .collect();
-        matching.sort_by(|a, b| b.1.date.cmp(&a.1.date).then(a.0.cmp(b.0)));
+        matching.sort_by(|a, b| b.1.received.cmp(&a.1.received).then(a.0.cmp(b.0)));
 
         let offset: usize = page.map_or(0, |page| page.parse().unwrap());
         let end = (offset + account.page).min(matching.len());
@@ -269,6 +273,11 @@ impl GmailSource for FakeGmail {
                         date: Some(mail.date.clone()),
                         ..Default::default()
                     },
+                    received: mail
+                        .received
+                        .parse::<Timestamp>()
+                        .ok()
+                        .map(|at| at.as_millisecond()),
                 }
             });
             read.push((id.clone(), envelope));
@@ -625,7 +634,7 @@ fn an_account_listing_reads_each_message_once_a_run() {
             profiles: 1,
             account_lists: 2,
             label_lists: 2,
-            batches: 3,
+            batches: 4,
             reads: 76,
             histories: 0,
         }
@@ -646,7 +655,7 @@ fn an_account_listing_reads_each_message_once_a_run() {
             profiles: 1,
             account_lists: 2,
             label_lists: 0,
-            batches: 8,
+            batches: 15,
             reads: 352,
             histories: 0,
         }
@@ -799,4 +808,46 @@ fn a_bare_old_cursor_is_read_as_a_labels() {
     assert_eq!(page.checkpoint, None, "a resumed round hands none");
     let counts = gmail.counts();
     assert_eq!((counts.account_lists, counts.label_lists), (0, 1));
+}
+
+/// The instant `hours` before the account's newest message.
+fn hours_back(hours: i64) -> String {
+    let top: Timestamp = "2026-10-01T12:00:00Z".parse().unwrap();
+    top.checked_sub(SignedDuration::from_hours(hours))
+        .unwrap()
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+        .to_string()
+}
+
+// NOTE: a busy account, a message an hour: the two days of margin the
+// listing's `after:` takes below the first chunk's floor hold 48 more
+// messages, all dated below it. The listing stops a batch past the floor
+// rather than reading them, but reads that batch whole, so a message
+// dated in the scope and received below the floor still lands.
+#[test]
+fn a_first_chunk_stops_reading_a_batch_past_its_floor() {
+    let gmail = FakeGmail::new(200, |_| vec![INBOX]);
+    {
+        let mut account = gmail.lock();
+        for (index, mail) in account.mails.values_mut().enumerate() {
+            mail.date = hours_back(index as i64);
+            mail.received = hours_back(index as i64);
+        }
+        // NOTE: a sender's clock six hours ahead.
+        account.mails.get_mut(&id(55)).unwrap().date = hours_back(49);
+    }
+    let mut harness = Harness::new(&gmail, &[INBOX]);
+
+    harness.pass();
+
+    let held = harness.held(INBOX);
+    assert_eq!(held.len(), 51, "the 50 newest and the one dated among them");
+    assert!(held.contains(&id(55)));
+    assert_eq!(harness.since(INBOX), Some(Some(hours_back(49))));
+    let counts = gmail.counts();
+    assert_eq!(
+        (counts.batches, counts.reads),
+        (3, 75),
+        "the floor's two batches and one past it, not the 98 the margin lists"
+    );
 }
