@@ -287,13 +287,19 @@ public class MainActivity extends Activity {
                             }
 
                             @Override
-                            public void mailboxes(int done, int total) {
-                                syncProgress(R.string.sync_step_mailboxes, done, total);
+                            public void collections(PimDomain domain, int done, int total) {
+                                syncCollections(domain, done, total);
                             }
 
                             @Override
                             public void step(PimDomain domain, int stage, int count) {
                                 syncStep(domain, stage, count);
+                            }
+
+                            @Override
+                            public void advance(
+                                    PimDomain domain, int stage, int done, int total) {
+                                syncAdvance(domain, stage, done, total);
                             }
                         });
         // NOTE: the two flows reference each other (grants land back in
@@ -1245,8 +1251,18 @@ public class MainActivity extends Activity {
             }
 
             @Override
+            public void advance(PimDomain domain, int stage, int done, int total) {
+                syncAdvance(domain, stage, done, total);
+            }
+
+            @Override
             public void account(String email) {
                 syncAccount(email);
+            }
+
+            @Override
+            public void collections(PimDomain domain, int done, int total) {
+                syncCollections(domain, done, total);
             }
 
             @Override
@@ -1297,9 +1313,13 @@ public class MainActivity extends Activity {
             // NOTE: a line from the first frame. A pass has a round trip
             // or two to make before it can name what it is on, and a strip
             // that shows nothing for that long reads as nothing running.
-            syncLine = getString(R.string.sync_overlay_preparing);
-            syncDone = 0;
-            syncTotal = 0;
+            synchronized (strip) {
+                syncLine = getString(R.string.sync_overlay_preparing);
+                syncLanded = 0;
+                syncLandedOf = 0;
+                syncDone = 0;
+                syncTotal = 0;
+            }
             renderSyncStrip();
             return;
         }
@@ -1317,60 +1337,110 @@ public class MainActivity extends Activity {
         if (!syncing) {
             return;
         }
-        String account = syncAccount;
+        String account;
+        String line;
+        int done;
+        int total;
+        synchronized (strip) {
+            account = syncAccount;
+            line = syncLine;
+            done = syncDone;
+            total = syncTotal;
+        }
         for (int panel : new int[] {PANEL_MAIL, PANEL_CONTACTS, PANEL_CALENDAR}) {
-            headerOf(panel).sync(account, syncLine, syncDone, syncTotal);
+            headerOf(panel).sync(account, line, done, total);
         }
     }
 
+    /** Guards the strip's state, which the pass's workers set side by side. */
+    private final Object strip = new Object();
+
     /** The account a pass is on, null until it reaches one. */
-    private volatile String syncAccount;
+    private String syncAccount;
 
     /** The step the pass stands at, and how far it is when it can count. */
-    private volatile String syncLine = "";
+    private String syncLine = "";
 
-    private volatile int syncDone;
+    private int syncDone;
 
-    private volatile int syncTotal;
+    private int syncTotal;
+
+    /**
+     * How many of the account's collections have landed, which the bar
+     * holds between the steps that count, 0 of 0 before the first.
+     */
+    private int syncLanded;
+
+    private int syncLandedOf;
 
     /**
      * Names the account a pass moved on to, null between accounts (callable
      * off the main thread), so a pass over several says whose it is on. The
-     * count starts over: it was the previous step's.
+     * counts start over: they were the previous account's.
      */
     private void syncAccount(String accountEmail) {
-        syncAccount = accountEmail;
-        syncTotal = 0;
+        synchronized (strip) {
+            syncAccount = accountEmail;
+            syncLanded = 0;
+            syncLandedOf = 0;
+            syncDone = 0;
+            syncTotal = 0;
+        }
         main.post(this::renderSyncStrip);
     }
 
     /**
      * Sets the strip's step from an engine stage of a domain (any thread),
      * in that domain's words: events while the agenda syncs, messages while
-     * the mail does.
+     * the mail does. The bar goes back to the account's collections.
      */
     private void syncStep(PimDomain domain, int stage, int count) {
         String text = SyncSteps.text(getResources(), domain, stage, count);
-        if (text != null) {
-            syncTotal = 0;
-            syncDetail(text);
+        if (text == null) {
+            return;
         }
+        synchronized (strip) {
+            syncLine = text;
+            syncDone = syncLanded;
+            syncTotal = syncLandedOf;
+        }
+        main.post(this::renderSyncStrip);
     }
 
     /**
-     * Sets the strip's step to a count of a whole (any thread), filling its
-     * bar: how many of an account's mailboxes have landed, where they land
-     * side by side and no one engine's step says how far the pass is.
+     * Fills the bar with how far a counted step is (any thread): the
+     * contacts or events read so far, or written to the phone.
      */
-    private void syncProgress(int string, int done, int total) {
-        syncDone = done;
-        syncTotal = total;
-        syncDetail(getString(string, done, total));
+    private void syncAdvance(PimDomain domain, int stage, int done, int total) {
+        String text = SyncSteps.text(getResources(), domain, stage, total);
+        if (text == null) {
+            return;
+        }
+        synchronized (strip) {
+            syncLine = text;
+            syncDone = done;
+            syncTotal = total;
+        }
+        main.post(this::renderSyncStrip);
     }
 
-    /** Sets the strip's step line (any thread). */
-    private void syncDetail(String text) {
-        syncLine = text;
+    /**
+     * Sets the strip's step to how many of the account's collections have
+     * landed (any thread), filling its bar: its mailboxes, address books or
+     * calendars. A count overtaken by a worker beside it is dropped.
+     */
+    private void syncCollections(PimDomain domain, int done, int total) {
+        String text = getString(SyncSteps.collectionsOf(domain), done, total);
+        synchronized (strip) {
+            if (total == syncLandedOf && done < syncLanded) {
+                return;
+            }
+            syncLanded = done;
+            syncLandedOf = total;
+            syncLine = text;
+            syncDone = done;
+            syncTotal = total;
+        }
         main.post(this::renderSyncStrip);
     }
 
@@ -2259,23 +2329,39 @@ public class MainActivity extends Activity {
                         OfflineEngine engine =
                                 new OfflineEngine(base, pimdir, client, null, null, this);
                         engine.progress =
-                                (domain, stage, count) -> {
-                                    String text =
-                                            SyncSteps.text(getResources(), domain, stage, count);
-                                    if (text != null) {
-                                        postAlive(() -> phoneStrip(text));
+                                new PimdirEngine.Progress() {
+                                    @Override
+                                    public void step(PimDomain domain, int stage, int count) {
+                                        phoneStep(domain, stage, count, 0);
+                                    }
+
+                                    @Override
+                                    public void advance(
+                                            PimDomain domain, int stage, int done, int total) {
+                                        phoneStep(domain, stage, total, done);
                                     }
                                 };
                         engine.syncPhone(url, new OfflineEngine.Report());
                     } catch (Exception error) {
                         Log.w("pimalaya", "first projection failed for " + url, error);
                     }
-                    postAlive(() -> phoneStrip(null));
+                    postAlive(() -> phoneStrip(null, 0, 0));
                 });
     }
 
-    /** The strip's line during a first projection, null once it ended. */
-    private void phoneStrip(String text) {
+    /**
+     * Sets the strip from a first projection's stage (any thread), its bar
+     * filled to {@code done} of a counted step's {@code count}.
+     */
+    private void phoneStep(PimDomain domain, int stage, int count, int done) {
+        String text = SyncSteps.text(getResources(), domain, stage, count);
+        if (text != null) {
+            postAlive(() -> phoneStrip(text, done, done > 0 ? count : 0));
+        }
+    }
+
+    /** The strip during a first projection, a null line once it ended. */
+    private void phoneStrip(String text, int done, int total) {
         if (syncing || BackgroundJob.running) {
             return;
         }
@@ -2283,7 +2369,7 @@ public class MainActivity extends Activity {
             if (text == null) {
                 headerOf(panel).synced();
             } else {
-                headerOf(panel).sync(null, text, 0, 0);
+                headerOf(panel).sync(null, text, done, total);
             }
         }
     }

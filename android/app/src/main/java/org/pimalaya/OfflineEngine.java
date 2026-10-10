@@ -291,15 +291,12 @@ final class OfflineEngine extends PimdirEngine {
     }
 
     /**
-     * Announces a hydrate, unless it is the phone spoke's: projecting a
-     * book onto the device downloads nothing, so a "downloading" line
-     * over it would name the wrong thing.
+     * Not the phone spoke's: projecting a book onto the device downloads
+     * nothing, so a "downloading" line over it would name the wrong thing.
      */
     @Override
-    protected void hydrating(String collection, int count) {
-        if (!CardStore.isPhoneCollection(collection)) {
-            step(Progress.STAGE_DOWNLOAD, count);
-        }
+    protected boolean downloads(String collection) {
+        return !CardStore.isPhoneCollection(collection);
     }
 
     /**
@@ -727,7 +724,11 @@ final class OfflineEngine extends PimdirEngine {
         JSONArray changes = yielded.getJSONArray("changes");
         if (CardStore.isPhoneCollection(url)) {
             step(Progress.STAGE_PROJECT, changes.length());
-            JSONObject reply = phone.push(url, changes);
+            JSONObject reply =
+                    phone.push(
+                            url,
+                            changes,
+                            done -> advance(Progress.STAGE_PROJECT, done, changes.length()));
             tallyPushes(url, changes, reply.getJSONArray("results"));
             return reply;
         }

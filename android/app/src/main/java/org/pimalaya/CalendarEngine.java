@@ -239,15 +239,10 @@ final class CalendarEngine extends PimdirEngine {
         return SYNC_LOCKS.computeIfAbsent(collection, key -> new ReentrantLock());
     }
 
-    /**
-     * Announces a hydrate, unless it is the phone spoke's: projecting a
-     * calendar onto the device downloads nothing.
-     */
+    /** Not the phone spoke's: projecting a calendar onto the device downloads nothing. */
     @Override
-    protected void hydrating(String collection, int count) {
-        if (!PimdirStorage.isPhoneCollection(collection)) {
-            step(Progress.STAGE_DOWNLOAD, count);
-        }
+    protected boolean downloads(String collection) {
+        return !PimdirStorage.isPhoneCollection(collection);
     }
 
     /**
@@ -381,7 +376,10 @@ final class CalendarEngine extends PimdirEngine {
         JSONArray changes = yielded.getJSONArray("changes");
         if (PimdirStorage.isPhoneCollection(collection)) {
             step(Progress.STAGE_PROJECT, changes.length());
-            return phone.push(collection, changes);
+            return phone.push(
+                    collection,
+                    changes,
+                    done -> advance(Progress.STAGE_PROJECT, done, changes.length()));
         }
         step(Progress.STAGE_UPLOAD, changes.length());
 

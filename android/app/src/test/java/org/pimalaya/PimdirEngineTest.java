@@ -185,4 +185,37 @@ public class PimdirEngineTest {
 
         assertTrue(stored().isEmpty());
     }
+
+    @Test
+    public void aDownloadCountsWhatHasBeenRead() {
+        for (int index = 0; index < 130; index++) {
+            String handle = "new-" + index + ".ics";
+            engine.members.put(handle, new String[] {"etag-1", BODY.replace("ev-1", handle)});
+        }
+        List<String> told = new ArrayList<>();
+        engine.progress =
+                new PimdirEngine.Progress() {
+                    @Override
+                    public void step(PimDomain domain, int stage, int count) {
+                        told.add("step " + stage + " " + count);
+                    }
+
+                    @Override
+                    public void advance(PimDomain domain, int stage, int done, int total) {
+                        told.add(stage + ": " + done + " of " + total);
+                    }
+                };
+        engine.sync(COLLECTION);
+
+        // NOTE: the naming read goes 64 bodies at a time, and the bar
+        // follows the reads that landed, never ahead of them.
+        int download = PimdirEngine.Progress.STAGE_DOWNLOAD;
+        assertEquals(
+                List.of(
+                        "step " + download + " 130",
+                        download + ": 64 of 130",
+                        download + ": 128 of 130",
+                        download + ": 130 of 130"),
+                told);
+    }
 }

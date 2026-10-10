@@ -73,6 +73,12 @@ abstract class PimdirEngine implements OfflineDriver {
         int STAGE_RESOLVE = 5;
 
         void step(PimDomain domain, int stage, int count);
+
+        /**
+         * How far a counted step is: {@code done} of its {@code total} items
+         * landed. Told only by the steps that move items batch by batch.
+         */
+        default void advance(PimDomain domain, int stage, int done, int total) {}
     }
 
     /** The foreground pass's progress observer; null when headless. */
@@ -81,6 +87,13 @@ abstract class PimdirEngine implements OfflineDriver {
     protected void step(int stage, int count) {
         if (progress != null) {
             progress.step(domain(), stage, count);
+        }
+    }
+
+    /** Tells how far a counted step is, at most once per percent. */
+    protected void advance(int stage, int done, int total) {
+        if (progress != null && SyncSteps.tells(done, total)) {
+            progress.advance(domain(), stage, done, total);
         }
     }
 
@@ -109,16 +122,21 @@ abstract class PimdirEngine implements OfflineDriver {
         if (pending.isEmpty()) {
             return;
         }
-        hydrating(collection, pending.size());
+        if (downloads(collection)) {
+            step(Progress.STAGE_DOWNLOAD, pending.size());
+        }
         Log.d(
                 "pimalaya",
                 "hydrate " + collection + " (" + pending.size() + " below full): "
                         + client.offlineUpgrade(this, collection, pending));
     }
 
-    /** Announces a hydrate about to run, for a driver that reports one. */
-    protected void hydrating(String collection, int count) {
-        step(Progress.STAGE_DOWNLOAD, count);
+    /**
+     * Whether reading the bodies of {@code collection} is a download to
+     * tell, for a driver that reports one.
+     */
+    protected boolean downloads(String collection) {
+        return true;
     }
 
     /**
@@ -342,19 +360,24 @@ abstract class PimdirEngine implements OfflineDriver {
             return page;
         }
 
-        hydrating(collection, unread.size());
+        boolean told = downloads(collection);
+        if (told) {
+            step(Progress.STAGE_DOWNLOAD, unread.size());
+        }
         java.util.Map<String, JSONObject> bodies = new java.util.HashMap<>();
         for (int from = 0; from < unread.size(); from += NAMING_BATCH) {
+            int to = Math.min(unread.size(), from + NAMING_BATCH);
             JSONObject asked = new JSONObject();
             asked.put("collection", collection);
-            asked.put(
-                    "handles",
-                    new JSONArray(unread.subList(from, Math.min(unread.size(), from + NAMING_BATCH))));
+            asked.put("handles", new JSONArray(unread.subList(from, to)));
             asked.put("tier", "full");
             JSONArray fetched = fetch(asked).optJSONArray("items");
             for (int index = 0; fetched != null && index < fetched.length(); index++) {
                 JSONObject body = fetched.getJSONObject(index);
                 bodies.put(body.getString("handle"), body);
+            }
+            if (told) {
+                advance(Progress.STAGE_DOWNLOAD, to, unread.size());
             }
         }
 

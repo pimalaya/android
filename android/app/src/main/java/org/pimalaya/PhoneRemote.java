@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.IntConsumer;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -305,9 +306,11 @@ final class PhoneRemote {
      * the raw contact; updates and removes are guarded on the recorded
      * VERSION and report rejected on a mismatch, so a contacts-app edit
      * racing the sync is reconciled by the next round instead of being
-     * overwritten.
+     * overwritten. {@code pushed} is told how many changes are through
+     * after each one.
      */
-    JSONObject push(String collection, JSONArray changes) throws JSONException {
+    JSONObject push(String collection, JSONArray changes, IntConsumer pushed)
+            throws JSONException {
         JSONArray results = new JSONArray();
         for (int index = 0; index < changes.length(); index++) {
             JSONObject change = changes.getJSONObject(index);
@@ -332,6 +335,7 @@ final class PhoneRemote {
                 Log.w("pimalaya", "phone push failed for " + handle, failure);
                 results.put(result(handle, false, null, null));
             }
+            pushed.accept(index + 1);
         }
 
         JSONObject reply = new JSONObject();
