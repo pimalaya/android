@@ -60,6 +60,7 @@ public class MailBodiesTest {
         store.replaceMailboxes(EMAIL, List.of(new Mailbox("INBOX", "inbox")));
         inbox = store.collectionOf(EMAIL, "INBOX");
         accountId = new PimdirAccount(context).idOf(EMAIL);
+        MailWindow.set(context, accountId, window);
         server = new Server();
         server.sync(inbox);
     }
@@ -67,6 +68,7 @@ public class MailBodiesTest {
     /** UIDs 4 to 2 are recent, newest first; UID 1 is three years old. */
     private final class Server extends MailEngine {
         final List<String> read = new ArrayList<>();
+        final List<String> pushed = new ArrayList<>();
 
         Server() {
             super(pimdir, new PimalayaClient(), null, accountId);
@@ -97,6 +99,15 @@ public class MailBodiesTest {
         protected byte[] source(String mailbox, String handle) {
             read.add(handle);
             return LATIN1;
+        }
+
+        @Override
+        protected JSONObject push(JSONObject yielded) throws JSONException {
+            JSONArray changes = yielded.getJSONArray("changes");
+            for (int index = 0; index < changes.length(); index++) {
+                pushed.add(changes.getJSONObject(index).toString());
+            }
+            return new JSONObject().put("results", new JSONArray());
         }
     }
 
@@ -158,6 +169,7 @@ public class MailBodiesTest {
 
     @Test
     public void aMailboxKeptWholeDownloadsPastTheWindow() {
+        MailOffline.setWhole(context, inbox, true);
         MailBodies.Run run = new MailBodies.Run();
         run.plan(EMAIL, planned(null));
         assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
@@ -214,6 +226,7 @@ public class MailBodiesTest {
 
     @Test
     public void aWindowMovedLaterFreesTheBodiesBelowIt() {
+        MailWindow.set(context, accountId, null);
         MailBodies.Run run = new MailBodies.Run();
         run.plan(EMAIL, planned(null));
         assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
@@ -229,5 +242,36 @@ public class MailBodiesTest {
         MailStore.Query all = store.query((account, collection) -> true, false, false, "");
         assertEquals("its header stays, for search", 4, store.count(all));
         assertEquals("and it plans again under all mail", 1, planned(null).size());
+
+        // NOTE: a plan made before the window moved later fetches nothing
+        // it freed: the window is read again as the chunk downloads.
+        MailWindow.set(context, accountId, window);
+        server.read.clear();
+        run = new MailBodies.Run();
+        run.plan(EMAIL, planned(null));
+        MailBodies.step(run, host(false));
+        assertTrue("nothing fetched back: " + server.read, server.read.isEmpty());
+        assertNull(store.storedSource(inbox, "1"));
+    }
+
+    @Test
+    public void aBodyFetchedAgainAfterAReleaseIsNoEditToPush() {
+        MailWindow.set(context, accountId, null);
+        MailBodies.Run run = new MailBodies.Run();
+        run.plan(EMAIL, planned(null));
+        MailBodies.step(run, host(false));
+        assertEquals(1, store.release(EMAIL, window));
+
+        run = new MailBodies.Run();
+        run.plan(EMAIL, planned(null));
+        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
+        assertArrayEquals(LATIN1, store.storedSource(inbox, "1"));
+
+        server.sync(inbox);
+        assertTrue("nothing pushed: " + server.pushed, server.pushed.isEmpty());
+        MailStore.Query all = store.query((account, collection) -> true, false, false, "");
+        for (MailStore.StoredMessage message : store.all(all)) {
+            assertFalse("no change owed for " + message.id, message.unsynced);
+        }
     }
 }

@@ -268,6 +268,9 @@
     <string name="mail_window_release_title">Free older messages?</string>
     <string name="mail_window_release_message">Messages before %1$s leave this phone. Their headers stay, so search still finds them, and opening one downloads it again.</string>
     <string name="mail_window_release">Free</string>
+    <string name="mail_window_release_failed">Could not free the older messages</string>
+    <string name="mail_scope_failed">Could not change the sync period</string>
+    <string name="mail_window_frees">Messages before this day leave the phone, their headers kept for search</string>
     <string name="mail_row_not_downloaded">Not downloaded</string>
     <string name="mail_row_wifi">Downloads on Wi-Fi</string>
     <string name="mail_chip_unread">Unread</string>
@@ -375,6 +378,64 @@
     <string name="attachment_saved">Saved to %1$s</string>
     <string name="attachment_no_app">No app on this phone opens this file</string>
     <string name="attachment_failed">Could not read the attachment</string>
+
+    <!-- The Files tab. -->
+    <string name="files_title">Files</string>
+    <string name="domain_files">Files</string>
+    <string name="files_search">Search files and senders</string>
+    <string name="files_empty">No files yet</string>
+    <string name="files_folder_empty">Empty folder</string>
+    <string name="files_attachments">Attachments</string>
+    <string name="files_attachments_of">Attachments · %1$s</string>
+    <string name="files_on_device">On this device</string>
+    <string name="files_file">File</string>
+    <string name="files_from">From %1$s</string>
+    <string name="chip_folders">Folders</string>
+    <string name="chip_attachments">Attachments</string>
+    <string name="chip_images">Images</string>
+    <string name="chip_pdfs">PDFs</string>
+    <string name="chip_documents">Documents</string>
+    <plurals name="files_meta">
+        <item quantity="one">%1$d file</item>
+        <item quantity="other">%1$d files</item>
+    </plurals>
+    <string name="files_share">Share</string>
+    <string name="files_export">Export</string>
+    <string name="files_exported">Exported</string>
+    <string name="files_show_message">Show the message</string>
+    <string name="files_delete">Delete</string>
+    <string name="files_delete_confirm">Delete %1$s from this folder?</string>
+    <string name="files_import">Import a file</string>
+    <string name="files_imported">Imported into %1$s</string>
+    <string name="files_rename">Rename</string>
+    <string name="files_delete_folder">Delete folder</string>
+    <string name="files_delete_folder_confirm">Delete %1$s and every file in it?</string>
+    <string name="files_folder_exists">A folder already goes by that name</string>
+    <string name="files_no_message">The message this file came from is gone</string>
+
+    <!-- An item's links, on every item page. -->
+    <string name="linked_title">Linked</string>
+    <plurals name="linked_count">
+        <item quantity="one">%1$d linked item</item>
+        <item quantity="other">%1$d linked items</item>
+    </plurals>
+    <string name="linked_link_to">Link to</string>
+    <string name="linked_search">Search messages, contacts, events, files</string>
+    <string name="linked_unlink">Unlink</string>
+    <string name="linked_unlink_confirm">Unlink these two items?</string>
+    <string name="linked_unlink_automatic">This link was made automatically: it may come back while what made it still holds.</string>
+    <string name="linked_by_you">Linked by you</string>
+    <string name="linked_sender">Sent by</string>
+    <string name="linked_attachment">Attachment</string>
+    <string name="linked_invitation">Invitation</string>
+    <string name="linked_related">Related</string>
+    <string name="linked_kind_message">Message</string>
+    <string name="linked_kind_contact">Contact</string>
+    <string name="linked_kind_event">Event</string>
+    <string name="linked_kind_file">File</string>
+    <string name="linked_untitled">(Untitled)</string>
+    <string name="linked_gone">This item is no longer on the phone</string>
+    <string name="linked_failed">Could not link these items</string>
 
     <!-- What the reader does to the message it has open. -->
     <string name="message_mark_unread">Mark unread</string>

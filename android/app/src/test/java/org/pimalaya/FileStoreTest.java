@@ -106,9 +106,9 @@ public class FileStoreTest {
     public void aStoredMessageListsItsPartsAsStandInsInDocumentOrder() {
         byte[] source = stored("m1");
 
-        List<FileStore.Attachment> attachments = files.attachments(accountId, "m1");
+        List<FileStore.StoredFile> attachments = files.attachments(accountId, "m1");
         assertEquals(2, attachments.size());
-        FileStore.Attachment invoice = attachments.get(0);
+        FileStore.StoredFile invoice = attachments.get(0);
         assertEquals("part:m1#2", invoice.linkId);
         assertEquals("Invoice.pdf", invoice.name);
         assertEquals("application/pdf", invoice.mediaType);
@@ -153,8 +153,8 @@ public class FileStoreTest {
         assertEquals("Invoices", files.folders().get(0).name);
 
         byte[] bytes = "%PDF".getBytes(StandardCharsets.UTF_8);
-        FileStore.Attachment first = files.attachments(accountId, "m1").get(0);
-        FileStore.Attachment second = files.attachments(accountId, "m2").get(0);
+        FileStore.StoredFile first = files.attachments(accountId, "m1").get(0);
+        FileStore.StoredFile second = files.attachments(accountId, "m2").get(0);
         files.save(folder, first, bytes);
         files.save(folder, second, bytes);
         files.save(folder, first, bytes);
@@ -169,7 +169,7 @@ public class FileStoreTest {
                 scalar("SELECT seq FROM items WHERE collection = ? AND link_id = ?", folder,
                         first.linkId));
 
-        FileStore.Attachment saved = files.attachments(accountId, "m1").get(0);
+        FileStore.StoredFile saved = files.attachments(accountId, "m1").get(0);
         assertEquals(hash, saved.objectHash);
         assertEquals("the stand-in is still the row listed", "2", saved.part);
         assertArrayEquals(bytes, files.saved(saved));
@@ -179,7 +179,7 @@ public class FileStoreTest {
     public void aMessageGoneTakesItsStandInsAndLeavesItsSavedCopies() {
         stored("m1");
         String folder = files.createFolder("Kept");
-        FileStore.Attachment invoice = files.attachments(accountId, "m1").get(0);
+        FileStore.StoredFile invoice = files.attachments(accountId, "m1").get(0);
         files.save(folder, invoice, "%PDF".getBytes(StandardCharsets.UTF_8));
 
         SQLiteDatabase db = items.writable();
@@ -200,5 +200,81 @@ public class FileStoreTest {
         assertEquals(0, scalar("SELECT count(*) FROM collections WHERE id = ?",
                 FileStore.attachmentsOf(accountId)));
         assertTrue(files.attachments(accountId, "m1").isEmpty());
+    }
+
+    @Test
+    public void aStandInLeadsBackToItsMessageAndSender() {
+        stored("m1");
+        FileStore.StoredFile invoice =
+                files.files(FileStore.attachmentsOf(accountId)).get(0);
+
+        FileStore.Origin origin = files.origin(invoice.linkId);
+        assertEquals(inbox, origin.collection);
+        assertEquals("m1", origin.linkId);
+        assertEquals("a@example.org", origin.sender);
+        assertEquals("Invoice", mail.message(origin.collection, origin.linkId).subject);
+        assertNull("an import comes from no message", files.origin("file:none"));
+    }
+
+    @Test
+    public void foldersAreListedApartFromAttachmentsAndRenamedByLabel() {
+        stored("m1");
+        String folder = files.createFolder("Taxes");
+
+        assertEquals(1, files.folders().size());
+        assertEquals(1, files.attachmentCollections().size());
+        assertTrue(FileStore.isAttachments(files.attachmentCollections().get(0).id));
+
+        files.renameFolder(folder, "Receipts");
+        assertEquals(folder, files.folders().get(0).id);
+        assertEquals("Receipts", files.folders().get(0).name);
+    }
+
+    @Test
+    public void anImportIsAFileOfItsOwnAndADeleteReleasesItsBody() {
+        String folder = files.createFolder("Inbox");
+        byte[] bytes = "hello".getBytes(StandardCharsets.UTF_8);
+        files.importFile(folder, "Hello.txt", "text/plain", bytes);
+
+        List<FileStore.StoredFile> held = files.files(folder);
+        assertEquals(1, held.size());
+        assertTrue(held.get(0).linkId.matches("file:[0-9a-f]{32}"));
+        assertEquals("text/plain", held.get(0).mediaType);
+        assertEquals(Long.valueOf(5), held.get(0).size);
+        assertArrayEquals(bytes, files.saved(held.get(0)));
+
+        files.delete(held.get(0));
+
+        assertTrue(files.files(folder).isEmpty());
+        assertEquals(0, scalar("SELECT count(*) FROM objects WHERE hash = ?",
+                PimdirHash.of(bytes)));
+    }
+
+    @Test
+    public void aStandInIsNotDeletedByHandAndAFolderGoesWithItsFiles() {
+        stored("m1");
+        String folder = files.createFolder("Kept");
+        FileStore.StoredFile invoice = files.attachments(accountId, "m1").get(0);
+        byte[] bytes = "%PDF".getBytes(StandardCharsets.UTF_8);
+        files.save(folder, invoice, bytes);
+
+        files.delete(invoice);
+        assertEquals(2, files.attachments(accountId, "m1").size());
+
+        files.deleteFolder(folder);
+        assertTrue(files.folders().isEmpty());
+        assertEquals(0, scalar("SELECT count(*) FROM objects WHERE hash = ?",
+                PimdirHash.of(bytes)));
+        assertNull(files.attachments(accountId, "m1").get(0).objectHash);
+    }
+
+    @Test
+    public void theTypeChipsSortMediaTypes() {
+        assertTrue(FilesList.matches(FilesList.IMAGES, "image/png"));
+        assertTrue(FilesList.matches(FilesList.PDFS, "application/pdf"));
+        assertTrue(FilesList.matches(
+                FilesList.DOCUMENTS,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
+        assertTrue(!FilesList.matches(FilesList.DOCUMENTS, null));
     }
 }

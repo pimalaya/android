@@ -8,15 +8,15 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * One domain's filter: which accounts and which of their collections its list
+ * One list's filter: which accounts and which of their collections it
  * shows, keyed by collection id and kept across restarts (the filter page,
  * {@link FilterPage}).
  *
- * <p>One per domain, since the collections are the domain's own. State is kept
- * as the <em>hidden</em> sets rather than the shown ones, so the empty filter
- * is the everything-shown default (which is also where a build that kept the
- * filter in memory starts from) and a collection listed later shows up without
- * having to be enrolled.
+ * <p>One per domain, since the collections are the domain's own, and one for
+ * the Files tab. State is kept as the <em>hidden</em> sets rather than the
+ * shown ones, so the empty filter is the everything-shown default (which is
+ * also where a build that kept the filter in memory starts from) and a
+ * collection listed later shows up without having to be enrolled.
  *
  * <p>An account is hidden apart from its collections, so hiding it keeps
  * which of them were hidden for when it comes back, the page folding them
@@ -45,17 +45,22 @@ final class MergedFilter implements SyncScope {
     /** Collection ids whose items are kept out of the list. */
     private final Set<String> hiddenCollections;
 
-    private MergedFilter(Context context, PimDomain domain) {
+    private MergedFilter(Context context, String list) {
         this.context = context;
-        this.accountsKey = domain.id + ".accounts";
-        this.collectionsKey = domain.id + ".collections";
+        this.accountsKey = list + ".accounts";
+        this.collectionsKey = list + ".collections";
         this.hiddenAccounts = new HashSet<>(prefs().getStringSet(accountsKey, Set.of()));
         this.hiddenCollections = new HashSet<>(prefs().getStringSet(collectionsKey, Set.of()));
     }
 
     /** The domain's filter as it was last left. */
     static MergedFilter of(Context context, PimDomain domain) {
-        return new MergedFilter(context, domain);
+        return new MergedFilter(context, domain.id);
+    }
+
+    /** The Files tab's filter, which no account connects as a domain. */
+    static MergedFilter files(Context context) {
+        return new MergedFilter(context, "files");
     }
 
     /** Whether an item of this account and collection takes part. */

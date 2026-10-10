@@ -716,6 +716,7 @@ final class PimdirStorage {
                 statement.close();
             }
             compiled = null;
+            PimdirItems.unlinkCollected(db, blobs);
         }
     }
 
@@ -1660,6 +1661,7 @@ final class PimdirStorage {
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
+            PimdirItems.unlinkCollected(db, blobs);
         }
     }
 
@@ -1979,7 +1981,7 @@ final class PimdirStorage {
         }
     }
 
-    /** Drops unreferenced objects and unlinks their blobs. */
+    /** Drops unreferenced objects, their blobs unlinked once the batch commits. */
     private void collectGarbage(SQLiteDatabase db) {
         List<String> orphans = new ArrayList<>();
         try (Cursor cursor =
@@ -1990,12 +1992,9 @@ final class PimdirStorage {
         }
         for (String hash : orphans) {
             db.execSQL("DELETE FROM objects WHERE hash = ?", new Object[] {hash});
-            // NOTE: the row goes inside the transaction, the file after it, so a
-            // crash leaves an orphan blob rather than a row without its body.
-            if (!blobs.remove(hash)) {
-                Log.w("pimalaya", "could not unlink the orphan blob " + hash);
-            }
         }
+        // NOTE: the row goes inside the transaction, the file once it commits.
+        PimdirItems.deferUnlink(orphans);
     }
 
     private static boolean sameObject(String left, String right) {

@@ -85,25 +85,9 @@ final class BackgroundCheck {
      */
     static void setNotifies(Context context, String email, boolean on) {
         put(context, NOTIFY, email, on);
-        // NOTE: the watermark goes, so the next run seeds it afresh from the
-        // unread mail already there rather than notifying it.
-        prefs(context).edit().remove("notified:" + email).apply();
         if (on && !syncs(context, email)) {
             setInterval(context, email, DEFAULT);
         }
-    }
-
-    /**
-     * The sort key of the newest message a run notified for the account,
-     * kept no later than the run, null before any (the next run seeds it):
-     * nothing at or below it notifies again.
-     */
-    static String notifiedUpTo(Context context, String email) {
-        return prefs(context).getString("notified:" + email, null);
-    }
-
-    static void setNotifiedUpTo(Context context, String email, String sortKey) {
-        prefs(context).edit().putString("notified:" + email, sortKey).apply();
     }
 
     /**
@@ -126,11 +110,7 @@ final class BackgroundCheck {
 
     /** Drops a removed account's switches. */
     static void forget(Context context, String email) {
-        prefs(context)
-                .edit()
-                .remove("interval:" + email)
-                .remove("notified:" + email)
-                .apply();
+        prefs(context).edit().remove("interval:" + email).apply();
         put(context, NOTIFY, email, false);
         schedule(context);
     }

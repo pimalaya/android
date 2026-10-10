@@ -75,6 +75,7 @@ public class MainActivity extends Activity {
     static final int PANEL_COMPOSE = 6;
     static final int PANEL_MESSAGE = 7;
     static final int PANEL_EVENT_VIEW = 8;
+    static final int PANEL_FILES = 9;
     private static final int PANEL_AUTH = 20;
     static final int PANEL_ACCOUNT = 21;
     static final int PANEL_FILTER = 22;
@@ -114,6 +115,8 @@ public class MainActivity extends Activity {
     private static final int REQUEST_NOTIFICATIONS = 4;
     private static final int REQUEST_IMPORT = 2;
     private static final int REQUEST_EXPORT = 3;
+    static final int REQUEST_FILE_IMPORT = 5;
+    static final int REQUEST_FILE_EXPORT = 6;
 
     /** The shared backend client, the single-thread io executor, the
      *  main-thread handler and the theme helper. */
@@ -177,6 +180,19 @@ public class MainActivity extends Activity {
 
     /** The file side of the store: attachments and the folders they are saved into. */
     FileStore files;
+
+    /** The Files list, and what a file offers wherever it shows. */
+    FilesList filesList;
+
+    FileActions fileActions;
+
+    /** References between items, and the Linked card every item page shows. */
+    ItemLinks links;
+
+    LinkedSection linked;
+
+    /** The Files list's filter, which no account connects as a domain. */
+    private MergedFilter filesFilter;
 
     /** The reader one message row opens onto. */
     MessageView messageView;
@@ -273,6 +289,10 @@ public class MainActivity extends Activity {
         mail = new MailStore(this, pimdir);
         mailList = new MailList(this, mail);
         files = new FileStore(this, pimdir);
+        fileActions = new FileActions(this);
+        filesList = new FilesList(this);
+        links = new ItemLinks(this, pimdir);
+        linked = new LinkedSection(this);
         eventView = new EventView(this);
         messageView = new MessageView(this);
         compose = new MessageCompose(this);
@@ -319,11 +339,22 @@ public class MainActivity extends Activity {
         authFlipper = findViewById(R.id.auth_flipper);
         form = new ContactForm(this);
         form.setOnRender(this::updateSaveEnabled);
+        // NOTE: a card being composed or a conflict being resolved has no
+        // links to show: the one is no item yet, the other not settled.
+        form.setTrailing(
+                sections ->
+                        linked.section(
+                                sections,
+                                edit == null || edit.card == null || edit.resolvingConflict
+                                        ? null
+                                        : ItemLinks.ofContact(edit.card.id),
+                                form::refresh));
 
         setUpScreens();
         setUpEmailPanel();
         contactsList.setUp();
         calendarList.setUp();
+        filesList.setUp();
         mailList.setUp();
         setUpContactPanel();
         setUpHomePanel();
@@ -2274,7 +2305,8 @@ public class MainActivity extends Activity {
         io.execute(
                 () -> {
                     boolean widened = false;
-                    java.time.LocalDate today = java.time.LocalDate.now(java.time.ZoneOffset.UTC);
+                    java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+                    java.time.LocalDate today = java.time.LocalDate.now(zone);
                     List<String> moved = new ArrayList<>();
                     for (String email : emails) {
                         if (!AccountActivation.enabled(this, email)) {
@@ -2282,7 +2314,7 @@ public class MainActivity extends Activity {
                         }
                         String id = accountIdOf(email);
                         int months = MailScope.months(this, id);
-                        int covering = MailScope.covering(date, today);
+                        int covering = MailScope.covering(date, today, zone);
                         if (months > 0 && (covering == 0 || covering > months)) {
                             mail.bound(email, covering);
                             widened = true;
@@ -2303,21 +2335,28 @@ public class MainActivity extends Activity {
     /**
      * Moves the windows of {@code emails} later to {@code date}, on the io
      * thread, freeing the bodies of their mail below it, headers and search
-     * kept ({@link MailStore#release}); then the list is read again and
-     * {@code done} runs on the main thread.
+     * kept ({@link MailStore#release}): the body step replanned first, so no
+     * step of an older plan fetches a body back, and a window moved only
+     * once its release went through, a failure said in a dialog. Turned
+     * down while a background run holds the sync lock. The list is read
+     * again and {@code done} runs on the main thread.
      */
     void releaseWindow(List<String> emails, String date, Runnable done) {
         io.execute(
                 () -> {
-                    for (String email : emails) {
-                        MailWindow.set(this, accountIdOf(email), date);
-                        try {
-                            int released = mail.release(email, date);
-                            Log.d("pimalaya", "mail of " + email + ": " + released + " freed");
-                        } catch (Exception error) {
-                            Log.w("pimalaya", "mail release failed for " + email, error);
-                        }
-                    }
+                    replanBodies = true;
+                    underSyncLock(
+                            R.string.mail_window_release_failed,
+                            () -> {
+                                for (String email : emails) {
+                                    int released = mail.release(email, date);
+                                    MailWindow.set(this, accountIdOf(email), date);
+                                    Log.d(
+                                            "pimalaya",
+                                            "mail of " + email + ": " + released
+                                                    + " freed");
+                                }
+                            });
                     postAlive(
                             () -> {
                                 mailList.reload();
@@ -2330,19 +2369,43 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * Runs a store-wide write on the io thread while no sync runs: the
+     * process's sync lock taken around it, so a background run (on a
+     * thread of its own) never writes the same rows meanwhile. Turned down,
+     * saying so, while one holds it; a failure is said in a dialog, under
+     * {@code failed} when it names nothing itself.
+     */
+    void underSyncLock(int failed, Runnable write) {
+        if (!SyncLock.take()) {
+            postAlive(() -> toast(getString(R.string.sync_busy)));
+            return;
+        }
+        try {
+            write.run();
+        } catch (RuntimeException error) {
+            Log.w("pimalaya", "store write failed", error);
+            postAlive(() -> showError(error, failed));
+        } finally {
+            SyncLock.release();
+        }
+    }
+
+    /**
      * One step of listing moved windows down to {@code date}, on the io
      * thread: every mailbox of {@code emails} {@code shown} lets through
      * whose floor is above it widened by one chunk of
      * {@link MailEngine#FILL_CHUNK}, never below the date, side by side;
      * the next step queued behind, so an open or a pull waits one chunk at
      * most, as with the fill. It ends once none is above the date, on a
-     * failure, with no network, or when a sync starts (the fill lists the
-     * rest), then replans the bodies and reads the list again.
+     * failure, with no network, when a sync starts or the app leaves the
+     * foreground (the fill lists the rest); a metered network does not stop
+     * it, the user having asked for these headers by tapping. Then it
+     * replans the bodies and reads the list again.
      */
     private void reachStep(
             List<String> emails, String date, java.util.function.Predicate<String> shown) {
         List<MailStore.Edge> above = new ArrayList<>();
-        if (!syncing && online()) {
+        if (!syncing && foreground && online()) {
             for (MailStore.Edge edge : mail.edges()) {
                 if (emails.contains(edge.accountEmail)
                         && shown.test(edge.collection)
@@ -2613,6 +2676,34 @@ public class MainActivity extends Activity {
      * per-field alternative chips when they diverge. Saving fans the
      * form out onto every replica.
      */
+    /** The merged contact row holding a card of this key, null for none. */
+    Group contactGroupOf(String linkId) {
+        return contactsList.groupOf(linkId);
+    }
+
+    /**
+     * Opens one calendar resource on its page, as its series rather than an
+     * occurrence; false when the store holds it no more.
+     */
+    boolean openEvent(String collection, String linkId) {
+        EventStore.StoredCalendar calendar = null;
+        for (EventStore.StoredCalendar held : events.loadCalendars()) {
+            if (held.id.equals(collection)) {
+                calendar = held;
+            }
+        }
+        if (calendar == null) {
+            return false;
+        }
+        for (EventStore.StoredEvent event : events.loadEvents()) {
+            if (event.collectionId.equals(collection) && event.id.equals(linkId)) {
+                eventView.open(null, event, calendar);
+                return true;
+            }
+        }
+        return false;
+    }
+
     void openGroup(Group group) {
         if (group.conflicted()) {
             openConflict(group);
@@ -2716,6 +2807,10 @@ public class MainActivity extends Activity {
             vcfTransfer.importFile(data.getData());
         } else if (request == REQUEST_EXPORT) {
             vcfTransfer.exportFile(data.getData());
+        } else if (request == REQUEST_FILE_IMPORT) {
+            filesList.imported(data.getData());
+        } else if (request == REQUEST_FILE_EXPORT) {
+            fileActions.exported(data.getData());
         }
     }
 
@@ -3257,6 +3352,9 @@ public class MainActivity extends Activity {
         if (panel == PANEL_MAIL) {
             return mailList.header();
         }
+        if (panel == PANEL_FILES) {
+            return filesList.header();
+        }
         return panel == PANEL_CALENDAR ? calendarList.header() : contactsList.header();
     }
 
@@ -3377,7 +3475,9 @@ public class MainActivity extends Activity {
         button.setVisibility(View.VISIBLE);
         button.setImageTintList(
                 android.content.res.ColorStateList.valueOf(
-                        domain != null && filterOf(domain).isActive()
+                        (panel == PANEL_FILES
+                                        ? filesFilter().isActive()
+                                        : domain != null && filterOf(domain).isActive())
                                 ? ui.resolveColor(android.R.attr.colorAccent)
                                 : ui.resolveColor(android.R.attr.textColorPrimary)));
     }
@@ -3410,6 +3510,10 @@ public class MainActivity extends Activity {
 
     /** Opens the filter page of the domain on screen. */
     private void openFilter() {
+        if (screen == PANEL_FILES) {
+            filterPage.openFiles();
+            return;
+        }
         filterPage.open(domainOf(screen) == null ? PimDomain.CONTACTS : domainOf(screen));
     }
 
@@ -3418,11 +3522,41 @@ public class MainActivity extends Activity {
         return filters.computeIfAbsent(domain, key -> MergedFilter.of(this, key));
     }
 
+    /** The Files list's filter, as it was last left. */
+    MergedFilter filesFilter() {
+        if (filesFilter == null) {
+            filesFilter = MergedFilter.files(this);
+        }
+        return filesFilter;
+    }
+
+    /**
+     * What the filter page lists for Files: the device's folders under the
+     * device, and each account that is on with its attachments collection.
+     */
+    List<FilterPage.Account> filesRoster() {
+        List<FilterPage.Account> roster = new ArrayList<>();
+        List<PimdirCollections.Stored> folders = files.folders();
+        if (!folders.isEmpty()) {
+            roster.add(
+                    new FilterPage.Account(
+                            LocalBook.ACCOUNT, getString(R.string.files_on_device), folders));
+        }
+        for (PimdirCollections.Stored held : files.attachmentCollections()) {
+            if (AccountActivation.enabled(this, held.accountEmail)) {
+                roster.add(
+                        new FilterPage.Account(held.accountEmail, held.accountEmail, List.of(held)));
+            }
+        }
+        return roster;
+    }
+
     /** A filter changed: the lists and the bar's filter icon follow. */
     void filterChanged() {
         contactsList.reRender();
         calendarList.reload();
         mailList.reload();
+        filesList.reload();
     }
 
     /**
@@ -3745,6 +3879,16 @@ public class MainActivity extends Activity {
                 };
         calendar.fab = this::composeEvent;
         screens.put(PANEL_CALENDAR, calendar);
+
+        Screen filesScreen = new Screen();
+        filesScreen.chrome =
+                () -> {
+                    listFab(R.string.attachment_new_folder, R.drawable.ic_add);
+                    showDomainBar(PANEL_FILES);
+                    filesList.reload();
+                };
+        filesScreen.fab = () -> filesList.newFolder();
+        screens.put(PANEL_FILES, filesScreen);
 
         // The composer is a frame with a send button in the bar and a
         // back arrow that asks before losing what was typed.

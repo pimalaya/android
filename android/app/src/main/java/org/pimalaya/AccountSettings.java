@@ -231,7 +231,6 @@ final class AccountSettings {
 
         // NOTE: back takes in more, later frees the bodies below, asked first.
         String window = host.mail.windowOf(email);
-        MergedFilter filter = host.filterOf(PimDomain.MAIL);
         rows.add(
                 sections.row(
                         host.getString(R.string.account_window_title),
@@ -246,15 +245,13 @@ final class AccountSettings {
                                         host,
                                         host.mailList.reads(),
                                         host.mail.query(
-                                                (owner, collection) ->
-                                                        owner.equals(email)
-                                                                && filter.accepts(owner, collection),
+                                                (owner, collection) -> owner.equals(email),
                                                 false,
                                                 false,
                                                 ""),
                                         window,
                                         List.of(email),
-                                        collection -> filter.accepts(email, collection),
+                                        collection -> true,
                                         true,
                                         () -> renderIfOpen(email))));
 
@@ -293,15 +290,17 @@ final class AccountSettings {
     private void bound(String email, int months) {
         host.io.execute(
                 () -> {
-                    try {
-                        int collected = host.mail.bound(email, months);
-                        Log.d(
-                                "pimalaya",
-                                "mail of " + email + " bounded to " + months + " months, "
-                                        + collected + " collected");
-                    } catch (Exception error) {
-                        Log.w("pimalaya", "mail bound failed for " + email, error);
-                    }
+                    // NOTE: a narrower bound collects, so not while a
+                    // background run writes the same rows.
+                    host.underSyncLock(
+                            R.string.mail_scope_failed,
+                            () -> {
+                                int collected = host.mail.bound(email, months);
+                                Log.d(
+                                        "pimalaya",
+                                        "mail of " + email + " bounded to " + months
+                                                + " months, " + collected + " collected");
+                            });
                     host.postAlive(
                             () -> {
                                 host.mailList.reload();

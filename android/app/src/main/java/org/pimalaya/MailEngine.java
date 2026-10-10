@@ -548,9 +548,15 @@ class MailEngine extends PimdirEngine {
         marks.clear();
         attachments.clear();
         List<String> handles = new ArrayList<>(rows.size());
+        // NOTE: read now rather than trusted from the plan: a window moved
+        // later since frees bodies a stale plan would fetch back.
+        String window = MailWindow.since(pimdir.context(), accountId);
+        String role = mail().roles().get(collection);
+        boolean whole = MailOffline.whole(pimdir.context(), collection);
         synchronized (STORE) {
             for (MailBodies.Row row : rows) {
-                if (offline.isPendingCreate(collection, row.linkId)) {
+                if (!MailBodies.takes(row.sortKey, window, role, whole)
+                        || offline.isPendingCreate(collection, row.linkId)) {
                     continue;
                 }
                 String handle = offline.handleFor(collection, row.linkId);

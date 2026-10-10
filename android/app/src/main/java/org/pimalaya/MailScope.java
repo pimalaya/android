@@ -4,7 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 
 /**
  * An account's mail bound: all of its mail, or the last N months of it.
@@ -50,7 +50,7 @@ final class MailScope {
 
     /** The floor of an account's scope today, null for all mail. */
     static String sinceOf(Context context, String accountId) {
-        return since(months(context, accountId), LocalDate.now(ZoneOffset.UTC));
+        return since(months(context, accountId));
     }
 
     /**
@@ -89,32 +89,39 @@ final class MailScope {
     /**
      * The floor of an {@code months} bound on {@code today}, as the RFC 3339
      * instant Annex A writes a date in: the first day of the month that many
-     * months back, at midnight UTC, or null for no bound.
+     * months back, at midnight in {@code zone}, or null for no bound.
      *
      * <p>A month boundary rather than today's date: the scope then holds
      * still for a month, so a round cut off one day resumes the next under
      * the same scope instead of restarting over one a day narrower, and the
-     * coverage is restated once a month rather than once a pass.
+     * coverage is restated once a month rather than once a pass. Midnight on
+     * the device's clock, as a window's dates are ({@link MailWindow}), so a
+     * window and the bound compare by the same days.
      */
-    static String since(int months, LocalDate today) {
+    static String since(int months, LocalDate today, ZoneId zone) {
         if (months <= 0) {
             return null;
         }
-        LocalDate floor = today.withDayOfMonth(1).minusMonths(months);
-        return floor + "T00:00:00Z";
+        return MailWindow.startOf(today.withDayOfMonth(1).minusMonths(months), zone);
+    }
+
+    /** The floor of an {@code months} bound today on the device's clock. */
+    static String since(int months) {
+        ZoneId zone = ZoneId.systemDefault();
+        return since(months, LocalDate.now(zone), zone);
     }
 
     /**
-     * The narrowest bound reaching back to {@code date} on {@code today},
-     * in months, 0 (all mail) when no choice does or for no date: what a
-     * window picked below the bound widens it to.
+     * The narrowest bound reaching back to {@code date} on {@code today} in
+     * {@code zone}, in months, 0 (all mail) when no choice does or for no
+     * date: what a window picked below the bound widens it to.
      */
-    static int covering(String date, LocalDate today) {
+    static int covering(String date, LocalDate today, ZoneId zone) {
         if (date == null) {
             return 0;
         }
         for (int months : MONTHS) {
-            if (months > 0 && since(months, today).compareTo(date) <= 0) {
+            if (months > 0 && since(months, today, zone).compareTo(date) <= 0) {
                 return months;
             }
         }

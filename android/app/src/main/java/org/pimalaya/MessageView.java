@@ -1,7 +1,6 @@
 package org.pimalaya;
 
 import android.app.AlertDialog;
-import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
@@ -13,7 +12,6 @@ import android.view.View;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -82,6 +80,7 @@ final class MessageView {
 
         header(message);
         badges(new ArrayList<>());
+        host.findViewById(R.id.message_view_linked).setVisibility(View.GONE);
         actions();
         loading();
         host.show(MainActivity.PANEL_MESSAGE);
@@ -197,12 +196,14 @@ final class MessageView {
                     }
                     // NOTE: read whether or not the body came: a message
                     // whose body was released keeps its attachments listed.
-                    List<FileStore.Attachment> files =
+                    List<FileStore.StoredFile> files =
                             message.pending
                                     ? new ArrayList<>()
                                     : host.files.attachments(
                                             host.mail.accountIdOf(message.accountEmail),
                                             message.id);
+                    ItemLinks.Endpoint self = ItemLinks.ofMessage(message);
+                    int links = self == null ? -1 : host.links.links(self).size();
 
                     MessageBody outcome = loaded;
                     boolean stored = fetched;
@@ -221,6 +222,7 @@ final class MessageView {
                                     return;
                                 }
                                 badges(files);
+                                linked(message, links);
                                 if (outcome == null) {
                                     state(host.message(error, R.string.message_failed));
                                     return;
@@ -252,63 +254,56 @@ final class MessageView {
         return source;
     }
 
-    /** What a tap on an attachment offers: open it, or save it to a folder. */
-    private void choose(MailStore.StoredMessage message, FileStore.Attachment attachment) {
+    /**
+     * The badge opening the message's Linked card, saying how many links it
+     * has; hidden for a message that cannot be linked ({@code count} -1).
+     */
+    private void linked(MailStore.StoredMessage message, int count) {
+        android.widget.TextView badge = host.findViewById(R.id.message_view_linked);
+        badge.setVisibility(count < 0 ? View.GONE : View.VISIBLE);
+        badge.setText(
+                count == 0
+                        ? host.getString(R.string.linked_link_to)
+                        : host.getResources()
+                                .getQuantityString(R.plurals.linked_count, count, count));
+        badge.setOnClickListener(
+                view ->
+                        host.linked.dialog(
+                                ItemLinks.ofMessage(message),
+                                message.subject,
+                                () -> {
+                                    if (current == message) {
+                                        linked(
+                                                message,
+                                                host.links
+                                                        .links(ItemLinks.ofMessage(message))
+                                                        .size());
+                                    }
+                                }));
+    }
+
+    /** What a tap on an attachment offers: open it, share it, or save it to a folder. */
+    private void choose(MailStore.StoredMessage message, FileStore.StoredFile attachment) {
+        FileActions.Bytes bytes = () -> bytesOf(message, attachment);
         CharSequence[] actions = {
-            host.getString(R.string.attachment_open), host.getString(R.string.attachment_save)
+            host.getString(R.string.attachment_open),
+            host.getString(R.string.files_share),
+            host.getString(R.string.attachment_save)
         };
         new AlertDialog.Builder(host)
-                .setTitle(label(attachment))
+                .setTitle(host.fileActions.label(attachment))
                 .setItems(
                         actions,
                         (dialog, which) -> {
                             if (which == 0) {
-                                view(message, attachment);
+                                host.fileActions.open(attachment, bytes);
+                            } else if (which == 1) {
+                                host.fileActions.share(attachment, bytes);
                             } else {
-                                pickFolder(message, attachment);
+                                host.fileActions.saveToFolder(attachment, bytes);
                             }
                         })
                 .show();
-    }
-
-    /**
-     * Opens one attachment in the app the phone picks for its type, through
-     * a copy in the cache ({@link OpenedFiles}).
-     */
-    private void view(MailStore.StoredMessage message, FileStore.Attachment attachment) {
-        host.io.execute(
-                () -> {
-                    Uri uri;
-                    try {
-                        uri =
-                                OpenedFiles.put(
-                                        host,
-                                        attachment.seq,
-                                        label(attachment),
-                                        bytesOf(message, attachment));
-                    } catch (Exception error) {
-                        Log.w("pimalaya", "attachment not read: " + attachment.linkId, error);
-                        host.postAlive(
-                                () -> host.toast(host.message(error, R.string.attachment_failed)));
-                        return;
-                    }
-                    host.postAlive(
-                            () -> {
-                                Intent intent =
-                                        new Intent(Intent.ACTION_VIEW)
-                                                .setDataAndType(
-                                                        uri,
-                                                        attachment.mediaType == null
-                                                                ? PimdirSummary.FILE
-                                                                : attachment.mediaType)
-                                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                try {
-                                    host.startActivity(intent);
-                                } catch (ActivityNotFoundException none) {
-                                    host.toast(host.getString(R.string.attachment_no_app));
-                                }
-                            });
-                });
     }
 
     /**
@@ -321,7 +316,7 @@ final class MessageView {
      * blob) would spare the rest of the message; the whole message is what
      * every backend reads today.
      */
-    private byte[] bytesOf(MailStore.StoredMessage message, FileStore.Attachment attachment) {
+    byte[] bytesOf(MailStore.StoredMessage message, FileStore.StoredFile attachment) {
         if (attachment.objectHash != null) {
             byte[] saved = host.files.saved(attachment);
             if (saved != null) {
@@ -342,88 +337,6 @@ final class MessageView {
             host.postAlive(host.mailList::reload);
         }
         return host.client.messagePart(source, attachment.part);
-    }
-
-    /** Asks which folder to save an attachment into, or to create one. */
-    private void pickFolder(MailStore.StoredMessage message, FileStore.Attachment attachment) {
-        host.io.execute(
-                () -> {
-                    List<PimdirCollections.Stored> folders = host.files.folders();
-                    host.postAlive(
-                            () -> {
-                                CharSequence[] labels = new CharSequence[folders.size() + 1];
-                                for (int index = 0; index < folders.size(); index++) {
-                                    labels[index] = folders.get(index).name;
-                                }
-                                labels[folders.size()] =
-                                        host.getString(R.string.attachment_new_folder);
-                                new AlertDialog.Builder(host)
-                                        .setTitle(R.string.attachment_save)
-                                        .setItems(
-                                                labels,
-                                                (dialog, which) -> {
-                                                    if (which < folders.size()) {
-                                                        PimdirCollections.Stored folder =
-                                                                folders.get(which);
-                                                        save(message, attachment, folder.id,
-                                                                folder.name);
-                                                    } else {
-                                                        newFolder(message, attachment);
-                                                    }
-                                                })
-                                        .setNegativeButton(android.R.string.cancel, null)
-                                        .show();
-                            });
-                });
-    }
-
-    /** Asks for a folder's name, creates it and saves the attachment there. */
-    private void newFolder(MailStore.StoredMessage message, FileStore.Attachment attachment) {
-        EditText name = new EditText(host);
-        name.setHint(R.string.attachment_folder_name);
-        name.setSingleLine(true);
-        FrameLayout frame = new FrameLayout(host);
-        frame.setPadding(host.dp(24), host.dp(8), host.dp(24), 0);
-        frame.addView(name);
-        new AlertDialog.Builder(host)
-                .setTitle(R.string.attachment_new_folder)
-                .setView(frame)
-                .setPositiveButton(
-                        R.string.attachment_create,
-                        (dialog, which) -> {
-                            String typed = name.getText().toString().trim();
-                            if (!typed.isEmpty()) {
-                                save(message, attachment, null, typed);
-                            }
-                        })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
-    }
-
-    /**
-     * Saves one attachment into a folder, creating it first when no id is
-     * given, and says where it went.
-     */
-    private void save(
-            MailStore.StoredMessage message,
-            FileStore.Attachment attachment,
-            String folder,
-            String name) {
-        host.io.execute(
-                () -> {
-                    try {
-                        byte[] bytes = bytesOf(message, attachment);
-                        String target = folder == null ? host.files.createFolder(name) : folder;
-                        host.files.save(target, attachment, bytes);
-                    } catch (Exception error) {
-                        Log.w("pimalaya", "attachment not saved: " + attachment.linkId, error);
-                        host.postAlive(
-                                () -> host.toast(host.message(error, R.string.attachment_failed)));
-                        return;
-                    }
-                    host.postAlive(
-                            () -> host.toast(host.getString(R.string.attachment_saved, name)));
-                });
     }
 
     /**
@@ -1011,7 +924,7 @@ final class MessageView {
      * alternative is a horizontal scroll, which hides the third
      * attachment of a message behind an edge nothing says is there.
      */
-    private void badges(List<FileStore.Attachment> attachments) {
+    private void badges(List<FileStore.StoredFile> attachments) {
         LinearLayout container = host.findViewById(R.id.message_view_attachments);
         container.removeAllViews();
         container.setVisibility(attachments.isEmpty() ? View.GONE : View.VISIBLE);
@@ -1023,7 +936,7 @@ final class MessageView {
         LinearLayout row = null;
         int used = 0;
         MailStore.StoredMessage message = current;
-        for (FileStore.Attachment attachment : attachments) {
+        for (FileStore.StoredFile attachment : attachments) {
             View badge = badge(attachment);
             badge.setOnClickListener(view -> choose(message, attachment));
             badge.measure(free, free);
@@ -1048,7 +961,7 @@ final class MessageView {
     }
 
     /** One attachment badge: a paperclip, the name, and how big it is. */
-    private View badge(FileStore.Attachment attachment) {
+    private View badge(FileStore.StoredFile attachment) {
         ImageView icon = new ImageView(host);
         icon.setImageResource(R.drawable.ic_attach_file);
         icon.setImageTintList(
@@ -1078,7 +991,7 @@ final class MessageView {
     }
 
     /** What a badge calls an attachment, size included. */
-    private String name(FileStore.Attachment attachment) {
+    private String name(FileStore.StoredFile attachment) {
         String name = label(attachment);
         return attachment.size == null || attachment.size <= 0
                 ? name
@@ -1086,7 +999,7 @@ final class MessageView {
     }
 
     /** An attachment's name, or what stands for none. */
-    private String label(FileStore.Attachment attachment) {
+    private String label(FileStore.StoredFile attachment) {
         return attachment.name.isEmpty()
                 ? host.getString(R.string.message_attachment_unnamed)
                 : attachment.name;

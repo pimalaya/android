@@ -72,7 +72,7 @@ public class MailWindowTest {
         // NOTE: read under the bound, never older than its floor, and raised
         // to it by a narrowing.
         MailScope.set(context, ACCOUNT, 1);
-        String floor = MailScope.since(1, LocalDate.now(ZoneOffset.UTC));
+        String floor = MailScope.since(1);
         assertEquals(floor, MailWindow.since(context, ACCOUNT));
         MailWindow.raise(context, ACCOUNT, floor);
         MailScope.set(context, ACCOUNT, 0);
@@ -89,10 +89,15 @@ public class MailWindowTest {
 
     @Test
     public void aDatePickedBelowTheBoundWidensItToTheNarrowestCoveringIt() {
-        assertEquals(1, MailScope.covering("2026-09-15T00:00:00Z", TODAY));
-        assertEquals(12, MailScope.covering("2026-03-03T00:00:00Z", TODAY));
-        assertEquals(0, MailScope.covering("2020-01-01T00:00:00Z", TODAY));
-        assertEquals("all my mail", 0, MailScope.covering(null, TODAY));
+        assertEquals(1, MailScope.covering("2026-09-15T00:00:00Z", TODAY, UTC));
+        assertEquals(12, MailScope.covering("2026-03-03T00:00:00Z", TODAY, UTC));
+        assertEquals(0, MailScope.covering("2020-01-01T00:00:00Z", TODAY, UTC));
+        assertEquals("all my mail", 0, MailScope.covering(null, TODAY, UTC));
+        // NOTE: the bound is midnight on the device's clock too, so a window
+        // on its first day in Paris needs no wider one.
+        String julyInParis = MailWindow.startOf(LocalDate.of(2026, 7, 1), PARIS);
+        assertEquals(julyInParis, MailScope.since(3, TODAY, PARIS));
+        assertEquals(3, MailScope.covering(julyInParis, TODAY, PARIS));
     }
 
     @Test

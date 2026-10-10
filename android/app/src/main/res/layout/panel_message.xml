@@ -146,6 +146,27 @@
             android:orientation="vertical"
             android:visibility="gone" />
 
+        <!-- What the message is linked to, opened in a dialog: the body
+             fills the rest of the page, so the Linked card cannot sit
+             under it. -->
+        <TextView
+            android:id="@+id/message_view_linked"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/badge_background"
+            android:drawableStart="@drawable/ic_link"
+            android:drawablePadding="6dp"
+            android:drawableTint="?android:attr/textColorSecondary"
+            android:gravity="center_vertical"
+            android:paddingStart="10dp"
+            android:paddingTop="6dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="6dp"
+            android:textColor="?android:attr/textColorPrimary"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
     </LinearLayout>
 
     <FrameLayout

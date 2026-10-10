@@ -157,6 +157,18 @@ final class ContactsList {
         return sortedContacts;
     }
 
+    /** The merged row holding a card of this key, filter or no filter; null for none. */
+    Group groupOf(String linkId) {
+        for (Group group : groupedContacts) {
+            for (Entry entry : group.replicas) {
+                if (entry.card.id.equals(linkId)) {
+                    return group;
+                }
+            }
+        }
+        return null;
+    }
+
     boolean isSelectionMode() {
         return selectionMode;
     }

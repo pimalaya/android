@@ -647,6 +647,7 @@ final class MailStore {
         } finally {
             db.endTransaction();
         }
+        items.unlinkCollected();
     }
 
     /** One message the version before this one left in an outbox of items. */
@@ -1051,32 +1052,79 @@ final class MailStore {
         Map<String, PimdirCollections.Stored> mailboxes = mailboxes();
         try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
-                PimdirCollections.Stored mailbox = mailboxes.get(cursor.getString(0));
-                if (mailbox == null) {
-                    continue;
+                StoredMessage message = row(cursor, mailboxes);
+                if (message != null) {
+                    messages.add(message);
                 }
-                boolean unsynced = storage.unsynced(cursor.getString(0), cursor.getString(2));
-                messages.add(
-                        new StoredMessage(
-                                mailbox.accountEmail,
-                                cursor.getString(0),
-                                mailbox.name,
-                                mailboxLabel(mailbox),
-                                cursor.getString(2),
-                                cursor.isNull(9) ? "" : cursor.getString(9),
-                                cursor.isNull(11) ? "" : cursor.getString(11),
-                                cursor.isNull(10) ? "" : cursor.getString(10),
-                                cursor.isNull(5) ? "" : cursor.getString(5),
-                                cursor.getLong(1),
-                                cursor.isNull(3) ? null : cursor.getString(3),
-                                cursor.isNull(14) ? null : cursor.getInt(14),
-                                cursor.isNull(13) ? null : cursor.getLong(13),
-                                !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL,
-                                unsynced,
-                                unsynced && refused(cursor.getString(0), cursor.getString(2))));
             }
         }
         return messages;
+    }
+
+    /**
+     * One stored message by its mailbox and key, as a list row carries it,
+     * null when the mailbox holds it no more: what a file's origin opens.
+     * Read as the one row of the mailbox's page keyed just past it, the
+     * cursor's collection a hair above the row's.
+     */
+    StoredMessage message(String collection, String linkId) {
+        Map<String, Object> key = new HashMap<>();
+        key.put("collection", collection);
+        key.put("link_id", linkId);
+        PimdirSql.Bound seqOf = PimdirSql.bind("SEQ_BY_LINK", key);
+        Long seq = null;
+        try (Cursor cursor = typed(items.readable(), seqOf.sql, seqOf.args)) {
+            if (cursor.moveToFirst()) {
+                seq = cursor.getLong(0);
+            }
+        }
+        if (seq == null) {
+            return null;
+        }
+        key.put("seq", seq);
+        PimdirSql.Bound item = PimdirSql.bind("GET_MAIL", key);
+        String sortKey;
+        try (Cursor cursor = typed(items.readable(), item.sql, item.args)) {
+            if (!cursor.moveToFirst()) {
+                return null;
+            }
+            sortKey = cursor.isNull(4) ? "" : cursor.getString(4);
+        }
+        Map<String, Object> values =
+                new Query(List.of(collection), null, null, null, List.of()).values(null, 1);
+        values.put("after_key", sortKey);
+        values.put("after_seq", seq);
+        values.put("after_collection", collection + "\u0000");
+        PimdirSql.Bound bound = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
+        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+            return cursor.moveToFirst() ? row(cursor, mailboxes()) : null;
+        }
+    }
+
+    /** One row of a mail page as a list shows it, null when its mailbox is unknown. */
+    private StoredMessage row(Cursor cursor, Map<String, PimdirCollections.Stored> mailboxes) {
+        PimdirCollections.Stored mailbox = mailboxes.get(cursor.getString(0));
+        if (mailbox == null) {
+            return null;
+        }
+        boolean unsynced = storage.unsynced(cursor.getString(0), cursor.getString(2));
+        return new StoredMessage(
+                mailbox.accountEmail,
+                cursor.getString(0),
+                mailbox.name,
+                mailboxLabel(mailbox),
+                cursor.getString(2),
+                cursor.isNull(9) ? "" : cursor.getString(9),
+                cursor.isNull(11) ? "" : cursor.getString(11),
+                cursor.isNull(10) ? "" : cursor.getString(10),
+                cursor.isNull(5) ? "" : cursor.getString(5),
+                cursor.getLong(1),
+                cursor.isNull(3) ? null : cursor.getString(3),
+                cursor.isNull(14) ? null : cursor.getInt(14),
+                cursor.isNull(13) ? null : cursor.getLong(13),
+                !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL,
+                unsynced,
+                unsynced && refused(cursor.getString(0), cursor.getString(2)));
     }
 
     /**
@@ -1546,7 +1594,7 @@ final class MailStore {
         if (!narrower) {
             return 0;
         }
-        String floor = MailScope.since(months, java.time.LocalDate.now(java.time.ZoneOffset.UTC));
+        String floor = MailScope.since(months);
         MailWindow.raise(context, account, floor);
         return collectBefore(accountEmail, floor);
     }
@@ -1588,6 +1636,7 @@ final class MailStore {
         } finally {
             db.endTransaction();
         }
+        items.unlinkCollected();
         return collected;
     }
 
@@ -1633,6 +1682,7 @@ final class MailStore {
         } finally {
             db.endTransaction();
         }
+        items.unlinkCollected();
         return released;
     }
 

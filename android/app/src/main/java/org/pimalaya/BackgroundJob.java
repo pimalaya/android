@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -133,32 +134,22 @@ public class BackgroundJob extends JobService {
             }
         }
         Map<String, Map<String, MailStore.StoredMessage>> before = new LinkedHashMap<>();
+        Map<String, String> floors = new HashMap<>();
         for (String email : notified) {
             before.put(email, unreadInbox(mail, collections, email));
+            for (String inbox : inboxes(collections, email)) {
+                floors.put(inbox, mail.coverage(inbox).since);
+            }
         }
         RemotePass.MailPass pass = remote.mailPass(mailScope);
         if (pass.failure != null) {
             Log.w("pimalaya", "background mail sync failed", pass.failure);
         }
-        String runAt =
-                java.time.Instant.now()
-                        .truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
-                        .toString();
         for (String email : notified) {
-            Map<String, MailStore.StoredMessage> held = before.get(email);
-            // NOTE: none notified yet (just turned on, or upgraded): seeded
-            // from the unread mail already there, so none of it bursts out.
-            String upTo = BackgroundCheck.notifiedUpTo(context, email);
-            if (upTo == null && !held.isEmpty()) {
-                upTo = held.values().iterator().next().sortKey;
-            }
-            List<MailStore.StoredMessage> arrived =
-                    arrived(held, unreadInbox(mail, collections, email), upTo);
-            notify(context, email, arrived);
-            String mark = watermark(upTo, arrived, runAt);
-            if (mark != null) {
-                BackgroundCheck.setNotifiedUpTo(context, email, mark);
-            }
+            notify(
+                    context,
+                    email,
+                    arrived(before.get(email), unreadInbox(mail, collections, email), floors));
         }
         if (stopped) {
             return;
@@ -193,37 +184,37 @@ public class BackgroundJob extends JobService {
 
     /**
      * What a run notifies, newest first: the unread inbox messages present
-     * after its pass ({@code now}) and not before it, dated after the newest
-     * one already notified ({@code upTo}, null for none), so headers a fill
-     * listed between two runs never notify.
+     * after its pass ({@code now}) and not before it, dated on or after
+     * their inbox's floor as it stood before the pass ({@code floors} by
+     * collection, null for none). A band of older mail an interrupted fill
+     * left for the pass to finish lies below that floor and never notifies;
+     * new mail, delayed or not, lies above it.
      */
     static List<MailStore.StoredMessage> arrived(
             Map<String, MailStore.StoredMessage> before,
             Map<String, MailStore.StoredMessage> now,
-            String upTo) {
+            Map<String, String> floors) {
         List<MailStore.StoredMessage> arrived = new ArrayList<>();
         for (Map.Entry<String, MailStore.StoredMessage> entry : now.entrySet()) {
             MailStore.StoredMessage message = entry.getValue();
+            String floor = floors.get(message.collection);
             if (!before.containsKey(entry.getKey())
-                    && (upTo == null || message.sortKey.compareTo(upTo) > 0)) {
+                    && (floor == null || message.sortKey.compareTo(floor) >= 0)) {
                 arrived.add(message);
             }
         }
         return arrived;
     }
 
-    /**
-     * What is kept as the newest notified, null for nothing yet: the later
-     * of {@code upTo} and the newest of {@code arrived}, never past
-     * {@code runAt}, so a message dated in the future (a spam dated 2099)
-     * cannot silence every later one.
-     */
-    static String watermark(String upTo, List<MailStore.StoredMessage> arrived, String runAt) {
-        String mark = upTo;
-        if (!arrived.isEmpty() && (mark == null || arrived.get(0).sortKey.compareTo(mark) > 0)) {
-            mark = arrived.get(0).sortKey;
+    /** An account's inboxes, by collection id. */
+    private static List<String> inboxes(PimdirCollections collections, String email) {
+        List<String> inbox = new ArrayList<>();
+        for (PimdirCollections.Stored mailbox : collections.list(PimdirSummary.MAIL)) {
+            if (email.equals(mailbox.accountEmail) && "inbox".equals(mailbox.role)) {
+                inbox.add(mailbox.id);
+            }
         }
-        return mark == null || mark.compareTo(runAt) <= 0 ? mark : runAt;
+        return inbox;
     }
 
     /**
@@ -232,12 +223,7 @@ public class BackgroundJob extends JobService {
      */
     private static Map<String, MailStore.StoredMessage> unreadInbox(
             MailStore mail, PimdirCollections collections, String email) {
-        List<String> inbox = new ArrayList<>();
-        for (PimdirCollections.Stored mailbox : collections.list(PimdirSummary.MAIL)) {
-            if (email.equals(mailbox.accountEmail) && "inbox".equals(mailbox.role)) {
-                inbox.add(mailbox.id);
-            }
-        }
+        List<String> inbox = inboxes(collections, email);
         Map<String, MailStore.StoredMessage> unread = new LinkedHashMap<>();
         if (inbox.isEmpty()) {
             return unread;
