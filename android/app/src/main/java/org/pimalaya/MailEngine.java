@@ -524,8 +524,8 @@ class MailEngine extends PimdirEngine {
     /** The rows {@link #download} asked for, by handle, while its upgrade runs. */
     private final Map<String, MailBodies.Row> downloading = new HashMap<>();
 
-    /** The attachment mark each fetched body gives, by link id, applied once it lands. */
-    private final Map<String, Boolean> marks = new HashMap<>();
+    /** The summary each fetched body gives, by link id, restated once it lands. */
+    private final Map<String, JSONObject> summaries = new HashMap<>();
 
     /** The attachments each fetched body carries, by link id, recorded once it lands. */
     private final Map<String, List<MessageBody.Attachment>> attachments = new HashMap<>();
@@ -538,14 +538,14 @@ class MailEngine extends PimdirEngine {
      * pending (a move's target, a sent copy) is left: it has no handle the
      * server knows.
      *
-     * <p>The summary and sort key stay those the listing gave; only the
-     * attachment mark is restated, off the parts the body carries, and
-     * the parts recorded as files ({@link FileStore#recordAttachments}),
+     * <p>The sort key stays the listing's; the summary is restated from
+     * the body (its attachment mark, size and invitation,
+     * {@link MailStore#restateFromBody}), and the parts recorded as files ({@link FileStore#recordAttachments}),
      * as opening it does.
      */
     void download(String collection, List<MailBodies.Row> rows) {
         downloading.clear();
-        marks.clear();
+        summaries.clear();
         attachments.clear();
         List<String> handles = new ArrayList<>(rows.size());
         // NOTE: read now rather than trusted from the plan: a window moved
@@ -574,16 +574,21 @@ class MailEngine extends PimdirEngine {
                 "mail bodies " + collection + " (" + handles.size() + "): "
                         + client.offlineUpgrade(this, collection, handles));
         synchronized (STORE) {
-            for (Map.Entry<String, Boolean> mark : marks.entrySet()) {
-                mail().markAttachment(collection, mark.getKey(), mark.getValue());
+            for (Map.Entry<String, JSONObject> summary : summaries.entrySet()) {
+                mail().restateFromBody(collection, summary.getKey(), summary.getValue());
             }
             FileStore files = new FileStore(pimdir.context(), pimdir);
             for (Map.Entry<String, List<MessageBody.Attachment>> parts : attachments.entrySet()) {
-                files.recordAttachments(accountId, parts.getKey(), parts.getValue());
+                // NOTE: one message failing leaves the others to record.
+                try {
+                    files.recordAttachments(accountId, parts.getKey(), parts.getValue());
+                } catch (RuntimeException failure) {
+                    Log.w("pimalaya", "attachments not recorded: " + parts.getKey(), failure);
+                }
             }
         }
         downloading.clear();
-        marks.clear();
+        summaries.clear();
         attachments.clear();
     }
 
@@ -628,11 +633,10 @@ class MailEngine extends PimdirEngine {
             item.put("bodyBase64", java.util.Base64.getEncoder().encodeToString(source));
             items.put(item);
 
-            JSONObject derived = PimdirSql.derive(PimdirSummary.MAIL, source);
-            JSONObject summary = derived.optJSONObject("summary");
-            JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
-            if (mail != null && mail.has("attachment")) {
-                marks.put(row.linkId, mail.getBoolean("attachment"));
+            JSONObject summary =
+                    PimdirSql.derive(PimdirSummary.MAIL, source).optJSONObject("summary");
+            if (summary != null) {
+                summaries.put(row.linkId, summary);
             }
             try {
                 attachments.put(row.linkId, client.parseMessage(source).attachments);

@@ -10,6 +10,7 @@ import io.requery.android.database.sqlite.SQLiteDatabase;
 import io.requery.android.database.sqlite.SQLiteQuery;
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimdirSql;
 
@@ -977,16 +978,19 @@ final class MailStore {
 
     /**
      * What the query's messages dated in {@code [since, until)} weigh, under
-     * its chips, either bound null for open ({@code sum_mail}): what a
-     * window moved back to {@code since} takes in.
+     * its chips, either bound null for open ({@code sum_mail}), each message
+     * once: with {@code held} 0 those the phone holds no body of, what a
+     * window moved back to {@code since} downloads; 1 those it holds, what a
+     * window moved later to {@code until} frees; null either.
      */
-    Sum sum(Query query, String since, String until) {
+    Sum sum(Query query, String since, String until, Integer held) {
         if (query.size == 0) {
             return new Sum(0, 0, 0);
         }
         Map<String, Object> values = query.values(null, -1);
         values.put("since", since);
         values.put("until", until);
+        values.put("held", held);
         PimdirSql.Bound bound = PimdirSql.bind("SUM_MAIL", values);
         try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
             return cursor.moveToFirst()
@@ -1062,40 +1066,15 @@ final class MailStore {
     }
 
     /**
-     * One stored message by its mailbox and key, as a list row carries it,
-     * null when the mailbox holds it no more: what a file's origin opens.
-     * Read as the one row of the mailbox's page keyed just past it, the
-     * cursor's collection a hair above the row's.
+     * One stored message by its mailbox and key, as a list row carries it
+     * ({@code get_mail_row}), null when the mailbox holds it no more: what a
+     * file's origin and a link open.
      */
     StoredMessage message(String collection, String linkId) {
         Map<String, Object> key = new HashMap<>();
         key.put("collection", collection);
         key.put("link_id", linkId);
-        PimdirSql.Bound seqOf = PimdirSql.bind("SEQ_BY_LINK", key);
-        Long seq = null;
-        try (Cursor cursor = typed(items.readable(), seqOf.sql, seqOf.args)) {
-            if (cursor.moveToFirst()) {
-                seq = cursor.getLong(0);
-            }
-        }
-        if (seq == null) {
-            return null;
-        }
-        key.put("seq", seq);
-        PimdirSql.Bound item = PimdirSql.bind("GET_MAIL", key);
-        String sortKey;
-        try (Cursor cursor = typed(items.readable(), item.sql, item.args)) {
-            if (!cursor.moveToFirst()) {
-                return null;
-            }
-            sortKey = cursor.isNull(4) ? "" : cursor.getString(4);
-        }
-        Map<String, Object> values =
-                new Query(List.of(collection), null, null, null, List.of()).values(null, 1);
-        values.put("after_key", sortKey);
-        values.put("after_seq", seq);
-        values.put("after_collection", collection + "\u0000");
-        PimdirSql.Bound bound = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
+        PimdirSql.Bound bound = PimdirSql.bind("GET_MAIL_ROW", key);
         try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
             return cursor.moveToFirst() ? row(cursor, mailboxes()) : null;
         }
@@ -1297,16 +1276,26 @@ final class MailStore {
     }
 
     /**
-     * Corrects one message's attachment mark from the walk of its parts,
-     * once its body is in (pimdir STORAGE Annex A.1): the listing read it
-     * off the top-level {@code Content-Type} alone.
+     * Restates one message's summary from its body once the body is in
+     * (pimdir STORAGE Annex A.1): the attachment mark and the size the
+     * listing read without it are replaced by the body's own, and the
+     * invitation it names is recorded, then tied to its calendar item
+     * ({@code link_invitations_of}). {@code summary} is what
+     * {@code PimdirSql.derive} gives of the body; null changes nothing.
      */
-    void markAttachment(String collection, String linkId, boolean attachment) {
-        items.writable()
-                .execSQL(
-                        "UPDATE mail_summary SET attachment = ? WHERE collection = ?"
-                                + " AND link_id = ? AND attachment IS NOT ?",
-                        new Object[] {attachment ? 1 : 0, collection, linkId, attachment ? 1 : 0});
+    void restateFromBody(String collection, String linkId, JSONObject summary) {
+        if (summary == null) {
+            return;
+        }
+        SQLiteDatabase db = items.writable();
+        db.beginTransaction();
+        try {
+            PimdirSummary.write(db, collection, linkId, summary);
+            PimdirSummary.link(db, "LINK_INVITATIONS_OF", linkId);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
     }
 
     /** What a mailbox's last complete listing covered (pimdir STORAGE section 4.3). */
@@ -1728,6 +1717,15 @@ final class MailStore {
             return queue.body(message.objectHash);
         }
         return items.objectBytes(message.collection, message.id);
+    }
+
+    /**
+     * The file one message's body is stored in, null when the store holds
+     * none: what an attachment is read out of, the body never loaded whole on
+     * this side.
+     */
+    java.io.File sourceFile(StoredMessage message) {
+        return message.pending ? null : items.objectFile(message.collection, message.id);
     }
 
     /** Files the message a reader just fetched, against its envelope. */

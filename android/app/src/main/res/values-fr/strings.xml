@@ -101,6 +101,10 @@
     <string name="mail_window_release_failed">Impossible de libérer les anciens messages</string>
     <string name="mail_scope_failed">Impossible de changer la période de synchronisation</string>
     <string name="mail_window_frees">Les messages d\'avant ce jour quittent le téléphone, leurs en-têtes restent pour la recherche</string>
+    <plurals name="mail_window_frees_some">
+        <item quantity="one">%1$s message (%2$s) quitte le téléphone, son en-tête reste pour la recherche</item>
+        <item quantity="other">%1$s messages (%2$s) quittent le téléphone, leurs en-têtes restent pour la recherche</item>
+    </plurals>
     <string name="mail_row_not_downloaded">Non téléchargé</string>
     <string name="mail_row_wifi">Se télécharge en Wi-Fi</string>
     <string name="mail_chip_unread">Non lus</string>
@@ -191,6 +195,7 @@
     <string name="files_delete_folder">Supprimer le dossier</string>
     <string name="files_delete_folder_confirm">Supprimer %1$s et tous ses fichiers ?</string>
     <string name="files_folder_exists">Un dossier porte déjà ce nom</string>
+    <string name="files_already_saved">Déjà dans %1$s</string>
     <string name="files_no_message">Le message d\'où vient ce fichier n\'existe plus</string>
     <string name="linked_title">Liés</string>
     <plurals name="linked_count">

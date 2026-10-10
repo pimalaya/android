@@ -453,7 +453,7 @@ final class MailList {
             return null;
         }
         MailStore.Sum sum =
-                date == null ? null : store.sum(store.downloading(wanted), date, floor);
+                date == null ? null : store.sum(store.downloading(wanted), date, floor, 0);
         return new Footer(date, sum, floor, listing, accounts);
     }
 
@@ -530,7 +530,7 @@ final class MailList {
     private static boolean matches(MailStore.StoredMessage message, String words) {
         return words.isEmpty()
                 || (message.subject + " " + message.fromName + " " + message.fromAddress)
-                        .toLowerCase()
+                        .toLowerCase(java.util.Locale.ROOT)
                         .contains(words);
     }
 

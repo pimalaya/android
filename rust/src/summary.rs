@@ -53,6 +53,7 @@ impl From<&PimdirSummary> for SummaryJson {
                 date: mail.date.clone(),
                 size: mail.size,
                 attachment: mail.attachment,
+                invitation: mail.invitation.clone(),
                 addresses,
             }),
             PimdirSummary::Contact(contact) => Self::Contact(ContactJson {
@@ -112,6 +113,7 @@ impl From<SummaryJson> for PimdirSummary {
                 date: mail.date,
                 size: mail.size,
                 attachment: mail.attachment,
+                invitation: mail.invitation,
                 from: role_of(&mail.addresses, PimdirAddressRole::From),
                 to: role_of(&mail.addresses, PimdirAddressRole::To),
                 cc: role_of(&mail.addresses, PimdirAddressRole::Cc),
@@ -184,6 +186,8 @@ pub struct MailJson {
     size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     attachment: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invitation: Option<String>,
     #[serde(default)]
     addresses: Vec<AddressJson>,
 }

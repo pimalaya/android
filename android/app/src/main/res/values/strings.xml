@@ -271,6 +271,10 @@
     <string name="mail_window_release_failed">Could not free the older messages</string>
     <string name="mail_scope_failed">Could not change the sync period</string>
     <string name="mail_window_frees">Messages before this day leave the phone, their headers kept for search</string>
+    <plurals name="mail_window_frees_some">
+        <item quantity="one">%1$s message (%2$s) leaves the phone, its header kept for search</item>
+        <item quantity="other">%1$s messages (%2$s) leave the phone, their headers kept for search</item>
+    </plurals>
     <string name="mail_row_not_downloaded">Not downloaded</string>
     <string name="mail_row_wifi">Downloads on Wi-Fi</string>
     <string name="mail_chip_unread">Unread</string>
@@ -411,6 +415,7 @@
     <string name="files_delete_folder">Delete folder</string>
     <string name="files_delete_folder_confirm">Delete %1$s and every file in it?</string>
     <string name="files_folder_exists">A folder already goes by that name</string>
+    <string name="files_already_saved">Already in %1$s</string>
     <string name="files_no_message">The message this file came from is gone</string>
 
     <!-- An item's links, on every item page. -->

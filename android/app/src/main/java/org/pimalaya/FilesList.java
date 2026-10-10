@@ -13,7 +13,6 @@ import android.widget.BaseAdapter;
 import android.widget.ListView;
 import android.widget.TextView;
 
-import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -25,9 +24,8 @@ import java.util.Map;
  * The Files screen: one card per file collection the filter shows, the
  * device's folders first, then each mail account's attachments.
  *
- * <p>Read off the store on the io executor: an attachment names the sender of
- * its message, which takes a lookup per file until pimdir reads attachments
- * across an account in one statement.
+ * <p>Read off the store on the io executor: an account's attachments in one
+ * statement with their messages, newest first, a folder's files A to Z.
  */
 final class FilesList {
     /** The kind chips: folders, attachments. */
@@ -95,7 +93,7 @@ final class FilesList {
         }
 
         boolean attachment() {
-            return FileStore.isAttachments(collection.id);
+            return FileStore.isAttachments(collection);
         }
     }
 
@@ -189,10 +187,16 @@ final class FilesList {
     /** One collection's rows, an empty folder standing as its placeholder. */
     private List<Row> rowsOf(PimdirCollections.Stored collection, String section) {
         List<Row> rows = new ArrayList<>();
+        if (FileStore.isAttachments(collection)) {
+            for (FileStore.Attached attached : host.files.attachmentsIn(collection.id)) {
+                rows.add(new Row(collection, section, attached.file, attached.origin));
+            }
+            return rows;
+        }
         for (FileStore.StoredFile file : host.files.files(collection.id)) {
             rows.add(new Row(collection, section, file, host.files.origin(file.linkId)));
         }
-        if (rows.isEmpty() && !FileStore.isAttachments(collection.id)) {
+        if (rows.isEmpty()) {
             rows.add(new Row(collection, section, null, null));
         }
         return rows;
@@ -260,36 +264,30 @@ final class FilesList {
                         || row.origin.senderName.toLowerCase(Locale.ROOT).contains(query));
     }
 
-    /** Creates a folder under a name the user gives. */
+    /**
+     * Creates a folder under a name the user gives, unless a folder already
+     * goes by it: one card per name, so two folders of one name would read as
+     * one.
+     */
     void newFolder() {
         host.fileActions.askName(
                 R.string.attachment_new_folder,
                 R.string.attachment_create,
                 "",
-                name -> {
-                    if (taken(name)) {
-                        return;
-                    }
-                    host.io.execute(
-                            () -> {
-                                host.files.createFolder(name);
-                                host.postAlive(this::reload);
-                            });
-                });
-    }
-
-    /**
-     * Whether a folder already goes by a name, said in a toast: one card
-     * per name, so two folders of one name would read as one.
-     */
-    private boolean taken(String name) {
-        for (PimdirCollections.Stored folder : host.files.folders()) {
-            if (folder.name.equals(name)) {
-                host.toast(host.getString(R.string.files_folder_exists));
-                return true;
-            }
-        }
-        return false;
+                name ->
+                        host.io.execute(
+                                () -> {
+                                    String created = host.files.createFolder(name);
+                                    host.postAlive(
+                                            () -> {
+                                                if (created == null) {
+                                                    host.toast(
+                                                            host.getString(
+                                                                    R.string.files_folder_exists));
+                                                }
+                                                reload();
+                                            });
+                                }));
     }
 
     /**
@@ -340,7 +338,7 @@ final class FilesList {
     /** What a file offers: open, share, save, export, its message, its links, delete. */
     private void fileMenu(Row row) {
         FileStore.StoredFile file = row.file;
-        FileActions.Bytes bytes = () -> bytesOf(row);
+        FileActions.Source bytes = () -> fileOf(row);
         List<CharSequence> labels = new ArrayList<>();
         List<Runnable> actions = new ArrayList<>();
         labels.add(host.getString(R.string.attachment_open));
@@ -371,11 +369,12 @@ final class FilesList {
     }
 
     /**
-     * A file's bytes: its own body, or for a stand-in the part its message
-     * holds, the message fetched when the phone does not hold it.
+     * The file a row is read from: its own body's blob, or for a stand-in
+     * the part its message holds written out, the message fetched when the
+     * phone does not hold it.
      */
-    private byte[] bytesOf(Row row) {
-        byte[] saved = host.files.saved(row.file);
+    private java.io.File fileOf(Row row) {
+        java.io.File saved = host.files.saved(row.file);
         if (saved != null) {
             return saved;
         }
@@ -386,7 +385,7 @@ final class FilesList {
         if (message == null || row.file.part == null) {
             throw new IllegalStateException(host.getString(R.string.files_no_message));
         }
-        return host.messageView.bytesOf(message, row.file);
+        return host.messageView.fileOf(message, row.file);
     }
 
     /** Opens the message a file came from in the reader. */
@@ -452,13 +451,21 @@ final class FilesList {
                 R.string.files_rename,
                 folder.name,
                 name -> {
-                    if (name.equals(folder.name) || taken(name)) {
+                    if (name.equals(folder.name)) {
                         return;
                     }
                     host.io.execute(
                             () -> {
-                                host.files.renameFolder(folder.id, name);
-                                host.postAlive(this::reload);
+                                boolean renamed = host.files.renameFolder(folder.id, name);
+                                host.postAlive(
+                                        () -> {
+                                            if (!renamed) {
+                                                host.toast(
+                                                        host.getString(
+                                                                R.string.files_folder_exists));
+                                            }
+                                            reload();
+                                        });
                             });
                 });
     }
@@ -478,6 +485,28 @@ final class FilesList {
                 .show();
     }
 
+    /** The key the folder an import waits on survives a recreation under. */
+    private static final String IMPORT_FOLDER = "files.import.folder";
+
+    private static final String IMPORT_NAME = "files.import.name";
+
+    /** Keeps a waiting import across the activity's recreation. */
+    void save(android.os.Bundle state) {
+        if (importing != null) {
+            state.putString(IMPORT_FOLDER, importing.id);
+            state.putString(IMPORT_NAME, importing.name);
+        }
+    }
+
+    void restore(android.os.Bundle state) {
+        String id = state.getString(IMPORT_FOLDER);
+        if (id != null) {
+            importing =
+                    new PimdirCollections.Stored(
+                            id, LocalBook.ACCOUNT, state.getString(IMPORT_NAME), null, null);
+        }
+    }
+
     /** Asks for a document to import into a folder ({@link #imported}). */
     private void startImport(PimdirCollections.Stored folder) {
         importing = folder;
@@ -488,7 +517,10 @@ final class FilesList {
                 MainActivity.REQUEST_FILE_IMPORT);
     }
 
-    /** Imports the document picked into the folder that asked for it. */
+    /**
+     * Imports the document picked into the folder that asked for it, copied
+     * into the cache a buffer at a time, then hashed and filed from there.
+     */
     void imported(Uri source) {
         PimdirCollections.Stored folder = importing;
         importing = null;
@@ -497,17 +529,30 @@ final class FilesList {
         }
         host.io.execute(
                 () -> {
+                    java.io.File staged = null;
                     try {
+                        staged = java.io.File.createTempFile("import", null, host.getCacheDir());
+                        try (InputStream in = host.getContentResolver().openInputStream(source);
+                                java.io.OutputStream out = new java.io.FileOutputStream(staged)) {
+                            if (in == null) {
+                                throw new java.io.IOException("Unreadable " + source);
+                            }
+                            OpenedFiles.copy(in, out);
+                        }
                         host.files.importFile(
                                 folder.id,
                                 displayName(source),
                                 host.getContentResolver().getType(source),
-                                read(source));
+                                staged);
                     } catch (Exception error) {
                         Log.w("pimalaya", "file not imported: " + source, error);
                         host.postAlive(
                                 () -> host.toast(host.message(error, R.string.attachment_failed)));
                         return;
+                    } finally {
+                        if (staged != null) {
+                            staged.delete();
+                        }
                     }
                     host.postAlive(
                             () -> {
@@ -529,20 +574,6 @@ final class FilesList {
         }
         String last = source.getLastPathSegment();
         return last == null ? "" : last;
-    }
-
-    private byte[] read(Uri source) throws java.io.IOException {
-        try (InputStream in = host.getContentResolver().openInputStream(source)) {
-            if (in == null) {
-                throw new java.io.IOException("Unreadable " + source);
-            }
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buffer = new byte[64 * 1024];
-            for (int read = in.read(buffer); read >= 0; read = in.read(buffer)) {
-                out.write(buffer, 0, read);
-            }
-            return out.toByteArray();
-        }
     }
 
     /** A byte count in the largest unit that keeps it under a thousand. */

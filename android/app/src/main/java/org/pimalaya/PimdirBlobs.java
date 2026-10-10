@@ -81,6 +81,35 @@ final class PimdirBlobs {
         }
     }
 
+    /**
+     * Files a file's bytes under their hash, copied a buffer at a time, on
+     * {@link #put(String, byte[])}'s terms; the source stays where it is.
+     */
+    void put(String hash, File source) throws IOException {
+        File target = pathOf(hash);
+        if (target.isFile()) {
+            return;
+        }
+        File shard = target.getParentFile();
+        if (shard != null && !shard.isDirectory() && !shard.mkdirs()) {
+            throw new IOException("Could not create the blob shard " + shard);
+        }
+        File temp = new File(shard, "." + hash + ".tmp");
+        try (java.io.InputStream in = new java.io.FileInputStream(source);
+                FileOutputStream out = new FileOutputStream(temp)) {
+            byte[] buffer = new byte[64 * 1024];
+            for (int read = in.read(buffer); read >= 0; read = in.read(buffer)) {
+                out.write(buffer, 0, read);
+            }
+            out.flush();
+            out.getFD().sync();
+        }
+        if (!temp.renameTo(target)) {
+            temp.delete();
+            throw new IOException("Could not commit the blob " + hash);
+        }
+    }
+
     /** Files text, the shape every current kind stores. */
     void putText(String hash, String body) throws IOException {
         put(hash, body.getBytes(StandardCharsets.UTF_8));

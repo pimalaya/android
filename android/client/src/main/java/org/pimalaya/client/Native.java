@@ -325,12 +325,12 @@ final class Native {
     static native String parseMessage(byte[] source);
 
     /**
-     * The decoded bytes of one part of a message, by its IMAP section.
-     * Returns a JSON object of {@code {bytes}}, base64, or an error when
-     * the message holds no such part. No transport, as {@link
-     * #parseMessage}.
+     * Writes the decoded bytes of one part of the message stored at
+     * {@code source}, by its IMAP section, to the file {@code target}.
+     * Returns a JSON object of {@code {size}}, or an error when the message
+     * holds no such part. No transport, as {@link #parseMessage}.
      */
-    static native String messagePart(byte[] source, String part);
+    static native String messagePart(String source, String part, String target);
 
     /**
      * Adds or removes one marker on one message, named the IMAP way

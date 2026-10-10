@@ -2189,6 +2189,7 @@ fn email_summary(email: &JmapEmail) -> PimdirMailSummary {
         date: email.sent_at.as_deref().and_then(utc),
         size: email.size,
         attachment: email.has_attachment,
+        invitation: None,
         from,
         to: list(&email.to),
         cc: list(&email.cc),

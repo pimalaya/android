@@ -355,6 +355,14 @@ public class MainActivity extends Activity {
         contactsList.setUp();
         calendarList.setUp();
         filesList.setUp();
+        if (savedInstanceState != null) {
+            fileActions.restore(savedInstanceState);
+            filesList.restore(savedInstanceState);
+        } else {
+            // NOTE: the copies handed to other apps are read while they show
+            // them; a fresh start is when none is shown any more.
+            io.execute(() -> OpenedFiles.clear(this));
+        }
         mailList.setUp();
         setUpContactPanel();
         setUpHomePanel();
@@ -659,6 +667,13 @@ public class MainActivity extends Activity {
         fab.setContentDescription(getString(R.string.contact_diverged_pending));
         fab.setEnabled(false);
         fab.setAlpha(1f);
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        fileActions.save(state);
+        filesList.save(state);
     }
 
     @Override
@@ -2683,25 +2698,38 @@ public class MainActivity extends Activity {
 
     /**
      * Opens one calendar resource on its page, as its series rather than an
-     * occurrence; false when the store holds it no more.
+     * occurrence, read off the store on the io executor; {@code gone} runs
+     * when the store holds it no more.
      */
-    boolean openEvent(String collection, String linkId) {
-        EventStore.StoredCalendar calendar = null;
-        for (EventStore.StoredCalendar held : events.loadCalendars()) {
-            if (held.id.equals(collection)) {
-                calendar = held;
-            }
-        }
-        if (calendar == null) {
-            return false;
-        }
-        for (EventStore.StoredEvent event : events.loadEvents()) {
-            if (event.collectionId.equals(collection) && event.id.equals(linkId)) {
-                eventView.open(null, event, calendar);
-                return true;
-            }
-        }
-        return false;
+    void openEvent(String collection, String linkId, Runnable gone) {
+        io.execute(
+                () -> {
+                    EventStore.StoredCalendar calendar = null;
+                    for (EventStore.StoredCalendar held : events.loadCalendars()) {
+                        if (held.id.equals(collection)) {
+                            calendar = held;
+                        }
+                    }
+                    EventStore.StoredEvent found = null;
+                    if (calendar != null) {
+                        for (EventStore.StoredEvent event : events.loadEvents()) {
+                            if (event.collectionId.equals(collection)
+                                    && event.id.equals(linkId)) {
+                                found = event;
+                            }
+                        }
+                    }
+                    EventStore.StoredCalendar in = calendar;
+                    EventStore.StoredEvent event = found;
+                    postAlive(
+                            () -> {
+                                if (event == null) {
+                                    gone.run();
+                                } else {
+                                    eventView.open(null, event, in);
+                                }
+                            });
+                });
     }
 
     void openGroup(Group group) {

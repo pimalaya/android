@@ -2,6 +2,7 @@ package org.pimalaya;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -17,7 +18,10 @@ import org.pimalaya.client.PimalayaClient;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
+import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.List;
 
 /**
@@ -60,7 +64,7 @@ public class FileStoreTest {
     private String inbox;
 
     @Before
-    public void setUp() {
+    public void setUp() throws Exception {
         Context context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
         items = new PimdirItems(pimdir);
@@ -96,6 +100,28 @@ public class FileStoreTest {
         return source;
     }
 
+    /** Bytes written to a file of their own, as a file travels in the app. */
+    private File file(byte[] bytes) throws IOException {
+        File file =
+                File.createTempFile(
+                        "bytes", null, RuntimeEnvironment.getApplication().getCacheDir());
+        Files.write(file.toPath(), bytes);
+        return file;
+    }
+
+    private static byte[] bytes(File file) throws IOException {
+        return Files.readAllBytes(file.toPath());
+    }
+
+    /** One part of a message, written out by the bridge as the reader has it. */
+    private byte[] part(byte[] source, String section) throws IOException {
+        File out =
+                File.createTempFile(
+                        "part", null, RuntimeEnvironment.getApplication().getCacheDir());
+        client.messagePart(file(source), section, out);
+        return bytes(out);
+    }
+
     private long scalar(String sql, String... args) {
         try (Cursor cursor = pimdir.getReadableDatabase().rawQuery(sql, args)) {
             return cursor.moveToFirst() ? cursor.getLong(0) : -1;
@@ -103,7 +129,7 @@ public class FileStoreTest {
     }
 
     @Test
-    public void aStoredMessageListsItsPartsAsStandInsInDocumentOrder() {
+    public void aStoredMessageListsItsPartsAsStandInsInDocumentOrder() throws Exception {
         byte[] source = stored("m1");
 
         List<FileStore.StoredFile> attachments = files.attachments(accountId, "m1");
@@ -117,7 +143,7 @@ public class FileStoreTest {
         assertNull("a part stating no type has none", attachments.get(1).mediaType);
         assertArrayEquals(
                 "%PDF".getBytes(StandardCharsets.UTF_8),
-                client.messagePart(source, invoice.part));
+                part(source, invoice.part));
 
         assertEquals(
                 "a stand-in holds no body",
@@ -131,7 +157,7 @@ public class FileStoreTest {
     }
 
     @Test
-    public void storingABodyAgainRecordsNothingNew() {
+    public void storingABodyAgainRecordsNothingNew() throws Exception {
         stored("m1");
         long seq = files.attachments(accountId, "m1").get(0).seq;
 
@@ -146,7 +172,7 @@ public class FileStoreTest {
     }
 
     @Test
-    public void aSavedCopySharesTheStandInsKeyAndOneBlobPerBytes() {
+    public void aSavedCopySharesTheStandInsKeyAndOneBlobPerBytes() throws Exception {
         stored("m1");
         stored("m2");
         String folder = files.createFolder("Invoices");
@@ -155,9 +181,9 @@ public class FileStoreTest {
         byte[] bytes = "%PDF".getBytes(StandardCharsets.UTF_8);
         FileStore.StoredFile first = files.attachments(accountId, "m1").get(0);
         FileStore.StoredFile second = files.attachments(accountId, "m2").get(0);
-        files.save(folder, first, bytes);
-        files.save(folder, second, bytes);
-        files.save(folder, first, bytes);
+        files.save(folder, first, file(bytes));
+        files.save(folder, second, file(bytes));
+        files.save(folder, first, file(bytes));
 
         String hash = PimdirHash.of(bytes);
         assertEquals("two files, saved once each", 2,
@@ -172,15 +198,15 @@ public class FileStoreTest {
         FileStore.StoredFile saved = files.attachments(accountId, "m1").get(0);
         assertEquals(hash, saved.objectHash);
         assertEquals("the stand-in is still the row listed", "2", saved.part);
-        assertArrayEquals(bytes, files.saved(saved));
+        assertArrayEquals(bytes, bytes(files.saved(saved)));
     }
 
     @Test
-    public void aMessageGoneTakesItsStandInsAndLeavesItsSavedCopies() {
+    public void aMessageGoneTakesItsStandInsAndLeavesItsSavedCopies() throws Exception {
         stored("m1");
         String folder = files.createFolder("Kept");
         FileStore.StoredFile invoice = files.attachments(accountId, "m1").get(0);
-        files.save(folder, invoice, "%PDF".getBytes(StandardCharsets.UTF_8));
+        files.save(folder, invoice, file("%PDF".getBytes(StandardCharsets.UTF_8)));
 
         SQLiteDatabase db = items.writable();
         items.remove(db, inbox, "m1");
@@ -192,7 +218,7 @@ public class FileStoreTest {
     }
 
     @Test
-    public void forgettingTheAccountDropsItsStandIns() {
+    public void forgettingTheAccountDropsItsStandIns() throws Exception {
         stored("m1");
 
         mail.forget(ONE);
@@ -203,7 +229,7 @@ public class FileStoreTest {
     }
 
     @Test
-    public void aStandInLeadsBackToItsMessageAndSender() {
+    public void aStandInLeadsBackToItsMessageAndSender() throws Exception {
         stored("m1");
         FileStore.StoredFile invoice =
                 files.files(FileStore.attachmentsOf(accountId)).get(0);
@@ -217,13 +243,13 @@ public class FileStoreTest {
     }
 
     @Test
-    public void foldersAreListedApartFromAttachmentsAndRenamedByLabel() {
+    public void foldersAreListedApartFromAttachmentsAndRenamedByLabel() throws Exception {
         stored("m1");
         String folder = files.createFolder("Taxes");
 
         assertEquals(1, files.folders().size());
         assertEquals(1, files.attachmentCollections().size());
-        assertTrue(FileStore.isAttachments(files.attachmentCollections().get(0).id));
+        assertTrue(FileStore.isAttachments(files.attachmentCollections().get(0)));
 
         files.renameFolder(folder, "Receipts");
         assertEquals(folder, files.folders().get(0).id);
@@ -231,17 +257,17 @@ public class FileStoreTest {
     }
 
     @Test
-    public void anImportIsAFileOfItsOwnAndADeleteReleasesItsBody() {
+    public void anImportIsAFileOfItsOwnAndADeleteReleasesItsBody() throws Exception {
         String folder = files.createFolder("Inbox");
         byte[] bytes = "hello".getBytes(StandardCharsets.UTF_8);
-        files.importFile(folder, "Hello.txt", "text/plain", bytes);
+        files.importFile(folder, "Hello.txt", "text/plain", file(bytes));
 
         List<FileStore.StoredFile> held = files.files(folder);
         assertEquals(1, held.size());
         assertTrue(held.get(0).linkId.matches("file:[0-9a-f]{32}"));
         assertEquals("text/plain", held.get(0).mediaType);
         assertEquals(Long.valueOf(5), held.get(0).size);
-        assertArrayEquals(bytes, files.saved(held.get(0)));
+        assertArrayEquals(bytes, bytes(files.saved(held.get(0))));
 
         files.delete(held.get(0));
 
@@ -251,12 +277,12 @@ public class FileStoreTest {
     }
 
     @Test
-    public void aStandInIsNotDeletedByHandAndAFolderGoesWithItsFiles() {
+    public void aStandInIsNotDeletedByHandAndAFolderGoesWithItsFiles() throws Exception {
         stored("m1");
         String folder = files.createFolder("Kept");
         FileStore.StoredFile invoice = files.attachments(accountId, "m1").get(0);
         byte[] bytes = "%PDF".getBytes(StandardCharsets.UTF_8);
-        files.save(folder, invoice, bytes);
+        files.save(folder, invoice, file(bytes));
 
         files.delete(invoice);
         assertEquals(2, files.attachments(accountId, "m1").size());
@@ -269,12 +295,59 @@ public class FileStoreTest {
     }
 
     @Test
-    public void theTypeChipsSortMediaTypes() {
+    public void theTypeChipsSortMediaTypes() throws Exception {
         assertTrue(FilesList.matches(FilesList.IMAGES, "image/png"));
         assertTrue(FilesList.matches(FilesList.PDFS, "application/pdf"));
         assertTrue(FilesList.matches(
                 FilesList.DOCUMENTS,
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
         assertTrue(!FilesList.matches(FilesList.DOCUMENTS, null));
+    }
+
+    @Test
+    public void aFolderNameIsTakenOnceAndASecondSaveSavesNothing() throws Exception {
+        stored("m1");
+        String taxes = files.createFolder("Taxes");
+        String receipts = files.createFolder("Receipts");
+
+        assertNull("a name taken", files.createFolder("Taxes"));
+        assertFalse(files.renameFolder(receipts, "Taxes"));
+        assertTrue("its own name is its own", files.renameFolder(taxes, "Taxes"));
+
+        FileStore.StoredFile invoice = files.attachments(accountId, "m1").get(0);
+        byte[] bytes = "%PDF".getBytes(StandardCharsets.UTF_8);
+        assertTrue(files.save(taxes, invoice, file(bytes)));
+        assertFalse(files.save(taxes, invoice, file(bytes)));
+    }
+
+    @Test
+    public void anAttachmentUnlinkedComesBackWithTheBody() throws Exception {
+        stored("m1");
+        ItemLinks links = new ItemLinks(RuntimeEnvironment.getApplication(), pimdir);
+        ItemLinks.Link attachment =
+                links.links(new ItemLinks.Endpoint(PimdirSummary.MAIL, "m1")).get(0);
+
+        // NOTE: the reader offers no unlink for it; a reference removed
+        // anyway takes the stand-in, and storing the body records both again.
+        links.remove(attachment);
+        stored("m1");
+
+        assertEquals(2, files.attachments(accountId, "m1").size());
+    }
+
+    @Test
+    public void aTextPartIsReadAsItsSenderWroteIt() throws Exception {
+        byte[] latin = {'c', 'a', 'f', (byte) 0xe9};
+        java.io.ByteArrayOutputStream raw = new java.io.ByteArrayOutputStream();
+        raw.write(("From: a@example.org\r\n"
+                        + "Content-Type: multipart/mixed; boundary=\"sep\"\r\n\r\n"
+                        + "--sep\r\nContent-Type: text/plain\r\n\r\nbody\r\n"
+                        + "--sep\r\nContent-Type: text/plain; charset=iso-8859-1\r\n"
+                        + "Content-Disposition: attachment; filename=\"latin.txt\"\r\n\r\n")
+                .getBytes(StandardCharsets.US_ASCII));
+        raw.write(latin);
+        raw.write("\r\n--sep--\r\n".getBytes(StandardCharsets.US_ASCII));
+
+        assertArrayEquals(latin, part(raw.toByteArray(), "2"));
     }
 }

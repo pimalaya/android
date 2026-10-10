@@ -79,20 +79,38 @@ final class WindowPicker {
         info.setPadding(host.dp(24), 0, host.dp(24), host.dp(8));
         content.addView(info);
 
-        // NOTE: no statement counts the bodies a release frees, so a day
-        // later says what happens rather than how much.
+        // NOTE: a day later counts what a release frees (the messages held
+        // below it), a day earlier what a download fetches.
         Runnable preview =
                 () -> {
                     String date = dateOf(picker);
                     if (freeing(later, date, until)) {
-                        info.setText(R.string.mail_window_frees);
+                        reads.execute(
+                                () -> {
+                                    // NOTE: a mailbox kept whole keeps its bodies.
+                                    MailStore.Sum freed =
+                                            host.mail.sum(
+                                                    query.only(
+                                                            collection ->
+                                                                    !MailOffline.whole(
+                                                                            host, collection)),
+                                                    null,
+                                                    date,
+                                                    1);
+                                    host.main.post(
+                                            () -> {
+                                                if (date.equals(dateOf(picker))) {
+                                                    info.setText(frees(host, freed));
+                                                }
+                                            });
+                                });
                         return;
                     }
                     reads.execute(
                             () -> {
                                 MailStore.Query counted = host.mail.downloading(query);
                                 boolean listing = MailStore.listing(query, host.mail.edges());
-                                MailStore.Sum sum = host.mail.sum(counted, date, until);
+                                MailStore.Sum sum = host.mail.sum(counted, date, until, 0);
                                 host.main.post(
                                         () -> {
                                             if (date.equals(dateOf(picker))) {
@@ -127,6 +145,19 @@ final class WindowPicker {
                         (dialog, which) -> apply(host, emails, null, shown, after))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+    }
+
+    /** What a window moved later frees, as the picker's line says it. */
+    static String frees(Context context, MailStore.Sum freed) {
+        if (freed.count == 0) {
+            return context.getString(R.string.mail_window_frees);
+        }
+        return context.getResources()
+                .getQuantityString(
+                        R.plurals.mail_window_frees_some,
+                        (int) Math.min(Integer.MAX_VALUE, freed.count),
+                        NumberFormat.getIntegerInstance().format(freed.count),
+                        Formatter.formatShortFileSize(context, freed.size));
     }
 
     /** Whether a picker allowing {@code later} moves a window from {@code until} later. */

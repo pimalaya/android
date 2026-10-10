@@ -27,13 +27,17 @@ import java.util.Map;
  * one collection whose id is the account's namespace and a control character,
  * as the outbox's is: no server names a mailbox that way, so it never
  * collides, and it is found again from the account id alone, with no app
- * state to lose or keep in step. {@link #isAttachments} is the one place that
- * tells such a collection from a folder. A folder belongs to the device
- * ({@link LocalBook#ACCOUNT}) under a random id, so renaming it moves a label.
+ * state to lose or keep in step. It carries the role {@code attachments}
+ * (section 14), which is what tells it from a folder ({@link #isAttachments}).
+ * A folder belongs to the device ({@link LocalBook#ACCOUNT}) under a random
+ * id, so renaming it moves a label.
  */
 final class FileStore {
     /** The collection name an account's stand-ins are filed under. */
     private static final String ATTACHMENTS = "\u0001attachments";
+
+    /** The role an attachments collection carries (STORAGE section 14). */
+    static final String ROLE = "attachments";
 
     /** The prefix of a folder's collection name, before its random part. */
     private static final String FOLDER = "folder:";
@@ -123,22 +127,52 @@ final class FileStore {
         return PimdirAccount.collectionId(accountId, ATTACHMENTS);
     }
 
-    /**
-     * Whether a file collection holds an account's attachments rather than
-     * being a folder: by the id scheme, until pimdir names the role.
-     */
-    static boolean isAttachments(String collection) {
-        return collection.endsWith(PimdirAccount.SEPARATOR + ATTACHMENTS);
+    /** Whether a file collection holds an account's attachments rather than being a folder. */
+    static boolean isAttachments(PimdirCollections.Stored collection) {
+        return ROLE.equals(collection.role);
     }
 
-    /** The key of one part of a message (Annex A.7): every writer names it alike. */
+    /**
+     * Gives the role to the attachments collections a store written before
+     * the role holds, found by the id this class files them under; once, on
+     * open, after the role's constraint takes it.
+     */
+    static void reconcileRoles(SQLiteDatabase db) {
+        List<String> missing = new ArrayList<>();
+        String sql = PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0];
+        try (Cursor cursor = db.rawQuery(sql, null)) {
+            while (cursor.moveToNext()) {
+                String id = cursor.getString(0);
+                if (PimdirSummary.FILE.equals(cursor.getString(2)) && cursor.isNull(9)
+                        && id.endsWith(PimdirAccount.SEPARATOR + ATTACHMENTS)) {
+                    missing.add(id);
+                }
+            }
+        }
+        for (String id : missing) {
+            setRole(db, id);
+        }
+    }
+
+    private static void setRole(SQLiteDatabase db, String collection) {
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collection);
+        values.put("role", ROLE);
+        exec(db, "SET_COLLECTION_ROLE", values);
+    }
+
+    /**
+     * The key of one part of a message (Annex A.7): every writer names it
+     * alike. Null for a message under a writer-derived key, which names no
+     * identity a part could be keyed on (section 9.1).
+     */
     static String partKey(String messageLinkId, String section) {
-        return "part:" + messageLinkId + "#" + section;
+        return ItemLinks.derived(messageLinkId) ? null : "part:" + messageLinkId + "#" + section;
     }
 
     /** What a file collection is called: a folder's name, or Attachments. */
     String label(PimdirCollections.Stored collection) {
-        return isAttachments(collection.id)
+        return isAttachments(collection)
                 ? context.getString(R.string.files_attachments)
                 : collection.name;
     }
@@ -148,12 +182,13 @@ final class FileStore {
      * part the collection does not hold yet, a stand-in at {@code Meta} with
      * its summary and the {@code attachment} reference from the message, all
      * in one transaction, so no stand-in is ever left unreferenced. A part
-     * already recorded is left as it is, so storing a body again writes
-     * nothing.
+     * already recorded keeps its stand-in and gets its reference back if a
+     * person removed it.
      */
     void recordAttachments(
             String accountId, String messageLinkId, List<MessageBody.Attachment> attachments) {
-        if (attachments.isEmpty()) {
+        // NOTE: a message under a derived key gets no stand-in (section 14.3).
+        if (attachments.isEmpty() || ItemLinks.derived(messageLinkId)) {
             return;
         }
         String collection = attachmentsOf(accountId);
@@ -162,10 +197,14 @@ final class FileStore {
         try {
             if (kindOf(db, collection) == null) {
                 declare(db, collection, accountId, ATTACHMENTS.substring(1));
+                setRole(db, collection);
             }
             for (MessageBody.Attachment attachment : attachments) {
                 String linkId = partKey(messageLinkId, attachment.part);
                 if (items.knows(db, collection, linkId)) {
+                    // NOTE: a reference unlinked by hand comes back with the
+                    // body, the stand-in being the attachment.
+                    reference(db, messageLinkId, linkId);
                     continue;
                 }
                 insert(db, collection, linkId, attachment.name, null, PimdirItems.META);
@@ -209,6 +248,74 @@ final class FileStore {
             }
         }
         return attachments;
+    }
+
+    /** One stand-in with the message attaching it. */
+    static final class Attached {
+        final StoredFile file;
+        final Origin origin;
+
+        Attached(StoredFile file, Origin origin) {
+            this.file = file;
+            this.origin = origin;
+        }
+    }
+
+    /**
+     * Every attachment of one attachments collection with its message,
+     * newest message first ({@code list_attachments_by_account}), read a page
+     * at a time.
+     */
+    List<Attached> attachmentsIn(String collection) {
+        SQLiteDatabase db = items.readable();
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collection);
+        values.put("account", text(db, "LOAD_ACCOUNT", values));
+        values.put("after_key", null);
+        values.put("after_seq", null);
+        values.put("limit", PAGE);
+        List<Attached> attached = new ArrayList<>();
+        while (true) {
+            PimdirSql.Bound bound = PimdirSql.bind("LIST_ATTACHMENTS_BY_ACCOUNT", values);
+            int read = 0;
+            try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+                while (cursor.moveToNext()) {
+                    read++;
+                    values.put("after_key", cursor.getString(10));
+                    values.put("after_seq", cursor.getLong(1));
+                    if (!collection.equals(cursor.getString(0))) {
+                        continue;
+                    }
+                    attached.add(
+                            new Attached(
+                                    new StoredFile(
+                                            cursor.getString(0),
+                                            cursor.getString(2),
+                                            cursor.getLong(1),
+                                            cursor.isNull(3) ? "" : cursor.getString(3),
+                                            cursor.isNull(4) ? null : cursor.getString(4),
+                                            cursor.isNull(5) ? null : cursor.getLong(5),
+                                            cursor.isNull(6) ? null : cursor.getString(6),
+                                            null),
+                                    new Origin(
+                                            cursor.getString(8),
+                                            cursor.getString(7),
+                                            cursor.isNull(11) ? "" : cursor.getString(11),
+                                            cursor.isNull(12) ? "" : cursor.getString(12))));
+                }
+            }
+            if (read < PAGE) {
+                return attached;
+            }
+        }
+    }
+
+    /** The one text column a statement answers, null for no row or NULL. */
+    private static String text(SQLiteDatabase db, String name, Map<String, Object> values) {
+        PimdirSql.Bound bound = PimdirSql.bind(name, values);
+        try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+            return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : null;
+        }
     }
 
     /** Every live file of one collection, A to Z, read a page at a time. */
@@ -303,16 +410,9 @@ final class FileStore {
         return null;
     }
 
-    /** The bytes a placement holds, null when it holds none or its blob is gone. */
-    byte[] saved(StoredFile file) {
-        if (file.objectHash == null) {
-            return null;
-        }
-        try {
-            return new PimdirBlobs(store.blobs()).get(file.objectHash);
-        } catch (IOException error) {
-            return null;
-        }
+    /** The file a placement's body is stored in, null when it holds none or its blob is gone. */
+    java.io.File saved(StoredFile file) {
+        return items.blobFile(file.objectHash);
     }
 
     /** The device's folders, by name. */
@@ -320,7 +420,7 @@ final class FileStore {
         List<PimdirCollections.Stored> folders = new ArrayList<>();
         for (PimdirCollections.Stored collection : collections.list(PimdirSummary.FILE)) {
             if (LocalBook.ACCOUNT.equals(collection.accountEmail)
-                    && !isAttachments(collection.id)) {
+                    && !isAttachments(collection)) {
                 folders.add(collection);
             }
         }
@@ -331,15 +431,31 @@ final class FileStore {
     List<PimdirCollections.Stored> attachmentCollections() {
         List<PimdirCollections.Stored> held = new ArrayList<>();
         for (PimdirCollections.Stored collection : collections.list(PimdirSummary.FILE)) {
-            if (isAttachments(collection.id)) {
+            if (isAttachments(collection)) {
                 held.add(collection);
             }
         }
         return held;
     }
 
-    /** Creates a folder on the device, answering its collection id. */
+    /** Whether a folder other than {@code except} already goes by a name. */
+    private boolean taken(String name, String except) {
+        for (PimdirCollections.Stored folder : folders()) {
+            if (folder.name.equals(name) && !folder.id.equals(except)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Creates a folder on the device, answering its collection id; null when
+     * a folder already goes by the name, one card standing for each name.
+     */
     String createFolder(String name) {
+        if (taken(name, null)) {
+            return null;
+        }
         String account = accounts.idOf(LocalBook.ACCOUNT);
         String id = PimdirAccount.collectionId(account, FOLDER + random());
         SQLiteDatabase db = items.writable();
@@ -353,13 +469,20 @@ final class FileStore {
         return id;
     }
 
-    /** Renames a folder, which moves its label and nothing else. */
-    void renameFolder(String folder, String name) {
+    /**
+     * Renames a folder, which moves its label and nothing else; false when
+     * another folder already goes by the name.
+     */
+    boolean renameFolder(String folder, String name) {
+        if (taken(name, folder)) {
+            return false;
+        }
         Map<String, Object> values = new HashMap<>();
         values.put("collection", folder);
         values.put("account", accounts.idOf(LocalBook.ACCOUNT));
         values.put("name", name);
         exec(items.writable(), "SET_COLLECTION_NAME", values);
+        return true;
     }
 
     /**
@@ -371,33 +494,31 @@ final class FileStore {
     }
 
     /**
-     * Saves a file into a folder: its bytes become a blob, shared with every
-     * other file holding the same ones, and the folder places the same key
-     * with that body, a stand-in staying (section 14.3). A folder already
-     * holding it is left as it is.
+     * Saves a file into a folder: its bytes, read from {@code source}, become
+     * a blob shared with every other file holding the same ones, and the
+     * folder places the same key with that body, a stand-in staying (section
+     * 14.3). False when the folder holds it already, which is left as it is.
      */
-    void save(String folder, StoredFile file, byte[] bytes) {
-        place(folder, file.linkId, file.name, file.mediaType, bytes);
+    boolean save(String folder, StoredFile file, java.io.File source) throws IOException {
+        return place(folder, file.linkId, file.name, file.mediaType, source);
     }
 
     /**
-     * Imports bytes from outside the store into a folder, as a file of its
+     * Imports a file from outside the store into a folder, as a file of its
      * own keyed {@code file:} and 128 random bits (Annex A.7).
      */
-    void importFile(String folder, String name, String mediaType, byte[] bytes) {
-        place(folder, "file:" + random(), name, mediaType, bytes);
+    void importFile(String folder, String name, String mediaType, java.io.File source)
+            throws IOException {
+        place(folder, "file:" + random(), name, mediaType, source);
     }
 
     /**
-     * Deletes a folder's copy of a file, releasing its body. A stand-in is
-     * not deleted by hand: it goes with the last message referencing it.
-     *
-     * <p>Retained then purged in one transaction: the canonical delete is
-     * the purge of a retained row, and a collection no source syncs keeps no
-     * retention (section 14.3).
+     * Deletes a folder's copy of a file ({@code delete_unbound_item}),
+     * releasing its body. A stand-in is not deleted by hand: it goes with the
+     * last message referencing it.
      */
     void delete(StoredFile file) {
-        if (isAttachments(file.collection)) {
+        if (file.objectHash == null) {
             return;
         }
         SQLiteDatabase db = items.writable();
@@ -406,12 +527,7 @@ final class FileStore {
             Map<String, Object> key = new HashMap<>();
             key.put("collection", file.collection);
             key.put("link_id", file.linkId);
-            key.put("source", null);
-            exec(db, "RETAIN_ITEM", key);
-            Map<String, Object> purge = new HashMap<>();
-            purge.put("collection", file.collection);
-            purge.put("seq", file.seq);
-            PimdirSql.Bound bound = PimdirSql.bind("PURGE_ITEM", purge);
+            PimdirSql.Bound bound = PimdirSql.bind("DELETE_UNBOUND_ITEM", key);
             List<String> released = new ArrayList<>();
             try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
                 while (cursor.moveToNext()) {
@@ -430,6 +546,7 @@ final class FileStore {
         } finally {
             db.endTransaction();
         }
+        items.unlinkCollected();
     }
 
     /**
@@ -438,23 +555,30 @@ final class FileStore {
      */
     void forget(String accountId) {
         dropCollection(attachmentsOf(accountId));
+        OpenedFiles.clear(context);
     }
 
-    /** Places a key with a body in a folder, unless the folder holds it already. */
-    private void place(
-            String folder, String linkId, String name, String mediaType, byte[] bytes) {
-        String hash = PimdirHash.of(bytes);
+    /**
+     * Places a key with a body in a folder, unless the folder holds it
+     * already; the blob is hashed and copied from the file a buffer at a time.
+     */
+    private boolean place(
+            String folder, String linkId, String name, String mediaType, java.io.File source)
+            throws IOException {
+        String hash = PimdirHash.of(source);
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            if (!items.knows(db, folder, linkId)) {
-                items.storeObject(db, hash, bytes);
+            boolean placed = !items.knows(db, folder, linkId);
+            if (placed) {
+                items.storeObject(db, hash, source);
                 insert(db, folder, linkId, name, hash, PimdirItems.FULL);
                 PimdirSummary.write(
-                        db, folder, linkId, summary(name, mediaType, bytes.length, null), true);
+                        db, folder, linkId, summary(name, mediaType, source.length(), null), true);
                 items.adjustRefcount(db, null, hash);
             }
             db.setTransactionSuccessful();
+            return placed;
         } finally {
             db.endTransaction();
         }
@@ -467,13 +591,23 @@ final class FileStore {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
+            boolean held;
+            PimdirSql.Bound holds = PimdirSql.bind("COLLECTION_HOLDS_OBJECTS", values);
+            try (Cursor cursor = MailStore.typed(db, holds.sql, holds.args)) {
+                held = cursor.moveToFirst() && cursor.getInt(0) == 1;
+            }
             exec(db, "DELETE_COLLECTION", values);
-            exec(db, "RECOMPUTE_REFCOUNTS", new HashMap<>());
-            items.collectGarbage(db);
+            // NOTE: a collection pointing at no object drops no pin, so the
+            // store-wide recount is spared.
+            if (held) {
+                exec(db, "RECOMPUTE_REFCOUNTS", new HashMap<>());
+                items.collectGarbage(db);
+            }
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
         }
+        items.unlinkCollected();
     }
 
     /** 128 random bits as 32 lowercase hexadecimal digits. */

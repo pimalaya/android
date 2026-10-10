@@ -875,6 +875,7 @@ fn graph_summary(message: &MsgraphMessage) -> PimdirMailSummary {
             .first()
             .and_then(|size| size.value.trim().parse().ok()),
         attachment: message.has_attachments,
+        invitation: None,
         from,
         to: message.to_recipients.iter().filter_map(address).collect(),
         cc: message.cc_recipients.iter().filter_map(address).collect(),

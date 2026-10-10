@@ -4,6 +4,7 @@ import android.app.AlertDialog;
 import android.content.res.ColorStateList;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.Log;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -11,7 +12,10 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * An item's links made visible (plan C.5): a Linked card listing what the
@@ -21,9 +25,17 @@ import java.util.List;
  *
  * <p>Inline on the pages built of cards (a contact, an entry), in a dialog
  * from the reader and the file sheet, whose layouts have no card column.
+ * Every read and write runs on the io executor: a page draws its card from
+ * the links last read for it, and redraws once a read lands.
  */
 final class LinkedSection {
     private final MainActivity host;
+
+    /** The links read for an item and not drawn yet, by endpoint. */
+    private final Map<String, List<ItemLinks.Link>> read = new HashMap<>();
+
+    /** The dialog a tap in it closes before opening the other item. */
+    private AlertDialog opening;
 
     LinkedSection(MainActivity host) {
         this.host = host;
@@ -31,19 +43,54 @@ final class LinkedSection {
 
     /**
      * Adds the Linked card to a page; {@code refresh} redraws the page once
-     * a link is added or removed. Nothing for an item that cannot be linked
-     * (a contact not saved yet, a message still in an outbox).
+     * the links are read, or a link is added or removed. Nothing for an item
+     * that cannot be linked (a contact not saved yet, a message still in an
+     * outbox). Drawn empty while the read runs.
      */
     void section(Sections sections, ItemLinks.Endpoint self, Runnable refresh) {
         if (self == null) {
             return;
         }
+        List<ItemLinks.Link> links = read.remove(keyOf(self));
+        if (links == null) {
+            load(self, refresh);
+            links = new ArrayList<>();
+        }
         List<View> rows = new ArrayList<>();
-        for (ItemLinks.Link link : host.links.links(self)) {
+        for (ItemLinks.Link link : links) {
             rows.add(row(sections, self, link, refresh));
         }
         sections.section(
                 R.string.linked_title, R.drawable.ic_link, rows, linkTo(self, refresh), true);
+    }
+
+    /** Reads an item's links off the main thread, then redraws its page with them. */
+    private void load(ItemLinks.Endpoint self, Runnable refresh) {
+        run(
+                () -> {
+                    List<ItemLinks.Link> links = host.links.links(self);
+                    host.postAlive(
+                            () -> {
+                                read.put(keyOf(self), links);
+                                refresh.run();
+                            });
+                });
+    }
+
+    private static String keyOf(ItemLinks.Endpoint endpoint) {
+        return endpoint.kind + "\u0000" + endpoint.linkId;
+    }
+
+    /** Runs store work on the io executor, unless the activity is going. */
+    private void run(Runnable work) {
+        if (host.isDestroyed() || host.io.isShutdown()) {
+            return;
+        }
+        try {
+            host.io.execute(work);
+        } catch (RejectedExecutionException closing) {
+            Log.i("pimalaya", "links not read: the activity is closing");
+        }
     }
 
     /** The Linked card in a dialog of its own, titled by the item. */
@@ -81,18 +128,23 @@ final class LinkedSection {
         dialog.show();
     }
 
-    /** The dialog a tap in it closes before opening the other item. */
-    private AlertDialog opening;
-
-    /** One link: the other item, why it is linked, and the unlink action. */
+    /**
+     * One link: the other item, why it is linked, and the unlink action,
+     * which an attachment does not offer: the file is the message's own, and
+     * unlinked it would be lost.
+     */
     private View row(
             Sections sections, ItemLinks.Endpoint self, ItemLinks.Link link, Runnable refresh) {
-        ImageView unlink = new ImageView(host);
-        unlink.setImageResource(R.drawable.ic_link_off);
-        unlink.setImageTintList(
-                ColorStateList.valueOf(host.ui.resolveColor(android.R.attr.textColorSecondary)));
-        unlink.setContentDescription(host.getString(R.string.linked_unlink));
-        unlink.setOnClickListener(view -> confirmUnlink(link, refresh));
+        ImageView unlink = null;
+        if (!(link.automatic() && "attachment".equals(link.role))) {
+            unlink = new ImageView(host);
+            unlink.setImageResource(R.drawable.ic_link_off);
+            unlink.setImageTintList(
+                    ColorStateList.valueOf(
+                            host.ui.resolveColor(android.R.attr.textColorSecondary)));
+            unlink.setContentDescription(host.getString(R.string.linked_unlink));
+            unlink.setOnClickListener(view -> confirmUnlink(link, refresh));
+        }
 
         ItemLinks.Endpoint other = link.from.same(self) ? link.to : link.from;
         String title =
@@ -149,10 +201,12 @@ final class LinkedSection {
                 .setMessage(question)
                 .setPositiveButton(
                         R.string.linked_unlink,
-                        (dialog, which) -> {
-                            host.links.remove(link);
-                            refresh.run();
-                        })
+                        (dialog, which) ->
+                                run(
+                                        () -> {
+                                            host.links.remove(link);
+                                            host.postAlive(refresh);
+                                        }))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
@@ -199,6 +253,14 @@ final class LinkedSection {
                         .create();
         Sections sections = new Sections(host, results);
         Runnable[] pending = new Runnable[1];
+        // NOTE: a search still waiting when the picker goes would run against
+        // a dialog nobody sees, or an executor already shut.
+        dialog.setOnDismissListener(
+                gone -> {
+                    if (pending[0] != null) {
+                        host.main.removeCallbacks(pending[0]);
+                    }
+                });
         field.addTextChangedListener(
                 new TextWatcher() {
                     @Override
@@ -227,11 +289,14 @@ final class LinkedSection {
             Sections sections,
             AlertDialog dialog,
             Runnable refresh) {
-        host.io.execute(
+        run(
                 () -> {
                     List<ItemLinks.Placement> found = host.links.search(words);
                     host.postAlive(
                             () -> {
+                                if (!dialog.isShowing()) {
+                                    return;
+                                }
                                 sections.clear();
                                 List<View> rows = new ArrayList<>();
                                 for (ItemLinks.Placement placement : found) {
@@ -261,14 +326,21 @@ final class LinkedSection {
     }
 
     private void link(ItemLinks.Endpoint self, ItemLinks.Placement other, Runnable refresh) {
-        if (host.links.add(self, other.endpoint)) {
-            refresh.run();
-        } else {
-            host.toast(host.getString(R.string.linked_failed));
-        }
+        run(
+                () -> {
+                    boolean linked = host.links.add(self, other.endpoint);
+                    host.postAlive(
+                            () -> {
+                                if (linked) {
+                                    refresh.run();
+                                } else {
+                                    host.toast(host.getString(R.string.linked_failed));
+                                }
+                            });
+                });
     }
 
-    /** Opens the other item on its own page. */
+    /** Opens the other item on its own page, read off the store first. */
     private void open(ItemLinks.Placement other) {
         if (opening != null) {
             opening.dismiss();
@@ -277,12 +349,19 @@ final class LinkedSection {
         String linkId = other.endpoint.linkId;
         switch (other.endpoint.kind) {
             case PimdirSummary.MAIL:
-                MailStore.StoredMessage message = host.mail.message(other.collection, linkId);
-                if (message == null) {
-                    gone();
-                } else {
-                    host.messageView.open(message);
-                }
+                run(
+                        () -> {
+                            MailStore.StoredMessage message =
+                                    host.mail.message(other.collection, linkId);
+                            host.postAlive(
+                                    () -> {
+                                        if (message == null) {
+                                            gone();
+                                        } else {
+                                            host.messageView.open(message);
+                                        }
+                                    });
+                        });
                 break;
             case PimdirSummary.CONTACT:
                 Group group = host.contactGroupOf(linkId);
@@ -293,9 +372,7 @@ final class LinkedSection {
                 }
                 break;
             case PimdirSummary.CALENDAR:
-                if (!host.openEvent(other.collection, linkId)) {
-                    gone();
-                }
+                host.openEvent(other.collection, linkId, this::gone);
                 break;
             default:
                 host.filesList.openFile(other.collection, linkId);

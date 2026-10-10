@@ -17,5 +17,6 @@ Java paths are relative to android/app/src/main/java/org/pimalaya/.
 - [x] Strings in values/ and values-fr/
 - [x] Tests: `FileStoreTest` for folders, imports, deletes and origins
 - [x] CHANGELOG [Unreleased]
+- [x] Moved by automatic-references: the attachments read by `list_attachments_by_account`, a folder's copy deleted by `delete_unbound_item`, `collection_holds_objects` sparing the recount, the attachments collection told by its role
 - [ ] Device test
 - [ ] Fold the delta into spec/mail.md, log, archive

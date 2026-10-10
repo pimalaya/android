@@ -4,13 +4,13 @@ import android.content.Context;
 import android.database.Cursor;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
+import org.json.JSONArray;
 import org.pimalaya.client.PimdirSql;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -21,8 +21,7 @@ import java.util.Map;
  *
  * <p>Which item stands for which endpoint is decided here and nowhere else
  * ({@link #ofMessage} and its siblings), so a rule about which keys may be
- * referenced (pimdir may stop referencing a message under a derived key) is
- * one change.
+ * referenced (none under a writer-derived key) is one change.
  */
 final class ItemLinks {
     /** The role a person's link takes. */
@@ -33,9 +32,6 @@ final class ItemLinks {
 
     /** How many results each kind gives a search. */
     private static final int FOUND = 10;
-
-    /** How many rows a scan of a collection reads at a time. */
-    private static final int PAGE = 500;
 
     private final Context context;
     private final PimdirDb store;
@@ -123,11 +119,23 @@ final class ItemLinks {
     }
 
     /**
-     * An endpoint, or null when its key may not be referenced: every key
-     * may for now; a narrower rule pimdir settles lands here.
+     * An endpoint, or null when its key may not be referenced: a
+     * writer-derived key names no identity (STORAGE sections 9.1, 14.2).
      */
     private static Endpoint endpoint(String kind, String linkId) {
-        return linkId == null || linkId.isEmpty() ? null : new Endpoint(kind, linkId);
+        return linkId == null || linkId.isEmpty() || derived(linkId)
+                ? null
+                : new Endpoint(kind, linkId);
+    }
+
+    /**
+     * Whether a key is one a writer derived (an {@code alt:}, {@code dup:}
+     * or {@code hash:} key, or a part of a message under one), which pimdir
+     * neither references nor keys a stand-in on.
+     */
+    static boolean derived(String linkId) {
+        String key = linkId.startsWith("part:") ? linkId.substring(5) : linkId;
+        return key.startsWith("alt:") || key.startsWith("dup:") || key.startsWith("hash:");
     }
 
     /**
@@ -188,9 +196,10 @@ final class ItemLinks {
 
     /**
      * Records a person's link from one item to another, role {@code related};
-     * false when it records nothing (an endpoint the store does not hold).
-     * Linking again changes nothing, save that a rule's link becomes the
-     * person's.
+     * false when it records nothing (an endpoint the store does not hold, or
+     * one under a derived key). Linking again changes nothing, save that a
+     * rule's link becomes the person's: the statement answers the reference
+     * standing either way.
      */
     boolean add(Endpoint from, Endpoint to) {
         if (from.same(to)) {
@@ -203,17 +212,7 @@ final class ItemLinks {
         values.put("to_link_id", to.linkId);
         values.put("role", RELATED);
         values.put("origin", USER);
-        if (query(store.getWritableDatabase(), "ADD_REFERENCE", values)) {
-            return true;
-        }
-        // NOTE: the statement answers nothing for a link already recorded
-        // as the person's, which is linked all the same.
-        for (Link link : links(from)) {
-            if (link.from.same(from) && link.to.same(to) && RELATED.equals(link.role)) {
-                return true;
-            }
-        }
-        return false;
+        return query(store.getWritableDatabase(), "ADD_REFERENCE", values);
     }
 
     /** Removes one reference, whatever its origin; a rule may record it anew. */
@@ -243,86 +242,34 @@ final class ItemLinks {
         return placement(store.getReadableDatabase(), endpoint);
     }
 
+    /** {@code describe_endpoint}: the first live placement and its title. */
     private static Placement placement(SQLiteDatabase db, Endpoint endpoint) {
         Map<String, Object> values = new HashMap<>();
+        values.put("kind", endpoint.kind);
         values.put("link_id", endpoint.linkId);
-        PimdirSql.Bound bound = PimdirSql.bind("LIST_LINK_PLACEMENTS", values);
-        try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
-            while (cursor.moveToNext()) {
-                String collection = cursor.getString(0);
-                if (endpoint.kind.equals(kindOf(db, collection))) {
-                    return titled(db, endpoint, collection, cursor.getLong(2));
-                }
-            }
-        }
-        return null;
-    }
-
-    /** A placement titled from its kind's summary. */
-    private static Placement titled(
-            SQLiteDatabase db, Endpoint endpoint, String collection, long seq) {
-        Map<String, Object> values = new HashMap<>();
-        values.put("collection", collection);
-        values.put("seq", seq);
-        values.put("link_id", endpoint.linkId);
-        String title = "";
-        String detail = "";
-        switch (endpoint.kind) {
-            case PimdirSummary.MAIL:
-                try (Cursor row = read(db, "GET_MAIL", values)) {
-                    if (row.moveToFirst()) {
-                        title = text(row, 8);
-                        detail = text(row, 10).isEmpty() ? text(row, 9) : text(row, 10);
-                    }
-                }
-                break;
-            case PimdirSummary.CONTACT:
-                title = column(db, "GET_CONTACT", values, 7);
-                break;
-            case PimdirSummary.CALENDAR:
-                title = column(db, componentStatement(db, values), values, 7);
-                break;
-            default:
-                title = column(db, "GET_FILE", values, 6);
-                break;
-        }
-        return new Placement(endpoint, collection, seq, title, detail);
-    }
-
-    /** The statement reading a calendar resource's summary, by its component. */
-    private static String componentStatement(SQLiteDatabase db, Map<String, Object> values) {
-        try (Cursor row = read(db, "COMPONENT_OF", values)) {
-            String component = row.moveToFirst() ? row.getString(0) : "VEVENT";
-            switch (component) {
-                case "VTODO":
-                    return "GET_TASK";
-                case "VJOURNAL":
-                    return "GET_JOURNAL";
-                default:
-                    return "GET_EVENT";
-            }
+        try (Cursor row = read(db, "DESCRIBE_ENDPOINT", values)) {
+            return row.moveToFirst()
+                    ? new Placement(endpoint, row.getString(0), row.getLong(1), text(row, 2), "")
+                    : null;
         }
     }
 
     /**
      * Items whose title holds {@code words}, a few of each kind: messages
-     * through the mail search, contacts, calendar resources and files by
-     * their summary's name.
+     * through the mail search, contacts by name or address, calendar
+     * resources by summary, files by name.
      */
     List<Placement> search(String words) {
-        String needle = words.trim().toLowerCase(Locale.ROOT);
         Map<String, Placement> found = new LinkedHashMap<>();
-        if (needle.isEmpty()) {
+        if (words.trim().isEmpty()) {
             return new ArrayList<>();
         }
 
         MailStore mail = new MailStore(context, store);
-        int messages = 0;
-        for (MailStore.StoredMessage message :
-                mail.page(mail.query((account, collection) -> true, false, false, words), null,
-                        0, FOUND)) {
+        MailStore.Query query = mail.query((account, collection) -> true, false, false, words);
+        for (MailStore.StoredMessage message : mail.page(query, null, 0, FOUND)) {
             Endpoint endpoint = ofMessage(message);
-            if (endpoint != null && messages < FOUND) {
+            if (endpoint != null) {
                 found.putIfAbsent(
                         key(endpoint),
                         new Placement(
@@ -333,71 +280,49 @@ final class ItemLinks {
                                 message.fromName.isEmpty()
                                         ? message.fromAddress
                                         : message.fromName));
-                messages++;
             }
         }
 
         SQLiteDatabase db = store.getReadableDatabase();
-        scan(db, PimdirSummary.CONTACT, new String[] {"LIST_CONTACTS_PAGE_ASC"}, 7, needle, found);
-        scan(
-                db,
-                PimdirSummary.CALENDAR,
-                new String[] {
-                    "LIST_EVENTS_PAGE_ASC", "LIST_TASKS_PAGE_ASC", "LIST_JOURNALS_PAGE_ASC"
-                },
-                7,
-                needle,
-                found);
-        scan(db, PimdirSummary.FILE, new String[] {"LIST_FILES_PAGE_ASC"}, 6, needle, found);
+        String pattern = MailStore.likePattern(words);
+        search(db, PimdirSummary.CONTACT, "SEARCH_CONTACTS", 8, pattern, found);
+        search(db, PimdirSummary.CALENDAR, "SEARCH_CALENDAR", 8, pattern, found);
+        search(db, PimdirSummary.FILE, "SEARCH_FILES", 7, pattern, found);
         return new ArrayList<>(found.values());
     }
 
-    /**
-     * Scans every collection of a kind through its pages, keeping up to a
-     * few items whose title column holds the needle.
-     */
-    private void scan(
+    /** One kind's search statement over every collection of the kind, a page of a few. */
+    private void search(
             SQLiteDatabase db,
             String kind,
-            String[] statements,
+            String statement,
             int titleColumn,
-            String needle,
+            String pattern,
             Map<String, Placement> found) {
-        int kept = 0;
+        List<String> ids = new ArrayList<>();
         for (PimdirCollections.Stored collection : collections.list(kind)) {
-            for (String statement : statements) {
-                Map<String, Object> values = new HashMap<>();
-                values.put("collection", collection.id);
-                values.put("after_key", "");
-                values.put("after_seq", -1);
-                values.put("limit", PAGE);
-                while (kept < FOUND) {
-                    int read = 0;
-                    try (Cursor cursor = read(db, statement, values)) {
-                        while (cursor.moveToNext() && kept < FOUND) {
-                            read++;
-                            values.put("after_key", text(cursor, 4));
-                            values.put("after_seq", cursor.getLong(0));
-                            String title = text(cursor, titleColumn);
-                            Endpoint endpoint = endpoint(kind, cursor.getString(1));
-                            if (endpoint != null
-                                    && title.toLowerCase(Locale.ROOT).contains(needle)
-                                    && !found.containsKey(key(endpoint))) {
-                                found.put(
-                                        key(endpoint),
-                                        new Placement(
-                                                endpoint,
-                                                collection.id,
-                                                cursor.getLong(0),
-                                                title,
-                                                ""));
-                                kept++;
-                            }
-                        }
-                    }
-                    if (read < PAGE) {
-                        break;
-                    }
+            ids.add(collection.id);
+        }
+        if (ids.isEmpty()) {
+            return;
+        }
+        Map<String, Object> values = new HashMap<>();
+        values.put("collections", new JSONArray(ids).toString());
+        values.put("pattern", pattern);
+        values.put("after_key", null);
+        values.put("limit", FOUND);
+        try (Cursor cursor = read(db, statement, values)) {
+            while (cursor.moveToNext()) {
+                Endpoint endpoint = endpoint(kind, cursor.getString(2));
+                if (endpoint != null) {
+                    found.putIfAbsent(
+                            key(endpoint),
+                            new Placement(
+                                    endpoint,
+                                    cursor.getString(0),
+                                    cursor.getLong(1),
+                                    text(cursor, titleColumn),
+                                    ""));
                 }
             }
         }
@@ -412,20 +337,7 @@ final class ItemLinks {
         return MailStore.typed(db, bound.sql, bound.args);
     }
 
-    private static String column(
-            SQLiteDatabase db, String name, Map<String, Object> values, int column) {
-        try (Cursor row = read(db, name, values)) {
-            return row.moveToFirst() ? text(row, column) : "";
-        }
-    }
-
     private static String text(Cursor cursor, int column) {
         return cursor.isNull(column) ? "" : cursor.getString(column);
-    }
-
-    private static String kindOf(SQLiteDatabase db, String collection) {
-        Map<String, Object> values = new HashMap<>();
-        values.put("collection", collection);
-        return column(db, "LOAD_KIND", values, 0);
     }
 }
