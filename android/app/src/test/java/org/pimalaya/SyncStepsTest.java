@@ -2,7 +2,6 @@ package org.pimalaya;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.res.Resources;
@@ -14,92 +13,68 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
 /**
- * The sync dialog's detail line counts what the domain being synced holds:
- * events while the agenda syncs, messages while the mail does, contacts
- * while the books do; the phone steps are the two mirrors'.
+ * The sync strip names the domain being synced, over one bar filled by an
+ * account's collections and the counted steps within each.
  */
 @RunWith(RobolectricTestRunner.class)
 public class SyncStepsTest {
-    private static String line(PimDomain domain, int stage, int count) {
+    private static String line(PimDomain domain) {
         Resources resources = RuntimeEnvironment.getApplication().getResources();
-        return SyncSteps.text(resources, domain, stage, count);
+        return resources.getString(SyncSteps.lineOf(domain));
     }
 
     @Test
-    public void theAgendaDownloadsEvents() {
-        // NOTE: the owner's device read "Downloading 23 contact(s)" while
-        // the agenda synced.
-        assertEquals(
-                "Downloading 23 events",
-                line(PimDomain.CALENDAR, PimdirEngine.Progress.STAGE_DOWNLOAD, 23));
-        assertEquals(
-                "Downloading 1 event",
-                line(PimDomain.CALENDAR, PimdirEngine.Progress.STAGE_DOWNLOAD, 1));
+    public void eachDomainSaysItsName() {
+        assertEquals("Syncing mail", line(PimDomain.MAIL));
+        assertEquals("Syncing contacts", line(PimDomain.CONTACTS));
+        assertEquals("Syncing calendars", line(PimDomain.CALENDAR));
     }
 
     @Test
-    public void mailDownloadsMessages() {
-        assertEquals(
-                "Downloading 50 messages",
-                line(PimDomain.MAIL, PimdirEngine.Progress.STAGE_DOWNLOAD, 50));
+    @Config(qualifiers = "fr")
+    public void inFrenchTheAgendaSyncs() {
+        assertEquals("Synchronisation des agendas", line(PimDomain.CALENDAR));
     }
 
     @Test
-    public void booksDownloadContacts() {
-        assertEquals(
-                "Downloading 2 contacts",
-                line(PimDomain.CONTACTS, PimdirEngine.Progress.STAGE_DOWNLOAD, 2));
-        assertEquals(
-                "Writing 1 contact to the phone",
-                line(PimDomain.CONTACTS, PimdirEngine.Progress.STAGE_PROJECT, 1));
-        assertEquals(
-                "Reconciling with the phone contacts",
-                line(PimDomain.CONTACTS, PimdirEngine.Progress.STAGE_PHONE, 0));
+    public void aBookDownloadFillsItsShareThenTheProjectionTheRest() {
+        int download = PimdirEngine.Progress.STAGE_DOWNLOAD;
+        int project = PimdirEngine.Progress.STAGE_PROJECT;
+        assertEquals(0.3, SyncSteps.shareOf(PimDomain.CONTACTS, download, 115, 230), 1e-9);
+        assertEquals(0.6, SyncSteps.shareOf(PimDomain.CONTACTS, download, 230, 230), 1e-9);
+        assertEquals(0.6, SyncSteps.shareOf(PimDomain.CALENDAR, project, 0, 23), 1e-9);
+        assertEquals(1.0, SyncSteps.shareOf(PimDomain.CALENDAR, project, 23, 23), 1e-9);
     }
 
     @Test
-    public void theAgendaReconcilesWithThePhoneCalendar() {
+    public void aMailDownloadFillsItsMailboxWhole() {
         assertEquals(
-                "Reconciling with the phone calendar",
-                line(PimDomain.CALENDAR, PimdirEngine.Progress.STAGE_PHONE, 0));
-        assertEquals(
-                "Writing 3 events to the phone",
-                line(PimDomain.CALENDAR, PimdirEngine.Progress.STAGE_PROJECT, 3));
+                1.0,
+                SyncSteps.shareOf(PimDomain.MAIL, PimdirEngine.Progress.STAGE_DOWNLOAD, 50, 50),
+                1e-9);
     }
 
     @Test
-    public void mailHasNoPhoneSteps() {
-        assertNull(line(PimDomain.MAIL, PimdirEngine.Progress.STAGE_PHONE, 0));
-        assertNull(line(PimDomain.MAIL, PimdirEngine.Progress.STAGE_PROJECT, 3));
+    public void theBarAddsTheCollectionUnderWayToThoseLanded() {
+        // NOTE: two of five calendars landed, the third half way.
+        assertEquals(500, SyncSteps.permille(2, 5, 0.5));
+        assertEquals(400, SyncSteps.permille(2, 5, 0));
+        assertEquals(1000, SyncSteps.permille(5, 5, 0));
     }
 
     @Test
-    public void everyDomainSharesTheNeutralSteps() {
-        for (PimDomain domain : PimDomain.values()) {
-            assertEquals(
-                    "Checking the server for changes",
-                    line(domain, PimdirEngine.Progress.STAGE_SERVER, 0));
-            assertEquals(
-                    "Sending 3 changes to the server",
-                    line(domain, PimdirEngine.Progress.STAGE_UPLOAD, 3));
-            assertEquals(
-                    "Resolving 1 conflict",
-                    line(domain, PimdirEngine.Progress.STAGE_RESOLVE, 1));
-        }
+    public void withNoCollectionCountedTheShareIsTheBar() {
+        assertEquals(250, SyncSteps.permille(0, 0, 0.25));
+        assertEquals(1000, SyncSteps.permille(0, 0, 2));
     }
 
     @Test
-    public void eachDomainCountsItsCollections() {
-        Resources resources = RuntimeEnvironment.getApplication().getResources();
-        assertEquals(
-                "Address books synced: 1 of 3",
-                resources.getString(SyncSteps.collectionsOf(PimDomain.CONTACTS), 1, 3));
-        assertEquals(
-                "Mailboxes synced: 3 of 12",
-                resources.getString(SyncSteps.collectionsOf(PimDomain.MAIL), 3, 12));
-        assertEquals(
-                "Calendars synced: 2 of 5",
-                resources.getString(SyncSteps.collectionsOf(PimDomain.CALENDAR), 2, 5));
+    public void theBarSpansThePass() {
+        // NOTE: contacts (one book) passed, mail (three mailboxes) half way,
+        // calendars (two) ahead: 1 + 1.5 of 6.
+        assertEquals(416, SyncSteps.across(1, 3, 6, 500));
+        assertEquals(1000, SyncSteps.across(4, 2, 6, 1000));
+        assertEquals(300, SyncSteps.across(0, 0, 0, 300));
     }
 
     @Test
@@ -127,16 +102,5 @@ public class SyncStepsTest {
     public void nothingCountedIsNeverTold() {
         assertFalse(SyncSteps.tells(0, 10));
         assertFalse(SyncSteps.tells(1, 0));
-    }
-
-    @Test
-    @Config(qualifiers = "fr")
-    public void inFrenchTheAgendaDownloadsEvents() {
-        assertEquals(
-                "Téléchargement de 5 événements",
-                line(PimDomain.CALENDAR, PimdirEngine.Progress.STAGE_DOWNLOAD, 5));
-        assertEquals(
-                "Téléchargement de 1 message",
-                line(PimDomain.MAIL, PimdirEngine.Progress.STAGE_DOWNLOAD, 1));
     }
 }

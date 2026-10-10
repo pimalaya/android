@@ -1,82 +1,78 @@
 package org.pimalaya;
 
 /**
- * What the sync strip's step line says for one engine stage, in the
- * words of the domain being synced, and when a count is worth telling.
+ * What the sync strip says and how full its bar is.
  *
- * <p>The stages are every engine's ({@link PimdirEngine.Progress}), the
- * nouns are not: a calendar pass downloads events and a mail pass messages,
- * and a line saying contacts while the agenda syncs reads as the wrong sync
- * running. The phone steps are the two mirrors', contacts and calendars, so
- * mail has no text for them and leaves the line as it was.
+ * <p>The line names the domain being synced and nothing of the engine's
+ * steps: a pass reads as one wait. The bar is one progress over an
+ * account's collections, each counted step filling its share of the
+ * collection it runs in: the download first, then the projection onto the
+ * phone for the domains that have one.
  */
 final class SyncSteps {
     private SyncSteps() {}
 
     /**
-     * The text of {@code stage} in {@code domain}: a plural for a counted
-     * stage ({@link #counted}), a string otherwise, 0 when the domain has no
-     * such stage.
+     * The share of a collection its download fills in a domain mirrored on
+     * the phone, the projection filling the rest.
      */
-    static int textOf(PimDomain domain, int stage) {
-        switch (stage) {
-            case PimdirEngine.Progress.STAGE_SERVER:
-                return R.string.sync_step_server;
-            case PimdirEngine.Progress.STAGE_DOWNLOAD:
-                switch (domain) {
-                    case MAIL:
-                        return R.plurals.sync_step_download_mail;
-                    case CALENDAR:
-                        return R.plurals.sync_step_download_events;
-                    default:
-                        return R.plurals.sync_step_download_contacts;
-                }
-            case PimdirEngine.Progress.STAGE_UPLOAD:
-                return R.plurals.sync_step_upload;
-            case PimdirEngine.Progress.STAGE_PHONE:
-                switch (domain) {
-                    case CONTACTS:
-                        return R.string.sync_step_phone;
-                    case CALENDAR:
-                        return R.string.sync_step_phone_calendar;
-                    default:
-                        return 0;
-                }
-            case PimdirEngine.Progress.STAGE_PROJECT:
-                switch (domain) {
-                    case CONTACTS:
-                        return R.plurals.sync_step_project;
-                    case CALENDAR:
-                        return R.plurals.sync_step_project_events;
-                    default:
-                        return 0;
-                }
-            case PimdirEngine.Progress.STAGE_RESOLVE:
-                return R.plurals.sync_step_resolve;
-            default:
-                return 0;
-        }
-    }
+    static final double DOWNLOAD_SHARE = 0.6;
 
-    /** Whether a stage's text carries its count, a plural resource. */
-    static boolean counted(int stage) {
-        return stage != PimdirEngine.Progress.STAGE_SERVER
-                && stage != PimdirEngine.Progress.STAGE_PHONE;
+    /** The strip's line for a pass over {@code domain}. */
+    static int lineOf(PimDomain domain) {
+        switch (domain) {
+            case MAIL:
+                return R.string.sync_line_mail;
+            case CALENDAR:
+                return R.string.sync_line_calendars;
+            default:
+                return R.string.sync_line_contacts;
+        }
     }
 
     /**
-     * The line counting an account's collections as they land: its
-     * mailboxes, address books or calendars.
+     * How much of its collection a counted step has filled at {@code done}
+     * of {@code total}, from 0 to 1.
      */
-    static int collectionsOf(PimDomain domain) {
-        switch (domain) {
-            case MAIL:
-                return R.string.sync_step_mailboxes;
-            case CALENDAR:
-                return R.string.sync_step_calendars;
-            default:
-                return R.string.sync_step_books;
+    static double shareOf(PimDomain domain, int stage, int done, int total) {
+        if (total <= 0) {
+            return 0;
         }
+        double step = (double) Math.min(Math.max(done, 0), total) / total;
+        if (domain == PimDomain.MAIL) {
+            return step;
+        }
+        if (stage == PimdirEngine.Progress.STAGE_PROJECT) {
+            return DOWNLOAD_SHARE + (1 - DOWNLOAD_SHARE) * step;
+        }
+        return DOWNLOAD_SHARE * step;
+    }
+
+    /**
+     * The bar in thousandths: {@code landed} of {@code of} collections plus
+     * the {@code share} of the one under way, or that share alone when no
+     * collection is counted.
+     */
+    static int permille(int landed, int of, double share) {
+        double current = Math.min(Math.max(share, 0), 1);
+        if (of <= 0) {
+            return (int) (current * 1000);
+        }
+        return (int) Math.min(1000, (Math.min(landed, of) + current) * 1000 / of);
+    }
+
+    /**
+     * The bar over a whole pass, in thousandths: the sections passed, whose
+     * weights come to {@code passed}, and the {@code section} thousandths
+     * of the one under way weighing {@code weight}, out of the {@code
+     * planned} whole; the section alone when nothing was planned.
+     */
+    static int across(int passed, int weight, int planned, int section) {
+        if (planned <= 0) {
+            return section;
+        }
+        long whole = (long) passed * 1000 + (long) weight * section;
+        return (int) Math.min(1000, whole / planned);
     }
 
     /**
@@ -90,17 +86,5 @@ final class SyncSteps {
             return false;
         }
         return done >= total || done * 100L / total != (done - 1) * 100L / total;
-    }
-
-    /** The line itself, or null when the domain has no such stage. */
-    static String text(android.content.res.Resources resources, PimDomain domain, int stage,
-            int count) {
-        int text = textOf(domain, stage);
-        if (text == 0) {
-            return null;
-        }
-        return counted(stage)
-                ? resources.getQuantityString(text, count, count)
-                : resources.getString(text);
     }
 }

@@ -268,6 +268,9 @@ final class RemotePass {
             return error;
         }
 
+        // NOTE: how many there are before the first lands, so the bar fills
+        // from the first count rather than from the first mailbox.
+        progress.collections(PimDomain.MAIL, 0, collections.size());
         MailPool.Outcome outcome;
         try (MailPool<MailSession> pool =
                 new MailPool<>(
@@ -339,6 +342,7 @@ final class RemotePass {
             // NOTE: the calendars side by side, as the mailboxes are, the
             // listing's transport the first worker's: the wait was the
             // network's, one calendar after another.
+            progress.collections(PimDomain.CALENDAR, 0, calendars.size());
             String accountId = accountIdOf(account.email);
             AtomicInteger running = new AtomicInteger();
             AtomicInteger landed = new AtomicInteger();
