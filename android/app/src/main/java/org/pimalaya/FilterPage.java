@@ -16,10 +16,10 @@ import java.util.List;
  * indented below with theirs, over the domain's {@link MergedFilter}.
  *
  * <p>Checkboxes rather than switches, to stay apart from an account's on and
- * off in the drawer, which decides what syncs at all: an account that is off
- * is not listed here. An account's box reads partly ticked while some of its
- * collections are hidden. Every tick applies at once, the list behind
- * narrowing as it goes, and is kept.
+ * off in its settings, which decides what syncs at all: an account that is off
+ * is not listed here. Unticking an account folds its collections away, each
+ * keeping its own box for when the account is ticked again. Every tick applies
+ * at once, the list behind narrowing as it goes, and is kept.
  *
  * <p>On calendars and address books, the account's default collection says
  * so, and a writable one of an account whose source names no default offers
@@ -112,11 +112,14 @@ final class FilterPage {
                             tick,
                             true,
                             () -> {
-                                filter.toggleAccount(account.email, ids);
+                                filter.toggleAccount(account.email);
                                 changed();
                             },
                             0,
                             null));
+            if (tick == MergedFilter.Tick.OFF) {
+                continue;
+            }
 
             PimdirCollections.Stored fallback =
                     defaults
@@ -124,7 +127,7 @@ final class FilterPage {
                                     host, account.email, kind, account.collections)
                             : null;
             for (PimdirCollections.Stored collection : account.collections) {
-                boolean ticked = filter.ticked(account.email, collection.id);
+                boolean ticked = filter.chosen(collection.id);
                 boolean isDefault = fallback != null && fallback.id.equals(collection.id);
                 boolean whole = !defaults && MailOffline.whole(host, collection.id);
                 String detail =
@@ -152,12 +155,14 @@ final class FilterPage {
                                 ticked ? MergedFilter.Tick.ON : MergedFilter.Tick.OFF,
                                 false,
                                 () -> {
-                                    filter.toggleCollection(account.email, collection.id, ids);
+                                    filter.toggleCollection(collection.id);
                                     changed();
                                 },
                                 defaults
                                         ? R.string.filter_set_default
-                                        : whole ? R.string.filter_download_stop : R.string.filter_download,
+                                        : whole
+                                                ? R.string.filter_download_stop
+                                                : R.string.filter_download,
                                 defaults ? choose : () -> download(collection, !whole)));
             }
         }
@@ -177,7 +182,10 @@ final class FilterPage {
         }
         new android.app.AlertDialog.Builder(host)
                 .setTitle(R.string.filter_download_title)
-                .setMessage(host.getString(R.string.filter_download_message, host.mail.mailboxLabel(collection)))
+                .setMessage(
+                        host.getString(
+                                R.string.filter_download_message,
+                                host.mail.mailboxLabel(collection)))
                 .setPositiveButton(
                         R.string.filter_download,
                         (dialog, which) -> {
@@ -243,7 +251,7 @@ final class FilterPage {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setMinimumHeight(host.dp(48));
         row.setPadding(host.dp(16) + indent, 0, host.dp(16), 0);
-        row.setBackgroundResource(android.R.drawable.list_selector_background);
+        row.setBackgroundResource(host.ui.resolveAttr(android.R.attr.selectableItemBackground));
         row.addView(box, new LinearLayout.LayoutParams(host.dp(24), host.dp(24)));
         LinearLayout.LayoutParams textParams =
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
