@@ -205,7 +205,7 @@ final class ContactsList {
                     continue;
                 }
                 if (searchQuery.isEmpty()
-                        || entry.card.vcard.toLowerCase().contains(searchQuery)) {
+                        || entry.card.vcard.toLowerCase(java.util.Locale.ROOT).contains(searchQuery)) {
                     matches = true;
                     break;
                 }

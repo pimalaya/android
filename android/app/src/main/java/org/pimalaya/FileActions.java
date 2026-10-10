@@ -4,37 +4,61 @@ import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Bundle;
+import android.provider.DocumentsContract;
 import android.util.Log;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * What can be done with one file, wherever it is shown: open it, share it,
  * save it to a folder, export it. The reader's attachments and the Files tab
- * both come here, each saying where the bytes are read from.
+ * both come here, each saying where the file is read from.
  *
- * <p>Every read and write runs on the io executor, the outcome said in a
- * toast.
+ * <p>A file travels as a file, never as an array: a blob, or the part a
+ * message holds written out by the bridge, copied a buffer at a time, so an
+ * attachment of any size opens. Every read and write runs on the io
+ * executor, the outcome said in a toast.
  */
 final class FileActions {
-    /** Where one file's bytes are read from: its body, or its message's. */
-    interface Bytes {
-        byte[] read() throws Exception;
+    /** Where one file's bytes are: its body's blob, or its message's part written out. */
+    interface Source {
+        File read() throws Exception;
     }
+
+    /** The keys an export waiting on the document picker survives a recreation under. */
+    private static final String EXPORT_PATH = "files.export.path";
+
+    private static final String EXPORT_NAME = "files.export.name";
 
     private final MainActivity host;
 
-    /** The file an export waits on the document picker for. */
-    private FileStore.StoredFile exporting;
+    /** The file an export waits on the document picker for, null for none. */
+    private String exportPath;
 
-    private Bytes exportingBytes;
+    private String exportName;
 
     FileActions(MainActivity host) {
         this.host = host;
+    }
+
+    /** Keeps a waiting export across the activity's recreation. */
+    void save(Bundle state) {
+        state.putString(EXPORT_PATH, exportPath);
+        state.putString(EXPORT_NAME, exportName);
+    }
+
+    void restore(Bundle state) {
+        exportPath = state.getString(EXPORT_PATH);
+        exportName = state.getString(EXPORT_NAME);
     }
 
     /** A file's name, or what stands for none. */
@@ -44,19 +68,26 @@ final class FileActions {
                 : file.name;
     }
 
-    /** The media type a file is handed over as. */
+    /**
+     * The media type a file is handed over as: the one stated, else the one
+     * its name's extension says when none, or only the generic one, is.
+     */
     static String typeOf(FileStore.StoredFile file) {
-        return file.mediaType == null ? PimdirSummary.FILE : file.mediaType;
+        if (file.mediaType != null && !PimdirSummary.FILE.equals(file.mediaType)) {
+            return file.mediaType;
+        }
+        String guessed = OpenedFiles.typeOf(file.name);
+        return guessed == null ? PimdirSummary.FILE : guessed;
     }
 
     /**
      * Opens a file in the app the phone picks for its type, through a copy
      * in the cache ({@link OpenedFiles}).
      */
-    void open(FileStore.StoredFile file, Bytes bytes) {
+    void open(FileStore.StoredFile file, Source source) {
         handOver(
                 file,
-                bytes,
+                source,
                 uri ->
                         new Intent(Intent.ACTION_VIEW)
                                 .setDataAndType(uri, typeOf(file))
@@ -64,10 +95,10 @@ final class FileActions {
     }
 
     /** Shares a file with the app the user picks. */
-    void share(FileStore.StoredFile file, Bytes bytes) {
+    void share(FileStore.StoredFile file, Source source) {
         handOver(
                 file,
-                bytes,
+                source,
                 uri ->
                         Intent.createChooser(
                                 new Intent(Intent.ACTION_SEND)
@@ -79,14 +110,12 @@ final class FileActions {
 
     /** Copies a file into the cache, then starts what {@code intent} makes of its URI. */
     private void handOver(
-            FileStore.StoredFile file,
-            Bytes bytes,
-            java.util.function.Function<Uri, Intent> intent) {
+            FileStore.StoredFile file, Source source, Function<Uri, Intent> intent) {
         host.io.execute(
                 () -> {
                     Uri uri;
                     try {
-                        uri = OpenedFiles.put(host, file.seq, label(file), bytes.read());
+                        uri = OpenedFiles.put(host, file.seq, label(file), source.read());
                     } catch (Exception error) {
                         failed(file, error);
                         return;
@@ -102,33 +131,64 @@ final class FileActions {
                 });
     }
 
-    /** Asks for a destination document, then writes the file there ({@link #exported}). */
-    void export(FileStore.StoredFile file, Bytes bytes) {
-        exporting = file;
-        exportingBytes = bytes;
-        host.startActivityForResult(
-                new Intent(Intent.ACTION_CREATE_DOCUMENT)
-                        .addCategory(Intent.CATEGORY_OPENABLE)
-                        .setType(typeOf(file))
-                        .putExtra(Intent.EXTRA_TITLE, label(file)),
-                MainActivity.REQUEST_FILE_EXPORT);
-    }
-
-    /** Writes the file an export waited on into the document picked. */
-    void exported(Uri target) {
-        FileStore.StoredFile file = exporting;
-        Bytes bytes = exportingBytes;
-        exporting = null;
-        exportingBytes = null;
-        if (file == null) {
-            return;
-        }
+    /**
+     * Reads the file first, then asks for a destination document, and writes
+     * it there once picked ({@link #exported}).
+     */
+    void export(FileStore.StoredFile file, Source source) {
         host.io.execute(
                 () -> {
-                    try (OutputStream out = host.getContentResolver().openOutputStream(target)) {
-                        out.write(bytes.read());
+                    File read;
+                    try {
+                        read = source.read();
                     } catch (Exception error) {
                         failed(file, error);
+                        return;
+                    }
+                    host.postAlive(
+                            () -> {
+                                exportPath = read.getAbsolutePath();
+                                exportName = label(file);
+                                host.startActivityForResult(
+                                        new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                                                .addCategory(Intent.CATEGORY_OPENABLE)
+                                                .setType(typeOf(file))
+                                                .putExtra(Intent.EXTRA_TITLE, exportName),
+                                        MainActivity.REQUEST_FILE_EXPORT);
+                            });
+                });
+    }
+
+    /**
+     * Writes the file an export waited on into the document picked; a
+     * document left half written, or with nothing to write, is deleted.
+     */
+    void exported(Uri target) {
+        String path = exportPath;
+        exportPath = null;
+        exportName = null;
+        host.io.execute(
+                () -> {
+                    try {
+                        if (path == null) {
+                            throw new IllegalStateException(
+                                    host.getString(R.string.attachment_failed));
+                        }
+                        try (InputStream in = new FileInputStream(path);
+                                OutputStream out =
+                                        host.getContentResolver().openOutputStream(target)) {
+                            OpenedFiles.copy(in, out);
+                        }
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "file not exported: " + path, error);
+                        try {
+                            DocumentsContract.deleteDocument(host.getContentResolver(), target);
+                        } catch (Exception ignored) {
+                            // NOTE: a provider refusing the delete leaves the
+                            // empty document, which the toast explains.
+                        }
+                        host.postAlive(
+                                () -> host.toast(host.message(error, R.string.attachment_failed)));
                         return;
                     }
                     host.postAlive(() -> host.toast(host.getString(R.string.files_exported)));
@@ -136,7 +196,7 @@ final class FileActions {
     }
 
     /** Asks which folder to save a file into, or to create one. */
-    void saveToFolder(FileStore.StoredFile file, Bytes bytes) {
+    void saveToFolder(FileStore.StoredFile file, Source source) {
         host.io.execute(
                 () -> {
                     List<PimdirCollections.Stored> folders = host.files.folders();
@@ -156,13 +216,15 @@ final class FileActions {
                                                     if (which < folders.size()) {
                                                         PimdirCollections.Stored folder =
                                                                 folders.get(which);
-                                                        save(file, bytes, folder.id, folder.name);
+                                                        save(file, source, folder.id, folder.name);
                                                     } else {
                                                         askName(
                                                                 R.string.attachment_new_folder,
                                                                 R.string.attachment_create,
                                                                 "",
-                                                                name -> save(file, bytes, null, name));
+                                                                name ->
+                                                                        save(file, source, null,
+                                                                                name));
                                                     }
                                                 })
                                         .setNegativeButton(android.R.string.cancel, null)
@@ -173,22 +235,30 @@ final class FileActions {
 
     /**
      * Saves a file into a folder, creating it first when no id is given, and
-     * says where it went.
+     * says where it went, or that it was there already.
      */
-    private void save(FileStore.StoredFile file, Bytes bytes, String folder, String name) {
+    private void save(FileStore.StoredFile file, Source source, String folder, String name) {
         host.io.execute(
                 () -> {
+                    int said;
                     try {
-                        byte[] read = bytes.read();
                         String target = folder == null ? host.files.createFolder(name) : folder;
-                        host.files.save(target, file, read);
+                        if (target == null) {
+                            host.postAlive(
+                                    () -> host.toast(host.getString(R.string.files_folder_exists)));
+                            return;
+                        }
+                        said =
+                                host.files.save(target, file, source.read())
+                                        ? R.string.attachment_saved
+                                        : R.string.files_already_saved;
                     } catch (Exception error) {
                         failed(file, error);
                         return;
                     }
                     host.postAlive(
                             () -> {
-                                host.toast(host.getString(R.string.attachment_saved, name));
+                                host.toast(host.getString(said, name));
                                 host.filesList.reload();
                             });
                 });

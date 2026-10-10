@@ -22,6 +22,7 @@ import android.widget.TextView;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.PimdirSql;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -181,10 +182,6 @@ final class MessageView {
                         }
                         loaded = host.client.parseMessage(source);
                         if (!message.pending) {
-                            // NOTE: the listing marked the attachment off the
-                            // top-level type alone; the parts are in now.
-                            host.mail.markAttachment(
-                                    message.collection, message.id, loaded.attachmentMark);
                             host.files.recordAttachments(
                                     host.mail.accountIdOf(message.accountEmail),
                                     message.id,
@@ -239,7 +236,7 @@ final class MessageView {
                 });
     }
 
-    /** Fetches one message the store does not hold, and files it. */
+    /** Fetches one message the store does not hold, files it and restates its summary. */
     private byte[] fetch(MailStore.StoredMessage message, AccountEntry account) {
         String[] address = addressOf(message);
         byte[] source;
@@ -251,6 +248,12 @@ final class MessageView {
             source = host.client.fetchMessageSource(session, address[0], address[1]);
         }
         host.mail.saveSource(message.collection, message.id, source);
+        // NOTE: the listing read the summary without the body; the body
+        // just stored restates it.
+        host.mail.restateFromBody(
+                message.collection,
+                message.id,
+                PimdirSql.derive(PimdirSummary.MAIL, source).optJSONObject("summary"));
         return source;
     }
 
@@ -271,20 +274,27 @@ final class MessageView {
                         host.linked.dialog(
                                 ItemLinks.ofMessage(message),
                                 message.subject,
-                                () -> {
-                                    if (current == message) {
-                                        linked(
-                                                message,
-                                                host.links
-                                                        .links(ItemLinks.ofMessage(message))
-                                                        .size());
-                                    }
-                                }));
+                                () ->
+                                        host.io.execute(
+                                                () -> {
+                                                    int links =
+                                                            host.links
+                                                                    .links(
+                                                                            ItemLinks.ofMessage(
+                                                                                    message))
+                                                                    .size();
+                                                    host.postAlive(
+                                                            () -> {
+                                                                if (current == message) {
+                                                                    linked(message, links);
+                                                                }
+                                                            });
+                                                })));
     }
 
     /** What a tap on an attachment offers: open it, share it, or save it to a folder. */
     private void choose(MailStore.StoredMessage message, FileStore.StoredFile attachment) {
-        FileActions.Bytes bytes = () -> bytesOf(message, attachment);
+        FileActions.Source bytes = () -> fileOf(message, attachment);
         CharSequence[] actions = {
             host.getString(R.string.attachment_open),
             host.getString(R.string.files_share),
@@ -307,23 +317,21 @@ final class MessageView {
     }
 
     /**
-     * The bytes of one attachment: a saved copy's body when one was saved,
-     * else the part read from the message's body, the message fetched first
-     * when the store does not hold it.
+     * The file one attachment is read from: a saved copy's blob when one was
+     * saved, else the part the bridge writes out of the message's blob, the
+     * message fetched first when the store does not hold it.
      *
      * <p>NOTE: fetching the part alone (IMAP {@code BODY.PEEK[<section>]},
      * Gmail {@code attachments.get}, Graph {@code /attachments/{id}}, a JMAP
      * blob) would spare the rest of the message; the whole message is what
      * every backend reads today.
      */
-    byte[] bytesOf(MailStore.StoredMessage message, FileStore.StoredFile attachment) {
-        if (attachment.objectHash != null) {
-            byte[] saved = host.files.saved(attachment);
-            if (saved != null) {
-                return saved;
-            }
+    java.io.File fileOf(MailStore.StoredMessage message, FileStore.StoredFile attachment) {
+        java.io.File saved = host.files.saved(attachment);
+        if (saved != null) {
+            return saved;
         }
-        byte[] source = host.mail.source(message);
+        java.io.File source = host.mail.sourceFile(message);
         if (source == null) {
             AccountEntry account = accountOf(message.accountEmail);
             if (account == null) {
@@ -333,10 +341,16 @@ final class MessageView {
                 throw new IllegalStateException(
                         host.getString(R.string.message_not_on_phone_later));
             }
-            source = fetch(message, account);
+            fetch(message, account);
             host.postAlive(host.mailList::reload);
+            source = host.mail.sourceFile(message);
+            if (source == null) {
+                throw new IllegalStateException(host.getString(R.string.attachment_failed));
+            }
         }
-        return host.client.messagePart(source, attachment.part);
+        java.io.File part = OpenedFiles.partFile(host, attachment.seq);
+        host.client.messagePart(source, attachment.part, part);
+        return part;
     }
 
     /**
@@ -385,7 +399,7 @@ final class MessageView {
      * for the body; before it loads, the reply goes to the sender alone.
      */
     private MessageCompose.Prefill reply(MailStore.StoredMessage message, MessageBody body) {
-        String self = message.accountEmail.toLowerCase();
+        String self = message.accountEmail.toLowerCase(java.util.Locale.ROOT);
         java.util.Set<String> to = new java.util.LinkedHashSet<>();
         java.util.Set<String> cc = new java.util.LinkedHashSet<>();
         boolean own = message.fromAddress.equalsIgnoreCase(self);

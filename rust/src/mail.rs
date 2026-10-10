@@ -18,9 +18,12 @@
 //! message saying the same thing. Attachments are the reason that will
 //! change.
 
-use std::{collections::HashMap, fmt::Write as _};
+use std::{borrow::Cow, fmt::Write as _};
 
-use mail_parser::{Address, Message, MessageParser, MessagePartId, MimeHeaders, PartType};
+use mail_parser::{
+    Address, Message, MessageParser, MessagePart, MessagePartId, MimeHeaders, PartType,
+    decoders::{base64::base64_decode, quoted_printable::quoted_printable_decode},
+};
 use serde::Deserialize;
 
 use crate::types::{BridgeError, MessageAttachment, MessageBody};
@@ -324,16 +327,19 @@ pub fn parse(raw: &[u8]) -> Result<MessageBody, BridgeError> {
     })
 }
 
-/// The parts a message carries beside its body, each with its IMAP
-/// section, the key pimdir names its stand-in by (STORAGE Annex A.7).
+/// The parts a message carries as attachments, in document order, each
+/// with its IMAP section, the key pimdir names its stand-in by: exactly
+/// the parts making the attachment mark, those carrying
+/// `Content-Disposition: attachment` (STORAGE Annex A.1, section 14.3).
 fn attachments(parsed: &Message<'_>) -> Vec<MessageAttachment> {
-    let sections = sections(parsed);
-    parsed
-        .attachments
-        .iter()
-        .filter_map(|id| {
-            let part = parsed.parts.get(*id as usize)?;
-            Some(MessageAttachment {
+    sections(parsed)
+        .into_iter()
+        .filter_map(|(id, section)| {
+            let part = parsed.parts.get(id as usize)?;
+            let attached = part
+                .content_disposition()
+                .is_some_and(|disposition| disposition.ctype().eq_ignore_ascii_case("attachment"));
+            attached.then(|| MessageAttachment {
                 name: part.attachment_name().unwrap_or_default().to_string(),
                 mime: part
                     .content_type()
@@ -343,8 +349,8 @@ fn attachments(parsed: &Message<'_>) -> Vec<MessageAttachment> {
                     })
                     .unwrap_or_default()
                     .to_lowercase(),
-                size: part.contents().len() as u64,
-                part: sections.get(id).cloned()?,
+                size: decoded(parsed, part).len() as u64,
+                part: section,
             })
         })
         .collect()
@@ -360,41 +366,64 @@ pub fn part(raw: &[u8], section: &str) -> Result<Vec<u8>, BridgeError> {
         .into_iter()
         .find_map(|(id, held)| (held == section).then_some(id))
         .ok_or_else(|| BridgeError::from(format!("No part {section} in the message")))?;
-    Ok(parsed.parts[id as usize].contents().to_vec())
+    Ok(decoded(&parsed, &parsed.parts[id as usize]).into_owned())
+}
+
+/// One part's bytes as its sender wrote them, only the
+/// `Content-Transfer-Encoding` undone: the parser hands a text part over
+/// converted to UTF-8 from its charset, which would change a file's bytes,
+/// so a text part is read from the raw message instead.
+fn decoded<'a>(parsed: &'a Message<'_>, part: &'a MessagePart<'_>) -> Cow<'a, [u8]> {
+    if !matches!(part.body, PartType::Text(_) | PartType::Html(_)) {
+        return Cow::Borrowed(part.contents());
+    }
+    let raw = parsed
+        .raw_message
+        .get(part.raw_body_offset() as usize..part.raw_end_offset() as usize)
+        .unwrap_or_default();
+    let encoding = part
+        .content_transfer_encoding()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    match encoding.as_str() {
+        "base64" => base64_decode(raw).map_or(Cow::Borrowed(raw), Cow::Owned),
+        "quoted-printable" => quoted_printable_decode(raw).map_or(Cow::Borrowed(raw), Cow::Owned),
+        _ => Cow::Borrowed(raw),
+    }
 }
 
 /// The IMAP section of every part of a message (RFC 3501 section
-/// 6.4.5), by its index in the parser's flat list: a single-part body is
-/// `1`, the children of a multipart count from 1 under it. A nested
-/// message is one part, its own parts left to its own parse.
-fn sections(parsed: &Message<'_>) -> HashMap<MessagePartId, String> {
-    let mut sections = HashMap::new();
+/// 6.4.5), in document order, by its index in the parser's flat list: a
+/// single-part body is `1`, the children of a multipart count from 1
+/// under it. A nested message is one part, its own parts left to its own
+/// parse.
+fn sections(parsed: &Message<'_>) -> Vec<(MessagePartId, String)> {
+    let mut sections = Vec::new();
     match parsed.parts.first().map(|root| &root.body) {
         Some(PartType::Multipart(children)) => number(parsed, children, "", &mut sections),
-        Some(_) => {
-            sections.insert(0, String::from("1"));
-        }
+        Some(_) => sections.push((0, String::from("1"))),
         None => {}
     }
     sections
 }
 
-/// Numbers the children of one multipart under `prefix`, recursing into
-/// the multiparts among them.
+/// Numbers the children of one multipart under `prefix`, each before the
+/// parts nested in it.
 fn number(
     parsed: &Message<'_>,
     children: &[MessagePartId],
     prefix: &str,
-    sections: &mut HashMap<MessagePartId, String>,
+    sections: &mut Vec<(MessagePartId, String)>,
 ) {
     for (index, id) in children.iter().enumerate() {
         let section = format!("{prefix}{}", index + 1);
+        sections.push((*id, section.clone()));
         if let Some(PartType::Multipart(nested)) =
             parsed.parts.get(*id as usize).map(|part| &part.body)
         {
             number(parsed, nested, &format!("{section}."), sections);
         }
-        sections.insert(*id, section);
     }
 }
 
@@ -976,6 +1005,67 @@ mod tests {
         assert_eq!(message.attachments[0].part, "1");
         assert_eq!(message.attachments[0].size, 3);
         assert_eq!(part(raw, "1").unwrap(), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn only_parts_disposed_as_attachments_are_listed() {
+        let raw = b"From: alice@example.org\r\n\
+                    Content-Type: multipart/related; boundary=\"sep\"\r\n\
+                    \r\n\
+                    --sep\r\n\
+                    Content-Type: text/html\r\n\
+                    \r\n\
+                    <img src=\"cid:logo\">\r\n\
+                    --sep\r\n\
+                    Content-Type: image/png\r\n\
+                    Content-Disposition: inline; filename=\"logo.png\"\r\n\
+                    \r\n\
+                    PNG\r\n\
+                    --sep\r\n\
+                    Content-Type: text/plain\r\n\
+                    Content-Disposition: attachment; filename=\"notes.txt\"\r\n\
+                    \r\n\
+                    notes\r\n\
+                    --sep--\r\n";
+
+        let message = parse(raw).unwrap();
+
+        assert_eq!(message.attachments.len(), 1);
+        assert_eq!(message.attachments[0].name, "notes.txt");
+        assert_eq!(message.attachments[0].part, "3");
+    }
+
+    #[test]
+    fn a_text_attachment_keeps_its_bytes() {
+        let mut raw = b"From: alice@example.org\r\n\
+                    Content-Type: multipart/mixed; boundary=\"sep\"\r\n\
+                    \r\n\
+                    --sep\r\n\
+                    Content-Type: text/plain\r\n\
+                    \r\n\
+                    body\r\n\
+                    --sep\r\n\
+                    Content-Type: text/plain; charset=iso-8859-1\r\n\
+                    Content-Disposition: attachment; filename=\"latin.txt\"\r\n\
+                    Content-Transfer-Encoding: 8bit\r\n\
+                    \r\n\
+                    caf"
+        .to_vec();
+        raw.extend_from_slice(b"\xe9\r\n--sep\r\n");
+        raw.extend_from_slice(
+            b"Content-Type: text/plain; charset=utf-8\r\n\
+              Content-Disposition: attachment; filename=\"qp.txt\"\r\n\
+              Content-Transfer-Encoding: quoted-printable\r\n\
+              \r\n\
+              caf=C3=A9\r\n\
+              --sep--\r\n",
+        );
+
+        let message = parse(&raw).unwrap();
+
+        assert_eq!(part(&raw, "2").unwrap(), b"caf\xe9");
+        assert_eq!(message.attachments[0].size, 4);
+        assert_eq!(part(&raw, "3").unwrap(), "café".as_bytes());
     }
 
     #[test]

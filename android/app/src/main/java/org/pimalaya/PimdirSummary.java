@@ -101,6 +101,10 @@ final class PimdirSummary {
 
         exec(db, "UPSERT_" + kind.toUpperCase(Locale.ROOT) + "_SUMMARY", values);
         writeAddresses(db, collection, linkId, addresses, fresh);
+        String rule = ruleOf(kind);
+        if (rule != null) {
+            link(db, rule, linkId);
+        }
         if (fresh) {
             return;
         }
@@ -113,6 +117,48 @@ final class PimdirSummary {
         scope.put("collection", collection);
         scope.put("link_id", linkId);
         exec(db, "STAMP_ITEM", scope);
+    }
+
+    /**
+     * The automatic-reference rule (STORAGE section 14.2) a summary of this
+     * kind runs once written: a mail refers to its sender's card, a card
+     * gathers the mail from its addresses, a calendar item the mail inviting
+     * to it. The invitation from the mail's side runs when its body is stored
+     * ({@link MailStore#restateFromBody}), the summary holding none before.
+     */
+    private static String ruleOf(String kind) {
+        switch (kind) {
+            case "mail":
+                return "LINK_SENDERS_OF";
+            case "contact":
+                return "LINK_MAIL_FROM";
+            case "event":
+            case "task":
+                return "LINK_INVITATIONS_TO";
+            default:
+                return null;
+        }
+    }
+
+    /** Runs one rule for one item, or for every item with a null link id. */
+    static void link(SQLiteDatabase db, String rule, String linkId) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("link_id", linkId);
+        exec(db, rule, values);
+    }
+
+    /**
+     * Runs every rule over the whole store, once, for a store written before
+     * automatic references.
+     */
+    static void linkAll(SQLiteDatabase db) {
+        for (String rule :
+                new String[] {
+                    "LINK_SENDERS_OF", "LINK_INVITATIONS_OF", "LINK_MAIL_FROM",
+                    "LINK_INVITATIONS_TO"
+                }) {
+            link(db, rule, null);
+        }
     }
 
     /**

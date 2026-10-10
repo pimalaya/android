@@ -156,7 +156,7 @@ final class PimdirDb extends SQLiteOpenHelper {
 
     @Override
     public void onOpen(SQLiteDatabase db) {
-        reconcileDraftShape(db);
+        reconcileDraftShape(db, blobs);
     }
 
     /**
@@ -177,8 +177,11 @@ final class PimdirDb extends SQLiteOpenHelper {
      * {@code client} feature, and a copy of it here goes stale the first time
      * a draft folds a column in or back out, with nothing to notice.
      */
-    private static void reconcileDraftShape(SQLiteDatabase db) {
+    private static void reconcileDraftShape(SQLiteDatabase db, File blobs) {
+        rebuildCollections(db);
         Map<String, String> existing = heldObjects(db);
+        Set<String> mail = columnsOf(db, "mail_summary");
+        boolean invitations = !mail.isEmpty() && !mail.contains("invitation");
 
         // The tables first, columns and all: an index and a trigger name the
         // columns they read, so creating one over a table that has not been
@@ -245,8 +248,137 @@ final class PimdirDb extends SQLiteOpenHelper {
                 db.execSQL(statement);
             }
         }
+
+        if (invitations) {
+            backfillReferences(db, blobs);
+        }
+        FileStore.reconcileRoles(db);
     }
 
+    /**
+     * Rebuilds {@code collections} when the constraint its role is checked
+     * by predates the canonical one (the {@code attachments} role, §14.3),
+     * which no {@code ALTER TABLE} changes: §6's procedure, foreign keys off
+     * so the drop cascades nothing, {@code legacy_alter_table} on so the
+     * rename leaves the other tables' triggers alone, the rows copied, the
+     * keys checked before the commit. Its indexes and triggers go with the
+     * old table and come back with the reconcile's second pass.
+     */
+    private static void rebuildCollections(SQLiteDatabase db) {
+        String create = null;
+        for (String statement : PimdirSql.schema()) {
+            if (statement.trim().toUpperCase().startsWith("CREATE TABLE")
+                    && "collections".equals(declaredName(statement))) {
+                create = statement;
+            }
+        }
+        String stored = heldObjects(db).get("collections");
+        if (create == null || stored == null || !create.contains("'attachments'")
+                || stored.contains("'attachments'")) {
+            return;
+        }
+
+        Set<String> columns = columnsOf(db, "collections");
+        columns.retainAll(canonicalColumns().get("collections").keySet());
+        String list = String.join(", ", columns);
+        db.setForeignKeyConstraintsEnabled(false);
+        try {
+            db.beginTransaction();
+            try {
+                db.execSQL("PRAGMA legacy_alter_table = ON");
+                db.execSQL(create.replaceFirst("collections", "collections_rebuild"));
+                db.execSQL("INSERT INTO collections_rebuild (" + list + ") SELECT " + list
+                        + " FROM collections");
+                db.execSQL("DROP TABLE collections");
+                db.execSQL("ALTER TABLE collections_rebuild RENAME TO collections");
+                db.execSQL("PRAGMA legacy_alter_table = OFF");
+                try (Cursor broken = db.rawQuery("PRAGMA foreign_key_check", null)) {
+                    if (broken.moveToFirst()) {
+                        throw new IllegalStateException(
+                                "The collections rebuild left a foreign key dangling");
+                    }
+                }
+                db.setTransactionSuccessful();
+            } finally {
+                db.endTransaction();
+            }
+        } finally {
+            db.setForeignKeyConstraintsEnabled(true);
+        }
+    }
+
+    /**
+     * The references a store written before automatic references owes, once:
+     * every held message's invitation derived from its body (Annex A.1),
+     * then every rule over the whole store (§14.2), the invitation's among
+     * them. Read on {@code list_mail_page_filtered}'s keyset over every
+     * mailbox; a body the blob directory lacks leaves its row as it is.
+     */
+    private static void backfillReferences(SQLiteDatabase db, File blobs) {
+        List<String> mailboxes = new ArrayList<>();
+        try (Cursor cursor =
+                db.rawQuery(PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0], null)) {
+            while (cursor.moveToNext()) {
+                if (PimdirSummary.MAIL.equals(cursor.getString(2))) {
+                    mailboxes.add(cursor.getString(0));
+                }
+            }
+        }
+        PimdirBlobs store = new PimdirBlobs(blobs);
+        db.beginTransaction();
+        try {
+            Map<String, Object> values = new LinkedHashMap<>();
+            values.put("collections", new org.json.JSONArray(mailboxes).toString());
+            values.put("limit", 500);
+            while (!mailboxes.isEmpty()) {
+                PimdirSql.Bound bound = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
+                List<String[]> held = new ArrayList<>();
+                int read = 0;
+                try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+                    while (cursor.moveToNext()) {
+                        read++;
+                        if (!cursor.isNull(4)) {
+                            held.add(new String[] {
+                                cursor.getString(0), cursor.getString(2), cursor.getString(4)
+                            });
+                        }
+                        values.put("after_key", cursor.isNull(5) ? "" : cursor.getString(5));
+                        values.put("after_seq", cursor.getLong(1));
+                        values.put("after_collection", cursor.getString(0));
+                    }
+                }
+                for (String[] row : held) {
+                    restateInvitation(db, store, row[0], row[1], row[2]);
+                }
+                if (read < 500) {
+                    break;
+                }
+            }
+            PimdirSummary.linkAll(db);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    /** Writes one held message's summary from its body when it names an invitation. */
+    private static void restateInvitation(
+            SQLiteDatabase db, PimdirBlobs blobs, String collection, String linkId, String hash) {
+        try {
+            byte[] body = blobs.get(hash);
+            if (body == null) {
+                return;
+            }
+            org.json.JSONObject summary =
+                    PimdirSql.derive(PimdirSummary.MAIL, body).optJSONObject("summary");
+            org.json.JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
+            if (mail != null && mail.has("invitation")) {
+                PimdirSummary.write(db, collection, linkId, summary);
+            }
+        } catch (java.io.IOException | RuntimeException unreadable) {
+            Log.w("pimalaya", "invitation not derived: " + linkId, unreadable);
+        }
+    }
     /**
      * Every table, index and trigger the store holds, mapping its name to the
      * text it was created with, which is what {@code sqlite_master} keeps.

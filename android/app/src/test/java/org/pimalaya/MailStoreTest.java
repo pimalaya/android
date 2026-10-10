@@ -509,11 +509,17 @@ public class MailStoreTest {
         // What a range weighs, sizes the store does not know told apart.
         sized(ONE, "s1", "Sized", "2026-03-02T09:00:00Z", 1_000, false);
         sized(ONE, "s2", "Sized", "2026-03-02T10:00:00Z", 2_000, false);
-        MailStore.Sum known = store.sum(query, "2026-03-02T00:00:00Z", null);
+        MailStore.Sum known = store.sum(query, "2026-03-02T00:00:00Z", null, null);
         assertEquals(2, known.count);
         assertEquals(3_000, known.size);
         assertEquals(0, known.unknown);
-        MailStore.Sum unknown = store.sum(query, "2026-02-01T00:00:00Z", "2026-03-02T00:00:00Z");
+        // NOTE: held 1 is what a release frees, 0 what a download fetches.
+        store.saveSource(
+                store.collectionOf(ONE, "INBOX"), "s1", SOURCE.getBytes(StandardCharsets.UTF_8));
+        assertEquals(1, store.sum(query, "2026-03-02T00:00:00Z", null, 1).count);
+        assertEquals(1, store.sum(query, "2026-03-02T00:00:00Z", null, 0).count);
+        MailStore.Sum unknown =
+                store.sum(query, "2026-02-01T00:00:00Z", "2026-03-02T00:00:00Z", null);
         assertEquals(58, unknown.count);
         assertEquals(58, unknown.unknown);
         assertTrue(

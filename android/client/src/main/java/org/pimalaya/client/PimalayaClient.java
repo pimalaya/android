@@ -522,12 +522,16 @@ public class PimalayaClient {
     }
 
     /**
-     * The decoded bytes of one attachment of a message, by the section
-     * {@link MessageBody.Attachment#part} names. No network.
+     * Writes the decoded bytes of one attachment of the message stored at
+     * {@code source}, by the section {@link MessageBody.Attachment#part}
+     * names, to {@code target}, answering its size. Files on both sides, so
+     * a large part never sits on the heap twice. No network.
      */
-    public byte[] messagePart(byte[] source, String part) {
-        JSONObject reply = object(Native.messagePart(source, part));
-        return Base64.getDecoder().decode(reply.optString("bytes"));
+    public long messagePart(java.io.File source, String part, java.io.File target) {
+        return object(
+                        Native.messagePart(
+                                source.getAbsolutePath(), part, target.getAbsolutePath()))
+                .optLong("size");
     }
 
     /**

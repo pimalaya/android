@@ -210,7 +210,7 @@ final class ListHeader {
                     @Override
                     public void afterTextChanged(Editable s) {
                         clear.setVisibility(s.length() > 0 ? View.VISIBLE : View.GONE);
-                        String query = s.toString().trim().toLowerCase();
+                        String query = s.toString().trim().toLowerCase(java.util.Locale.ROOT);
                         if (pendingSearch != null) {
                             host.main.removeCallbacks(pendingSearch);
                         }

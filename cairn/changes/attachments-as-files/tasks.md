@@ -18,5 +18,6 @@ Java paths are relative to android/app/src/main/java/org/pimalaya/.
 - [x] Strings in values/ and values-fr/
 - [x] Tests: `PimdirDbTest` (an older store gains the file table and trigger), `FileStoreTest`
 - [x] CHANGELOG [Unreleased]
+- [x] Moved by automatic-references: stand-ins only for parts disposed as attachments, none under a derived key, the attachments collection carries the role `attachments`, the body restates the whole summary
 - [ ] Device test: open and save an attachment, offline and online, a message whose body was released
 - [ ] Fold the delta into spec/mail.md, log, archive

@@ -350,6 +350,33 @@ final class PimdirItems {
                 new Object[] {hash, bytes.length});
     }
 
+    /** Files a file's bytes and indexes them, streamed, leaving the refcount to the caller. */
+    void storeObject(SQLiteDatabase db, String hash, java.io.File source) {
+        try {
+            blobs.put(hash, source);
+        } catch (IOException error) {
+            throw new IllegalStateException("Could not store the body " + hash, error);
+        }
+        db.execSQL(
+                "INSERT INTO objects(hash, size, refcount) VALUES(?, ?, 0)"
+                        + " ON CONFLICT(hash) DO NOTHING",
+                new Object[] {hash, source.length()});
+    }
+
+    /** The file one body is stored in, null when the store holds no such blob. */
+    java.io.File blobFile(String hash) {
+        if (hash == null) {
+            return null;
+        }
+        java.io.File file = blobs.pathOf(hash);
+        return file.isFile() ? file : null;
+    }
+
+    /** The file one item's body is stored in, null when it holds none. */
+    java.io.File objectFile(String collection, String linkId) {
+        return blobFile(objectOf(readable(), collection, linkId));
+    }
+
     /** Moves the refcount by the difference one reference made, never globally. */
     void adjustRefcount(SQLiteDatabase db, String before, String after) {
         if (before == null ? after == null : before.equals(after)) {

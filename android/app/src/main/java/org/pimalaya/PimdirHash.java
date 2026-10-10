@@ -51,6 +51,20 @@ final class PimdirHash {
         }
     }
 
+    /** The content hash of a file's bytes, read a buffer at a time. */
+    static String of(java.io.File file) throws java.io.IOException {
+        try (java.io.InputStream in = new java.io.FileInputStream(file)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[64 * 1024];
+            for (int read = in.read(buffer); read >= 0; read = in.read(buffer)) {
+                digest.update(buffer, 0, read);
+            }
+            return base32(digest.digest());
+        } catch (NoSuchAlgorithmException error) {
+            throw new IllegalStateException("SHA-256 is not available", error);
+        }
+    }
+
     /**
      * The first {@link #BYTES} bytes of a digest as lowercase base32, no padding.
      *

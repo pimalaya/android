@@ -315,22 +315,34 @@ pub extern "system" fn Java_org_pimalaya_client_Native_parseMessage<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// `Native.messagePart`: the decoded bytes of one part of a stored
-/// message, by its IMAP section, as `{"bytes"}` base64-encoded, or
-/// `{"error": ".."}` when the message holds no such part. Pure, as
-/// [`Java_org_pimalaya_client_Native_parseMessage`] is.
+/// `Native.messagePart`: writes the decoded bytes of one part of a stored
+/// message, read from the file at `source`, by its IMAP section, to the
+/// file at `target`, answering `{"size"}`, or `{"error": ".."}` when the
+/// message holds no such part. Files on both sides, so no copy of the
+/// part crosses the boundary: an attachment of tens of megabytes is one
+/// decoded buffer, never a base64 string on the Java heap.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_messagePart<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
-    source: JByteArray<'local>,
+    source: JString<'local>,
     section: JString<'local>,
+    target: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
-        let raw = env.convert_byte_array(&source).unwrap_or_default();
+        let source = read_string(env, &source);
         let section = read_string(env, &section);
-        let json = match mail::part(&raw, &section) {
-            Ok(bytes) => json!({ "bytes": mail::base64(&bytes) }).to_string(),
+        let target = read_string(env, &target);
+        let written = std::fs::read(&source)
+            .map_err(|err| BridgeError::from(err.to_string()))
+            .and_then(|raw| mail::part(&raw, &section))
+            .and_then(|bytes| {
+                std::fs::write(&target, &bytes)
+                    .map(|()| bytes.len())
+                    .map_err(|err| BridgeError::from(err.to_string()))
+            });
+        let json = match written {
+            Ok(size) => json!({ "size": size }).to_string(),
             Err(err) => error_json(err),
         };
 
