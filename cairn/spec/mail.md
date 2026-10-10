@@ -568,3 +568,11 @@ While the body step runs for an account, the account's pill in the drawer SHALL 
 - GIVEN an account set to whole mailbox
 - WHEN the drawer is opened while its bodies download
 - THEN its pill counts the messages left, falling as they land
+
+### Requirement: The mail list shows its background download
+While the background fill downloads older mail or bodies, the mail list SHALL show a download glyph beside its count, pulsing gently in opacity, and holding still when the system removes animations; a long press SHALL name it (*Loading older mail*). It SHALL show only once a step downloaded something, and SHALL go when the fill ends or pauses (the app left, a metered network, no network).
+
+#### Scenario: After the first mail sync
+- GIVEN a first mail sync that landed the newest messages of each mailbox
+- WHEN the fill widens them in the background
+- THEN the glyph pulses beside the count, and goes once the fill stops

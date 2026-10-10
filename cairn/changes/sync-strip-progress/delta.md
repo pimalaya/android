@@ -3,7 +3,7 @@ cairn: delta
 change: sync-strip-progress
 ---
 
-Folds into `spec/offline-store.md`.
+Folds into `spec/offline-store.md`, the background download glyph into `spec/mail.md`.
 
 ## ADDED Requirements
 

@@ -18,4 +18,4 @@ change: sync-strip-progress
 - [x] Build: `:app:assembleDebug` and `:app:testDebugUnitTest`
 - [x] Device feedback 2026-10-10: one bar across the whole pass, sized per domain and account from the stored collections; the background fill's pulsing download glyph
 - [ ] Device test
-- [ ] Fold the delta into the spec, log, CHANGELOG
+- [x] Fold the delta into the spec, log, CHANGELOG
