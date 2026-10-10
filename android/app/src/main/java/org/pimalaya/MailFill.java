@@ -16,7 +16,7 @@ import java.util.function.ToIntFunction;
  * draws from the input whose head is next.
  *
  * <p>A chunk is a number of messages, never a span of time: a step of the
- * fill widens by {@link MailEngine#FILL_CHUNK}.
+ * fill widens by {@link MailEngine#fillChunk}.
  */
 final class MailFill {
     private MailFill() {}

@@ -69,6 +69,14 @@ pub struct Client<'a, 'local> {
     transport: &'a JObject<'local>,
     exchange: Exchange,
     waited: Duration,
+    /// The Gmail account this native call's requests are paced under, once
+    /// it sent one ([`throttle::pace_gmail`]): a mail call speaks to one
+    /// account.
+    gmail_pace: Option<String>,
+    /// Whether this native call serves someone waiting on it, a message
+    /// being opened, rather than background work: its Gmail requests
+    /// skip the pacing queue ([`throttle::pace_gmail`]).
+    pub(crate) urgent: bool,
 }
 
 impl<'a, 'local> Client<'a, 'local> {
@@ -79,6 +87,8 @@ impl<'a, 'local> Client<'a, 'local> {
             transport,
             exchange: Exchange::default(),
             waited: Duration::ZERO,
+            gmail_pace: None,
+            urgent: false,
         }
     }
 }

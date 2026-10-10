@@ -58,8 +58,8 @@ final class PhoneQueue {
             return;
         }
         Context app = context.getApplicationContext();
-        PimdirDb pimdir = new PimdirDb(app);
-        CardStore base = new CardStore(app, pimdir);
+        PimdirDb pimdir = PimdirDb.shared(app);
+        CardStore base = CardStore.shared(app);
         shared =
                 new PhoneQueue(
                         new Handler(Looper.getMainLooper()),

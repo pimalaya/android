@@ -135,7 +135,7 @@
     <string name="conflict_auto_resolved">Conflict resolved automatically; changes push on the next sync</string>
     <string name="contact_diverged_pending">Diverged fields await review</string>
     <string name="sync_busy">Wait for the sync to finish</string>
-    <string name="sync_overlay_preparing">Preparing synchronization</string>
+    <string name="sync_line_starting">Starting the sync</string>
     <string name="sync_line_mail">Syncing mail</string>
     <string name="sync_line_contacts">Syncing contacts</string>
     <string name="sync_line_calendars">Syncing calendars</string>

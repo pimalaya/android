@@ -372,6 +372,9 @@ fn read_source(
         return client.fetch_graph_source(session.credentials().password, id);
     }
     if session.is_gmail() {
+        // NOTE: a session of no pool run is the reader's, opening the
+        // message for someone waiting on it: no queue behind the fill.
+        client.urgent = session.alone();
         return client.fetch_gmail_source(session.credentials().password, id);
     }
 

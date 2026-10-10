@@ -1,0 +1,29 @@
+---
+cairn: log
+change: gmail-first-sync-stall
+landed: 2026-10-10
+---
+
+# A Gmail first sync no longer stalls on a minute's wait
+
+Capabilities moved: mail (modified: an HTTP sync rides out throttling, Gmail is paced below its quota, a mailbox is stored whole, older mail fills in behind; added: opening a message waits on no background work, the bridge logs to logcat), offline-store (modified: a sync says what it is working on; added: the process holds one store).
+
+**Evidence.** Logcat of a fresh Google onboarding (2026-10-10, 20:20): nothing logged from 20:20:38 to 20:22:11, then SENT (69) and INBOX (235) each after 92 s on the network, *12 mailboxes on 2 sessions in 94021 ms*; a body round of 7 messages in 62 s. No throttling line, because the bridge never installed a `log` logger. A read-only probe on google@pimalaya.org (io-gmail std client, service account): two batches of 50 metadata reads side by side drew 17 to 33 of 50 inner `429 Too many concurrent requests for user` (`rateLimitExceeded`, `RESOURCE_EXHAUSTED`), one batch of 50 alone 3 to 10, one batch of 25 at a time paced at 200 units a second one 429 in 300 reads, 300 envelopes in 7.5 s.
+
+**Cause.** Each refused inner answer was read again alone, and every Google 429 was classed a per-minute quota (`throttle::throttled`, `429 if google`): the worker slept to the next wall-clock minute and exhausted the process's minute budget, holding the other worker a minute too, twice in that pass. The pacing counted a batch as one request of 40 a second though it bills 250 units, so two workers sent five times Gmail's 250 units a second. The 62 s body round was the same minute budget, spent by the listing. INBOX listed 235 because the test account's mail is imported: its `Date` headers spread over the year while Gmail received it at once, so the 50 newest received reach below the account's bound and the first chunk is the bound (`since 2026-01-01`), the listing reading every envelope received since.
+
+**Logger.** rust/src/logger.rs installs a `log` logger at `JNI_OnLoad`: liblog's `__android_log_write` under the tag `pimalaya` on Android, stderr on the host; debug for the bridge's records, info for the libraries (io-http narrates every chunk at debug).
+
+**Throttle** (rust/src/client/throttle.rs). `throttled` answers `Minute` only for a body naming a per-minute (or per-100-seconds) quota, in its message or `ErrorInfo` metadata, `None` for a daily one, `Burst` for any other 429, 503 or Google rate-limit 403. A `Retry-After` header, else the `Retry after <RFC 3339>` Gmail's message names, sets the wait. Each wait is logged at debug with the status, Google's reasons and message (capped), the kind of wait and the retry number; the give-up stays a warning.
+
+**Pacing.** Per account, keyed by the bearer token the requests carry (a refreshed token starts a fresh bucket; idle ones are dropped after two minutes): a cell rate over quota units, 200 a second with 50 units of burst, and the sliding minute budget of 4,800 units as a ceiling. A native call serving the reader (`Client::urgent`, set for a Gmail `fetchMessageSource` on a session of no pool run) takes no slot behind the queue, pushes the queue back by its units, and draws on a separate 1,200-unit minute. A minute-quota refusal exhausts both budgets of that account only. Batches are 25 reads, one per account in flight (`gmail_gate`). Every Gmail request logs its call name, units, pacing wait and answer time.
+
+**Floor stop.** `GmailEnvelope` carries `internalDate`. `list_label` reads a round's page a batch at a time and ends the round once a whole batch was received before the scope's floor, rather than reading the two days of margin `after:` takes. A message dated in scope but received below the floor is still read when it sits in the batch crossing the floor; one more than a batch of mail behind it is not (a sender's clock running ahead by that much).
+
+**Java.** `MailEngine.fillChunk`: 100 messages a fill step on Gmail, 500 elsewhere; `widen` logs its floor and time. `MessageView.load` runs on `MainActivity.interactive`, its store writes (`saveSource`, `restateFromBody`, `recordAttachments`) under `PimdirEngine.STORE`. `PimdirDb.shared` and `CardStore.shared` give every production caller one store; the leak came from `SyncService`, `CalendarSyncService`, `BackgroundJob`, `PhoneQueue` and `ZoneChange` each opening a new `PimdirDb` (and `CardStore`) never closed, which the collector reported, and which also tripped `PRAGMA journal_mode` on a file another pool held. The strip says *Starting the sync* / *Démarrage de la synchronisation* while nothing is counted (`sync_overlay_preparing` renamed `sync_line_starting`), and the indeterminate bar is `drawable/sync_bar_indeterminate`, the determinate track at full height with an accent segment sliding over it, where the platform's indeterminate drawable drew thinner bars of its own in the same view.
+
+**Tests.** Rust: classification of concurrency, user-rate, minute, daily and other refusals; a concurrency 429 retried within a second; the named instant waited; pacing by units, after a pause, per account, urgent ahead of a spent minute; `a_first_chunk_stops_reading_a_batch_past_its_floor` (75 reads, not 98, the late-dated message kept); batch counts at 25. Java: `PimdirDbTest.theProcessSharesOneStore`.
+
+**Expected.** An ordinary account's first chunk (100 to 150 reads) in 3 to 5 s; the imported test account's whole-bound first chunk (about 600 reads) in about 15 s, against 94 s. Not measured on the device yet.
+
+**Left open.** The spec's count of 100 ids per Gmail page was stale (the code lists 500); corrected here. The pacing key is the token, so a refresh mid-pass briefly runs two buckets for one user. The `mail-download-window` change's delta still quotes 100 ids.

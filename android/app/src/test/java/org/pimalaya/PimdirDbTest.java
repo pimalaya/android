@@ -4,6 +4,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import android.database.Cursor;
@@ -40,6 +41,23 @@ public class PimdirDbTest {
     public void setUp() {
         store = new PimdirDb(RuntimeEnvironment.getApplication());
         db = store.getWritableDatabase();
+    }
+
+    /**
+     * Every caller of the process shares one store, so a sync adapter run
+     * opens no connection pool of its own to leak: the same helper, the
+     * same database, whichever context asks.
+     */
+    @Test
+    public void theProcessSharesOneStore() {
+        PimdirDb shared = PimdirDb.shared(RuntimeEnvironment.getApplication());
+        assertSame(shared, PimdirDb.shared(RuntimeEnvironment.getApplication()));
+        assertSame(
+                shared.getReadableDatabase(),
+                PimdirDb.shared(RuntimeEnvironment.getApplication()).getWritableDatabase());
+        assertSame(
+                CardStore.shared(RuntimeEnvironment.getApplication()),
+                CardStore.shared(RuntimeEnvironment.getApplication()));
     }
 
     /** A collection, an item in it, and the binding of one source. */

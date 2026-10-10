@@ -47,6 +47,28 @@ public class CardStore extends SQLiteOpenHelper {
 
     private final PimdirCollections collections;
 
+    /** The process's one card store, null until first asked for ({@link #shared}). */
+    private static CardStore shared;
+
+    /** The pimdir store the shared card store was opened over. */
+    private static PimdirDb sharedOver;
+
+    /**
+     * The process's one card store, over the shared pimdir store
+     * ({@link PimdirDb#shared}): one connection pool for every caller, a
+     * sync adapter's included, rather than one left open per call.
+     */
+    static synchronized CardStore shared(Context context) {
+        PimdirDb pimdir = PimdirDb.shared(context);
+        if (shared == null || sharedOver != pimdir) {
+            shared = new CardStore(context.getApplicationContext() == null
+                    ? context
+                    : context.getApplicationContext(), pimdir);
+            sharedOver = pimdir;
+        }
+        return shared;
+    }
+
     public CardStore(Context context, PimdirDb pimdir) {
         super(context, DATABASE, null, VERSION);
         this.collections = new PimdirCollections(pimdir, context);

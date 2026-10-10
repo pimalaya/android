@@ -229,11 +229,11 @@ Submitting a message SHALL NOT be retried: a submission whose reply was lost is 
 ### Requirement: A sync says what it is working on, in every domain
 A running sync SHALL show, under the large title of every list, a strip naming what the pass is on over one thin bar: the account on a first line once the pass reaches one (*me@example.org*), the domain on the line below (*Syncing contacts*), never the engine's steps. The three domains SHALL report alike, so a wait reads the same whichever one is being synced.
 
-The bar SHALL be one progress over the whole pass, every account and every domain it runs, and SHALL never move back while the pass runs. Before it starts, the pass SHALL be sized in sections, one per domain and account, each weighing the collections stored for it, one at least; a section SHALL fill its weight however many collections its listing turns up, and sections MAY fill at different speeds. Within a section, the pass SHALL tell how many collections it will run before the first one runs, and each collection SHALL fill its share as it lands; within it, a step moving items batch by batch, the members a listing did not carry being read or the contacts and events being written to the phone, SHALL fill part of that share, the download the first three fifths and the phone the rest where the domain has a phone mirror, the download all of it for mail; a calendar's steps only while that calendar runs alone. The bar SHALL run indeterminate only before anything is counted.
+The bar SHALL be one progress over the whole pass, every account and every domain it runs, and SHALL never move back while the pass runs. Before it starts, the pass SHALL be sized in sections, one per domain and account, each weighing the collections stored for it, one at least; a section SHALL fill its weight however many collections its listing turns up, and sections MAY fill at different speeds. Within a section, the pass SHALL tell how many collections it will run before the first one runs, and each collection SHALL fill its share as it lands; within it, a step moving items batch by batch, the members a listing did not carry being read or the contacts and events being written to the phone, SHALL fill part of that share, the download the first three fifths and the phone the rest where the domain has a phone mirror, the download all of it for mail; a calendar's steps only while that calendar runs alone. The bar SHALL run indeterminate only before anything is counted, its line then saying the sync is starting (*Starting the sync*) rather than naming a domain, and SHALL keep the determinate bar's track, height and margins.
 
 While the strip shows, the list's search field and its chips SHALL be hidden, and SHALL come back when it goes; a search field holding a query SHALL stay.
 
-The strip SHALL NOT block the app: the lists, the reader and the composer stay usable while it runs, the lists refreshing when the pass ends. One pass SHALL run at a time, a pull or the drawer's sync asked for meanwhile doing nothing, and an account SHALL NOT be deleted while a pass runs. The strip's line SHALL never be empty: it SHALL open saying it is preparing, and SHALL follow the pass to the next account and domain.
+The strip SHALL NOT block the app: the lists, the reader and the composer stay usable while it runs, the lists refreshing when the pass ends. One pass SHALL run at a time, a pull or the drawer's sync asked for meanwhile doing nothing, and an account SHALL NOT be deleted while a pass runs. The strip's line SHALL never be empty: it SHALL open saying the sync is starting, and SHALL follow the pass to the next account and domain once something is counted.
 
 #### Scenario: A pass over every domain
 - GIVEN the drawer's sync
@@ -249,7 +249,7 @@ The strip SHALL NOT block the app: the lists, the reader and the composer stay u
 #### Scenario: The first frame
 - GIVEN a sync the user has just asked for
 - WHEN the strip shows, before any round trip
-- THEN its line says it is preparing
+- THEN its line says the sync is starting, over an indeterminate bar the size of the counting one
 
 #### Scenario: A book's first download
 - GIVEN an account of one CardDAV book of 230 contacts, mirrored on the phone, synced for the first time
@@ -560,3 +560,11 @@ The app SHALL open every database it owns, the pimdir store included, on the SQL
 - GIVEN a device whose platform SQLite is 3.18
 - WHEN the app creates the store
 - THEN the `STRICT` tables are created and the `RETURNING` and `json_each` statements run, on the bundled SQLite
+
+### Requirement: The process holds one store
+Every caller in the process, the activity, the sync adapters, the background job, the phone queue and the time-zone receiver, SHALL share one store (`PimdirDb`) and one card store, so no call leaves a connection pool open behind it.
+
+#### Scenario: A phone sync
+- GIVEN an address book mirrored on the phone
+- WHEN the system runs its sync adapter
+- THEN the adapter uses the process's store, and no SQLite connection is reported leaked

@@ -86,8 +86,8 @@ public class BackgroundJob extends JobService {
     }
 
     private void check(Context context) {
-        PimdirDb pimdir = new PimdirDb(context);
-        CardStore base = new CardStore(context, pimdir);
+        PimdirDb pimdir = PimdirDb.shared(context);
+        CardStore base = CardStore.shared(context);
         SecureStore store = new SecureStore(context);
         MailStore mail = new MailStore(context, pimdir);
         EventStore events = new EventStore(context, pimdir);

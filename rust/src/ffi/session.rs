@@ -46,6 +46,9 @@ pub struct MailSession {
     /// shared with the run's other sessions; the session's own until it
     /// joins one ([`Self::join_run`]).
     gmail: Arc<GmailRun>,
+    /// The pool run the session works for, 0 outside one: a session of
+    /// its own, the reader's.
+    run: i64,
 }
 
 /// The protocol state a session carries, if its backend has any.
@@ -144,6 +147,7 @@ impl MailSession {
             password: password.into(),
             kind,
             gmail: Arc::default(),
+            run: 0,
         })
     }
 
@@ -195,6 +199,13 @@ impl MailSession {
     pub fn join_run(&mut self, run: i64) {
         let account = format!("{}\u{0}{}", self.base_url, self.login);
         self.gmail = gmail_sync::join(&account, run);
+        self.run = run;
+    }
+
+    /// Whether the session works for no pool run: opened for one request
+    /// someone waits on, as the reader opening a message does.
+    pub fn alone(&self) -> bool {
+        self.run == 0
     }
 
     /// Whether the backend behind this session is IMAP.

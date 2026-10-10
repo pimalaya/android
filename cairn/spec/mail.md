@@ -12,7 +12,7 @@ A message rises off that rung by being opened, or by the body step its account's
 
 Every mailbox runs io-pimdir's sync, on a session of the pass's pool, from its floor: its first pass lists its 50 newest messages, the floor being the oldest `Date` among them, and the end of the list and a background fill widen it a chunk of messages at a time toward the account's bound, all of its mail or the last N months on the `Date` header. One LIST names the mailboxes and a few are listed at once, each on its own session, the inbox begun first. A mailbox carrying a `(UIDVALIDITY, HIGHESTMODSEQ)` checkpoint on a QRESYNC server is selected with the QRESYNC parameter, the server streams what moved and what went, and the messages that moved are read for their header fields in the same pass. Anything else is a round: the UIDs `UID SEARCH` finds in the scope, newest first, read 500 at a time by `UID FETCH` for their markers, their size and the header fields pimdir STORAGE Annex A derives a summary from, `Content-Type` among them and no `BODYSTRUCTURE`. The connection ENABLEs CONDSTORE and QRESYNC once when it opens, which RFC 7162 section 3.1 requires before the parameter may be used at all. Every message a page lists arrives named, so it is listed the moment its page lands: there is no probe and no upgrade after the sync. Each page is one write with the round's resume cursor, so a pass cut off resumes below its last page, and only the round's last page retires what it found absent, within the bound; mail outside the bound is never deleted by a sync, only by narrowing the bound.
 
-Four backends answer, told apart by the account's base URL: an IMAP session behind an `imaps://` URL, the RFC 8621 verbs behind the `jmap://` marker, Microsoft Graph behind the `msgraph://` one, the Gmail API behind `google://`. A Graph mailbox is a mail folder named by its path, its mail listed by band with `/messages` filtered on `sentDateTime`, 1,000 messages a page with the summary `$select`, and its changes followed by one message delta link made with no filter, whose first pass names the folder's messages by id once, made by the pass after the first chunk. A JMAP mailbox is an `Email/query` sorted by `receivedAt`, 500 a page capped by the server's `maxObjectsInGet`, then `Email/changes` from the state read before its first page. A Gmail mailbox is a label filing mail, its name already a path, listed 100 ids a page narrowed by `after:`, each read for its metadata under the account's pacing, and every round after replays the history from the `historyId` taken before its first page, reading again only the messages that moved. Graph, Gmail and JMAP address a mailbox by the id their roster names, and a session reads the roster the first time it addresses a mailbox it holds no id for, whatever opened it: a pass, a widening, a step of the fill, or a session reopened after its connection died.
+Four backends answer, told apart by the account's base URL: an IMAP session behind an `imaps://` URL, the RFC 8621 verbs behind the `jmap://` marker, Microsoft Graph behind the `msgraph://` one, the Gmail API behind `google://`. A Graph mailbox is a mail folder named by its path, its mail listed by band with `/messages` filtered on `sentDateTime`, 1,000 messages a page with the summary `$select`, and its changes followed by one message delta link made with no filter, whose first pass names the folder's messages by id once, made by the pass after the first chunk. A JMAP mailbox is an `Email/query` sorted by `receivedAt`, 500 a page capped by the server's `maxObjectsInGet`, then `Email/changes` from the state read before its first page. A Gmail mailbox is a label filing mail, its name already a path, listed 500 ids a page narrowed by `after:`, read for their metadata 25 to a batch under the account's pacing, a round stopping a batch past its floor, and every round after replays the history from the `historyId` taken before its first page, reading again only the messages that moved. Graph, Gmail and JMAP address a mailbox by the id their roster names, and a session reads the roster the first time it addresses a mailbox it holds no id for, whatever opened it: a pass, a widening, a step of the fill, or a session reopened after its connection died.
 
 The reader can write three things back, all of them into the store: the markers, whether the message has been read, and where it is filed. A fourth thing, a message of their own, does not go into the store at all: it is an action on the store's queue, pimdir's write door for what a process wants done somewhere else, with a mail submission as the standard's own worked example. The outbox is that queue read back.
 
@@ -309,12 +309,17 @@ A message's date SHALL be its `Date` header, which pimdir STORAGE Annex A.1 stor
 - THEN the message's date is 08:00
 
 ### Requirement: An HTTP sync rides out throttling
-Every HTTP backend (Graph, Gmail, Google Calendar and People, CalDAV, CardDAV, JMAP) SHALL send a request again when the server answers 429, 503, or 403 with Google's `rateLimitExceeded` or `userRateLimitExceeded`, after the `Retry-After` the server named, or else after an exponential back-off with jitter. The waiting SHALL be bounded per request and per native call, a `Retry-After` past the bound SHALL NOT be waited, and past the bound the throttled answer SHALL fail the request as any error does. An answer whose end cannot be told SHALL NOT be retried.
+Every HTTP backend (Graph, Gmail, Google Calendar and People, CalDAV, CardDAV, JMAP) SHALL send a request again when the server answers 429, 503, or 403 with Google's `rateLimitExceeded` or `userRateLimitExceeded`, after the `Retry-After` the server named or the instant Google's message names (`Retry after …`), or else after an exponential back-off with jitter from about a second. Only an answer naming a per-minute quota (`Quota exceeded for quota metric … per minute per user`) SHALL wait for the next minute, and on Gmail SHALL hold the account's pacing a minute; a rate or concurrency refusal (`Too many concurrent requests for user`, `User-rate limit exceeded`) SHALL NOT. An answer naming a daily quota SHALL NOT be retried. The waiting SHALL be bounded per request and per native call, a `Retry-After` past the bound SHALL NOT be waited, and past the bound the throttled answer SHALL fail the request as any error does. An answer whose end cannot be told SHALL NOT be retried. Every wait SHALL be logged at debug with the answer's status and reason.
 
 #### Scenario: Graph asks for a pause
 - GIVEN a Graph request answered 429 with `Retry-After: 2`
 - WHEN the bridge reads the answer
 - THEN it waits two seconds and sends the request again, and the sync goes on with the answer to that
+
+#### Scenario: Gmail's concurrency limit
+- GIVEN a Gmail metadata read answered 429 `Too many concurrent requests for user`
+- WHEN the bridge reads the answer
+- THEN it sends the read again within a second or two, never waiting for the next minute
 
 #### Scenario: A server that keeps throttling
 - GIVEN a server answering 503 to every request
@@ -322,15 +327,15 @@ Every HTTP backend (Graph, Gmail, Google Calendar and People, CalDAV, CardDAV, J
 - THEN the request fails with the 503 within the bound, and the pass reports it as it reports any error
 
 ### Requirement: Gmail is paced below its quota
-Gmail API requests SHALL be paced near 40 a second across every worker of the process, below the 50 metadata reads a second Gmail's per-user quota allows, rather than sent until Gmail answers 429.
+Gmail API requests SHALL be paced per account, every worker, the body step and the reader sharing the account's pacing: near 200 quota units a second, below the 250 Gmail's per-user rate allows, each request costing its documented units and a batch the units of every call it carries; and within a per-minute ceiling of four fifths of the project's 6,000 units per user. Metadata SHALL be read 25 to a batch, one batch of an account at a time: the calls of a batch run side by side at Gmail, and 50 of them draw its per-user concurrency 429s. A request someone waits on, a message being opened, SHALL take no slot behind the background requests, which wait for it, and SHALL draw on the fifth of the minute's quota the ceiling leaves. Every pacing wait SHALL be logged at debug.
 
 #### Scenario: A first round over a large label
-- GIVEN several workers reading Gmail envelopes at once
+- GIVEN two workers reading Gmail envelopes at once
 - WHEN they run
-- THEN their requests together go out at about 40 a second
+- THEN their batches of 25 go out one at a time, about 40 reads a second together
 
 ### Requirement: A mailbox is stored whole
-A mail round SHALL list every message of a mailbox within its scope (its floor, within the account's bound), newest first in the source's own recency order, a page at a time (500 UIDs per IMAP `UID FETCH`, 1,000 per Graph `/messages` page, 100 ids per Gmail `messages.list`, 500 per JMAP `Email/query` capped by the server's `maxObjectsInGet`), each page landing in one write. Every message a page lists SHALL arrive named by the summary and sort key of pimdir STORAGE Annex A read in the listing itself, with no body: IMAP from `FLAGS`, `RFC822.SIZE` and the header fields Annex A reads, `Content-Type` among them and no `BODYSTRUCTURE`; Graph from the summary `$select`, or for a delta's member the store does not bind, from that `$select` read by id; Gmail from its metadata read; JMAP from `Email/get`'s summary properties. An interrupted round SHALL resume from the cursor its last landed page left, and a cursor the source refuses SHALL restart the round. A round's last page SHALL retire only what it found absent within its scope; mail outside it SHALL never be deleted by a sync. The chunks and the fill (A mailbox is listed a chunk at a time, Older mail fills in behind) SHALL bring a mailbox whole within the account's bound.
+A mail round SHALL list every message of a mailbox within its scope (its floor, within the account's bound), newest first in the source's own recency order, a page at a time (500 UIDs per IMAP `UID FETCH`, 1,000 per Graph `/messages` page, 500 ids per Gmail `messages.list`, 500 per JMAP `Email/query` capped by the server's `maxObjectsInGet`), each page landing in one write. Every message a page lists SHALL arrive named by the summary and sort key of pimdir STORAGE Annex A read in the listing itself, with no body: IMAP from `FLAGS`, `RFC822.SIZE` and the header fields Annex A reads, `Content-Type` among them and no `BODYSTRUCTURE`; Graph from the summary `$select`, or for a delta's member the store does not bind, from that `$select` read by id; Gmail from its metadata read; JMAP from `Email/get`'s summary properties. A Gmail round SHALL read its page's metadata a batch at a time in Gmail's order of reception, and SHALL end once a whole batch was received before its floor: the two days of margin its `after:` takes below the floor are mail dated below it but for a sender's clock running ahead by more than a batch of mail. An interrupted round SHALL resume from the cursor its last landed page left, and a cursor the source refuses SHALL restart the round. A round's last page SHALL retire only what it found absent within its scope; mail outside it SHALL never be deleted by a sync. The chunks and the fill (A mailbox is listed a chunk at a time, Older mail fills in behind) SHALL bring a mailbox whole within the account's bound.
 
 #### Scenario: A first pass over a large mailbox
 - GIVEN a mailbox of 100k messages and an empty store
@@ -461,7 +466,7 @@ Every mail pass SHALL take an account's mailboxes in the order of the role each 
 - THEN *Inbox* is begun first and *Sent Items* second
 
 ### Requirement: Older mail fills in behind
-After a mail tab's first sync, and on every return to the app or pass after it, every mailbox SHALL widen 500 messages at a time toward its account's bound, with no dialog, the inbox and the sent mail first, a mailbox never listed before one that only lacks older mail, and among them the one holding the most recent floor; a step SHALL widen the next mailboxes in that order side by side, as many of an account as its pool runs. The fill SHALL run only while the app is in the foreground, on a network that is not metered, and while no other sync runs; it SHALL stop on an error, and SHALL resume from the floors the store covers.
+After a mail tab's first sync, and on every return to the app or pass after it, every mailbox SHALL widen 500 messages at a time toward its account's bound (100 on Gmail, whose reads are paced by quota units, so a step holds nothing else up for long), with no dialog, the inbox and the sent mail first, a mailbox never listed before one that only lacks older mail, and among them the one holding the most recent floor; a step SHALL widen the next mailboxes in that order side by side, as many of an account as its pool runs. The fill SHALL run only while the app is in the foreground, on a network that is not metered, and while no other sync runs; it SHALL stop on an error, and SHALL resume from the floors the store covers.
 
 #### Scenario: Leaving the app
 - GIVEN a fill under way
@@ -576,3 +581,19 @@ While the background fill downloads older mail or bodies, the mail list SHALL sh
 - GIVEN a first mail sync that landed the newest messages of each mailbox
 - WHEN the fill widens them in the background
 - THEN the glyph pulses beside the count, and goes once the fill stops
+
+### Requirement: Opening a message waits on no background work
+Opening a message SHALL NOT queue behind a step of the background fill or of the body download: its read and its fetch SHALL run apart from them, and what it writes to the store SHALL be written under the store's one writer. A Gmail fetch for the reader SHALL go out ahead of the background requests the account's pacing holds (Gmail is paced below its quota).
+
+#### Scenario: Opening during the fill
+- GIVEN the background fill widening a Gmail account
+- WHEN a message not on the phone is opened
+- THEN its fetch goes out at once, and the reader renders it without waiting for the fill's step to end
+
+### Requirement: The bridge logs to logcat
+The Rust bridge SHALL log to logcat under the app's tag: debug and above for its own records, info and above for the libraries under it. Every Gmail request SHALL be logged at debug with its call, its quota units, its pacing wait and the time its answer took, and every widening of a mailbox with its floor and the time it took.
+
+#### Scenario: A throttled request
+- GIVEN a Gmail request answered 429
+- WHEN the bridge waits to send it again
+- THEN logcat names the status, the reason and the wait

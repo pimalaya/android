@@ -85,6 +85,14 @@ class MailEngine extends PimdirEngine {
     static final int FILL_CHUNK = 500;
 
     /**
+     * Messages one step of the background fill widens a Gmail mailbox by:
+     * its reads are paced by quota units, five a message, so a step of
+     * {@link #FILL_CHUNK} would hold the io executor for half a minute and
+     * more, every pull or widening the user asks for queued behind it.
+     */
+    static final int GMAIL_FILL_CHUNK = 100;
+
+    /**
      * Told after every write a mail driver's pass lands, so a list showing
      * the store redraws as the pages of a first pass land; null when
      * nothing is listening. Called on the sync thread.
@@ -171,6 +179,13 @@ class MailEngine extends PimdirEngine {
         return widen(collection, count, null);
     }
 
+    /** The messages one step of the background fill widens this account's mailboxes by. */
+    int fillChunk() {
+        return session != null && PimalayaClient.isGoogle(session.account())
+                ? GMAIL_FILL_CHUNK
+                : FILL_CHUNK;
+    }
+
     /**
      * {@link #widen(String, int)}, never below {@code stop} (null for no
      * stop): a chunk of a window moved back to a date, listed a chunk at a
@@ -189,10 +204,15 @@ class MailEngine extends PimdirEngine {
         boolean accountWide = MailStore.accountWide(pimdir.context(), accountId);
         String ceiling = accountWide ? accountFloor(coverage.since) : coverage.since;
         step(Progress.STAGE_SERVER, 0);
+        long started = System.nanoTime();
         String floor = timedFloor(collection, ceiling, count);
         if (accountWide && floor != null && coverage.since.compareTo(floor) <= 0) {
             floor = timedFloor(collection, coverage.since, count);
         }
+        Log.d(
+                "pimalaya",
+                "mail widen " + collection + " by " + count + " below " + ceiling + ": floor "
+                        + floor + " in " + (System.nanoTime() - started) / 1_000_000 + " ms");
         list(collection, MailScope.clamp(floor, bound));
         return true;
     }
