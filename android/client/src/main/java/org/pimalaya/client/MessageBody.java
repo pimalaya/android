@@ -75,26 +75,27 @@ public final class MessageBody {
     }
 
     /**
-     * One attachment, named and measured but not carried.
-     *
-     * <p>The bytes stay on the server: the reader shows attachments as
-     * badges saying what is there, and downloading one is a separate act
-     * that needs somewhere to put it.
+     * One attachment, named and measured but not carried: its bytes stay
+     * in the message, read by section ({@link PimalayaClient#messagePart}).
      */
     public static final class Attachment {
         /** The file name, empty when the part names none. */
         public final String name;
 
-        /** The media type, lowercased. */
+        /** The media type, lowercased; empty when the part states none. */
         public final String mime;
 
-        /** The size in octets, zero when the source reports none. */
+        /** The decoded size in octets. */
         public final long size;
 
-        public Attachment(String name, String mime, long size) {
+        /** The IMAP section of the part (RFC 3501 section 6.4.5): {@code 2}, {@code 1.2}. */
+        public final String part;
+
+        public Attachment(String name, String mime, long size, String part) {
             this.name = name;
             this.mime = mime;
             this.size = size;
+            this.part = part;
         }
     }
 }

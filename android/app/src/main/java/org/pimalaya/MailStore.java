@@ -151,7 +151,8 @@ final class MailStore {
 
     /**
      * Drops everything one account's mail left in the store: its mailboxes,
-     * their messages, and whatever was still waiting to go out.
+     * their messages, their attachments, and whatever was still waiting to
+     * go out.
      */
     void forget(String accountEmail) {
         String outbox = outboxOf(accountEmail);
@@ -166,6 +167,7 @@ final class MailStore {
         }
 
         collections.replace(accountEmail, PimdirSummary.MAIL, List.of());
+        new FileStore(context, store).forget(accounts.idOf(accountEmail));
         context.getSharedPreferences(TRASH_PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .remove(accountEmail)

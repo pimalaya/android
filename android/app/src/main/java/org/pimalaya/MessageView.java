@@ -1,6 +1,7 @@
 package org.pimalaya;
 
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
@@ -12,6 +13,7 @@ import android.view.View;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -175,18 +177,7 @@ final class MessageView {
                                                     : R.string.message_not_on_phone_later));
                         }
                         if (source == null) {
-                            String[] address = addressOf(message);
-                            // NOTE: a connection of its own, opened and closed
-                            // around this one read. A reader opening a message
-                            // is not a pass, and holding one open for the time
-                            // someone spends reading would be holding it for
-                            // no work at all.
-                            try (MailSession session = host.openMail(account)) {
-                                source =
-                                        host.client.fetchMessageSource(
-                                                session, address[0], address[1]);
-                            }
-                            host.mail.saveSource(message.collection, message.id, source);
+                            source = fetch(message, account);
                             fetched = true;
                         }
                         loaded = host.client.parseMessage(source);
@@ -195,11 +186,23 @@ final class MessageView {
                             // top-level type alone; the parts are in now.
                             host.mail.markAttachment(
                                     message.collection, message.id, loaded.attachmentMark);
+                            host.files.recordAttachments(
+                                    host.mail.accountIdOf(message.accountEmail),
+                                    message.id,
+                                    loaded.attachments);
                         }
                     } catch (Exception error) {
                         Log.w("pimalaya", "message fetch failed: " + message.id, error);
                         failure = error;
                     }
+                    // NOTE: read whether or not the body came: a message
+                    // whose body was released keeps its attachments listed.
+                    List<FileStore.Attachment> files =
+                            message.pending
+                                    ? new ArrayList<>()
+                                    : host.files.attachments(
+                                            host.mail.accountIdOf(message.accountEmail),
+                                            message.id);
 
                     MessageBody outcome = loaded;
                     boolean stored = fetched;
@@ -217,6 +220,7 @@ final class MessageView {
                                 if (current != message) {
                                     return;
                                 }
+                                badges(files);
                                 if (outcome == null) {
                                     state(host.message(error, R.string.message_failed));
                                     return;
@@ -230,6 +234,195 @@ final class MessageView {
                                     write(MailEngine.SEEN, true);
                                 }
                             });
+                });
+    }
+
+    /** Fetches one message the store does not hold, and files it. */
+    private byte[] fetch(MailStore.StoredMessage message, AccountEntry account) {
+        String[] address = addressOf(message);
+        byte[] source;
+        // NOTE: a connection of its own, opened and closed around this one
+        // read. A reader opening a message is not a pass, and holding one
+        // open for the time someone spends reading would be holding it for
+        // no work at all.
+        try (MailSession session = host.openMail(account)) {
+            source = host.client.fetchMessageSource(session, address[0], address[1]);
+        }
+        host.mail.saveSource(message.collection, message.id, source);
+        return source;
+    }
+
+    /** What a tap on an attachment offers: open it, or save it to a folder. */
+    private void choose(MailStore.StoredMessage message, FileStore.Attachment attachment) {
+        CharSequence[] actions = {
+            host.getString(R.string.attachment_open), host.getString(R.string.attachment_save)
+        };
+        new AlertDialog.Builder(host)
+                .setTitle(label(attachment))
+                .setItems(
+                        actions,
+                        (dialog, which) -> {
+                            if (which == 0) {
+                                view(message, attachment);
+                            } else {
+                                pickFolder(message, attachment);
+                            }
+                        })
+                .show();
+    }
+
+    /**
+     * Opens one attachment in the app the phone picks for its type, through
+     * a copy in the cache ({@link OpenedFiles}).
+     */
+    private void view(MailStore.StoredMessage message, FileStore.Attachment attachment) {
+        host.io.execute(
+                () -> {
+                    Uri uri;
+                    try {
+                        uri =
+                                OpenedFiles.put(
+                                        host,
+                                        attachment.seq,
+                                        label(attachment),
+                                        bytesOf(message, attachment));
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "attachment not read: " + attachment.linkId, error);
+                        host.postAlive(
+                                () -> host.toast(host.message(error, R.string.attachment_failed)));
+                        return;
+                    }
+                    host.postAlive(
+                            () -> {
+                                Intent intent =
+                                        new Intent(Intent.ACTION_VIEW)
+                                                .setDataAndType(
+                                                        uri,
+                                                        attachment.mediaType == null
+                                                                ? PimdirSummary.FILE
+                                                                : attachment.mediaType)
+                                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                try {
+                                    host.startActivity(intent);
+                                } catch (ActivityNotFoundException none) {
+                                    host.toast(host.getString(R.string.attachment_no_app));
+                                }
+                            });
+                });
+    }
+
+    /**
+     * The bytes of one attachment: a saved copy's body when one was saved,
+     * else the part read from the message's body, the message fetched first
+     * when the store does not hold it.
+     *
+     * <p>NOTE: fetching the part alone (IMAP {@code BODY.PEEK[<section>]},
+     * Gmail {@code attachments.get}, Graph {@code /attachments/{id}}, a JMAP
+     * blob) would spare the rest of the message; the whole message is what
+     * every backend reads today.
+     */
+    private byte[] bytesOf(MailStore.StoredMessage message, FileStore.Attachment attachment) {
+        if (attachment.objectHash != null) {
+            byte[] saved = host.files.saved(attachment);
+            if (saved != null) {
+                return saved;
+            }
+        }
+        byte[] source = host.mail.source(message);
+        if (source == null) {
+            AccountEntry account = accountOf(message.accountEmail);
+            if (account == null) {
+                throw new IllegalStateException(host.getString(R.string.message_no_account));
+            }
+            if (!host.online()) {
+                throw new IllegalStateException(
+                        host.getString(R.string.message_not_on_phone_later));
+            }
+            source = fetch(message, account);
+            host.postAlive(host.mailList::reload);
+        }
+        return host.client.messagePart(source, attachment.part);
+    }
+
+    /** Asks which folder to save an attachment into, or to create one. */
+    private void pickFolder(MailStore.StoredMessage message, FileStore.Attachment attachment) {
+        host.io.execute(
+                () -> {
+                    List<PimdirCollections.Stored> folders = host.files.folders();
+                    host.postAlive(
+                            () -> {
+                                CharSequence[] labels = new CharSequence[folders.size() + 1];
+                                for (int index = 0; index < folders.size(); index++) {
+                                    labels[index] = folders.get(index).name;
+                                }
+                                labels[folders.size()] =
+                                        host.getString(R.string.attachment_new_folder);
+                                new AlertDialog.Builder(host)
+                                        .setTitle(R.string.attachment_save)
+                                        .setItems(
+                                                labels,
+                                                (dialog, which) -> {
+                                                    if (which < folders.size()) {
+                                                        PimdirCollections.Stored folder =
+                                                                folders.get(which);
+                                                        save(message, attachment, folder.id,
+                                                                folder.name);
+                                                    } else {
+                                                        newFolder(message, attachment);
+                                                    }
+                                                })
+                                        .setNegativeButton(android.R.string.cancel, null)
+                                        .show();
+                            });
+                });
+    }
+
+    /** Asks for a folder's name, creates it and saves the attachment there. */
+    private void newFolder(MailStore.StoredMessage message, FileStore.Attachment attachment) {
+        EditText name = new EditText(host);
+        name.setHint(R.string.attachment_folder_name);
+        name.setSingleLine(true);
+        FrameLayout frame = new FrameLayout(host);
+        frame.setPadding(host.dp(24), host.dp(8), host.dp(24), 0);
+        frame.addView(name);
+        new AlertDialog.Builder(host)
+                .setTitle(R.string.attachment_new_folder)
+                .setView(frame)
+                .setPositiveButton(
+                        R.string.attachment_create,
+                        (dialog, which) -> {
+                            String typed = name.getText().toString().trim();
+                            if (!typed.isEmpty()) {
+                                save(message, attachment, null, typed);
+                            }
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * Saves one attachment into a folder, creating it first when no id is
+     * given, and says where it went.
+     */
+    private void save(
+            MailStore.StoredMessage message,
+            FileStore.Attachment attachment,
+            String folder,
+            String name) {
+        host.io.execute(
+                () -> {
+                    try {
+                        byte[] bytes = bytesOf(message, attachment);
+                        String target = folder == null ? host.files.createFolder(name) : folder;
+                        host.files.save(target, attachment, bytes);
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "attachment not saved: " + attachment.linkId, error);
+                        host.postAlive(
+                                () -> host.toast(host.message(error, R.string.attachment_failed)));
+                        return;
+                    }
+                    host.postAlive(
+                            () -> host.toast(host.getString(R.string.attachment_saved, name)));
                 });
     }
 
@@ -673,8 +866,6 @@ final class MessageView {
             date(stamp);
         }
 
-        badges(message.attachments);
-
         if (MessageBody.HTML.equals(message.kind)) {
             body(html(message.body));
         } else if (MessageBody.PLAIN.equals(message.kind)) {
@@ -820,7 +1011,7 @@ final class MessageView {
      * alternative is a horizontal scroll, which hides the third
      * attachment of a message behind an edge nothing says is there.
      */
-    private void badges(List<MessageBody.Attachment> attachments) {
+    private void badges(List<FileStore.Attachment> attachments) {
         LinearLayout container = host.findViewById(R.id.message_view_attachments);
         container.removeAllViews();
         container.setVisibility(attachments.isEmpty() ? View.GONE : View.VISIBLE);
@@ -831,8 +1022,10 @@ final class MessageView {
 
         LinearLayout row = null;
         int used = 0;
-        for (MessageBody.Attachment attachment : attachments) {
+        MailStore.StoredMessage message = current;
+        for (FileStore.Attachment attachment : attachments) {
             View badge = badge(attachment);
+            badge.setOnClickListener(view -> choose(message, attachment));
             badge.measure(free, free);
             int width = badge.getMeasuredWidth() + host.dp(8);
 
@@ -855,7 +1048,7 @@ final class MessageView {
     }
 
     /** One attachment badge: a paperclip, the name, and how big it is. */
-    private View badge(MessageBody.Attachment attachment) {
+    private View badge(FileStore.Attachment attachment) {
         ImageView icon = new ImageView(host);
         icon.setImageResource(R.drawable.ic_attach_file);
         icon.setImageTintList(
@@ -885,12 +1078,18 @@ final class MessageView {
     }
 
     /** What a badge calls an attachment, size included. */
-    private String name(MessageBody.Attachment attachment) {
-        String name =
-                attachment.name.isEmpty()
-                        ? host.getString(R.string.message_attachment_unnamed)
-                        : attachment.name;
-        return attachment.size <= 0 ? name : name + " · " + size(attachment.size);
+    private String name(FileStore.Attachment attachment) {
+        String name = label(attachment);
+        return attachment.size == null || attachment.size <= 0
+                ? name
+                : name + " · " + size(attachment.size);
+    }
+
+    /** An attachment's name, or what stands for none. */
+    private String label(FileStore.Attachment attachment) {
+        return attachment.name.isEmpty()
+                ? host.getString(R.string.message_attachment_unnamed)
+                : attachment.name;
     }
 
     /** A byte count in the largest unit that keeps it under a thousand. */

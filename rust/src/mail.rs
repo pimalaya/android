@@ -18,9 +18,9 @@
 //! message saying the same thing. Attachments are the reason that will
 //! change.
 
-use std::fmt::Write as _;
+use std::{collections::HashMap, fmt::Write as _};
 
-use mail_parser::{Address, MessageParser, MimeHeaders, PartType};
+use mail_parser::{Address, Message, MessageParser, MessagePartId, MimeHeaders, PartType};
 use serde::Deserialize;
 
 use crate::types::{BridgeError, MessageAttachment, MessageBody};
@@ -314,21 +314,7 @@ pub fn parse(raw: &[u8]) -> Result<MessageBody, BridgeError> {
             .unwrap_or_default(),
         kind: kind.to_string(),
         body,
-        attachments: parsed
-            .attachments()
-            .map(|part| MessageAttachment {
-                name: part.attachment_name().unwrap_or_default().to_string(),
-                mime: part
-                    .content_type()
-                    .map(|content| match content.subtype() {
-                        Some(subtype) => format!("{}/{subtype}", content.ctype()),
-                        None => content.ctype().to_string(),
-                    })
-                    .unwrap_or_else(|| String::from("application/octet-stream"))
-                    .to_lowercase(),
-                size: part.contents().len() as u64,
-            })
-            .collect(),
+        attachments: attachments(&parsed),
         attachment_mark: match io_pimdir::summary::mail::derive(raw).summary {
             Some(io_pimdir::summary::PimdirSummary::Mail(summary)) => {
                 summary.attachment.unwrap_or(false)
@@ -336,6 +322,80 @@ pub fn parse(raw: &[u8]) -> Result<MessageBody, BridgeError> {
             _ => false,
         },
     })
+}
+
+/// The parts a message carries beside its body, each with its IMAP
+/// section, the key pimdir names its stand-in by (STORAGE Annex A.7).
+fn attachments(parsed: &Message<'_>) -> Vec<MessageAttachment> {
+    let sections = sections(parsed);
+    parsed
+        .attachments
+        .iter()
+        .filter_map(|id| {
+            let part = parsed.parts.get(*id as usize)?;
+            Some(MessageAttachment {
+                name: part.attachment_name().unwrap_or_default().to_string(),
+                mime: part
+                    .content_type()
+                    .map(|content| match content.subtype() {
+                        Some(subtype) => format!("{}/{subtype}", content.ctype()),
+                        None => content.ctype().to_string(),
+                    })
+                    .unwrap_or_default()
+                    .to_lowercase(),
+                size: part.contents().len() as u64,
+                part: sections.get(id).cloned()?,
+            })
+        })
+        .collect()
+}
+
+/// The decoded bytes of one part of a raw message, by its IMAP section:
+/// an attachment opened from the body the store holds.
+pub fn part(raw: &[u8], section: &str) -> Result<Vec<u8>, BridgeError> {
+    let parsed = MessageParser::default()
+        .parse(raw)
+        .ok_or_else(|| BridgeError::from("Could not read the message"))?;
+    let id = sections(&parsed)
+        .into_iter()
+        .find_map(|(id, held)| (held == section).then_some(id))
+        .ok_or_else(|| BridgeError::from(format!("No part {section} in the message")))?;
+    Ok(parsed.parts[id as usize].contents().to_vec())
+}
+
+/// The IMAP section of every part of a message (RFC 3501 section
+/// 6.4.5), by its index in the parser's flat list: a single-part body is
+/// `1`, the children of a multipart count from 1 under it. A nested
+/// message is one part, its own parts left to its own parse.
+fn sections(parsed: &Message<'_>) -> HashMap<MessagePartId, String> {
+    let mut sections = HashMap::new();
+    match parsed.parts.first().map(|root| &root.body) {
+        Some(PartType::Multipart(children)) => number(parsed, children, "", &mut sections),
+        Some(_) => {
+            sections.insert(0, String::from("1"));
+        }
+        None => {}
+    }
+    sections
+}
+
+/// Numbers the children of one multipart under `prefix`, recursing into
+/// the multiparts among them.
+fn number(
+    parsed: &Message<'_>,
+    children: &[MessagePartId],
+    prefix: &str,
+    sections: &mut HashMap<MessagePartId, String>,
+) {
+    for (index, id) in children.iter().enumerate() {
+        let section = format!("{prefix}{}", index + 1);
+        if let Some(PartType::Multipart(nested)) =
+            parsed.parts.get(*id as usize).map(|part| &part.body)
+        {
+            number(parsed, nested, &format!("{section}."), sections);
+        }
+        sections.insert(*id, section);
+    }
 }
 
 /// A header's addresses as one line, the way a header reads them.
@@ -894,6 +954,50 @@ mod tests {
         assert_eq!(message.attachments.len(), 1);
         assert_eq!(message.attachments[0].name, "invoice.pdf");
         assert_eq!(message.attachments[0].mime, "application/pdf");
+        assert_eq!(message.attachments[0].part, "2");
+        assert_eq!(part(raw, "2").unwrap(), b"%PDF");
+        assert_eq!(part(raw, "1.2").unwrap(), b"<p>rich body</p>");
+        assert!(part(raw, "3").is_err());
+    }
+
+    #[test]
+    fn a_single_part_attachment_is_section_one_and_decoded() {
+        let raw = b"From: alice@example.org\r\n\
+                    Content-Type: application/octet-stream\r\n\
+                    Content-Disposition: attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.bin\r\n\
+                    Content-Transfer-Encoding: base64\r\n\
+                    \r\n\
+                    AAEC\r\n";
+
+        let message = parse(raw).unwrap();
+
+        assert_eq!(message.attachments.len(), 1);
+        assert_eq!(message.attachments[0].name, "résumé.bin");
+        assert_eq!(message.attachments[0].part, "1");
+        assert_eq!(message.attachments[0].size, 3);
+        assert_eq!(part(raw, "1").unwrap(), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn a_part_stating_no_type_has_none() {
+        let raw = b"From: alice@example.org\r\n\
+                    Content-Type: multipart/mixed; boundary=\"sep\"\r\n\
+                    \r\n\
+                    --sep\r\n\
+                    Content-Type: text/plain\r\n\
+                    \r\n\
+                    text\r\n\
+                    --sep\r\n\
+                    Content-Disposition: attachment; filename=\"notes\"\r\n\
+                    \r\n\
+                    notes\r\n\
+                    --sep--\r\n";
+
+        let message = parse(raw).unwrap();
+
+        assert_eq!(message.attachments.len(), 1);
+        assert_eq!(message.attachments[0].mime, "");
+        assert_eq!(message.attachments[0].part, "2");
     }
 
     #[test]

@@ -216,20 +216,20 @@ pub struct MessageBody {
     pub attachment_mark: bool,
 }
 
-/// One attachment of a message, named and measured but not carried.
-///
-/// The bytes stay on the server: the reader shows attachments as badges
-/// saying what is there, and downloading one is a separate act that has
-/// somewhere to put it.
+/// One attachment of a message, named and measured but not carried: its
+/// bytes stay in the message, read by section ([`crate::mail::part`]).
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageAttachment {
     /// The file name, or an empty string when the part names none.
     pub name: String,
-    /// The media type, lowercased.
+    /// The media type, lowercased, parameters dropped; empty when the
+    /// part states none.
     pub mime: String,
-    /// The size in octets, zero when the source does not report one.
+    /// The decoded size in octets.
     pub size: u64,
+    /// The IMAP section of the part (RFC 3501 section 6.4.5), `2`, `1.2`.
+    pub part: String,
 }
 
 /// Incremental changes of one collection since a sync cursor: the

@@ -175,6 +175,9 @@ public class MainActivity extends Activity {
 
     MailList mailList;
 
+    /** The file side of the store: attachments and the folders they are saved into. */
+    FileStore files;
+
     /** The reader one message row opens onto. */
     MessageView messageView;
 
@@ -269,6 +272,7 @@ public class MainActivity extends Activity {
         calendarList = new CalendarList(this, events);
         mail = new MailStore(this, pimdir);
         mailList = new MailList(this, mail);
+        files = new FileStore(this, pimdir);
         eventView = new EventView(this);
         messageView = new MessageView(this);
         compose = new MessageCompose(this);

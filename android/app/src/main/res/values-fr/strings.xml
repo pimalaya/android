@@ -149,6 +149,14 @@
     <string name="message_forward">Transférer</string>
     <string name="message_not_on_phone">Ce message n\'est pas encore sur votre téléphone. Il sera téléchargé dès votre retour en ligne.</string>
     <string name="message_not_on_phone_later">Ce message n\'est pas sur votre téléphone. Rouvrez-le une fois en ligne.</string>
+    <string name="attachment_open">Ouvrir</string>
+    <string name="attachment_save">Enregistrer dans un dossier</string>
+    <string name="attachment_new_folder">Nouveau dossier</string>
+    <string name="attachment_folder_name">Nom du dossier</string>
+    <string name="attachment_create">Créer</string>
+    <string name="attachment_saved">Enregistré dans %1$s</string>
+    <string name="attachment_no_app">Aucune application de ce téléphone n\'ouvre ce fichier</string>
+    <string name="attachment_failed">Impossible de lire la pièce jointe</string>
     <string name="compose_quote_intro">Le %1$s, %2$s a écrit :</string>
     <string name="compose_forward_intro">---------- Message transféré ----------</string>
     <string name="week_number">Sem. %d</string>

@@ -7,6 +7,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimdirSql;
 
@@ -526,6 +527,9 @@ class MailEngine extends PimdirEngine {
     /** The attachment mark each fetched body gives, by link id, applied once it lands. */
     private final Map<String, Boolean> marks = new HashMap<>();
 
+    /** The attachments each fetched body carries, by link id, recorded once it lands. */
+    private final Map<String, List<MessageBody.Attachment>> attachments = new HashMap<>();
+
     /**
      * Downloads the bodies of some messages of one mailbox through the
      * engine's upgrade to {@code Full}: a body the store holds under the
@@ -535,12 +539,14 @@ class MailEngine extends PimdirEngine {
      * server knows.
      *
      * <p>The summary and sort key stay those the listing gave; only the
-     * attachment mark is restated, off the parts the body carries, as
-     * opening it does.
+     * attachment mark is restated, off the parts the body carries, and
+     * the parts recorded as files ({@link FileStore#recordAttachments}),
+     * as opening it does.
      */
     void download(String collection, List<MailBodies.Row> rows) {
         downloading.clear();
         marks.clear();
+        attachments.clear();
         List<String> handles = new ArrayList<>(rows.size());
         synchronized (STORE) {
             for (MailBodies.Row row : rows) {
@@ -565,9 +571,14 @@ class MailEngine extends PimdirEngine {
             for (Map.Entry<String, Boolean> mark : marks.entrySet()) {
                 mail().markAttachment(collection, mark.getKey(), mark.getValue());
             }
+            FileStore files = new FileStore(pimdir.context(), pimdir);
+            for (Map.Entry<String, List<MessageBody.Attachment>> parts : attachments.entrySet()) {
+                files.recordAttachments(accountId, parts.getKey(), parts.getValue());
+            }
         }
         downloading.clear();
         marks.clear();
+        attachments.clear();
     }
 
     /**
@@ -616,6 +627,13 @@ class MailEngine extends PimdirEngine {
             JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
             if (mail != null && mail.has("attachment")) {
                 marks.put(row.linkId, mail.getBoolean("attachment"));
+            }
+            try {
+                attachments.put(row.linkId, client.parseMessage(source).attachments);
+            } catch (RuntimeException unreadable) {
+                // NOTE: stored all the same; a body the parser cannot
+                // read has no parts to record, and its reader says so.
+                Log.w("pimalaya", "parts not read: " + collection + " " + handle, unreadable);
             }
         }
 

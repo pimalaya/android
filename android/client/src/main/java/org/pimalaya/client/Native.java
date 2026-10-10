@@ -325,6 +325,14 @@ final class Native {
     static native String parseMessage(byte[] source);
 
     /**
+     * The decoded bytes of one part of a message, by its IMAP section.
+     * Returns a JSON object of {@code {bytes}}, base64, or an error when
+     * the message holds no such part. No transport, as {@link
+     * #parseMessage}.
+     */
+    static native String messagePart(byte[] source, String part);
+
+    /**
      * Adds or removes one marker on one message, named the IMAP way
      * ({@code \Seen}, {@code \Answered}, {@code \Flagged}) whichever
      * backend answers: JMAP's keywords map onto the same three (RFC 8621
