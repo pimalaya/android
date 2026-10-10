@@ -535,6 +535,9 @@ final class EventView {
         section(R.string.event_section_details, R.drawable.ic_section_notes);
         people();
         origin();
+        if (!creating) {
+            host.linked.section(sections, ItemLinks.ofEvent(event), this::render);
+        }
 
         host.updateBarTitle(title());
         if (host.screen == MainActivity.PANEL_EVENT_VIEW) {

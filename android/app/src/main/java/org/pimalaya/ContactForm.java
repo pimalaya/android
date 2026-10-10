@@ -179,6 +179,18 @@ final class ContactForm {
         this.onRender = onRender;
     }
 
+    /** What a render adds after the card's own sections (the Linked card). */
+    private java.util.function.Consumer<Sections> trailing;
+
+    void setTrailing(java.util.function.Consumer<Sections> trailing) {
+        this.trailing = trailing;
+    }
+
+    /** Draws the page again from the working model, after a change outside it. */
+    void refresh() {
+        render();
+    }
+
     /**
      * Whether the form may be validated: always in a plain edit, in a
      * merge only once every diverging row has been reviewed.
@@ -671,6 +683,10 @@ final class ContactForm {
                                 () -> dialogs.noteDialog(at)));
             }
             section(R.string.section_notes, R.drawable.ic_section_notes, items);
+        }
+
+        if (trailing != null) {
+            trailing.accept(sections);
         }
 
         if (onRender != null) {

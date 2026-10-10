@@ -341,10 +341,12 @@
 
         <include layout="@layout/panel_event_view" />
 
+        <include layout="@layout/panel_files" />
+
     </ViewFlipper>
 
-    <!-- The app's top-level navigation, on the three lists only: one
-         item per domain, mail, contacts then calendars, the one on
+    <!-- The app's top-level navigation, on the four lists only: one
+         item per tab, mail, contacts, calendars then files, the one on
          screen on an accent pill (showDomainBar). It takes the bottom
          system inset, so the lists above it need none. -->
     <LinearLayout
@@ -465,6 +467,39 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:text="@string/domain_calendar"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/nav_files"
+            android:layout_width="0dp"
+            android:layout_height="@dimen/nav_height"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical">
+
+            <FrameLayout
+                android:layout_width="@dimen/nav_indicator_width"
+                android:layout_height="@dimen/nav_indicator_height">
+
+                <ImageView
+                    android:layout_width="@dimen/item_icon"
+                    android:layout_height="@dimen/item_icon"
+                    android:layout_gravity="center"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_folder_open" />
+
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/domain_files"
                 android:textSize="12sp" />
 
         </LinearLayout>

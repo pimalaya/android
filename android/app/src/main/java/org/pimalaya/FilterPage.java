@@ -53,6 +53,9 @@ final class FilterPage {
     /** The domain on the page, null while it is closed. */
     private PimDomain domain;
 
+    /** Whether the page filters the Files tab, which is no domain. */
+    private boolean files;
+
     /** The list screen the page was raised over, restored on the way out. */
     private int cameFrom = MainActivity.PANEL_MAIL;
 
@@ -65,7 +68,7 @@ final class FilterPage {
         host.findViewById(R.id.filter_reset)
                 .setOnClickListener(
                         view -> {
-                            host.filterOf(domain).reset();
+                            filter().reset();
                             changed();
                         });
     }
@@ -73,11 +76,30 @@ final class FilterPage {
     /** Opens the page over the list of {@code domain}. */
     void open(PimDomain domain) {
         this.domain = domain;
+        this.files = false;
         this.cameFrom = host.screen;
         ((TextView) host.findViewById(R.id.filter_title))
                 .setText(host.getString(R.string.filter_title_of, host.getString(domain.label)));
         render();
         host.openOverlay(MainActivity.PANEL_FILTER);
+    }
+
+    /** Opens the page over the Files tab. */
+    void openFiles() {
+        this.domain = null;
+        this.files = true;
+        this.cameFrom = host.screen;
+        ((TextView) host.findViewById(R.id.filter_title))
+                .setText(
+                        host.getString(
+                                R.string.filter_title_of, host.getString(R.string.files_title)));
+        render();
+        host.openOverlay(MainActivity.PANEL_FILTER);
+    }
+
+    /** The filter on the page. */
+    private MergedFilter filter() {
+        return files ? host.filesFilter() : host.filterOf(domain);
     }
 
     /** Closes the page onto the list it was opened over. */
@@ -97,11 +119,12 @@ final class FilterPage {
     private void render() {
         LinearLayout content = host.findViewById(R.id.filter_content);
         content.removeAllViews();
-        MergedFilter filter = host.filterOf(domain);
-        boolean defaults = domain != PimDomain.MAIL;
+        MergedFilter filter = filter();
+        boolean mail = !files && domain == PimDomain.MAIL;
+        boolean defaults = !files && !mail;
         String kind = domain == PimDomain.CALENDAR ? PimdirSummary.CALENDAR : PimdirSummary.CONTACT;
 
-        for (Account account : host.filterRoster(domain)) {
+        for (Account account : files ? host.filesRoster() : host.filterRoster(domain)) {
             List<String> ids = account.ids();
             MergedFilter.Tick tick = filter.tick(account.email, ids);
             content.addView(
@@ -129,7 +152,7 @@ final class FilterPage {
             for (PimdirCollections.Stored collection : account.collections) {
                 boolean ticked = filter.chosen(collection.id);
                 boolean isDefault = fallback != null && fallback.id.equals(collection.id);
-                boolean whole = !defaults && MailOffline.whole(host, collection.id);
+                boolean whole = mail && MailOffline.whole(host, collection.id);
                 String detail =
                         isDefault
                                 ? host.getString(R.string.filter_default)
@@ -147,9 +170,9 @@ final class FilterPage {
                                 : null;
                 content.addView(
                         row(
-                                domain == PimDomain.MAIL
+                                mail
                                         ? host.mail.mailboxLabel(collection)
-                                        : collection.name,
+                                        : files ? host.files.label(collection) : collection.name,
                                 detail,
                                 host.dp(24),
                                 ticked ? MergedFilter.Tick.ON : MergedFilter.Tick.OFF,
@@ -163,7 +186,9 @@ final class FilterPage {
                                         : whole
                                                 ? R.string.filter_download_stop
                                                 : R.string.filter_download,
-                                defaults ? choose : () -> download(collection, !whole)));
+                                defaults
+                                        ? choose
+                                        : mail ? () -> download(collection, !whole) : null));
             }
         }
     }

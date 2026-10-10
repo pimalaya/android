@@ -428,7 +428,9 @@ final class MailList {
         boolean bounded = false;
         List<String> accounts = new ArrayList<>();
         for (MailStore.Edge edge : edges) {
-            if (!wanted.holds(edge.collection)) {
+            // NOTE: an account that is off moves no window.
+            if (!wanted.holds(edge.collection)
+                    || !AccountActivation.enabled(host, edge.accountEmail)) {
                 continue;
             }
             listing |= edge.limit != null;

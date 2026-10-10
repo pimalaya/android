@@ -371,9 +371,10 @@ final class DeletedItems {
      * pimdir's {@code collect_garbage}: the counts recomputed from the
      * pointers, then the objects at zero and their bodies reclaimed.
      *
-     * <p>The blobs go inside the transaction, as the app's other collectors
-     * do: no writer of this app takes io-pimdir's staging lock, so a body
-     * filed again between the commit and the unlink would lose its file.
+     * <p>The blobs go once the rows have committed, as the app's other
+     * collectors do ({@link PimdirItems#unlinkCollected}), each only while
+     * its row is still gone, so a rollback or a body filed again meanwhile
+     * keeps its file.
      */
     void collectGarbage() {
         SQLiteDatabase db = store.getWritableDatabase();
@@ -388,15 +389,12 @@ final class DeletedItems {
                 }
             }
             exec(db, "DELETE_GARBAGE_OBJECTS", new HashMap<>());
-            for (String hash : garbage) {
-                if (!blobs.remove(hash)) {
-                    Log.w("pimalaya", "could not unlink the collected blob " + hash);
-                }
-            }
+            PimdirItems.deferUnlink(garbage);
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
         }
+        PimdirItems.unlinkCollected(db, blobs);
     }
 
     // ---- canonical statements ---------------------------------------------

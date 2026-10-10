@@ -103,6 +103,19 @@ Java paths are relative to android/app/src/main/java/org/pimalaya/, tests to and
 - [x] Delta: "An account's settings show its window" allows later; ADDED "A window moved later frees the bodies below it"; proposal and CHANGELOG
 - [x] Test: `MailBodiesTest.aWindowMovedLaterFreesTheBodiesBelowIt`
 
+## Second review (2026-10-10)
+
+- [x] Bound floors at local midnight (`MailScope.since(months, today, zone)`, `since(months)`), `covering` by the same days; a window on a bound's first local day widens nothing
+- [x] `releaseWindow`: body step replanned inside the io task, release before the window moves, failure in a dialog; `MailEngine.download` re-checks `MailBodies.takes` against the current window
+- [x] Notifications: the Date watermark replaced by the inbox coverage floor read before the pass (`BackgroundJob.arrived(before, now, floors)`); `BackgroundCheck` keeps no mark
+- [x] Release preview says what happens, no count (no statement counts held bodies in a range); settings previews and bands over every mailbox of the account
+- [x] `MainActivity.underSyncLock`: release and `AccountSettings.bound` turned down while the sync lock is held
+- [x] Footer: accounts that are off take no part
+- [x] `reachStep` stops when the app leaves the foreground, not on a metered network; delta says so
+- [x] Re-download after a release pushes nothing: `MailBodiesTest.aBodyFetchedAgainAfterAReleaseIsNoEditToPush`
+- [x] Blobs unlinked after commit with a re-check (`PimdirItems.deferUnlink`, `unlinkCollected`, OBJECT_EXISTS), in `PimdirItems`, `PimdirStorage`, `DeletedItems`, `MailStore`
+- [x] Tests: Paris bound in `MailWindowTest`, floor rule in `BackgroundCheckTest`
+
 ## Land
 
 - [x] CHANGELOG.md, net diff of [Unreleased]: rewrite the *offline mail per account* bullet into the window; in the *whole mailboxes* bullet, the badge and select-all follow the window, search every stored header; in the *short first sync* bullet, the footer replaces scrolling to the end; drop *the end of the list* from the *parallel mail sync* and *band-by-band loading* bullets

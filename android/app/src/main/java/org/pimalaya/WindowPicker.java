@@ -79,30 +79,30 @@ final class WindowPicker {
         info.setPadding(host.dp(24), 0, host.dp(24), host.dp(8));
         content.addView(info);
 
+        // NOTE: no statement counts the bodies a release frees, so a day
+        // later says what happens rather than how much.
         Runnable preview =
                 () -> {
                     String date = dateOf(picker);
-                    boolean freeing = freeing(later, date, until);
+                    if (freeing(later, date, until)) {
+                        info.setText(R.string.mail_window_frees);
+                        return;
+                    }
                     reads.execute(
                             () -> {
                                 MailStore.Query counted = host.mail.downloading(query);
                                 boolean listing = MailStore.listing(query, host.mail.edges());
-                                MailStore.Sum sum =
-                                        freeing
-                                                ? host.mail.sum(counted, until, date)
-                                                : host.mail.sum(counted, date, until);
+                                MailStore.Sum sum = host.mail.sum(counted, date, until);
                                 host.main.post(
                                         () -> {
                                             if (date.equals(dateOf(picker))) {
                                                 info.setText(
-                                                        freeing
-                                                                ? info(host, sum, false, true, false)
-                                                                : info(
-                                                                        host,
-                                                                        sum,
-                                                                        listing,
-                                                                        host.online(),
-                                                                        host.metered()));
+                                                        info(
+                                                                host,
+                                                                sum,
+                                                                listing,
+                                                                host.online(),
+                                                                host.metered()));
                                             }
                                         });
                             });

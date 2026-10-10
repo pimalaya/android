@@ -5,13 +5,16 @@ import android.database.sqlite.SQLiteDatabase;
 import android.util.Log;
 
 import org.json.JSONObject;
+import org.pimalaya.client.PimdirSql;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Item-level writes and reads the app performs on its own, outside a sync.
@@ -95,7 +98,9 @@ final class PimdirItems {
     }
 
     SQLiteDatabase writable() {
-        return store.getWritableDatabase();
+        SQLiteDatabase db = store.getWritableDatabase();
+        unlinkCollected(db, blobs);
+        return db;
     }
 
     /** A body by content hash, empty when the hash names nothing stored. */
@@ -362,7 +367,10 @@ final class PimdirItems {
         }
     }
 
-    /** Drops unreferenced objects and unlinks their blobs. */
+    /**
+     * Drops unreferenced objects, their blobs left for after the commit
+     * ({@link #deferUnlink}).
+     */
     void collectGarbage(SQLiteDatabase db) {
         List<String> orphans = new ArrayList<>();
         try (Cursor cursor = db.rawQuery("SELECT hash FROM objects WHERE refcount <= 0", null)) {
@@ -372,9 +380,47 @@ final class PimdirItems {
         }
         for (String hash : orphans) {
             db.execSQL("DELETE FROM objects WHERE hash = ?", new Object[] {hash});
-            // NOTE: the row goes inside the transaction and the file after it,
-            // so a crash leaves an orphan blob rather than a row without a body.
-            if (!blobs.remove(hash)) {
+        }
+        deferUnlink(orphans);
+    }
+
+    /** The objects deleted in a transaction whose blobs wait for it to commit. */
+    private static final Set<String> COLLECTED = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Leaves the blobs of objects a transaction just deleted until it has
+     * committed ({@link #unlinkCollected}): a rollback restores the rows,
+     * and a row whose blob was already unlinked would be a body lost.
+     */
+    static void deferUnlink(List<String> hashes) {
+        COLLECTED.addAll(hashes);
+    }
+
+    /**
+     * Unlinks the blobs {@link #deferUnlink} left, once no transaction is
+     * open on this thread: those whose object row is still gone, so one
+     * rolled back or filed again keeps its file. Run before each write
+     * ({@link #writable}) and after a collector commits; a crash between
+     * leaves an orphan blob, never a row without its body.
+     */
+    /** {@link #unlinkCollected} over this store, for a collector just committed. */
+    void unlinkCollected() {
+        unlinkCollected(store.getWritableDatabase(), blobs);
+    }
+
+    static void unlinkCollected(SQLiteDatabase db, PimdirBlobs blobs) {
+        if (COLLECTED.isEmpty() || db.inTransaction()) {
+            return;
+        }
+        for (String hash : new ArrayList<>(COLLECTED)) {
+            COLLECTED.remove(hash);
+            PimdirSql.Bound exists =
+                    PimdirSql.bind("OBJECT_EXISTS", Map.of("hash", hash));
+            boolean held;
+            try (Cursor cursor = MailStore.typed(db, exists.sql, exists.args)) {
+                held = cursor.moveToFirst();
+            }
+            if (!held && !blobs.remove(hash)) {
                 Log.w("pimalaya", "could not unlink the orphan blob " + hash);
             }
         }

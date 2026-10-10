@@ -564,7 +564,7 @@ public class MailStoreTest {
         assertEquals(0, scalar("SELECT count(*) FROM items WHERE link_id = 'old'"));
         assertEquals("an undated message is never older", 1,
                 scalar("SELECT count(*) FROM items WHERE link_id = 'undated'"));
-        String floor = MailScope.since(6, java.time.LocalDate.now(java.time.ZoneOffset.UTC));
+        String floor = MailScope.since(6);
         assertEquals("the window is raised to the floor", floor, store.windowOf(ONE));
 
         assertEquals("a wider bound collects nothing", 0, store.bound(ONE, 0));
@@ -575,9 +575,10 @@ public class MailStoreTest {
     @Test
     public void aBoundIsTheFirstOfTheMonthItReachesBack() {
         java.time.LocalDate today = java.time.LocalDate.of(2026, 10, 7);
-        assertEquals("2026-04-01T00:00:00Z", MailScope.since(6, today));
-        assertEquals("2025-10-01T00:00:00Z", MailScope.since(12, today));
-        assertNull("all mail has no floor", MailScope.since(0, today));
+        java.time.ZoneId utc = java.time.ZoneOffset.UTC;
+        assertEquals("2026-04-01T00:00:00Z", MailScope.since(6, today, utc));
+        assertEquals("2025-10-01T00:00:00Z", MailScope.since(12, today, utc));
+        assertNull("all mail has no floor", MailScope.since(0, today, utc));
     }
 
     @Test
@@ -605,7 +606,7 @@ public class MailStoreTest {
         MailScope.set(context, accountId, 6);
         MailWindow.migrate(context, store, ONE);
         assertEquals(
-                MailScope.since(6, java.time.LocalDate.now(java.time.ZoneOffset.UTC)),
+                MailScope.since(6),
                 store.windowOf(ONE));
         assertFalse(MailOffline.downloadedAhead(context, accountId));
 
@@ -613,7 +614,7 @@ public class MailStoreTest {
         MailScope.set(context, accountId, 0);
         MailWindow.migrate(context, store, ONE);
         assertEquals(
-                MailScope.since(6, java.time.LocalDate.now(java.time.ZoneOffset.UTC)),
+                MailScope.since(6),
                 store.windowOf(ONE));
     }
 }
