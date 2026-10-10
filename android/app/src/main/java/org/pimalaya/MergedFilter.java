@@ -19,7 +19,8 @@ import java.util.Set;
  * having to be enrolled.
  *
  * <p>An account is hidden apart from its collections, so hiding it keeps
- * which of them were hidden for when it comes back. An account that is off
+ * which of them were hidden for when it comes back, the page folding them
+ * away meanwhile. An account that is off
  * ({@link AccountActivation}) is never shown, whatever the filter says.
  *
  * <p>It is also the scope of the domain's pull: what it hides is not synced.
@@ -82,58 +83,49 @@ final class MergedFilter implements SyncScope {
         return !hiddenAccounts.isEmpty() || !hiddenCollections.isEmpty();
     }
 
-    /** What an account's checkbox reads over its collections. */
+    /**
+     * What an account's checkbox reads over its collections: unticked when
+     * the account is hidden and only then, a blank box meaning its
+     * collections are folded away; otherwise ticked when they all show,
+     * partly ticked when some or none do.
+     */
     Tick tick(String account, Collection<String> collections) {
         if (hiddenAccounts.contains(account)) {
             return Tick.OFF;
         }
-        int shown = 0;
         for (String collection : collections) {
-            if (!hiddenCollections.contains(collection)) {
-                shown += 1;
+            if (hiddenCollections.contains(collection)) {
+                return Tick.PARTIAL;
             }
         }
-        if (shown == 0) {
-            return Tick.OFF;
-        }
-        return shown == collections.size() ? Tick.ON : Tick.PARTIAL;
+        return Tick.ON;
     }
 
-    /** Whether a collection's checkbox reads ticked: it and its account shown. */
+    /** Whether a collection shows: it and its account. */
     boolean ticked(String account, String collection) {
-        return !hiddenAccounts.contains(account) && !hiddenCollections.contains(collection);
+        return !hiddenAccounts.contains(account) && chosen(collection);
+    }
+
+    /** Whether a collection's own checkbox reads ticked, whatever its account. */
+    boolean chosen(String collection) {
+        return !hiddenCollections.contains(collection);
     }
 
     /**
-     * Flips an account's checkbox: a ticked or partly ticked account is
-     * hidden, its collections keeping their own choices; a hidden one comes
-     * back with them, or with all of them when they would show none.
+     * Flips an account's checkbox: a shown account is hidden, a hidden one
+     * comes back, its collections keeping their own choices either way.
      */
-    void toggleAccount(String account, Collection<String> collections) {
-        if (tick(account, collections) != Tick.OFF) {
+    void toggleAccount(String account) {
+        if (!hiddenAccounts.remove(account)) {
             hiddenAccounts.add(account);
-        } else {
-            hiddenAccounts.remove(account);
-            if (tick(account, collections) == Tick.OFF) {
-                hiddenCollections.removeAll(collections);
-            }
         }
         save();
     }
 
-    /**
-     * Flips one collection's checkbox. Ticking one under a hidden account
-     * brings the account back with that collection alone, since every box
-     * under it read unticked.
-     */
-    void toggleCollection(String account, String collection, Collection<String> siblings) {
-        if (ticked(account, collection)) {
+    /** Flips one collection's own checkbox. */
+    void toggleCollection(String collection) {
+        if (!hiddenCollections.remove(collection)) {
             hiddenCollections.add(collection);
-        } else {
-            if (hiddenAccounts.remove(account)) {
-                hiddenCollections.addAll(siblings);
-            }
-            hiddenCollections.remove(collection);
         }
         save();
     }

@@ -45,8 +45,8 @@ public class MergedFilterTest {
     /** What is hidden is still hidden after a restart, and in its domain alone. */
     @Test
     public void theFilterIsKeptPerDomain() {
-        MergedFilter.of(context, PimDomain.MAIL).toggleCollection(JANE, "jane-archive", HERS);
-        MergedFilter.of(context, PimDomain.CALENDAR).toggleAccount(JOHN, List.of("john-work"));
+        MergedFilter.of(context, PimDomain.MAIL).toggleCollection("jane-archive");
+        MergedFilter.of(context, PimDomain.CALENDAR).toggleAccount(JOHN);
 
         MergedFilter mail = MergedFilter.of(context, PimDomain.MAIL);
         MergedFilter calendar = MergedFilter.of(context, PimDomain.CALENDAR);
@@ -59,64 +59,101 @@ public class MergedFilterTest {
         assertTrue(MergedFilter.of(context, PimDomain.CONTACTS).accepts(JOHN, "john-book"));
     }
 
-    /** An account reads partly ticked while some of its collections are hidden. */
+    /**
+     * A shown account reads partly ticked while any of its collections is
+     * unticked, none ticked included: a blank box is a hidden account alone.
+     */
     @Test
-    public void anAccountReadsWhatItsCollectionsSay() {
+    public void aShownAccountReadsWhatItsCollectionsSay() {
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
 
-        filter.toggleCollection(JANE, "jane-archive", HERS);
+        filter.toggleCollection("jane-archive");
         assertEquals(MergedFilter.Tick.PARTIAL, filter.tick(JANE, HERS));
 
-        filter.toggleCollection(JANE, "jane-inbox", HERS);
-        filter.toggleCollection(JANE, "jane-sent", HERS);
-        assertEquals(MergedFilter.Tick.OFF, filter.tick(JANE, HERS));
+        filter.toggleCollection("jane-inbox");
+        filter.toggleCollection("jane-sent");
+        assertEquals(MergedFilter.Tick.PARTIAL, filter.tick(JANE, HERS));
+        assertTrue(filter.showsAccount(JANE));
+        assertFalse(filter.accepts(JANE, "jane-inbox"));
 
-        // NOTE: ticking an account whose collections are all unticked
-        // ticks them all.
-        filter.toggleAccount(JANE, HERS);
+        filter.toggleCollection("jane-inbox");
+        filter.toggleCollection("jane-archive");
+        filter.toggleCollection("jane-sent");
         assertEquals(MergedFilter.Tick.ON, filter.tick(JANE, HERS));
     }
 
-    /** Unticking an account keeps its collections' choices for when it comes back. */
+    /**
+     * Unticking an account hides it and nothing more: its collections keep
+     * their own boxes while it is folded away, and come back as they were.
+     */
     @Test
     public void anAccountComesBackWithItsChoices() {
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
-        filter.toggleCollection(JANE, "jane-archive", HERS);
+        filter.toggleCollection("jane-archive");
 
-        filter.toggleAccount(JANE, HERS);
+        filter.toggleAccount(JANE);
         assertEquals(MergedFilter.Tick.OFF, filter.tick(JANE, HERS));
+        assertFalse(filter.showsAccount(JANE));
         assertFalse(filter.accepts(JANE, "jane-inbox"));
         assertFalse(filter.ticked(JANE, "jane-inbox"));
+        assertTrue(filter.chosen("jane-inbox"));
+        assertFalse(filter.chosen("jane-archive"));
+        assertTrue(filter.isActive());
 
-        filter.toggleAccount(JANE, HERS);
+        filter = MergedFilter.of(context, PimDomain.MAIL);
+        filter.toggleAccount(JANE);
         assertEquals(MergedFilter.Tick.PARTIAL, filter.tick(JANE, HERS));
         assertTrue(filter.accepts(JANE, "jane-inbox"));
+        assertTrue(filter.accepts(JANE, "jane-sent"));
         assertFalse(filter.accepts(JANE, "jane-archive"));
     }
 
-    /** Ticking one collection of a hidden account brings it back with that one alone. */
+    /** An account with every collection unticked comes back with none ticked. */
     @Test
-    public void aCollectionTickedUnderAHiddenAccountShowsAlone() {
+    public void anAccountWithNothingTickedComesBackSo() {
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
-        filter.toggleAccount(JANE, HERS);
+        for (String collection : HERS) {
+            filter.toggleCollection(collection);
+        }
 
-        filter.toggleCollection(JANE, "jane-sent", HERS);
+        filter.toggleAccount(JANE);
+        filter.toggleAccount(JANE);
 
-        assertTrue(filter.accepts(JANE, "jane-sent"));
-        assertFalse(filter.accepts(JANE, "jane-inbox"));
         assertEquals(MergedFilter.Tick.PARTIAL, filter.tick(JANE, HERS));
+        for (String collection : HERS) {
+            assertFalse(filter.chosen(collection));
+            assertFalse(filter.accepts(JANE, collection));
+        }
+    }
+
+    /** A collection flipped under a hidden account stays hidden until it is back. */
+    @Test
+    public void aCollectionFlippedUnderAHiddenAccountWaitsForIt() {
+        MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
+        filter.toggleAccount(JANE);
+
+        filter.toggleCollection("jane-sent");
+
+        assertFalse(filter.showsAccount(JANE));
+        assertEquals(MergedFilter.Tick.OFF, filter.tick(JANE, HERS));
+        assertFalse(filter.accepts(JANE, "jane-inbox"));
+
+        filter.toggleAccount(JANE);
+        assertTrue(filter.accepts(JANE, "jane-inbox"));
+        assertFalse(filter.accepts(JANE, "jane-sent"));
     }
 
     @Test
     public void resetShowsEverything() {
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
-        filter.toggleAccount(JOHN, List.of("john-inbox"));
-        filter.toggleCollection(JANE, "jane-archive", HERS);
+        filter.toggleAccount(JOHN);
+        filter.toggleCollection("jane-archive");
 
         filter.reset();
 
         assertFalse(MergedFilter.of(context, PimDomain.MAIL).isActive());
         assertTrue(filter.accepts(JOHN, "john-inbox"));
+        assertTrue(filter.accepts(JANE, "jane-archive"));
     }
 
     /**
@@ -127,14 +164,15 @@ public class MergedFilterTest {
     @Test
     public void thePullSyncsWhatTheFilterShows() {
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
-        filter.toggleCollection(JANE, "jane-archive", HERS);
-        filter.toggleAccount(JOHN, List.of("john-inbox"));
+        filter.toggleCollection("jane-archive");
+        filter.toggleAccount(JOHN);
         AccountActivation.set(context, "off@example.net", false);
         SyncScope all = SyncScope.all(context);
 
         assertTrue(filter.collection(JANE, "jane-inbox"));
         assertFalse(filter.collection(JANE, "jane-archive"));
         assertFalse(filter.account(JOHN));
+        assertFalse(filter.collection(JOHN, "john-inbox"));
         assertFalse(filter.account("off@example.net"));
         assertFalse(filter.accepts("off@example.net", "off-inbox"));
 

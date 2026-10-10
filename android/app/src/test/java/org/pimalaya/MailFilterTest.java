@@ -85,7 +85,7 @@ public class MailFilterTest {
         String his = store.collectionOf(JOHN, "Archive");
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
 
-        filter.toggleCollection(JANE, hers, List.of(hers));
+        filter.toggleCollection(hers);
 
         assertEquals(5, count(filter::accepts));
         BiPredicate<String, String> archives =
@@ -106,7 +106,7 @@ public class MailFilterTest {
         assertEquals(6, count(MailList.narrowed(filter::accepts, null, store.roles())));
 
         // NOTE: a hidden account's trash is not one the chip shows.
-        filter.toggleAccount(JOHN, List.of(store.collectionOf(JOHN, "Trash")));
+        filter.toggleAccount(JOHN);
         assertEquals(1, count(MailList.narrowed(filter::accepts, "trash", store.roles())));
     }
 
