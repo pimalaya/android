@@ -24,7 +24,10 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
 };
 
-use ical::tree::cst::IcalCst;
+use ical::{
+    component::IcalComponent, jscalendar::IcalJscalendarVersion, prop::IcalPropKind,
+    tree::cst::IcalCst,
+};
 use io_jmap::rfc9610::contact_card::JmapContactCard;
 use serde::Serialize;
 use serde_json::{Map, Value, to_string};
@@ -117,15 +120,36 @@ pub fn to_patch(vcard: &str, base_vcard: Option<&str>) -> Result<BTreeMap<String
 }
 
 /// The staged iCalendar object as the one JSCalendar entry a
-/// CalendarEvent is: ical-rs converts a calendar to a Group, the
+/// CalendarEvent is: ical-rs converts a calendar to a JSCalendar 2.0
+/// Group, the version draft-ietf-jmap-calendars builds on, the
 /// overriding components folded into their series' `recurrenceOverrides`
 /// and every `EXDATE` an `excluded` override, so a series with its
-/// occurrences is one entry, written in the draft's jscalendarbis names
-/// ([`from_jscalendarbis`]). An object converting to any other number of
-/// entries is no one CalendarEvent and is refused.
+/// occurrences is one entry. An object converting to any other number of
+/// entries is no one CalendarEvent and is refused, as is a series of more
+/// than one rule.
+///
+/// NOTE: 2.0 holds one `recurrenceRule`; ical-rs keeps a further `RRULE`
+/// in the `iCalendar` hatch, which Stalwart 0.16 drops, so the series
+/// would lose a rule silently.
 pub fn to_jscalendar_event(ical: &str) -> Result<Map<String, Value>, String> {
     let cst = IcalCst::parse(ical).map_err(|err| format!("Invalid iCalendar: {err}"))?;
-    let mut entries = match cst.decode().to_jscalendar() {
+    let calendar = cst.decode();
+    let rules = |component: &IcalComponent| {
+        component
+            .props
+            .iter()
+            .filter(|prop| prop.name == IcalPropKind::RRule.into())
+            .count()
+    };
+    if calendar
+        .components
+        .iter()
+        .any(|component| rules(component) > 1)
+    {
+        return Err("A JMAP event holds one recurrence rule, not several".to_string());
+    }
+
+    let mut entries = match calendar.to_jscalendar_as(IcalJscalendarVersion::V2_0) {
         Value::Object(mut group) => group.remove("entries"),
         _ => None,
     };
@@ -137,94 +161,12 @@ pub fn to_jscalendar_event(ical: &str) -> Result<Map<String, Value>, String> {
         return Err("The calendar object is not one JMAP event".to_string());
     };
 
-    // NOTE: the draft has a stored event carry no `method`, a server
-    // refusing one as invalid; it belongs to a scheduling message.
+    // NOTE: 2.0 states the calendar's `METHOD` on each entry, but the
+    // draft has a stored event carry none, a server refusing one as
+    // invalid; it belongs to a scheduling message.
     entry.remove("method");
-    to_jscalendarbis(&mut entry)?;
 
     Ok(entry)
-}
-
-/// Reads the members draft-ietf-jmap-calendars takes from
-/// draft-ietf-calext-jscalendarbis back into the RFC 8984 ones ical-rs
-/// converts: the one `recurrenceRule` as `recurrenceRules`, a
-/// participant's `calendarAddress` as its `sendTo`, the event's
-/// `organizerCalendarAddress` as its `replyTo`. A server speaking RFC
-/// 8984 already reads as is.
-///
-/// NOTE: ical-rs writes RFC 8984 on purpose, and a JMAP calendar server
-/// keeps none of the three: Stalwart refuses `recurrenceRules` and drops
-/// a participant with no `calendarAddress`, so without this a series
-/// reads as its first occurrence and a write loses its attendees. It
-/// goes once ical-rs speaks jscalendarbis.
-pub fn from_jscalendarbis(event: &mut Map<String, Value>) {
-    if let Some(rule) = event.remove("recurrenceRule")
-        && rule.is_object()
-    {
-        event
-            .entry("recurrenceRules")
-            .or_insert_with(|| Value::Array(vec![rule]));
-    }
-    if let Some(Value::String(address)) = event.remove("organizerCalendarAddress") {
-        event.entry("replyTo").or_insert_with(|| imip(address));
-    }
-    if let Some(Value::Object(participants)) = event.get_mut("participants") {
-        for participant in participants.values_mut().filter_map(Value::as_object_mut) {
-            if let Some(Value::String(address)) = participant.remove("calendarAddress") {
-                participant.entry("sendTo").or_insert_with(|| imip(address));
-            }
-        }
-    }
-}
-
-/// The inverse of [`from_jscalendarbis`], for what is written: a series
-/// of more than one rule has no jscalendarbis form and is refused.
-fn to_jscalendarbis(event: &mut Map<String, Value>) -> Result<(), String> {
-    if let Some(Value::Array(mut rules)) = event.remove("recurrenceRules") {
-        match (rules.pop(), rules.is_empty()) {
-            (None, _) => {}
-            (Some(rule), true) => {
-                event.insert("recurrenceRule".to_string(), rule);
-            }
-            (Some(_), false) => {
-                return Err("A JMAP event holds one recurrence rule, not several".to_string());
-            }
-        }
-    }
-    if let Some(address) = event.remove("replyTo").and_then(address_of) {
-        event
-            .entry("organizerCalendarAddress")
-            .or_insert(Value::String(address));
-    }
-    if let Some(Value::Object(participants)) = event.get_mut("participants") {
-        for participant in participants.values_mut().filter_map(Value::as_object_mut) {
-            if let Some(address) = participant.remove("sendTo").and_then(address_of) {
-                participant
-                    .entry("calendarAddress")
-                    .or_insert(Value::String(address));
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// One calendar address as an RFC 8984 `sendTo` or `replyTo` map.
-fn imip(address: String) -> Value {
-    Value::Object(Map::from_iter([(
-        "imip".to_string(),
-        Value::String(address),
-    )]))
-}
-
-/// The address an RFC 8984 `sendTo` or `replyTo` map names: its `imip`
-/// one, else the first.
-fn address_of(methods: Value) -> Option<String> {
-    let Value::Object(methods) = methods else {
-        return None;
-    };
-    let address = methods.get("imip").or_else(|| methods.values().next())?;
-    address.as_str().map(str::to_string)
 }
 
 /// `CalendarEvent/set` update patch turning the `base` entry into the

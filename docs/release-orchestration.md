@@ -14,7 +14,7 @@ The handoff for the session that builds what was planned on 2026-10-09. That ses
 - **Landed on master, device test owed, change left active:** `phone-contacts-mirror`, `calendar-zones-and-series`, `calendar-conflict-form`, `calendar-occurrence-writes`, `phone-calendar-mirror`, `jmap-release-readiness`, `ical-rs-0-6`, beside the four of the handoff.
 - **Released:** ical-rs 0.6.0, io-jmap 0.6.0, io-msgraph 0.5.0, io-gcal 0.2.0, io-pimdir 0.7.0, vcard-rs 0.5.2, all pinned here from crates.io with no path patch; CI green and release APKs signed.
 - **Landed after:** `jmap-calendar-writes` (active, device test owed), release hygiene (CI tests, signing, PRIVACY.md); calendula on ical-rs 0.6 and io-pimdir 0.7.
-- **Open:** the Google console steps (release OAuth clients, restricted-scope verification), versioning, jscalendarbis names belong in ical-rs (the app renames three at the JMAP boundary), JMAP `sendSchedulingMessages` stays off.
+- **Open:** the Google console steps (release OAuth clients, restricted-scope verification), versioning. Done since: attendee notifications on Google and JMAP (`attendee-notifications`), JSCalendar 2.0 in ical-rs 0.6.1 replacing the app's renaming.
 
 ## Order
 

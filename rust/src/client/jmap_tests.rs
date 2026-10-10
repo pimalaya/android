@@ -596,7 +596,7 @@ fn a_cached_session_serves_until_it_ages_or_its_api_fails() {
     assert_eq!(cache.entries.len(), 1);
 }
 
-/// A weekly series on a JMAP calendar as a jscalendarbis server holds
+/// A weekly series on a JMAP calendar as a JSCalendar 2.0 server holds
 /// it, with an attendee, and a member the conversion carries only through
 /// its escape hatch.
 fn standup() -> Value {
@@ -1101,7 +1101,7 @@ fn an_object_of_two_events_is_refused_for_good() {
 }
 
 #[test]
-fn a_jscalendarbis_series_reads_as_a_series_with_its_people() {
+fn a_series_reads_as_a_series_with_its_people() {
     let account = events(&[standup()]);
 
     let listed = account.listed("ev1");
@@ -1125,17 +1125,23 @@ fn a_jscalendarbis_series_reads_as_a_series_with_its_people() {
 }
 
 #[test]
-fn a_new_series_is_written_as_jscalendarbis() {
+fn a_new_series_is_written_as_jscalendar_2_0() {
     let mut account = events(&[]);
-    let series = NEW_ENTRY.replace(
-        "SUMMARY:Lunch\r\n",
-        "SUMMARY:Lunch\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\n\
-         ORGANIZER:mailto:jane@example.com\r\nATTENDEE;CN=Ada:mailto:ada@example.com\r\n",
-    );
+    let series = NEW_ENTRY
+        .replace("VERSION:2.0\r\n", "VERSION:2.0\r\nMETHOD:REQUEST\r\n")
+        .replace(
+            "SUMMARY:Lunch\r\n",
+            "SUMMARY:Lunch\r\nRRULE:FREQ=WEEKLY;COUNT=4\r\n\
+             ORGANIZER:mailto:jane@example.com\r\nATTENDEE;CN=Ada:mailto:ada@example.com\r\n",
+        );
 
     create_event(&mut account, "c1", &series, &[]).unwrap();
 
     let stored = &account.events["ev1"];
+    // NOTE: Stalwart 0.16 refuses a `version` as an invalid property;
+    // the draft has the server set it.
+    assert!(stored.get("version").is_none(), "{stored}");
+    assert!(stored.get("method").is_none(), "{stored}");
     assert_eq!(stored["recurrenceRule"]["frequency"], "weekly", "{stored}");
     assert_eq!(stored["recurrenceRule"]["count"], 4, "{stored}");
     assert!(stored.get("recurrenceRules").is_none(), "{stored}");
@@ -1154,17 +1160,35 @@ fn a_new_series_is_written_as_jscalendarbis() {
     assert!(ada.get("sendTo").is_none(), "{stored}");
 }
 
+/// JSCalendar 2.0 holds one rule, and a second would ride a hatch
+/// Stalwart 0.16 drops: the series is refused rather than cut.
 #[test]
 fn a_series_of_two_rules_is_refused_for_good() {
+    let rules = "SUMMARY:Lunch\r\nRRULE:FREQ=WEEKLY\r\nRRULE:FREQ=MONTHLY\r\n";
     let mut account = events(&[]);
-    let series = NEW_ENTRY.replace(
-        "SUMMARY:Lunch\r\n",
-        "SUMMARY:Lunch\r\nRRULE:FREQ=WEEKLY\r\nRRULE:FREQ=MONTHLY\r\n",
-    );
+    let series = NEW_ENTRY.replace("SUMMARY:Lunch\r\n", rules);
 
     let err = create_event(&mut account, "c1", &series, &[])
         .err()
         .expect("a refused create");
+
+    assert_eq!(err.status, Some(REFUSED));
+    assert!(
+        err.message.contains("one recurrence rule"),
+        "{}",
+        err.message
+    );
+    assert!(account.sets.is_empty());
+
+    let mut account = events(&[standup()]);
+    let listed = account.listed("ev1");
+    let edited = listed.ical.replace(
+        "RRULE:FREQ=WEEKLY\r\n",
+        "RRULE:FREQ=WEEKLY\r\nRRULE:FREQ=MONTHLY\r\n",
+    );
+    assert_ne!(edited, listed.ical);
+
+    let err = update_event(&mut account, "ev1", &edited, listed.etag.as_deref(), &[]).unwrap_err();
 
     assert_eq!(err.status, Some(REFUSED));
     assert!(account.sets.is_empty());
