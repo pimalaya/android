@@ -83,7 +83,7 @@ A `Calendars` row is rewritten only when one of its columns changes: every write
 | `vnd.android.cursor.item/vnd.ical4android.url` | `URL` | where Etar edits it (rewritten on each save, as sync adapter, beside its update of the event row) |
 | any other | not mapped | never touched: rows we did not write belong to the apps that wrote them |
 
-Everything else the object carries (`ATTACH`, `CATEGORIES`, `PRIORITY`, `X-` properties, unknown parameters, the order and folding of lines) is object-only and survives every round trip. An applied phone edit refreshes `DTSTAMP` (and `LAST-MODIFIED` when present) on each component it changes; `SEQUENCE` is bumped, once per applied edit on each component it changes, only when the user organizes an event with attendees (RFC 5546). An object created from the phone gets `DTEND`, never `DURATION`: iCloud refuses events without `DTEND`.
+Everything else the object carries (`ATTACH`, `CATEGORIES`, `PRIORITY`, `X-` properties, unknown parameters, the order and folding of lines) is object-only and survives every round trip. An applied phone edit refreshes `DTSTAMP` (and `LAST-MODIFIED` when present) on each component it changes; `SEQUENCE` is bumped, once per applied edit on each component it changes, only when the user organizes an event with attendees (RFC 5546); the same rule (`organized` in rust/src/calendar.rs) decides whether a push asks Google and JMAP to notify the attendees. An object created from the phone gets `DTEND`, never `DURATION`: iCloud refuses events without `DTEND`.
 
 An object with neither `DTEND` nor `DURATION` projects an end equal to `DTSTART` for a date-time start and `DTSTART` plus one day for a date (RFC 5545 3.6.1); a phone end equal to that is no edit and the object stays without one.
 

@@ -321,6 +321,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
     id: JString<'local>,
     ical: JString<'local>,
     etag: JString<'local>,
+    address: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let base_url = read_string(env, &base_url);
@@ -330,6 +331,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
         let id = read_string(env, &id);
         let ical = read_string(env, &ical);
         let etag = read_string(env, &etag);
+        let address = read_string(env, &address);
         let credentials = Credentials {
             login: &login,
             password: &password,
@@ -344,6 +346,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
             &id,
             &ical,
             &etag,
+            &address,
         ) {
             Ok(etag) => to_string(&etag).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
@@ -354,7 +357,10 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
     .resolve::<LogErrorAndDefault>()
 }
 
-/// Pushes one edited object with whichever backend its base URL names.
+/// Pushes one edited object with whichever backend its base URL names,
+/// `address` the account's, which Google and JMAP announce a meeting the
+/// user organizes by.
+#[allow(clippy::too_many_arguments)]
 fn update_event(
     client: &mut Client<'_, '_>,
     base_url: &str,
@@ -363,6 +369,7 @@ fn update_event(
     id: &str,
     ical: &str,
     etag: &str,
+    address: &str,
 ) -> Result<Option<String>, BridgeError> {
     match Backend::of(base_url) {
         Backend::Jmap => client.update_jmap_event(
@@ -371,6 +378,7 @@ fn update_event(
             id,
             ical,
             Some(etag).filter(|etag| !etag.is_empty()),
+            address,
         ),
         Backend::Graph => client.update_graph_event(
             credentials.password,
@@ -384,6 +392,7 @@ fn update_event(
             id,
             ical,
             Some(etag).filter(|etag| !etag.is_empty()),
+            address,
         ),
         _ => client.update_caldav_event(
             &parse_url(calendar_url)?,
@@ -582,6 +591,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createEvent<'local>(
     password: JString<'local>,
     id: JString<'local>,
     ical: JString<'local>,
+    address: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let base_url = read_string(env, &base_url);
@@ -590,6 +600,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createEvent<'local>(
         let password = read_string(env, &password);
         let id = read_string(env, &id);
         let ical = read_string(env, &ical);
+        let address = read_string(env, &address);
         let credentials = Credentials {
             login: &login,
             password: &password,
@@ -603,6 +614,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createEvent<'local>(
             &credentials,
             &id,
             &ical,
+            &address,
         ) {
             Ok(created) => to_string(&created).unwrap_or_else(|err| error_json(err.to_string())),
             Err(err) => error_json(err),
@@ -627,6 +639,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteEvent<'local>(
     password: JString<'local>,
     id: JString<'local>,
     etag: JString<'local>,
+    address: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let base_url = read_string(env, &base_url);
@@ -635,6 +648,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteEvent<'local>(
         let password = read_string(env, &password);
         let id = read_string(env, &id);
         let etag = read_string(env, &etag);
+        let address = read_string(env, &address);
         let credentials = Credentials {
             login: &login,
             password: &password,
@@ -648,6 +662,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteEvent<'local>(
             &credentials,
             &id,
             &etag,
+            &address,
         ) {
             Ok(()) => String::from("{}"),
             Err(err) => error_json(err),
@@ -660,7 +675,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteEvent<'local>(
 
 /// Files one new object with whichever backend the base URL names,
 /// answering the resource it landed under: the name asked for on CalDAV,
-/// the id Graph, Google or the JMAP server minted.
+/// the id Graph, Google or the JMAP server minted; `address` the
+/// account's, as [`update_event`] takes it.
 fn create_event(
     client: &mut Client<'_, '_>,
     base_url: &str,
@@ -668,6 +684,7 @@ fn create_event(
     credentials: &Credentials,
     id: &str,
     ical: &str,
+    address: &str,
 ) -> Result<EventRef, BridgeError> {
     match Backend::of(base_url) {
         Backend::Jmap => client.create_jmap_event(
@@ -675,6 +692,7 @@ fn create_event(
             credentials,
             account::jmap_collection_id(calendar_url),
             ical,
+            address,
         ),
         Backend::Graph => client.create_graph_event(
             credentials.password,
@@ -685,6 +703,7 @@ fn create_event(
             credentials.password,
             account::book_segment(base_url, calendar_url),
             ical,
+            address,
         ),
         _ => {
             let etag =
@@ -697,7 +716,8 @@ fn create_event(
     }
 }
 
-/// Removes one object with whichever backend the base URL names.
+/// Removes one object with whichever backend the base URL names,
+/// `address` the account's, as [`update_event`] takes it.
 fn delete_event(
     client: &mut Client<'_, '_>,
     base_url: &str,
@@ -705,6 +725,7 @@ fn delete_event(
     credentials: &Credentials,
     id: &str,
     etag: &str,
+    address: &str,
 ) -> Result<(), BridgeError> {
     match Backend::of(base_url) {
         Backend::Jmap => client.delete_jmap_event(
@@ -712,6 +733,7 @@ fn delete_event(
             credentials,
             id,
             Some(etag).filter(|etag| !etag.is_empty()),
+            address,
         ),
         Backend::Graph => client.delete_graph_event(
             credentials.password,
@@ -723,6 +745,7 @@ fn delete_event(
             account::book_segment(base_url, calendar_url),
             id,
             Some(etag).filter(|etag| !etag.is_empty()),
+            address,
         ),
         _ => client.delete_caldav_event(
             &parse_url(calendar_url)?,

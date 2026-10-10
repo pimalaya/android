@@ -200,7 +200,7 @@ public class CalendarMirrorTest {
     }
 
     private void phonePass() {
-        new CalendarEngine(pimdir, new PimalayaClient(), null, null, null).syncPhone(COLLECTION);
+        new CalendarEngine(pimdir, new PimalayaClient(), null, null, null, null).syncPhone(COLLECTION);
     }
 
     /** The server's event, through the store, onto the phone. */

@@ -363,7 +363,7 @@ public class MailMoveTest {
     public void aCalendarRefusesARelocation() throws Exception {
         String calendar = PimdirAccount.collectionId(accountId, "https://dav.example.org/cal/");
         CalendarEngine engine =
-                new CalendarEngine(pimdir, new PimalayaClient(), null, null, accountId);
+                new CalendarEngine(pimdir, new PimalayaClient(), null, null, accountId, null);
         JSONObject change =
                 new JSONObject()
                         .put("op", "remove")

@@ -1056,8 +1056,19 @@ public class PimalayaClient {
      *
      * <p>Guarded on purpose: a calendar is shared, and an unguarded PUT
      * is how one client silently overwrites another's edit.
+     *
+     * <p>{@code address} is the account's: a backend that announces a
+     * write to the attendees only when asked (Google, JMAP) asks for a
+     * meeting it names the organizer of.
      */
-    public String updateEvent(Transport transport, Account account, String calendarUrl, String id, String ical, String etag) {
+    public String updateEvent(
+            Transport transport,
+            Account account,
+            String calendarUrl,
+            String id,
+            String ical,
+            String etag,
+            String address) {
         String reply =
                 Native.updateEvent(
                         transport,
@@ -1067,7 +1078,8 @@ public class PimalayaClient {
                         account.password,
                         id,
                         ical,
-                        etag == null ? "" : etag);
+                        etag == null ? "" : etag,
+                        address == null ? "" : address);
 
         String trimmed = reply.trim();
         if (trimmed.startsWith("{")) {
@@ -1109,9 +1121,16 @@ public class PimalayaClient {
      * Files a new object in a calendar, guarded on the resource not
      * existing, and returns where it landed: the name asked for, or the
      * one a backend that names its own resources (Graph) gave it, with
-     * its ETag.
+     * its ETag. {@code address} is the account's, as
+     * {@link #updateEvent} takes it.
      */
-    public EventRef createEvent(Transport transport, Account account, String calendarUrl, String id, String ical) {
+    public EventRef createEvent(
+            Transport transport,
+            Account account,
+            String calendarUrl,
+            String id,
+            String ical,
+            String address) {
         JSONObject created =
                 object(
                         Native.createEvent(
@@ -1121,7 +1140,8 @@ public class PimalayaClient {
                                 account.login,
                                 account.password,
                                 id,
-                                ical));
+                                ical,
+                                address == null ? "" : address));
         try {
             return new EventRef(
                     created.getString("id"),
@@ -1133,9 +1153,16 @@ public class PimalayaClient {
 
     /**
      * Removes one object from its calendar, guarded by the ETag it was
-     * read with, for the same reason the update is.
+     * read with, for the same reason the update is. {@code address} is the
+     * account's, as {@link #updateEvent} takes it.
      */
-    public void deleteEvent(Transport transport, Account account, String calendarUrl, String id, String etag) {
+    public void deleteEvent(
+            Transport transport,
+            Account account,
+            String calendarUrl,
+            String id,
+            String etag,
+            String address) {
         object(
                 Native.deleteEvent(
                         transport,
@@ -1144,7 +1171,8 @@ public class PimalayaClient {
                         account.login,
                         account.password,
                         id,
-                        etag == null ? "" : etag));
+                        etag == null ? "" : etag,
+                        address == null ? "" : address));
     }
 
     /**

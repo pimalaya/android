@@ -769,6 +769,62 @@ fn address_of(value: String) -> String {
     }
 }
 
+/// The user a calendar-user address names: a `mailto:` address, or the
+/// `EMAIL` parameter of any other URI.
+fn user_address(prop: &IcalProp) -> Option<String> {
+    let value = raw_value(prop)?;
+    match value.split_once(':') {
+        Some((scheme, _)) if !scheme.eq_ignore_ascii_case("mailto") => {
+            prop.params.iter().find_map(|param| match param {
+                IcalParam::Email(email) => Some(email.to_string()),
+                _ => None,
+            })
+        }
+        _ => Some(address_of(value)),
+    }
+}
+
+/// Whether the user organizes an event with attendees, which is when a
+/// change of it is theirs to announce (RFC 5546): the `organizer` is one
+/// of their `addresses`, compared case-insensitively, or nobody, the
+/// server then filling the owner.
+fn organizes(organizer: &str, attendees: bool, addresses: &[String]) -> bool {
+    attendees
+        && (organizer.is_empty()
+            || addresses
+                .iter()
+                .any(|address| address.eq_ignore_ascii_case(organizer)))
+}
+
+/// Whether the user organizes one of an object's scheduled components
+/// with attendees ([`organizes`]), which is when a write of it is
+/// announced to them; an object that does not parse is not.
+pub fn organized(ical: &str, addresses: &[String]) -> bool {
+    let Ok(cst) = IcalCst::parse(ical) else {
+        return false;
+    };
+    let cst = cst.into_static();
+
+    scheduled(&cst).into_iter().any(|index| {
+        let component = decoded(child(&cst, index));
+        let named = |kind: IcalPropKind| {
+            component
+                .props
+                .iter()
+                .filter(move |prop| prop.name == IcalPropName::Kind(kind))
+                .filter_map(user_address)
+                .filter(|address| !address.is_empty())
+        };
+        let organizer = named(IcalPropKind::Organizer).next().unwrap_or_default();
+
+        organizes(
+            &organizer,
+            named(IcalPropKind::Attendee).next().is_some(),
+            addresses,
+        )
+    })
+}
+
 /// Expands every scheduled component of one calendar object into the
 /// occurrences starting inside `[from, until)`, both civil `YYYYMMDD` or
 /// `YYYYMMDDTHHMMSS` stamps.
@@ -1682,5 +1738,33 @@ mod tests {
         assert!(new("VTODO", "20260105T090000").is_ok());
         assert!(new("VJOURNAL", "20260105").is_ok());
         assert!(new("VTIMEZONE", "20260105T090000").is_err());
+    }
+
+    #[test]
+    fn an_object_is_organized_by_one_of_the_users_addresses_or_nobody() {
+        let addresses = ["jane@example.com".to_string()];
+        let organized = |people: &str| {
+            let event = format!(
+                "BEGIN:VEVENT\r\nUID:1\r\nDTSTART:20261012T090000Z\r\n{people}END:VEVENT\r\n"
+            );
+            super::organized(&object(&event), &addresses)
+        };
+        let ada = "ATTENDEE:mailto:ada@example.com\r\n";
+
+        assert!(organized(&format!(
+            "ORGANIZER:mailto:JANE@example.COM\r\n{ada}"
+        )));
+        assert!(organized(ada), "the server fills the owner");
+        assert!(organized(&format!(
+            "ORGANIZER;EMAIL=jane@example.com:urn:uuid:jane\r\n{ada}"
+        )));
+        assert!(!organized("ORGANIZER:mailto:jane@example.com\r\n"));
+        assert!(!organized(
+            "ORGANIZER:mailto:jane@example.com\r\nATTENDEE:urn:uuid:nobody\r\n"
+        ));
+        assert!(!organized(&format!(
+            "ORGANIZER:mailto:boss@example.com\r\n{ada}"
+        )));
+        assert!(!super::organized("not a calendar", &addresses));
     }
 }

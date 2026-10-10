@@ -34,10 +34,10 @@ use serde::{Deserialize, Serialize};
 use crate::types::BridgeError;
 
 use super::{
-    EventTime, EventTimeKind, PRODID, Zones, address_of, child, child_mut, date_prop, decoded,
-    line, line_mut, prop, raw_value, remove_named, scheduled,
+    EventTime, EventTimeKind, PRODID, Zones, child, child_mut, date_prop, decoded, line, line_mut,
+    organizes, prop, raw_value, remove_named, scheduled,
     series::{Series, set_of, set_rule},
-    text,
+    text, user_address,
     zone::stamp,
 };
 
@@ -218,7 +218,7 @@ pub fn apply(ical: &str, edit: &str) -> Result<String, BridgeError> {
     let mut patcher = Patcher {
         edit: &edit,
         zones: Zones::of_cst(&cst),
-        organizes: organizes(&view, &edit),
+        organizes: announces(&view, &edit),
         written: Vec::new(),
         used: zones_used(&cst),
     };
@@ -254,10 +254,10 @@ fn moment(stamp: &str) -> Result<IcalRecurDateTime, BridgeError> {
         .map_err(|err| err.to_string().into())
 }
 
-/// Whether the user organizes the event with attendees, which is when
-/// an edit is theirs to announce (RFC 5546): the organizer is one of
-/// their addresses, or nobody.
-fn organizes(view: &View, edit: &PhoneEdit) -> bool {
+/// Whether an edit is the user's to announce: they organize the event
+/// with attendees ([`organizes`]), as the edit leaves it or else as the
+/// object holds it.
+fn announces(view: &View, edit: &PhoneEdit) -> bool {
     let base = view.master.as_ref().map(|master| &master.component);
     let model = edit.event.master.as_ref();
     let pick = |field: fn(&PhoneComponent) -> Option<&Vec<PhoneAttendee>>| {
@@ -271,12 +271,11 @@ fn organizes(view: &View, edit: &PhoneEdit) -> bool {
         .or_else(|| base.and_then(|base| base.organizer.as_deref()))
         .unwrap_or_default();
 
-    pick(|component| component.attendees.as_ref())
-        && (organizer.is_empty()
-            || edit
-                .addresses
-                .iter()
-                .any(|address| address.eq_ignore_ascii_case(organizer)))
+    organizes(
+        organizer,
+        pick(|component| component.attendees.as_ref()),
+        &edit.addresses,
+    )
 }
 
 /// One component of the object, where it sits and how it projects.
@@ -566,21 +565,6 @@ fn project_component(component: &IcalCst<'static>, zones: &Zones) -> Located {
         ..out
     };
     located
-}
-
-/// The user a calendar-user address names: a `mailto:` address, or the
-/// `EMAIL` parameter of any other URI.
-fn user_address(prop: &IcalProp) -> Option<String> {
-    let value = raw_value(prop)?;
-    match value.split_once(':') {
-        Some((scheme, _)) if !scheme.eq_ignore_ascii_case("mailto") => {
-            prop.params.iter().find_map(|param| match param {
-                IcalParam::Email(email) => Some(email.to_string()),
-                _ => None,
-            })
-        }
-        _ => Some(address_of(value)),
-    }
 }
 
 /// One attendee as the phone carries it; none for one without an

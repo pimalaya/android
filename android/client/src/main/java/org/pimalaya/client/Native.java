@@ -513,8 +513,9 @@ final class Native {
 
     /**
      * Pushes an edited object back to its calendar, guarded by
-     * {@code etag} when one is known. Returns the new ETag as a JSON
-     * string (or null), or a JSON error object.
+     * {@code etag} when one is known, {@code address} the account's, which
+     * Google and JMAP announce a meeting the user organizes by. Returns the
+     * new ETag as a JSON string (or null), or a JSON error object.
      */
     static native String updateEvent(
             Transport transport,
@@ -524,7 +525,8 @@ final class Native {
             String password,
             String id,
             String ical,
-            String etag);
+            String etag,
+            String address);
 
     /**
      * The object a new calendar entry starts from, carrying the three
@@ -543,8 +545,8 @@ final class Native {
 
     /**
      * Files a new object in a calendar, guarded on the resource not
-     * existing. Returns the new ETag as a JSON string (or null), or a
-     * JSON error object.
+     * existing, {@code address} as {@link #updateEvent} takes it. Returns
+     * the new ETag as a JSON string (or null), or a JSON error object.
      */
     static native String createEvent(
             Transport transport,
@@ -553,11 +555,13 @@ final class Native {
             String login,
             String password,
             String id,
-            String ical);
+            String ical,
+            String address);
 
     /**
      * Removes one object from its calendar, guarded by {@code etag} when
-     * one is known. Returns an empty JSON object, or a JSON error one.
+     * one is known, {@code address} as {@link #updateEvent} takes it.
+     * Returns an empty JSON object, or a JSON error one.
      */
     static native String deleteEvent(
             Transport transport,
@@ -566,7 +570,8 @@ final class Native {
             String login,
             String password,
             String id,
-            String etag);
+            String etag,
+            String address);
 
     /**
      * Lists every card of an account-level backend (JMAP, Google) in
