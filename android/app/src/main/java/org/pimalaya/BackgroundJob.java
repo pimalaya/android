@@ -140,15 +140,25 @@ public class BackgroundJob extends JobService {
         if (pass.failure != null) {
             Log.w("pimalaya", "background mail sync failed", pass.failure);
         }
+        String runAt =
+                java.time.Instant.now()
+                        .truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+                        .toString();
         for (String email : notified) {
-            List<MailStore.StoredMessage> arrived = new ArrayList<>();
-            for (Map.Entry<String, MailStore.StoredMessage> now :
-                    unreadInbox(mail, collections, email).entrySet()) {
-                if (!before.get(email).containsKey(now.getKey())) {
-                    arrived.add(now.getValue());
-                }
+            Map<String, MailStore.StoredMessage> held = before.get(email);
+            // NOTE: none notified yet (just turned on, or upgraded): seeded
+            // from the unread mail already there, so none of it bursts out.
+            String upTo = BackgroundCheck.notifiedUpTo(context, email);
+            if (upTo == null && !held.isEmpty()) {
+                upTo = held.values().iterator().next().sortKey;
             }
+            List<MailStore.StoredMessage> arrived =
+                    arrived(held, unreadInbox(mail, collections, email), upTo);
             notify(context, email, arrived);
+            String mark = watermark(upTo, arrived, runAt);
+            if (mark != null) {
+                BackgroundCheck.setNotifiedUpTo(context, email, mark);
+            }
         }
         if (stopped) {
             return;
@@ -181,7 +191,45 @@ public class BackgroundJob extends JobService {
         };
     }
 
-    /** An account's unread inbox messages, newest first, by collection and id. */
+    /**
+     * What a run notifies, newest first: the unread inbox messages present
+     * after its pass ({@code now}) and not before it, dated after the newest
+     * one already notified ({@code upTo}, null for none), so headers a fill
+     * listed between two runs never notify.
+     */
+    static List<MailStore.StoredMessage> arrived(
+            Map<String, MailStore.StoredMessage> before,
+            Map<String, MailStore.StoredMessage> now,
+            String upTo) {
+        List<MailStore.StoredMessage> arrived = new ArrayList<>();
+        for (Map.Entry<String, MailStore.StoredMessage> entry : now.entrySet()) {
+            MailStore.StoredMessage message = entry.getValue();
+            if (!before.containsKey(entry.getKey())
+                    && (upTo == null || message.sortKey.compareTo(upTo) > 0)) {
+                arrived.add(message);
+            }
+        }
+        return arrived;
+    }
+
+    /**
+     * What is kept as the newest notified, null for nothing yet: the later
+     * of {@code upTo} and the newest of {@code arrived}, never past
+     * {@code runAt}, so a message dated in the future (a spam dated 2099)
+     * cannot silence every later one.
+     */
+    static String watermark(String upTo, List<MailStore.StoredMessage> arrived, String runAt) {
+        String mark = upTo;
+        if (!arrived.isEmpty() && (mark == null || arrived.get(0).sortKey.compareTo(mark) > 0)) {
+            mark = arrived.get(0).sortKey;
+        }
+        return mark == null || mark.compareTo(runAt) <= 0 ? mark : runAt;
+    }
+
+    /**
+     * An account's unread inbox messages within its window, newest first, by
+     * collection and id.
+     */
     private static Map<String, MailStore.StoredMessage> unreadInbox(
             MailStore mail, PimdirCollections collections, String email) {
         List<String> inbox = new ArrayList<>();
@@ -195,7 +243,9 @@ public class BackgroundJob extends JobService {
             return unread;
         }
         for (MailStore.StoredMessage message :
-                mail.all(new MailStore.Query(inbox, 0, null, null, List.of()))) {
+                mail.all(
+                        new MailStore.Query(inbox, 0, null, null, List.of())
+                                .since(mail.windowOf(email)))) {
             if (!message.deleted) {
                 unread.put(message.collection + "/" + message.id, message);
             }

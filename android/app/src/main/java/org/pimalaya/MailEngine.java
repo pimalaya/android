@@ -38,7 +38,7 @@ import java.util.Map;
  * header fields the listing read, so a new message lands listed in the page
  * that found it, with no probe and no upgrade after it. Only the body needs
  * the network, which is why opening a message is the one read that still
- * reaches for one, beside the body step an account's offline setting runs
+ * reaches for one, beside the body step an account's window runs
  * ({@link MailBodies}).
  *
  * <p>A mailbox is listed whole, within the account's bound ({@link
@@ -75,8 +75,8 @@ class MailEngine extends PimdirEngine {
     private static final String[] WRITABLE = {SEEN, ANSWERED, FLAGGED, DELETED};
 
     /**
-     * Messages a mailbox's first pass lists, and a scroll past the list's
-     * floor widens a mailbox by: a number of messages, never a span of time.
+     * Messages a mailbox's first pass lists, the chunk an account's window
+     * starts from: a number of messages, never a span of time.
      */
     static final int FIRST_CHUNK = 50;
 
@@ -163,11 +163,20 @@ class MailEngine extends PimdirEngine {
      * <p>An account listed account-wide holds one floor: its mailboxes widen
      * below the most recent floor among them, sharing one listing. One
      * already at or below that chunk's floor (an inbox whose first chunk
-     * reached further) widens below its own instead, so a scroll never
+     * reached further) widens below its own instead, so the fill never
      * stalls.
      */
     boolean widen(String collection, int count) {
-        String bound = bound(collection);
+        return widen(collection, count, null);
+    }
+
+    /**
+     * {@link #widen(String, int)}, never below {@code stop} (null for no
+     * stop): a chunk of a window moved back to a date, listed a chunk at a
+     * time as the fill is. Answers false once the floor is at or below it.
+     */
+    boolean widen(String collection, int count, String stop) {
+        String bound = MailScope.clamp(stop, bound(collection));
         MailStore.Coverage coverage = mail().coverage(collection);
         if (coverage.filling || coverage.at == null) {
             sync(collection);

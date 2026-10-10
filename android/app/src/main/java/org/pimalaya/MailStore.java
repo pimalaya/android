@@ -172,6 +172,7 @@ final class MailStore {
                 .apply();
         MailScope.forget(context, accounts.idOf(accountEmail));
         MailOffline.forget(context, accounts.idOf(accountEmail));
+        MailWindow.forget(context, accounts.idOf(accountEmail));
         markAccountWide(context, accounts.idOf(accountEmail), false);
         markExpungesOne(context, accounts.idOf(accountEmail), true);
     }
@@ -375,6 +376,15 @@ final class MailStore {
         final boolean flagged;
         final boolean hasAttachment;
 
+        /** The attachment mark: 1 with, 0 without, null never examined. */
+        final Integer attachment;
+
+        /** Its size in bytes, null where the store does not know it. */
+        final Long size;
+
+        /** Whether the store holds its body: what a row not on the phone is dimmed by. */
+        final boolean bodied;
+
         /**
          * The queue row this message is, or 0 when it is a message the
          * store synced rather than one waiting to go out.
@@ -456,6 +466,9 @@ final class MailStore {
             this.answered = answered;
             this.flagged = flagged;
             this.hasAttachment = hasAttachment;
+            this.attachment = hasAttachment ? 1 : 0;
+            this.size = null;
+            this.bodied = true;
             this.queued = queued;
             this.objectHash = objectHash;
             this.failed = failed;
@@ -480,7 +493,9 @@ final class MailStore {
                 String sortKey,
                 long seq,
                 String flags,
-                boolean hasAttachment,
+                Integer attachment,
+                Long size,
+                boolean bodied,
                 boolean unsynced,
                 boolean refused) {
             this.accountEmail = accountEmail;
@@ -500,7 +515,10 @@ final class MailStore {
             this.seen = has(flags, MailEngine.SEEN);
             this.answered = has(flags, MailEngine.ANSWERED);
             this.flagged = has(flags, MailEngine.FLAGGED);
-            this.hasAttachment = hasAttachment;
+            this.hasAttachment = attachment != null && attachment == 1;
+            this.attachment = attachment;
+            this.size = size;
+            this.bodied = bodied;
             this.queued = 0;
             this.objectHash = null;
             this.failed = false;
@@ -703,10 +721,10 @@ final class MailStore {
 
         /**
          * How far down the list reaches, on the sort key (the {@code Date}),
-         * null for all of it: the most recent floor of the mailboxes it
-         * shows ({@link #floorOf}).
+         * null for all of it: the list's floor ({@link #floorOf}), or a
+         * window. The canonical statements apply it themselves.
          */
-        final String floor;
+        final String since;
 
         /**
          * The rows it leaves out as {@code [collection, link_id]} pairs, a
@@ -727,7 +745,7 @@ final class MailStore {
             this.seen = seen;
             this.attachment = attachment;
             this.pattern = pattern;
-            this.floor = null;
+            this.since = null;
             this.held = new HashSet<>(collections);
             JSONArray pairs = new JSONArray();
             for (String[] pair : hidden) {
@@ -739,21 +757,21 @@ final class MailStore {
 
         /** The same query narrowed to unread mail, for the unread line. */
         Query unread() {
-            return new Query(this, 0, floor);
+            return new Query(this, 0, since);
         }
 
-        /** The same query reaching down to {@code floor} alone, null for all of it. */
-        Query reaching(String floor) {
-            return new Query(this, seen, floor);
+        /** The same query reaching down to {@code since} alone, null for all of it. */
+        Query since(String since) {
+            return new Query(this, seen, since);
         }
 
-        private Query(Query query, Integer seen, String floor) {
+        private Query(Query query, Integer seen, String since) {
             this.collections = query.collections;
             this.size = query.size;
             this.seen = seen;
             this.attachment = query.attachment;
             this.pattern = query.pattern;
-            this.floor = floor;
+            this.since = since;
             this.hidden = query.hidden;
             this.hiding = query.hiding;
             this.held = query.held;
@@ -764,6 +782,17 @@ final class MailStore {
             return held.contains(collection);
         }
 
+        /** The same query over the collections {@code keep} lets through alone. */
+        Query only(java.util.function.Predicate<String> keep) {
+            List<String> kept = new ArrayList<>();
+            for (String collection : held) {
+                if (keep.test(collection)) {
+                    kept.add(collection);
+                }
+            }
+            return new Query(kept, seen, attachment, pattern, List.of()).since(since);
+        }
+
         /** The canonical statement's values, with a page's cursor and size. */
         Map<String, Object> values(StoredMessage after, long limit) {
             Map<String, Object> values = new HashMap<>();
@@ -771,6 +800,7 @@ final class MailStore {
             values.put("seen", seen);
             values.put("attachment", attachment);
             values.put("pattern", pattern);
+            values.put("since", since);
             values.put("after_key", after == null ? null : after.sortKey);
             values.put("after_seq", after == null ? null : after.seq);
             values.put("after_collection", after == null ? null : after.collection);
@@ -843,9 +873,7 @@ final class MailStore {
         if (query.size == 0) {
             return 0;
         }
-        boolean canonical =
-                query.pattern == null && query.floor == null && query.hidden == null;
-        PimdirSql.Bound bound = canonical
+        PimdirSql.Bound bound = query.pattern == null && query.hidden == null
                 ? PimdirSql.bind("COUNT_MAIL", query.values(null, -1))
                 : around("SELECT count(*) FROM (", listed(query), ")");
         try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
@@ -882,7 +910,7 @@ final class MailStore {
             return days;
         }
         PimdirSql.Bound bound;
-        if (query.pattern == null && query.floor == null && query.hidden == null) {
+        if (query.pattern == null && query.hidden == null) {
             Map<String, Object> values = query.values(null, -1);
             values.put("shift", shift);
             bound = PimdirSql.bind("COUNT_MAIL_BY_DAY", values);
@@ -906,8 +934,8 @@ final class MailStore {
     }
 
     /**
-     * The unread mail of each of the query's collections, chips and search
-     * aside: what the badge counts, over every stored message.
+     * The unread mail of the query's collections down to its floor, chips
+     * and search aside: what the badge counts, one window at a time.
      */
     long unread(Query query) {
         if (query.size == 0) {
@@ -916,6 +944,7 @@ final class MailStore {
         Map<String, Object> values = new HashMap<>();
         values.put("collections", query.collections);
         values.put("attachment", null);
+        values.put("since", query.since);
         PimdirSql.Bound bound = PimdirSql.bind("COUNT_UNREAD", values);
         long unread = 0;
         try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
@@ -924,6 +953,64 @@ final class MailStore {
             }
         }
         return unread;
+    }
+
+    /** What a range of the list weighs: its messages, their known bytes, how many weigh unknown. */
+    static final class Sum {
+        final long count;
+
+        /** The bytes of the messages whose size is known. */
+        final long size;
+
+        /** How many have no known size (Graph before it reads one, a server without it). */
+        final long unknown;
+
+        Sum(long count, long size, long unknown) {
+            this.count = count;
+            this.size = size;
+            this.unknown = unknown;
+        }
+    }
+
+    /**
+     * What the query's messages dated in {@code [since, until)} weigh, under
+     * its chips, either bound null for open ({@code sum_mail}): what a
+     * window moved back to {@code since} takes in.
+     */
+    Sum sum(Query query, String since, String until) {
+        if (query.size == 0) {
+            return new Sum(0, 0, 0);
+        }
+        Map<String, Object> values = query.values(null, -1);
+        values.put("since", since);
+        values.put("until", until);
+        PimdirSql.Bound bound = PimdirSql.bind("SUM_MAIL", values);
+        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+            return cursor.moveToFirst()
+                    ? new Sum(cursor.getLong(0), cursor.getLong(1), cursor.getLong(2))
+                    : new Sum(0, 0, 0);
+        }
+    }
+
+    /**
+     * The sort key of the query's newest message dated below {@code floor},
+     * under its chips, null when none is stored: one row of
+     * {@code list_mail_page_filtered} read after a cursor sorting before
+     * every row dated at the floor.
+     */
+    String newestBelow(Query query, String floor) {
+        if (query.size == 0 || floor == null) {
+            return null;
+        }
+        Map<String, Object> values = query.values(null, 1);
+        values.put("since", null);
+        values.put("after_key", floor);
+        values.put("after_seq", Long.MIN_VALUE);
+        values.put("after_collection", "");
+        PimdirSql.Bound bound = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
+        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+            return cursor.moveToFirst() && !cursor.isNull(5) ? cursor.getString(5) : null;
+        }
     }
 
     /**
@@ -948,7 +1035,7 @@ final class MailStore {
             // cut out of it is still a whole one.
             PimdirSql.Bound read =
                     PimdirSql.bind(statement, query.values(after, limit + query.hiding));
-            bound = reaching(hiding(read, query, limit), query.floor);
+            bound = hiding(read, query, limit);
         } else {
             PimdirSql.Bound inner = listed(query);
             Object[] args = new Object[inner.args.length + 2];
@@ -980,7 +1067,9 @@ final class MailStore {
                                 cursor.isNull(5) ? "" : cursor.getString(5),
                                 cursor.getLong(1),
                                 cursor.isNull(3) ? null : cursor.getString(3),
-                                !cursor.isNull(14) && cursor.getInt(14) == 1,
+                                cursor.isNull(14) ? null : cursor.getInt(14),
+                                cursor.isNull(13) ? null : cursor.getLong(13),
+                                !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL,
                                 unsynced,
                                 unsynced && refused(cursor.getString(0), cursor.getString(2))));
             }
@@ -989,12 +1078,13 @@ final class MailStore {
     }
 
     /**
-     * Every stored message of some mailboxes, newest first, with whether
-     * the store holds its body: what the body step plans from
+     * Every stored message of some mailboxes dated from {@code since} on
+     * (null for all of them), newest first, with whether the store holds its
+     * body and what it weighs: what the body step plans from
      * ({@link MailBodies}). Read a page of 500 at a time on
      * {@code list_mail_page_filtered}'s keyset.
      */
-    List<MailBodies.Row> bodyRows(List<String> ids) {
+    List<MailBodies.Row> bodyRows(List<String> ids, String since) {
         List<MailBodies.Row> rows = new ArrayList<>();
         if (ids.isEmpty()) {
             return rows;
@@ -1003,6 +1093,7 @@ final class MailStore {
         values.put("collections", new JSONArray(ids).toString());
         values.put("seen", null);
         values.put("attachment", null);
+        values.put("since", since);
         values.put("after_key", null);
         values.put("after_seq", null);
         values.put("after_collection", null);
@@ -1019,7 +1110,9 @@ final class MailStore {
                                     cursor.getString(0),
                                     cursor.getString(2),
                                     sortKey,
-                                    !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL));
+                                    !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL,
+                                    cursor.isNull(13) ? null : cursor.getLong(13),
+                                    cursor.isNull(14) ? null : cursor.getInt(14)));
                     values.put("after_key", sortKey);
                     values.put("after_seq", cursor.getLong(1));
                     values.put("after_collection", cursor.getString(0));
@@ -1072,17 +1165,18 @@ final class MailStore {
 
     /**
      * Every row a query lets through, newest first, as one statement: the
-     * page or search statement read whole, cut at the query's floor.
+     * page or search statement read whole, down to the query's floor.
      */
     private static PimdirSql.Bound listed(Query query) {
         String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
-        return reaching(hiding(wrapped("", statement, "", query), query, -1), query.floor);
+        return hiding(wrapped("", statement, "", query), query, -1);
     }
 
     /**
      * A newest-first read with the query's hidden rows cut out, at most
      * {@code limit} of what is left ({@code -1} for all); the read itself
-     * when it hides none. The order is restated, as {@link #reaching} does.
+     * when it hides none. The order is restated, a subquery's own being no
+     * promise.
      */
     private static PimdirSql.Bound hiding(PimdirSql.Bound inner, Query query, long limit) {
         if (query.hidden == null) {
@@ -1097,28 +1191,6 @@ final class MailStore {
                         + " WHERE json_extract(h.value, '$[0]') = collection"
                         + " AND json_extract(h.value, '$[1]') = link_id)"
                         + " ORDER BY sort_key DESC, seq DESC, collection DESC LIMIT ?",
-                args);
-    }
-
-    /**
-     * A newest-first read cut at a floor on the sort key, null for none.
-     *
-     * <p>Around the canonical statement rather than inside it: the cut keeps
-     * the rows at or above the floor, which in a newest-first read are a
-     * prefix, so a page read under its own limit and then cut is still the
-     * page, only shorter at the floor. The order is restated, a subquery's
-     * own being no promise.
-     */
-    private static PimdirSql.Bound reaching(PimdirSql.Bound inner, String floor) {
-        if (floor == null) {
-            return inner;
-        }
-        Object[] args = new Object[inner.args.length + 1];
-        System.arraycopy(inner.args, 0, args, 0, inner.args.length);
-        args[inner.args.length] = floor;
-        return new PimdirSql.Bound(
-                "SELECT * FROM (" + inner.sql + ") WHERE sort_key >= ?"
-                        + " ORDER BY sort_key DESC, seq DESC, collection DESC",
                 args);
     }
 
@@ -1255,20 +1327,106 @@ final class MailStore {
     }
 
     /**
-     * How far down the merged list may show the collections of a query: the
-     * most recent of their floors, every older message of one mailbox
-     * waiting on the others' chunks to reach it, null when none limits it.
+     * How far down the merged list may show the collections of a query, null
+     * when nothing limits it: the most recent of their floors, every older
+     * message of one mailbox waiting on the others' chunks to reach it, and
+     * of the windows of the accounts they belong to, so the list stays
+     * continuous by date across accounts. A mailbox kept whole brings no
+     * window. Over {@code edges}, as {@link #edges} reads them.
      */
-    String floorOf(Query query) {
-        String limit = null;
-        for (Edge edge : edges()) {
-            if (query.holds(edge.collection)
-                    && edge.limit != null
-                    && (limit == null || edge.limit.compareTo(limit) > 0)) {
-                limit = edge.limit;
+    String floorOf(Query query, List<Edge> edges) {
+        List<String> floors = new ArrayList<>();
+        Map<String, String> windows = new HashMap<>();
+        for (Edge edge : edges) {
+            if (!query.holds(edge.collection)) {
+                continue;
+            }
+            floors.add(edge.limit);
+            if (!MailOffline.whole(context, edge.collection)) {
+                floors.add(windows.computeIfAbsent(edge.accountEmail, this::windowOf));
             }
         }
-        return limit;
+        return MailWindow.latest(floors);
+    }
+
+    /**
+     * The query's mailboxes whose bodies download ({@link
+     * MailBodies#downloads}): what moving a window back would take in.
+     */
+    Query downloading(Query query) {
+        Map<String, String> roles = roles();
+        return query.only(
+                collection ->
+                        MailBodies.downloads(
+                                roles.get(collection), MailOffline.whole(context, collection)));
+    }
+
+    /** Whether a mailbox of the query still has headers to list below its floor. */
+    static boolean listing(Query query, List<Edge> edges) {
+        for (Edge edge : edges) {
+            if (query.holds(edge.collection) && edge.limit != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** An account's window today, null for all mail ({@link MailWindow#since}). */
+    String windowOf(String accountEmail) {
+        return MailWindow.since(context, accounts.idOf(accountEmail));
+    }
+
+    /**
+     * The window an account's first mail sync leaves ({@link
+     * MailWindow#initial}): its inbox's floor, else (an account listed
+     * account-wide, or one with no inbox) the most recent of its mailboxes'.
+     */
+    String firstWindow(String accountEmail) {
+        String account = accounts.idOf(accountEmail);
+        boolean accountWide = accountWide(context, account);
+        String inbox = null;
+        List<String> floors = new ArrayList<>();
+        List<String> ids = new ArrayList<>();
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+            if (!stored.accountEmail.equals(accountEmail)) {
+                continue;
+            }
+            String since = coverage(stored.id).since;
+            floors.add(since);
+            ids.add(stored.id);
+            if ("inbox".equals(stored.role) && !accountWide) {
+                inbox = since;
+            }
+        }
+        boolean empty = count(new Query(ids, null, null, null, List.of())) == 0;
+        java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+        return MailWindow.initial(empty, inbox, floors, java.time.LocalDate.now(zone), zone);
+    }
+
+    /**
+     * The window of an account set up before windows existed: the date of
+     * its inbox's {@link MailEngine#FIRST_CHUNK}th newest stored message,
+     * what its first chunk reached, or {@link #firstWindow} where the inbox
+     * holds fewer.
+     */
+    String storedWindow(String accountEmail) {
+        List<String> inbox = new ArrayList<>();
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+            if (stored.accountEmail.equals(accountEmail) && "inbox".equals(stored.role)) {
+                inbox.add(stored.id);
+            }
+        }
+        List<StoredMessage> newest =
+                page(
+                        new Query(inbox, null, null, null, List.of()),
+                        null,
+                        0,
+                        MailEngine.FIRST_CHUNK);
+        if (newest.size() < MailEngine.FIRST_CHUNK) {
+            return firstWindow(accountEmail);
+        }
+        String oldest = newest.get(newest.size() - 1).sortKey;
+        return oldest.isEmpty() ? firstWindow(accountEmail) : oldest;
     }
 
     /** One mailbox, and how far down its chunks have reached. */
@@ -1374,7 +1532,8 @@ final class MailStore {
      * <p>A wider bound collects nothing: the next sync lists the band it now
      * lacks. A narrower one collects what falls below its floor, since no
      * sync deletes what lies outside its scope (pimdir SYNC section 5): the
-     * messages stay on the server, and a later widening lists them again.
+     * messages stay on the server, and a later widening lists them again. It
+     * raises a window left below its floor ({@link MailWindow#raise}).
      */
     int bound(String accountEmail, int months) {
         String account = accounts.idOf(accountEmail);
@@ -1385,9 +1544,9 @@ final class MailStore {
         if (!narrower) {
             return 0;
         }
-        return collectBefore(
-                accountEmail,
-                MailScope.since(months, java.time.LocalDate.now(java.time.ZoneOffset.UTC)));
+        String floor = MailScope.since(months, java.time.LocalDate.now(java.time.ZoneOffset.UTC));
+        MailWindow.raise(context, account, floor);
+        return collectBefore(accountEmail, floor);
     }
 
     /**
@@ -1428,6 +1587,51 @@ final class MailStore {
             db.endTransaction();
         }
         return collected;
+    }
+
+    /**
+     * Frees the bodies of one account's mail dated before {@code until}
+     * (pimdir STORAGE section 11.4), its headers, flags and bindings kept,
+     * so a search still finds them: what a window moved later lets go. A
+     * mailbox kept whole keeps all of it, and so does a message the store
+     * still needs the body of (a conflict, a pending create, a local edit,
+     * one a source does not bind yet). The bases first, the items, the
+     * counts, then the collector, in one transaction. Answers how many were
+     * freed.
+     */
+    int release(String accountEmail, String until) {
+        List<String> ids = new ArrayList<>();
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+            if (stored.accountEmail.equals(accountEmail)
+                    && !MailOffline.whole(context, stored.id)) {
+                ids.add(stored.id);
+            }
+        }
+        if (ids.isEmpty()) {
+            return 0;
+        }
+        Map<String, Object> values = new HashMap<>();
+        values.put("collections", new JSONArray(ids).toString());
+        values.put("until", until);
+        int released = 0;
+        SQLiteDatabase db = items.writable();
+        db.beginTransaction();
+        try {
+            PimdirSql.Bound bases = PimdirSql.bind("RELEASE_BASES_BEFORE", values);
+            db.execSQL(bases.sql, bases.args);
+            PimdirSql.Bound bodies = PimdirSql.bind("RELEASE_BEFORE", values);
+            try (Cursor cursor = typed(db, bodies.sql, bodies.args)) {
+                while (cursor.moveToNext()) {
+                    released++;
+                }
+            }
+            db.execSQL(PimdirSql.split(PimdirSql.of("RECOMPUTE_REFCOUNTS"))[0]);
+            items.collectGarbage(db);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        return released;
     }
 
     /**

@@ -715,8 +715,7 @@ dependencies = [
 [[package]]
 name = "io-pimdir"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2f9a6703ec6e7993d395ed325bf0698e7ab17b61b0b5ad84095704349a71e90"
+source = "git+https://github.com/pimalaya/io-pimdir?rev=1030bfcc08b17ac3c126a7f78ab2130352e71756#1030bfcc08b17ac3c126a7f78ab2130352e71756"
 dependencies = [
  "blake3",
  "fs4",

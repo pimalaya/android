@@ -2,6 +2,7 @@ package org.pimalaya;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -23,16 +24,16 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
 
 /**
- * The body step an account's offline setting runs: the bodies it plans,
- * the network rule it waits on, and the upgrade it lands them through,
- * from the engine down to the store.
+ * The body step: the bodies a window and a mailbox kept whole plan, the
+ * metered cap it waits on, and the upgrade it lands them through, from the
+ * engine down to the store.
  *
- * <p>The server is one mailbox of two messages, a recent one and one from
- * three years back, answering the engine's listing and the source each
- * body is read from.
+ * <p>The server is one mailbox of four messages: three from the last days
+ * (one of 40 KB, one of 3 MB, one of unknown size carrying an attachment)
+ * and one from three years back, answering the engine's listing and the
+ * source each body is read from.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailBodiesTest {
@@ -49,8 +50,7 @@ public class MailBodiesTest {
     private String inbox;
     private Server server;
 
-    private final String recent = Instant.now().minus(1, ChronoUnit.DAYS).toString();
-    private final String old = Instant.now().minus(3 * 365, ChronoUnit.DAYS).toString();
+    private final String window = Instant.now().minus(30, ChronoUnit.DAYS).toString();
 
     @Before
     public void setUp() {
@@ -64,7 +64,7 @@ public class MailBodiesTest {
         server.sync(inbox);
     }
 
-    /** UID 2 is the recent message, UID 1 the old one. */
+    /** UIDs 4 to 2 are recent, newest first; UID 1 is three years old. */
     private final class Server extends MailEngine {
         final List<String> read = new ArrayList<>();
 
@@ -84,7 +84,12 @@ public class MailBodiesTest {
                 return page.put("items", new JSONArray()).put("complete", false)
                         .put("checkpoint", "cp");
             }
-            JSONArray items = new JSONArray().put(named("2", recent)).put(named("1", old));
+            JSONArray items =
+                    new JSONArray()
+                            .put(named("4", daysBack(1), 0, true))
+                            .put(named("3", daysBack(2), 40_000, false))
+                            .put(named("2", daysBack(3), 3_000_000, false))
+                            .put(named("1", daysBack(3 * 365), 1_000, false));
             return page.put("items", items).put("complete", true).put("checkpoint", "cp");
         }
 
@@ -95,7 +100,12 @@ public class MailBodiesTest {
         }
     }
 
-    private static JSONObject named(String handle, String date) throws JSONException {
+    private static String daysBack(int days) {
+        return Instant.now().minus(days, ChronoUnit.DAYS).toString();
+    }
+
+    private static JSONObject named(String handle, String date, long size, boolean attachment)
+            throws JSONException {
         return new JSONObject()
                 .put("handle", handle)
                 .put("flags", new JSONArray())
@@ -103,16 +113,14 @@ public class MailBodiesTest {
                 .put(
                         "summary",
                         PimdirSummary.mail(
-                                null, "Subject " + handle, "", "a@example.org", null, date, 0,
-                                false))
+                                null, "Subject " + handle, "", "a@example.org", null, date, size,
+                                attachment))
                 .put("sortKey", PimdirSummary.mailSortKey(date));
     }
 
-    /** The bodies the account's setting plans, newest first. */
-    private List<MailBodies.Row> planned() {
-        Function<String, String> boundOf =
-                collection -> MailScope.sinceOf(context, accountId, collection);
-        return MailBodies.wanted(store.bodyRows(List.of(inbox)), boundOf);
+    /** The bodies the inbox plans from {@code since} on (null for all), newest first. */
+    private List<MailBodies.Row> planned(String since) {
+        return MailBodies.wanted(store.bodyRows(List.of(inbox), since));
     }
 
     /** A step host downloading through the server, on the network given. */
@@ -120,8 +128,12 @@ public class MailBodiesTest {
         return new MailBodies.Host() {
             @Override
             public boolean allowed(String accountEmail) {
-                return MailBodies.networkAllows(
-                        true, metered, MailOffline.metered(context, accountId));
+                return true;
+            }
+
+            @Override
+            public boolean metered() {
+                return metered;
             }
 
             @Override
@@ -132,47 +144,90 @@ public class MailBodiesTest {
     }
 
     @Test
-    public void theStepRaisesOnlyBodiesWithinTheBound() {
-        MailOffline.setPolicy(context, accountId, MailOffline.Policy.BACKGROUND);
-        MailScope.set(context, accountId, 12);
-
+    public void theStepRaisesOnlyBodiesWithinTheWindow() {
         MailBodies.Run run = new MailBodies.Run();
-        run.plan(EMAIL, planned());
+        run.plan(EMAIL, planned(window));
         assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
 
-        assertEquals("only the message within the bound is read", List.of("2"), server.read);
+        assertEquals("newest first, within the window", List.of("4", "3", "2"), server.read);
         assertArrayEquals(
-                "the 8-bit body is stored as fetched", LATIN1, store.storedSource(inbox, "2"));
-        assertNull("the one below the bound stays a summary", store.storedSource(inbox, "1"));
-        assertTrue("and nothing is planned again", planned().isEmpty());
+                "the 8-bit body is stored as fetched", LATIN1, store.storedSource(inbox, "4"));
+        assertNull("the one below the window stays a summary", store.storedSource(inbox, "1"));
+        assertTrue("and nothing is planned again", planned(window).isEmpty());
     }
 
     @Test
-    public void aMailboxKeptWholeDownloadsPastTheBound() {
-        MailScope.set(context, accountId, 12);
-        MailOffline.setWhole(context, inbox, true);
-
+    public void aMailboxKeptWholeDownloadsPastTheWindow() {
         MailBodies.Run run = new MailBodies.Run();
-        run.plan(EMAIL, planned());
+        run.plan(EMAIL, planned(null));
         assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
 
-        assertEquals("newest first", List.of("2", "1"), server.read);
+        assertEquals("newest first", List.of("4", "3", "2", "1"), server.read);
         assertArrayEquals(LATIN1, store.storedSource(inbox, "1"));
     }
 
     @Test
-    public void aMeteredNetworkDefersIt() {
-        MailOffline.setPolicy(context, accountId, MailOffline.Policy.BACKGROUND);
+    public void theJunkAndTheTrashDownloadOnlyKeptWhole() {
+        assertTrue(MailBodies.downloads("inbox", false));
+        assertTrue(MailBodies.downloads(null, false));
+        assertFalse(MailBodies.downloads("junk", false));
+        assertFalse(MailBodies.downloads("trash", false));
+        assertTrue(MailBodies.downloads("trash", true));
+
+        assertTrue(MailBodies.takes(daysBack(1), window, "inbox", false));
+        assertFalse("below the window", MailBodies.takes(daysBack(60), window, "inbox", false));
+        assertFalse("undated under a window", MailBodies.takes("", window, "inbox", false));
+        assertTrue("undated under all mail", MailBodies.takes("", null, "inbox", false));
+        assertFalse(MailBodies.takes(daysBack(1), window, "junk", false));
+        assertTrue(MailBodies.takes(daysBack(60), window, "trash", true));
+    }
+
+    @Test
+    public void aMeteredNetworkTakesTheSmallBodiesAlone() {
+        assertTrue(MailBodies.fits(MailBodies.CAP, null));
+        assertFalse(MailBodies.fits(MailBodies.CAP + 1, 0));
+        assertTrue("unknown, carrying no attachment", MailBodies.fits(null, 0));
+        assertFalse("unknown, carrying one", MailBodies.fits(null, 1));
+        assertFalse("unknown, never examined", MailBodies.fits(null, null));
 
         MailBodies.Run run = new MailBodies.Run();
-        run.plan(EMAIL, planned());
-        assertEquals(MailBodies.Step.PAUSED, MailBodies.step(run, host(true)));
-        assertTrue("nothing read on a metered network", server.read.isEmpty());
+        run.plan(EMAIL, planned(window));
+        assertEquals(MailBodies.Step.AGAIN, MailBodies.step(run, host(true)));
+        assertEquals("the 40 KB body alone", List.of("3"), server.read);
+        assertEquals(
+                "the larger ones wait", MailBodies.Step.PAUSED, MailBodies.step(run, host(true)));
         assertNull(store.storedSource(inbox, "2"));
 
-        // NOTE: the plan is kept, so the account's switch picks it up.
-        MailOffline.setMetered(context, accountId, true);
-        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
-        assertEquals(List.of("2", "1"), server.read);
+        // NOTE: the plan is kept, so an unmetered network picks it up.
+        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
+        assertEquals(List.of("3", "4", "2"), server.read);
+    }
+
+    @Test
+    public void twoNewestFirstListsMergeNewestFirst() {
+        MailBodies.Row a = new MailBodies.Row("x", "a", "2026-10-03T00:00:00Z", false, null, null);
+        MailBodies.Row b = new MailBodies.Row("y", "b", "2026-10-02T00:00:00Z", false, null, null);
+        MailBodies.Row c = new MailBodies.Row("x", "c", "2026-10-01T00:00:00Z", false, null, null);
+        List<MailBodies.Row> merged = MailBodies.merged(List.of(a, c), List.of(b));
+        assertEquals(List.of(a, b, c), merged);
+    }
+
+    @Test
+    public void aWindowMovedLaterFreesTheBodiesBelowIt() {
+        MailBodies.Run run = new MailBodies.Run();
+        run.plan(EMAIL, planned(null));
+        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
+
+        // NOTE: a mailbox kept whole keeps all of it.
+        MailOffline.setWhole(context, inbox, true);
+        assertEquals(0, store.release(EMAIL, window));
+        MailOffline.setWhole(context, inbox, false);
+
+        assertEquals("the one below the window", 1, store.release(EMAIL, window));
+        assertNull(store.storedSource(inbox, "1"));
+        assertArrayEquals("the window's stay", LATIN1, store.storedSource(inbox, "2"));
+        MailStore.Query all = store.query((account, collection) -> true, false, false, "");
+        assertEquals("its header stays, for search", 4, store.count(all));
+        assertEquals("and it plans again under all mail", 1, planned(null).size());
     }
 }

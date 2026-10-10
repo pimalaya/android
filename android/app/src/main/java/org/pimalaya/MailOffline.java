@@ -4,28 +4,15 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 /**
- * How much of an account's mail is kept to read offline: which bodies
- * download without being opened, on which networks, and which mailboxes
- * are kept whole.
+ * Which mailboxes are kept whole ("Download this mailbox"): listed past
+ * their account's bound and every body downloaded, whatever the account's
+ * window ({@link MailWindow}).
  *
  * <p>Kept beside the account rather than inside its encrypted record, as
  * its bound is ({@link MailScope}): it is no secret, and what reads it
- * knows an account by the id its collections are namespaced under.
- *
- * <p>The bound is the only limit: no storage cap. Space is freed from
- * Deleted items and by narrowing the bound.
+ * knows a mailbox by its collection id.
  */
 final class MailOffline {
-    /** Which bodies an account downloads before anyone opens them. */
-    enum Policy {
-        /** None: a body is fetched when its message is opened. */
-        ON_OPEN,
-        /** Every listed message's within the bound, after each pass and fill step. */
-        BACKGROUND,
-        /** The bound set to all mail, and every body: a full copy. */
-        WHOLE
-    }
-
     private static final String PREFS = "mail-offline";
 
     private MailOffline() {}
@@ -34,31 +21,7 @@ final class MailOffline {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    /** An account's policy, bodies on open unless set. */
-    static Policy policy(Context context, String accountId) {
-        int ordinal = prefs(context).getInt("policy:" + accountId, 0);
-        Policy[] policies = Policy.values();
-        return ordinal >= 0 && ordinal < policies.length ? policies[ordinal] : Policy.ON_OPEN;
-    }
-
-    static void setPolicy(Context context, String accountId, Policy policy) {
-        prefs(context).edit().putInt("policy:" + accountId, policy.ordinal()).apply();
-    }
-
-    /** Whether an account's bodies also download on a metered network; off unless set. */
-    static boolean metered(Context context, String accountId) {
-        return prefs(context).getBoolean("metered:" + accountId, false);
-    }
-
-    static void setMetered(Context context, String accountId, boolean metered) {
-        prefs(context).edit().putBoolean("metered:" + accountId, metered).apply();
-    }
-
-    /**
-     * Whether a mailbox is kept whole ("Download this mailbox"): listed
-     * past its account's bound and every body downloaded, whatever the
-     * account's policy.
-     */
+    /** Whether a mailbox is kept whole. */
     static boolean whole(Context context, String collection) {
         return prefs(context).getBoolean("whole:" + collection, false);
     }
@@ -73,26 +36,25 @@ final class MailOffline {
         editor.apply();
     }
 
-    /** Whether a mailbox's bodies download without being opened. */
-    static boolean downloads(Context context, String accountId, String collection) {
-        return policy(context, accountId) != Policy.ON_OPEN || whole(context, collection);
+    /**
+     * Whether an account downloaded its bodies ahead under the offline
+     * policy windows replaced (in the background, or whole): what its
+     * window starts from ({@link MailWindow#migrate}).
+     */
+    static boolean downloadedAhead(Context context, String accountId) {
+        return prefs(context).getInt("policy:" + accountId, 0) != 0;
     }
 
-    /** Whether any mailbox of an account downloads its bodies. */
-    static boolean downloadsAny(Context context, String accountId) {
-        if (policy(context, accountId) != Policy.ON_OPEN) {
-            return true;
-        }
-        String prefix = "whole:" + PimdirAccount.collectionId(accountId, "");
-        for (String key : prefs(context).getAll().keySet()) {
-            if (key.startsWith(prefix)) {
-                return true;
-            }
-        }
-        return false;
+    /** Forgets the offline policy and metered setting windows replaced. */
+    static void forgetPolicy(Context context, String accountId) {
+        prefs(context)
+                .edit()
+                .remove("policy:" + accountId)
+                .remove("metered:" + accountId)
+                .apply();
     }
 
-    /** Forgets an account's settings and its mailboxes', with the account. */
+    /** Forgets an account's mailboxes kept whole, with the account. */
     static void forget(Context context, String accountId) {
         SharedPreferences.Editor editor = prefs(context).edit();
         editor.remove("policy:" + accountId);

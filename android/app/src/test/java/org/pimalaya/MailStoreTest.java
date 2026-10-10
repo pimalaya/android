@@ -410,6 +410,13 @@ public class MailStoreTest {
     private void listed(
             String accountEmail, String id, String subject, String date, boolean attachment,
             String... flags) throws Exception {
+        sized(accountEmail, id, subject, date, 0, attachment, flags);
+    }
+
+    /** {@link #listed}, weighing {@code size} bytes (0 for unknown). */
+    private void sized(
+            String accountEmail, String id, String subject, String date, long size,
+            boolean attachment, String... flags) throws Exception {
         String collection = store.collectionOf(accountEmail, "INBOX");
         JSONArray marks = new JSONArray();
         for (String flag : flags) {
@@ -425,7 +432,8 @@ public class MailStoreTest {
         placement.put(
                 "summary",
                 PimdirSummary.mail(
-                        null, subject, "Sender", "sender@example.org", null, date, 0, attachment));
+                        null, subject, "Sender", "sender@example.org", null, date, size,
+                        attachment));
         placement.put("sortKey", PimdirSummary.mailSortKey(date));
         placement.put("base", new org.json.JSONObject().put("flags", marks));
         new PimdirStorage(pimdir)
@@ -484,6 +492,34 @@ public class MailStoreTest {
         assertEquals(30, store.count(all(false, true, "")));
         assertEquals(40, store.unread(query));
         assertEquals(10, store.count(all(true, true, "")));
+
+        // A floor is the statements' own: the count, the days, the pages and
+        // the badge stop at it. February on holds rows 62 to 119.
+        MailStore.Query floored = query.since("2026-02-01T00:00:00Z");
+        assertEquals(58, store.count(floored));
+        long days = 0;
+        for (MailStore.Day day : store.countByDay(floored, "+0 minutes")) {
+            days += day.count;
+        }
+        assertEquals(58, days);
+        assertEquals(58, store.all(floored).size());
+        assertEquals("unread below the floor is not counted", 19, store.unread(floored));
+        assertEquals(19, store.count(floored.unread()));
+
+        // What a range weighs, sizes the store does not know told apart.
+        sized(ONE, "s1", "Sized", "2026-03-02T09:00:00Z", 1_000, false);
+        sized(ONE, "s2", "Sized", "2026-03-02T10:00:00Z", 2_000, false);
+        MailStore.Sum known = store.sum(query, "2026-03-02T00:00:00Z", null);
+        assertEquals(2, known.count);
+        assertEquals(3_000, known.size);
+        assertEquals(0, known.unknown);
+        MailStore.Sum unknown = store.sum(query, "2026-02-01T00:00:00Z", "2026-03-02T00:00:00Z");
+        assertEquals(58, unknown.count);
+        assertEquals(58, unknown.unknown);
+        assertTrue(
+                "the newest below a floor",
+                store.newestBelow(query, "2026-03-02T00:00:00Z").startsWith("2026-03-01"));
+        assertNull(store.newestBelow(query, "2026-01-01T00:00:00Z"));
     }
 
     @Test
@@ -505,20 +541,20 @@ public class MailStoreTest {
 
     @Test
     public void aNarrowedBoundCollectsWhatFallsBelowIt() throws Exception {
+        Context context = RuntimeEnvironment.getApplication();
         mailboxes(ONE, "INBOX");
         listed(ONE, "old", "Old", "2020-01-01T08:00:00Z", false);
         listed(ONE, "kept", "Old but starred here", "2020-01-02T08:00:00Z", false);
         listed(ONE, "new", "New", "2099-01-01T08:00:00Z", false);
         listed(ONE, "undated", "Undated", "not a date", false);
+        String accountId = store.accountIdOf(ONE);
+        MailWindow.set(context, accountId, "2019-06-01T00:00:00Z");
 
         // A flag change staged and not pushed yet owes the server something,
         // so a collection leaves it.
         MailEngine engine =
                 new MailEngine(
-                        pimdir,
-                        new org.pimalaya.client.PimalayaClient(),
-                        null,
-                        new PimdirAccount(RuntimeEnvironment.getApplication()).idOf(ONE));
+                        pimdir, new org.pimalaya.client.PimalayaClient(), null, accountId);
         String collection = store.collectionOf(ONE, "INBOX");
         engine.mutateFlags(collection, "kept", new JSONArray().put(MailEngine.FLAGGED));
 
@@ -528,9 +564,12 @@ public class MailStoreTest {
         assertEquals(0, scalar("SELECT count(*) FROM items WHERE link_id = 'old'"));
         assertEquals("an undated message is never older", 1,
                 scalar("SELECT count(*) FROM items WHERE link_id = 'undated'"));
+        String floor = MailScope.since(6, java.time.LocalDate.now(java.time.ZoneOffset.UTC));
+        assertEquals("the window is raised to the floor", floor, store.windowOf(ONE));
 
         assertEquals("a wider bound collects nothing", 0, store.bound(ONE, 0));
         assertEquals(0, store.monthsOf(ONE));
+        assertEquals("and leaves the window where it was raised", floor, store.windowOf(ONE));
     }
 
     @Test
@@ -539,5 +578,42 @@ public class MailStoreTest {
         assertEquals("2026-04-01T00:00:00Z", MailScope.since(6, today));
         assertEquals("2025-10-01T00:00:00Z", MailScope.since(12, today));
         assertNull("all mail has no floor", MailScope.since(0, today));
+    }
+
+    @Test
+    public void anAccountSetUpBeforeWindowsTakesOne() throws Exception {
+        Context context = RuntimeEnvironment.getApplication();
+        store.replaceMailboxes(ONE, List.of(new Mailbox("INBOX", "inbox")));
+        java.time.Instant start = java.time.Instant.parse("2026-09-01T00:00:00Z");
+        for (int index = 0; index < 60; index++) {
+            listed(ONE, "m" + index, "M", start.plusSeconds(index * 3600L).toString(), false);
+        }
+        String accountId = store.accountIdOf(ONE);
+
+        // NOTE: bodies on open: the inbox's first chunk as stored, the
+        // date of its 50th newest message, so nothing downloads by surprise.
+        MailWindow.migrate(context, store, ONE);
+        assertTrue(store.windowOf(ONE).startsWith("2026-09-01T10:00"));
+
+        // NOTE: an account that held its bodies takes its bound's floor,
+        // and the old policy is forgotten.
+        MailWindow.forget(context, accountId);
+        context.getSharedPreferences("mail-offline", Context.MODE_PRIVATE)
+                .edit()
+                .putInt("policy:" + accountId, 1)
+                .apply();
+        MailScope.set(context, accountId, 6);
+        MailWindow.migrate(context, store, ONE);
+        assertEquals(
+                MailScope.since(6, java.time.LocalDate.now(java.time.ZoneOffset.UTC)),
+                store.windowOf(ONE));
+        assertFalse(MailOffline.downloadedAhead(context, accountId));
+
+        // NOTE: once held, a window is never migrated again.
+        MailScope.set(context, accountId, 0);
+        MailWindow.migrate(context, store, ONE);
+        assertEquals(
+                MailScope.since(6, java.time.LocalDate.now(java.time.ZoneOffset.UTC)),
+                store.windowOf(ONE));
     }
 }

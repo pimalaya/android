@@ -75,9 +75,31 @@
     </plurals>
     <string name="mail_search">Rechercher dans les e-mails</string>
     <string name="date_unknown">Sans date</string>
-    <string name="mail_more_loading">Chargement des e-mails plus anciens</string>
-    <string name="mail_more_offline">Les e-mails plus anciens demandent le réseau</string>
-    <string name="mail_more_failed">Impossible de charger les e-mails plus anciens. Touchez pour réessayer</string>
+    <string name="mail_window_load">Charger depuis le %1$s</string>
+    <string name="mail_window_choose">Choisir une date</string>
+    <string name="mail_window_confirm">Charger</string>
+    <string name="mail_window_all">Tous mes e-mails</string>
+    <plurals name="mail_window_size">
+        <item quantity="one">%1$s message · environ %2$s</item>
+        <item quantity="other">%1$s messages · environ %2$s</item>
+    </plurals>
+    <plurals name="mail_window_unknown">
+        <item quantity="one">%1$s message · taille inconnue</item>
+        <item quantity="other">%1$s messages · taille inconnue</item>
+    </plurals>
+    <plurals name="mail_window_unknown_some">
+        <item quantity="one">%1$s message · %2$s, taille inconnue pour %3$s</item>
+        <item quantity="other">%1$s messages · %2$s, taille inconnue pour %3$s</item>
+    </plurals>
+    <string name="mail_window_syncing">En-têtes plus anciens en cours de synchro</string>
+    <string name="mail_window_offline">Téléchargement une fois en ligne</string>
+    <string name="mail_window_wifi">Les plus gros en Wi-Fi</string>
+    <string name="mail_window_widened">Période de synchronisation élargie jusqu\'à cette date</string>
+    <string name="mail_window_release_title">Libérer les anciens messages ?</string>
+    <string name="mail_window_release_message">Les messages d\'avant le %1$s quittent ce téléphone. Leurs en-têtes restent, la recherche les trouve encore, et en ouvrir un le télécharge à nouveau.</string>
+    <string name="mail_window_release">Libérer</string>
+    <string name="mail_row_not_downloaded">Non téléchargé</string>
+    <string name="mail_row_wifi">Se télécharge en Wi-Fi</string>
     <string name="mail_chip_unread">Non lus</string>
     <string name="mail_chip_inbox">Réception</string>
     <string name="mail_chip_sent">Envoyés</string>
@@ -95,7 +117,7 @@
     <string name="filter_download_stop">Arrêter</string>
     <string name="filter_downloaded">Gardée entière hors ligne</string>
     <string name="filter_download_title">Télécharger cette boîte ?</string>
-    <string name="filter_download_message">Tous les messages de %1$s sont listés et téléchargés, au-delà de la période synchronisée du compte, sur un réseau non facturé à l\'usage sauf si le compte l\'autorise.</string>
+    <string name="filter_download_message">Tous les messages de %1$s sont listés et téléchargés, au-delà de la période synchronisée du compte, les plus gros en Wi-Fi seulement.</string>
     <string name="filter_reset">Réinitialiser</string>
 
     <!-- Deleted items -->
@@ -125,6 +147,8 @@
     <string name="deleted_free_failed">Impossible de libérer de l\'espace</string>
     <string name="message_reply">Répondre</string>
     <string name="message_forward">Transférer</string>
+    <string name="message_not_on_phone">Ce message n\'est pas encore sur votre téléphone. Il sera téléchargé dès votre retour en ligne.</string>
+    <string name="message_not_on_phone_later">Ce message n\'est pas sur votre téléphone. Rouvrez-le une fois en ligne.</string>
     <string name="compose_quote_intro">Le %1$s, %2$s a écrit :</string>
     <string name="compose_forward_intro">---------- Message transféré ----------</string>
     <string name="week_number">Sem. %d</string>
@@ -493,15 +517,8 @@
         <item>La dernière année</item>
         <item>Les 2 dernières années</item>
     </string-array>
-    <string name="mail_offline_title">Télécharger les messages</string>
-    <string name="mail_offline_message">Les messages téléchargés s\'ouvrent sans connexion.</string>
-    <string-array name="mail_offline_policies">
-        <item>À l\'ouverture</item>
-        <item>En arrière-plan</item>
-        <item>Boîtes entières (synchronisation complète)</item>
-    </string-array>
-    <string name="mail_offline_metered">Aussi sur les données mobiles</string>
-    <string name="mail_offline_metered_note">Sinon, les téléchargements en arrière-plan attendent le Wi-Fi</string>
+    <string name="account_window_title">E-mails sur ce téléphone</string>
+    <string name="account_window_since">Depuis le %1$s</string>
     <string name="account_send">Envoyer via</string>
     <string name="account_send_none">Aucun serveur</string>
     <string name="account_books">Carnets d\'adresses</string>

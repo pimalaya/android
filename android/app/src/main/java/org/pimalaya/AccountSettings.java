@@ -199,12 +199,11 @@ final class AccountSettings {
 
     /**
      * The mail card: the name mail goes out under, how far back it syncs,
-     * which bodies download ahead and on which networks, and where it
-     * sends through.
+     * since when its mail is on the phone ({@link MailWindow}), and where
+     * it sends through.
      */
     private void addMail(Sections sections, AccountEntry account) {
         String email = account.email;
-        String accountId = host.mail.accountIdOf(email);
         List<View> rows = new ArrayList<>();
 
         String name = SenderName.of(host, email);
@@ -215,60 +214,49 @@ final class AccountSettings {
                         chevron(),
                         () -> promptSenderName(email)));
 
-        // NOTE: a whole mailbox is all of it, which the download setting
-        // says, so the period holds at all mail and dims.
-        MailOffline.Policy policy = MailOffline.policy(host, accountId);
-        boolean whole = policy == MailOffline.Policy.WHOLE;
         String[] scopes = host.getResources().getStringArray(R.array.mail_scopes);
-        int scope = whole ? 0 : scopeIndex(host.mail.monthsOf(email));
-        View period =
+        int scope = scopeIndex(host.mail.monthsOf(email));
+        rows.add(
                 sections.row(
                         host.getString(R.string.mail_scope_title),
                         scopes[scope],
                         chevron(),
-                        whole
-                                ? null
-                                : () ->
-                                        choose(
-                                                R.string.mail_scope_title,
-                                                R.string.mail_scope_message,
-                                                R.array.mail_scopes,
-                                                scope,
-                                                picked -> bound(email, MailScope.MONTHS[picked])));
-        period.setAlpha(whole ? 0.5f : 1f);
-        rows.add(period);
-
-        String[] policies = host.getResources().getStringArray(R.array.mail_offline_policies);
-        rows.add(
-                sections.row(
-                        host.getString(R.string.mail_offline_title),
-                        policies[policy.ordinal()],
-                        chevron(),
                         () ->
                                 choose(
-                                        R.string.mail_offline_title,
-                                        R.string.mail_offline_message,
-                                        R.array.mail_offline_policies,
-                                        policy.ordinal(),
-                                        picked ->
-                                                setPolicy(
-                                                        email,
-                                                        accountId,
-                                                        MailOffline.Policy.values()[picked]))));
+                                        R.string.mail_scope_title,
+                                        R.string.mail_scope_message,
+                                        R.array.mail_scopes,
+                                        scope,
+                                        picked -> bound(email, MailScope.MONTHS[picked]))));
 
-        Switch metered = new Switch(host);
-        metered.setChecked(MailOffline.metered(host, accountId));
-        metered.setOnCheckedChangeListener(
-                (view, checked) -> {
-                    MailOffline.setMetered(host, accountId, checked);
-                    host.fillMail();
-                });
+        // NOTE: back takes in more, later frees the bodies below, asked first.
+        String window = host.mail.windowOf(email);
+        MergedFilter filter = host.filterOf(PimDomain.MAIL);
         rows.add(
-                switchRow(
-                        sections,
-                        host.getString(R.string.mail_offline_metered),
-                        host.getString(R.string.mail_offline_metered_note),
-                        metered));
+                sections.row(
+                        host.getString(R.string.account_window_title),
+                        window == null
+                                ? host.getString(R.string.mail_window_all)
+                                : host.getString(
+                                        R.string.account_window_since,
+                                        WindowPicker.label(host, window)),
+                        chevron(),
+                        () ->
+                                WindowPicker.open(
+                                        host,
+                                        host.mailList.reads(),
+                                        host.mail.query(
+                                                (owner, collection) ->
+                                                        owner.equals(email)
+                                                                && filter.accepts(owner, collection),
+                                                false,
+                                                false,
+                                                ""),
+                                        window,
+                                        List.of(email),
+                                        collection -> filter.accepts(email, collection),
+                                        true,
+                                        () -> renderIfOpen(email))));
 
         // NOTE: JMAP, Graph and Gmail submit through the account they read
         // from, so there is no server of its own to change.
@@ -318,34 +306,6 @@ final class AccountSettings {
                             () -> {
                                 host.mailList.reload();
                                 renderIfOpen(email);
-                            });
-                });
-        render();
-    }
-
-    /**
-     * Sets which bodies download ahead ({@link MailOffline}). Whole mailbox
-     * sets the bound to all mail, and the body step starts or replans.
-     */
-    private void setPolicy(String email, String accountId, MailOffline.Policy picked) {
-        MailOffline.setPolicy(host, accountId, picked);
-        if (picked != MailOffline.Policy.WHOLE) {
-            render();
-            host.fillMail();
-            return;
-        }
-        host.io.execute(
-                () -> {
-                    try {
-                        host.mail.bound(email, 0);
-                    } catch (Exception error) {
-                        Log.w("pimalaya", "mail bound failed for " + email, error);
-                    }
-                    host.postAlive(
-                            () -> {
-                                renderIfOpen(email);
-                                host.mailList.reload();
-                                host.fillMail();
                             });
                 });
         render();

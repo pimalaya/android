@@ -80,25 +80,6 @@ public class MailFillTest {
     }
 
     @Test
-    public void aScrollWidensEveryShownMailboxHoldingTheLimitingFloor() {
-        List<MailStore.Edge> edges =
-                List.of(
-                        edge("INBOX", "inbox", true, "2026-09-20T00:00:00Z"),
-                        edge("Sent", "sent", true, "2026-09-20T00:00:00Z"),
-                        edge("Projets", "", true, "2026-09-25T00:00:00Z"),
-                        edge("Archive", "", true, "2026-09-02T00:00:00Z"));
-
-        List<MailStore.Edge> limiting = MailFill.limiting(edges, name -> !name.equals("Projets"));
-        assertEquals(2, limiting.size());
-        assertEquals("INBOX", limiting.get(0).mailbox);
-        assertEquals("Sent", limiting.get(1).mailbox);
-
-        assertEquals(
-                "Projets", MailFill.limiting(edges, name -> true).get(0).mailbox);
-        assertEquals(0, MailFill.limiting(edges, name -> false).size());
-    }
-
-    @Test
     public void theFillStopsWhenItMayNotRunAndResumesFromItsFloors() {
         Host host = new Host();
         host.edges.add(edge("INBOX", "inbox", true, "2026-09-03T00:00:00Z"));

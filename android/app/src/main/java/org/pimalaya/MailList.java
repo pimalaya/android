@@ -41,13 +41,17 @@ import java.util.function.Consumer;
  * over them, with the account and mailbox shown per row and filterable on
  * both axes.
  *
- * <p>It loads lazily. Its size is a count of what the filter, the chips
- * and the search let through, its day headers are placed from one count
- * per day, and its rows are read a page at a time around the scroll
- * position, far pages evicted, a placeholder standing in for a row whose
- * page is still on its way. Search, the chips and the unread badge are
- * conditions of the store's query, so they cover every stored message;
- * none of them changes what syncs, which the filter alone decides. The
+ * <p>It shows the windows ({@link MailWindow}): down to its floor, the
+ * most recent of the shown accounts' windows and of the shown mailboxes'
+ * coverage, so what it shows is on the phone, and it ends on a footer
+ * moving the windows back. It loads lazily. Its size is a count of what
+ * the filter, the chips, the search and the floor let through, its day
+ * headers are placed from one count per day, and its rows are read a page
+ * at a time around the scroll position, far pages evicted, a placeholder
+ * standing in for a row whose page is still on its way. Search, the chips,
+ * the floor and the unread badge are conditions of the store's query,
+ * search covering every stored message and the badge each account's
+ * window; none of them changes what syncs, which the filter alone decides. The
  * messages waiting to go out stay on top, outside the paged query. A long
  * press starts a selection the bar then acts on, keyed by store id, and
  * selecting all is a query rather than a walk over rows in memory.
@@ -255,6 +259,11 @@ final class MailList {
                                 });
     }
 
+    /** The list's one reader, for a read that has to stay off the sync's thread. */
+    java.util.concurrent.Executor reads() {
+        return reads;
+    }
+
     ListHeader header() {
         return header;
     }
@@ -278,20 +287,33 @@ final class MailList {
         boolean attachments = attachmentsOnly;
         String outboxLabel = store.outboxName();
         String undated = host.getString(R.string.date_unknown);
+        boolean metered = host.metered();
 
         reads.execute(
                 () -> {
-                    BiPredicate<String, String> shown =
-                            narrowed(
-                                    filter::accepts,
-                                    narrowing,
-                                    narrowing == null ? Map.of() : store.roles());
+                    Map<String, String> roles = store.roles();
+                    BiPredicate<String, String> shown = narrowed(filter::accepts, narrowing, roles);
                     MailStore.Query wanted = store.query(shown, unread, attachments, words);
-                    MailStore.Query everything = store.query(filter::accepts, false, false, "");
+                    List<MailStore.Edge> edges = store.edges();
+
+                    Map<String, String> windows = new HashMap<>();
+                    for (MailStore.Edge edge : edges) {
+                        if (!windows.containsKey(edge.accountEmail)) {
+                            windows.put(edge.accountEmail, store.windowOf(edge.accountEmail));
+                        }
+                    }
+                    long badge = badge(filter, windows);
+
                     // NOTE: a search covers every stored message; the list
-                    // reaches down to the floor its mailboxes share alone.
-                    String floor = words.trim().isEmpty() ? store.floorOf(wanted) : null;
-                    MailStore.Query listed = wanted.reaching(floor);
+                    // reaches down to its floor otherwise, ending on the
+                    // footer that moves the windows back.
+                    String floor = null;
+                    Footer footer = null;
+                    if (words.trim().isEmpty()) {
+                        floor = store.floorOf(wanted, edges);
+                        footer = footerOf(wanted, edges, floor);
+                    }
+                    MailStore.Query listed = wanted.since(floor);
 
                     List<MailStore.StoredMessage> outbox = new ArrayList<>();
                     for (MailStore.StoredMessage message : store.outgoing()) {
@@ -305,9 +327,16 @@ final class MailList {
 
                     List<MailStore.Day> days = store.countByDay(listed, shift());
                     long shownUnread = store.count(listed.unread());
-                    long badge = store.unread(everything);
                     Layout next = Layout.of(host, outbox, outboxLabel, undated, days, shownUnread);
-                    next.limited = floor != null;
+                    // NOTE: nothing shown and nothing older stored: the
+                    // empty state alone, not a lone "Choose a date".
+                    next.footer =
+                            footer != null && footer.date == null && next.rows() == 0
+                                    ? null
+                                    : footer;
+                    next.windows = windows;
+                    next.roles = roles;
+                    next.metered = metered;
 
                     // NOTE: the pages around where the list stands, read
                     // before the swap, so the rows on screen stay drawn.
@@ -353,85 +382,136 @@ final class MailList {
                         ? resources.getQuantityString(
                                 R.plurals.mail_meta_unread, unread, unread, rows)
                         : resources.getQuantityString(R.plurals.mail_meta, rows, rows));
+        // NOTE: an empty window over older mail shows its footer instead.
         host.findViewById(R.id.mail_empty)
-                .setVisibility(rows == 0 && !layout.limited ? View.VISIBLE : View.GONE);
+                .setVisibility(rows == 0 && layout.footer == null ? View.VISIBLE : View.GONE);
     }
 
-    // ---- older mail -------------------------------------------------------
-
-    /** Whether the mailboxes' next chunks are being listed for the list's end. */
-    private boolean widening;
+    // ---- the footer -------------------------------------------------------
 
     /**
-     * Why older mail could not be listed, as the line the list's last row
-     * says ({@link #stallOf}); 0 while it can be tried. No retry until asked.
+     * What the list's footer offers, read with the layout: the date it
+     * moves the windows back to (null for none, "Choose a date" alone),
+     * what that takes in, the floor it reaches down from, whether shown
+     * mailboxes still have headers to list below it, and the accounts whose
+     * windows move.
      */
-    private int stalled;
+    private static final class Footer {
+        final String date;
+        final MailStore.Sum sum;
+        final String floor;
+        final boolean listing;
+        final List<String> accounts;
 
-    /**
-     * What the list's last row says once a widening is over: nothing when it
-     * went through, that older mail needs the network only when there is
-     * none, and otherwise that it could not be loaded, with a tap to try
-     * again. A failure on a phone that is online is the server's or this
-     * app's, and blaming the network for it sends the reader looking for a
-     * signal they already have.
-     */
-    static int stallOf(boolean widened, boolean online) {
-        if (widened) {
-            return 0;
-        }
-        return online ? R.string.mail_more_failed : R.string.mail_more_offline;
-    }
-
-    /**
-     * Lets the list's end try for older mail again: after a pass went through,
-     * on return to the app, or on a tap on the row that said it failed.
-     */
-    void retryOlder() {
-        if (stalled != 0) {
-            stalled = 0;
-            adapter.notifyDataSetChanged();
+        Footer(
+                String date,
+                MailStore.Sum sum,
+                String floor,
+                boolean listing,
+                List<String> accounts) {
+            this.date = date;
+            this.sum = sum;
+            this.floor = floor;
+            this.listing = listing;
+            this.accounts = accounts;
         }
     }
 
     /**
-     * The list's end was reached while its floor holds older mail back: the
-     * next chunk of every shown mailbox whose floor is the limiting one, then
-     * the list read again, reaching down to whichever floor limits it next.
+     * The footer under {@code wanted}, null for none: the next date
+     * ({@link MailWindow#next}) when one is worth a tap, "Choose a date"
+     * while a shown account is bounded. Only accounts showing a mailbox not
+     * kept whole have a window to move.
      */
-    private void older() {
-        if (widening || stalled != 0 || currentQuery == null) {
-            return;
+    private Footer footerOf(MailStore.Query wanted, List<MailStore.Edge> edges, String floor) {
+        boolean listing = false;
+        boolean bounded = false;
+        List<String> accounts = new ArrayList<>();
+        for (MailStore.Edge edge : edges) {
+            if (!wanted.holds(edge.collection)) {
+                continue;
+            }
+            listing |= edge.limit != null;
+            if (!MailOffline.whole(host, edge.collection)
+                    && !accounts.contains(edge.accountEmail)) {
+                accounts.add(edge.accountEmail);
+                bounded |= store.monthsOf(edge.accountEmail) > 0;
+            }
         }
-        if (!host.online()) {
-            stalled = stallOf(false, false);
-            host.main.post(adapter::notifyDataSetChanged);
-            return;
+        if (accounts.isEmpty()) {
+            return null;
         }
-        widening = true;
-        host.widenMail(
-                currentQuery::holds,
-                widened -> {
-                    widening = false;
-                    stalled = stallOf(widened, host.online());
-                    reload();
-                });
+        String date =
+                MailWindow.next(
+                        store.newestBelow(wanted, floor),
+                        floor,
+                        listing,
+                        java.time.ZoneId.systemDefault());
+        if (date == null && !bounded) {
+            return null;
+        }
+        MailStore.Sum sum =
+                date == null ? null : store.sum(store.downloading(wanted), date, floor);
+        return new Footer(date, sum, floor, listing, accounts);
     }
 
-    /** The list's last row while older mail is held back: loading, or why not. */
-    private View more(View recycled, ViewGroup parent) {
+    /**
+     * The badge: the unread mail of each account within its window, every
+     * mailbox the filter shows, chips and search aside.
+     */
+    private long badge(MergedFilter filter, Map<String, String> windows) {
+        long badge = 0;
+        for (Map.Entry<String, String> window : windows.entrySet()) {
+            String email = window.getKey();
+            MailStore.Query mail =
+                    store.query(
+                            (account, collection) ->
+                                    account.equals(email) && filter.accepts(account, collection),
+                            false,
+                            false,
+                            "");
+            badge += store.unread(mail.since(window.getValue()));
+        }
+        return badge;
+    }
+
+    /** The list's footer: the button, the line under it, and "Choose a date". */
+    private View footer(View recycled, ViewGroup parent) {
         View view = recycled;
         if (view == null) {
-            view = LayoutInflater.from(host).inflate(R.layout.item_mail_more, parent, false);
+            view = LayoutInflater.from(host).inflate(R.layout.item_mail_window, parent, false);
         }
-        older();
-        view.findViewById(R.id.mail_more_progress)
-                .setVisibility(stalled != 0 ? View.GONE : View.VISIBLE);
-        ((TextView) view.findViewById(R.id.mail_more_label))
-                .setText(stalled != 0 ? stalled : R.string.mail_more_loading);
-        boolean retry = stalled == R.string.mail_more_failed;
-        view.setOnClickListener(retry ? tapped -> retryOlder() : null);
-        view.setClickable(retry);
+        Footer footer = layout.footer;
+        java.util.function.Predicate<String> shown = currentQuery::holds;
+
+        android.widget.Button load = view.findViewById(R.id.mail_window_load);
+        load.setVisibility(footer.date != null ? View.VISIBLE : View.GONE);
+        TextView info = view.findViewById(R.id.mail_window_info);
+        info.setVisibility(footer.date != null ? View.VISIBLE : View.GONE);
+        if (footer.date != null) {
+            load.setText(
+                    host.getString(
+                            R.string.mail_window_load, WindowPicker.label(host, footer.date)));
+            load.setOnClickListener(
+                    tapped -> WindowPicker.apply(host, footer.accounts, footer.date, shown, null));
+            info.setText(
+                    WindowPicker.info(
+                            host, footer.sum, footer.listing, host.online(), host.metered()));
+        }
+
+        MailStore.Query query = currentQuery;
+        view.findViewById(R.id.mail_window_choose)
+                .setOnClickListener(
+                        tapped ->
+                                WindowPicker.open(
+                                        host,
+                                        reads,
+                                        query,
+                                        footer.floor,
+                                        footer.accounts,
+                                        shown,
+                                        false,
+                                        null));
         return view;
     }
 
@@ -475,8 +555,17 @@ final class MailList {
         /** Each section's header position. */
         int[] headerAt = new int[0];
 
-        /** Whether a floor holds older mail back, the list ending on a row saying so. */
-        boolean limited;
+        /** The footer the list ends on, null for none. */
+        Footer footer;
+
+        /** Each account's window, null for all mail: what a row not on the phone says. */
+        Map<String, String> windows = Map.of();
+
+        /** Each mailbox's role, by collection id. */
+        Map<String, String> roles = Map.of();
+
+        /** Whether the network was metered when read, holding the larger bodies back. */
+        boolean metered;
 
         int size;
 
@@ -695,12 +784,12 @@ final class MailList {
     private final class Adapter extends BaseAdapter {
         @Override
         public int getCount() {
-            return layout.size + (layout.limited ? 1 : 0);
+            return layout.size + (layout.footer != null ? 1 : 0);
         }
 
-        /** Whether a position is the row past the last message. */
-        private boolean isMore(int position) {
-            return layout.limited && position == layout.size;
+        /** Whether a position is the footer past the last message. */
+        private boolean isFooter(int position) {
+            return layout.footer != null && position == layout.size;
         }
 
         @Override
@@ -720,7 +809,7 @@ final class MailList {
 
         @Override
         public int getItemViewType(int position) {
-            if (isMore(position)) {
+            if (isFooter(position)) {
                 return 2;
             }
             return layout.isHeader(position) ? 1 : 0;
@@ -728,13 +817,13 @@ final class MailList {
 
         @Override
         public boolean isEnabled(int position) {
-            return !isMore(position) && !layout.isHeader(position);
+            return !isFooter(position) && !layout.isHeader(position);
         }
 
         @Override
         public View getView(int position, View recycled, ViewGroup parent) {
-            if (isMore(position)) {
-                return more(recycled, parent);
+            if (isFooter(position)) {
+                return footer(recycled, parent);
             }
             if (layout.isHeader(position)) {
                 View view = recycled;
@@ -785,6 +874,39 @@ final class MailList {
         view.findViewById(R.id.message_attachment).setVisibility(View.GONE);
         view.findViewById(R.id.message_answered).setVisibility(View.GONE);
         view.findViewById(R.id.message_unsynced).setVisibility(View.GONE);
+        dim(view, false);
+    }
+
+    /** Draws a row's content faded, its card left as it is. */
+    private static void dim(View view, boolean dimmed) {
+        ViewGroup card = view.findViewById(R.id.row_card);
+        for (int index = 0; index < card.getChildCount(); index++) {
+            card.getChildAt(index).setAlpha(dimmed ? 0.5f : 1f);
+        }
+    }
+
+    /**
+     * What a row whose body the phone does not hold says, 0 for nothing: a
+     * message within its account's window (outside the junk and the trash)
+     * is on its way, saying so only while a metered network holds a large
+     * one back; any other is not downloaded.
+     */
+    private int notOnPhone(MailStore.StoredMessage message) {
+        if (message.bodied) {
+            return 0;
+        }
+        boolean taken =
+                MailBodies.takes(
+                        message.sortKey,
+                        layout.windows.get(message.accountEmail),
+                        layout.roles.get(message.collection),
+                        MailOffline.whole(host, message.collection));
+        if (!taken) {
+            return R.string.mail_row_not_downloaded;
+        }
+        return layout.metered && !MailBodies.fits(message.size, message.attachment)
+                ? R.string.mail_row_wifi
+                : 0;
     }
 
     /** One message's row. */
@@ -807,8 +929,14 @@ final class MailList {
         // answer where it is, and what the reader is asking is whether
         // it has gone. One the server refused says that instead, which
         // is the same question answered for good.
+        int missing = notOnPhone(message);
         ((TextView) view.findViewById(R.id.message_origin))
-                .setText(state(message) + " · " + message.accountEmail);
+                .setText(
+                        state(message)
+                                + " · "
+                                + message.accountEmail
+                                + (missing == 0 ? "" : " · " + host.getString(missing)));
+        dim(view, !message.bodied);
 
         // The disc stands for the sender rather than the message, so
         // it is keyed by the address alone: a sender who changes how

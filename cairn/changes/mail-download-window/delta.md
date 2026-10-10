@@ -20,7 +20,7 @@ Its third paragraph's first sentence becomes:
 ## ADDED Requirements
 
 ### Requirement: A mail account keeps a download window
-A mail account SHALL keep a window date, kept as app state beside the account and not in the store: the messages dated on or after it are the ones the phone holds whole. It SHALL be set at the end of the account's first mail sync, with nothing asked at onboarding: the floor of the inbox's first chunk (the oldest `Date` among its 50 newest); for an account listed account-wide (Gmail), or one with no inbox, the most recent floor among its mailboxes; all mail when every mailbox fitted in its first chunk; the first of the current month for an account holding no mail. It SHALL move back only when the user moves it (the list's footer, its date picker, the account's settings), and never forward by itself: new mail lands above it. It SHALL never be older than the floor of the account's bound: a date picked below that floor SHALL widen the bound to the smallest choice covering it, or all mail, and say so, and narrowing the bound above the window SHALL raise the window to the new floor. All mail SHALL set both the window and the bound to all mail. A message with no date SHALL fall below every window but all mail. A mailbox kept whole SHALL have no window.
+A mail account SHALL keep a window date, kept as app state beside the account and not in the store: the messages dated on or after it are the ones the phone holds whole. It SHALL be set at the end of the account's first mail sync, with nothing asked at onboarding: the floor of the inbox's first chunk (the oldest `Date` among its 50 newest); for an account listed account-wide (Gmail), one with no inbox, or one whose inbox fitted in its first chunk, the most recent floor among its mailboxes; all mail when every mailbox fitted in its first chunk; the first of the current month for an account holding no mail. An account set up again SHALL keep the window it holds. It SHALL move only when the user moves it (back from the list's footer, its date picker or the account's settings, later from the account's settings alone), and never by itself: new mail lands above it. A date the user picks or the footer offers SHALL be a day on the device's clock, the window holding the instant of its midnight there, as the list's day headers do. It SHALL never be older than the floor of the account's bound: a date picked below that floor SHALL widen the bound to the smallest choice covering it, or all mail, and say so, and narrowing the bound above the window SHALL raise the window to the new floor. All mail SHALL set both the window and the bound to all mail. A message with no date SHALL fall below every window but all mail. A mailbox kept whole SHALL have no window.
 
 #### Scenario: A first sync
 - GIVEN an account whose inbox's 50 newest messages reach back to 15 October
@@ -40,7 +40,7 @@ A mail account SHALL keep a window date, kept as app state beside the account an
 ### Requirement: The mail list ends on a footer moving the window back
 While the list's floor holds older mail back, the mail list SHALL end on a footer: a button "Load since" a date, an info line under it, and "Choose a date". The date SHALL be the first of the month of the newest stored message dated below the floor, among the shown mailboxes under the chips, so an empty month is skipped and a tap never loads nothing; where none is stored below it but a shown mailbox still has headers to list below the floor, it SHALL be the latest first of a month before the floor (a floor of 15 October offers 1 October, one of 1 October offers 1 September). The info line SHALL count the shown messages stored between the date and the floor and sum their sizes ("1,240 messages · about 85 MB"), leaving out the sizes the store does not know and then saying for how many ("size unknown for 40"); it SHALL add that older headers are still syncing while a shown mailbox has headers to list there, that the download waits for the network when there is none, and on a metered network that larger messages wait for Wi-Fi when the total passes 10 MB.
 
-A tap SHALL set the window of every shown account to the earlier of its window and the date, list the band down to the date of every shown mailbox whose floor is above it, download the bodies the windows now take in, and read the list again, the rows already stored showing at once, dimmed until their bodies land. "Choose a date" SHALL open a date picker offering any day before the floor and "All my mail", showing the same info line for the date picked before it is confirmed, then do what a tap does with that date. The button SHALL go when no stored message lies below the floor and no shown mailbox has headers left to list below it; "Choose a date" SHALL stay while a shown account is bounded. The footer SHALL follow the chips, a role chip moving the windows of the accounts it shows, and SHALL hide under a search. With no network the tap SHALL still move the windows and show the stored rows, the band and the bodies waiting for the network.
+A tap SHALL set the window of every shown account that is on to the earlier of its window and the date and read the list again at once, the rows already stored showing dimmed until their bodies land; then list the band down to the date of every shown mailbox whose floor is above it, a chunk of 500 at a time as the fill does, so opening a message waits a chunk at most, stopping when a sync starts; then download the bodies the windows now take in. "Choose a date" SHALL open a date picker offering any day before the floor and "All my mail", showing the same info line for the date picked before it is confirmed, then do what a tap does with that date. The info line SHALL count only the mailboxes whose bodies download (no junk or trash unless kept whole). The button SHALL go when no stored message lies below the floor and no shown mailbox has headers left to list below it; "Choose a date" SHALL stay while a shown account is bounded, except under an empty list, which shows its empty state alone. The footer SHALL follow the chips, a role chip moving the windows of the accounts it shows, and SHALL hide under a search. With no network the tap SHALL still move the windows and show the stored rows, the band and the bodies waiting for the network.
 
 #### Scenario: Two accounts at different windows
 - GIVEN account A's window at 15 October and account B's at 3 June, both shown
@@ -87,7 +87,7 @@ Opening a message whose body the store does not hold, with no network, SHALL sho
 - THEN the reader says it is not on the phone and to open it again once online
 
 ### Requirement: A notification reaches no lower than the window
-A background run SHALL notify only the messages dated on or after their account's window and after the newest message it already notified for that account, so headers an in-app fill lists between two runs never notify.
+A background run SHALL notify only the messages dated on or after their account's window and after the newest message it already notified for that account, kept no later than the run so a message dated in the future cannot silence later ones, so headers an in-app fill lists between two runs never notify. An account with nothing notified yet (notifications just turned on, or an install upgraded) SHALL take the newest unread inbox message already there as that mark, so none of it notifies.
 
 #### Scenario: A fill between two runs
 - GIVEN an account notifying new mail, whose last run notified a message of this morning
@@ -95,12 +95,25 @@ A background run SHALL notify only the messages dated on or after their account'
 - THEN only the new message notifies
 
 ### Requirement: An account's settings show its window
-A mail account's settings SHALL show its window ("Mail on this phone since 1 September", or "All my mail"), and the row SHALL open the footer's date picker, taking the account alone, offering only dates before the window.
+A mail account's settings SHALL show its window ("Mail on this phone since 1 September", or "All my mail"), and the row SHALL open the footer's date picker over the account alone and the mailboxes the mail filter shows, offering any day up to today. A day before the window SHALL move it back as the footer does. A day after it SHALL ask first, saying the messages before it leave the phone while their headers stay for search; confirmed, the window SHALL move to it and the bodies of the account's messages dated below it SHALL be freed (A window moved later frees the bodies below it).
 
 #### Scenario: Moving the window back from settings
 - GIVEN an account whose window is 1 September
 - WHEN 1 June is picked from its settings
 - THEN its window is 1 June, and the bodies dated since then download
+
+#### Scenario: Moving the window later from settings
+- GIVEN an account whose window is 1 June
+- WHEN 1 September is picked from its settings and the question confirmed
+- THEN its window is 1 September, and the bodies of its messages before it are freed, their rows still found by a search
+
+### Requirement: A window moved later frees the bodies below it
+Moving an account's window later SHALL free the bodies of its messages dated below the new window, through pimdir's owner release (STORAGE section 11.4: the bindings' bases, then the items back to `Meta`, then the counts, in one transaction, then the collector), each message's headers, flags and bindings kept. A mailbox kept whole SHALL keep all of it, and so SHALL a message the store still needs the body of: a conflict, a pending create, a local edit, one a source of its mailbox does not bind yet. A message freed and opened again SHALL be fetched, as one never opened is.
+
+#### Scenario: An archive kept whole
+- GIVEN an account whose Archive is kept whole
+- WHEN its window is moved later
+- THEN the Archive keeps every body, and the other mailboxes free theirs below the new window
 
 ### Requirement: An account set up before the window takes one
 An account whose first mail sync was paid before windows existed SHALL take a window once, when the app starts: the floor of its bound where it downloaded bodies in the background or kept all mail, its bodies being mostly held; else the floor of its inbox's first chunk, the oldest `Date` among the 50 newest stored inbox messages, so nothing downloads by surprise. The offline policy and metered setting it carried SHALL then be forgotten.

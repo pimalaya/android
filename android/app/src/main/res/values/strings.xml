@@ -124,7 +124,6 @@
     <string name="local_account">Pimalaya</string>
     <string name="local_book">Local app contacts</string>
     <!-- The account's mail bound: what a sync lists and what the store keeps. -->
-    <!-- Which bodies an account downloads before they are opened (MailOffline). -->
     <string name="home_empty">No account yet. Add one to get started.</string>
 
     <string name="sync_title">Synchronizing</string>
@@ -196,7 +195,7 @@
     <string name="filter_download_stop">Stop</string>
     <string name="filter_downloaded">Kept whole offline</string>
     <string name="filter_download_title">Download this mailbox?</string>
-    <string name="filter_download_message">Every message of %1$s is listed and downloaded, past the account\'s sync period, on unmetered networks unless the account allows metered ones.</string>
+    <string name="filter_download_message">Every message of %1$s is listed and downloaded, past the account\'s sync period, larger ones on Wi-Fi only.</string>
     <string name="contacts_transfer">Import or export</string>
     <string name="filter_reset">Reset</string>
 
@@ -245,9 +244,32 @@
     </plurals>
     <string name="mail_search">Search mail</string>
     <string name="date_unknown">Undated</string>
-    <string name="mail_more_loading">Loading older mail</string>
-    <string name="mail_more_offline">Older mail needs the network</string>
-    <string name="mail_more_failed">Couldn\'t load older mail. Tap to retry</string>
+    <!-- The list's footer moving the download windows back (MailWindow). -->
+    <string name="mail_window_load">Load since %1$s</string>
+    <string name="mail_window_choose">Choose a date</string>
+    <string name="mail_window_confirm">Load</string>
+    <string name="mail_window_all">All my mail</string>
+    <plurals name="mail_window_size">
+        <item quantity="one">%1$s message · about %2$s</item>
+        <item quantity="other">%1$s messages · about %2$s</item>
+    </plurals>
+    <plurals name="mail_window_unknown">
+        <item quantity="one">%1$s message · size unknown</item>
+        <item quantity="other">%1$s messages · size unknown</item>
+    </plurals>
+    <plurals name="mail_window_unknown_some">
+        <item quantity="one">%1$s message · %2$s, size unknown for %3$s</item>
+        <item quantity="other">%1$s messages · %2$s, size unknown for %3$s</item>
+    </plurals>
+    <string name="mail_window_syncing">Older headers still syncing</string>
+    <string name="mail_window_offline">Downloads once online</string>
+    <string name="mail_window_wifi">Larger ones on Wi-Fi</string>
+    <string name="mail_window_widened">Sync period widened to reach that date</string>
+    <string name="mail_window_release_title">Free older messages?</string>
+    <string name="mail_window_release_message">Messages before %1$s leave this phone. Their headers stay, so search still finds them, and opening one downloads it again.</string>
+    <string name="mail_window_release">Free</string>
+    <string name="mail_row_not_downloaded">Not downloaded</string>
+    <string name="mail_row_wifi">Downloads on Wi-Fi</string>
     <string name="mail_chip_unread">Unread</string>
     <string name="mail_chip_inbox">Inbox</string>
     <string name="mail_chip_sent">Sent</string>
@@ -336,6 +358,8 @@
 
     <!-- The message reader. -->
     <string name="message_failed">Could not read the message</string>
+    <string name="message_not_on_phone">This message is not on your phone yet. It will download when you are back online.</string>
+    <string name="message_not_on_phone_later">This message is not on your phone. Open it again once you are online.</string>
     <string name="message_no_content">This message has no readable body</string>
     <string name="message_no_account">The account this message came from is gone</string>
     <string name="message_to">To: %s</string>
@@ -631,15 +655,8 @@
         <item>The last year</item>
         <item>The last 2 years</item>
     </string-array>
-    <string name="mail_offline_title">Download messages</string>
-    <string name="mail_offline_message">Downloaded messages open without a connection.</string>
-    <string-array name="mail_offline_policies">
-        <item>When opened</item>
-        <item>In the background</item>
-        <item>Whole mailboxes (full sync)</item>
-    </string-array>
-    <string name="mail_offline_metered">Also on mobile data</string>
-    <string name="mail_offline_metered_note">Background downloads wait for Wi-Fi otherwise</string>
+    <string name="account_window_title">Mail on this phone</string>
+    <string name="account_window_since">Since %1$s</string>
     <string name="account_send">Send through</string>
     <string name="account_send_none">No server</string>
     <string name="account_books">Addressbooks</string>
