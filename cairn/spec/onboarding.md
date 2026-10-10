@@ -139,3 +139,37 @@ A browser grant against Google's or Microsoft's authorization server SHALL run w
 - GIVEN mail and calendars both connected through Microsoft
 - WHEN the sign-in sequence runs
 - THEN it asks for two consents, Outlook's and Graph's
+
+### Requirement: A permission is asked only as its option is turned on
+The app SHALL ask the contacts, calendar and notifications permissions only when the user turns on an option needing them: a phone box or the notifications box of a setup, or the matching option in an account's settings. A refusal SHALL turn that option back off. Nothing else SHALL prompt: not continuing a setup, not opening the app, not a sync. An option whose permission was revoked in the system settings SHALL read as off, and turning it on SHALL ask again.
+
+#### Scenario: Refused in a setup
+- GIVEN the standard setup with Contacts ticked
+- WHEN "Show in phone contacts" is turned on and the permission refused
+- THEN the box is unticked again, and Continue asks nothing
+
+#### Scenario: Revoked later
+- GIVEN an account notifying new mail, its notifications permission then revoked in the system settings
+- WHEN its settings are opened
+- THEN "Notify new mail" reads off, and turning it on asks the permission
+
+### Requirement: The setups offer new-mail notifications
+Both setups SHALL offer, for an account covering mail, a box "Notify new mail", unticked by default, asking the notifications permission on Android 13 and later when it is turned on. Connected with it on, the account SHALL notify new mail and SHALL sync in the background, at the default interval when its interval was off.
+
+#### Scenario: Turned on
+- GIVEN the standard setup with Mail ticked
+- WHEN "Notify new mail" is turned on, the permission granted, and the setup connects
+- THEN the account's settings show "Notify new mail" on and background sync every 15 minutes
+
+#### Scenario: Left off
+- GIVEN the same setup with the box left unticked
+- WHEN it connects
+- THEN no permission was asked and the account does not notify
+
+### Requirement: The standard setup starts with nothing ticked
+The standard setup SHALL open with every domain unticked, so each ticked one shows its options to read in turn, and Continue SHALL stay disabled until one is ticked. Ticks SHALL be kept when the flow steps back to this screen.
+
+#### Scenario: A Microsoft address
+- GIVEN an address offering mail, contacts and calendars
+- WHEN the standard setup is shown
+- THEN no domain is ticked, no option row shows, and Continue is disabled

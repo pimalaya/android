@@ -3,7 +3,7 @@ cairn: delta
 change: onboarding-options-ask-on-switch
 ---
 
-Folds into `spec/phone-mirror.md` (after `phone-contacts-mirror` and `phone-calendar-mirror` create it), `spec/onboarding.md` and `spec/mail.md` (after `background-check`).
+The ADDED requirements fold into `spec/onboarding.md`. The MODIFIED ones restate requirements that `phone-contacts-mirror` (into `spec/phone-mirror.md`) and `background-check` (into `spec/mail.md`) still carry in their own deltas, both active: they fold with those changes, whose deltas take this wording.
 
 ## ADDED Requirements
 
@@ -67,6 +67,6 @@ A run SHALL notify, for an account with new-mail notifications on, each unread i
 #### Scenario: Pulling during a run
 - GIVEN a background run syncing when the app is opened
 - WHEN the list is pulled
-- THEN the sync is turned down with "A background sync is running", and the strip says one is
+- THEN no second pass starts and nothing pops up, the strip saying a background sync is running
 
 ## REMOVED Requirements

@@ -19,7 +19,7 @@ change: onboarding-options-ask-on-switch
 - [x] Device feedback 2026-10-10: the standard setup's options are ticks rather than switches, as its domains are
 - [x] Device feedback 2026-10-10: the standard setup opens with every domain unticked
 - [ ] Device test: each switch on, granted and refused, in both setups and in settings; a permission revoked in the system settings
-- [ ] Fold the delta into the spec, log, CHANGELOG
+- [x] Fold the delta into the spec, log, CHANGELOG
 
 ## Notes
 
