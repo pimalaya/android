@@ -173,6 +173,8 @@
         <item quantity="other">Resolving %1$d conflicts</item>
     </plurals>
     <string name="sync_step_mailboxes">Mailboxes synced: %1$d of %2$d</string>
+    <string name="sync_step_books">Address books synced: %1$d of %2$d</string>
+    <string name="sync_step_calendars">Calendars synced: %1$d of %2$d</string>
 
     <string name="contacts_sync">Sync</string>
     <string name="birthdays_title">Next birthday</string>

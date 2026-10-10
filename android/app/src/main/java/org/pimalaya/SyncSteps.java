@@ -2,7 +2,7 @@ package org.pimalaya;
 
 /**
  * What the sync strip's step line says for one engine stage, in the
- * words of the domain being synced.
+ * words of the domain being synced, and when a count is worth telling.
  *
  * <p>The stages are every engine's ({@link PimdirEngine.Progress}), the
  * nouns are not: a calendar pass downloads events and a mail pass messages,
@@ -62,6 +62,34 @@ final class SyncSteps {
     static boolean counted(int stage) {
         return stage != PimdirEngine.Progress.STAGE_SERVER
                 && stage != PimdirEngine.Progress.STAGE_PHONE;
+    }
+
+    /**
+     * The line counting an account's collections as they land: its
+     * mailboxes, address books or calendars.
+     */
+    static int collectionsOf(PimDomain domain) {
+        switch (domain) {
+            case MAIL:
+                return R.string.sync_step_mailboxes;
+            case CALENDAR:
+                return R.string.sync_step_calendars;
+            default:
+                return R.string.sync_step_books;
+        }
+    }
+
+    /**
+     * Whether {@code done} of {@code total} is worth telling the strip: the
+     * last item, or one crossing a percent. A projection of a thousand
+     * contacts moves the bar ten at a time rather than posting a thousand
+     * frames.
+     */
+    static boolean tells(int done, int total) {
+        if (total <= 0 || done <= 0) {
+            return false;
+        }
+        return done >= total || done * 100L / total != (done - 1) * 100L / total;
     }
 
     /** The line itself, or null when the domain has no such stage. */

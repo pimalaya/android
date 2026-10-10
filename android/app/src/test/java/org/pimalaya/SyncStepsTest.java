@@ -1,7 +1,9 @@
 package org.pimalaya;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import android.content.res.Resources;
 
@@ -84,6 +86,47 @@ public class SyncStepsTest {
                     "Resolving 1 conflict",
                     line(domain, PimdirEngine.Progress.STAGE_RESOLVE, 1));
         }
+    }
+
+    @Test
+    public void eachDomainCountsItsCollections() {
+        Resources resources = RuntimeEnvironment.getApplication().getResources();
+        assertEquals(
+                "Address books synced: 1 of 3",
+                resources.getString(SyncSteps.collectionsOf(PimDomain.CONTACTS), 1, 3));
+        assertEquals(
+                "Mailboxes synced: 3 of 12",
+                resources.getString(SyncSteps.collectionsOf(PimDomain.MAIL), 3, 12));
+        assertEquals(
+                "Calendars synced: 2 of 5",
+                resources.getString(SyncSteps.collectionsOf(PimDomain.CALENDAR), 2, 5));
+    }
+
+    @Test
+    public void aLargeProjectionTellsOncePerPercent() {
+        int told = 0;
+        for (int done = 1; done <= 1000; done++) {
+            if (SyncSteps.tells(done, 1000)) {
+                told += 1;
+            }
+        }
+        assertEquals(100, told);
+        assertFalse(SyncSteps.tells(9, 1000));
+        assertTrue(SyncSteps.tells(10, 1000));
+        assertTrue(SyncSteps.tells(1000, 1000));
+    }
+
+    @Test
+    public void aSmallStepTellsEveryItem() {
+        for (int done = 1; done <= 3; done++) {
+            assertTrue(SyncSteps.tells(done, 3));
+        }
+    }
+
+    @Test
+    public void nothingCountedIsNeverTold() {
+        assertFalse(SyncSteps.tells(0, 10));
+        assertFalse(SyncSteps.tells(1, 0));
     }
 
     @Test

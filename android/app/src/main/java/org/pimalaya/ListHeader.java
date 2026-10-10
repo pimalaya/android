@@ -39,6 +39,11 @@ final class ListHeader {
 
     private int lastTop;
 
+    /** Whether this list searches, and filters with chips. */
+    private boolean searching;
+
+    private boolean chipping;
+
     /** Debounced search, so typing does not re-render per keystroke. */
     private Runnable pendingSearch;
 
@@ -98,9 +103,12 @@ final class ListHeader {
     }
 
     /**
-     * Shows the sync strip in place of the meta line: the account the pass
-     * is on (none before it reaches one), the step it stands at, over a bar filled to {@code done} of {@code total}, or running
-     * indeterminate while the pass cannot count (a total of zero).
+     * Shows the sync strip in place of the meta line, the search field and
+     * the chips: the account the pass is on (none before it reaches one),
+     * the step it stands at, over a bar filled to {@code done} of {@code
+     * total}, or running indeterminate while the pass cannot count (a total
+     * of zero). A search field holding a query or the cursor stays: hidden,
+     * it would filter the list with nothing saying so.
      */
     void sync(String account, String detail, int done, int total) {
         TextView whose = view.findViewById(R.id.header_sync_account);
@@ -112,14 +120,32 @@ final class ListHeader {
         ProgressBar bar = view.findViewById(R.id.header_sync_bar);
         bar.setIndeterminate(total <= 0);
         if (total > 0) {
-            bar.setProgress(done * bar.getMax() / total);
+            bar.setProgress((int) ((long) Math.min(done, total) * bar.getMax() / total));
         }
+        controls(false);
     }
 
-    /** Puts the meta line back once the sync is over. */
+    /** Puts the meta line, the search field and the chips back once the sync is over. */
     void synced() {
         view.findViewById(R.id.header_sync).setVisibility(View.GONE);
         view.findViewById(R.id.header_meta).setVisibility(View.VISIBLE);
+        controls(true);
+    }
+
+    /**
+     * Shows or hides the search field and the chips this list uses, a
+     * search field holding a query, or the cursor, always shown.
+     */
+    private void controls(boolean shown) {
+        if (searching) {
+            EditText input = view.findViewById(R.id.header_search_input);
+            boolean kept = shown || input.length() > 0 || input.hasFocus();
+            view.findViewById(R.id.header_search).setVisibility(kept ? View.VISIBLE : View.GONE);
+        }
+        if (chipping) {
+            view.findViewById(R.id.header_chips_scroll)
+                    .setVisibility(shown ? View.VISIBLE : View.GONE);
+        }
     }
 
     /** Whether the bar should carry the title, the large one being gone. */
@@ -132,6 +158,7 @@ final class ListHeader {
      * cased) to {@code onQuery}.
      */
     void search(int hint, Consumer<String> onQuery) {
+        searching = true;
         view.findViewById(R.id.header_search).setVisibility(View.VISIBLE);
         EditText input = view.findViewById(R.id.header_search_input);
         View clear = view.findViewById(R.id.header_search_clear);
@@ -165,6 +192,7 @@ final class ListHeader {
 
     /** The chip row, shown, for the caller to fill. */
     LinearLayout chips() {
+        chipping = true;
         view.findViewById(R.id.header_chips_scroll).setVisibility(View.VISIBLE);
         return view.findViewById(R.id.header_chips);
     }

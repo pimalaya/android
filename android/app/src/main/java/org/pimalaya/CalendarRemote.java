@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.function.IntConsumer;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -533,8 +534,10 @@ final class CalendarRemote {
      * report rejected on a mismatch, so a calendar-app edit racing the pass
      * is reconciled by the next one. A write the provider refuses for one
      * object leaves that object off the phone, logged, until it changes.
+     * {@code pushed} is told how many changes are through after each one.
      */
-    JSONObject push(String collection, JSONArray changes) throws JSONException {
+    JSONObject push(String collection, JSONArray changes, IntConsumer pushed)
+            throws JSONException {
         Target target = requireTarget(collection);
         JSONArray results = new JSONArray();
         for (int index = 0; index < changes.length(); index++) {
@@ -559,6 +562,7 @@ final class CalendarRemote {
                 Log.w("pimalaya", "calendar phone push failed for " + handle, failure);
                 results.put(PimdirEngine.result(handle, false, null, null));
             }
+            pushed.accept(index + 1);
         }
         JSONObject reply = new JSONObject();
         reply.put("results", results);

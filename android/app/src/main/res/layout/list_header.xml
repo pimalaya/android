@@ -34,7 +34,7 @@
 
     <!-- While a sync runs: whose account, then the step, over a thin bar,
          determinate once the pass can count. In place of the meta line,
-         which ListHeader hides meanwhile. -->
+         the search field and the chips, which ListHeader hides meanwhile. -->
     <LinearLayout
         android:id="@+id/header_sync"
         android:layout_width="match_parent"

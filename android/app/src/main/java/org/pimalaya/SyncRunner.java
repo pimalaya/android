@@ -27,12 +27,12 @@ final class SyncRunner {
      * Observes a run for the foreground loader and the account cache;
      * every hook fires on the sync thread.
      */
-    interface Observer {
-        /** An engine stage of a domain stepped (the loader's detail line). */
-        void step(PimDomain domain, int stage, int count);
-
+    interface Observer extends PimdirEngine.Progress {
         /** A pass moved on to one account (the loader's title). */
         void account(String email);
+
+        /** How many of an account's address books have landed. */
+        void collections(PimDomain domain, int done, int total);
 
         /** A token refresh re-persisted the account's credentials. */
         void accountRefreshed(AccountEntry updated);
@@ -267,17 +267,21 @@ final class SyncRunner {
 
             OfflineEngine engine = engine(primary, account);
 
-            for (BookEntry entry : books) {
+            for (int index = 0; index < books.size(); index++) {
+                BookEntry entry = books.get(index);
                 outcome.absorb(engine.syncBook(entry.book.url, entry.remoteSynced));
+                if (observer != null) {
+                    observer.collections(PimDomain.CONTACTS, index + 1, books.size());
+                }
             }
         }
     }
 
-    /** An engine wired to the observer's progress display. */
+    /** An engine wired to the observer's progress display, steps and counts. */
     private OfflineEngine engine(Transport primary, Account account) {
         OfflineEngine engine = new OfflineEngine(base, pimdir, client, primary, account, context);
         if (observer != null) {
-            engine.progress = observer::step;
+            engine.progress = observer;
         }
         return engine;
     }

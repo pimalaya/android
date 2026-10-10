@@ -4,6 +4,7 @@ import android.content.Context;
 import android.util.Log;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
@@ -24,8 +25,8 @@ final class RemotePass {
         /** The pass moved on to one account, null between accounts. */
         void account(String email);
 
-        /** How many of an account's mailboxes have landed. */
-        void mailboxes(int done, int total);
+        /** How many of an account's mailboxes or calendars have landed. */
+        void collections(PimDomain domain, int done, int total);
     }
 
     /** A pass nobody watches, the background check's. */
@@ -35,7 +36,7 @@ final class RemotePass {
                 public void account(String email) {}
 
                 @Override
-                public void mailboxes(int done, int total) {}
+                public void collections(PimDomain domain, int done, int total) {}
 
                 @Override
                 public void step(PimDomain domain, int stage, int count) {}
@@ -280,7 +281,7 @@ final class RemotePass {
                             worker -> new MailEngine(pimdir, client, worker, accountId),
                             MailEngine::sync,
                             (done, total) ->
-                                    progress.mailboxes(done, total));
+                                    progress.collections(PimDomain.MAIL, done, total));
         }
         for (MailPool.Failure failure : outcome.failures) {
             Log.w("pimalaya", "mail sync failed: " + failure.collection, failure.error);
@@ -339,6 +340,9 @@ final class RemotePass {
             // listing's transport the first worker's: the wait was the
             // network's, one calendar after another.
             String accountId = accountIdOf(account.email);
+            AtomicInteger running = new AtomicInteger();
+            AtomicInteger landed = new AtomicInteger();
+            PimdirEngine.Progress alone = alone(running);
             Exception failure;
             try (CalendarPool<Transport> pool =
                     new CalendarPool<>(CalendarPool.SIZE, transport, Transport::new)) {
@@ -346,7 +350,9 @@ final class RemotePass {
                         pool.run(
                                 account.email,
                                 calendars,
-                                (worker, collection, remote) ->
+                                (worker, collection, remote) -> {
+                                    running.incrementAndGet();
+                                    try {
                                         session.call(
                                                 server -> {
                                                     CalendarEngine engine =
@@ -357,14 +363,22 @@ final class RemotePass {
                                                                     server,
                                                                     accountId,
                                                                     account.email);
-                                                    engine.progress = progress;
+                                                    engine.progress = alone;
                                                     try {
                                                         engine.sync(collection);
                                                     } finally {
                                                         remote.addAndGet(engine.remoteSoFar());
                                                     }
                                                     return null;
-                                                }));
+                                                });
+                                    } finally {
+                                        running.decrementAndGet();
+                                        progress.collections(
+                                                PimDomain.CALENDAR,
+                                                landed.incrementAndGet(),
+                                                calendars.size());
+                                    }
+                                });
                 for (CalendarPool.Failure failed : outcome.failures) {
                     Log.w("pimalaya", "calendar sync failed: " + failed.collection, failed.error);
                 }
@@ -375,6 +389,27 @@ final class RemotePass {
             }
             return failure;
         }
+    }
+
+    /**
+     * The pass's progress for one account's calendar engines: every step,
+     * but a step's count only while its calendar is the one {@code running},
+     * so the bar never jumps between three downloads.
+     */
+    private PimdirEngine.Progress alone(AtomicInteger running) {
+        return new PimdirEngine.Progress() {
+            @Override
+            public void step(PimDomain domain, int stage, int count) {
+                progress.step(domain, stage, count);
+            }
+
+            @Override
+            public void advance(PimDomain domain, int stage, int done, int total) {
+                if (running.get() == 1) {
+                    progress.advance(domain, stage, done, total);
+                }
+            }
+        };
     }
 
     /** The store id one account's collections are namespaced under. */
