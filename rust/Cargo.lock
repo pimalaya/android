@@ -662,8 +662,9 @@ dependencies = [
 
 [[package]]
 name = "io-msgraph"
-version = "0.5.0"
-source = "git+https://github.com/pimalaya/io-msgraph?rev=fa73f0491295db73ba8f7326a6af8ec1f2ecc817#fa73f0491295db73ba8f7326a6af8ec1f2ecc817"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aae4ecde2c789d9dd0d8298d986bead64422404cb1b821768e77fb13d26e9de8"
 dependencies = [
  "base64 0.23.1",
  "ical-rs",
@@ -715,7 +716,7 @@ dependencies = [
 [[package]]
 name = "io-pimdir"
 version = "0.7.0"
-source = "git+https://github.com/pimalaya/io-pimdir?rev=f6ca07fae703a4b5105fad347546df8f11e4a766#f6ca07fae703a4b5105fad347546df8f11e4a766"
+source = "git+https://github.com/pimalaya/io-pimdir?rev=c03a269dddaf51c8558e5b24c7dbd193a8aedec5#c03a269dddaf51c8558e5b24c7dbd193a8aedec5"
 dependencies = [
  "blake3",
  "fs4",

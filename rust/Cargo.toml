@@ -20,7 +20,7 @@ io-gpeople = { version = "0.5", default-features = false, features = ["vcard"] }
 io-http = { version = "0.5", default-features = false }
 io-imap = { version = "0.7", default-features = false }
 io-jmap = { version = "0.6", default-features = false }
-io-msgraph = { version = "0.5", default-features = false, features = ["ical", "vcard"] }
+io-msgraph = { version = "0.6", default-features = false, features = ["ical", "vcard"] }
 io-oauth = { version = "0.3", default-features = false }
 io-pim-discovery = { version = "0.9", default-features = false, features = ["autoconfig", "pacc", "rfc6764", "rfc8414", "rfc8620"] }
 io-pimdir = { version = "0.7", default-features = false }
@@ -46,5 +46,4 @@ io-pimdir = { version = "0.7", features = ["client", "vendored"] }
 tempfile = { version = "3", default-features = false }
 
 [patch.crates-io]
-io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "fa73f0491295db73ba8f7326a6af8ec1f2ecc817" }
-io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "f6ca07fae703a4b5105fad347546df8f11e4a766" }
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "c03a269dddaf51c8558e5b24c7dbd193a8aedec5" }
