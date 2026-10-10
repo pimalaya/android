@@ -56,7 +56,7 @@ use url::Url;
 use crate::{
     client::{
         Client,
-        graph::parse_graph_url,
+        graph::{graph_url, parse_graph_url, relative},
         listing::{Floor, GRAPH_PAGE, Listing, MailPage, MailRequest, Named, Scope, flags, utc},
     },
     types::{BridgeError, Mailbox},
@@ -82,6 +82,11 @@ const WELL_KNOWN: [(&str, &str); 4] = [
 /// reception time is no part of a summary.
 const MESSAGE_SELECT: &str = "id,subject,from,toRecipients,ccRecipients,sentDateTime,isRead,\
 flag,hasAttachments,internetMessageId";
+
+/// The `$expand` riding along [`MESSAGE_SELECT`]: the MAPI
+/// `PidTagMessageSize` (`Integer 0x0E08`), the size Exchange states for
+/// the message, as IMAP's `RFC822.SIZE` does.
+const MESSAGE_EXPAND: &str = "singleValueExtendedProperties($filter=id eq 'Integer 0x0E08')";
 
 impl<'a, 'local> Client<'a, 'local> {
     /// Reads the inbox's folder, so a session that cannot authenticate
@@ -713,6 +718,7 @@ impl GraphFolder for LiveFolder<'_, '_, '_> {
             top: Some(top),
             skip: (band.skip > 0).then_some(band.skip),
             select: Some(MESSAGE_SELECT),
+            expand: Some(MESSAGE_EXPAND),
             filter: filter.as_deref(),
             orderby: Some("sentDateTime desc"),
             ..Default::default()
@@ -738,6 +744,7 @@ impl GraphFolder for LiveFolder<'_, '_, '_> {
                 let params = MsgraphMessagesDeltaParams {
                     select: Some(DELTA_SELECT),
                     filter: None,
+                    expand: None,
                     max_page_size: Some(GRAPH_PAGE),
                 };
                 MsgraphMessagesDelta::with_params(&self.auth, "me", Some(self.folder), &params)
@@ -761,13 +768,15 @@ impl GraphFolder for LiveFolder<'_, '_, '_> {
             let requests: Vec<MsgraphBatchRequest> = chunk
                 .iter()
                 .enumerate()
-                .map(|(index, id)| MsgraphBatchRequest {
-                    id: index.to_string(),
-                    method: String::from("GET"),
-                    url: format!("/me/messages/{id}?$select={MESSAGE_SELECT}"),
-                    ..Default::default()
+                .map(|(index, id)| {
+                    Ok(MsgraphBatchRequest {
+                        id: index.to_string(),
+                        method: String::from("GET"),
+                        url: relative(&message_url(id)?),
+                        ..Default::default()
+                    })
                 })
-                .collect();
+                .collect::<Result<_, BridgeError>>()?;
             let coroutine =
                 MsgraphBatch::new(&self.auth, &requests).map_err(|err| err.to_string())?;
             let replies = self.client.run_msgraph(coroutine)?;
@@ -792,13 +801,10 @@ impl GraphFolder for LiveFolder<'_, '_, '_> {
         }
 
         for id in again {
-            let url = parse_graph_url(&format!(
-                "{MSGRAPH_API_BASE}me/messages/{id}?$select={MESSAGE_SELECT}"
-            ))?;
-            match self
-                .client
-                .run_msgraph(MsgraphSend::<MsgraphMessage>::get(&self.auth, url))
-            {
+            match self.client.run_msgraph(MsgraphSend::<MsgraphMessage>::get(
+                &self.auth,
+                message_url(&id)?,
+            )) {
                 Ok(message) => read.push(message),
                 Err(err) if err.status == Some(404) => (),
                 Err(err) => return Err(err),
@@ -806,6 +812,16 @@ impl GraphFolder for LiveFolder<'_, '_, '_> {
         }
         Ok(read)
     }
+}
+
+/// The address one message is read at by id: the summary `$select` and
+/// its `$expand`, percent-encoded.
+fn message_url(id: &str) -> Result<Url, BridgeError> {
+    let mut url = graph_url(&format!("me/messages/{id}"))?;
+    url.query_pairs_mut()
+        .append_pair("$select", MESSAGE_SELECT)
+        .append_pair("$expand", MESSAGE_EXPAND);
+    Ok(url)
 }
 
 /// The markers of one Graph message, named the IMAP way.
@@ -832,7 +848,8 @@ fn named(message: MsgraphMessage, scope: &Scope, items: &mut Vec<Named>) {
 /// The Annex A summary of one Graph message, read off its `$select`.
 ///
 /// The date is the `Date` header (`sentDateTime`), never the reception;
-/// the attachment mark is Graph's own `hasAttachments`.
+/// the attachment mark is Graph's own `hasAttachments`; the size is the
+/// MAPI one [`MESSAGE_EXPAND`] asks for, the only property it expands.
 fn graph_summary(message: &MsgraphMessage) -> PimdirMailSummary {
     let from: Vec<PimdirAddress> = message.from.iter().filter_map(address).collect();
     let first = from.first().cloned();
@@ -853,7 +870,10 @@ fn graph_summary(message: &MsgraphMessage) -> PimdirMailSummary {
         sender: first.as_ref().map(|address| address.address.clone()),
         sender_name: first.and_then(|address| address.name),
         date: message.sent_date_time.as_deref().and_then(utc),
-        size: None,
+        size: message
+            .single_value_extended_properties
+            .first()
+            .and_then(|size| size.value.trim().parse().ok()),
         attachment: message.has_attachments,
         from,
         to: message.to_recipients.iter().filter_map(address).collect(),
@@ -892,11 +912,13 @@ mod sync_tests;
 
 #[cfg(test)]
 mod tests {
-    use io_msgraph::v1::rest::users::messages::{
-        MsgraphEmailAddress, MsgraphMessage, MsgraphRecipient,
+    use io_msgraph::v1::rest::users::{
+        contacts::MsgraphSingleValueExtendedProperty,
+        messages::{MsgraphEmailAddress, MsgraphMessage, MsgraphRecipient},
     };
 
-    use super::{graph_summary, permanent_delete_url};
+    use super::{graph_summary, message_url, permanent_delete_url};
+    use crate::client::graph::relative;
 
     #[test]
     fn a_permanent_delete_posts_the_action() {
@@ -904,6 +926,46 @@ mod tests {
             permanent_delete_url("AAMk-1=").unwrap().as_str(),
             "https://graph.microsoft.com/v1.0/me/messages/AAMk-1=/permanentDelete"
         );
+    }
+
+    #[test]
+    fn a_read_by_id_expands_the_size_percent_encoded() {
+        let url = message_url("AAMk-1=").unwrap();
+        let expand = url
+            .query_pairs()
+            .find(|(key, _)| key == "$expand")
+            .map(|(_, value)| value.into_owned());
+        assert_eq!(
+            expand.as_deref(),
+            Some("singleValueExtendedProperties($filter=id eq 'Integer 0x0E08')")
+        );
+
+        // NOTE: a batch names it relative to the API version, no raw
+        // space left in it.
+        let batched = relative(&url);
+        assert!(batched.starts_with("/me/messages/AAMk-1=?%24select="));
+        assert!(!batched.contains(' '), "got: {batched}");
+    }
+
+    #[test]
+    fn the_size_is_the_expanded_mapi_size() {
+        let sized = |value: &str| MsgraphMessage {
+            id: "m1".into(),
+            single_value_extended_properties: vec![MsgraphSingleValueExtendedProperty {
+                id: "Integer 0xe08".into(),
+                value: value.into(),
+            }],
+            ..Default::default()
+        };
+        assert_eq!(graph_summary(&sized("48213")).size, Some(48213));
+        assert_eq!(graph_summary(&sized("large")).size, None, "unparsable");
+        assert_eq!(graph_summary(&sized("-1")).size, None, "negative");
+
+        let bare = MsgraphMessage {
+            id: "m2".into(),
+            ..Default::default()
+        };
+        assert_eq!(graph_summary(&bare).size, None, "not expanded");
     }
 
     #[test]

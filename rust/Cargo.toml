@@ -44,3 +44,6 @@ vcard-rs = { version = "0.5", default-features = false, features = ["parser", "j
 # engine and store over a fake Graph; the bridge itself compiles no SQLite.
 io-pimdir = { version = "0.7", features = ["client", "vendored"] }
 tempfile = { version = "3", default-features = false }
+
+[patch.crates-io]
+io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "fa73f0491295db73ba8f7326a6af8ec1f2ecc817" }
