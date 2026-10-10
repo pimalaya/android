@@ -663,8 +663,7 @@ dependencies = [
 [[package]]
 name = "io-msgraph"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65320c336ee6a7dbcbae717a2fbe8915d62e87da13c241861daed4a16f0d5734"
+source = "git+https://github.com/pimalaya/io-msgraph?rev=fa73f0491295db73ba8f7326a6af8ec1f2ecc817#fa73f0491295db73ba8f7326a6af8ec1f2ecc817"
 dependencies = [
  "base64 0.23.1",
  "ical-rs",

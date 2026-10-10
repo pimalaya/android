@@ -14,7 +14,7 @@ use std::{
 };
 
 use io_msgraph::v1::rest::users::{
-    contacts::delta::MsgraphRemoved,
+    contacts::{MsgraphSingleValueExtendedProperty, delta::MsgraphRemoved},
     messages::{
         MsgraphFlagStatus, MsgraphFollowupFlag, MsgraphMessage,
         delta::{MsgraphMessageDelta, MsgraphMessagesDeltaResponse},
@@ -29,6 +29,7 @@ use io_pimdir::{
         PimdirEnumerate, PimdirEnumerated, PimdirFetchedItem, PimdirListing, PimdirPushResult,
         PimdirRemote, PimdirTier,
     },
+    summary::PimdirSummary,
     sync::PimdirSyncOptions,
 };
 use jiff::{SignedDuration, Timestamp};
@@ -48,6 +49,9 @@ const INBOX: &str = "Inbox";
 struct Message {
     date: Option<String>,
     read: bool,
+    /// The MAPI size the summary's `$expand` reads, [`None`] when Graph
+    /// answers none.
+    size: Option<u64>,
 }
 
 /// A Graph mail folder, and what was asked of it.
@@ -86,7 +90,8 @@ fn hours_back(hours: i64) -> String {
 }
 
 impl FakeGraph {
-    /// A folder of `size` messages, one an hour, `m0000` the newest.
+    /// A folder of `size` messages, one an hour, `m0000` the newest, each
+    /// of 1,000 bytes plus its index.
     fn new(size: usize) -> Self {
         let mut graph = Self {
             page: 1000,
@@ -98,14 +103,21 @@ impl FakeGraph {
                 Message {
                     date: Some(hours_back(index as i64)),
                     read: false,
+                    size: Some(1000 + index as u64),
                 },
             );
         }
         graph
     }
 
+    /// Adds a message Graph states no size for.
     fn add(&mut self, id: &str, date: Option<String>) {
-        self.folder.insert(id.into(), Message { date, read: false });
+        let message = Message {
+            date,
+            read: false,
+            size: None,
+        };
+        self.folder.insert(id.into(), message);
         self.log.push(id.into());
     }
 
@@ -147,6 +159,14 @@ impl FakeGraph {
             flag: Some(MsgraphFollowupFlag {
                 flag_status: Some(MsgraphFlagStatus::NotFlagged),
             }),
+            single_value_extended_properties: message
+                .size
+                .map(|size| MsgraphSingleValueExtendedProperty {
+                    id: "Integer 0xe08".into(),
+                    value: size.to_string(),
+                })
+                .into_iter()
+                .collect(),
             ..Default::default()
         }
     }
@@ -409,6 +429,21 @@ fn is_read(dir: &Path, id: &str) -> bool {
         .is_some_and(|item| item.flags.contains("\\Seen"))
 }
 
+/// The size the store's summary holds for the message.
+fn size(dir: &Path, id: &str) -> Option<u64> {
+    let reader = PimdirReader::open(dir).unwrap();
+    let item = reader
+        .list_summaries(INBOX, None, 100_000)
+        .unwrap()
+        .into_iter()
+        .find(|item| item.link_id.as_str() == id)
+        .unwrap();
+    match item.summary {
+        Some(PimdirSummary::Mail(summary)) => summary.size,
+        other => panic!("no mail summary: {other:?}"),
+    }
+}
+
 /// Whether the inbox has a round under way.
 fn round_open(dir: &Path) -> bool {
     let reader = PimdirReader::open(dir).unwrap();
@@ -592,6 +627,27 @@ fn what_changes_before_the_delta_link_exists_is_not_lost() {
     assert!(held.contains("undated"), "no date is in every scope");
     assert_eq!(graph.reads, 2, "the two new ones, read by id");
     assert_eq!(held.len(), 51);
+}
+
+#[test]
+fn the_store_holds_the_size_graph_states() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = store(dir.path());
+    let mut graph = FakeGraph::new(200);
+    let floor = graph.floor(None, 50).unwrap();
+    sync(&mut store, &mut graph, dir.path(), Some(&floor)).unwrap();
+    assert_eq!(size(dir.path(), "m0007"), Some(1007), "listed by band");
+
+    // NOTE: the delta lists by id alone; the ones it names are read by
+    // id, the size riding the read.
+    sync(&mut store, &mut graph, dir.path(), Some(&floor)).unwrap();
+    graph.add("sized", Some(hours_back(-1)));
+    graph.folder.get_mut("sized").unwrap().size = Some(48213);
+    graph.add("unsized", Some(hours_back(-2)));
+    sync(&mut store, &mut graph, dir.path(), Some(&floor)).unwrap();
+    assert_eq!(graph.reads, 2);
+    assert_eq!(size(dir.path(), "sized"), Some(48213), "read by id");
+    assert_eq!(size(dir.path(), "unsized"), None, "Graph stated none");
 }
 
 #[test]
