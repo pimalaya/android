@@ -1,5 +1,6 @@
 package org.pimalaya.client;
 
+import java.io.File;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
@@ -12,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.JSONTokener;
 
 /**
  * The only surface the app needs: config search (endpoints plus
@@ -486,39 +488,90 @@ public class PimalayaClient {
      * mailbox is whole below it.
      */
     public String mailFloor(MailSession session, String mailbox, String before, int count) {
-        JSONObject reply =
-                object(
-                        on(
-                                session,
-                                open ->
-                                        Native.mailFloor(
-                                                open.transport(),
-                                                open.handle(),
-                                                mailbox,
-                                                before == null ? "" : before,
-                                                count)));
+        JSONObject reply = floorReply(session, mailbox, before, count);
         return reply.isNull("floor") ? null : reply.optString("floor", null);
     }
 
     /**
-     * Reads one message whole, as the bytes the server holds.
-     *
-     * <p>IMAP fetches it with {@code BODY.PEEK[]}; JMAP reads the
-     * message's {@code blobId} and downloads that blob, which is one
-     * round trip more than its body values would have been and the only
-     * way to come back with the message rather than a rendering of it.
-     * The caller stores what it gets and renders it through
-     * {@link #parseMessage}, so a second open costs nothing.
+     * The {@code Date}s of a mailbox's {@code count} newest messages by
+     * {@code Date} dated before {@code before} (null for no ceiling),
+     * newest first: the {@link #mailFloor} read, its floor the last of them
+     * when there are {@code count}, fewer when the mailbox is whole below
+     * the ceiling.
      */
-    public byte[] fetchMessageSource(MailSession session, String mailbox, String id) {
+    public List<String> mailNewest(MailSession session, String mailbox, String before, int count) {
+        JSONArray dates = floorReply(session, mailbox, before, count).optJSONArray("dates");
+        List<String> newest = new ArrayList<>();
+        for (int index = 0; dates != null && index < dates.length(); index++) {
+            newest.add(dates.optString(index));
+        }
+        return newest;
+    }
+
+    private JSONObject floorReply(MailSession session, String mailbox, String before, int count) {
+        return object(
+                on(
+                        session,
+                        open ->
+                                Native.mailFloor(
+                                        open.transport(),
+                                        open.handle(),
+                                        mailbox,
+                                        before == null ? "" : before,
+                                        count)));
+    }
+
+    /**
+     * One step of an account's mail, read whole into files of {@code dir};
+     * {@code mailbox} the one mailbox a view filtered to it steps, null for
+     * the account. {@code request} is {@code {count, frontier, bound,
+     * anchors, mailboxes}}, each backend reading what it needs, and asking
+     * {@code store} which of each page it lists the store holds ({@link
+     * Native#mailStep}); the reply as the bridge wrote it.
+     */
+    public JSONObject mailStep(
+            MailSession session,
+            String mailbox,
+            JSONObject request,
+            File dir,
+            OfflineDriver store) {
+        String asked = request.toString();
+        return object(
+                on(
+                        session,
+                        open ->
+                                Native.mailStep(
+                                        open.transport(),
+                                        open.handle(),
+                                        mailbox == null ? "" : mailbox,
+                                        asked,
+                                        dir.getAbsolutePath(),
+                                        store)));
+    }
+
+    /**
+     * Reads some messages of a mailbox whole into files of {@code dir}, one
+     * per message, as the bytes the server holds: each {@code {id, path,
+     * size}}, a message gone or not handed over left out. Gmail, Graph and
+     * IMAP read them in batches, JMAP names their blobs in one
+     * {@code Email/get} and downloads them one after another.
+     */
+    public JSONArray fetchMessageSources(
+            MailSession session, String mailbox, List<String> ids, File dir) {
+        String asked = new JSONArray(ids).toString();
         JSONObject reply =
                 object(
                         on(
                                 session,
                                 open ->
-                                        Native.fetchMessageSource(
-                                                open.transport(), open.handle(), mailbox, id)));
-        return Base64.getDecoder().decode(reply.optString("source"));
+                                        Native.fetchMessageSources(
+                                                open.transport(),
+                                                open.handle(),
+                                                mailbox,
+                                                asked,
+                                                dir.getAbsolutePath())));
+        JSONArray items = reply.optJSONArray("items");
+        return items == null ? new JSONArray() : items;
     }
 
     /**
@@ -527,7 +580,7 @@ public class PimalayaClient {
      * names, to {@code target}, answering its size. Files on both sides, so
      * a large part never sits on the heap twice. No network.
      */
-    public long messagePart(java.io.File source, String part, java.io.File target) {
+    public long messagePart(File source, String part, File target) {
         return object(
                         Native.messagePart(
                                 source.getAbsolutePath(), part, target.getAbsolutePath()))
@@ -542,21 +595,31 @@ public class PimalayaClient {
      * of a message the store already holds.
      */
     public MessageBody parseMessage(byte[] source) {
-        JSONObject reply = object(Native.parseMessage(source));
+        return message(object(Native.parseMessage(source)));
+    }
 
-        JSONArray listed = reply.optJSONArray("attachments");
-        List<MessageBody.Attachment> attachments =
-                new ArrayList<>(listed == null ? 0 : listed.length());
-        for (int index = 0; listed != null && index < listed.length(); index++) {
-            JSONObject attachment = object(listed, index);
-            attachments.add(
-                    new MessageBody.Attachment(
-                            attachment.optString("name"),
-                            attachment.optString("mime"),
-                            attachment.optLong("size"),
-                            attachment.optString("part")));
-        }
+    /**
+     * {@link #parseMessage(byte[])} of the message stored in {@code source},
+     * read by the bridge: the message never crosses onto the Java heap.
+     */
+    public MessageBody parseMessage(File source) {
+        return message(object(Native.parseMessageFile(source.getAbsolutePath())));
+    }
 
+    /**
+     * What the store files of one message read into {@code source}, read
+     * once by the bridge: {@code {hash, size, summary, attachments}}, the
+     * content hash the object store names it by ({@code sha256-128}), the
+     * summary io-pimdir derives from it (null where it yields none) and its
+     * attachments as {@link #attachmentsOf} reads them (null when the
+     * parser cannot read it). No body crosses the boundary.
+     */
+    public JSONObject describeMessage(File source) {
+        return object(Native.describeMessage(source.getAbsolutePath()));
+    }
+
+    /** A {@code parseMessage} reply as what a reader draws. */
+    private static MessageBody message(JSONObject reply) {
         // NOTE: optString and not the null-returning helper beside it:
         // every one of these fields is always serialised, and a reader
         // must never be handed a null to render.
@@ -569,8 +632,24 @@ public class PimalayaClient {
                 reply.optString("date"),
                 reply.optString("kind"),
                 reply.optString("body"),
-                attachments,
+                attachmentsOf(reply.optJSONArray("attachments")),
                 reply.optBoolean("attachmentMark"));
+    }
+
+    /** The attachments a parse or a description lists, each {@code {name, mime, size, part}}. */
+    public static List<MessageBody.Attachment> attachmentsOf(JSONArray listed) {
+        List<MessageBody.Attachment> attachments =
+                new ArrayList<>(listed == null ? 0 : listed.length());
+        for (int index = 0; listed != null && index < listed.length(); index++) {
+            JSONObject attachment = object(listed, index);
+            attachments.add(
+                    new MessageBody.Attachment(
+                            attachment.optString("name"),
+                            attachment.optString("mime"),
+                            attachment.optLong("size"),
+                            attachment.optString("part")));
+        }
+        return attachments;
     }
 
     /**
@@ -622,6 +701,8 @@ public class PimalayaClient {
      *
      * @throws SubmissionRefused when the server refused the message for
      *     good, which is what parks it rather than queueing it again.
+     * @throws SubmissionUncertain when the whole message went over and no
+     *     verdict came back, which parks it for the user to confirm.
      */
     public String submitMessage(MailSession session, byte[] source) {
         String submitUrl = session.account().submitUrl;
@@ -641,8 +722,11 @@ public class PimalayaClient {
         JSONObject reply = read(json);
         String error = reply.optString("error");
         if (!error.isEmpty()) {
-            throw reply.optBoolean("permanent")
-                    ? new SubmissionRefused(error)
+            if (reply.optBoolean("permanent")) {
+                throw new SubmissionRefused(error);
+            }
+            throw reply.optBoolean("uncertain")
+                    ? new SubmissionUncertain(error)
                     : new PimalayaException(error);
         }
         return reply.isNull("messageId") ? null : reply.optString("messageId", null);
@@ -729,26 +813,45 @@ public class PimalayaClient {
      * has died.
      *
      * <p>A held connection is a hint and never a promise: a server's idle
-     * timeout, a rebound NAT and a walk from wifi to cellular all end one
-     * under the app, and none of them announce it. So the first failure
-     * is read as the connection rather than as the verb, and the verb is
-     * given one honest attempt on a fresh session before its failure is
-     * reported as its own.
+     * timeout (Graph's is about two minutes), a rebound NAT and a walk from
+     * wifi to cellular all end one under the app, and none of them announce
+     * it. The bridge answers a failure as an error reply rather than
+     * throwing, so a failure is read as the connection's when the transport
+     * lost one since a verb last answered ({@link Transport#losses}), in this
+     * call or in one run once outside it (a copy, an append): the verb is
+     * then given one honest attempt on a fresh session, an IMAP one greeted
+     * and authenticated again, before its failure is reported as its own. A
+     * refusal from a live server is reported at once.
      *
-     * <p>Idempotent is the condition and not a description: a refusal and
-     * a dead socket are not told apart here, so whatever runs through
-     * this runs twice whenever a server says no. Re-reading a message,
-     * re-storing a marker and re-moving a message that has already moved
-     * all cost a round trip and change nothing. Submitting a message does
-     * not, which is why it does not come through here.
+     * <p>Idempotent is the condition and not a description: a verb that
+     * lost its connection may have been carried out before it did.
+     * Re-reading a message, re-storing a marker and re-moving a message that
+     * has already moved all cost a round trip and change nothing. Submitting
+     * a message does not, which is why it does not come through here.
      */
     private static String on(MailSession session, OnSession verb) {
+        String reply;
+        boolean reopened = false;
         try {
-            return verb.run(session);
+            reply = verb.run(session);
         } catch (RuntimeException failure) {
             session.reopen();
-            return verb.run(session);
+            reopened = true;
+            reply = verb.run(session);
         }
+        if (!reopened && failed(reply) && session.lostSinceAnswered()) {
+            session.reopen();
+            reply = verb.run(session);
+        }
+        if (!failed(reply)) {
+            session.answered();
+        }
+        return reply;
+    }
+
+    /** Whether a bridge reply is a failure, read without parsing a large one. */
+    static boolean failed(String reply) {
+        return reply != null && reply.trim().startsWith("{\"error\"");
     }
 
     /**
@@ -1095,15 +1198,29 @@ public class PimalayaClient {
                         etag == null ? "" : etag,
                         address == null ? "" : address);
 
+        return etag(reply);
+    }
+
+    /**
+     * The ETag an update answered: a bare JSON string, or null, an object
+     * being the bridge's error shape.
+     *
+     * <p>Read as the JSON string it is, not with its quotes cut off: Google's
+     * and Graph's ETags carry quotes of their own, which the reply escapes,
+     * and an ETag kept escaped is a revision no listing names, so the next
+     * pass reads the entry as changed elsewhere.
+     */
+    static String etag(String reply) {
         String trimmed = reply.trim();
         if (trimmed.startsWith("{")) {
-            // An object here is the bridge's error shape; a success
-            // is the new ETag as a bare JSON string, or null.
             object(trimmed);
         }
-        return trimmed.startsWith("\"")
-                ? trimmed.substring(1, trimmed.length() - 1)
-                : null;
+        try {
+            Object etag = new JSONTokener(trimmed).nextValue();
+            return etag instanceof String ? (String) etag : null;
+        } catch (JSONException error) {
+            throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
+        }
     }
 
     /**
@@ -1535,6 +1652,9 @@ public class PimalayaClient {
      * {@link #object} would have thrown before anything could look.
      */
     private static JSONObject read(String json) {
+        if (json == null) {
+            throw new PimalayaException("Internal error: no bridge reply");
+        }
         try {
             return new JSONObject(json.trim());
         } catch (JSONException error) {
@@ -1553,6 +1673,9 @@ public class PimalayaClient {
     }
 
     private static JSONArray array(String json) {
+        if (json == null) {
+            throw new PimalayaException("Internal error: no bridge reply");
+        }
         String trimmed = json.trim();
 
         if (trimmed.startsWith("{")) {

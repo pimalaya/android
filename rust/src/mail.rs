@@ -18,15 +18,20 @@
 //! message saying the same thing. Attachments are the reason that will
 //! change.
 
-use std::{borrow::Cow, fmt::Write as _};
+use std::{borrow::Cow, fmt::Write as _, io::Write};
 
+use io_pimdir::{hash::PimdirHashAlgo, summary::derive};
 use mail_parser::{
     Address, Message, MessageParser, MessagePart, MessagePartId, MimeHeaders, PartType,
     decoders::{base64::base64_decode, quoted_printable::quoted_printable_decode},
 };
 use serde::Deserialize;
+use serde_json::{Value, json};
 
-use crate::types::{BridgeError, MessageAttachment, MessageBody};
+use crate::{
+    summary::SummaryJson,
+    types::{BridgeError, MessageAttachment, MessageBody},
+};
 
 /// How long a header line may run before it folds (RFC 5322 section
 /// 2.1.1 recommends 78, and requires no more than 998).
@@ -180,6 +185,16 @@ pub fn envelope(raw: &[u8]) -> Result<Composed, BridgeError> {
     })
 }
 
+/// A message's `Message-ID`, its angle brackets taken off, read from its
+/// header alone; [`None`] when it carries none.
+pub(crate) fn message_id(raw: &[u8]) -> Option<String> {
+    MessageParser::default()
+        .parse_headers(raw)?
+        .message_id()
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+}
+
 /// The bare addresses of one address header, for the envelope.
 fn envelope_addresses(header: Option<&Address>) -> Vec<String> {
     let Some(header) = header else {
@@ -318,7 +333,7 @@ pub fn parse(raw: &[u8]) -> Result<MessageBody, BridgeError> {
         kind: kind.to_string(),
         body,
         attachments: attachments(&parsed),
-        attachment_mark: match io_pimdir::summary::mail::derive(raw).summary {
+        attachment_mark: match io_pimdir::summary::mail::derive(derivable(raw)).summary {
             Some(io_pimdir::summary::PimdirSummary::Mail(summary)) => {
                 summary.attachment.unwrap_or(false)
             }
@@ -356,9 +371,11 @@ fn attachments(parsed: &Message<'_>) -> Vec<MessageAttachment> {
         .collect()
 }
 
-/// The decoded bytes of one part of a raw message, by its IMAP section:
-/// an attachment opened from the body the store holds.
-pub fn part(raw: &[u8], section: &str) -> Result<Vec<u8>, BridgeError> {
+/// Writes the decoded bytes of one part of a raw message, by its IMAP
+/// section, to `out`, answering how many: an attachment opened from the
+/// body the store holds. The part is written as the parser holds it,
+/// never copied first.
+pub fn write_part(raw: &[u8], section: &str, out: &mut impl Write) -> Result<usize, BridgeError> {
     let parsed = MessageParser::default()
         .parse(raw)
         .ok_or_else(|| BridgeError::from("Could not read the message"))?;
@@ -366,7 +383,10 @@ pub fn part(raw: &[u8], section: &str) -> Result<Vec<u8>, BridgeError> {
         .into_iter()
         .find_map(|(id, held)| (held == section).then_some(id))
         .ok_or_else(|| BridgeError::from(format!("No part {section} in the message")))?;
-    Ok(decoded(&parsed, &parsed.parts[id as usize]).into_owned())
+    let bytes = decoded(&parsed, &parsed.parts[id as usize]);
+    out.write_all(&bytes)
+        .map_err(|err| BridgeError::from(err.to_string()))?;
+    Ok(bytes.len())
 }
 
 /// One part's bytes as its sender wrote them, only the
@@ -393,38 +413,111 @@ fn decoded<'a>(parsed: &'a Message<'_>, part: &'a MessagePart<'_>) -> Cow<'a, [u
     }
 }
 
+/// How deep a multipart tree is walked: RFC 2046 sets no limit, real
+/// mail nests a handful of levels, and a hostile one thousands, which a
+/// recursive walk on a 1 MiB Java thread overflows (a SIGSEGV no panic
+/// guard catches). Parts nested deeper are left unnumbered.
+const MAX_DEPTH: usize = 64;
+
 /// The IMAP section of every part of a message (RFC 3501 section
 /// 6.4.5), in document order, by its index in the parser's flat list: a
 /// single-part body is `1`, the children of a multipart count from 1
 /// under it. A nested message is one part, its own parts left to its own
-/// parse.
+/// parse. Walked with a stack of its own, at most [`MAX_DEPTH`] levels.
 fn sections(parsed: &Message<'_>) -> Vec<(MessagePartId, String)> {
     let mut sections = Vec::new();
-    match parsed.parts.first().map(|root| &root.body) {
-        Some(PartType::Multipart(children)) => number(parsed, children, "", &mut sections),
-        Some(_) => sections.push((0, String::from("1"))),
-        None => {}
+    let root = match parsed.parts.first().map(|root| &root.body) {
+        Some(PartType::Multipart(children)) => children,
+        Some(_) => {
+            sections.push((0, String::from("1")));
+            return sections;
+        }
+        None => return sections,
+    };
+
+    // NOTE: each level holds the children it numbers, how many of them
+    // are numbered, and the prefix they are numbered under.
+    let mut levels: Vec<(&[MessagePartId], usize, String)> = vec![(root, 0, String::new())];
+    while let Some((children, numbered, prefix)) = levels.last_mut() {
+        let Some(id) = children.get(*numbered).copied() else {
+            levels.pop();
+            continue;
+        };
+        *numbered += 1;
+        let section = format!("{prefix}{numbered}");
+        sections.push((id, section.clone()));
+        if levels.len() < MAX_DEPTH
+            && let Some(PartType::Multipart(nested)) =
+                parsed.parts.get(id as usize).map(|part| &part.body)
+        {
+            levels.push((nested, 0, format!("{section}.")));
+        }
     }
     sections
 }
 
-/// Numbers the children of one multipart under `prefix`, each before the
-/// parts nested in it.
-fn number(
-    parsed: &Message<'_>,
-    children: &[MessagePartId],
-    prefix: &str,
-    sections: &mut Vec<(MessagePartId, String)>,
-) {
-    for (index, id) in children.iter().enumerate() {
-        let section = format!("{prefix}{}", index + 1);
-        sections.push((*id, section.clone()));
-        if let Some(PartType::Multipart(nested)) =
-            parsed.parts.get(*id as usize).map(|part| &part.body)
+/// What the store files of one message, read once: its content `hash`
+/// under the store's algorithm (`sha256-128`, the app's `PimdirHash`), its
+/// `size`, the `summary` io-pimdir derives from it ([`derivable`]), null
+/// where it yields none, and its `attachments` as [`parse`] lists them,
+/// null when the parser cannot read it.
+pub fn describe(raw: &[u8]) -> Value {
+    let hash = PimdirHashAlgo::Sha256_128.hash(raw);
+    let summary = derive("message/rfc822", derivable(raw)).and_then(|derived| derived.summary);
+    let attachments = parse(raw).ok().map(|message| message.attachments);
+    json!({
+        "hash": hash.0,
+        "size": raw.len(),
+        "summary": summary.as_ref().map(SummaryJson::from),
+        "attachments": attachments,
+    })
+}
+
+/// The bytes of a raw message io-pimdir may derive from: the message,
+/// or its header alone when its multipart tree runs deeper than
+/// [`MAX_DEPTH`], which the library walks recursively. The header still
+/// names the message and gives its summary; its parts are not read.
+///
+/// Counting `multipart` first spares the parse for any message that
+/// cannot nest that deep.
+pub(crate) fn derivable(raw: &[u8]) -> &[u8] {
+    let mentions = raw
+        .windows(9)
+        .filter(|window| window.eq_ignore_ascii_case(b"multipart"))
+        .count();
+    if mentions < MAX_DEPTH || depth(raw) < MAX_DEPTH {
+        return raw;
+    }
+    let end = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|at| at + 4)
+        .or_else(|| {
+            raw.windows(2)
+                .position(|window| window == b"\n\n")
+                .map(|at| at + 2)
+        })
+        .unwrap_or(raw.len());
+    &raw[..end]
+}
+
+/// How many multipart levels a raw message nests, walked with a stack
+/// of its own.
+fn depth(raw: &[u8]) -> usize {
+    let Some(parsed) = MessageParser::default().parse(raw) else {
+        return 0;
+    };
+    let mut deepest = 0;
+    let mut pending: Vec<(MessagePartId, usize)> = vec![(0, 0)];
+    while let Some((id, level)) = pending.pop() {
+        if let Some(PartType::Multipart(children)) =
+            parsed.parts.get(id as usize).map(|part| &part.body)
         {
-            number(parsed, nested, &format!("{section}."), sections);
+            deepest = deepest.max(level + 1);
+            pending.extend(children.iter().map(|child| (*child, level + 1)));
         }
     }
+    deepest
 }
 
 /// A header's addresses as one line, the way a header reads them.
@@ -658,7 +751,17 @@ fn addresses(field: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+
+    use io_pimdir::summary::derive;
+
     use super::*;
+
+    /// [`write_part`] into memory.
+    fn part(raw: &[u8], section: &str) -> Result<Vec<u8>, BridgeError> {
+        let mut out = Vec::new();
+        write_part(raw, section, &mut out).map(|_| out)
+    }
 
     fn draft() -> Draft {
         Draft {
@@ -1105,5 +1208,91 @@ mod tests {
         // address rather than showing an empty sender.
         assert_eq!(message.from, "");
         assert_eq!(message.from_address, "alice@example.org");
+    }
+
+    /// A message nesting `levels` multipart/mixed parts, an attachment at
+    /// the bottom.
+    fn nested(levels: usize) -> Vec<u8> {
+        let mut raw = String::from("From: alice@example.org\r\nSubject: deep\r\n");
+        for level in 0..levels {
+            raw.push_str(&format!(
+                "Content-Type: multipart/mixed; boundary=\"b{level}\"\r\n\r\n--b{level}\r\n"
+            ));
+        }
+        raw.push_str(
+            "Content-Type: text/plain\r\n\
+             Content-Disposition: attachment; filename=\"deep.txt\"\r\n\r\nbottom\r\n",
+        );
+        for level in (0..levels).rev() {
+            raw.push_str(&format!("--b{level}--\r\n"));
+        }
+        raw.into_bytes()
+    }
+
+    /// Runs `f` on a thread with the stack of an ordinary Android Java
+    /// thread, where the bridge's calls run.
+    fn on_java_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(f)
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_hostile_mime_depth_reads_on_a_java_stack() {
+        let raw = nested(10_000);
+
+        let (message, opened, derived) = on_java_stack(move || {
+            let message = parse(&raw).unwrap();
+            let opened = part(&raw, "1.1.1").is_ok();
+            let derived = derive("message/rfc822", derivable(&raw))
+                .and_then(|derived| derived.summary)
+                .is_some();
+            (message, opened, derived)
+        });
+
+        assert_eq!(message.subject, "deep");
+        assert!(message.attachments.is_empty());
+        assert!(opened);
+        assert!(derived);
+    }
+
+    #[test]
+    fn a_hostile_mime_depth_is_derived_from_its_header() {
+        let raw = nested(MAX_DEPTH);
+
+        assert_eq!(depth(&raw), MAX_DEPTH);
+        assert!(derivable(&raw).ends_with(b"\r\n\r\n"));
+        assert!(derivable(&raw).len() < 200);
+    }
+
+    #[test]
+    fn a_message_is_described_by_one_read() {
+        let raw = nested(3);
+
+        let described = describe(&raw);
+
+        assert_eq!(
+            described["hash"],
+            PimdirHashAlgo::Sha256_128.hash(&raw).0.as_str(),
+            "the store's algorithm"
+        );
+        assert_eq!(described["size"], raw.len());
+        assert!(described["summary"].to_string().contains("deep"));
+        assert_eq!(described["attachments"][0]["part"], "1.1.1");
+    }
+
+    #[test]
+    fn a_reasonable_mime_depth_is_numbered_whole() {
+        let raw = nested(3);
+
+        let message = parse(&raw).unwrap();
+
+        assert_eq!(derivable(&raw), &raw[..]);
+        assert_eq!(message.attachments.len(), 1);
+        assert_eq!(message.attachments[0].part, "1.1.1");
+        assert_eq!(part(&raw, "1.1.1").unwrap(), b"bottom");
     }
 }

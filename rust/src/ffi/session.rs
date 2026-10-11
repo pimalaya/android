@@ -30,6 +30,7 @@ use crate::{
         self, Client,
         gmail_sync::{self, GmailRun},
         imap::ImapState,
+        jmap_sync::{self, JmapRun},
     },
     ffi::parse_url,
     types::{BridgeError, Credentials, Mailbox},
@@ -46,6 +47,9 @@ pub struct MailSession {
     /// shared with the run's other sessions; the session's own until it
     /// joins one ([`Self::join_run`]).
     gmail: Arc<GmailRun>,
+    /// What the pool run this session works for read of a JMAP account's
+    /// changes, shared the same way.
+    jmap: Arc<JmapRun>,
     /// The pool run the session works for, 0 outside one: a session of
     /// its own, the reader's.
     run: i64,
@@ -147,6 +151,7 @@ impl MailSession {
             password: password.into(),
             kind,
             gmail: Arc::default(),
+            jmap: Arc::default(),
             run: 0,
         })
     }
@@ -193,12 +198,18 @@ impl MailSession {
         Arc::clone(&self.gmail)
     }
 
+    /// What the run this session works for read of its JMAP account.
+    pub fn jmap_run(&self) -> Arc<JmapRun> {
+        Arc::clone(&self.jmap)
+    }
+
     /// Joins the pool run numbered `run`, sharing what it reads of a
-    /// Gmail account with the run's other sessions; 0 leaves it for a
+    /// Gmail or JMAP account with the run's other sessions; 0 leaves it for a
     /// run of the session's own, empty.
     pub fn join_run(&mut self, run: i64) {
         let account = format!("{}\u{0}{}", self.base_url, self.login);
         self.gmail = gmail_sync::join(&account, run);
+        self.jmap = jmap_sync::join(&account, run);
         self.run = run;
     }
 
@@ -228,10 +239,10 @@ impl MailSession {
     /// Refuses a JMAP session rather than opening a second connection
     /// behind the caller's back: a verb reaching for this on a JMAP
     /// account is a verb that has not said what it does there.
-    pub fn imap<'a, 'b, 'local>(
+    pub fn imap<'a>(
         &'a mut self,
-        client: &'a mut Client<'b, 'local>,
-    ) -> Result<client::imap::ImapSession<'a, 'b, 'local>, BridgeError> {
+        client: &'a mut Client<'_, '_>,
+    ) -> Result<client::imap::ImapSession<'a>, BridgeError> {
         match &mut self.kind {
             MailKind::Imap(state) => Ok(client::imap::ImapSession::bind(client, state)),
             MailKind::Jmap(_) | MailKind::Graph(_) | MailKind::Gmail(_) => {

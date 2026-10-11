@@ -2,14 +2,14 @@
 
 use jni::{
     EnvUnowned,
-    errors::{Error, LogErrorAndDefault},
+    errors::Error,
     objects::{JClass, JObject, JString},
     sys::{jboolean, jint},
 };
 use serde_json::{from_str, json};
 
 use crate::{
-    ffi::{error_json, parse_ref_cards, parse_strings, read_string},
+    ffi::{ErrorReply, error_json, parse_ref_cards, parse_strings, read_string},
     project::{
         apply, card_prop_labels, card_props, card_set_prop, card_set_prop_parts, card_source,
         card_type_order, duplicate_group, find_duplicates, form_date, form_entry, form_view,
@@ -37,7 +37,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_indexCard<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.mergeCards`: merges several vCards (a JSON string array)
@@ -64,7 +64,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_mergeCards<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.mergeCardChanges`: three-way merges a conflicted push (the
@@ -91,7 +91,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_mergeCardChanges<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.mergeConflictForm`: builds the conflict form's inputs for a
@@ -119,7 +119,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_mergeConflictForm<'local>
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.setCardUid`: rewrites the card's UID (a plain copy is a new
@@ -143,7 +143,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_setCardUid<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.findDuplicates`: finds groups of likely-duplicate cards
@@ -170,7 +170,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_findDuplicates<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.cardProps`: lists the card's raw property lines for the
@@ -192,7 +192,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_cardProps<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.cardSetProp`: rewrites one raw property line for the
@@ -217,7 +217,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_cardSetProp<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.cardSetPropParts`: recomposes one property from its
@@ -246,7 +246,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_cardSetPropParts<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.cardPropLabels`: the component labels of a structured
@@ -264,7 +264,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_cardPropLabels<'local>(
         let json = json!({ "labels": card_prop_labels(&name) }).to_string();
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.cardTypeOrder`: the ordered type-set vocabulary the edit
@@ -283,7 +283,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_cardTypeOrder<'local>(
         let json = json!({ "order": card_type_order(&kind) }).to_string();
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.cardSource`: validates a hand-edited vCard source (it must
@@ -305,7 +305,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_cardSource<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.projectCard`: projects a vCard onto the neutral field model
@@ -327,7 +327,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_projectCard<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.applyCard`: patches the edited field model back onto the
@@ -354,7 +354,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_applyCard<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.formView`: the edit form's view support computed from the
@@ -378,7 +378,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_formView<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.formEntry`: one typed entry saved from an edit dialog, its
@@ -406,7 +406,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_formEntry<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.formDate`: one picked date on the model wire (the vCard
@@ -426,7 +426,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_formDate<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.groupContacts`: groups the replica pool into merged
@@ -453,7 +453,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_groupContacts<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.duplicateGroup`: the duplicate review's group facts, the
@@ -478,5 +478,5 @@ pub extern "system" fn Java_org_pimalaya_client_Native_duplicateGroup<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }

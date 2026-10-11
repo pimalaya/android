@@ -26,9 +26,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The body step: the bodies a window and a mailbox kept whole plan, the
- * metered cap it waits on, and the upgrade it lands them through, from the
- * engine down to the store.
+ * The body step: the bodies a frontier and a mailbox kept whole plan, the
+ * Wi-Fi it waits for, an arrival taken whatever its date, and the upgrade
+ * it lands them through, each body read into a file and filed as the
+ * object it is, from the engine down to the store.
  *
  * <p>The server is one mailbox of four messages: three from the last days
  * (one of 40 KB, one of 3 MB, one of unknown size carrying an attachment)
@@ -54,6 +55,7 @@ public class MailBodiesTest {
 
     @Before
     public void setUp() {
+        MailBodies.FAILED.clear();
         context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
         store = new MailStore(context, pimdir);
@@ -69,6 +71,10 @@ public class MailBodiesTest {
     private final class Server extends MailEngine {
         final List<String> read = new ArrayList<>();
         final List<String> pushed = new ArrayList<>();
+
+        /** How many more reads of a handle the server fails, -1 for all of them. */
+        final java.util.Map<String, Integer> refusing = new java.util.HashMap<>();
+
 
         Server() {
             super(pimdir, new PimalayaClient(), null, accountId);
@@ -96,9 +102,25 @@ public class MailBodiesTest {
         }
 
         @Override
-        protected byte[] source(String mailbox, String handle) {
-            read.add(handle);
-            return LATIN1;
+        protected java.util.Map<String, java.io.File> sources(
+                String mailbox, List<String> handles, java.io.File dir) {
+            java.util.Map<String, java.io.File> files = new java.util.HashMap<>();
+            for (String handle : handles) {
+                read.add(handle);
+                int refused = refusing.getOrDefault(handle, 0);
+                if (refused != 0) {
+                    refusing.put(handle, refused - 1);
+                    continue;
+                }
+                java.io.File file = new java.io.File(dir, handle + ".eml");
+                try {
+                    java.nio.file.Files.write(file.toPath(), LATIN1);
+                } catch (java.io.IOException failure) {
+                    throw new AssertionError(failure);
+                }
+                files.put(handle, file);
+            }
+            return files;
         }
 
         @Override
@@ -134,22 +156,17 @@ public class MailBodiesTest {
         return MailBodies.wanted(store.bodyRows(List.of(inbox), since));
     }
 
-    /** A step host downloading through the server, on the network given. */
-    private MailBodies.Host host(boolean metered) {
+    /** A step host downloading through the server, on Wi-Fi or not. */
+    private MailBodies.Host host(boolean wifi) {
         return new MailBodies.Host() {
             @Override
             public boolean allowed(String accountEmail) {
-                return true;
+                return wifi;
             }
 
             @Override
-            public boolean metered() {
-                return metered;
-            }
-
-            @Override
-            public void download(String accountEmail, List<MailBodies.Row> rows) {
-                server.download(inbox, rows);
+            public List<MailBodies.Row> download(String accountEmail, List<MailBodies.Row> rows) {
+                return server.download(inbox, rows);
             }
         };
     }
@@ -158,7 +175,7 @@ public class MailBodiesTest {
     public void theStepRaisesOnlyBodiesWithinTheWindow() {
         MailBodies.Run run = new MailBodies.Run();
         run.plan(EMAIL, planned(window));
-        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
+        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
 
         assertEquals("newest first, within the window", List.of("4", "3", "2"), server.read);
         assertArrayEquals(
@@ -172,7 +189,7 @@ public class MailBodiesTest {
         MailOffline.setWhole(context, inbox, true);
         MailBodies.Run run = new MailBodies.Run();
         run.plan(EMAIL, planned(null));
-        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
+        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
 
         assertEquals("newest first", List.of("4", "3", "2", "1"), server.read);
         assertArrayEquals(LATIN1, store.storedSource(inbox, "1"));
@@ -195,24 +212,31 @@ public class MailBodiesTest {
     }
 
     @Test
-    public void aMeteredNetworkTakesTheSmallBodiesAlone() {
-        assertTrue(MailBodies.fits(MailBodies.CAP, null));
-        assertFalse(MailBodies.fits(MailBodies.CAP + 1, 0));
-        assertTrue("unknown, carrying no attachment", MailBodies.fits(null, 0));
-        assertFalse("unknown, carrying one", MailBodies.fits(null, 1));
-        assertFalse("unknown, never examined", MailBodies.fits(null, null));
-
+    public void nothingDownloadsOffWifi() {
         MailBodies.Run run = new MailBodies.Run();
         run.plan(EMAIL, planned(window));
-        assertEquals(MailBodies.Step.AGAIN, MailBodies.step(run, host(true)));
-        assertEquals("the 40 KB body alone", List.of("3"), server.read);
-        assertEquals(
-                "the larger ones wait", MailBodies.Step.PAUSED, MailBodies.step(run, host(true)));
-        assertNull(store.storedSource(inbox, "2"));
+        assertEquals(MailBodies.Step.PAUSED, MailBodies.step(run, host(false)));
+        assertTrue("whatever the size: " + server.read, server.read.isEmpty());
 
-        // NOTE: the plan is kept, so an unmetered network picks it up.
-        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
-        assertEquals(List.of("3", "4", "2"), server.read);
+        // NOTE: the plan is kept, so Wi-Fi picks it up.
+        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
+        assertEquals(List.of("4", "3", "2"), server.read);
+    }
+
+    @Test
+    public void anArrivalDownloadsWhateverItsDate() {
+        MailBodies.Row old = planned(null).get(3);
+        assertEquals("1", old.linkId);
+        server.download(inbox, List.of(old));
+        assertTrue("below the frontier, a plan takes nothing", server.read.isEmpty());
+
+        server.download(
+                inbox,
+                List.of(
+                        new MailBodies.Row(
+                                inbox, "1", old.sortKey, false, old.size, old.attachment, true)));
+        assertEquals(List.of("1"), server.read);
+        assertArrayEquals(LATIN1, store.storedSource(inbox, "1"));
     }
 
     @Test
@@ -229,7 +253,7 @@ public class MailBodiesTest {
         MailWindow.set(context, accountId, null);
         MailBodies.Run run = new MailBodies.Run();
         run.plan(EMAIL, planned(null));
-        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
+        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
 
         // NOTE: a mailbox kept whole keeps all of it.
         MailOffline.setWhole(context, inbox, true);
@@ -249,7 +273,7 @@ public class MailBodiesTest {
         server.read.clear();
         run = new MailBodies.Run();
         run.plan(EMAIL, planned(null));
-        MailBodies.step(run, host(false));
+        MailBodies.step(run, host(true));
         assertTrue("nothing fetched back: " + server.read, server.read.isEmpty());
         assertNull(store.storedSource(inbox, "1"));
     }
@@ -259,12 +283,12 @@ public class MailBodiesTest {
         MailWindow.set(context, accountId, null);
         MailBodies.Run run = new MailBodies.Run();
         run.plan(EMAIL, planned(null));
-        MailBodies.step(run, host(false));
+        MailBodies.step(run, host(true));
         assertEquals(1, store.release(EMAIL, window));
 
         run = new MailBodies.Run();
         run.plan(EMAIL, planned(null));
-        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(false)));
+        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
         assertArrayEquals(LATIN1, store.storedSource(inbox, "1"));
 
         server.sync(inbox);
@@ -273,5 +297,132 @@ public class MailBodiesTest {
         for (MailStore.StoredMessage message : store.all(all)) {
             assertFalse("no change owed for " + message.id, message.unsynced);
         }
+    }
+
+    /** Steps a run until it is done, at most {@code steps} times. */
+    private static void drain(MailBodies.Run run, MailBodies.Host host, int steps) {
+        for (int step = 0; step < steps; step++) {
+            if (MailBodies.step(run, host) == MailBodies.Step.DONE) {
+                return;
+            }
+        }
+        throw new AssertionError("the run never ended");
+    }
+
+    @Test
+    public void aBodyRefusedOnceIsTriedAgainLaterInTheRun() {
+        server.refusing.put("3", 1);
+        MailBodies.Run run = new MailBodies.Run();
+        run.plan(EMAIL, planned(window));
+        assertEquals(MailBodies.Step.AGAIN, MailBodies.step(run, host(true)));
+        assertNull("not landed yet", store.storedSource(inbox, "3"));
+        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
+
+        assertEquals("tried again after the others", List.of("4", "3", "2", "3"), server.read);
+        assertArrayEquals(LATIN1, store.storedSource(inbox, "3"));
+        assertFalse(MailBodies.FAILED.contains(MailOwed.key(inbox, "3")));
+    }
+
+    @Test
+    public void aBodyFailingEveryAttemptIsMarkedFailedUntilALaterRunBringsIt() {
+        server.refusing.put("3", -1);
+        MailBodies.Run run = new MailBodies.Run();
+        run.plan(EMAIL, planned(window));
+        drain(run, host(true), 10);
+
+        assertEquals(
+                MailBodies.ATTEMPTS,
+                server.read.stream().filter(handle -> handle.equals("3")).count());
+        assertNull(store.storedSource(inbox, "3"));
+        assertTrue(MailBodies.FAILED.contains(MailOwed.key(inbox, "3")));
+        assertArrayEquals("the others landed", LATIN1, store.storedSource(inbox, "2"));
+
+        server.refusing.clear();
+        run = new MailBodies.Run();
+        run.plan(EMAIL, planned(window));
+        drain(run, host(true), 10);
+        assertArrayEquals(LATIN1, store.storedSource(inbox, "3"));
+        assertFalse(MailBodies.FAILED.contains(MailOwed.key(inbox, "3")));
+    }
+
+    @Test
+    public void aDownloadFailingWholeIsTriedAgainAndTwiceInARowLeavesTheRun() {
+        MailBodies.Host down =
+                new MailBodies.Host() {
+                    @Override
+                    public boolean allowed(String accountEmail) {
+                        return true;
+                    }
+
+                    @Override
+                    public List<MailBodies.Row> download(
+                            String accountEmail, List<MailBodies.Row> rows) {
+                        throw new IllegalStateException("No session");
+                    }
+                };
+        MailBodies.Run run = new MailBodies.Run();
+        run.plan(EMAIL, planned(window));
+        assertEquals("put back once", MailBodies.Step.AGAIN, MailBodies.step(run, down));
+        assertEquals("then the account leaves", MailBodies.Step.DONE, MailBodies.step(run, down));
+        assertTrue("no session marks no message failed", MailBodies.FAILED.isEmpty());
+
+        // NOTE: a token expiring mid-run: the next download renews it.
+        int[] calls = {0};
+        MailBodies.Host renewed =
+                new MailBodies.Host() {
+                    @Override
+                    public boolean allowed(String accountEmail) {
+                        return true;
+                    }
+
+                    @Override
+                    public List<MailBodies.Row> download(
+                            String accountEmail, List<MailBodies.Row> rows) {
+                        if (calls[0]++ == 0) {
+                            throw new IllegalStateException("Token expired");
+                        }
+                        return server.download(inbox, rows);
+                    }
+                };
+        run = new MailBodies.Run();
+        run.plan(EMAIL, planned(window));
+        drain(run, renewed, 3);
+        assertEquals(List.of("4", "3", "2"), server.read);
+        assertTrue(planned(window).isEmpty());
+    }
+
+    @Test
+    public void anArrivalIsOwedBesideTheAccountUntilItsBodyLands() throws JSONException {
+        // NOTE: a delta read through the engine's own listing, which notes
+        // what it brings new.
+        JSONObject delta =
+                new JSONObject()
+                        .put("items", new JSONArray().put(named("5", daysBack(400), 1_000, false)))
+                        .put("vanished", new JSONArray())
+                        .put("complete", false)
+                        .put("last", true)
+                        .put("checkpoint", "cp2");
+        PimalayaClient listing =
+                new PimalayaClient() {
+                    @Override
+                    public String enumerateMailboxRaw(
+                            org.pimalaya.client.MailSession session,
+                            String mailbox,
+                            JSONObject request) {
+                        return delta.toString();
+                    }
+                };
+        new MailEngine(pimdir, listing, null, accountId).sync(inbox);
+        assertTrue("a delta's new member is owed", MailOwed.owed(context, inbox, "5"));
+        assertFalse("one already held is not", MailOwed.owed(context, inbox, "4"));
+        assertEquals(List.of(MailOwed.key(inbox, "5")), MailOwed.all(context));
+
+        MailStore.StoredMessage stored = store.message(inbox, "5");
+        MailBodies.Row row =
+                new MailBodies.Row(
+                        inbox, "5", stored.sortKey, false, stored.size, stored.attachment, true);
+        assertTrue(server.download(inbox, List.of(row)).isEmpty());
+        assertArrayEquals(LATIN1, store.storedSource(inbox, "5"));
+        assertFalse("owed no more", MailOwed.owed(context, inbox, "5"));
     }
 }

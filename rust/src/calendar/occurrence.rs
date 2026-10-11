@@ -14,7 +14,7 @@ use ical::{
 
 use crate::types::BridgeError;
 
-use super::{child, line, scheduled, series::Series, text, zone::stamp};
+use super::{child, cst_of, line, scheduled, series::Series, text, zone::stamp};
 
 /// How far either side of an occurrence its instance is looked for, in
 /// seconds: two days, past the widest UTC offset there is.
@@ -126,9 +126,7 @@ pub fn occurrences(ical: &str) -> Result<Vec<IcalRecurDateTime>, BridgeError> {
 }
 
 fn parse(ical: &str) -> Result<IcalCst<'static>, BridgeError> {
-    Ok(IcalCst::parse(ical)
-        .map_err(|err| err.to_string())?
-        .into_static())
+    Ok(cst_of(ical)?.into_static())
 }
 
 /// Whether an override cancels its instance (RFC 5545 3.8.1.11).

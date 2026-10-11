@@ -3,16 +3,19 @@ package org.pimalaya;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyPermanentlyInvalidatedException;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import android.util.Log;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
+import java.security.UnrecoverableKeyException;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.crypto.AEADBadTagException;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -42,6 +45,7 @@ public class SecureStore {
     private static final String PREFS = "pimalaya.account";
     private static final String KEY_PAYLOAD = "payload";
     private static final String KEY_IV = "iv";
+    private static final String KEY_LOST = "lost";
     private static final String ANDROID_KEYSTORE = "AndroidKeyStore";
     private static final String KEY_ALIAS = "pimalaya.account.key";
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
@@ -62,17 +66,89 @@ public class SecureStore {
                 return new ArrayList<>();
             }
 
+            String plaintext;
             try {
-                Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-                GCMParameterSpec spec =
-                        new GCMParameterSpec(GCM_TAG_BITS, Base64.decode(iv, Base64.NO_WRAP));
-                cipher.init(Cipher.DECRYPT_MODE, secretKey(), spec);
-
-                byte[] plaintext = cipher.doFinal(Base64.decode(payload, Base64.NO_WRAP));
-                return decode(new String(plaintext, StandardCharsets.UTF_8));
+                plaintext = open(payload, iv);
             } catch (Exception error) {
-                throw new IllegalStateException("Could not load the accounts", error);
+                if (!keyLost(error)) {
+                    throw new IllegalStateException("Could not load the accounts", error);
+                }
+                // NOTE: data copied from another phone (a device transfer)
+                // arrives without the Keystore key that sealed it, which
+                // never leaves its phone: the accounts can no longer be
+                // read, here or on any launch after, so they are dropped
+                // and the user asked to add them again rather than the
+                // app failing every start.
+                Log.w("pimalaya", "accounts sealed under another key, dropped", error);
+                prefs.edit()
+                        .remove(KEY_PAYLOAD)
+                        .remove(KEY_IV)
+                        .putBoolean(KEY_LOST, true)
+                        .commit();
+                return new ArrayList<>();
             }
+            return decode(plaintext);
+        }
+    }
+
+    /**
+     * Whether the accounts were dropped because this phone could not open
+     * them, and the user was not told yet: true once, the flag cleared.
+     */
+    public boolean takeLost() {
+        synchronized (LOCK) {
+            if (!prefs.getBoolean(KEY_LOST, false)) {
+                return false;
+            }
+            prefs.edit().remove(KEY_LOST).apply();
+            return true;
+        }
+    }
+
+    /**
+     * Whether opening the sealed accounts failed for good: the key is not
+     * the one that sealed them, or the Keystore can no longer use it. A
+     * Keystore failing for now (locked, busy) is not.
+     */
+    static boolean keyLost(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof AEADBadTagException
+                    || cause instanceof UnrecoverableKeyException
+                    || cause instanceof KeyPermanentlyInvalidatedException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The stored account of this address, or null. */
+    public AccountEntry find(String email) {
+        for (AccountEntry entry : loadAll()) {
+            if (entry.email.equals(email)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Renews the credential one domain of a stored account signs in with, on
+     * the account as stored rather than on a caller's copy, then persists;
+     * returns the renewed account, or null when the address is gone.
+     */
+    AccountEntry renew(String email, PimDomain domain, String accessToken, String refreshToken) {
+        synchronized (LOCK) {
+            List<AccountEntry> entries = loadAll();
+            for (int at = 0; at < entries.size(); at++) {
+                if (entries.get(at).email.equals(email)) {
+                    AccountEntry renewed =
+                            entries.get(at).refreshed(domain, accessToken, refreshToken);
+                    entries.set(at, renewed);
+                    save(entries);
+                    return renewed;
+                }
+            }
+            return null;
         }
     }
 
@@ -175,22 +251,42 @@ public class SecureStore {
 
     private void save(List<AccountEntry> entries) {
         try {
-            Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey());
-
-            byte[] ciphertext = cipher.doFinal(encode(entries).getBytes(StandardCharsets.UTF_8));
-
-            prefs.edit()
-                    .putString(KEY_PAYLOAD, Base64.encodeToString(ciphertext, Base64.NO_WRAP))
-                    .putString(KEY_IV, Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP))
-                    .apply();
+            String[] sealed = seal(encode(entries));
+            prefs.edit().putString(KEY_PAYLOAD, sealed[0]).putString(KEY_IV, sealed[1]).apply();
         } catch (Exception error) {
             throw new IllegalStateException("Could not save the accounts", error);
         }
     }
 
+    /**
+     * Encrypts a text under the Keystore key, as its Base64 ciphertext
+     * then its Base64 IV. Shared with the other secrets kept on disk, so
+     * the app holds one key and one scheme.
+     */
+    static String[] seal(String plaintext) throws Exception {
+        Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey());
+
+        byte[] ciphertext = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
+        return new String[] {
+            Base64.encodeToString(ciphertext, Base64.NO_WRAP),
+            Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP)
+        };
+    }
+
+    /** Decrypts what {@link #seal} returned, failing on any tampering. */
+    static String open(String payload, String iv) throws Exception {
+        Cipher cipher = Cipher.getInstance(TRANSFORMATION);
+        GCMParameterSpec spec =
+                new GCMParameterSpec(GCM_TAG_BITS, Base64.decode(iv, Base64.NO_WRAP));
+        cipher.init(Cipher.DECRYPT_MODE, secretKey(), spec);
+
+        byte[] plaintext = cipher.doFinal(Base64.decode(payload, Base64.NO_WRAP));
+        return new String(plaintext, StandardCharsets.UTF_8);
+    }
+
     /** Returns the Keystore AES key, generating it on first use. */
-    private SecretKey secretKey() throws Exception {
+    private static SecretKey secretKey() throws Exception {
         KeyStore keystore = KeyStore.getInstance(ANDROID_KEYSTORE);
         keystore.load(null);
 
@@ -303,7 +399,7 @@ public class SecureStore {
         JSONObject credentials = object.optJSONObject("credentials");
 
         if (connections == null || credentials == null) {
-            Log.w("pimalaya", "dropping an account stored in an older shape: " + email);
+            Log.w("pimalaya", "dropping an account stored in an older shape: " + Accounts.redacted(email));
             return null;
         }
 

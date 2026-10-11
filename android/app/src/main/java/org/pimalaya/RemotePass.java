@@ -9,6 +9,7 @@ import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.SubmissionRefused;
+import org.pimalaya.client.SubmissionUncertain;
 import org.pimalaya.client.Transport;
 
 /**
@@ -77,14 +78,20 @@ final class RemotePass {
     }
 
     /**
-     * Every mail account's outbox drained and mailboxes synced, on the
-     * calling thread: those the scope takes.
+     * Every mail account's outbox drained and, with {@code listing}, its
+     * mailboxes synced, on the calling thread: those the scope takes. A
+     * pass lists nothing on a metered network, where the outbox goes out
+     * all the same.
      */
-    MailPass mailPass(SyncScope scope) {
+    MailPass mailPass(SyncScope scope, boolean listing) {
         progress.account(null);
         MailPass pass = new MailPass();
+        List<String> queued = new ArrayList<>();
+        for (MailStore.StoredMessage waiting : mail.outgoing()) {
+            queued.add(waiting.accountEmail);
+        }
         for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
-            if (!scope.account(account.email)) {
+            if (!scope.account(account.email) || (!listing && !queued.contains(account.email))) {
                 continue;
             }
             progress.account(account.email);
@@ -100,18 +107,18 @@ final class RemotePass {
                         pass.sent += drainOutbox(account, session);
                     }
                 } catch (Exception error) {
-                    Log.w("pimalaya", "outbox drain failed: " + account.email, error);
+                    Log.w("pimalaya", "outbox drain failed: " + Accounts.redacted(account.email), error);
                     if (pass.failure == null) {
                         pass.failure = error;
                     }
                 }
 
-                Exception error = fetchMail(account, session, scope);
+                Exception error = listing ? fetchMail(account, session, scope) : null;
                 if (pass.failure == null) {
                     pass.failure = error;
                 }
             } catch (Exception error) {
-                Log.w("pimalaya", "mail sync failed: " + account.email, error);
+                Log.w("pimalaya", "mail sync failed: " + Accounts.redacted(account.email), error);
                 if (pass.failure == null) {
                     pass.failure = error;
                 }
@@ -131,10 +138,13 @@ final class RemotePass {
      * that dies between the handover and the acknowledgement sends the
      * message twice, which is the trade against losing it.
      *
-     * <p>A failure has two answers. A message the server refused for good
+     * <p>A failure has three answers. A message the server refused for good
      * is parked carrying what it said, and the drain carries on to the
      * ones behind it: nothing will ever make that message acceptable, and
-     * leaving it queued would offer it again on every sync for ever.
+     * leaving it queued would offer it again on every sync for ever. A
+     * message handed over whole with no verdict back may have gone, so it
+     * is parked as uncertain rather than sent again on its own, for the
+     * user to send again once they find it did not go.
      * Anything else counts an attempt and stops the drain where it is,
      * since the usual cause is that there is no network and the next
      * message would fail too.
@@ -146,9 +156,16 @@ final class RemotePass {
             try {
                 filed = client.submitMessage(session, waiting.source);
             } catch (SubmissionRefused refused) {
-                Log.w("pimalaya", "submission refused: " + account.email, refused);
+                Log.w("pimalaya", "submission refused: " + Accounts.redacted(account.email), refused);
                 mail.parkOutgoing(waiting.id, refused.getMessage());
                 continue;
+            } catch (SubmissionUncertain uncertain) {
+                // NOTE: the message may have gone: parked, never handed
+                // over again unasked, and the drain stops here as for any
+                // failure of the connection.
+                Log.w("pimalaya", "submission uncertain: " + Accounts.redacted(account.email), uncertain);
+                mail.parkUncertain(waiting.id, uncertain.getMessage());
+                throw uncertain;
             } catch (Exception error) {
                 mail.retryOutgoing(waiting.id);
                 throw error;
@@ -264,7 +281,7 @@ final class RemotePass {
                 collections.add(collection);
             }
         } catch (Exception error) {
-            Log.w("pimalaya", "mail sync failed: " + account.email, error);
+            Log.w("pimalaya", "mail sync failed: " + Accounts.redacted(account.email), error);
             return error;
         }
 
@@ -286,13 +303,86 @@ final class RemotePass {
                             (done, total) ->
                                     progress.collections(PimDomain.MAIL, done, total));
         }
-        for (MailPool.Failure failure : outcome.failures) {
-            Log.w("pimalaya", "mail sync failed: " + failure.collection, failure.error);
+        // NOTE: a mailbox the server refuses to open is skipped, unless every
+        // one is (MailEngine.refused): the next roster drops it if it is gone.
+        Exception failure = null;
+        Exception refusal = null;
+        for (MailPool.Failure failed : outcome.failures) {
+            if (MailEngine.refused(failed.error)) {
+                Log.w("pimalaya", "mailbox refused, skipped: " + failed.collection, failed.error);
+                refusal = refusal == null ? failed.error : refusal;
+            } else {
+                Log.w("pimalaya", "mail sync failed: " + failed.collection, failed.error);
+                failure = failure == null ? failed.error : failure;
+            }
         }
-        if (outcome.failure() == null) {
+        if (failure == null && refusal != null && outcome.failures.size() == collections.size()) {
+            failure = refusal;
+        }
+        if (failure == null) {
             SyncStamps.mark(context, account.email);
         }
-        return outcome.failure();
+        return failure;
+    }
+
+    /**
+     * One step of one account's mail ({@link MailStep}) on its session, on
+     * the calling thread: for the first sync ({@code first}) after its
+     * mailboxes are read and stored, which opens every one of them; else
+     * over the mailboxes stored, of the account or the one {@code only}
+     * names. The account's frontier moves back to what it brought, all
+     * mail once nothing older is left ({@link MailWindow}), or the one
+     * mailbox's own when it stepped that alone. Answers what went wrong, or
+     * null.
+     */
+    Exception stepMail(AccountEntry account, MailSession session, String only, boolean first) {
+        progress.account(account.email);
+        String accountId = accountIdOf(account.email);
+        try {
+            progress.step(PimDomain.MAIL, PimdirEngine.Progress.STAGE_SERVER, 0);
+            MailEngine engine = new MailEngine(pimdir, client, session, accountId);
+            // NOTE: the step's bodies are its download, counted as their
+            // files land: nothing before its listing ends, the bar then
+            // indeterminate on the first account.
+            engine.tally =
+                    new MailTally(
+                            (landed, planned) ->
+                                    progress.advance(
+                                            PimDomain.MAIL,
+                                            PimdirEngine.Progress.STAGE_DOWNLOAD,
+                                            landed,
+                                            planned));
+            List<String> collections = new ArrayList<>();
+            List<Mailbox> mailboxes;
+            if (first) {
+                mailboxes = engine.mailboxes();
+                mail.replaceMailboxes(account.email, mailboxes);
+            } else {
+                mailboxes = new ArrayList<>();
+                for (PimdirCollections.Stored stored : mail.loadMailboxes(List.of(account.email))) {
+                    mailboxes.add(new Mailbox(stored.name, stored.role));
+                }
+            }
+            for (Mailbox mailbox : MailEngine.ordered(mailboxes)) {
+                collections.add(mail.collectionOf(account.email, mailbox.name));
+            }
+            progress.collections(PimDomain.MAIL, 0, 1);
+            MailStep.Outcome outcome =
+                    MailStep.of(account.server(PimDomain.MAIL))
+                            .run(engine, account.email, collections, only, first);
+            progress.collections(PimDomain.MAIL, 1, 1);
+            Log.d(
+                    "pimalaya",
+                    "mail step " + account.email + ": " + outcome.brought + " brought, frontier "
+                            + outcome.frontier + (outcome.exhausted ? ", all held" : ""));
+
+            MailWindow.stepped(context, accountId, only, outcome);
+            SyncStamps.mark(context, account.email);
+            return null;
+        } catch (Exception error) {
+            Log.w("pimalaya", "mail step failed: " + Accounts.redacted(account.email), error);
+            return error;
+        }
     }
 
     /**
@@ -317,7 +407,7 @@ final class RemotePass {
                         account.email,
                         session.call(server -> client.listCalendars(transport, server)));
             } catch (Exception error) {
-                Log.w("pimalaya", "calendar list failed: " + account.email, error);
+                Log.w("pimalaya", "calendar list failed: " + Accounts.redacted(account.email), error);
                 return error;
             }
             // NOTE: the roster the phone's calendars hang off, its first
@@ -325,7 +415,7 @@ final class RemotePass {
             try {
                 CalendarRows.reconcile(context, pimdir);
             } catch (Exception error) {
-                Log.w("pimalaya", "phone calendars failed: " + account.email, error);
+                Log.w("pimalaya", "phone calendars failed: " + Accounts.redacted(account.email), error);
             }
 
             List<String> calendars = new ArrayList<>();

@@ -13,6 +13,9 @@ package org.pimalaya.client;
 final class Native {
     static {
         System.loadLibrary("pimalaya");
+        // NOTE: the library is built in release whatever the variant, so
+        // only this side knows a debug app, whose logs go verbose.
+        debugLogs(BuildConfig.DEBUG);
     }
 
     private Native() {}
@@ -118,10 +121,11 @@ final class Native {
 
     /**
      * Validates the authorization redirect against the expected CSRF
-     * state and extracts the authorization code; pure computation, no
-     * transport. Returns {@code {"code": ".."}}.
+     * state and, when {@code issuer} is not empty, its RFC 9207
+     * {@code iss}, and extracts the authorization code; pure computation,
+     * no transport. Returns {@code {"code": ".."}}.
      */
-    static native String oauthValidateRedirect(String redirectUrl, String state);
+    static native String oauthValidateRedirect(String redirectUrl, String state, String issuer);
 
     /**
      * Exchanges an authorization code for tokens against the token
@@ -224,6 +228,12 @@ final class Native {
     static native int pimdirVersion();
 
     /**
+     * Turns the bridge's debug logs on or off: warnings and above only
+     * until then, which is what a release app keeps.
+     */
+    static native void debugLogs(boolean on);
+
+    /**
      * Every canonical migration in order, as a JSON array of scripts, applied
      * above the store's {@code user_version} (STORAGE §6).
      */
@@ -272,11 +282,12 @@ final class Native {
             Transport transport, long session, String mailbox, String handles);
 
     /**
-     * The floor of a mailbox's next chunk: the oldest {@code Date} among its
-     * {@code count} newest messages dated before {@code before} (RFC 3339
-     * {@code Z}, empty for no ceiling). Returns {@code {floor, dated}},
-     * {@code floor} null when fewer than {@code count} dated messages lie
-     * below the ceiling.
+     * The floor of a mailbox's next chunk: the {@code Date} of its
+     * {@code count}th newest message by {@code Date} dated before
+     * {@code before} (RFC 3339 {@code Z}, empty for no ceiling). Returns
+     * {@code {floor, dated, dates}}, {@code floor} null when fewer than
+     * {@code count} dated messages lie below the ceiling, {@code dates}
+     * the dates of those taken, newest first.
      */
     static native String mailFloor(
             Transport transport, long session, String mailbox, String before, int count);
@@ -303,16 +314,46 @@ final class Native {
     static native void joinMailRun(long session, long run);
 
     /**
-     * Reads one message whole, as the RFC 5322 bytes the server holds.
-     * Returns a JSON object of {@code {source}}, the message
-     * base64-encoded: a Java string is UTF-8 and a message is not, so
-     * the bytes travel encoded and are stored decoded.
+     * One step of the account's mail: about {@code count} messages the
+     * store does not hold, each read whole into a file of {@code dir}.
+     * {@code mailbox} names the one mailbox a view filtered to it steps,
+     * empty for the account. {@code request} is {@code {count, frontier,
+     * bound, anchors, mailboxes}}, each backend reading what it needs:
+     * {@code frontier} the RFC 3339 date the step starts
+     * below and {@code bound} the account's (Graph, JMAP paging from the
+     * frontier once no anchor is left); {@code anchors} the ids the last
+     * step answered (JMAP); {@code mailboxes} the ones stepped, by name
+     * (Graph). Returns {@code {exhausted, items}}, each item with its
+     * {@code handle}, {@code sortKey}, the {@code mailboxes} it is a member
+     * of, when it was {@code received}, its {@code size} and its file's
+     * {@code path}: Gmail and JMAP add {@code historyId} (on JMAP the
+     * account's {@code Email} state) and name each item as a listed one is
+     * ({@code flags, linkId, summary}), JMAP adds the {@code anchors} the
+     * next step starts from; a Graph item holds no {@code path} where its
+     * body was not read (held).
      *
-     * <p>The mailbox is only IMAP's concern: a JMAP {@code Email} id
-     * addresses the message across the whole account.
+     * <p>Which of the messages it lists the store holds, each backend asks
+     * {@code store} a page at a time ({@code {op: "held", handles}}
+     * answered {@code {held}}), so no step carries the account's every
+     * handle across the boundary.
      */
-    static native String fetchMessageSource(
-            Transport transport, long session, String mailbox, String id);
+    static native String mailStep(
+            Transport transport,
+            long session,
+            String mailbox,
+            String request,
+            String dir,
+            OfflineDriver store);
+
+    /**
+     * Reads some messages of {@code mailbox} whole, one file per message
+     * in {@code dir}, as the bytes the server holds. {@code ids} is a JSON
+     * array; returns {@code {items}}, each {@code {id, path, size}} (with
+     * {@code labels} and {@code received} on Gmail), a message gone or not
+     * handed over left out. Files, so no message crosses as a string.
+     */
+    static native String fetchMessageSources(
+            Transport transport, long session, String mailbox, String ids, String dir);
 
     /**
      * Resolves one message's MIME tree into what a reader draws. Returns
@@ -323,6 +364,23 @@ final class Native {
      * store already holds is read with no network at all.
      */
     static native String parseMessage(byte[] source);
+
+    /**
+     * {@link #parseMessage} of the message stored in the file at
+     * {@code source}, read on the native side: no copy of the message on
+     * the Java heap, none across the boundary.
+     */
+    static native String parseMessageFile(String source);
+
+    /**
+     * What the store files of the message in the file at {@code source},
+     * read once: a JSON object of {@code {hash, size, summary,
+     * attachments}}, the content hash under the store's algorithm
+     * ({@code sha256-128}), the summary io-pimdir derives from it (null
+     * where it yields none) and its attachments as {@link #parseMessage}
+     * lists them (null when the parser cannot read it).
+     */
+    static native String describeMessage(String source);
 
     /**
      * Writes the decoded bytes of one part of the message stored at

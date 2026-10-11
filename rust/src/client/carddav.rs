@@ -11,7 +11,7 @@ use io_webdav::{
         addressbook::{CarddavAddressbook as DavAddressbook, list::CarddavAddressbookList},
         card::{
             CarddavCardEntry,
-            create::CarddavCardCreate,
+            create::{CarddavCardCreate, CarddavCardCreateOk},
             delete::CarddavCardDelete,
             list::{CarddavCardList, CarddavCardListOptions},
             multiget::CarddavCardMultiget,
@@ -96,15 +96,16 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(list.cards.into_iter().map(into_card).collect())
     }
 
-    /// Creates the card `id` inside the addressbook collection at
-    /// `url`, returning the new ETag when the server sent one.
+    /// Creates the card named `id` inside the addressbook collection at
+    /// `url`, returning it under the name the server filed it by
+    /// ([`into_created_card`]), with its ETag when the server sent one.
     pub fn create_carddav_card(
         &mut self,
         url: &Url,
         credentials: &Credentials,
         id: &str,
         vcard: &str,
-    ) -> Result<Option<String>, BridgeError> {
+    ) -> Result<Card, BridgeError> {
         let auth = auth(credentials);
         let coroutine = CarddavCardCreate::new(
             url,
@@ -115,7 +116,7 @@ impl<'a, 'local> Client<'a, 'local> {
             normalize_vcard(vcard).as_bytes().to_vec(),
         );
 
-        Ok(self.run(url, coroutine)?.etag)
+        Ok(into_created_card(self.run(url, coroutine)?, vcard))
     }
 
     /// Reads the card at resource name `uri` (as the server returned
@@ -271,6 +272,22 @@ fn into_addressbook(home_set: &Url, book: DavAddressbook) -> Addressbook {
     }
 }
 
+/// A created card under the resource name the server filed it by: the
+/// name asked for, or the one its `Location` header answered. Google
+/// files a card under a name of its own, and a binding kept on the
+/// name asked for addresses a resource that does not exist: its delete
+/// answers 404, read as converged, and the next listing brings the card
+/// back.
+fn into_created_card(created: CarddavCardCreateOk, vcard: &str) -> Card {
+    Card {
+        id: created.id.clone(),
+        uri: created.id,
+        etag: created.etag,
+        vcard: vcard.to_string(),
+        books: Vec::new(),
+    }
+}
+
 /// io-webdav card entry to the JNI-facing shape; vCards are text, so
 /// the raw bytes are decoded lossily.
 fn into_card(entry: CarddavCardEntry) -> Card {
@@ -282,3 +299,7 @@ fn into_card(entry: CarddavCardEntry) -> Card {
         books: Vec::new(),
     }
 }
+
+#[cfg(test)]
+#[path = "carddav_tests.rs"]
+mod tests;

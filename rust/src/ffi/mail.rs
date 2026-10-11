@@ -11,22 +11,32 @@
 //! every verb: an IMAP session behind an `imaps://` URL, or the RFC 8621
 //! verbs behind the `jmap://` marker.
 
+use std::{
+    collections::HashMap,
+    fs::{self, File},
+    path::Path,
+};
+
 use jni::{
     EnvUnowned,
-    errors::{Error, LogErrorAndDefault},
+    errors::Error,
     objects::{JByteArray, JClass, JObject, JString},
 };
-use serde_json::{from_str, json, to_string};
+use serde::Deserialize;
+use serde_json::{Value, from_str, json, to_string, to_value};
 
 use crate::{
     client::{
         self, Client,
         convert::REFUSED,
+        gmail::belongs,
         gmail_sync::{self, LiveGmail},
-        listing::{Floor, FloorReply, MailPage, MailRequest, Named},
+        graph_mail::{GraphFetched, StepAsk},
+        jmap_sync::StepRequest,
+        listing::{Floor, FloorReply, MailPage, MailRequest, Named, Scope},
     },
     ffi::{
-        error_json, parse_url, read_string,
+        ErrorReply, error_json, parse_url, read_string,
         session::{self, MailSession},
     },
     mail::{self, Draft},
@@ -67,7 +77,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_openMailSession<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.closeMailSession`: frees the session a handle names.
@@ -76,11 +86,15 @@ pub extern "system" fn Java_org_pimalaya_client_Native_openMailSession<'local>(
 /// caller's other half of the same act.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_closeMailSession(
-    _env: EnvUnowned<'_>,
+    mut env: EnvUnowned<'_>,
     _class: JClass<'_>,
     handle: i64,
 ) {
-    unsafe { session::drop_handle(handle) };
+    env.with_env(|_| -> Result<(), Error> {
+        unsafe { session::drop_handle(handle) };
+        Ok(())
+    })
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.listMailboxes`: the account's mailboxes and the RFC 6154 role
@@ -106,7 +120,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listMailboxes<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.enumerateMailbox`: one page of a mailbox's listing, the
@@ -142,7 +156,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_enumerateMailbox<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.nameMessages`: the messages a listing named by id and markers
@@ -170,10 +184,13 @@ pub extern "system" fn Java_org_pimalaya_client_Native_nameMessages<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
-/// Names messages listed by id alone; only Graph lists any.
+/// Names messages listed by id alone: a Graph delta's, or a Gmail
+/// round's the store does not hold in that mailbox (a member of it new to
+/// the store, or one newly labelled), read by their metadata, a message
+/// no longer in the mailbox left out.
 fn name_messages(
     client: &mut Client<'_, '_>,
     handle: i64,
@@ -183,18 +200,28 @@ fn name_messages(
     let ids: Vec<String> =
         from_str(handles).map_err(|err| format!("Invalid message ids: {err}"))?;
     let session = unsafe { session::borrow(handle) }?;
-    if !session.is_graph() {
-        return Err("Only a Graph listing names messages by id alone".into());
-    }
     let id = mailbox_id(client, session, mailbox)?;
+    if session.is_gmail() {
+        let read = client.gmail_envelopes(session.credentials().password, &ids)?;
+        return Ok(read
+            .into_iter()
+            .filter_map(|(handle, envelope)| {
+                let envelope = envelope.filter(|envelope| envelope.belongs(&id))?;
+                envelope.named(&handle, &Scope::default())
+            })
+            .collect());
+    }
+    if !session.is_graph() {
+        return Err("Only a Graph or Gmail listing names messages by id alone".into());
+    }
     client.name_graph_messages(session.credentials().password, &id, &ids)
 }
 
-/// `Native.mailFloor`: the floor of a mailbox's next chunk, the oldest
-/// `Date` among its `count` newest messages dated before `before` (RFC
-/// 3339 `Z`, empty for no ceiling). Returns `{"floor", "dated"}`, `floor`
-/// null when fewer than `count` dated messages lie below the ceiling: the
-/// mailbox is whole below it.
+/// `Native.mailFloor`: the floor of a mailbox's next chunk, the `Date`
+/// of its `count`th newest message dated before `before` (RFC 3339 `Z`,
+/// empty for no ceiling). Returns `{"floor", "dated", "dates"}`, `floor`
+/// null when fewer than `count` dated messages lie below the ceiling (the
+/// mailbox is whole below it), `dates` those taken, newest first.
 ///
 /// A chunk is a number of messages, never a span of time: the floor is
 /// all the caller keeps, and it is the scope the next sync lists from.
@@ -221,7 +248,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_mailFloor<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// A chunk's floor with whichever backend the session speaks.
@@ -247,46 +274,372 @@ fn floor(
         client.graph_floor(session.credentials().password, &id, &mut floor)?;
         return Ok(floor.reply());
     }
-
-    // NOTE: one floor per account, walked once per pool run whichever
-    // mailbox asks, the envelopes it read kept for the rounds after it.
-    let run = session.gmail_run();
-    let token = session.credentials().password.to_string();
-    let before = floor.scope().until.clone();
-    let mut source = LiveGmail {
-        client,
-        token: &token,
-    };
-    gmail_sync::floor(&mut source, &run, &id, before.as_deref(), floor.count())
+    Err("A Gmail account is stepped through, never floored".into())
 }
 
-/// `Native.fetchMessageSource`: reads one message whole, as the RFC 5322
-/// bytes the server holds. Returns a JSON object of `{source}`, the
-/// message base64-encoded, since a Java string is UTF-8 and a message is
-/// not: what the caller decodes back is what the server sent, which is
-/// what makes it storable.
+/// `Native.mailStep`: one step of the account's mail (the app's
+/// `MailStep`): about `count` messages the store does not hold, each read
+/// whole into a file of `dir`. `mailbox` names the one mailbox a view
+/// filtered to it steps, empty for the account; `request` is a
+/// [`MailStepRequest`]. Returns `{exhausted, items}`, every item with its
+/// `handle`, `sortKey`, the `mailboxes` it is a member of, when it was
+/// `received` (milliseconds since the epoch), its `size` and its file's
+/// `path`.
+///
+/// Gmail and JMAP add `historyId` (on JMAP the account's `Email` state
+/// read before the step) and name each item as a listed one is (`flags`,
+/// `linkId`, `summary`), JMAP adds the `anchors` the next step starts
+/// from; a Graph item holds no `path` where its body was not read. IMAP
+/// steps from the store (`ImapStep`).
+///
+/// `store` is the app's driver (`OfflineDriver`), asked which of each
+/// page a step lists the store holds ([`Client::held`]).
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessageSource<'local>(
+pub extern "system" fn Java_org_pimalaya_client_Native_mailStep<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     transport: JObject<'local>,
     handle: i64,
     mailbox: JString<'local>,
-    id: JString<'local>,
+    request: JString<'local>,
+    dir: JString<'local>,
+    store: JObject<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let mailbox = read_string(env, &mailbox);
-        let id = read_string(env, &id);
+        let request = read_string(env, &request);
+        let dir = read_string(env, &dir);
 
         let mut client = Client::new(env, &transport);
-        let json = match read_source(&mut client, handle, &mailbox, &id) {
-            Ok(source) => json!({ "source": mail::base64(&source) }).to_string(),
+        client.store = (!store.is_null()).then_some(&store);
+        let json = match mail_step(&mut client, handle, &mailbox, &request, Path::new(&dir)) {
+            Ok(step) => step.to_string(),
             Err(err) => error_json(err),
         };
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
+}
+
+/// What a step is asked, each backend reading what it needs: `count` all
+/// of them, which of each listed page the store holds being asked of the
+/// store ([`Client::held`]); the `frontier` (RFC 3339) the step starts
+/// below and the account's `bound` Graph, JMAP paging from the frontier
+/// once no anchor is left;
+/// the `anchors` the last step answered, oldest first, JMAP; the
+/// `mailboxes` stepped, by name, Graph.
+#[derive(Deserialize)]
+struct MailStepRequest {
+    count: usize,
+    #[serde(default)]
+    frontier: Option<String>,
+    #[serde(default)]
+    bound: Option<String>,
+    #[serde(default)]
+    anchors: Vec<String>,
+    #[serde(default)]
+    mailboxes: Vec<String>,
+}
+
+/// One step of the account with whichever backend the session speaks; a
+/// Gmail one here ([`gmail_sync::step`]), each message with the mailboxes
+/// its labels place it in.
+fn mail_step(
+    client: &mut Client<'_, '_>,
+    handle: i64,
+    mailbox: &str,
+    request: &str,
+    dir: &Path,
+) -> Result<Value, BridgeError> {
+    let request: MailStepRequest =
+        from_str(request).map_err(|err| format!("Invalid step request: {err}"))?;
+    let session = unsafe { session::borrow(handle) }?;
+    if session.is_jmap() {
+        return jmap_step(client, session, mailbox, &request, dir);
+    }
+    if session.is_graph() {
+        return graph_step(client, session, mailbox, &request, dir);
+    }
+    if !session.is_gmail() {
+        return Err("An IMAP account steps from the store".into());
+    }
+    let label = match mailbox.is_empty() {
+        true => None,
+        false => Some(mailbox_id(client, session, mailbox)?),
+    };
+    if session.listing().ids.is_empty() {
+        let listed = http_roster(client, session)?;
+        session.listing().remember(listed);
+    }
+    let names: HashMap<String, String> = session
+        .listing()
+        .ids
+        .iter()
+        .map(|(name, id)| (id.clone(), name.clone()))
+        .collect();
+
+    let token = session.credentials().password.to_string();
+    let mut source = LiveGmail {
+        client,
+        token: &token,
+    };
+    let stepped = gmail_sync::step(&mut source, label.as_deref(), request.count, dir)?;
+
+    let mut items = Vec::with_capacity(stepped.messages.len());
+    for fetched in stepped.messages {
+        let mailboxes: Vec<&String> = fetched
+            .labels
+            .iter()
+            .filter(|label| belongs(&fetched.labels, label))
+            .filter_map(|label| names.get(label))
+            .collect();
+        let named = Named::new(fetched.id.clone(), fetched.flags.clone(), fetched.summary);
+        let mut item = to_value(&named).map_err(|err| err.to_string())?;
+        item["mailboxes"] = json!(mailboxes);
+        item["path"] = json!(fetched.path.to_string_lossy());
+        item["size"] = json!(fetched.size);
+        item["received"] = json!(fetched.received);
+        items.push(item);
+    }
+    Ok(json!({
+        "historyId": stepped.history_id,
+        "exhausted": stepped.exhausted,
+        "byReception": true,
+        "items": items,
+    }))
+}
+
+/// One step of a JMAP account ([`Client::jmap_step`]): the trash and the
+/// junk left out of the account's, each message with the mailboxes its
+/// `mailboxIds` file it in, by name. The roster is read afresh, for the
+/// roles that name the trash and the junk.
+fn jmap_step(
+    client: &mut Client<'_, '_>,
+    session: &mut MailSession,
+    mailbox: &str,
+    request: &MailStepRequest,
+    dir: &Path,
+) -> Result<Value, BridgeError> {
+    let listed = http_roster(client, session)?;
+    let excluded = listed
+        .iter()
+        .filter(|(_, listed)| listed.role == "trash" || listed.role == "junk")
+        .map(|(id, _)| id.clone())
+        .collect();
+    let names: HashMap<String, String> = listed
+        .iter()
+        .map(|(id, listed)| (id.clone(), listed.name.clone()))
+        .collect();
+    session.listing().remember(listed);
+    let only = match mailbox.is_empty() {
+        true => None,
+        false => Some(mailbox_id(client, session, mailbox)?),
+    };
+
+    let url = session.jmap_url()?;
+    let asked = StepRequest {
+        mailbox: only.as_deref(),
+        excluded,
+        sent_at: false,
+        anchors: &request.anchors,
+        frontier: request.frontier.as_deref(),
+        count: request.count,
+    };
+    let stepped = client.jmap_step(&url, &session.credentials(), asked, dir)?;
+
+    let mut items = Vec::with_capacity(stepped.items.len());
+    for stepped in stepped.items {
+        let mailboxes: Vec<&String> = stepped
+            .mailboxes
+            .iter()
+            .filter_map(|id| names.get(id))
+            .collect();
+        let mut item = to_value(&stepped.named).map_err(|err| err.to_string())?;
+        item["mailboxes"] = json!(mailboxes);
+        item["path"] = json!(stepped.path.to_string_lossy());
+        item["size"] = json!(stepped.size);
+        item["received"] = json!(stepped.received);
+        items.push(item);
+    }
+    Ok(json!({
+        "historyId": stepped.state,
+        "exhausted": stepped.exhausted,
+        "anchors": stepped.anchors,
+        "byReception": stepped.by_reception,
+        "items": items,
+    }))
+}
+
+/// One step of a Graph account ([`Client::graph_step`]): `mailboxes` the
+/// ones stepped by name, or `mailbox` alone for a filtered view, below the
+/// frontier (that mailbox's own over it alone). Each item is `{handle,
+/// mailboxes, sortKey, received, size}` with its file's `path` where its
+/// body was read (its `size` then the file's), a held message's body never
+/// read again.
+fn graph_step(
+    client: &mut Client<'_, '_>,
+    session: &mut MailSession,
+    mailbox: &str,
+    request: &MailStepRequest,
+    dir: &Path,
+) -> Result<Value, BridgeError> {
+    let names: Vec<String> = match mailbox.is_empty() {
+        true => request.mailboxes.clone(),
+        false => vec![mailbox.to_string()],
+    };
+    let mut folders = Vec::with_capacity(names.len());
+    let mut named = HashMap::with_capacity(names.len());
+    for name in &names {
+        let id = mailbox_id(client, session, name)?;
+        named.insert(id.clone(), name.clone());
+        folders.push(id);
+    }
+
+    let ask = StepAsk {
+        folders: &folders,
+        alone: !mailbox.is_empty(),
+        frontier: request.frontier.as_deref(),
+        bound: request.bound.as_deref(),
+        count: request.count,
+    };
+    let token = session.credentials().password.to_string();
+    let (stepped, fetched) = client.graph_step(&token, &ask, dir)?;
+    let mut files: HashMap<String, GraphFetched> = fetched
+        .into_iter()
+        .map(|fetched| (fetched.id.clone(), fetched))
+        .collect();
+
+    let items: Vec<Value> = stepped
+        .messages
+        .into_iter()
+        .map(|message| {
+            let mut item = json!({
+                "handle": message.id,
+                "mailboxes": [named.get(&message.folder)],
+                "sortKey": message.date,
+                "received": message.received,
+                "size": message.size,
+            });
+            if let Some(file) = files.remove(&message.id) {
+                item["path"] = json!(file.path.to_string_lossy());
+                item["size"] = json!(file.size);
+            }
+            item
+        })
+        .collect();
+    Ok(json!({ "exhausted": stepped.exhausted, "items": items }))
+}
+
+/// `Native.fetchMessageSources`: reads some messages of `mailbox` whole,
+/// one file per message in `dir`, as the bytes the server holds. `ids` is
+/// a JSON array; returns `{items}`, each `{id, path, size}`, with the
+/// `labels` and when it was `received` on Gmail; a message gone or one the
+/// server fails to hand over is left out, an expired token failing the
+/// call. Files, so no message crosses the boundary as a string.
+///
+/// Gmail and Graph read them in batches ([`Client::gmail_sources`],
+/// [`Client::graph_sources`]), a Graph message failing inside its batch
+/// left out like a gone one; IMAP in streamed `UID FETCH` batches
+/// ([`client::imap::ImapSession::fetch_sources`]); JMAP names their blobs
+/// in one `Email/get` and downloads them one after another
+/// ([`Client::jmap_sources`]).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessageSources<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    transport: JObject<'local>,
+    handle: i64,
+    mailbox: JString<'local>,
+    ids: JString<'local>,
+    dir: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let mailbox = read_string(env, &mailbox);
+        let ids = read_string(env, &ids);
+        let dir = read_string(env, &dir);
+
+        let mut client = Client::new(env, &transport);
+        let json = match fetch_sources(&mut client, handle, &mailbox, &ids, Path::new(&dir)) {
+            Ok(items) => json!({ "items": items }).to_string(),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// Some messages read whole into files with whichever backend the session
+/// speaks.
+fn fetch_sources(
+    client: &mut Client<'_, '_>,
+    handle: i64,
+    mailbox: &str,
+    ids: &str,
+    dir: &Path,
+) -> Result<Vec<Value>, BridgeError> {
+    let ids: Vec<String> = from_str(ids).map_err(|err| format!("Invalid message ids: {err}"))?;
+    let session = unsafe { session::borrow(handle) }?;
+    if session.is_jmap() {
+        let url = session.jmap_url()?;
+        let read = client.jmap_sources(&url, &session.credentials(), &ids, dir)?;
+        return Ok(read
+            .into_iter()
+            .map(|read| {
+                json!({
+                    "id": read.id,
+                    "path": read.path.to_string_lossy(),
+                    "size": read.size,
+                })
+            })
+            .collect());
+    }
+    if session.is_gmail() {
+        // NOTE: one message on a session of no pool run is the reader's,
+        // opening it for someone waiting on it: no queue behind the fill.
+        client.urgent = session.alone() && ids.len() == 1;
+        let token = session.credentials().password.to_string();
+        let fetched = client.gmail_sources(&token, &ids, dir)?;
+        return Ok(fetched
+            .into_iter()
+            .map(|fetched| {
+                json!({
+                    "id": fetched.id,
+                    "path": fetched.path.to_string_lossy(),
+                    "size": fetched.size,
+                    "labels": fetched.labels,
+                    "received": fetched.received,
+                })
+            })
+            .collect());
+    }
+    if session.is_graph() {
+        let token = session.credentials().password.to_string();
+        let fetched = client.graph_sources(&token, &ids, dir)?;
+        return Ok(fetched
+            .into_iter()
+            .map(|fetched| {
+                json!({
+                    "id": fetched.id,
+                    "path": fetched.path.to_string_lossy(),
+                    "size": fetched.size,
+                })
+            })
+            .collect());
+    }
+
+    let read = session.imap(client)?.fetch_sources(mailbox, &ids, dir)?;
+    Ok(read
+        .into_iter()
+        .map(|source| {
+            json!({
+                "id": source.id,
+                "path": source.path.to_string_lossy(),
+                "size": source.size,
+            })
+        })
+        .collect())
 }
 
 /// `Native.parseMessage`: one stored message to what the reader draws.
@@ -312,7 +665,54 @@ pub extern "system" fn Java_org_pimalaya_client_Native_parseMessage<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.parseMessageFile`: [`Java_org_pimalaya_client_Native_parseMessage`]
+/// of the message stored in the file at `source`, read here: no copy of
+/// the message on the Java heap, none across the boundary.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_parseMessageFile<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    source: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let source = read_string(env, &source);
+        let json = match fs::read(&source)
+            .map_err(|err| BridgeError::from(err.to_string()))
+            .and_then(|raw| mail::parse(&raw))
+        {
+            Ok(message) => to_string(&message).unwrap_or_else(|err| error_json(err.to_string())),
+            Err(err) => error_json(err),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
+}
+
+/// `Native.describeMessage`: what the store files of the message in the
+/// file at `source`, read once ([`mail::describe`]): `{hash, size,
+/// summary, attachments}`. A message read into a file by a step, a body
+/// download or an open is hashed, summarised and listed here, so the app
+/// moves the file into its blob store without reading it.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_describeMessage<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    source: JString<'local>,
+) -> JObject<'local> {
+    env.with_env(|env| -> Result<JObject<'local>, Error> {
+        let source = read_string(env, &source);
+        let json = match fs::read(&source) {
+            Ok(raw) => mail::describe(&raw).to_string(),
+            Err(err) => error_json(err.to_string()),
+        };
+
+        Ok(env.new_string(json)?.into())
+    })
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.messagePart`: writes the decoded bytes of one part of a stored
@@ -320,7 +720,8 @@ pub extern "system" fn Java_org_pimalaya_client_Native_parseMessage<'local>(
 /// file at `target`, answering `{"size"}`, or `{"error": ".."}` when the
 /// message holds no such part. Files on both sides, so no copy of the
 /// part crosses the boundary: an attachment of tens of megabytes is one
-/// decoded buffer, never a base64 string on the Java heap.
+/// decoded buffer, never a base64 string on the Java heap. The part is
+/// written from the parser's own buffer, never copied first.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_messagePart<'local>(
     mut env: EnvUnowned<'local>,
@@ -333,14 +734,10 @@ pub extern "system" fn Java_org_pimalaya_client_Native_messagePart<'local>(
         let source = read_string(env, &source);
         let section = read_string(env, &section);
         let target = read_string(env, &target);
-        let written = std::fs::read(&source)
+        let written = fs::read(&source)
+            .and_then(|raw| Ok((raw, File::create(&target)?)))
             .map_err(|err| BridgeError::from(err.to_string()))
-            .and_then(|raw| mail::part(&raw, &section))
-            .and_then(|bytes| {
-                std::fs::write(&target, &bytes)
-                    .map(|()| bytes.len())
-                    .map_err(|err| BridgeError::from(err.to_string()))
-            });
+            .and_then(|(raw, mut file)| mail::write_part(&raw, &section, &mut file));
         let json = match written {
             Ok(size) => json!({ "size": size }).to_string(),
             Err(err) => error_json(err),
@@ -348,37 +745,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_messagePart<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
-}
-
-/// Reads one message's source with whichever backend the session speaks.
-///
-/// The mailbox is only IMAP's concern: a JMAP `Email` id addresses the
-/// message across the whole account, and the same message filed in two
-/// mailboxes is one object with one id. Graph and Gmail message ids
-/// address it across the mailbox the same way.
-fn read_source(
-    client: &mut Client<'_, '_>,
-    handle: i64,
-    mailbox: &str,
-    id: &str,
-) -> Result<Vec<u8>, BridgeError> {
-    let session = unsafe { session::borrow(handle) }?;
-    if session.is_jmap() {
-        let url = session.jmap_url()?;
-        return client.fetch_jmap_source(&url, &session.credentials(), id);
-    }
-    if session.is_graph() {
-        return client.fetch_graph_source(session.credentials().password, id);
-    }
-    if session.is_gmail() {
-        // NOTE: a session of no pool run is the reader's, opening the
-        // message for someone waiting on it: no queue behind the fill.
-        client.urgent = session.alone();
-        return client.fetch_gmail_source(session.credentials().password, id);
-    }
-
-    client::imap::fetch_source(&mut session.imap(client)?, mailbox, id)
+    .resolve::<ErrorReply>()
 }
 
 /// The account's mailboxes with whichever backend the session speaks.
@@ -446,8 +813,8 @@ fn enumerate(
 
     let id = mailbox_id(client, session, mailbox)?;
     if session.is_gmail() {
-        // NOTE: a label's page is the account's listing projected onto it,
-        // read once for every session of the pool run.
+        // NOTE: a label's delta is the account's history projected onto
+        // it, replayed once for every session of the pool run.
         let run = session.gmail_run();
         let token = session.credentials().password.to_string();
         let mut source = LiveGmail {
@@ -458,7 +825,8 @@ fn enumerate(
     }
     if session.is_jmap() {
         let url = session.jmap_url()?;
-        return client.list_jmap_page(&url, &session.credentials(), &id, &request);
+        let run = session.jmap_run();
+        return client.list_jmap_page(&url, &session.credentials(), &run, &id, &request);
     }
 
     client.list_graph_page(session.credentials().password, &id, &request)
@@ -470,14 +838,18 @@ fn enumerate(
 /// with it; 0 leaves the run for the session's own.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_joinMailRun(
-    _env: EnvUnowned<'_>,
+    mut env: EnvUnowned<'_>,
     _class: JClass<'_>,
     handle: i64,
     run: i64,
 ) {
-    if let Ok(session) = unsafe { session::borrow(handle) } {
-        session.join_run(run);
-    }
+    env.with_env(|_| -> Result<(), Error> {
+        if let Ok(session) = unsafe { session::borrow(handle) } {
+            session.join_run(run);
+        }
+        Ok(())
+    })
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.setMessageFlag`: adds or removes one marker (`\Seen`,
@@ -507,7 +879,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_setMessageFlag<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.relocateMessage`: moves one message from `mailbox` into
@@ -536,7 +908,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_relocateMessage<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.copyMessage`: copies one message from `mailbox` into `target`
@@ -565,7 +937,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_copyMessage<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.destroyMessage`: deletes one message for good (pimdir SYNC §4,
@@ -592,7 +964,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_destroyMessage<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.appendMessage`: appends one message to `mailbox` with `flags`
@@ -621,7 +993,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_appendMessage<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// Writes one marker with whichever backend the session speaks.
@@ -637,6 +1009,15 @@ fn set_flag(
     if session.is_jmap() {
         let url = session.jmap_url()?;
         return client.set_jmap_keyword(&url, &session.credentials(), id, flag, add);
+    }
+    // NOTE: Graph and Gmail keep no answered or deleted marker, so clearing
+    // one is already done; only setting one is refused. A placement pushed
+    // with no agreed set states all four markers, those two cleared.
+    if !add
+        && matches!(flag, "\\Answered" | "\\Deleted")
+        && (session.is_graph() || session.is_gmail())
+    {
+        return Ok(());
     }
     if session.is_graph() {
         return client.set_graph_flag(session.credentials().password, id, flag, add);
@@ -772,12 +1153,12 @@ pub extern "system" fn Java_org_pimalaya_client_Native_composeMessage<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.submitMessage`: hands one stored message over. Returns a JSON
 /// object of `{messageId}`, the provider's own or null, or
-/// `{"error": "..", "permanent": bool}`.
+/// `{"error": "..", "permanent": bool, "uncertain": bool}`.
 ///
 /// The submission opens its own connection, SMTP being a second server.
 #[unsafe(no_mangle)]
@@ -796,14 +1177,17 @@ pub extern "system" fn Java_org_pimalaya_client_Native_submitMessage<'local>(
         let mut client = Client::new(env, &transport);
         let json = match submit_message(&mut client, handle, &submit_url, &raw) {
             Ok(filed) => json!({ "messageId": filed }).to_string(),
-            Err(refused) => {
-                json!({ "error": refused.message, "permanent": refused.permanent }).to_string()
-            }
+            Err(refused) => json!({
+                "error": refused.message,
+                "permanent": refused.permanent,
+                "uncertain": refused.uncertain,
+            })
+            .to_string(),
         };
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// Composes one draft into the message the outbox holds, the same bytes
@@ -816,10 +1200,13 @@ fn compose_message(draft: &str) -> Result<Vec<u8>, BridgeError> {
 /// One submission that did not happen, and whether it ever could.
 ///
 /// The queue reads this: a message the server refused is parked with
-/// what it said, and everything else stays queued for the next drain.
+/// what it said, one that may have gone is parked for the user to send
+/// again or not, and everything else stays queued for the next drain.
 struct Refused {
     message: String,
     permanent: bool,
+    /// The whole message went over and no verdict came back.
+    uncertain: bool,
 }
 
 impl Refused {
@@ -829,7 +1216,31 @@ impl Refused {
         Self {
             message: err.to_string(),
             permanent: false,
+            uncertain: false,
         }
+    }
+
+    /// A failed HTTP send: refused for good when its status says so
+    /// (`refused`), uncertain when the request went whole and no answer
+    /// came (`unanswered`) or a server error answered, which a gateway may
+    /// give after the work was done, else transient.
+    fn http(err: BridgeError, unanswered: bool, refused: fn(u16) -> bool) -> Self {
+        let permanent = err.status.is_some_and(refused);
+        let uncertain = !permanent && uncertain(err.status, unanswered);
+        Self {
+            message: err.to_string(),
+            permanent,
+            uncertain,
+        }
+    }
+}
+
+/// Whether an HTTP send that failed with `status` (none when no answer
+/// was read) may have been carried out.
+fn uncertain(status: Option<u16>, unanswered: bool) -> bool {
+    match status {
+        None => unanswered,
+        Some(status) => matches!(status, 500 | 502 | 503 | 504),
     }
 }
 
@@ -851,31 +1262,37 @@ fn submit_message(
         // NOTE: JMAP submits through the session it reads from, and the
         // server files the copy in Sent once it accepts the message.
         let url = session.jmap_url().map_err(Refused::transient)?;
-        client
-            .send_jmap_message(&url, &session.credentials(), raw)
-            .map_err(|err| Refused {
-                permanent: matches!(err.status, Some(413 | REFUSED)),
-                message: err.to_string(),
-            })?;
+        if let Err(err) = client.send_jmap_message(&url, &session.credentials(), raw) {
+            let unanswered = client.unanswered();
+            return Err(Refused::http(err, unanswered, |status| {
+                matches!(status, 413 | REFUSED)
+            }));
+        }
         return Ok(None);
     }
     if session.is_graph() || session.is_gmail() {
         // NOTE: Graph and Gmail submit through the session they read from
         // and file the sent copy themselves.
         let token = session.credentials().password;
-        let refused = |err: BridgeError| Refused {
-            permanent: matches!(err.status, Some(400 | 403 | 404 | 413 | 422)),
-            message: err.to_string(),
-        };
+        let refused: fn(u16) -> bool = |status| matches!(status, 400 | 403 | 404 | 413 | 422);
         if session.is_graph() {
-            client.send_graph_message(token, raw).map_err(refused)?;
+            if let Err(err) = client.send_graph_message(token, raw) {
+                let unanswered = client.unanswered();
+                return Err(Refused::http(err, unanswered, refused));
+            }
             return Ok(None);
         }
 
         // NOTE: Gmail replaces the Message-ID of what it sends, so its sent
         // copy is read back for the one it stamped. The message has left
         // either way: a failed read only leaves the staged copy unmatched.
-        let id = client.send_gmail_message(token, raw).map_err(refused)?;
+        let id = match client.send_gmail_message(token, raw) {
+            Ok(id) => id,
+            Err(err) => {
+                let unanswered = client.unanswered();
+                return Err(Refused::http(err, unanswered, refused));
+            }
+        };
         let filed = match client.gmail_envelope(token, &id) {
             Ok(envelope) => envelope.and_then(|envelope| envelope.summary.message_id),
             Err(err) => {
@@ -896,8 +1313,26 @@ fn submit_message(
     client::smtp::send(client, &submit, &session.credentials(), &composed).map_err(|err| {
         Refused {
             permanent: err.is_permanent(),
+            uncertain: err.is_uncertain(),
             message: err.to_string(),
         }
     })?;
     Ok(None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::uncertain;
+
+    /// A send with no answer, or a server error a gateway may give after
+    /// the work, may have gone; a refusal before the work did not.
+    #[test]
+    fn a_send_is_uncertain_without_a_verdict() {
+        assert!(uncertain(None, true), "written whole, never answered");
+        assert!(!uncertain(None, false), "failed before it was written");
+        assert!(uncertain(Some(503), false));
+        assert!(uncertain(Some(504), false));
+        assert!(!uncertain(Some(429), false), "throttled before any work");
+        assert!(!uncertain(Some(401), true));
+    }
 }

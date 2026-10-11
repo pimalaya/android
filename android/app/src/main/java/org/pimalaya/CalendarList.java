@@ -25,6 +25,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * The calendar screen: one agenda merging every calendar of
@@ -105,7 +107,12 @@ final class CalendarList {
 
     void setUp() {
         ListView list = host.findViewById(R.id.calendar_list);
-        header = new ListHeader(host, list, MainActivity.PANEL_CALENDAR);
+        header =
+                new ListHeader(
+                        host,
+                        list,
+                        MainActivity.PANEL_CALENDAR,
+                        host.findViewById(R.id.calendar_strip));
         header.empty(host.findViewById(R.id.calendar_empty));
         header.view
                 .findViewById(R.id.header_week_previous)
@@ -146,6 +153,13 @@ final class CalendarList {
     /**
      * Rebuilds the agenda off the stored objects, expanding each into
      * the shown week and dropping what the merged filter hides.
+     *
+     * <p>Off the main thread: it reads every stored entry and expands each
+     * through the bridge, which a store of thousands makes long enough to
+     * freeze the screen it runs on. The rows land on the main thread, the
+     * last reload asked winning. An entry's expansion is kept while the
+     * week and its object stay the same, so a reload after a sync expands
+     * only what the sync changed.
      */
     void reload() {
         // NOTE: the shown week alone, since the agenda never lists past it
@@ -155,15 +169,66 @@ final class CalendarList {
         // render keeps the week by instant.
         String from = plusDays(shownWeek(today()), -1);
         String until = plusDays(from, 9);
+        MergedFilter filter = host.filterOf(PimDomain.CALENDAR);
+        Set<String> defaults = defaultOnly ? host.shownDefaults(PimDomain.CALENDAR) : null;
+        int asked = ++generation;
 
+        reads.execute(
+                () -> {
+                    List<Row> read = rowsOf(from, until, filter, defaults);
+                    host.main.post(
+                            () -> {
+                                if (asked != generation) {
+                                    return;
+                                }
+                                rows.clear();
+                                rows.addAll(read);
+                                render();
+                            });
+                });
+    }
+
+    /** Counts the reloads asked, so only the last one's rows land. */
+    private int generation;
+
+    /** Where the agenda's rows are read, one reload after another. */
+    private final ExecutorService reads = Executors.newSingleThreadExecutor();
+
+    /**
+     * Each entry's occurrences in the window last expanded, by collection and
+     * id, with the object they were expanded from: read on {@link #reads}
+     * alone.
+     */
+    private final Map<String, Expanded> expanded = new HashMap<>();
+
+    /** The window {@link #expanded} holds occurrences of. */
+    private String expandedFrom;
+
+    /** One entry's occurrences in a window, and the object behind them. */
+    private static final class Expanded {
+        final String ical;
+        final List<Occurrence> occurrences;
+
+        Expanded(String ical, List<Occurrence> occurrences) {
+            this.ical = ical;
+            this.occurrences = occurrences;
+        }
+    }
+
+    /** The agenda's rows in {@code [from, until)}, earliest first; on {@link #reads}. */
+    private List<Row> rowsOf(
+            String from, String until, MergedFilter filter, Set<String> defaults) {
+        if (!from.equals(expandedFrom)) {
+            expanded.clear();
+            expandedFrom = from;
+        }
         Map<String, EventStore.StoredCalendar> byCollection = new HashMap<>();
         for (EventStore.StoredCalendar calendar : store.loadCalendars()) {
             byCollection.put(calendar.id, calendar);
         }
 
-        MergedFilter filter = host.filterOf(PimDomain.CALENDAR);
-        Set<String> defaults = defaultOnly ? host.shownDefaults(PimDomain.CALENDAR) : null;
-        rows.clear();
+        List<Row> read = new ArrayList<>();
+        Map<String, Expanded> kept = new HashMap<>();
         for (EventStore.StoredEvent event : store.loadEvents()) {
             EventStore.StoredCalendar calendar = byCollection.get(event.collectionId);
             if (calendar == null) {
@@ -173,20 +238,30 @@ final class CalendarList {
                     || defaults != null && !defaults.contains(calendar.id)) {
                 continue;
             }
-            try {
-                for (Occurrence occurrence :
-                        host.client.expandEvent(event.ical, from, until)) {
-                    rows.add(new Row(occurrence, event, calendar));
+            String key = event.collectionId + "\n" + event.id;
+            Expanded known = expanded.get(key);
+            if (known == null || !known.ical.equals(event.ical)) {
+                try {
+                    known =
+                            new Expanded(
+                                    event.ical, host.client.expandEvent(event.ical, from, until));
+                } catch (Exception error) {
+                    // NOTE: one unparseable object must not empty the whole
+                    // agenda, so it is dropped with a log and the rest render.
+                    Log.w("pimalaya", "event expand failed: " + event.id, error);
+                    continue;
                 }
-            } catch (Exception error) {
-                // NOTE: one unparseable object must not empty the whole
-                // agenda, so it is dropped with a log and the rest render.
-                Log.w("pimalaya", "event expand failed: " + event.id, error);
+            }
+            kept.put(key, known);
+            for (Occurrence occurrence : known.occurrences) {
+                read.add(new Row(occurrence, event, calendar));
             }
         }
+        expanded.clear();
+        expanded.putAll(kept);
 
-        rows.sort((left, right) -> Long.compare(left.start, right.start));
-        render();
+        read.sort((left, right) -> Long.compare(left.start, right.start));
+        return read;
     }
 
     /**

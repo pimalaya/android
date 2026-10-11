@@ -1,20 +1,26 @@
 package org.pimalaya;
 
+import android.content.Context;
 import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.client.Account;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.client.PimdirSql;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * The mail half of the engine: one driver per session, servicing the
@@ -85,14 +91,6 @@ class MailEngine extends PimdirEngine {
     static final int FILL_CHUNK = 500;
 
     /**
-     * Messages one step of the background fill widens a Gmail mailbox by:
-     * its reads are paced by quota units, five a message, so a step of
-     * {@link #FILL_CHUNK} would hold the io executor for half a minute and
-     * more, every pull or widening the user asks for queued behind it.
-     */
-    static final int GMAIL_FILL_CHUNK = 100;
-
-    /**
      * Told after every write a mail driver's pass lands, so a list showing
      * the store redraws as the pages of a first pass land; null when
      * nothing is listening. Called on the sync thread.
@@ -115,6 +113,12 @@ class MailEngine extends PimdirEngine {
      */
     private final Map<String, JSONObject> listed = new HashMap<>();
 
+    /**
+     * Counts the bodies this driver's bridge calls write, for the strip's
+     * bar ({@link MailTally}); null when nothing is counting.
+     */
+    MailTally tally;
+
     MailEngine(PimdirDb pimdir, PimalayaClient client, MailSession session, String accountId) {
         super(pimdir, client);
         this.pimdir = pimdir;
@@ -124,15 +128,42 @@ class MailEngine extends PimdirEngine {
 
     /**
      * The account's mailboxes and the role each carries, in one round; a
-     * Gmail account's are remembered as listed account-wide, and whether
-     * the server erases one message alone.
+     * Gmail or JMAP account's are remembered as listed account-wide, and
+     * whether the server erases one message alone. Any other account's
+     * bodies once linked across its mailboxes are released, once
+     * ({@link MailStore#repairLinks}).
      */
     List<Mailbox> mailboxes() {
         List<Mailbox> mailboxes = client.listMailboxes(session);
-        MailStore.markAccountWide(
-                pimdir.context(), accountId, PimalayaClient.isGoogle(session.account()));
+        Account server = session.account();
+        boolean accountWide = PimalayaClient.isGoogle(server) || PimalayaClient.isJmap(server);
+        MailStore.markAccountWide(pimdir.context(), accountId, accountWide);
         MailStore.markExpungesOne(pimdir.context(), accountId, session.expungesOne());
+        if (!accountWide) {
+            int released;
+            synchronized (STORE) {
+                released = mail().repairLinks(accountId);
+            }
+            if (released > 0) {
+                Log.i("pimalaya", "mail bodies linked across mailboxes released: " + released);
+            }
+        }
         return mailboxes;
+    }
+
+    /**
+     * The bodies the store holds under some link ids, within this account:
+     * a link id names one message across its mailboxes only where they are
+     * listed account-wide (Gmail, JMAP), each a projection of one listing.
+     * Elsewhere it is a handle of one mailbox (an IMAP UID names another
+     * message in the next mailbox, a Graph id is its folder's copy alone),
+     * so nothing is linked and every body is fetched.
+     */
+    @Override
+    protected JSONObject lookup(JSONArray links) throws JSONException {
+        return accountWide()
+                ? offline.lookupObjects(links, accountId)
+                : new JSONObject().put("objects", new JSONObject());
     }
 
     /**
@@ -168,31 +199,9 @@ class MailEngine extends PimdirEngine {
      * <p>The wider scope lists only the band below the old floor, on every
      * backend: no checkpoint is bound to a scope, a Graph delta link being
      * made with no filter, so it reports what changes in the band too.
-     *
-     * <p>An account listed account-wide holds one floor: its mailboxes widen
-     * below the most recent floor among them, sharing one listing. One
-     * already at or below that chunk's floor (an inbox whose first chunk
-     * reached further) widens below its own instead, so the fill never
-     * stalls.
      */
     boolean widen(String collection, int count) {
-        return widen(collection, count, null);
-    }
-
-    /** The messages one step of the background fill widens this account's mailboxes by. */
-    int fillChunk() {
-        return session != null && PimalayaClient.isGoogle(session.account())
-                ? GMAIL_FILL_CHUNK
-                : FILL_CHUNK;
-    }
-
-    /**
-     * {@link #widen(String, int)}, never below {@code stop} (null for no
-     * stop): a chunk of a window moved back to a date, listed a chunk at a
-     * time as the fill is. Answers false once the floor is at or below it.
-     */
-    boolean widen(String collection, int count, String stop) {
-        String bound = MailScope.clamp(stop, bound(collection));
+        String bound = bound(collection);
         MailStore.Coverage coverage = mail().coverage(collection);
         if (coverage.filling || coverage.at == null) {
             sync(collection);
@@ -201,44 +210,58 @@ class MailEngine extends PimdirEngine {
         if (!MailScope.limits(coverage.since, bound)) {
             return false;
         }
-        boolean accountWide = MailStore.accountWide(pimdir.context(), accountId);
-        String ceiling = accountWide ? accountFloor(coverage.since) : coverage.since;
         step(Progress.STAGE_SERVER, 0);
         long started = System.nanoTime();
-        String floor = timedFloor(collection, ceiling, count);
-        if (accountWide && floor != null && coverage.since.compareTo(floor) <= 0) {
-            floor = timedFloor(collection, coverage.since, count);
-        }
+        String floor = timedFloor(collection, coverage.since, count);
         Log.d(
                 "pimalaya",
-                "mail widen " + collection + " by " + count + " below " + ceiling + ": floor "
-                        + floor + " in " + (System.nanoTime() - started) / 1_000_000 + " ms");
+                "mail widen " + collection + " by " + count + " below " + coverage.since
+                        + ": floor " + floor + " in " + (System.nanoTime() - started) / 1_000_000
+                        + " ms");
         list(collection, MailScope.clamp(floor, bound));
         return true;
     }
 
     /**
-     * The most recent floor among the account's mailboxes, {@code since} at
-     * the least: where the account's one listing widens from.
+     * Lists one mailbox from {@code since} (null for all of it), within the
+     * account's bound: the round an IMAP first step opens each mailbox with
+     * ({@link ImapStep}). A mailbox already listed, or under way, syncs as
+     * {@link #sync} does.
      */
-    private String accountFloor(String since) {
-        String prefix = PimdirAccount.collectionId(accountId, "");
-        String latest = since;
-        for (MailStore.Edge edge : mail().edges()) {
-            if (edge.collection.startsWith(prefix)
-                    && edge.limit != null
-                    && edge.limit.compareTo(latest) > 0) {
-                latest = edge.limit;
-            }
+    void syncSince(String collection, String since) {
+        MailStore.Coverage coverage = mail().coverage(collection);
+        if (coverage.filling || coverage.at != null) {
+            sync(collection);
+            return;
         }
-        return latest;
+        step(Progress.STAGE_SERVER, 0);
+        list(collection, MailScope.clamp(since, bound(collection)));
+    }
+
+    /**
+     * Lists a mailbox down to {@code since} (null for all mail), within the
+     * account's bound, unless what it covers reaches there already: the
+     * band a step's frontier lacks, or the whole mailbox for one never
+     * listed. Answers whether it listed.
+     */
+    boolean reach(String collection, String since) {
+        String floor = MailScope.clamp(since, bound(collection));
+        MailStore.Coverage coverage = mail().coverage(collection);
+        if (coverage.at != null && !coverage.filling && !MailScope.limits(coverage.since, floor)) {
+            return false;
+        }
+        step(Progress.STAGE_SERVER, 0);
+        list(collection, floor);
+        return true;
     }
 
     /**
      * The floor one pass lists a mailbox from, within the account's bound:
      * where its round under way lists from, else what its last closed round
      * covered, so a pass after the first is a delta; and for a mailbox never
-     * listed, its first chunk, the {@link #FIRST_CHUNK} newest messages.
+     * listed, its first chunk, the {@link #FIRST_CHUNK} newest messages, or
+     * on an account stepped through account-wide (Gmail) its bound, whose
+     * round names what the store holds ({@link #nameUnnamed}).
      */
     private String scopeOf(String collection) {
         String bound = bound(collection);
@@ -248,6 +271,9 @@ class MailEngine extends PimdirEngine {
         }
         if (coverage.at != null) {
             return MailScope.clamp(coverage.since, bound);
+        }
+        if (accountWide()) {
+            return bound;
         }
         String floor = timedFloor(collection, null, FIRST_CHUNK);
         return MailScope.clamp(floor, bound);
@@ -260,6 +286,38 @@ class MailEngine extends PimdirEngine {
      */
     String floor(String collection, String before, int count) {
         return client.mailFloor(session, mailboxOf(collection), before, count);
+    }
+
+    /**
+     * The {@code Date}s of a mailbox's {@code count} newest messages, newest
+     * first, as {@link #floor} reads them: fewer when the mailbox holds
+     * fewer.
+     */
+    List<String> newest(String collection, int count) {
+        return client.mailNewest(session, mailboxOf(collection), null, count);
+    }
+
+    /**
+     * Whether a failure is the server refusing one mailbox, the connection
+     * standing: a 404, which the bridge answers for an IMAP mailbox the
+     * server would not open ({@code NO} to {@code EXAMINE} or
+     * {@code SELECT}: deleted since the roster was read, or not yet seen by
+     * a new session) as for a Graph folder or a Gmail label gone. A step and
+     * a pass skip such a mailbox, the next roster dropping it if it is gone.
+     */
+    static boolean refused(Exception failure) {
+        return isGone(failure);
+    }
+
+    /**
+     * Skips one mailbox a step or a pass found refused ({@link #refused}),
+     * logged; any other failure is thrown on.
+     */
+    static void skip(String collection, RuntimeException failure) {
+        if (!refused(failure)) {
+            throw failure;
+        }
+        Log.w("pimalaya", "mailbox refused, skipped: " + collection + ": " + failure.getMessage());
     }
 
     /** {@link #floor}, its time counted as the network's toward the first page. */
@@ -294,7 +352,7 @@ class MailEngine extends PimdirEngine {
     }
 
     /** The account's mail store, for the coverage a pass starts from. */
-    private MailStore mail() {
+    MailStore mail() {
         if (mail == null) {
             mail = new MailStore(pimdir.context(), pimdir);
         }
@@ -339,8 +397,132 @@ class MailEngine extends PimdirEngine {
     }
 
     /** The mailbox behind a collection id, which is what IMAP names it by. */
-    private String mailboxOf(String collection) {
+    String mailboxOf(String collection) {
         return PimdirAccount.nameOf(accountId, collection);
+    }
+
+    /** The collection id of one of the account's mailboxes, by its name. */
+    String collectionOf(String mailbox) {
+        return PimdirAccount.collectionId(accountId, mailbox);
+    }
+
+    /** The account's live connection, null on a driver that only stages. */
+    MailSession session() {
+        return session;
+    }
+
+    /** The app's context, for what the account keeps beside the store. */
+    Context context() {
+        return pimdir.context();
+    }
+
+    /** The store id the account's collections are namespaced under. */
+    String accountId() {
+        return accountId;
+    }
+
+    /** Whether the account is stepped through account-wide (Gmail). */
+    private boolean accountWide() {
+        return MailStore.accountWide(pimdir.context(), accountId);
+    }
+
+    /**
+     * The mailboxes the step under way holds the account's messages in
+     * ({@link #stepRead}), what {@link #held} answers over; none outside
+     * a step.
+     */
+    private List<String> holding = List.of();
+
+    /**
+     * Which of some server handles the store binds in the mailboxes the step
+     * under way holds: what the bridge asks of each page a step lists
+     * ({@code held}), so no step reads the account's every handle.
+     */
+    Set<String> held(List<String> handles) {
+        synchronized (STORE) {
+            return offline.heldOf(holding, handles);
+        }
+    }
+
+    /** {@link #held}, as the reply to the bridge's {@code held} yield. */
+    @Override
+    protected JSONObject held(JSONObject yielded) throws JSONException {
+        List<String> handles = stringsOf(yielded.getJSONArray("handles"));
+        return new JSONObject().put("held", new JSONArray(held(handles)));
+    }
+
+    /** The cache folder {@link #scratch} makes its folders in. */
+    static final String SCRATCH = "mail-sources";
+
+    /**
+     * A directory of its own under the app's cache, for one read of whole
+     * messages into files ({@link #sources}); the caller deletes it.
+     */
+    File scratch() {
+        File dir =
+                new File(
+                        new File(pimdir.context().getCacheDir(), SCRATCH),
+                        UUID.randomUUID().toString());
+        if (!dir.mkdirs()) {
+            throw new IllegalStateException("Could not create " + dir);
+        }
+        return dir;
+    }
+
+    /** Deletes a directory {@link #scratch} made, with what is left in it. */
+    static void discard(File dir) {
+        File[] files = dir.listFiles();
+        for (int index = 0; files != null && index < files.length; index++) {
+            files[index].delete();
+        }
+        dir.delete();
+    }
+
+    /**
+     * The page a step lands ({@link #land}), answered in place of a listing
+     * by the next enumerate; null while none is.
+     */
+    private Landing landing;
+
+    /** What a step's next enumerate answers: its members of one mailbox. */
+    private static final class Landing {
+        final JSONArray items;
+        final String checkpoint;
+        final boolean empty;
+
+        Landing(JSONArray items, String checkpoint, boolean empty) {
+            this.items = items;
+            this.checkpoint = checkpoint;
+            this.empty = empty;
+        }
+    }
+
+    /**
+     * Lands a step's members of one mailbox ({@link MailStep}) through the
+     * engine, as it lands a listing: each item named as a listed one is.
+     * Where the mailbox holds nothing yet and the engine opens a round, the
+     * items are that round, whole, closed with {@code checkpoint} (the
+     * account's history id taken before the step), so the next pass is a
+     * delta from it; anywhere else they are a delta adding them, which
+     * leaves the checkpoint and finds nothing absent.
+     */
+    void land(String collection, JSONArray items, String checkpoint) {
+        boolean empty;
+        synchronized (STORE) {
+            empty = !offline.bindsAny(collection);
+        }
+        landing = new Landing(items, checkpoint, empty);
+        try {
+            String bound = bound(collection);
+            MailStore.Coverage coverage = mail().coverage(collection);
+            String since = coverage.at != null ? MailScope.clamp(coverage.since, bound) : bound;
+            Log.d(
+                    "pimalaya",
+                    "mail step " + collection + " (" + items.length() + "): "
+                            + client.offlineSyncImmutable(this, collection, since, false));
+        } finally {
+            landing = null;
+        }
     }
 
     /**
@@ -356,27 +538,83 @@ class MailEngine extends PimdirEngine {
     @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
+        JSONObject listing = yielded.getJSONObject("listing");
+        if (landing != null) {
+            return landed(collection, listing);
+        }
         JSONObject request = new JSONObject();
-        request.put("listing", yielded.getJSONObject("listing"));
+        request.put("listing", listing);
         JSONObject scope = yielded.optJSONObject("scope");
         request.put("scope", scope == null ? new JSONObject() : scope);
         request.put("covered", covered(collection, scope));
+        Long reach = MailWindow.reach(pimdir.context(), accountId);
+        if (reach != null) {
+            request.put("received", reach);
+        }
 
         long started = System.nanoTime();
         String raw = client.enumerateMailboxRaw(session, mailboxOf(collection), request);
         JSONObject page = PimalayaClient.reply(raw);
-        nameUnnamed(collection, page);
+        nameUnnamed(collection, listing, page);
         nameByMessageId(collection, page);
         remote(System.nanoTime() - started);
+        return listed(collection, page, true);
+    }
 
+    /**
+     * The page a step lands, as {@link #land} says: a round's only page
+     * over a mailbox holding nothing, else a delta.
+     */
+    private JSONObject landed(String collection, JSONObject listing) throws JSONException {
+        Landing step = landing;
+        landing = null;
+        JSONObject page = new JSONObject();
+        page.put("items", step.items);
+        page.put("vanished", new JSONArray());
+        page.put("last", true);
+        boolean round = "round".equals(listing.optString("kind"));
+        page.put("complete", round && step.empty);
+        if (round && step.empty) {
+            page.put("checkpoint", step.checkpoint);
+        }
+        nameByMessageId(collection, page);
+        return listed(collection, page, false);
+    }
+
+    /**
+     * Keeps what a page named for a meta fetch to read back, counts it, and
+     * with {@code arrivals} owes the bodies of a delta's members new to the
+     * store, which download whatever their date ({@link MailOwed}): a
+     * listing's, not a step's, whose bodies download with it.
+     */
+    private JSONObject listed(String collection, JSONObject page, boolean arrivals)
+            throws JSONException {
         listed.clear();
         JSONArray items = page.optJSONArray("items");
+        List<String> handles = new ArrayList<>();
+        Map<String, String> links = new HashMap<>();
         for (int index = 0; items != null && index < items.length(); index++) {
             JSONObject item = items.getJSONObject(index);
-            listed.put(item.getString("handle"), item);
+            String handle = item.getString("handle");
+            listed.put(handle, item);
+            handles.add(handle);
+            links.put(handle, item.optString("linkId", handle));
         }
-        listed(items == null ? 0 : items.length());
-        step(Progress.STAGE_DOWNLOAD, items == null ? 0 : items.length());
+        if (arrivals && !page.optBoolean("complete") && !handles.isEmpty()) {
+            Map<String, String[]> bound;
+            synchronized (STORE) {
+                bound = offline.bound(collection, handles);
+            }
+            List<String> arrived = new ArrayList<>();
+            for (String handle : handles) {
+                if (!bound.containsKey(handle)) {
+                    arrived.add(links.get(handle));
+                }
+            }
+            MailOwed.owe(pimdir.context(), collection, arrived);
+        }
+        listed(handles.size());
+        step(Progress.STAGE_DOWNLOAD, handles.size());
         return page;
     }
 
@@ -400,13 +638,21 @@ class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Names the members a page listed by id and markers alone (a Graph
-     * delta), so nothing reaches the store unnamed (pimdir SYNC section 4):
-     * one the store binds keeps the summary it holds, every other one is
-     * read with its summary ({@link #read}), and one gone since it was
-     * listed is left out.
+     * Names the members a page listed by id and markers alone, so nothing
+     * reaches the store unnamed (pimdir SYNC section 4): one the store binds
+     * keeps the summary it holds, every other one is read with its summary
+     * ({@link #read}), and one gone since it was listed is left out.
+     *
+     * <p>A Graph delta lists them so. So does a round over a mailbox of an
+     * account stepped through account-wide (Gmail), which lists the
+     * mailbox's ids alone: there, of the members the mailbox does not
+     * hold, only those the account holds in another mailbox (newly filed
+     * here) and those listed before the first message the account holds
+     * (arrived since its history expired) are read; the rest are older mail
+     * no step brought, left out, as a band round leaves all of them.
      */
-    void nameUnnamed(String collection, JSONObject page) throws JSONException {
+    void nameUnnamed(String collection, JSONObject listing, JSONObject page)
+            throws JSONException {
         JSONArray items = page.optJSONArray("items");
         List<String> unnamed = new ArrayList<>();
         for (int index = 0; items != null && index < items.length(); index++) {
@@ -419,12 +665,18 @@ class MailEngine extends PimdirEngine {
             return;
         }
 
-        Map<String, String[]> bound = offline.bound(collection, unnamed);
+        Map<String, String[]> bound;
+        synchronized (STORE) {
+            bound = offline.bound(collection, unnamed);
+        }
         List<String> unbound = new ArrayList<>();
         for (String handle : unnamed) {
             if (!bound.containsKey(handle)) {
                 unbound.add(handle);
             }
+        }
+        if (page.optBoolean("complete") && accountWide()) {
+            unbound = steppedIn(listing, unnamed, bound);
         }
         Map<String, JSONObject> read = new HashMap<>();
         if (!unbound.isEmpty()) {
@@ -449,6 +701,55 @@ class MailEngine extends PimdirEngine {
             }
         }
         page.put("items", kept);
+    }
+
+    /**
+     * Which members of a Gmail round's page the mailbox does not hold are
+     * named ({@link #nameUnnamed}): those the account holds elsewhere, and
+     * those listed ahead of every message it holds, unless the round lists a
+     * band. Listed newest received first, so what comes ahead of every
+     * message held arrived after them.
+     */
+    private List<String> steppedIn(
+            JSONObject listing, List<String> unnamed, Map<String, String[]> bound) {
+        if (listing.isNull("cursor")) {
+            sawHeld = false;
+        }
+        Set<String> held;
+        synchronized (STORE) {
+            held = offline.heldOf(accountCollections(), unnamed);
+        }
+        boolean band = listing.optBoolean("band");
+        List<String> named = new ArrayList<>();
+        for (String handle : unnamed) {
+            if (bound.containsKey(handle)) {
+                sawHeld = true;
+            } else if (held.contains(handle)) {
+                sawHeld = true;
+                named.add(handle);
+            } else if (!band && !sawHeld) {
+                named.add(handle);
+            }
+        }
+        return named;
+    }
+
+    /**
+     * Whether the round under way met a message the account holds: past
+     * it, a member nobody holds is older mail, never an arrival.
+     */
+    private boolean sawHeld;
+
+    /** The account's mailboxes as the store keeps them. */
+    private List<String> accountCollections() {
+        String prefix = PimdirAccount.collectionId(accountId, "");
+        List<String> collections = new ArrayList<>();
+        for (MailStore.Edge edge : mail().edges()) {
+            if (edge.collection.startsWith(prefix)) {
+                collections.add(edge.collection);
+            }
+        }
+        return collections;
     }
 
     /**
@@ -544,6 +845,18 @@ class MailEngine extends PimdirEngine {
     /** The rows {@link #download} asked for, by handle, while its upgrade runs. */
     private final Map<String, MailBodies.Row> downloading = new HashMap<>();
 
+    /** The handles the upgrade asked the server for, while it runs. */
+    private final Set<String> asked = new HashSet<>();
+
+    /** The handles whose body was handed over and filed, while it runs. */
+    private final Set<String> answered = new HashSet<>();
+
+    /**
+     * The files of messages already read whole, by handle, a fetch takes
+     * rather than reading them again: a step's ({@link #fetched}).
+     */
+    private final Map<String, File> fetched = new HashMap<>();
+
     /** The summary each fetched body gives, by link id, restated once it lands. */
     private final Map<String, JSONObject> summaries = new HashMap<>();
 
@@ -551,32 +864,58 @@ class MailEngine extends PimdirEngine {
     private final Map<String, List<MessageBody.Attachment>> attachments = new HashMap<>();
 
     /**
+     * Hands over the files of messages a step read whole, by handle, for
+     * the downloads after it to store rather than read again; an empty map
+     * once they are done.
+     */
+    void fetched(Map<String, File> files) {
+        fetched.clear();
+        fetched.putAll(files);
+    }
+
+    /**
      * Downloads the bodies of some messages of one mailbox through the
      * engine's upgrade to {@code Full}: a body the store holds under the
      * same link id is linked rather than fetched, every other one is
      * fetched, and each lands with its base moved to it. A message still
      * pending (a move's target, a sent copy) is left: it has no handle the
-     * server knows.
+     * server knows; so is one the frontier no longer takes, read again
+     * rather than trusted from the plan, unless it downloads whatever its
+     * date ({@link MailBodies.Row#always}).
      *
      * <p>The sort key stays the listing's; the summary is restated from
      * the body (its attachment mark, size and invitation,
-     * {@link MailStore#restateFromBody}), and the parts recorded as files ({@link FileStore#recordAttachments}),
-     * as opening it does.
+     * {@link MailStore#restateFromBody}), and the parts recorded as files
+     * ({@link FileStore#recordAttachments}), as opening it does.
+     *
+     * <p>Answers the rows whose body did not land: asked of the server and
+     * not handed over, or not stored. A landed one is owed no more
+     * ({@link MailOwed}).
      */
-    void download(String collection, List<MailBodies.Row> rows) {
+    List<MailBodies.Row> download(String collection, List<MailBodies.Row> rows) {
         downloading.clear();
         summaries.clear();
         attachments.clear();
+        asked.clear();
+        answered.clear();
         List<String> handles = new ArrayList<>(rows.size());
-        // NOTE: read now rather than trusted from the plan: a window moved
+        // NOTE: read now rather than trusted from the plan: a frontier moved
         // later since frees bodies a stale plan would fetch back.
-        String window = MailWindow.since(pimdir.context(), accountId);
+        String window = MailWindow.since(pimdir.context(), accountId, collection);
         String role = mail().roles().get(collection);
         boolean whole = MailOffline.whole(pimdir.context(), collection);
+        List<String> poisoned = new ArrayList<>();
         synchronized (STORE) {
             for (MailBodies.Row row : rows) {
-                if (!MailBodies.takes(row.sortKey, window, role, whole)
+                if (!(row.always || MailBodies.takes(row.sortKey, window, role, whole))
                         || offline.isPendingCreate(collection, row.linkId)) {
+                    continue;
+                }
+                // NOTE: a body whose reading killed the app is never fetched
+                // again: failed for good, owed no more.
+                String key = MailOwed.key(collection, row.linkId);
+                if (MailPoison.poisoned(pimdir.context(), key)) {
+                    poisoned.add(key);
                     continue;
                 }
                 String handle = offline.handleFor(collection, row.linkId);
@@ -586,8 +925,9 @@ class MailEngine extends PimdirEngine {
                 }
             }
         }
+        MailOwed.settle(pimdir.context(), poisoned);
         if (handles.isEmpty()) {
-            return;
+            return List.of();
         }
         Log.d(
                 "pimalaya",
@@ -607,63 +947,83 @@ class MailEngine extends PimdirEngine {
                 }
             }
         }
+        List<MailBodies.Row> failed = new ArrayList<>();
+        List<String> landed = new ArrayList<>();
+        for (String handle : handles) {
+            MailBodies.Row row = downloading.get(handle);
+            if (asked.contains(handle) && !answered.contains(handle)) {
+                failed.add(row);
+            } else {
+                landed.add(MailOwed.key(collection, row.linkId));
+            }
+        }
+        MailOwed.settle(pimdir.context(), landed);
+        if (!failed.isEmpty()) {
+            Log.w("pimalaya", "mail bodies " + collection + ": " + failed.size() + " not landed");
+        }
         downloading.clear();
         summaries.clear();
         attachments.clear();
+        asked.clear();
+        answered.clear();
+        return failed;
     }
 
     /**
-     * The bodies of some messages, as the reply to a full fetch: each one's
-     * source as the server holds it, in base64 since a message is bytes,
-     * under the link id and sort key the store holds. One the server no
-     * longer has, or fails to hand over, is left out and stays below
-     * {@code Full}; an expired token fails the fetch, for the caller to
-     * renew.
+     * The bodies of some messages, as the reply to a full fetch: each one
+     * read whole into a file ({@link #sources}), unless a step read it
+     * already ({@link #fetched}), filed in the object store under its hash
+     * and answered by that hash and its size, with the link id and sort key
+     * the store holds, so no body crosses the boundary twice. One the
+     * server no longer has, or fails to hand over, is left out and stays
+     * below {@code Full}, which {@link #download} answers as not landed; an
+     * expired token fails the fetch, for the caller to renew.
      */
-    private JSONObject fetchBodies(String collection, JSONArray asked) throws JSONException {
-        String mailbox = mailboxOf(collection);
-        JSONArray items = new JSONArray();
-        for (String handle : stringsOf(asked)) {
-            MailBodies.Row row = downloading.get(handle);
-            if (row == null) {
+    private JSONObject fetchBodies(String collection, JSONArray wanted) throws JSONException {
+        List<String> missing = new ArrayList<>();
+        Map<String, File> files = new HashMap<>();
+        for (String handle : stringsOf(wanted)) {
+            if (!downloading.containsKey(handle)) {
                 continue;
             }
-            byte[] source;
-            long started = System.nanoTime();
-            try {
-                source = source(mailbox, handle);
-            } catch (RuntimeException failure) {
-                if (SyncRunner.expiredToken(failure)) {
-                    throw failure;
+            asked.add(handle);
+            File file = fetched.remove(handle);
+            if (file != null) {
+                files.put(handle, file);
+            } else {
+                missing.add(handle);
+            }
+        }
+        File dir = null;
+        long started = System.nanoTime();
+        try {
+            if (!missing.isEmpty()) {
+                dir = scratch();
+                try (MailTally.Watch counting = tally == null ? null : tally.watch(dir)) {
+                    files.putAll(sources(mailboxOf(collection), missing, dir));
                 }
-                Log.w("pimalaya", "body not downloaded: " + collection + " " + handle, failure);
-                continue;
-            } finally {
-                remote(System.nanoTime() - started);
             }
-            if (source == null) {
-                continue;
+        } catch (RuntimeException failure) {
+            if (SyncRunner.expiredToken(failure)) {
+                throw failure;
             }
+            Log.w("pimalaya", "bodies not downloaded: " + collection, failure);
+        } finally {
+            remote(System.nanoTime() - started);
+        }
 
-            JSONObject item = new JSONObject();
-            item.put("handle", handle);
-            item.put("linkId", row.linkId);
-            item.put("sortKey", row.sortKey);
-            item.put("hash", PimdirHash.of(source));
-            item.put("bodyBase64", java.util.Base64.getEncoder().encodeToString(source));
-            items.put(item);
-
-            JSONObject summary =
-                    PimdirSql.derive(PimdirSummary.MAIL, source).optJSONObject("summary");
-            if (summary != null) {
-                summaries.put(row.linkId, summary);
+        JSONArray items = new JSONArray();
+        try {
+            for (Map.Entry<String, File> entry : files.entrySet()) {
+                JSONObject item = stored(collection, entry.getKey(), entry.getValue());
+                if (item != null) {
+                    items.put(item);
+                    answered.add(entry.getKey());
+                }
             }
-            try {
-                attachments.put(row.linkId, client.parseMessage(source).attachments);
-            } catch (RuntimeException unreadable) {
-                // NOTE: stored all the same; a body the parser cannot
-                // read has no parts to record, and its reader says so.
-                Log.w("pimalaya", "parts not read: " + collection + " " + handle, unreadable);
+        } finally {
+            if (dir != null) {
+                discard(dir);
             }
         }
 
@@ -672,9 +1032,153 @@ class MailEngine extends PimdirEngine {
         return reply;
     }
 
-    /** One message's source as the server holds it. */
-    protected byte[] source(String mailbox, String handle) {
-        return client.fetchMessageSource(session, mailbox, handle);
+    /**
+     * One message's file filed in the object store and answered as a full
+     * fetch's item, its summary and parts kept for {@link #download} to
+     * restate; null when it cannot be read.
+     *
+     * <p>The bridge reads the file once for its hash, its summary and its
+     * parts ({@link PimalayaClient#describeMessage}), and the file is moved
+     * into the blob store, never copied: no body is read on this side or
+     * crosses the boundary.
+     */
+    private JSONObject stored(String collection, String handle, File file) throws JSONException {
+        MailBodies.Row row = downloading.get(handle);
+
+        // NOTE: a body whose reading killed the app before is not read
+        // again, and does not land (MailPoison).
+        String key = MailOwed.key(collection, row.linkId);
+        if (!MailPoison.begin(pimdir.context(), key)) {
+            file.delete();
+            return null;
+        }
+        JSONObject described;
+        try {
+            described = client.describeMessage(file);
+        } catch (RuntimeException unreadable) {
+            Log.w("pimalaya", "body not stored: " + collection + " " + handle, unreadable);
+            file.delete();
+            return null;
+        } finally {
+            MailPoison.end(pimdir.context(), key);
+        }
+        String hash = described.getString("hash");
+        try {
+            new PimdirBlobs(pimdir.blobs()).adopt(hash, file);
+        } catch (IOException unreadable) {
+            Log.w("pimalaya", "body not stored: " + collection + " " + handle, unreadable);
+            return null;
+        }
+
+        JSONObject summary = described.optJSONObject("summary");
+        if (summary != null) {
+            summaries.put(row.linkId, summary);
+        }
+        if (described.isNull("attachments")) {
+            // NOTE: stored all the same; a body the parser cannot read
+            // has no parts to record, and its reader says so.
+            Log.w("pimalaya", "parts not read: " + collection + " " + handle);
+        } else {
+            attachments.put(
+                    row.linkId,
+                    PimalayaClient.attachmentsOf(described.optJSONArray("attachments")));
+        }
+
+        JSONObject item = new JSONObject();
+        item.put("handle", handle);
+        item.put("linkId", row.linkId);
+        item.put("sortKey", row.sortKey);
+        item.put("hash", hash);
+        item.put("persisted", described.getLong("size"));
+        return item;
+    }
+
+    /**
+     * What a step over {@code only} (the collection a view filtered to it
+     * steps alone, null for the account) asks the bridge ({@link
+     * #stepped}), each backend reading what it needs: about {@link
+     * MailStep#COUNT} messages the store does not hold (each listed page
+     * asked of {@link #held}), below the {@code frontier} (the mailbox's
+     * own over it alone, else the account's; null for all mail or until
+     * the account holds one), within the account's {@code bound}, after
+     * the {@code anchors} the last JMAP step left ({@link
+     * MailWindow#anchors}).
+     */
+    JSONObject stepRequest(String only) throws JSONException {
+        Context context = pimdir.context();
+        String frontier = null;
+        if (MailWindow.held(context, accountId)) {
+            frontier =
+                    only == null
+                            ? MailWindow.since(context, accountId)
+                            : MailWindow.since(context, accountId, only);
+        }
+        String bound = MailScope.sinceOf(context, accountId);
+        String mailbox = only == null ? null : mailboxOf(only);
+        return new JSONObject()
+                .put("count", MailStep.COUNT)
+                .put("frontier", frontier == null ? JSONObject.NULL : frontier)
+                .put("bound", bound == null ? JSONObject.NULL : bound)
+                .put("anchors", new JSONArray(MailWindow.anchors(context, accountId, mailbox)));
+    }
+
+    /**
+     * {@link #stepped}, its bodies counted as their files land ({@link
+     * #tally}): the step's count planned before it reads, closed on what
+     * it brought once it answers. {@code holding} the mailboxes whose
+     * messages the step leaves out ({@link #held}).
+     */
+    JSONObject stepRead(String mailbox, List<String> holding, JSONObject request, File dir) {
+        this.holding = holding;
+        try {
+            if (tally == null) {
+                return stepped(mailbox, request, dir);
+            }
+            tally.expect(request.optInt("count", MailStep.COUNT));
+            try (MailTally.Watch counting = tally.watch(dir)) {
+                return stepped(mailbox, request, dir);
+            } finally {
+                tally.expect(0);
+            }
+        } finally {
+            this.holding = List.of();
+        }
+    }
+
+    /**
+     * One step of the account read by the bridge ({@link MailStep}), as
+     * {@code request} asks ({@link #stepRequest}), of {@code mailbox} or of
+     * the account for null, each message read into a file of {@code dir}.
+     * The bridge asks this driver which of each page it lists the store
+     * holds ({@link #held}).
+     */
+    protected JSONObject stepped(String mailbox, JSONObject request, File dir) {
+        return client.mailStep(session, mailbox, request, dir, this);
+    }
+
+    /**
+     * Some messages' sources as the server holds them, each read into a
+     * file of {@code dir}, by handle; one gone or not handed over left out.
+     */
+    protected Map<String, File> sources(String mailbox, List<String> handles, File dir) {
+        return sources(session, mailbox, handles, dir);
+    }
+
+    /**
+     * {@link #sources} on {@code on}, a session other than the driver's: the
+     * reader's own, opened for the one message it fetches.
+     */
+    protected Map<String, File> sources(
+            MailSession on, String mailbox, List<String> handles, File dir) {
+        JSONArray read = client.fetchMessageSources(on, mailbox, handles, dir);
+        Map<String, File> files = new HashMap<>();
+        for (int index = 0; index < read.length(); index++) {
+            JSONObject item = read.optJSONObject(index);
+            if (item != null) {
+                files.put(item.optString("id"), new File(item.optString("path")));
+            }
+        }
+        return files;
     }
 
     /** Tells a listening list that a write landed, page by page. */
@@ -684,6 +1188,18 @@ class MailEngine extends PimdirEngine {
         if (listener != null && effects.length() > 0) {
             listener.run();
         }
+    }
+
+    /**
+     * Stages one marker on one stored message, added or removed, the others
+     * it carries kept; the next sync pushes the difference.
+     */
+    void stageFlag(MailStore.StoredMessage message, String flag, boolean add)
+            throws JSONException {
+        mutateFlags(
+                message.collection,
+                offline.handleFor(message.collection, message.id),
+                withFlag(mail().flagsOf(message.collection, message.id), flag, add));
     }
 
     /** What deleting one message staged, which its row and toast say. */

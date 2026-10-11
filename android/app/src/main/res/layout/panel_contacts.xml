@@ -1,59 +1,73 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The contacts list content; its bar elements and FAB live in the
      persistent chrome (activity_main.xml). -->
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical">
 
-    <!-- Pull down anywhere on the list to sync every account. -->
-    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-        android:id="@+id/contacts_refresh"
+    <!-- The sync strip, pinned above the list so it shows wherever the
+         list is scrolled (ListHeader). -->
+    <include
+        android:id="@+id/contacts_strip"
+        layout="@layout/sync_strip" />
+
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
-        <ListView
-            android:id="@+id/contacts_list"
+        <!-- Pull down anywhere on the list to sync every account. -->
+        <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+            android:id="@+id/contacts_refresh"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <ListView
+                android:id="@+id/contacts_list"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:divider="@null"
+                android:listSelector="@android:color/transparent"
+                android:dividerHeight="0dp"
+                android:paddingBottom="88dp"
+                android:scrollbars="none" />
+
+        </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+        <!-- Centred in what the list's header leaves below it, which
+             ListHeader keeps as this view's top padding. -->
+        <LinearLayout
+            android:id="@+id/contacts_empty"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:clipToPadding="false"
-            android:divider="@null"
-            android:listSelector="@android:color/transparent"
-            android:dividerHeight="0dp"
-            android:paddingBottom="88dp"
-            android:scrollbars="none" />
-
-    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
-
-    <!-- Centred in what the list's header leaves below it, which
-         ListHeader keeps as this view's top padding. -->
-    <LinearLayout
-        android:id="@+id/contacts_empty"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:alpha="0.25"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:paddingStart="48dp"
-        android:paddingEnd="48dp"
-        android:visibility="gone">
-
-        <ImageView
-            android:layout_width="96dp"
-            android:layout_height="96dp"
-            android:contentDescription="@null"
-            android:src="@drawable/ic_no_contact"
-            android:tint="?android:attr/textColorSecondary" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:alpha="0.25"
             android:gravity="center"
-            android:text="@string/empty_title"
-            android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
-            android:textColor="?android:attr/textColorSecondary"
-            android:textSize="18sp" />
+            android:orientation="vertical"
+            android:paddingStart="48dp"
+            android:paddingEnd="48dp"
+            android:visibility="gone">
 
-    </LinearLayout>
+            <ImageView
+                android:layout_width="96dp"
+                android:layout_height="96dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_no_contact"
+                android:tint="?android:attr/textColorSecondary" />
 
-</FrameLayout>
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center"
+                android:text="@string/empty_title"
+                android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
+                android:textColor="?android:attr/textColorSecondary"
+                android:textSize="18sp" />
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+</LinearLayout>

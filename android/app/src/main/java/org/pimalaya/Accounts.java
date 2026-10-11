@@ -39,6 +39,18 @@ final class Accounts {
     /** Matches android:accountType in res/xml/authenticator.xml. */
     static final String TYPE = "org.pimalaya";
 
+    /**
+     * An address as a release log may name it: its domain alone, which
+     * tells the provider without telling the person.
+     */
+    static String redacted(String address) {
+        if (address == null) {
+            return "?";
+        }
+        int at = address.lastIndexOf('@');
+        return at < 0 ? "*" : "*" + address.substring(at);
+    }
+
     private static final String DATA_URL = "url";
 
     /** A calendar account's address; never set on a book's account. */
@@ -124,7 +136,7 @@ final class Accounts {
                 Bundle data = new Bundle();
                 data.putString(DATA_CALENDARS, address);
                 if (!manager.addAccountExplicitly(account, null, data)) {
-                    Log.w("pimalaya", "calendar account refused for " + address);
+                    Log.w("pimalaya", "calendar account refused for " + redacted(address));
                     continue;
                 }
             }

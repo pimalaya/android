@@ -35,6 +35,27 @@ public class PimalayaClientTest {
         }
     }
 
+    /** What a held session reopens on: a failure, told without parsing a page. */
+    @Test
+    public void aFailedReplyIsToldByItsErrorField() {
+        assertEquals(true, PimalayaClient.failed(" {\"error\":\"Transport read failed\"}"));
+        assertEquals(false, PimalayaClient.failed("{\"items\":[{\"error\":\"x\"}]}"));
+        assertEquals(false, PimalayaClient.failed(null));
+    }
+
+    /**
+     * An update's ETag is the string the reply encodes: Google's own quotes
+     * kept, unescaped, so the next listing names the same revision.
+     */
+    @Test
+    public void anUpdatedEtagIsReadAsTheStringTheReplyEncodes() {
+        assertEquals(
+                "\"3583433504310878\"", PimalayaClient.etag("\"\\\"3583433504310878\\\"\""));
+        assertEquals("W/\"abc\"", PimalayaClient.etag(" \"W/\\\"abc\\\"\" "));
+        assertEquals("e-1", PimalayaClient.etag("\"e-1\""));
+        assertNull(PimalayaClient.etag("null"));
+    }
+
     @Test
     public void successReplyPassesThrough() throws Exception {
         assertEquals("ok", PimalayaClient.object("{\"value\": \"ok\"}").getString("value"));

@@ -2,14 +2,14 @@
 
 use jni::{
     EnvUnowned,
-    errors::{Error, LogErrorAndDefault},
+    errors::Error,
     objects::{JClass, JObject, JString},
     sys::jboolean,
 };
 use serde_json::{Value, json};
 
 use crate::{
-    ffi::{error_json, parse_facts, parse_strings, read_string},
+    ffi::{ErrorReply, error_json, parse_facts, parse_strings, read_string},
     offline, store,
 };
 
@@ -52,7 +52,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineSync<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.offlineUpgrade`: raises the given handles (a JSON string
@@ -83,7 +83,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineUpgrade<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.offlineMutate`: stages a local mutation (a JSON object,
@@ -109,7 +109,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineMutate<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.offlineRetryUnguarded`: whether a 412-rejected push may
@@ -130,7 +130,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineRetryUnguarded<'lo
         };
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.offlineAccountSnapshot`: projects an account-wide delta
@@ -151,7 +151,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlineAccountSnapshot<'l
         };
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.offlinePushPlan`: plans one push change (membership patch
@@ -171,7 +171,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_offlinePushPlan<'local>(
         };
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// Serializes a store decision, or its error.

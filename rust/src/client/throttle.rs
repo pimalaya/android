@@ -8,13 +8,14 @@
 //! a wait rather than failing the sync pass: the server's `Retry-After`
 //! (or the instant Gmail's message names, `Retry after …`), else a short
 //! exponential back-off. Almost every such refusal is a per-second or a
-//! concurrency limit, gone within a second or two; only an answer that
-//! names a per-minute quota (`Quota exceeded for quota metric … Units
-//! per minute per user`) waits for the next minute.
+//! concurrency limit, gone within a second or two. An answer that names
+//! a per-minute quota (`Quota exceeded for quota metric … Units per
+//! minute per user`) waits for the next minute, but on Gmail, whose quota
+//! refills by the second, a few seconds more each retry.
 //!
 //! Gmail is also paced before it is asked ([`pace_gmail`]), per account:
-//! a rate of quota units per second, under Gmail's 250, and a per-minute
-//! ceiling below the project's quota, shared by every worker, the body
+//! a rate of quota units per second and a per-minute ceiling below the
+//! project's quota ([`quota`]), shared by every worker, the body
 //! downloads and the reader, so a long pass waits for its quota rather
 //! than drawing refusals. A request someone is waiting on (a message
 //! being opened) skips the queue the background work forms.
@@ -43,6 +44,17 @@
 //! it: it passes through untouched, bytes already read included.
 //!
 //! Every wait, a pacing one or a throttled one, is logged at debug.
+//!
+//! **Connections.** The transport keeps one connection per origin across
+//! requests, and a server closes one it left idle (Graph after about two
+//! minutes). Each answer is followed to its end by its framing and only
+//! then settled ([`Wire::wire_settle`]): a connection whose last answer was
+//! not read to its end (a coroutine that stopped half-way, a read that
+//! timed out, a body with no framing, a `Connection: close`) is dropped
+//! before the next request ([`Wire::wire_begin`]), so no answer is ever
+//! read as another's. A reused connection that ends or fails before the
+//! first byte of an answer to an idempotent request is reset and the
+//! request sent again once (RFC 9112 section 9.3.1).
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -53,7 +65,13 @@ use std::{
 use io_gmail::v1::send::GmailApiError;
 use jiff::{Timestamp, fmt::rfc2822::DateTimeParser};
 
-use crate::{client::Client, types::BridgeError};
+use crate::{
+    client::{
+        Client,
+        gmail::{minute_pause, quota},
+    },
+    types::BridgeError,
+};
 
 /// How many times one request is sent again after a throttled answer.
 const MAX_RETRIES: u32 = 4;
@@ -87,34 +105,32 @@ const HEAD_CAP: usize = 64 * 1024;
 /// through rather than being buffered.
 const BODY_CAP: usize = 256 * 1024;
 
+/// The largest chunk a chunked body is followed through: a larger chunk
+/// size is broken framing, so the answer passes through untouched and
+/// its connection is not reused.
+const CHUNK_CAP: usize = 64 * 1024 * 1024;
+
 /// The longest reason a throttled answer is logged with.
 const REASON_CAP: usize = 160;
 
-/// Gmail quota units per second an account is held near. Gmail grants
-/// 250 per user per second, a moving average, and a metadata read costs
-/// 5, so a batch of 50 reads already spends a whole second; pacing at a
-/// fifth below keeps clear of the limit rather than drawing its 429s.
-/// A batch is paced by the units of every call it carries.
-pub(crate) const GMAIL_UNITS_PER_SECOND: u32 = 200;
+/// Gmail quota units per second an account is held near
+/// ([`quota::UNITS_PER_SECOND`]). A batch is paced by the units of every
+/// call it carries.
+pub(crate) const GMAIL_UNITS_PER_SECOND: u32 = quota::UNITS_PER_SECOND;
 
 /// The units an account's pacing lets through at once after a pause, on
-/// top of the request's own: a handful of small calls.
-const GMAIL_BURST_UNITS: u32 = 50;
-
-/// Gmail's per-minute quota per user, in quota units, as the Cloud
-/// console of the app's project 991810147220 states it (2026-10-09):
-/// 6,000 units per user per minute, below the 15,000 Gmail's "Usage
-/// limits" page still documents, which Google calls the previous quota.
-const GMAIL_UNITS_PER_MINUTE_PER_USER: u32 = 6_000;
+/// top of the request's own ([`quota::BURST_UNITS`]).
+const GMAIL_BURST_UNITS: u32 = quota::BURST_UNITS;
 
 /// The quota units background Gmail requests may spend in any sixty
 /// seconds: the project's quota less a fifth, so the two sides' clocks
 /// and the requests still in flight never carry a pass over it.
-pub(crate) const GMAIL_UNITS_PER_MINUTE: u32 = GMAIL_UNITS_PER_MINUTE_PER_USER / 5 * 4;
+pub(crate) const GMAIL_UNITS_PER_MINUTE: u32 = quota::UNITS_PER_MINUTE_PER_USER / 5 * 4;
 
 /// The quota units urgent Gmail requests may spend in any sixty seconds:
 /// the fifth the background ceiling leaves.
-const GMAIL_URGENT_UNITS_PER_MINUTE: u32 = GMAIL_UNITS_PER_MINUTE_PER_USER - GMAIL_UNITS_PER_MINUTE;
+const GMAIL_URGENT_UNITS_PER_MINUTE: u32 =
+    quota::UNITS_PER_MINUTE_PER_USER - GMAIL_UNITS_PER_MINUTE;
 
 /// How long an account's pacing is kept unused before it is dropped:
 /// past a minute, nothing it holds bears on the next request.
@@ -131,6 +147,23 @@ pub(crate) struct Exchange {
     url: String,
     request: Vec<u8>,
     answering: bool,
+    /// Whether the request went out on a connection that served one
+    /// before, which the server may have closed while it idled.
+    reused: bool,
+    /// Whether the request was sent again on a new connection already.
+    resent: bool,
+    /// Whether any byte of its answer came.
+    heard: bool,
+    /// How far its answer was read, to settle it at its end.
+    follow: Follow,
+}
+
+impl Exchange {
+    /// Whether the request was written whole and no byte of its answer
+    /// came ([`Client::unanswered`]).
+    fn unanswered(&self) -> bool {
+        self.answering && !self.heard
+    }
 }
 
 /// What a throttled exchange needs of a connection: the bare transport,
@@ -145,6 +178,17 @@ pub(crate) trait Wire {
 
     /// Writes bytes to `url`'s stream.
     fn wire_write(&mut self, url: &str, bytes: &[u8]) -> Result<(), BridgeError>;
+
+    /// Opens a new request on `url`'s origin, dropping a connection whose
+    /// last answer was not read to its end; answers whether the request
+    /// goes out on a connection that served one before.
+    fn wire_begin(&mut self, url: &str) -> bool;
+
+    /// Marks the answer on `url`'s connection read to its end.
+    fn wire_settle(&mut self, url: &str);
+
+    /// Drops `url`'s connection.
+    fn wire_reset(&mut self, url: &str);
 
     /// The request in flight.
     fn exchange(&mut self) -> &mut Exchange;
@@ -178,6 +222,18 @@ impl Wire for Client<'_, '_> {
         self.write(url, bytes)
     }
 
+    fn wire_begin(&mut self, url: &str) -> bool {
+        self.begin(url)
+    }
+
+    fn wire_settle(&mut self, url: &str) {
+        self.settle(url)
+    }
+
+    fn wire_reset(&mut self, url: &str) {
+        self.reset(url)
+    }
+
     fn exchange(&mut self) -> &mut Exchange {
         &mut self.exchange
     }
@@ -194,6 +250,13 @@ impl Wire for Client<'_, '_> {
 /// HTTP exchange with throttling, used by every HTTP runner in place of
 /// the bare transport `read` and `write`.
 impl<'a, 'local> Client<'a, 'local> {
+    /// Whether the last request was written whole and no byte of its
+    /// answer came: a server may have carried it out, so a failed write
+    /// that is not idempotent (a send) may have happened.
+    pub(crate) fn unanswered(&self) -> bool {
+        self.exchange.unanswered()
+    }
+
     /// Writes request bytes to `url`, recording them so a throttled
     /// answer can be retried. A write after the answer started, or to
     /// another URL, opens a new request.
@@ -218,48 +281,109 @@ impl<'a, 'local> Client<'a, 'local> {
 }
 
 /// [`Client::http_write`] over any [`Wire`].
-fn throttled_write<W: Wire>(wire: &mut W, url: &str, bytes: &[u8]) -> Result<(), BridgeError> {
+///
+/// A new request begins on its origin ([`Wire::wire_begin`]). A write that
+/// fails on a reused connection, for an idempotent request, is sent again
+/// whole on a new one, once.
+pub(crate) fn throttled_write<W: Wire>(
+    wire: &mut W,
+    url: &str,
+    bytes: &[u8],
+) -> Result<(), BridgeError> {
     let exchange = wire.exchange();
-    if exchange.answering || exchange.url != url {
+    if exchange.answering || exchange.url != url || exchange.request.is_empty() {
         exchange.url.clear();
         exchange.url.push_str(url);
         exchange.request.clear();
         exchange.answering = false;
+        exchange.resent = false;
+        exchange.follow = Follow::Unknown;
+        exchange.heard = false;
+        let reused = wire.wire_begin(url);
+        wire.exchange().reused = reused;
     }
-    exchange.request.extend_from_slice(bytes);
-    wire.wire_write(url, bytes)
+    wire.exchange().request.extend_from_slice(bytes);
+
+    match wire.wire_write(url, bytes) {
+        Err(err) if !resendable(wire.exchange()) => Err(err),
+        Err(err) => {
+            log::debug!("{} write failed ({err}), sending again", short(url));
+            resend(wire, url)
+        }
+        Ok(()) => Ok(()),
+    }
 }
 
 /// [`Client::http_read`] over any [`Wire`].
-fn throttled_read<W: Wire>(wire: &mut W, url: &str) -> Result<Vec<u8>, BridgeError> {
+pub(crate) fn throttled_read<W: Wire>(wire: &mut W, url: &str) -> Result<Vec<u8>, BridgeError> {
     let exchange = wire.exchange();
     let fresh = !exchange.answering
         && exchange.url == url
         && !exchange.request.is_empty()
         && !exchange.request.starts_with(b"HEAD ");
     if !fresh {
-        return wire.wire_read(url);
+        let following = exchange.answering && exchange.url == url;
+        let chunk = wire.wire_read(url)?;
+        if following {
+            follow(wire, url, &chunk);
+        }
+        return Ok(chunk);
     }
-    exchange.answering = true;
+    wire.exchange().answering = true;
 
     let mut retries = 0;
     loop {
         let refusal = match read_answer(wire, url)? {
-            Answered::Passed(bytes) => return Ok(bytes),
+            Answered::Passed(bytes) => {
+                wire.exchange().heard = !bytes.is_empty();
+                begin_follow(wire, url, &bytes);
+                return Ok(bytes);
+            }
+            // NOTE: a read that timed out may be a server still at work on
+            // the request, not an idle connection it closed: sending it
+            // again could apply it twice, or meet its own 412.
+            Answered::Lost(lost)
+                if !resendable(wire.exchange()) || lost.as_ref().is_some_and(timed_out) =>
+            {
+                return match lost {
+                    Some(err) => Err(err),
+                    None => Ok(Vec::new()),
+                };
+            }
+            Answered::Lost(lost) => {
+                let why = lost.map_or_else(|| "end of stream".to_string(), |err| err.message);
+                log::debug!(
+                    "{} connection lost before its answer ({why}), sending again",
+                    short(url)
+                );
+                resend(wire, url)?;
+                continue;
+            }
             Answered::Throttled(refusal) => refusal,
         };
+        wire.exchange().heard = true;
 
-        // NOTE: the account's other workers would draw the same refusal,
-        // so its pacing holds them a minute too.
-        if refusal.throttle == Throttle::Minute
-            && let Some(key) = wire.paced()
-        {
-            gmail_quota_refused(&key);
+        // NOTE: a 503 may come from a gateway after the server behind it
+        // did the work: only a request that may be applied twice is sent
+        // again; a 429 or a quota 403 refuses before any work.
+        if refusal.status == 503 && !idempotent(&wire.exchange().request) {
+            log::debug!(
+                "{} unavailable (503), not sent again: not idempotent",
+                short(url)
+            );
+            begin_follow(wire, url, &refusal.bytes);
+            return Ok(refusal.bytes);
         }
 
         let (delay, budget) = match (refusal.retry_after, refusal.throttle) {
             (Some(delay), Throttle::Minute) => (delay, QUOTA_WAIT_BUDGET),
             (Some(delay), Throttle::Burst) => (delay, WAIT_BUDGET),
+            // NOTE: Gmail's minute quota is a bucket refilling by the
+            // second, measured clearing within 2 s: a few seconds more each
+            // retry, never the next minute, and no budget spent for it.
+            (None, Throttle::Minute) if wire.paced().is_some() => {
+                (minute_pause(retries + 1), WAIT_BUDGET)
+            }
             (None, Throttle::Minute) => {
                 let jitter = MINUTE_JITTER.mul_f64(rand::random_range(0.0..=1.0));
                 (until_next_minute(wire.now()) + jitter, QUOTA_WAIT_BUDGET)
@@ -276,6 +400,7 @@ fn throttled_read<W: Wire>(wire: &mut W, url: &str) -> Result<Vec<u8>, BridgeErr
                 refusal.status,
                 refusal.reason
             );
+            begin_follow(wire, url, &refusal.bytes);
             return Ok(refusal.bytes);
         }
 
@@ -291,11 +416,78 @@ fn throttled_read<W: Wire>(wire: &mut W, url: &str) -> Result<Vec<u8>, BridgeErr
         wire.sleep(delay);
         *wire.waited() += delay;
         retries += 1;
+        wire.exchange().heard = false;
 
         let request = std::mem::take(&mut wire.exchange().request);
         let written = wire.wire_write(url, &request);
         wire.exchange().request = request;
         written?;
+    }
+}
+
+/// Whether the request in flight may be sent again on a new connection:
+/// it went out on a reused one, which the server may have closed while it
+/// idled, it was not sent again already, and its method is idempotent
+/// (RFC 9112 section 9.3.1, RFC 9110 section 9.2.2; WebDAV's PROPFIND and
+/// REPORT are safe).
+fn resendable(exchange: &Exchange) -> bool {
+    exchange.reused && !exchange.resent && idempotent(&exchange.request)
+}
+
+/// Whether a request's method is idempotent (RFC 9110 section 9.2.2;
+/// WebDAV's PROPFIND and REPORT are safe): applying it twice does what
+/// applying it once does.
+fn idempotent(request: &[u8]) -> bool {
+    const IDEMPOTENT: [&[u8]; 8] = [
+        b"GET ",
+        b"HEAD ",
+        b"OPTIONS ",
+        b"TRACE ",
+        b"PUT ",
+        b"DELETE ",
+        b"PROPFIND ",
+        b"REPORT ",
+    ];
+    IDEMPOTENT.iter().any(|method| request.starts_with(method))
+}
+
+/// Whether a failed read timed out (the Java transport's
+/// `SocketTimeoutException` as the bridge words it), rather than the connection ending.
+fn timed_out(err: &BridgeError) -> bool {
+    err.message.contains("SocketTimeoutException") || err.message.contains("timed out")
+}
+
+/// Drops the request's connection and writes the whole request again on
+/// a new one.
+fn resend<W: Wire>(wire: &mut W, url: &str) -> Result<(), BridgeError> {
+    wire.wire_reset(url);
+    let exchange = wire.exchange();
+    exchange.resent = true;
+    exchange.reused = false;
+    let request = std::mem::take(&mut exchange.request);
+    let written = wire.wire_write(url, &request);
+    wire.exchange().request = request;
+    written
+}
+
+/// Starts following an answer from its first bytes, settling it at once
+/// when they hold all of it.
+fn begin_follow<W: Wire>(wire: &mut W, url: &str, bytes: &[u8]) {
+    wire.exchange().follow = Follow::of(bytes);
+    follow(wire, url, &[]);
+}
+
+/// Follows more bytes of the answer, settling it once its end is read, and
+/// dropping the connection when bytes come past that end.
+fn follow<W: Wire>(wire: &mut W, url: &str, bytes: &[u8]) {
+    let was = std::mem::take(&mut wire.exchange().follow);
+    match was.feed(bytes) {
+        Follow::Ended => {
+            wire.exchange().follow = Follow::Settled;
+            wire.wire_settle(url);
+        }
+        Follow::Excess => wire.wire_reset(url),
+        next => wire.exchange().follow = next,
     }
 }
 
@@ -311,7 +503,13 @@ fn read_answer<W: Wire>(wire: &mut W, url: &str) -> Result<Answered, BridgeError
         if bytes.len() > HEAD_CAP {
             return Ok(Answered::Passed(bytes));
         }
-        let chunk = wire.wire_read(url)?;
+        let chunk = match wire.wire_read(url) {
+            Err(err) if bytes.is_empty() => return Ok(Answered::Lost(Some(err))),
+            read => read?,
+        };
+        if chunk.is_empty() && bytes.is_empty() {
+            return Ok(Answered::Lost(None));
+        }
         if chunk.is_empty() {
             return Ok(Answered::Passed(bytes));
         }
@@ -400,18 +598,6 @@ pub(crate) fn gmail_gate(key: &str) -> Arc<Mutex<()>> {
     let pace = paces.entry(key.to_string()).or_insert_with(GmailPace::new);
     pace.used = Instant::now();
     Arc::clone(&pace.gate)
-}
-
-/// Spends what is left of the minute's Gmail budget of the account `key`
-/// names: Gmail just refused a per-minute quota, so every worker holds
-/// off a minute rather than drawing the same refusal.
-fn gmail_quota_refused(key: &str) {
-    let mut paces = GMAIL_PACES.lock().unwrap_or_else(|err| err.into_inner());
-    if let Some(pace) = paces.get_mut(key) {
-        let now = Instant::now();
-        pace.minute.exhaust(now, GMAIL_UNITS_PER_MINUTE);
-        pace.urgent.exhaust(now, GMAIL_URGENT_UNITS_PER_MINUTE);
-    }
 }
 
 /// One account's Gmail pacing: the next per-second slot, the minute's
@@ -503,15 +689,6 @@ impl MinuteBudget {
         self.total += units;
         at.saturating_duration_since(now)
     }
-
-    /// Fills the budget at `now`, so the next spend waits sixty seconds
-    /// from it.
-    fn exhaust(&mut self, now: Instant, limit: u32) {
-        let at = self.spent.back().map_or(now, |(last, _)| now.max(*last));
-        self.spent.clear();
-        self.spent.push_back((at, limit));
-        self.total = limit;
-    }
 }
 
 /// One step of a paced stream of costs (the generic cell rate algorithm
@@ -538,7 +715,8 @@ fn pace_slot(
 enum Throttle {
     /// A rate or concurrency limit: a short exponential back-off.
     Burst,
-    /// A per-minute quota the answer names: until the next minute.
+    /// A per-minute quota the answer names: until the next minute, or on
+    /// Gmail a few seconds more each retry ([`minute_pause`]).
     Minute,
 }
 
@@ -546,6 +724,9 @@ enum Throttle {
 enum Answered {
     /// Anything but a throttled answer: handed to the coroutine as is.
     Passed(Vec<u8>),
+    /// No byte of an answer: the connection ended, or failed with the
+    /// error, before one came.
+    Lost(Option<BridgeError>),
     /// A throttled answer, read to its end.
     Throttled(Refusal),
 }
@@ -563,8 +744,8 @@ struct Refusal {
 /// Whether a complete answer says the request was throttled, and how it
 /// is waited out: a 503, a 429, or one of Google's rate-limit 403s (a
 /// 403 for anything else, and any answer naming a daily quota, is no
-/// reason to wait). Only an answer naming a per-minute quota waits for
-/// the next minute: a bare 429, Gmail's concurrency one
+/// reason to wait). Only an answer naming a per-minute quota waits as a
+/// [`Throttle::Minute`]: a bare 429, Gmail's concurrency one
 /// (`Too many concurrent requests for user`) and its per-second one
 /// (`User-rate limit exceeded`) included, is gone within seconds.
 fn throttled(status: u16, body: &[u8]) -> Option<Throttle> {
@@ -588,7 +769,7 @@ fn throttled(status: u16, body: &[u8]) -> Option<Throttle> {
 /// per minute per user'` does, in its message or in its `ErrorInfo`
 /// metadata (`…PerMinutePerUser`); the older APIs' hundred seconds
 /// count alike.
-fn names_minute_quota(body: &[u8]) -> bool {
+pub(crate) fn names_minute_quota(body: &[u8]) -> bool {
     contains(body, b"per minute")
         || contains(body, b"PerMinute")
         || contains(body, b"per 100 seconds")
@@ -597,7 +778,7 @@ fn names_minute_quota(body: &[u8]) -> bool {
 
 /// Whether a body names a daily quota, which no wait within a sync
 /// brings back.
-fn names_daily_quota(body: &[u8]) -> bool {
+pub(crate) fn names_daily_quota(body: &[u8]) -> bool {
     contains(body, b"dailyLimitExceeded") || contains(body, b"per day") || contains(body, b"PerDay")
 }
 
@@ -782,6 +963,130 @@ impl Framing {
     }
 }
 
+/// How far an answer was read, to settle it once its end is.
+#[derive(Default)]
+enum Follow {
+    /// No answer, or one whose end cannot be told (no framing, a head past
+    /// the caps, `Connection: close`, an interim answer): never settled, so
+    /// its connection is dropped before the next request.
+    #[default]
+    Unknown,
+    /// This many octets of a `Content-Length` body still to come.
+    Length(usize),
+    /// A chunked body under way.
+    Chunked(Chunks),
+    /// Read to its end, not settled yet.
+    Ended,
+    /// Read to its end and settled.
+    Settled,
+    /// Bytes came past its end: the connection is out of step.
+    Excess,
+}
+
+impl Follow {
+    /// From an answer's first bytes, its head among them.
+    fn of(bytes: &[u8]) -> Self {
+        let Some(end) = head_end(bytes) else {
+            return Self::Unknown;
+        };
+        let Some(head) = Head::parse(&bytes[..end]) else {
+            return Self::Unknown;
+        };
+        if head.close || head.status < 200 {
+            return Self::Unknown;
+        }
+        let body = match (head.status, head.framing) {
+            (204 | 304, _) => Self::Length(0),
+            (_, Framing::Length(length)) => Self::Length(length),
+            (_, Framing::Chunked) => Self::Chunked(Chunks::default()),
+            (_, Framing::None) => return Self::Unknown,
+        };
+        body.feed(&bytes[end..])
+    }
+
+    /// The state after more bytes of the answer.
+    fn feed(self, bytes: &[u8]) -> Self {
+        match self {
+            Self::Length(left) if bytes.len() > left => Self::Excess,
+            Self::Length(left) if bytes.len() == left => Self::Ended,
+            Self::Length(left) => Self::Length(left - bytes.len()),
+            Self::Chunked(mut chunks) => match chunks.feed(bytes) {
+                ChunkFeed::Pending => Self::Chunked(chunks),
+                ChunkFeed::Ended(read) if read == bytes.len() => Self::Ended,
+                ChunkFeed::Ended(_) => Self::Excess,
+                ChunkFeed::Broken => Self::Unknown,
+            },
+            Self::Ended | Self::Settled if !bytes.is_empty() => Self::Excess,
+            other => other,
+        }
+    }
+}
+
+/// A chunked body followed as it streams (RFC 9112 section 7.1), nothing
+/// of it kept but the line under way.
+#[derive(Default)]
+struct Chunks {
+    /// Whether the last chunk was read and its trailers are coming.
+    trailer: bool,
+    /// The octets of the chunk under way still to come, its CRLF included.
+    data: usize,
+    /// The size or trailer line under way.
+    line: Vec<u8>,
+}
+
+/// What a chunked body's next bytes did.
+enum ChunkFeed {
+    /// More to come.
+    Pending,
+    /// It ended after this many of the bytes.
+    Ended(usize),
+    /// A line that is no chunk size, or past the caps.
+    Broken,
+}
+
+impl Chunks {
+    fn feed(&mut self, bytes: &[u8]) -> ChunkFeed {
+        let mut at = 0;
+        while at < bytes.len() {
+            if self.data > 0 {
+                let take = self.data.min(bytes.len() - at);
+                self.data -= take;
+                at += take;
+                continue;
+            }
+
+            let rest = &bytes[at..];
+            let Some(lf) = rest.iter().position(|byte| *byte == b'\n') else {
+                self.line.extend_from_slice(rest);
+                return match self.line.len() > HEAD_CAP {
+                    true => ChunkFeed::Broken,
+                    false => ChunkFeed::Pending,
+                };
+            };
+            self.line.extend_from_slice(&rest[..lf]);
+            at += lf + 1;
+            let taken = std::mem::take(&mut self.line);
+            let line = taken.strip_suffix(b"\r").unwrap_or(&taken);
+
+            if self.trailer {
+                if line.is_empty() {
+                    return ChunkFeed::Ended(at);
+                }
+                continue;
+            }
+            let Some(size) = chunk_size(line) else {
+                return ChunkFeed::Broken;
+            };
+            match size {
+                0 => self.trailer = true,
+                // NOTE: its CRLF included, in range under CHUNK_CAP.
+                size => self.data = size + 2,
+            }
+        }
+        ChunkFeed::Pending
+    }
+}
+
 /// Decodes a chunked body (RFC 9112 section 7.1), extensions and
 /// trailers skipped.
 fn dechunk(bytes: &[u8]) -> Body {
@@ -792,12 +1097,7 @@ fn dechunk(bytes: &[u8]) -> Body {
         let Some(line) = line_end(&bytes[at..]) else {
             return Body::Partial;
         };
-        let size = &bytes[at..at + line];
-        let size = size.split(|byte| *byte == b';').next().unwrap_or_default();
-        let Some(size) = std::str::from_utf8(size)
-            .ok()
-            .and_then(|size| usize::from_str_radix(size.trim(), 16).ok())
-        else {
+        let Some(size) = chunk_size(&bytes[at..at + line]) else {
             return Body::Unframed;
         };
         at += line + 2;
@@ -815,12 +1115,24 @@ fn dechunk(bytes: &[u8]) -> Body {
             }
         }
 
-        if bytes.len() < at + size + 2 {
+        if bytes.len() - at < size + 2 {
             return Body::Partial;
         }
         body.extend_from_slice(&bytes[at..at + size]);
         at += size + 2;
     }
+}
+
+/// The size a chunk-size line names (RFC 9112 section 7.1): hex digits
+/// before any extension, none for anything else or a size past
+/// [`CHUNK_CAP`].
+fn chunk_size(line: &[u8]) -> Option<usize> {
+    let size = line.split(|byte| *byte == b';').next()?.trim_ascii();
+    if size.is_empty() || !size.iter().all(u8::is_ascii_hexdigit) {
+        return None;
+    }
+    let size = usize::from_str_radix(std::str::from_utf8(size).ok()?, 16).ok()?;
+    (size <= CHUNK_CAP).then_some(size)
 }
 
 /// Where the line at the start of `bytes` ends, before its CRLF.
@@ -871,6 +1183,60 @@ mod tests {
             Body::Complete(body) if body == b"hello world"
         ));
         assert!(matches!(dechunk(b"zz\r\n"), Body::Unframed));
+    }
+
+    /// A chunk size a hostile or broken server sends is broken framing,
+    /// never an overflow nor a slice past the bytes read.
+    #[test]
+    fn a_chunk_size_out_of_range_or_garbage_is_broken_framing() {
+        let sizes: [&[u8]; 8] = [
+            b"FFFFFFFFFFFFFFFF",
+            b"FFFFFFFFFFFFFFFFF",
+            b"4000001",
+            b"-1",
+            b"+5",
+            b"",
+            b"5 5",
+            b"\xff",
+        ];
+        for size in sizes {
+            let body = [size, b"\r\nhello\r\n0\r\n\r\n"].concat();
+            assert!(matches!(dechunk(&body), Body::Unframed), "{size:?}");
+            let fed = Chunks::default().feed(&body);
+            assert!(matches!(fed, ChunkFeed::Broken), "{size:?}");
+        }
+
+        assert_eq!(chunk_size(b"4000000"), Some(CHUNK_CAP));
+        assert_eq!(chunk_size(b" a ;ext"), Some(10));
+    }
+
+    /// A chunk larger than the bytes read so far waits for more.
+    #[test]
+    fn a_chunk_past_the_bytes_read_is_partial() {
+        assert!(matches!(dechunk(b"4000000\r\nhello"), Body::Partial));
+        assert!(matches!(dechunk(b"6\r\nhello\r\n"), Body::Partial));
+
+        let mut chunks = Chunks::default();
+        let fed = chunks.feed(b"4000000\r\nhello");
+        assert!(matches!(fed, ChunkFeed::Pending));
+        assert_eq!(chunks.data, CHUNK_CAP + 2 - 5);
+    }
+
+    /// An answer whose chunk size overflows passes through, throttled or
+    /// not, and its connection is never settled for reuse.
+    #[test]
+    fn an_answer_with_an_overflowing_chunk_passes_through_unsettled() {
+        for status in ["200 OK", "429 Too Many Requests"] {
+            let answer = format!(
+                "HTTP/1.1 {status}\r\nTransfer-Encoding: chunked\r\n\r\nFFFFFFFFFFFFFFFF\r\nhi"
+            );
+            let mut wire = Scripted::new(&[answer.as_bytes()], "2026-10-11T08:00:00Z");
+            throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
+            let read = throttled_read(&mut wire, GRAPH).unwrap();
+            assert_eq!(read, answer.as_bytes());
+            assert!(wire.slept.is_empty());
+            assert_eq!(wire.settled, 0);
+        }
     }
 
     /// The answer Gmail gave on 2026-10-07, its project number made up.
@@ -995,6 +1361,18 @@ mod tests {
         waited: Duration,
         slept: Vec<Duration>,
         now: Timestamp,
+        /// The Gmail account the requests are paced under, none for any
+        /// other server.
+        paced: Option<String>,
+        /// Whether a request goes out on a connection that served one.
+        reused: bool,
+        /// How many reads fail before the script answers again.
+        failing: u32,
+        /// What a failing read fails with.
+        failure: &'static str,
+        begun: u32,
+        settled: u32,
+        resets: u32,
     }
 
     impl Scripted {
@@ -1006,12 +1384,23 @@ mod tests {
                 waited: Duration::ZERO,
                 slept: Vec::new(),
                 now: now.parse().unwrap(),
+                paced: None,
+                reused: false,
+                failing: 0,
+                failure: "Transport read failed: SocketException: Connection reset",
+                begun: 0,
+                settled: 0,
+                resets: 0,
             }
         }
     }
 
     impl Wire for Scripted {
         fn wire_read(&mut self, _url: &str) -> Result<Vec<u8>, BridgeError> {
+            if self.failing > 0 {
+                self.failing -= 1;
+                return Err(self.failure.into());
+            }
             Ok(self.answers.pop_front().unwrap_or_default())
         }
 
@@ -1020,12 +1409,29 @@ mod tests {
             Ok(())
         }
 
+        fn wire_begin(&mut self, _url: &str) -> bool {
+            self.begun += 1;
+            self.reused
+        }
+
+        fn wire_settle(&mut self, _url: &str) {
+            self.settled += 1;
+        }
+
+        fn wire_reset(&mut self, _url: &str) {
+            self.resets += 1;
+        }
+
         fn exchange(&mut self) -> &mut Exchange {
             &mut self.exchange
         }
 
         fn waited(&mut self) -> &mut Duration {
             &mut self.waited
+        }
+
+        fn paced(&self) -> Option<String> {
+            self.paced.clone()
         }
 
         fn sleep(&mut self, delay: Duration) {
@@ -1072,6 +1478,20 @@ mod tests {
             slept <= Duration::from_secs(40) + MINUTE_JITTER,
             "{slept:?}"
         );
+    }
+
+    #[test]
+    fn a_gmail_minute_quota_refusal_backs_off_seconds_more_each_time() {
+        let refused = answer("403 Forbidden", GMAIL_MINUTE_QUOTA);
+        let served = answer("200 OK", b"{}");
+        let mut wire = Scripted::new(&[&refused, &refused, &served], "2026-10-07T08:49:20Z");
+        wire.paced = Some("token".into());
+
+        throttled_write(&mut wire, URL, REQUEST).unwrap();
+        assert_eq!(throttled_read(&mut wire, URL).unwrap(), served);
+
+        // Two, then three seconds: never the forty to the next minute.
+        assert_eq!(wire.slept, [Duration::from_secs(2), Duration::from_secs(3)]);
     }
 
     #[test]
@@ -1209,16 +1629,9 @@ mod tests {
     }
 
     #[test]
-    fn a_quota_refusal_holds_the_budget_a_minute() {
+    fn a_spend_past_the_whole_budget_waits_for_an_empty_minute() {
         let start = Instant::now();
-        let mut budget = MinuteBudget::new();
-        assert_eq!(budget.reserve(start, 5, 100), Duration::ZERO);
-
-        let refused = start + Duration::from_secs(10);
-        budget.exhaust(refused, 100);
-        assert_eq!(budget.reserve(refused, 5, 100), Duration::from_secs(60));
-
-        // More than the whole budget waits for an empty minute, not forever.
+        // NOTE: not forever.
         let mut empty = MinuteBudget::new();
         assert_eq!(empty.reserve(start, 500, 100), Duration::ZERO);
         assert_eq!(empty.reserve(start, 1, 100), Duration::from_secs(60));
@@ -1229,20 +1642,20 @@ mod tests {
         let start = Instant::now();
         let mut pace = GmailPace::new();
 
-        // A batch of 25 metadata reads (125 units) goes at once, the next
-        // one waits for its units to be paid at the rate, and two batches
-        // never go out in the same second's worth of units.
-        assert_eq!(pace.book(start, 125, false), Duration::ZERO);
-        let second = pace.book(start, 125, false);
+        // A batch of 10 reads (200 units) goes at once, the next one waits
+        // for its units to be paid at the rate, and two batches never go
+        // out in the same second's worth of units.
+        assert_eq!(pace.book(start, 200, false), Duration::ZERO);
+        let second = pace.book(start, 200, false);
         let per_unit = Duration::from_secs(1) / GMAIL_UNITS_PER_SECOND;
-        assert_eq!(second, per_unit * 125);
-        let third = pace.book(start, 125, false);
-        assert_eq!(third, second + per_unit * 125);
+        assert_eq!(second, per_unit * 200);
+        let third = pace.book(start, 200, false);
+        assert_eq!(third, second + per_unit * 200);
 
         // After a pause, a few small calls go out at once, then the rate.
         let later = start + Duration::from_secs(10);
         let mut free = 0;
-        for _ in 0..20 {
+        for _ in 0..60 {
             free += u32::from(pace.book(later, 5, false).is_zero());
         }
         assert_eq!(free, GMAIL_BURST_UNITS / 5 + 1);
@@ -1264,6 +1677,202 @@ mod tests {
         let before = pace.next.unwrap();
         assert_eq!(pace.book(start, 5, true), Duration::ZERO);
         assert!(pace.next.unwrap() > before);
+    }
+
+    const GRAPH: &str = "https://graph.microsoft.com/v1.0";
+    const GRAPH_GET: &[u8] =
+        b"GET /v1.0/me/messages/m1/$value HTTP/1.1\r\nHost: graph.microsoft.com\r\n\r\n";
+    const GRAPH_POST: &[u8] =
+        b"POST /v1.0/$batch HTTP/1.1\r\nHost: graph.microsoft.com\r\nContent-Length: 2\r\n\r\n{}";
+    const GRAPH_PUT: &[u8] =
+        b"PUT /v1.0/me/events/e1 HTTP/1.1\r\nHost: graph.microsoft.com\r\nContent-Length: 2\r\n\r\n{}";
+
+    /// Graph closed the connection while it idled: the read ends before a
+    /// byte of the answer, and the request goes out again on a new one.
+    #[test]
+    fn a_reused_connection_ended_before_its_answer_sends_the_request_again() {
+        let served = answer("200 OK", b"From: a\r\n\r\nbody");
+        let mut wire = Scripted::new(&[b"", &served], "2026-10-11T08:00:00Z");
+        wire.reused = true;
+
+        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(throttled_read(&mut wire, GRAPH).unwrap(), served);
+
+        assert_eq!(wire.writes, [GRAPH_GET, GRAPH_GET]);
+        assert_eq!(wire.resets, 1);
+        assert_eq!(wire.settled, 1, "the answer read whole is settled");
+    }
+
+    #[test]
+    fn a_reused_connection_reset_before_its_answer_sends_the_request_again() {
+        let served = answer("200 OK", b"{}");
+        let mut wire = Scripted::new(&[&served], "2026-10-11T08:00:00Z");
+        wire.reused = true;
+        wire.failing = 1;
+
+        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(throttled_read(&mut wire, GRAPH).unwrap(), served);
+        assert_eq!(wire.writes, [GRAPH_GET, GRAPH_GET]);
+    }
+
+    #[test]
+    fn a_request_is_sent_again_once_only_idempotent_and_reused() {
+        // NOTE: a POST may have been served before the connection went.
+        let mut post = Scripted::new(&[b""], "2026-10-11T08:00:00Z");
+        post.reused = true;
+        throttled_write(&mut post, GRAPH, GRAPH_POST).unwrap();
+        assert!(throttled_read(&mut post, GRAPH).unwrap().is_empty());
+        assert_eq!(post.writes.len(), 1);
+
+        // A fresh connection that ends is the server's answer, not an idle
+        // close.
+        let mut fresh = Scripted::new(&[b""], "2026-10-11T08:00:00Z");
+        throttled_write(&mut fresh, GRAPH, GRAPH_GET).unwrap();
+        assert!(throttled_read(&mut fresh, GRAPH).unwrap().is_empty());
+        assert_eq!(fresh.writes.len(), 1);
+
+        let mut failing = Scripted::new(&[], "2026-10-11T08:00:00Z");
+        failing.reused = true;
+        failing.failing = 2;
+        throttled_write(&mut failing, GRAPH, GRAPH_GET).unwrap();
+        assert!(throttled_read(&mut failing, GRAPH).is_err());
+        assert_eq!(failing.writes.len(), 2, "sent again once");
+    }
+
+    /// A server slow to answer a PUT may still apply it: the timeout is
+    /// the answer, nothing is sent again.
+    #[test]
+    fn a_read_timeout_is_not_a_lost_connection() {
+        let mut wire = Scripted::new(&[], "2026-10-11T08:00:00Z");
+        wire.reused = true;
+        wire.failing = 1;
+        wire.failure = "Transport read failed: java.net.SocketTimeoutException: Read timed out";
+
+        throttled_write(&mut wire, GRAPH, GRAPH_PUT).unwrap();
+        assert!(throttled_read(&mut wire, GRAPH).is_err());
+        assert_eq!(wire.writes, [GRAPH_PUT]);
+    }
+
+    /// A send whose answer never came may have been carried out; one
+    /// answered, or refused while being written, was not.
+    #[test]
+    fn a_request_without_an_answer_is_unanswered() {
+        let mut lost = Scripted::new(&[b""], "2026-10-11T08:00:00Z");
+        throttled_write(&mut lost, GRAPH, GRAPH_POST).unwrap();
+        assert!(!lost.exchange.unanswered(), "nothing read yet");
+        assert!(throttled_read(&mut lost, GRAPH).unwrap().is_empty());
+        assert!(lost.exchange.unanswered());
+
+        let served = answer("500 Internal Server Error", b"{}");
+        let mut answered = Scripted::new(&[&served], "2026-10-11T08:00:00Z");
+        throttled_write(&mut answered, GRAPH, GRAPH_POST).unwrap();
+        throttled_read(&mut answered, GRAPH).unwrap();
+        assert!(!answered.exchange.unanswered());
+
+        throttled_write(&mut answered, GRAPH, GRAPH_POST).unwrap();
+        assert!(!answered.exchange.unanswered(), "a new request resets it");
+    }
+
+    /// A gateway's 503 may follow the work done behind it: a POST is not
+    /// sent again, a GET is.
+    #[test]
+    fn only_an_idempotent_request_is_sent_again_after_a_503() {
+        let unavailable =
+            b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 2\r\n\r\n{}";
+        let served = answer("200 OK", b"{}");
+
+        let mut post = Scripted::new(&[unavailable, &served], "2026-10-11T08:00:00Z");
+        throttled_write(&mut post, GRAPH, GRAPH_POST).unwrap();
+        assert_eq!(throttled_read(&mut post, GRAPH).unwrap(), unavailable);
+        assert_eq!(post.writes, [GRAPH_POST]);
+        assert!(post.slept.is_empty());
+
+        let mut get = Scripted::new(&[unavailable, &served], "2026-10-11T08:00:00Z");
+        throttled_write(&mut get, GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(throttled_read(&mut get, GRAPH).unwrap(), served);
+        assert_eq!(get.writes, [GRAPH_GET, GRAPH_GET]);
+    }
+
+    /// A 429 refuses before any work: a POST waits and goes again.
+    #[test]
+    fn a_post_refused_by_a_429_is_sent_again() {
+        let refused = answer("429 Too Many Requests", b"{}");
+        let served = answer("200 OK", b"{}");
+        let mut post = Scripted::new(&[&refused, &served], "2026-10-11T08:00:00Z");
+
+        throttled_write(&mut post, GRAPH, GRAPH_POST).unwrap();
+        assert_eq!(throttled_read(&mut post, GRAPH).unwrap(), served);
+        assert_eq!(post.writes, [GRAPH_POST, GRAPH_POST]);
+    }
+
+    #[test]
+    fn an_answer_is_settled_once_read_to_its_end() {
+        let served = answer("200 OK", b"0123456789");
+        let (head, tail) = served.split_at(served.len() - 4);
+        let mut wire = Scripted::new(&[head, tail], "2026-10-11T08:00:00Z");
+
+        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(wire.begun, 1, "a new request begins on its origin");
+        throttled_read(&mut wire, GRAPH).unwrap();
+        assert_eq!(wire.settled, 0, "four octets still to come");
+        throttled_read(&mut wire, GRAPH).unwrap();
+        assert_eq!(wire.settled, 1);
+
+        // The next request begins again.
+        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(wire.begun, 2);
+    }
+
+    #[test]
+    fn a_chunked_answer_is_settled_at_its_last_chunk() {
+        let mut wire = Scripted::new(
+            &[
+                b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel",
+                b"lo\r\n6;x=y\r\n world\r",
+                b"\n0\r\nX-T: 1\r\n",
+                b"\r\n",
+            ],
+            "2026-10-11T08:00:00Z",
+        );
+        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
+        for _ in 0..3 {
+            throttled_read(&mut wire, GRAPH).unwrap();
+            assert_eq!(wire.settled, 0);
+        }
+        throttled_read(&mut wire, GRAPH).unwrap();
+        assert_eq!(wire.settled, 1);
+    }
+
+    #[test]
+    fn an_answer_whose_end_cannot_be_told_is_never_settled() {
+        let closing = b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}";
+        let unframed = b"HTTP/1.1 200 OK\r\n\r\n{}";
+        for answer in [&closing[..], &unframed[..]] {
+            let mut wire = Scripted::new(&[answer], "2026-10-11T08:00:00Z");
+            throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
+            throttled_read(&mut wire, GRAPH).unwrap();
+            assert_eq!(wire.settled, 0);
+        }
+
+        // Bytes past the end put the connection out of step: it goes.
+        let mut excess = Scripted::new(
+            &[b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}HTTP/1.1"],
+            "2026-10-11T08:00:00Z",
+        );
+        throttled_write(&mut excess, GRAPH, GRAPH_GET).unwrap();
+        throttled_read(&mut excess, GRAPH).unwrap();
+        assert_eq!(excess.settled, 0);
+        assert_eq!(excess.resets, 1);
+    }
+
+    #[test]
+    fn a_throttled_answer_given_up_on_is_settled() {
+        let refused = answer("503 Service Unavailable", b"");
+        let answers: Vec<&[u8]> = vec![&refused; MAX_RETRIES as usize + 1];
+        let mut wire = Scripted::new(&answers, "2026-10-11T08:00:00Z");
+        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(throttled_read(&mut wire, GRAPH).unwrap(), refused);
+        assert_eq!(wire.settled, 1);
     }
 
     #[test]

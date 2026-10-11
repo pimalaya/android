@@ -363,6 +363,53 @@ final class PimdirItems {
                 new Object[] {hash, source.length()});
     }
 
+    /**
+     * Files a file the bridge wrote and indexes it, moved into the blob
+     * store rather than copied ({@link PimdirBlobs#adopt}), leaving the
+     * refcount to the caller; the file is gone after it.
+     */
+    void adoptObject(SQLiteDatabase db, String hash, java.io.File source) {
+        long size = source.length();
+        try {
+            blobs.adopt(hash, source);
+        } catch (IOException error) {
+            throw new IllegalStateException("Could not store the body " + hash, error);
+        }
+        db.execSQL(
+                "INSERT INTO objects(hash, size, refcount) VALUES(?, ?, 0)"
+                        + " ON CONFLICT(hash) DO NOTHING",
+                new Object[] {hash, size});
+    }
+
+    /**
+     * {@link #putObject(String, String, byte[])} of a body the bridge wrote
+     * to a file and hashed ({@code hash}), moved into the blob store: the
+     * body never read on this side. The file is gone after it.
+     */
+    void putObject(String collection, String linkId, String hash, java.io.File source) {
+        SQLiteDatabase db = writable();
+        db.beginTransaction();
+        try {
+            if (!knows(db, collection, linkId)) {
+                Log.w("pimalaya", "no item " + linkId + " in " + collection);
+                source.delete();
+                return;
+            }
+
+            String previous = objectOf(db, collection, linkId);
+            adoptObject(db, hash, source);
+            db.execSQL(
+                    "UPDATE items SET object_hash = ?, level = ?"
+                            + " WHERE collection = ? AND link_id = ?",
+                    new Object[] {hash, FULL, collection, linkId});
+            adjustRefcount(db, previous, hash);
+            collectGarbage(db);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
     /** The file one body is stored in, null when the store holds no such blob. */
     java.io.File blobFile(String hash) {
         if (hash == null) {

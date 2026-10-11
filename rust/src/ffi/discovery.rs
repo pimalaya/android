@@ -8,14 +8,14 @@ use io_pim_discovery::compose::{
 };
 use jni::{
     Env, EnvUnowned,
-    errors::{Error, LogErrorAndDefault},
+    errors::Error,
     objects::{JClass, JObject, JString},
 };
 use serde_json::{from_str, json, to_string};
 
 use crate::{
     client::Client,
-    ffi::{error_json, read_string},
+    ffi::{ErrorReply, error_json, read_string},
 };
 
 /// `Native.discover`: resolves the email's domain to a CardDAV context
@@ -42,7 +42,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_discover<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.searchProvider`: matches the email's MX records against
@@ -66,7 +66,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchProvider<'local>(
         );
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.searchPacc`: discovers the email domain's PACC document.
@@ -83,7 +83,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchPacc<'local>(
         let json = search_mechanism_json(env, &transport, &email, &resolver, SearchMechanism::Pacc);
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.searchCarddav`: resolves the email domain's CardDAV context
@@ -101,7 +101,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchCarddav<'local>(
             search_mechanism_json(env, &transport, &email, &resolver, SearchMechanism::Carddav);
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.searchCaldav`: resolves the email domain's CalDAV context
@@ -119,7 +119,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchCaldav<'local>(
             search_mechanism_json(env, &transport, &email, &resolver, SearchMechanism::Caldav);
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.searchAutoconfig`: fetches the email domain's Mozilla
@@ -143,7 +143,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchAutoconfig<'local>(
         );
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.searchJmap`: resolves the email domain's JMAP session URL
@@ -160,7 +160,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchJmap<'local>(
         let json = search_mechanism_json(env, &transport, &email, &resolver, SearchMechanism::Jmap);
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.searchMerge`: pure reduction of per-mechanism config lists
@@ -181,7 +181,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchMerge<'local>(
         };
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.searchProbe`: probes one config's endpoints for their
@@ -208,7 +208,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_searchProbe<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// One discovery mechanism the search verbs dispatch on.

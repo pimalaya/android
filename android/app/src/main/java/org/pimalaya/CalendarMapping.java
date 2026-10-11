@@ -50,6 +50,23 @@ final class CalendarMapping {
 
     private static final long DAY = 86_400_000L;
 
+    /**
+     * The most reminders one event carries into the provider, as Google
+     * Calendar allows: a calendar the server lets anyone write to cannot
+     * set off a burst of alarms.
+     */
+    static final int MAX_REMINDERS = 5;
+
+    /**
+     * The most characters a title or a location carries into the provider,
+     * and a description: the store keeps the whole text, but a phone pass
+     * writes its rows in one binder transaction, which a megabyte
+     * description would fail on every pass.
+     */
+    static final int SHORT_TEXT = 1024;
+
+    static final int LONG_TEXT = 16 * 1024;
+
     /** Where one object's rows land: its handle, its calendar's address, the device's zone. */
     static final class Phone {
         final String handle;
@@ -141,6 +158,15 @@ final class CalendarMapping {
         return rows;
     }
 
+    /** A text cut to at most {@code longest} characters, never inside a pair. */
+    static String clip(String text, int longest) {
+        if (text.length() <= longest) {
+            return text;
+        }
+        int end = Character.isHighSurrogate(text.charAt(longest - 1)) ? longest - 1 : longest;
+        return text.substring(0, end);
+    }
+
     /** One component's row, its organizer and series read off {@code master}. */
     private static Row row(
             JSONObject component, JSONObject master, String uid, Phone phone, boolean listed)
@@ -148,9 +174,9 @@ final class CalendarMapping {
         Row row = new Row();
         Map<String, Object> values = row.values;
         values.put(Events.UID_2445, uid);
-        values.put(Events.TITLE, component.optString("summary"));
-        values.put(Events.DESCRIPTION, component.optString("description"));
-        values.put(Events.EVENT_LOCATION, component.optString("location"));
+        values.put(Events.TITLE, clip(component.optString("summary"), SHORT_TEXT));
+        values.put(Events.DESCRIPTION, clip(component.optString("description"), LONG_TEXT));
+        values.put(Events.EVENT_LOCATION, clip(component.optString("location"), SHORT_TEXT));
 
         EventTime start = time(component.optJSONObject("start"));
         EventTime end = time(component.optJSONObject("end"));
@@ -239,7 +265,8 @@ final class CalendarMapping {
         values.put(Events.HAS_ATTENDEE_DATA, 1);
 
         JSONArray alarms = component.optJSONArray("alarms");
-        for (int index = 0; alarms != null && index < alarms.length(); index++) {
+        int reminders = alarms == null ? 0 : Math.min(alarms.length(), MAX_REMINDERS);
+        for (int index = 0; index < reminders; index++) {
             Map<String, Object> reminder = new LinkedHashMap<>();
             reminder.put(Reminders.MINUTES, minutes(alarms.getJSONObject(index), from));
             reminder.put(Reminders.METHOD, Reminders.METHOD_ALERT);

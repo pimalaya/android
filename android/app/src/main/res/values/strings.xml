@@ -107,6 +107,9 @@
     <string name="signin_signed">Signed in</string>
     <string name="signin_manual">Entered manually</string>
     <string name="signin_sends">%1$s, sends through %2$s</string>
+    <string name="signin_sent_to">Sent to %1$s</string>
+    <string name="signin_other_domain">%1$s, not on %2$s</string>
+    <string name="server_insecure">Only encrypted servers are accepted: imaps:// for mail, https:// for contacts and calendars, smtps:// or smtp:// for sending.</string>
     <string name="hint_token">Paste your API token</string>
     <string name="token_refused">Token not accepted</string>
     <string name="oauth_title">Your OAuth client</string>
@@ -136,6 +139,7 @@
     <string name="contact_diverged_pending">Diverged fields await review</string>
     <string name="sync_busy">Wait for the sync to finish</string>
     <string name="sync_line_starting">Starting the sync</string>
+    <string name="sync_line_wifi">Waiting for Wi-Fi</string>
     <string name="sync_line_mail">Syncing mail</string>
     <string name="sync_line_contacts">Syncing contacts</string>
     <string name="sync_line_calendars">Syncing calendars</string>
@@ -195,7 +199,7 @@
     <string name="filter_download_stop">Stop</string>
     <string name="filter_downloaded">Kept whole offline</string>
     <string name="filter_download_title">Download this mailbox?</string>
-    <string name="filter_download_message">Every message of %1$s is listed and downloaded, past the account\'s sync period, larger ones on Wi-Fi only.</string>
+    <string name="filter_download_message">Every message of %1$s is listed and downloaded on Wi-Fi, past the account\'s sync period.</string>
     <string name="contacts_transfer">Import or export</string>
     <string name="filter_reset">Reset</string>
 
@@ -244,27 +248,15 @@
     </plurals>
     <string name="mail_search">Search mail</string>
     <string name="date_unknown">Undated</string>
-    <!-- The list's footer moving the download windows back (MailWindow). -->
-    <string name="mail_window_load">Load since %1$s</string>
-    <string name="mail_window_choose">Choose a date</string>
-    <string name="mail_window_confirm">Load</string>
+    <!-- The list's footer taking the next step of each shown account (MailStep). -->
+    <string name="mail_more_load">Load more</string>
+    <string name="mail_more_loading">Loading more</string>
+    <plurals name="mail_more_info">
+        <item quantity="one">About %1$d more per account</item>
+        <item quantity="other">About %1$d more per account</item>
+    </plurals>
+    <string name="mail_more_wifi">Waits for Wi-Fi</string>
     <string name="mail_window_all">All my mail</string>
-    <plurals name="mail_window_size">
-        <item quantity="one">%1$s message · about %2$s</item>
-        <item quantity="other">%1$s messages · about %2$s</item>
-    </plurals>
-    <plurals name="mail_window_unknown">
-        <item quantity="one">%1$s message · size unknown</item>
-        <item quantity="other">%1$s messages · size unknown</item>
-    </plurals>
-    <plurals name="mail_window_unknown_some">
-        <item quantity="one">%1$s message · %2$s, size unknown for %3$s</item>
-        <item quantity="other">%1$s messages · %2$s, size unknown for %3$s</item>
-    </plurals>
-    <string name="mail_window_syncing">Older headers still syncing</string>
-    <string name="mail_window_offline">Downloads once online</string>
-    <string name="mail_window_wifi">Larger ones on Wi-Fi</string>
-    <string name="mail_window_widened">Sync period widened to reach that date</string>
     <string name="mail_window_release_title">Free older messages?</string>
     <string name="mail_window_release_message">Messages before %1$s leave this phone. Their headers stay, so search still finds them, and opening one downloads it again.</string>
     <string name="mail_window_release">Free</string>
@@ -276,7 +268,7 @@
         <item quantity="other">%1$s messages (%2$s) leave the phone, their headers kept for search</item>
     </plurals>
     <string name="mail_row_not_downloaded">Not downloaded</string>
-    <string name="mail_row_wifi">Downloads on Wi-Fi</string>
+    <string name="mail_row_failed">Download failed</string>
     <string name="mail_chip_unread">Unread</string>
     <string name="mail_chip_inbox">Inbox</string>
     <string name="mail_chip_sent">Sent</string>
@@ -459,6 +451,9 @@
     <string name="message_pending">Waiting to be sent</string>
     <string name="mail_outbox">Outbox</string>
     <string name="message_send_failed">Refused by the server</string>
+    <string name="message_send_uncertain">May have been sent</string>
+    <string name="message_send_again">Send again</string>
+    <string name="message_sent_again">Queued to send again</string>
     <string name="message_delete_no_trash">This account names no trash mailbox, and JMAP has no marker to delete a message in place with</string>
 
     <string name="size_bytes">%d B</string>
@@ -764,4 +759,8 @@
         <item quantity="one">%d new message</item>
         <item quantity="other">%d new messages</item>
     </plurals>
+    <string name="accounts_unreadable">Your accounts could not be read for now. Open the app again in a moment.</string>
+    <string name="accounts_lost_title">Add your accounts again</string>
+    <string name="accounts_lost">Your accounts were sealed with a key that stays on the phone they were set up on, so they cannot be read here. Add them again to sync.</string>
+    <string name="message_unreadable">This message could not be read: reading it stopped the app before.</string>
 </resources>

@@ -11,7 +11,8 @@
 use core::error::Error as StdError;
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
+    path::Path,
     sync::{Mutex, MutexGuard},
     time::{Duration, Instant},
 };
@@ -68,10 +69,16 @@ use crate::{
     client::{
         Client,
         convert::{REFUSED, coroutine_error, rejected, required},
+        jmap_sync::{
+            JmapDelta, JmapRun, JmapStepReads, JmapStepped, Source, Start, StepItem, StepQuery,
+            StepRequest, received, sources, step,
+        },
         listing::{
             Floor, JMAP_PAGE, Listing, MailPage, MailRequest, Named, RECEIVED_MARGIN_DAYS, Scope,
             flags, utc,
         },
+        throttle::{Wire, throttled_read, throttled_write},
+        trust::{CrossOrigin, Redirects},
     },
     jmap,
     mail::{self, Composed},
@@ -503,13 +510,15 @@ impl<'a, 'local> Client<'a, 'local> {
     /// state read before the first page is the checkpoint. A delta is
     /// `Email/changes` from it: what was created or updated is read again
     /// and is a member while it is still in this mailbox, gone from it
-    /// otherwise, and what was destroyed is gone. A state the server can
-    /// no longer compute changes from is refused for the engine to open a
-    /// round.
+    /// otherwise, and what was destroyed is gone; the replay is read once
+    /// per pool run (`run`) for every mailbox it projects onto. A state the
+    /// server can no longer compute changes from is refused for the engine
+    /// to open a round.
     pub fn list_jmap_page(
         &mut self,
         session_url: &Url,
         credentials: &Credentials,
+        run: &JmapRun,
         mailbox_id: &str,
         request: &MailRequest,
     ) -> Result<MailPage, BridgeError> {
@@ -520,8 +529,13 @@ impl<'a, 'local> Client<'a, 'local> {
 
         let (position, band) = match &request.listing {
             Listing::Delta { checkpoint } => {
-                return self
-                    .jmap_mail_delta(&session, &auth, &api_url, mailbox_id, checkpoint, scope);
+                let delta = run.delta(checkpoint, || {
+                    self.jmap_mail_changes(&session, &auth, &api_url, checkpoint)
+                })?;
+                return Ok(match delta {
+                    Some(delta) => project(&delta, mailbox_id, scope),
+                    None => MailPage::rejected(),
+                });
             }
             Listing::Round { cursor, band } => match cursor.as_deref() {
                 None => (0, *band),
@@ -556,6 +570,7 @@ impl<'a, 'local> Client<'a, 'local> {
             position: Some(position),
             limit: Some(limit),
             properties: Some(SUMMARY_PROPERTIES.to_vec()),
+            ..Default::default()
         };
         let coroutine =
             JmapEmailQuery::new(&session, &auth, opts).map_err(|err| err.to_string())?;
@@ -611,6 +626,7 @@ impl<'a, 'local> Client<'a, 'local> {
                 position: Some(position),
                 limit: Some(limit),
                 properties: Some(vec![JmapEmailProperty::Id, JmapEmailProperty::SentAt]),
+                ..Default::default()
             };
             let coroutine =
                 JmapEmailQuery::new(&session, &auth, opts).map_err(|err| err.to_string())?;
@@ -646,18 +662,19 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(self.run_jmap(api_url, coroutine)?.new_state)
     }
 
-    /// What changed in one mailbox since `state`, as one delta page.
-    fn jmap_mail_delta(
+    /// What changed in the account since `state`: every `Email/changes`
+    /// page, then the created and updated emails read with the summary
+    /// properties, a chunk of `maxObjectsInGet` at a time. [`None`] when
+    /// the server can no longer compute changes from it.
+    fn jmap_mail_changes(
         &mut self,
         session: &JmapSession,
         auth: &SecretString,
         api_url: &Url,
-        mailbox_id: &str,
         state: &str,
-        scope: &Scope,
-    ) -> Result<MailPage, BridgeError> {
+    ) -> Result<Option<JmapDelta>, BridgeError> {
         let mut touched = Vec::new();
-        let mut vanished = Vec::new();
+        let mut gone = Vec::new();
         let mut since = state.to_string();
 
         loop {
@@ -669,11 +686,11 @@ impl<'a, 'local> Client<'a, 'local> {
             )
             .map_err(|err| err.to_string())?;
             let Some(out) = self.run_email_changes(api_url, coroutine)? else {
-                return Ok(MailPage::rejected());
+                return Ok(None);
             };
             touched.extend(out.created);
             touched.extend(out.updated);
-            vanished.extend(out.destroyed);
+            gone.extend(out.destroyed);
             since = out.new_state;
             if !out.has_more_changes {
                 break;
@@ -682,7 +699,7 @@ impl<'a, 'local> Client<'a, 'local> {
         touched.sort();
         touched.dedup();
 
-        let mut items = Vec::new();
+        let mut emails = Vec::new();
         let chunk = page_size(session).max(1) as usize;
         for ids in touched.chunks(chunk) {
             let opts = JmapEmailGetOptions {
@@ -692,23 +709,15 @@ impl<'a, 'local> Client<'a, 'local> {
             let coroutine = JmapEmailGet::new(session, auth, ids.to_vec(), opts)
                 .map_err(|err| err.to_string())?;
             let out = self.run_jmap(api_url, coroutine)?;
-            vanished.extend(out.not_found);
-
-            for email in out.emails {
-                let filed = email
-                    .mailbox_ids
-                    .as_ref()
-                    .is_some_and(|mailboxes| mailboxes.get(mailbox_id).copied().unwrap_or(false));
-                match filed {
-                    true => items.extend(named(email, scope)),
-                    // NOTE: moved out of this mailbox, which is a removal
-                    // here whatever its date.
-                    false => vanished.extend(email.id),
-                }
-            }
+            gone.extend(out.not_found);
+            emails.extend(out.emails);
         }
 
-        Ok(MailPage::delta(items, vanished, since))
+        Ok(Some(JmapDelta {
+            next: since,
+            emails,
+            gone,
+        }))
     }
 
     /// Drives one `Email/changes`, surfacing a state the server can no
@@ -787,44 +796,71 @@ impl<'a, 'local> Client<'a, 'local> {
             .collect())
     }
 
-    /// Reads one message whole, as the RFC 5322 bytes behind it.
-    ///
-    /// Two round trips where the body values would have been one: an
-    /// `Email/get` for the `blobId`, then the RFC 8620 section 6.2
-    /// download of that blob. It buys the one thing the body values
-    /// cannot, which is a message the store can hold: what comes back
-    /// is the message rather than a server's rendering of it, so it is
-    /// filed once and read from the store every time after, offline
-    /// included, through the same parser the IMAP side uses.
-    pub fn fetch_jmap_source(
+    /// One step of the account ([`step`]): the query sorted by `sentAt`
+    /// where the account's mail capability lists it among its
+    /// `emailQuerySortOptions`, by `receivedAt` otherwise.
+    pub fn jmap_step(
         &mut self,
         session_url: &Url,
         credentials: &Credentials,
-        id: &str,
-    ) -> Result<Vec<u8>, BridgeError> {
-        let auth = jmap_auth(credentials);
-        let session = self.jmap_session(session_url, &auth)?;
-        let api_url = session.api_url.clone();
+        mut request: StepRequest<'_>,
+        dir: &Path,
+    ) -> Result<JmapStepped, BridgeError> {
+        let mut calls = self.jmap_calls(session_url, credentials)?;
+        let account = calls.session.primary_account_id_for(JMAP_MAIL_CAPABILITY);
+        request.sent_at = calls
+            .session
+            .mail_capability(&account)
+            .email_query_sort_options
+            .iter()
+            .any(|sort| sort == "sentAt");
+        let stepped = step(&mut calls, &request, dir)?;
 
-        let opts = JmapEmailGetOptions {
-            properties: Some(vec![JmapEmailProperty::Id, JmapEmailProperty::BlobId]),
-            ..Default::default()
-        };
+        let mut items = Vec::with_capacity(stepped.brought.len());
+        for brought in stepped.brought {
+            let mailboxes = brought
+                .email
+                .mailbox_ids
+                .iter()
+                .flatten()
+                .filter(|(_, filed)| **filed)
+                .map(|(id, _)| id.clone())
+                .collect();
+            let received = received(&brought.email);
+            let Some(named) = named(brought.email, &Scope::default()) else {
+                continue;
+            };
+            items.push(StepItem {
+                named,
+                mailboxes,
+                path: brought.path,
+                size: brought.size,
+                received,
+            });
+        }
+        Ok(JmapStepped {
+            state: stepped.state,
+            items,
+            exhausted: stepped.exhausted,
+            anchors: stepped.anchors,
+            by_reception: stepped.by_reception,
+        })
+    }
 
-        let coroutine = JmapEmailGet::new(&session, &auth, vec![id.to_string()], opts)
-            .map_err(|err| err.to_string())?;
-        let out = self.run_jmap(&api_url, coroutine)?;
-
-        let blob = out
-            .emails
-            .into_iter()
-            .next()
-            .and_then(|email| email.blob_id)
-            .ok_or_else(|| BridgeError::from(format!("No message `{id}`")))?;
-
-        let url = download_url(&session, &blob)?;
-        let out = self.run_jmap_redirect(&url, |target| JmapBlobDownload::new(&auth, target))?;
-        Ok(out.data)
+    /// Some messages read whole into files of `dir` ([`sources`]): their
+    /// blobs named by one `Email/get` a chunk of `maxObjectsInGet` at a
+    /// time, then downloaded one after another, never one `Email/get` per
+    /// message.
+    pub fn jmap_sources(
+        &mut self,
+        session_url: &Url,
+        credentials: &Credentials,
+        ids: &[String],
+        dir: &Path,
+    ) -> Result<Vec<Source>, BridgeError> {
+        let mut calls = self.jmap_calls(session_url, credentials)?;
+        let chunk = max_objects_in_get(&calls.session) as usize;
+        sources(&mut calls, ids, chunk, dir)
     }
 
     /// Adds or removes one keyword on one message.
@@ -1164,50 +1200,27 @@ impl<'a, 'local> Client<'a, 'local> {
         session_url: &Url,
         http_auth: &SecretString,
     ) -> Result<JmapSession, BridgeError> {
-        let out =
-            self.run_jmap_redirect(session_url, |target| JmapSessionGet::new(http_auth, target))?;
+        let out = self.run_jmap_redirect(session_url, CrossOrigin::Refuse, |target| {
+            JmapSessionGet::new(http_auth, target)
+        })?;
         let key = session_key(session_url, http_auth);
         sessions().put(key, Instant::now(), out.session.clone());
         Ok(out.session)
     }
 
     /// Runs a coroutine that may answer 3xx, rebuilding it against the
-    /// new target each time.
+    /// new target each time, within the bounds of [`Redirects`].
     fn run_jmap_redirect<C, T, E>(
         &mut self,
         start: &Url,
+        cross_origin: CrossOrigin,
         make: impl Fn(&Url) -> C,
     ) -> Result<T, BridgeError>
     where
         C: JmapCoroutine<Yield = JmapRedirectYield, Return = Result<T, E>>,
         E: StdError + 'static,
     {
-        let mut target = start.clone();
-
-        loop {
-            let mut coroutine = make(&target);
-            let mut arg: Option<Vec<u8>> = None;
-
-            loop {
-                match coroutine.resume(arg.as_deref()) {
-                    JmapCoroutineState::Complete(Ok(out)) => return Ok(out),
-                    JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
-                    JmapCoroutineState::Yielded(JmapRedirectYield::WantsWrite(bytes)) => {
-                        self.http_write(target.as_str(), &bytes)?;
-                        arg = None;
-                    }
-                    JmapCoroutineState::Yielded(JmapRedirectYield::WantsRead) => {
-                        arg = Some(self.http_read(target.as_str())?);
-                    }
-                    JmapCoroutineState::Yielded(JmapRedirectYield::WantsRedirect {
-                        url, ..
-                    }) => {
-                        target = url;
-                        break;
-                    }
-                }
-            }
-        }
+        run_jmap_redirect(self, start, cross_origin, make)
     }
 
     /// Runs a JMAP method coroutine to completion, routing every yield
@@ -1500,6 +1513,104 @@ impl JmapCardReads for JmapCalls<'_, '_, '_> {
     }
 }
 
+/// The `Email` properties a step reads: the summary's, its reception, and
+/// the blob its source is downloaded from.
+const STEP_PROPERTIES: [JmapEmailProperty; 14] = [
+    JmapEmailProperty::Id,
+    JmapEmailProperty::MailboxIds,
+    JmapEmailProperty::Keywords,
+    JmapEmailProperty::Size,
+    JmapEmailProperty::MessageId,
+    JmapEmailProperty::InReplyTo,
+    JmapEmailProperty::From,
+    JmapEmailProperty::To,
+    JmapEmailProperty::Cc,
+    JmapEmailProperty::Subject,
+    JmapEmailProperty::SentAt,
+    JmapEmailProperty::HasAttachment,
+    JmapEmailProperty::ReceivedAt,
+    JmapEmailProperty::BlobId,
+];
+
+impl JmapStepReads for JmapCalls<'_, '_, '_> {
+    fn state(&mut self) -> Result<String, BridgeError> {
+        let opts = JmapEmailGetOptions {
+            properties: Some(vec![JmapEmailProperty::Id]),
+            ..Default::default()
+        };
+        let coroutine = JmapEmailGet::new(&self.session, &self.auth, Vec::new(), opts)
+            .map_err(|err| err.to_string())?;
+        Ok(self
+            .client
+            .run_jmap(&self.session.api_url, coroutine)?
+            .new_state)
+    }
+
+    fn query(&mut self, query: &StepQuery) -> Result<Option<Vec<JmapEmail>>, BridgeError> {
+        let sort = match query.received {
+            true => JmapEmailComparator::received_at_desc(),
+            false => JmapEmailComparator::sent_at_desc(),
+        };
+        let (position, anchor) = match &query.start {
+            Start::Top => (None, None),
+            Start::After(id) => (None, Some(id.clone())),
+            Start::At(position) => (Some(*position), None),
+        };
+        let opts = JmapEmailQueryOptions {
+            filter: Some(JmapFilter::Condition(query.filter.clone())),
+            sort: Some(vec![sort]),
+            position,
+            anchor_offset: anchor.as_ref().map(|_| 1),
+            anchor,
+            limit: Some(query.limit),
+            calculate_total: false,
+            collapse_threads: false,
+            properties: Some(STEP_PROPERTIES.to_vec()),
+        };
+        let coroutine =
+            JmapEmailQuery::new(&self.session, &self.auth, opts).map_err(|err| err.to_string())?;
+        let api_url = self.session.api_url.clone();
+        match self.client.resume_jmap(&api_url, coroutine)? {
+            Ok(out) => Ok(Some(out.emails)),
+            Err(JmapEmailQueryError::QueryMethod(JmapMethodError::AnchorNotFound { .. })) => {
+                Ok(None)
+            }
+            Err(err) => {
+                sessions().forget(&api_url);
+                Err(coroutine_error(&err))
+            }
+        }
+    }
+
+    fn blobs(&mut self, ids: Vec<String>) -> Result<Vec<JmapEmail>, BridgeError> {
+        let opts = JmapEmailGetOptions {
+            properties: Some(vec![JmapEmailProperty::Id, JmapEmailProperty::BlobId]),
+            ..Default::default()
+        };
+        let coroutine = JmapEmailGet::new(&self.session, &self.auth, ids, opts)
+            .map_err(|err| err.to_string())?;
+        Ok(self
+            .client
+            .run_jmap(&self.session.api_url, coroutine)?
+            .emails)
+    }
+
+    fn download(&mut self, blob: &str) -> Result<Vec<u8>, BridgeError> {
+        let url = download_url(&self.session, blob)?;
+        let auth = &self.auth;
+        let out = self
+            .client
+            .run_jmap_redirect(&url, CrossOrigin::Anonymous, |target| {
+                JmapBlobDownload::new(auth, target)
+            })?;
+        Ok(out.data)
+    }
+
+    fn held(&mut self, ids: &[String]) -> Result<HashSet<String>, BridgeError> {
+        self.client.held(ids)
+    }
+}
+
 /// The requests a submission sends (RFC 8621 sections 4.8, 6.1, 7.5 and
 /// RFC 8620 section 6.1).
 trait JmapSubmit {
@@ -1549,9 +1660,11 @@ impl JmapSubmit for JmapCalls<'_, '_, '_> {
             .resolve_upload_url(&account)
             .map_err(|err| format!("Invalid upload URL: {err}"))?;
         let auth = &self.auth;
-        let out = self.client.run_jmap_redirect(&url, |target| {
-            JmapBlobUpload::new(auth, target, "message/rfc822", message.clone())
-        })?;
+        let out = self
+            .client
+            .run_jmap_redirect(&url, CrossOrigin::Refuse, |target| {
+                JmapBlobUpload::new(auth, target, "message/rfc822", message.clone())
+            })?;
         Ok(out.blob_id)
     }
 
@@ -2157,6 +2270,25 @@ fn named(email: JmapEmail, scope: &Scope) -> Option<Named> {
     Some(Named::new(email.id?, flags, summary))
 }
 
+/// One mailbox's delta page, projected from the account's changes: an
+/// email still filed in the mailbox is a member, one moved out of it is
+/// gone from it whatever its date, and what the changes destroyed is gone.
+fn project(delta: &JmapDelta, mailbox_id: &str, scope: &Scope) -> MailPage {
+    let mut items = Vec::new();
+    let mut vanished = delta.gone.clone();
+    for email in &delta.emails {
+        let filed = email
+            .mailbox_ids
+            .as_ref()
+            .is_some_and(|mailboxes| mailboxes.get(mailbox_id).copied().unwrap_or(false));
+        match filed {
+            true => items.extend(named(email.clone(), scope)),
+            false => vanished.extend(email.id.clone()),
+        }
+    }
+    MailPage::delta(items, vanished, delta.next.clone())
+}
+
 /// The Annex A summary of one JMAP Email: the date is `sentAt` (the
 /// `Date` header) in UTC, the attachment mark `hasAttachment`.
 fn email_summary(email: &JmapEmail) -> PimdirMailSummary {
@@ -2309,6 +2441,46 @@ fn jmap_collection_path(session: &JmapSession, capability: &str, id: &str) -> St
     match session.primary_accounts.get(capability) {
         Some(account) if !account.is_empty() => format!("{account}/{id}"),
         _ => id.to_string(),
+    }
+}
+
+/// [`Client::run_jmap_redirect`] over any [`Wire`].
+pub(crate) fn run_jmap_redirect<W, C, T, E>(
+    wire: &mut W,
+    start: &Url,
+    cross_origin: CrossOrigin,
+    make: impl Fn(&Url) -> C,
+) -> Result<T, BridgeError>
+where
+    W: Wire,
+    C: JmapCoroutine<Yield = JmapRedirectYield, Return = Result<T, E>>,
+    E: StdError + 'static,
+{
+    let mut redirects = Redirects::new(start, cross_origin);
+    let mut target = start.clone();
+
+    loop {
+        let mut coroutine = make(&target);
+        let mut arg: Option<Vec<u8>> = None;
+
+        loop {
+            match coroutine.resume(arg.as_deref()) {
+                JmapCoroutineState::Complete(Ok(out)) => return Ok(out),
+                JmapCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
+                JmapCoroutineState::Yielded(JmapRedirectYield::WantsWrite(bytes)) => {
+                    throttled_write(wire, target.as_str(), &redirects.request(&bytes))?;
+                    arg = None;
+                }
+                JmapCoroutineState::Yielded(JmapRedirectYield::WantsRead) => {
+                    arg = Some(throttled_read(wire, target.as_str())?);
+                }
+                JmapCoroutineState::Yielded(JmapRedirectYield::WantsRedirect { url, .. }) => {
+                    redirects.follow(&target, &url)?;
+                    target = url;
+                    break;
+                }
+            }
+        }
     }
 }
 

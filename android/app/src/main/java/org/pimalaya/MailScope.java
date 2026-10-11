@@ -110,21 +110,4 @@ final class MailScope {
         ZoneId zone = ZoneId.systemDefault();
         return since(months, LocalDate.now(zone), zone);
     }
-
-    /**
-     * The narrowest bound reaching back to {@code date} on {@code today} in
-     * {@code zone}, in months, 0 (all mail) when no choice does or for no
-     * date: what a window picked below the bound widens it to.
-     */
-    static int covering(String date, LocalDate today, ZoneId zone) {
-        if (date == null) {
-            return 0;
-        }
-        for (int months : MONTHS) {
-            if (months > 0 && since(months, today, zone).compareTo(date) <= 0) {
-                return months;
-            }
-        }
-        return 0;
-    }
 }

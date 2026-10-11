@@ -93,6 +93,12 @@ final class PimdirAccount {
         prefs.edit().remove(email).apply();
     }
 
+    /** The account id a collection id is namespaced under: what precedes its first separator. */
+    static String accountIdOf(String collectionId) {
+        int at = collectionId.indexOf(SEPARATOR);
+        return at < 0 ? collectionId : collectionId.substring(0, at);
+    }
+
     /** The collection id of {@code name} within the account. */
     static String collectionId(String accountId, String name) {
         return accountId + SEPARATOR + name;

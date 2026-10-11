@@ -158,3 +158,35 @@ A calendar pass SHALL log, page by page, how many entries a listing named and th
 - GIVEN a debug build
 - WHEN an account's calendars have all landed
 - THEN the log names how many ran on how many connections, the wall time and the network time summed
+
+### Requirement: Expansion is bounded whatever the rule
+An expansion SHALL walk at most 200 000 occurrences of a series, placed or not, and stop after 2 s for the whole object; a this-and-following split SHALL count at most 200 000 occurrences of a `COUNT`. A Graph series SHALL be read for exceptions within five years either side of today, bounded or not.
+
+#### Scenario: A secondly series from 1970
+- GIVEN an event `RRULE:FREQ=SECONDLY` starting in 1970
+- WHEN the agenda shows January 2026
+- THEN it answers within the bound, placing nothing
+
+### Requirement: The phone's calendars take bounded data
+The phone mirror SHALL list a secondly or minutely series instance by instance rather than hand its rule to the provider, and SHALL carry at most 5 reminders an event, 1024 characters of title and of location and 16 384 of description, cut between characters, the store keeping the whole text.
+
+#### Scenario: Fifty alarms
+- GIVEN an event with 50 `VALARM`s
+- WHEN it is mirrored to the phone
+- THEN the phone's event carries 5 reminders
+
+### Requirement: A Graph event is created once
+A Graph event create SHALL carry a `transactionId`, the hex of the first 16 bytes of the SHA-256 of the iCalendar object, the same for every attempt of one staged create, so a create sent again after a lost answer lands on the event the first made and invites nobody twice.
+
+#### Scenario: A create whose answer was lost
+- GIVEN an event with attendees created on Graph, the answer lost
+- WHEN the next pass pushes the staged create again
+- THEN it names the same transaction, and Graph keeps one event
+
+### Requirement: The agenda builds off the main thread
+The agenda SHALL read and expand its entries on a thread of its own and draw the result on the main thread, the last reload asked winning. An entry's expansion SHALL be kept while the shown week and its object stay the same.
+
+#### Scenario: Coming back to the app
+- GIVEN 10k stored entries
+- WHEN the app returns to the foreground
+- THEN the screen stays responsive while the agenda rebuilds, and only entries a sync changed are expanded again

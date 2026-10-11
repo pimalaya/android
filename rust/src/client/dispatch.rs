@@ -179,9 +179,9 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 
     /// Creates the card in the addressbook collection, returning it
-    /// with its ETag. CardDAV names the resource `<id>.vcf` itself;
-    /// the other backends name it server-side, so there the returned
-    /// card carries the server-assigned id.
+    /// with its ETag, under the name the server filed it by. On CardDAV
+    /// `id` is the whole resource name asked for, which a server may
+    /// replace with its own; the other backends name it themselves.
     pub fn create_card(
         &mut self,
         base_url: &str,
@@ -192,16 +192,7 @@ impl<'a, 'local> Client<'a, 'local> {
     ) -> Result<Card, BridgeError> {
         match Backend::of(base_url) {
             Backend::Carddav => {
-                let url = parse_url(addressbook_url)?;
-                let etag = self.create_carddav_card(&url, credentials, id, vcard)?;
-
-                Ok(Card {
-                    id: id.to_string(),
-                    uri: format!("{id}.vcf"),
-                    etag,
-                    vcard: vcard.to_string(),
-                    books: Vec::new(),
-                })
+                self.create_carddav_card(&parse_url(addressbook_url)?, credentials, id, vcard)
             }
             Backend::Graph => self.create_graph_card(
                 credentials.password,

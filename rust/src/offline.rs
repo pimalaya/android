@@ -412,10 +412,14 @@ fn parse_arg(yielded: &PimdirYield, reply: &str) -> Result<PimdirArg, BridgeErro
                     link_id: PimdirLinkId(item.link_id),
                     summary: item.summary.map(Into::into),
                     sort_key: item.sort_key.into(),
-                    body: match (item.hash, bytes) {
-                        (Some(hash), Some(bytes)) => Some(PimdirFetchedBody::Inline {
+                    body: match (item.hash, bytes, item.persisted) {
+                        (Some(hash), Some(bytes), _) => Some(PimdirFetchedBody::Inline {
                             hash: PimdirHash(hash),
                             bytes,
+                        }),
+                        (Some(hash), None, Some(size)) => Some(PimdirFetchedBody::Persisted {
+                            hash: PimdirHash(hash),
+                            size,
                         }),
                         _ => None,
                     },
@@ -787,7 +791,9 @@ enum WriteOpJson {
         reason: DropReasonJson,
     },
     /// A body, as text where it is UTF-8 and as base64 otherwise, so a
-    /// message's 8-bit bytes are stored as fetched.
+    /// message's 8-bit bytes are stored as fetched; `persisted`, with no
+    /// bytes, for one the driver filed in its object store as it fetched
+    /// it, whose row alone is written.
     StoreObject {
         hash: String,
         size: usize,
@@ -795,6 +801,8 @@ enum WriteOpJson {
         body: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         body_base64: Option<String>,
+        #[serde(skip_serializing_if = "core::ops::Not::not")]
+        persisted: bool,
     },
     SetCheckpoint {
         collection: String,
@@ -851,10 +859,15 @@ impl From<&PimdirWriteOp> for WriteOpJson {
                 reason: (*reason).into(),
             },
             PimdirWriteOp::StoreObject { object, body } => {
-                // NOTE: a byteless op (an object streamed into the store
-                // during fetch) does not arise here, every driver answering
-                // inline bodies; it maps to an empty payload for safety.
-                let bytes = body.as_deref().unwrap_or_default();
+                let Some(bytes) = body.as_deref() else {
+                    return Self::StoreObject {
+                        hash: object.hash.as_str().into(),
+                        size: object.size,
+                        body: None,
+                        body_base64: None,
+                        persisted: true,
+                    };
+                };
                 let (body, body_base64) = match core::str::from_utf8(bytes) {
                     Ok(text) => (Some(text.to_owned()), None),
                     Err(_) => (None, Some(base64(bytes))),
@@ -864,6 +877,7 @@ impl From<&PimdirWriteOp> for WriteOpJson {
                     size: object.size,
                     body,
                     body_base64,
+                    persisted: false,
                 }
             }
             PimdirWriteOp::SetCheckpoint {
@@ -1393,6 +1407,10 @@ struct FetchedItemJson {
     /// (a message's 8-bit parts).
     #[serde(default)]
     body_base64: Option<String>,
+    /// The size of a body the driver already filed in its object store
+    /// under `hash`, in place of its bytes: a message read into a file.
+    #[serde(default)]
+    persisted: Option<usize>,
     #[serde(default)]
     revision: Option<String>,
 }

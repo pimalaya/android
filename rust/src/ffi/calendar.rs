@@ -15,7 +15,7 @@
 
 use jni::{
     EnvUnowned,
-    errors::{Error, LogErrorAndDefault},
+    errors::Error,
     objects::{JClass, JObject, JString},
 };
 use serde_json::{from_str, json, to_string};
@@ -23,7 +23,7 @@ use serde_json::{from_str, json, to_string};
 use crate::{
     account::{self, Backend},
     client::Client,
-    ffi::{error_json, parse_url, read_string},
+    ffi::{ErrorReply, error_json, parse_url, read_string},
     types::{BridgeError, Calendar, Credentials, Event, EventRef},
 };
 
@@ -58,7 +58,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listCalendars<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.syncEvents`: enumerates a calendar collection from the
@@ -99,7 +99,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_syncEvents<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.multigetEvents`: the iCalendar text of the named events, in
@@ -134,7 +134,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_multigetEvents<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// The named events, the ids arriving as a JSON array of strings.
@@ -220,7 +220,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_expandEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.writeEvent`: applies one edit to a calendar object and
@@ -249,7 +249,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_writeEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.splitEvent`: splits a series at the occurrence an edit
@@ -276,7 +276,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_splitEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.removeEvent`: removes the occurrences an edit's scope names
@@ -303,7 +303,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_removeEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.updateEvent`: pushes an edited object back to the calendar
@@ -354,7 +354,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// Pushes one edited object with whichever backend its base URL names,
@@ -430,7 +430,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_projectEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.applyEvent`: patches a view the phone edited onto the object,
@@ -457,7 +457,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_applyEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.readEvent`: one calendar object read whole, for the page that
@@ -482,7 +482,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_readEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.mergeEvent`: three-way merges a conflicted calendar object,
@@ -509,7 +509,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_mergeEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.resolveEvent`: the resolution of a conflicted calendar object,
@@ -538,7 +538,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_resolveEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.newEvent`: the object a new entry starts from, as iCalendar
@@ -574,7 +574,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_newEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.createEvent`: files a new object in a calendar, guarded on
@@ -622,7 +622,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.deleteEvent`: removes one object from its calendar, guarded
@@ -670,12 +670,13 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteEvent<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// Files one new object with whichever backend the base URL names,
-/// answering the resource it landed under: the name asked for on CalDAV,
-/// the id Graph, Google or the JMAP server minted; `address` the
+/// answering the resource it landed under: on CalDAV the name asked for or
+/// the one the server filed it by, the id Graph, Google or the JMAP server
+/// minted; `address` the
 /// account's, as [`update_event`] takes it.
 fn create_event(
     client: &mut Client<'_, '_>,
@@ -705,14 +706,7 @@ fn create_event(
             ical,
             address,
         ),
-        _ => {
-            let etag =
-                client.create_caldav_event(&parse_url(calendar_url)?, credentials, id, ical)?;
-            Ok(EventRef {
-                id: id.to_string(),
-                etag,
-            })
-        }
+        _ => client.create_caldav_event(&parse_url(calendar_url)?, credentials, id, ical),
     }
 }
 

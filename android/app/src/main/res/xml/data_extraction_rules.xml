@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nothing leaves the phone, by cloud backup or by a transfer to a new
+     phone (Android 12 and later, where allowBackup no longer covers
+     device transfers): the store holds mail, contacts and calendars in
+     clear, and the accounts are sealed with a Keystore key no copy carries.
+     Each domain is excluded whole, which is every file the app has. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+    </device-transfer>
+</data-extraction-rules>

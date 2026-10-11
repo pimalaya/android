@@ -1,16 +1,19 @@
-//! The Gmail account listing over a fake Gmail account, driven by
-//! io-pimdir's own sync engine and store: one listing projected onto
-//! every label, each message read once, the history replayed once a pass.
+//! Gmail stepped through over a fake Gmail account, driven by io-pimdir's
+//! own sync engine and store: a step's messages read once and landed in
+//! every label they carry, the history replayed once a pass, a round over
+//! a label naming its ids by their markers alone.
 //!
-//! The fake answers the four requests of [`GmailSource`] the way Gmail
-//! does where it matters here: `messages.list` newest first, a page of
-//! 500 ids, narrowed by received date, a label's listing leaving spam and
-//! trash out; metadata read by batch; a history naming every message
-//! moved since a history id, the ones deleted for good apart, until Gmail
-//! no longer holds it.
+//! The fake answers the requests of [`GmailSource`] the way Gmail does
+//! where it matters here: `messages.list` newest received first, a page
+//! of 500 ids, the account's leaving spam and trash out, narrowed by
+//! `after:`; metadata read by batch; whole messages written to files; a
+//! history naming every message moved since a history id, the ones
+//! deleted for good apart, until Gmail no longer holds it.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
+    fs,
+    path::Path,
     sync::{Arc, Mutex, MutexGuard},
     thread,
 };
@@ -30,11 +33,14 @@ use io_pimdir::{
 use jiff::{SignedDuration, Timestamp};
 use tempfile::TempDir;
 
-use super::{FIRST_CHUNK, GmailRun, GmailSource, floor, list_label};
+use super::{GmailRun, GmailSource, Stepped, list_label, step};
 use crate::{
     client::{
-        gmail::{BATCH, GmailEnvelope, GmailHistoryDelta, GmailIds, INBOX, SPAM, TRASH},
-        listing::{Listing, MailPage, MailRequest, RECEIVED_MARGIN_DAYS, Scope, flags},
+        gmail::{
+            BATCH, Fetched, GmailEnvelope, GmailHistoryDelta, GmailIds, INBOX, SPAM, STARRED,
+            TRASH, UNREAD, belongs, source_path,
+        },
+        listing::{Listing, MailPage, MailRequest, Named, Scope, flags},
     },
     offline::enumerated,
     types::BridgeError,
@@ -72,10 +78,12 @@ struct Counts {
     account_lists: usize,
     /// `messages.list` requests with a label.
     label_lists: usize,
-    /// Batch requests.
+    /// Metadata batches.
     batches: usize,
     /// Metadata reads, all batches counted.
     reads: usize,
+    /// Messages read whole.
+    fetched: usize,
     /// `history.list` replays.
     histories: usize,
 }
@@ -91,15 +99,19 @@ struct Account {
     /// The ids `messages.list` answers a page.
     page: usize,
     counts: Counts,
-    /// Metadata reads by message.
-    read: BTreeMap<String, usize>,
+    /// Whole reads by message.
+    fetches: BTreeMap<String, usize>,
+    /// The `after:` of every label listing.
+    afters: Vec<Option<i64>>,
+    /// What the store holds, as a step asks it ([`GmailSource::held`]).
+    held: HashSet<String>,
 }
 
 /// One session's view of the account, which every session shares.
 #[derive(Clone)]
 struct FakeGmail(Arc<Mutex<Account>>);
 
-/// The date of the message `days` before the account's newest.
+/// The instant `days` before the account's newest message.
 fn days_back(days: i64) -> String {
     let top: Timestamp = "2026-10-01T12:00:00Z".parse().unwrap();
     top.checked_sub(SignedDuration::from_hours(24 * days))
@@ -111,6 +123,10 @@ fn days_back(days: i64) -> String {
 /// The id of the message `index` days before the newest.
 fn id(index: usize) -> String {
     format!("m{index:04}")
+}
+
+fn millis(instant: &str) -> i64 {
+    instant.parse::<Timestamp>().unwrap().as_millisecond()
 }
 
 impl FakeGmail {
@@ -134,8 +150,8 @@ impl FakeGmail {
         Self(Arc::new(Mutex::new(account)))
     }
 
-    /// The account of the seeded test account: every message under
-    /// [`MOA`], beside the inbox (one in two), the sent mail or [`SEED`].
+    /// The seeded test account: every message under [`MOA`], beside the
+    /// inbox (one in two), the sent mail or [`SEED`].
     fn seeded(size: usize) -> Self {
         Self::new(size, |index| match index % 4 {
             0 | 1 => vec![INBOX, MOA],
@@ -152,30 +168,9 @@ impl FakeGmail {
         self.lock().counts.clone()
     }
 
-    /// Whether every message of the account was read exactly once.
-    fn read_once(&self) -> bool {
-        let account = self.lock();
-        account
-            .mails
-            .keys()
-            .all(|id| account.read.get(id) == Some(&1))
-    }
-
-    fn reads_of(&self, id: &str) -> usize {
-        self.lock().read.get(id).copied().unwrap_or_default()
-    }
-
-    fn add(&mut self, id: &str, days: i64, labels: &[&str]) {
-        let mut account = self.lock();
-        account.mails.insert(
-            id.into(),
-            Mail {
-                date: days_back(days),
-                received: days_back(days),
-                labels: labels.iter().map(|label| label.to_string()).collect(),
-            },
-        );
-        account.log.push(Event::Moved(id.into()));
+    /// Whether no message was read whole twice.
+    fn fetched_once(&self) -> bool {
+        self.lock().fetches.values().all(|count| *count == 1)
     }
 
     fn relabel(&mut self, id: &str, add: &[&str], remove: &[&str]) {
@@ -199,9 +194,27 @@ impl FakeGmail {
         let mut account = self.lock();
         account.oldest = account.log.len();
     }
+
+    fn summary(id: &str, mail: &Mail) -> PimdirMailSummary {
+        PimdirMailSummary {
+            message_id: Some(format!("{id}@example.org")),
+            subject: format!("Subject {id}"),
+            date: Some(mail.date.clone()),
+            ..Default::default()
+        }
+    }
 }
 
 impl GmailSource for FakeGmail {
+    fn held(&mut self, ids: &[String]) -> Result<HashSet<String>, BridgeError> {
+        let account = self.lock();
+        Ok(ids
+            .iter()
+            .filter(|id| account.held.contains(*id))
+            .cloned()
+            .collect())
+    }
+
     fn history_id(&mut self) -> Result<String, BridgeError> {
         let mut account = self.lock();
         account.counts.profiles += 1;
@@ -211,31 +224,27 @@ impl GmailSource for FakeGmail {
     fn list(
         &mut self,
         label: Option<&str>,
-        scope: &Scope,
+        since: Option<i64>,
         page: Option<&str>,
     ) -> Result<GmailIds, BridgeError> {
         let mut account = self.lock();
         match label {
             None => account.counts.account_lists += 1,
-            Some(_) => account.counts.label_lists += 1,
+            Some(_) => {
+                account.counts.label_lists += 1;
+                account.afters.push(since);
+            }
         }
 
-        let since = scope.received_since(RECEIVED_MARGIN_DAYS);
-        let until = scope.received_until(RECEIVED_MARGIN_DAYS);
+        let spam_trash = label.is_some_and(|label| [TRASH, SPAM, UNREAD, STARRED].contains(&label));
         let mut matching: Vec<(&String, &Mail)> = account
             .mails
             .iter()
             .filter(|(_, mail)| {
                 let has = |id: &str| mail.labels.iter().any(|carried| carried == id);
-                label.is_none_or(|label| {
-                    has(label) && (label == TRASH || label == SPAM || !(has(TRASH) || has(SPAM)))
-                })
+                label.is_none_or(&has) && (spam_trash || !(has(TRASH) || has(SPAM)))
             })
-            .filter(|(_, mail)| {
-                let received: Timestamp = mail.received.parse().unwrap();
-                since.is_none_or(|since| received >= since)
-                    && until.is_none_or(|until| received < until)
-            })
+            .filter(|(_, mail)| since.is_none_or(|since| millis(&mail.received) / 1000 >= since))
             .collect();
         matching.sort_by(|a, b| b.1.received.cmp(&a.1.received).then(a.0.cmp(b.0)));
 
@@ -259,30 +268,20 @@ impl GmailSource for FakeGmail {
         account.counts.batches += 1;
         account.counts.reads += ids.len();
 
-        let mut read = Vec::new();
-        for id in ids {
-            *account.read.entry(id.clone()).or_default() += 1;
-            let envelope = account.mails.get(id).map(|mail| {
-                let has = |label: &str| mail.labels.iter().any(|carried| carried == label);
-                GmailEnvelope {
-                    labels: mail.labels.clone(),
-                    flags: flags(!has("UNREAD"), false, has("STARRED")),
-                    summary: PimdirMailSummary {
-                        message_id: Some(format!("{id}@example.org")),
-                        subject: format!("Subject {id}"),
-                        date: Some(mail.date.clone()),
-                        ..Default::default()
-                    },
-                    received: mail
-                        .received
-                        .parse::<Timestamp>()
-                        .ok()
-                        .map(|at| at.as_millisecond()),
-                }
-            });
-            read.push((id.clone(), envelope));
-        }
-        Ok(read)
+        Ok(ids
+            .iter()
+            .map(|id| {
+                let envelope = account.mails.get(id).map(|mail| {
+                    let has = |label: &str| mail.labels.iter().any(|carried| carried == label);
+                    GmailEnvelope {
+                        labels: mail.labels.clone(),
+                        flags: flags(!has(UNREAD), false, has(STARRED)),
+                        summary: Self::summary(id, mail),
+                    }
+                });
+                (id.clone(), envelope)
+            })
+            .collect())
     }
 
     fn history(&mut self, start: &str) -> Result<Option<GmailHistoryDelta>, BridgeError> {
@@ -316,13 +315,55 @@ impl GmailSource for FakeGmail {
             next: account.log.len().to_string(),
         }))
     }
+
+    fn fetch(&mut self, ids: &[String], dir: &Path) -> Result<Vec<Fetched>, BridgeError> {
+        let mut account = self.lock();
+        let mut fetched = Vec::new();
+        for id in ids {
+            account.counts.fetched += 1;
+            *account.fetches.entry(id.clone()).or_default() += 1;
+            let Some(mail) = account.mails.get(id) else {
+                continue;
+            };
+            let path = source_path(dir, id);
+            let bytes = format!("Subject: Subject {id}\r\n\r\n{id}\r\n");
+            fs::write(&path, &bytes).unwrap();
+            let has = |label: &str| mail.labels.iter().any(|carried| carried == label);
+            fetched.push(Fetched {
+                id: id.clone(),
+                path,
+                size: bytes.len(),
+                labels: mail.labels.clone(),
+                flags: flags(!has(UNREAD), false, has(STARRED)),
+                received: Some(millis(&mail.received)),
+                summary: Self::summary(id, mail),
+            });
+        }
+        Ok(fetched)
+    }
 }
 
-/// The engine's remote over the fake: a label's page, as Java forwards
-/// the request, answered from the run's account listing.
+/// What the engine's remote answers: a label's page as Java forwards the
+/// request, or a step's messages landed as `MailEngine.land` lands them.
+enum Answering<'r> {
+    /// A pass: the label's delta or round, from the run.
+    Pass(&'r GmailRun),
+    /// A step's members of the label: the round that opens the mailbox
+    /// when it holds nothing, else a delta adding them, its checkpoint
+    /// left where it is.
+    Land {
+        items: Vec<Named>,
+        checkpoint: String,
+        empty: bool,
+    },
+}
+
 struct Remote<'r> {
     gmail: FakeGmail,
-    run: &'r GmailRun,
+    answering: Answering<'r>,
+    /// The handles the label holds, so a round's members it holds not are
+    /// dropped as Java's naming drops them (no arrival here).
+    held: BTreeSet<String>,
 }
 
 impl PimdirRemote for Remote<'_> {
@@ -333,25 +374,47 @@ impl PimdirRemote for Remote<'_> {
         collection: &PimdirCollectionId,
         request: PimdirEnumerate,
     ) -> Result<PimdirEnumerated, String> {
-        let listing = match request.listing {
-            PimdirListing::Delta(checkpoint) => Listing::Delta {
-                checkpoint: String::from_utf8(checkpoint.0).unwrap(),
+        let round = matches!(request.listing, PimdirListing::Round { .. });
+        let page = match &mut self.answering {
+            Answering::Land {
+                items,
+                checkpoint,
+                empty,
+            } => match round && *empty {
+                true => MailPage::round(std::mem::take(items), None, Some(checkpoint.clone())),
+                false => MailPage {
+                    items: std::mem::take(items),
+                    last: true,
+                    ..Default::default()
+                },
             },
-            PimdirListing::Round { cursor, band } => Listing::Round {
-                cursor: cursor.map(|cursor| String::from_utf8(cursor.0).unwrap()),
-                band,
-            },
+            Answering::Pass(run) => {
+                let listing = match request.listing {
+                    PimdirListing::Delta(checkpoint) => Listing::Delta {
+                        checkpoint: String::from_utf8(checkpoint.0).unwrap(),
+                    },
+                    PimdirListing::Round { cursor, band } => Listing::Round {
+                        cursor: cursor.map(|cursor| String::from_utf8(cursor.0).unwrap()),
+                        band,
+                    },
+                };
+                let request = MailRequest {
+                    listing,
+                    scope: Scope {
+                        since: request.scope.since.clone(),
+                        until: request.scope.until.clone(),
+                    },
+                    covered: false,
+                    received: None,
+                };
+                let mut page = list_label(&mut self.gmail, run, collection.as_str(), &request)
+                    .map_err(|err| err.message)?;
+                if page.complete {
+                    page.items.retain(|item| self.held.contains(&item.handle));
+                }
+                page
+            }
         };
-        let request = MailRequest {
-            listing,
-            scope: Scope {
-                since: request.scope.since.clone(),
-                until: request.scope.until.clone(),
-            },
-            covered: false,
-        };
-        let page = list_label(&mut self.gmail, self.run, collection.as_str(), &request)
-            .map_err(|err| err.message)?;
         Ok(enumerated(&serde_json::to_string(&page).unwrap()))
     }
 
@@ -377,10 +440,11 @@ impl PimdirRemote for Remote<'_> {
     }
 }
 
-/// A store holding one mailbox per label, synced the way `MailEngine`
-/// syncs a Gmail account.
+/// A store holding one mailbox per label, stepped and synced the way
+/// `GmailStep` and `MailEngine` do.
 struct Harness {
     dir: TempDir,
+    files: TempDir,
     store: PimdirSourceStore,
     gmail: FakeGmail,
     labels: Vec<&'static str>,
@@ -395,75 +459,73 @@ impl Harness {
         }
         Self {
             dir,
+            files: tempfile::tempdir().unwrap(),
             store,
             gmail: gmail.clone(),
             labels: labels.to_vec(),
         }
     }
 
-    /// One pass over every mailbox on one run: a mailbox never listed
-    /// takes its first chunk, one listed lists what it covers.
+    /// One step of `count`, of the account or of one label, landed in
+    /// every mailbox its messages belong to.
+    fn step(&mut self, label: Option<&str>, count: usize) -> Stepped {
+        self.gmail.lock().held = self.held_anywhere();
+        let stepped = step(&mut self.gmail, label, count, self.files.path()).unwrap();
+        for label in self.labels.clone() {
+            let items: Vec<Named> = stepped
+                .messages
+                .iter()
+                .filter(|fetched| belongs(&fetched.labels, label))
+                .map(|fetched| {
+                    Named::new(
+                        fetched.id.clone(),
+                        fetched.flags.clone(),
+                        fetched.summary.clone(),
+                    )
+                })
+                .collect();
+            let empty = self.held(label).is_empty();
+            let answering = Answering::Land {
+                items,
+                checkpoint: stepped.history_id.clone(),
+                empty,
+            };
+            self.sync(label, answering);
+        }
+        stepped
+    }
+
+    /// One pass over every mailbox on one run.
     fn pass(&mut self) {
         let run = GmailRun::default();
         for label in self.labels.clone() {
-            let since = match self.since(label) {
-                Some(since) => since,
-                None => {
-                    floor(&mut self.gmail.clone(), &run, label, None, FIRST_CHUNK)
-                        .unwrap()
-                        .floor
-                }
-            };
-            self.sync(&run, label, since);
+            self.sync(label, Answering::Pass(&run));
         }
     }
 
-    /// Every mailbox widened by `count` below its floor on one run, as
-    /// the fill does.
-    fn fill(&mut self, count: usize) {
-        let run = GmailRun::default();
-        for label in self.labels.clone() {
-            let before = self.since(label).unwrap();
-            let since = floor(
-                &mut self.gmail.clone(),
-                &run,
-                label,
-                before.as_deref(),
-                count,
-            )
-            .unwrap()
-            .floor;
-            self.sync(&run, label, since);
-        }
-    }
-
-    fn sync(&mut self, run: &GmailRun, label: &str, since: Option<String>) {
+    fn sync(&mut self, label: &str, answering: Answering<'_>) {
         let opts = PimdirSyncOptions {
-            scope: PimdirScope { since, until: None },
+            scope: PimdirScope::unbounded(),
             ..Default::default()
         };
         let mut remote = Remote {
             gmail: self.gmail.clone(),
-            run,
+            answering,
+            held: self.held(label),
         };
         self.store.sync(label, opts, &mut remote).unwrap();
     }
 
-    /// Where a mailbox's listing starts, the way `MailEngine` reads it:
-    /// its round under way, else its last closed round; [`None`] for a
-    /// mailbox never listed.
-    fn since(&self, label: &str) -> Option<Option<String>> {
+    /// Whether a mailbox's last round closed over everything.
+    fn covered(&self, label: &str) -> bool {
         let reader = PimdirReader::open(self.dir.path()).unwrap();
-        let coverage = reader
+        reader
             .list_coverage(label)
             .unwrap()
             .into_iter()
-            .find(|coverage| coverage.source == SOURCE)?;
-        match (coverage.round, coverage.coverage) {
-            (Some(round), _) => Some(round.scope.since),
-            (None, Some(covered)) => Some(covered.scope.since),
-            (None, None) => None,
-        }
+            .find(|coverage| coverage.source == SOURCE)
+            .and_then(|coverage| coverage.coverage)
+            .is_some_and(|covered| covered.scope.since.is_none())
     }
 
     /// The message ids a mailbox holds.
@@ -476,6 +538,14 @@ impl Harness {
             .map(|item| item.link_id.as_str().to_string())
             .collect()
     }
+
+    /// What the account holds in any mailbox: what a step skips.
+    fn held_anywhere(&self) -> HashSet<String> {
+        self.labels
+            .iter()
+            .flat_map(|label| self.held(label))
+            .collect()
+    }
 }
 
 /// What was asked between two readings.
@@ -486,56 +556,132 @@ fn since(before: &Counts, after: &Counts) -> Counts {
         label_lists: after.label_lists - before.label_lists,
         batches: after.batches - before.batches,
         reads: after.reads - before.reads,
+        fetched: after.fetched - before.fetched,
         histories: after.histories - before.histories,
     }
 }
 
-/// A round's request from `cursor`, over `scope`.
-fn round(cursor: Option<&str>, scope: Scope) -> MailRequest {
-    MailRequest {
-        listing: Listing::Round {
-            cursor: cursor.map(String::from),
-            band: false,
-        },
-        scope,
-        covered: false,
-    }
-}
-
 #[test]
-fn a_mail_under_three_labels_is_read_once_and_placed_three_times() {
-    let gmail = FakeGmail::new(10, |index| match index {
-        3 => vec![INBOX, CLIENTS, SEED],
-        _ => vec![INBOX],
-    });
-    let mut harness = Harness::new(&gmail, &[INBOX, CLIENTS, SEED]);
+fn a_first_step_reads_fifty_once_and_lands_them_in_every_label() {
+    let gmail = FakeGmail::seeded(400);
+    let labels = [INBOX, SENT, SEED, MOA, TRASH];
+    let mut harness = Harness::new(&gmail, &labels);
 
-    harness.pass();
+    let stepped = harness.step(None, 50);
 
-    for label in [INBOX, CLIENTS, SEED] {
-        assert!(harness.held(label).contains("m0003"), "placed in {label}");
-    }
-    assert_eq!(harness.held(INBOX).len(), 10);
-    assert_eq!(harness.held(CLIENTS).len(), 1);
-    assert!(gmail.read_once());
+    assert!(!stepped.exhausted);
+    assert_eq!(harness.held(MOA).len(), 50, "every message is under it");
+    assert_eq!(harness.held(INBOX).len(), 26);
+    assert_eq!(harness.held(SENT).len(), 12);
+    assert_eq!(harness.held(SEED).len(), 12);
+    assert!(gmail.fetched_once());
     assert_eq!(
         gmail.counts(),
         Counts {
             profiles: 1,
             account_lists: 1,
-            batches: 1,
-            reads: 10,
+            fetched: 50,
             ..Default::default()
         },
-        "one listing and one batch for the three mailboxes"
+        "one listing, the fifty read whole, no metadata read"
     );
+    for label in labels {
+        assert!(harness.covered(label), "{label} opened, the trash included");
+    }
+
+    // NOTE: every mailbox holds its checkpoint: the next pass replays the
+    // history, once for the five.
+    let before = gmail.counts();
+    harness.pass();
+    assert_eq!(
+        since(&before, &gmail.counts()),
+        Counts {
+            histories: 1,
+            ..Default::default()
+        }
+    );
+}
+
+#[test]
+fn a_step_takes_the_ids_not_held_whatever_their_dates() {
+    // NOTE: an imported account: received newest first one a day, dated
+    // anywhere in the last ten years.
+    let gmail = FakeGmail::new(150, |_| vec![INBOX]);
+    {
+        let mut account = gmail.lock();
+        for (index, mail) in account.mails.values_mut().enumerate() {
+            mail.date = days_back(((index * 7919) % 3650) as i64);
+        }
+    }
+    let mut harness = Harness::new(&gmail, &[INBOX]);
+    harness.step(None, 50);
+    // NOTE: a message stored from a search, further down the listing.
+    harness
+        .store
+        .sync(
+            INBOX,
+            PimdirSyncOptions::default(),
+            &mut Remote {
+                gmail: gmail.clone(),
+                answering: Answering::Land {
+                    items: vec![Named::new(id(60), Vec::new(), PimdirMailSummary::default())],
+                    checkpoint: String::new(),
+                    empty: false,
+                },
+                held: BTreeSet::new(),
+            },
+        )
+        .unwrap();
+
+    let stepped = harness.step(None, 50);
+
+    let taken: Vec<String> = stepped.messages.iter().map(|m| m.id.clone()).collect();
+    let expected: Vec<String> = (50..=100).filter(|index| *index != 60).map(id).collect();
+    assert_eq!(taken, expected);
+    assert_eq!(harness.held(INBOX).len(), 101);
+    assert!(gmail.fetched_once());
+}
+
+#[test]
+fn the_last_step_says_the_account_is_exhausted() {
+    let gmail = FakeGmail::new(70, |_| vec![INBOX]);
+    let mut harness = Harness::new(&gmail, &[INBOX]);
+
+    assert!(!harness.step(None, 50).exhausted);
+    let last = harness.step(None, 50);
+    assert_eq!(last.messages.len(), 20);
+    assert!(last.exhausted);
+    let empty = harness.step(None, 50);
+    assert!(empty.messages.is_empty() && empty.exhausted);
+    assert_eq!(gmail.counts().fetched, 70, "nothing read twice");
+}
+
+#[test]
+fn spam_and_trash_are_never_stepped_and_a_label_view_steps_its_label() {
+    let gmail = FakeGmail::new(40, |index| match index % 4 {
+        0 => vec![INBOX, CLIENTS],
+        1 => vec![SPAM],
+        2 => vec![TRASH],
+        _ => vec![INBOX],
+    });
+    let mut harness = Harness::new(&gmail, &[INBOX, CLIENTS, SPAM, TRASH]);
+
+    let stepped = harness.step(Some(CLIENTS), 5);
+    let taken: Vec<String> = stepped.messages.iter().map(|m| m.id.clone()).collect();
+    assert_eq!(taken, [id(0), id(4), id(8), id(12), id(16)]);
+    assert_eq!(harness.held(INBOX).len(), 5, "placed beside the label");
+
+    harness.step(None, 100);
+    assert_eq!(harness.held(INBOX).len(), 20);
+    assert!(harness.held(SPAM).is_empty());
+    assert!(harness.held(TRASH).is_empty());
 }
 
 #[test]
 fn archiving_and_labelling_move_placements() {
     let mut gmail = FakeGmail::new(10, |_| vec![INBOX]);
     let mut harness = Harness::new(&gmail, &[INBOX, CLIENTS]);
-    harness.pass();
+    harness.step(None, 50);
     let before = gmail.counts();
 
     gmail.relabel("m0001", &[], &[INBOX]);
@@ -560,7 +706,7 @@ fn archiving_and_labelling_move_placements() {
             histories: 1,
             ..Default::default()
         },
-        "one history and the three moved read once"
+        "one history and the three moved read once, in one batch"
     );
 }
 
@@ -571,7 +717,7 @@ fn a_trashed_mail_leaves_its_labels_and_a_deleted_one_goes_unread() {
         _ => vec![INBOX],
     });
     let mut harness = Harness::new(&gmail, &[INBOX, CLIENTS, TRASH]);
-    harness.pass();
+    harness.step(None, 50);
     assert!(harness.held(TRASH).is_empty());
     let before = gmail.counts();
 
@@ -589,185 +735,65 @@ fn a_trashed_mail_leaves_its_labels_and_a_deleted_one_goes_unread() {
     for label in [INBOX, CLIENTS, TRASH] {
         assert!(!harness.held(label).contains("m0002"), "deleted");
     }
-    assert_eq!(gmail.reads_of("m0002"), 1, "never read after its deletion");
     assert_eq!(since(&before, &gmail.counts()).reads, 1, "the trashed one");
 }
 
 #[test]
-fn a_quiet_pass_is_one_history_request() {
-    let gmail = FakeGmail::seeded(400);
-    let mut harness = Harness::new(&gmail, &[INBOX, SENT, SEED, MOA]);
-    harness.pass();
-    let before = gmail.counts();
-
-    harness.pass();
-
-    assert_eq!(
-        since(&before, &gmail.counts()),
-        Counts {
-            histories: 1,
-            ..Default::default()
-        },
-        "four mailboxes, one history"
-    );
-}
-
-// NOTE: the seeded test account of 2026-10-07: 400 messages, every one
-// under `moa-seed` beside the inbox, the sent mail or a `Seed/…` label.
-// Per label, every message is read once per label holding it and each
-// label listed on its own; the account listing reads each once a run.
-#[test]
-fn an_account_listing_reads_each_message_once_a_run() {
-    let gmail = FakeGmail::seeded(400);
-    let labels = [INBOX, SENT, SEED, MOA];
-    let mut harness = Harness::new(&gmail, &labels);
-
-    // NOTE: the first sync: the account's 50 newest, and the inbox's own
-    // 50 since only 25 of those are in it.
-    harness.pass();
-    let first = gmail.counts();
-    assert_eq!(harness.held(INBOX).len(), 50);
-    assert_eq!(harness.held(MOA).len(), 50);
-    assert_eq!(
-        first,
-        Counts {
-            profiles: 1,
-            account_lists: 2,
-            label_lists: 2,
-            batches: 4,
-            reads: 76,
-            histories: 0,
-        }
-    );
-
-    // NOTE: the fill takes the whole account on one run, which reads
-    // again the 28 messages of the first run its band reaches: each run
-    // empties its envelopes.
-    harness.fill(500);
-    let whole = gmail.counts();
-    assert_eq!(harness.held(INBOX).len(), 200);
-    assert_eq!(harness.held(SENT).len(), 100);
-    assert_eq!(harness.held(SEED).len(), 100);
-    assert_eq!(harness.held(MOA).len(), 400);
-    assert_eq!(
-        since(&first, &whole),
-        Counts {
-            profiles: 1,
-            account_lists: 2,
-            label_lists: 0,
-            batches: 15,
-            reads: 352,
-            histories: 0,
-        }
-    );
-
-    harness.pass();
-    assert_eq!(
-        since(&whole, &gmail.counts()),
-        Counts {
-            histories: 1,
-            ..Default::default()
-        }
-    );
-
-    let per_label: usize = labels.iter().map(|label| harness.held(label).len()).sum();
-    assert_eq!(per_label, 800, "what a sync per label reads");
-    assert_eq!(gmail.counts().reads, 428, "400 and the 28 read again");
-}
-
-#[test]
-fn an_inbox_behind_the_account_reaches_its_own_fifty() {
-    let gmail = FakeGmail::new(200, |index| match index % 4 {
-        0 => vec![INBOX],
-        _ => vec![SENT],
+fn an_expired_history_lists_a_labels_ids_by_their_markers_alone() {
+    let mut gmail = FakeGmail::new(20, |index| match index {
+        3 => vec![INBOX, UNREAD],
+        4 => vec![INBOX, STARRED],
+        _ => vec![INBOX],
     });
-    let run = GmailRun::default();
-
-    let inbox = floor(&mut gmail.clone(), &run, INBOX, None, FIRST_CHUNK).unwrap();
-    let sent = floor(&mut gmail.clone(), &run, SENT, None, FIRST_CHUNK).unwrap();
-    assert_eq!(inbox.floor, Some(days_back(196)), "the 50th inbox mail");
-    assert_eq!(sent.floor, Some(days_back(49)), "the account's 50th");
-
-    let mut harness = Harness::new(&gmail, &[INBOX, SENT]);
-    harness.pass();
-    assert_eq!(harness.held(INBOX).len(), 50);
-    assert_eq!(harness.held(SENT).len(), 37);
-}
-
-#[test]
-fn two_threads_on_one_run_read_each_mail_once() {
-    for _ in 0..8 {
-        let gmail = FakeGmail::seeded(400);
-        let run = Arc::new(GmailRun::default());
-
-        let workers: Vec<_> = [INBOX, SENT, SEED, MOA]
-            .into_iter()
-            .map(|label| {
-                let mut gmail = gmail.clone();
-                let run = Arc::clone(&run);
-                thread::spawn(move || {
-                    let reply = floor(&mut gmail, &run, label, None, 500).unwrap();
-                    let scope = Scope {
-                        since: reply.floor,
-                        until: None,
-                    };
-                    let mut cursor: Option<String> = None;
-                    let mut items = 0;
-                    loop {
-                        let page: MailPage = list_label(
-                            &mut gmail,
-                            &run,
-                            label,
-                            &round(cursor.as_deref(), scope.clone()),
-                        )
-                        .unwrap();
-                        items += page.items.len();
-                        match page.cursor {
-                            Some(next) => cursor = Some(next),
-                            None => break items,
-                        }
-                    }
-                })
-            })
-            .collect();
-        let items: Vec<usize> = workers
-            .into_iter()
-            .map(|worker| worker.join().unwrap())
-            .collect();
-
-        assert_eq!(items, [200, 100, 100, 400]);
-        assert!(gmail.read_once());
-        assert_eq!(gmail.counts().reads, 400);
-    }
-}
-
-#[test]
-fn an_expired_history_falls_back_to_a_round() {
-    let mut gmail = FakeGmail::new(20, |_| vec![INBOX]);
     let mut harness = Harness::new(&gmail, &[INBOX]);
-    harness.pass();
+    harness.step(None, 50);
     let before = gmail.counts();
 
     gmail.delete("m0001");
-    gmail.add("new", -1, &[INBOX]);
     gmail.expire();
     harness.pass();
 
     let inbox = harness.held(INBOX);
-    assert!(!inbox.contains("m0001"));
-    assert!(inbox.contains("new"));
-    assert_eq!(inbox.len(), 20);
+    assert!(!inbox.contains("m0001"), "found absent");
+    assert_eq!(inbox.len(), 19);
     assert_eq!(
         since(&before, &gmail.counts()),
         Counts {
             profiles: 1,
-            account_lists: 1,
-            batches: 1,
-            reads: 20,
+            label_lists: 3,
             histories: 1,
             ..Default::default()
         },
-        "a history refused, then the account listed again"
+        "a history refused, then the label and the two markers listed, nothing read"
+    );
+
+    // NOTE: the page as the engine reads it: each id named by its markers.
+    let run = GmailRun::default();
+    let request = MailRequest {
+        listing: Listing::Round {
+            cursor: None,
+            band: false,
+        },
+        scope: Scope::default(),
+        covered: true,
+        received: Some(millis(&days_back(19))),
+    };
+    let page = list_label(&mut gmail.clone(), &run, INBOX, &request).unwrap();
+    let marked: BTreeMap<String, Vec<String>> = page
+        .items
+        .iter()
+        .filter(|item| ["m0003", "m0004", "m0005"].contains(&item.handle.as_str()))
+        .map(|item| (item.handle.clone(), item.flags.clone()))
+        .collect();
+    assert_eq!(marked["m0003"], Vec::<String>::new(), "unread");
+    assert_eq!(marked["m0004"], ["\\Seen", "\\Flagged"]);
+    assert_eq!(marked["m0005"], ["\\Seen"]);
+    assert!(page.items.iter().all(|item| item.summary.is_none()));
+    assert_eq!(page.checkpoint.as_deref(), Some("1"));
+    assert_eq!(
+        gmail.lock().afters.last().copied().flatten(),
+        Some(millis(&days_back(19)) / 1000 - 1),
+        "from the oldest reception held, a second earlier"
     );
 
     let before = gmail.counts();
@@ -782,72 +808,46 @@ fn an_expired_history_falls_back_to_a_round() {
     );
 }
 
-// NOTE: a round begun before the account listing left a label's bare page
-// token as its cursor; it resumes on the label.
 #[test]
-fn a_bare_old_cursor_is_read_as_a_labels() {
-    let mut gmail = FakeGmail::new(30, |index| match index % 2 {
-        1 => vec![INBOX, CLIENTS],
-        _ => vec![INBOX],
-    });
-    gmail.lock().page = 5;
-    let run = GmailRun::default();
-
-    let page = list_label(
-        &mut gmail,
-        &run,
-        CLIENTS,
-        &round(Some("5"), Scope::default()),
-    )
-    .unwrap();
-
-    let handles: Vec<String> = page.items.into_iter().map(|item| item.handle).collect();
-    let expected: Vec<String> = [11, 13, 15, 17, 19].into_iter().map(id).collect();
-    assert_eq!(handles, expected, "the label's second page");
-    assert_eq!(page.cursor.as_deref(), Some("l:10"));
-    assert_eq!(page.checkpoint, None, "a resumed round hands none");
-    let counts = gmail.counts();
-    assert_eq!((counts.account_lists, counts.label_lists), (0, 1));
-}
-
-/// The instant `hours` before the account's newest message.
-fn hours_back(hours: i64) -> String {
-    let top: Timestamp = "2026-10-01T12:00:00Z".parse().unwrap();
-    top.checked_sub(SignedDuration::from_hours(hours))
-        .unwrap()
-        .strftime("%Y-%m-%dT%H:%M:%SZ")
-        .to_string()
-}
-
-// NOTE: a busy account, a message an hour: the two days of margin the
-// listing's `after:` takes below the first chunk's floor hold 48 more
-// messages, all dated below it. The listing stops a batch past the floor
-// rather than reading them, but reads that batch whole, so a message
-// dated in the scope and received below the floor still lands.
-#[test]
-fn a_first_chunk_stops_reading_a_batch_past_its_floor() {
-    let gmail = FakeGmail::new(200, |_| vec![INBOX]);
-    {
-        let mut account = gmail.lock();
-        for (index, mail) in account.mails.values_mut().enumerate() {
-            mail.date = hours_back(index as i64);
-            mail.received = hours_back(index as i64);
+fn two_threads_on_one_run_read_each_moved_mail_once() {
+    for _ in 0..8 {
+        let mut gmail = FakeGmail::seeded(100);
+        let mut harness = Harness::new(&gmail, &[INBOX, SENT, SEED, MOA]);
+        harness.step(None, 100);
+        let checkpoint = gmail.lock().log.len().to_string();
+        for index in 0..40 {
+            gmail.relabel(&id(index), &[CLIENTS], &[]);
         }
-        // NOTE: a sender's clock six hours ahead.
-        account.mails.get_mut(&id(55)).unwrap().date = hours_back(49);
+        let before = gmail.counts();
+        let run = Arc::new(GmailRun::default());
+
+        let workers: Vec<_> = [INBOX, SENT, SEED, MOA]
+            .into_iter()
+            .map(|label| {
+                let mut gmail = gmail.clone();
+                let run = Arc::clone(&run);
+                let checkpoint = checkpoint.clone();
+                thread::spawn(move || {
+                    let request = MailRequest {
+                        listing: Listing::Delta { checkpoint },
+                        scope: Scope::default(),
+                        covered: true,
+                        received: None,
+                    };
+                    list_label(&mut gmail, &run, label, &request)
+                        .unwrap()
+                        .items
+                        .len()
+                })
+            })
+            .collect();
+        let items: Vec<usize> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+
+        assert_eq!(items, [20, 10, 10, 40]);
+        let asked = since(&before, &gmail.counts());
+        assert_eq!((asked.reads, asked.histories), (40, 1));
     }
-    let mut harness = Harness::new(&gmail, &[INBOX]);
-
-    harness.pass();
-
-    let held = harness.held(INBOX);
-    assert_eq!(held.len(), 51, "the 50 newest and the one dated among them");
-    assert!(held.contains(&id(55)));
-    assert_eq!(harness.since(INBOX), Some(Some(hours_back(49))));
-    let counts = gmail.counts();
-    assert_eq!(
-        (counts.batches, counts.reads),
-        (3, 75),
-        "the floor's two batches and one past it, not the 98 the margin lists"
-    );
 }

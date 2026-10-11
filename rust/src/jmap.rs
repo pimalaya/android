@@ -24,16 +24,13 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
 };
 
-use ical::{
-    component::IcalComponent, jscalendar::IcalJscalendarVersion, prop::IcalPropKind,
-    tree::cst::IcalCst,
-};
+use ical::{component::IcalComponent, jscalendar::IcalJscalendarVersion, prop::IcalPropKind};
 use io_jmap::rfc9610::contact_card::JmapContactCard;
 use serde::Serialize;
 use serde_json::{Map, Value, to_string};
 use vcard::{tree::cst::VcardCst, vcard::Vcard};
 
-use crate::types::Card;
+use crate::{calendar::cst_of, types::Card};
 
 /// JMAP ContactCard to the JNI-facing card shape: the projected vCard
 /// document, the ContactCard id as both display id and addressing key
@@ -132,7 +129,7 @@ pub fn to_patch(vcard: &str, base_vcard: Option<&str>) -> Result<BTreeMap<String
 /// in the `iCalendar` hatch, which Stalwart 0.16 drops, so the series
 /// would lose a rule silently.
 pub fn to_jscalendar_event(ical: &str) -> Result<Map<String, Value>, String> {
-    let cst = IcalCst::parse(ical).map_err(|err| format!("Invalid iCalendar: {err}"))?;
+    let cst = cst_of(ical).map_err(|err| format!("Invalid iCalendar: {err}"))?;
     let calendar = cst.decode();
     let rules = |component: &IcalComponent| {
         component

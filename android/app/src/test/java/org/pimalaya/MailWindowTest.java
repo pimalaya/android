@@ -7,6 +7,7 @@ import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
 
+import org.json.JSONArray;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -20,9 +21,10 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * An account's download window: the value a first sync leaves, how it
- * moves (back only, raised by a narrowed bound, never older than the
- * bound), and the date the list's footer offers next.
+ * An account's frontier: the one a step leaves (imports and wrong clocks
+ * aside), the one first chunks leave, how it moves (back only, raised by a
+ * narrowed bound, never older than the bound), and whether a step may bring
+ * more.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailWindowTest {
@@ -88,52 +90,152 @@ public class MailWindowTest {
     }
 
     @Test
-    public void aDatePickedBelowTheBoundWidensItToTheNarrowestCoveringIt() {
-        assertEquals(1, MailScope.covering("2026-09-15T00:00:00Z", TODAY, UTC));
-        assertEquals(12, MailScope.covering("2026-03-03T00:00:00Z", TODAY, UTC));
-        assertEquals(0, MailScope.covering("2020-01-01T00:00:00Z", TODAY, UTC));
-        assertEquals("all my mail", 0, MailScope.covering(null, TODAY, UTC));
-        // NOTE: the bound is midnight on the device's clock too, so a window
-        // on its first day in Paris needs no wider one.
-        String julyInParis = MailWindow.startOf(LocalDate.of(2026, 7, 1), PARIS);
-        assertEquals(julyInParis, MailScope.since(3, TODAY, PARIS));
-        assertEquals(3, MailScope.covering(julyInParis, TODAY, PARIS));
+    public void aStepMayBringMoreUntilAllMailOrTheBound() {
+        assertFalse("no frontier yet: the first step is owed", MailWindow.more(context, ACCOUNT));
+        MailWindow.set(context, ACCOUNT, "2026-09-15T00:00:00Z");
+        assertTrue(MailWindow.more(context, ACCOUNT));
+        MailScope.set(context, ACCOUNT, 1);
+        MailWindow.set(context, ACCOUNT, MailScope.since(1));
+        assertFalse("at the bound's floor", MailWindow.more(context, ACCOUNT));
+        MailScope.set(context, ACCOUNT, 0);
+        MailWindow.set(context, ACCOUNT, null);
+        assertFalse("every message held", MailWindow.more(context, ACCOUNT));
+
+        assertNull(MailWindow.reach(context, ACCOUNT));
+        MailWindow.reach(context, ACCOUNT, 2_000L);
+        MailWindow.reach(context, ACCOUNT, 3_000L);
+        assertEquals(
+                "the oldest reception kept",
+                Long.valueOf(2_000L),
+                MailWindow.reach(context, ACCOUNT));
+        MailWindow.forget(context, ACCOUNT);
+        assertNull(MailWindow.reach(context, ACCOUNT));
     }
 
     @Test
-    public void theFooterOffersTheFirstOfTheNextMonthHoldingMail() {
+    public void aStepOverOneMailboxMovesItsOwnFrontierAndNotTheAccounts() {
+        String clients = PimdirAccount.collectionId(ACCOUNT, "Clients");
+        String inbox = PimdirAccount.collectionId(ACCOUNT, "INBOX");
+        MailWindow.stepped(context, ACCOUNT, null, new MailStep.Outcome("2026-10-01T00:00:00Z", false, 50));
+        assertEquals("2026-10-01T00:00:00Z", MailWindow.since(context, ACCOUNT));
+
+        MailWindow.stepped(
+                context, ACCOUNT, clients, new MailStep.Outcome("2026-09-01T00:00:00Z", false, 50));
+        assertEquals("the account's stays", "2026-10-01T00:00:00Z", MailWindow.since(context, ACCOUNT));
+        assertEquals("2026-09-01T00:00:00Z", MailWindow.since(context, ACCOUNT, clients));
         assertEquals(
-                "an empty September is skipped",
-                "2026-08-01T00:00:00Z",
-                MailWindow.next("2026-08-20T10:00:00Z", "2026-10-01T00:00:00Z", false, UTC));
-        assertEquals(
-                "nothing stored below, headers still to list",
+                "another mailbox reads its account's",
                 "2026-10-01T00:00:00Z",
-                MailWindow.next(null, "2026-10-15T08:00:00Z", true, UTC));
+                MailWindow.since(context, ACCOUNT, inbox));
+        assertTrue(MailWindow.more(context, ACCOUNT, clients));
+
+        // NOTE: the older of the two: an account's step past it wins.
+        MailWindow.stepped(context, ACCOUNT, null, new MailStep.Outcome("2026-08-01T00:00:00Z", false, 50));
+        assertEquals("2026-08-01T00:00:00Z", MailWindow.since(context, ACCOUNT, clients));
+
+        // A mailbox stepped alone to its end has no more, its account still has.
+        MailWindow.stepped(context, ACCOUNT, clients, new MailStep.Outcome(null, true, 3));
+        assertNull(MailWindow.since(context, ACCOUNT, clients));
+        assertFalse(MailWindow.more(context, ACCOUNT, clients));
+        assertTrue(MailWindow.more(context, ACCOUNT));
+        assertTrue(MailWindow.more(context, ACCOUNT, inbox));
+
+        // Moving the account's later drops a mailbox's own older one.
+        MailWindow.set(context, ACCOUNT, "2026-09-15T00:00:00Z");
+        MailWindow.dropMailboxes(context, ACCOUNT, "2026-09-15T00:00:00Z");
+        assertEquals("2026-09-15T00:00:00Z", MailWindow.since(context, ACCOUNT, clients));
+
+        MailWindow.stepped(
+                context, ACCOUNT, clients, new MailStep.Outcome("2026-09-01T00:00:00Z", false, 50));
+        MailWindow.forget(context, ACCOUNT);
+        MailWindow.set(context, ACCOUNT, "2026-10-01T00:00:00Z");
         assertEquals(
-                "2026-09-01T00:00:00Z", MailWindow.next(null, "2026-10-01T00:00:00Z", true, UTC));
-        assertNull(
-                "nothing below and nothing to list",
-                MailWindow.next(null, "2026-10-01T00:00:00Z", false, UTC));
-        assertNull(MailWindow.next(null, null, true, UTC));
+                "forgotten with the account",
+                "2026-10-01T00:00:00Z",
+                MailWindow.since(context, ACCOUNT, clients));
+    }
+
+    @Test
+    public void aStepsFrontierSkipsWhatWasDatedADayBeforeItsReception() {
+        long received = java.time.Instant.parse("2026-10-09T12:00:00Z").toEpochMilli();
+        assertEquals(
+                "an import received with the step is held, not the frontier",
+                "2026-10-08T20:00:00Z",
+                MailWindow.frontier(
+                        List.of(
+                                new MailStep.Brought("2026-10-09T11:00:00Z", received),
+                                new MailStep.Brought("2019-03-01T08:00:00Z", received),
+                                new MailStep.Brought("2026-10-08T20:00:00Z", received),
+                                new MailStep.Brought("", received)), false));
+        assertEquals(
+                "a reception unknown takes the date",
+                "2019-03-01T08:00:00Z",
+                MailWindow.frontier(
+                        List.of(
+                                new MailStep.Brought("2026-10-09T11:00:00Z", received),
+                                new MailStep.Brought("2019-03-01T08:00:00Z", null)), false));
+        assertEquals(
+                "every one imported: the oldest of all, so the list moves",
+                "2018-01-01T00:00:00Z",
+                MailWindow.frontier(
+                        List.of(
+                                new MailStep.Brought("2019-03-01T08:00:00Z", received),
+                                new MailStep.Brought("2018-01-01T00:00:00Z", received)), false));
+        assertNull("nothing brought", MailWindow.frontier(List.of(), false));
+    }
+
+    @Test
+    public void aStepByReceptionNeverReachesBelowItsOldestReception() {
+        long late = java.time.Instant.parse("2026-10-09T15:00:00Z").toEpochMilli();
+        long oldest = java.time.Instant.parse("2026-10-09T14:00:00.500Z").toEpochMilli();
+        List<MailStep.Brought> brought =
+                List.of(
+                        new MailStep.Brought("2026-10-09T09:00:00Z", late),
+                        new MailStep.Brought("2026-10-09T13:59:58Z", oldest));
+        assertEquals(
+                "what was received before 14:00 may be dated after 09:00",
+                "2026-10-09T14:00:00Z",
+                MailWindow.frontier(brought, true));
+        assertEquals(
+                "a step by date keeps the oldest timely date",
+                "2026-10-09T09:00:00Z",
+                MailWindow.frontier(brought, false));
+        assertEquals(
+                "a reception after every date changes nothing in order",
+                "2026-10-09T09:00:00Z",
+                MailWindow.frontier(
+                        List.of(new MailStep.Brought("2026-10-09T09:00:00Z", late - 6 * 3_600_000L)),
+                        true));
     }
 
     @Test
     public void aDateIsMidnightOnTheDeviceClock() {
-        // NOTE: "Load since 1 October" in Paris starts at its midnight, two
-        // hours before UTC's, so a message of 1 October 00:30 there is in.
+        // NOTE: the bound is midnight on the device's clock too.
         assertEquals(
-                "2026-09-30T22:00:00Z",
-                MailWindow.next("2026-10-05T10:00:00Z", "2026-10-15T00:00:00Z", false, PARIS));
-        assertEquals(
-                "a message of 1 October 00:30 in Paris is in October",
-                "2026-09-30T22:00:00Z",
-                MailWindow.next("2026-09-30T22:30:00Z", "2026-10-15T00:00:00Z", false, PARIS));
-        assertEquals(
-                "2026-08-31T22:00:00Z",
-                MailWindow.next(null, "2026-09-30T22:00:00Z", true, PARIS));
+                MailWindow.startOf(LocalDate.of(2026, 7, 1), PARIS),
+                MailScope.since(3, TODAY, PARIS));
         assertEquals(
                 "2026-09-30T22:00:00Z", MailWindow.initial(true, null, List.of(), TODAY, PARIS));
         assertEquals(LocalDate.of(2026, 10, 1), MailWindow.dayOf("2026-09-30T22:00:00Z", PARIS));
+    }
+
+    @Test
+    public void aJmapStepsAnchorsAreKeptPerViewAndForgottenWithTheAccount() {
+        assertTrue(MailWindow.anchors(context, ACCOUNT, null).isEmpty());
+
+        MailWindow.anchor(context, ACCOUNT, null, new JSONArray().put("e49").put("e48"));
+        MailWindow.anchor(context, ACCOUNT, "Clients", new JSONArray().put("c9"));
+        MailWindow.anchor(context, ACCOUNT, null, new JSONArray());
+
+        assertEquals(List.of("e49", "e48"), MailWindow.anchors(context, ACCOUNT, null));
+        assertEquals(List.of("c9"), MailWindow.anchors(context, ACCOUNT, "Clients"));
+        assertEquals(
+                "a view never stepped starts from the account's",
+                List.of("e49", "e48"),
+                MailWindow.anchors(context, ACCOUNT, "INBOX"));
+
+        MailWindow.forget(context, ACCOUNT);
+        assertTrue(MailWindow.anchors(context, ACCOUNT, null).isEmpty());
+        assertTrue(MailWindow.anchors(context, ACCOUNT, "Clients").isEmpty());
     }
 }

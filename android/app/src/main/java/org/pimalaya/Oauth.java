@@ -66,11 +66,96 @@ final class Oauth {
     private static final java.util.Set<String> OIDC_SCOPES =
             java.util.Set.of("offline_access", "openid", "profile", "email");
 
+    /** The hosts Google's own client signs in to: Gmail's IMAP and SMTP, its APIs and DAV. */
+    static final java.util.Set<String> GOOGLE_HOSTS =
+            java.util.Set.of(
+                    "imap.gmail.com",
+                    "smtp.gmail.com",
+                    "www.googleapis.com",
+                    "gmail.googleapis.com",
+                    "people.googleapis.com",
+                    "apidata.googleusercontent.com");
+
+    /** The scopes Google's own client asks for: mail, calendars and contacts. */
+    private static final java.util.Set<String> GOOGLE_SCOPES =
+            java.util.Set.of(
+                    "https://mail.google.com/",
+                    "https://www.googleapis.com/auth/calendar",
+                    "https://www.googleapis.com/auth/carddav",
+                    GOOGLE_PEOPLE_SCOPE);
+
+    /** The hosts Microsoft's own client signs in to: Outlook's IMAP and SMTP, and Graph. */
+    static final java.util.Set<String> MICROSOFT_HOSTS =
+            java.util.Set.of(
+                    "outlook.office365.com",
+                    "outlook.office.com",
+                    "smtp.office365.com",
+                    "smtp-mail.outlook.com",
+                    "graph.microsoft.com");
+
+    /** The scopes Microsoft's own client asks for, Graph's bare or prefixed. */
+    private static final java.util.Set<String> MICROSOFT_SCOPES =
+            java.util.Set.of(
+                    "offline_access",
+                    "https://outlook.office.com/IMAP.AccessAsUser.All",
+                    "https://outlook.office.com/SMTP.Send",
+                    "Mail.ReadWrite",
+                    "Mail.Send",
+                    "Calendars.ReadWrite",
+                    "Contacts.ReadWrite",
+                    "https://graph.microsoft.com/Mail.ReadWrite",
+                    "https://graph.microsoft.com/Mail.Send",
+                    "https://graph.microsoft.com/Calendars.ReadWrite",
+                    "https://graph.microsoft.com/Contacts.ReadWrite");
+
+    /** Which of the app's own clients a grant runs with. */
+    enum Shipped {
+        GOOGLE,
+        MICROSOFT
+    }
+
     private Oauth() {}
 
     /** Whether a grant runs against Google's authorization server. */
     static boolean isGoogle(String authorizationEndpoint) {
         return GOOGLE_AUTH_ENDPOINT.equals(authorizationEndpoint);
+    }
+
+    /**
+     * The app's own client a grant may run with, or null for a generic one.
+     *
+     * <p>The authorization endpoint alone is not enough: a discovered
+     * configuration is free to name Google's sign-in beside its own IMAP
+     * host, and the token the user consents to would then go to that host.
+     * So the shipped client signs in only when every endpoint the token will
+     * be presented to is the provider's own ({@link Endpoints#allOn}).
+     */
+    static Shipped shipped(String authorizationEndpoint, java.util.Collection<String> endpoints) {
+        if (isGoogle(authorizationEndpoint)
+                && Endpoints.allOn(endpoints, "google", GOOGLE_HOSTS)) {
+            return Shipped.GOOGLE;
+        }
+        if (MICROSOFT_AUTH_ENDPOINT.equals(authorizationEndpoint)
+                && Endpoints.allOn(endpoints, "msgraph", MICROSOFT_HOSTS)) {
+            return Shipped.MICROSOFT;
+        }
+        return null;
+    }
+
+    /**
+     * The scope a shipped client asks for: the requested one kept to the
+     * provider's fixed set, whatever else a discovered configuration added.
+     */
+    static String fixedScope(Shipped client, String scope) {
+        java.util.Set<String> allowed =
+                client == Shipped.GOOGLE ? GOOGLE_SCOPES : MICROSOFT_SCOPES;
+        java.util.Set<String> kept = new java.util.LinkedHashSet<>();
+        for (String part : scopes(scope)) {
+            if (allowed.contains(part)) {
+                kept.add(part);
+            }
+        }
+        return kept.isEmpty() ? null : String.join(" ", kept);
     }
 
     /**

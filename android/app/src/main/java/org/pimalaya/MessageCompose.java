@@ -6,18 +6,13 @@ import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.TimeZone;
-import java.util.UUID;
 
 /**
  * The composer: who it is from, who it goes to, and what it says.
@@ -39,9 +34,6 @@ import java.util.UUID;
  * else. With more than one mail account, the picker comes first.
  */
 final class MessageCompose {
-    /** The pattern an RFC 5322 date is written in (section 3.3). */
-    private static final String DATE_FORMAT = "EEE, d MMM yyyy HH:mm:ss Z";
-
     /** The three address fields. */
     private static final int[] RECIPIENTS = {
         R.id.compose_to, R.id.compose_cc, R.id.compose_bcc
@@ -206,12 +198,8 @@ final class MessageCompose {
     }
 
     /**
-     * Composes what is on screen and puts it in the outbox.
-     *
-     * <p>Nothing is handed over here, and that is the point: composing
-     * reaches for nothing, so a message can be written and sent with the
-     * radio off, and the sync that follows is what carries it out. What
-     * the composer waits for is a disk write.
+     * Composes what is on screen and puts it in the outbox ({@link
+     * MailSubmit}).
      *
      * <p>The two stamps are minted here rather than in the bridge, which
      * keeps the composition a pure function of what it is handed: the
@@ -233,27 +221,21 @@ final class MessageCompose {
         // NOTE: everything the fields say, read before the work moves off
         // this thread. A view is the main thread's, and the composition
         // that follows is not.
-        String messageId = messageId(account.email);
-        String date = now();
-        String to = recipients(R.id.compose_to);
-        String subject = value(R.id.compose_subject);
-
-        String draft;
+        JSONObject draft;
         try {
             draft =
                     new JSONObject()
                             .put("from", account.email)
                             .put("fromName", SenderName.of(host, account.email))
-                            .put("to", to)
+                            .put("to", recipients(R.id.compose_to))
                             .put("cc", recipients(R.id.compose_cc))
                             .put("bcc", recipients(R.id.compose_bcc))
-                            .put("subject", subject)
+                            .put("subject", value(R.id.compose_subject))
                             .put("body", value(R.id.compose_body))
-                            .put("date", date)
-                            .put("messageId", messageId)
+                            .put("date", MailSubmit.now())
+                            .put("messageId", MailSubmit.messageId(account.email))
                             .put("inReplyTo", opened != null ? opened.inReplyTo : "")
-                            .put("references", opened != null ? opened.references : "")
-                            .toString();
+                            .put("references", opened != null ? opened.references : "");
         } catch (JSONException error) {
             host.showError(error, R.string.compose_failed);
             return;
@@ -274,21 +256,10 @@ final class MessageCompose {
                 () -> {
                     Exception failure = null;
                     try {
-                        byte[] source = host.client.composeMessage(draft);
-                        // The `Message-ID` is the identity, which is what
-                        // the payload names it by: it is minted here and
-                        // stamped on the message, so the copy the sync
-                        // files in the sent mailbox comes back under the
-                        // same name.
-                        host.mail.queueSubmission(
-                                sender.email,
-                                PimdirSummary.bare(messageId),
-                                subject,
-                                PimdirSummary.mailSortKey(date),
-                                source);
-                        stageSentCopy(sender, messageId, subject, to, date, source);
+                        new MailSubmit(host.client, host.mail, host.mailEngine(sender.email))
+                                .queue(draft);
                     } catch (Exception error) {
-                        Log.w("pimalaya", "compose failed: " + sender.email, error);
+                        Log.w("pimalaya", "compose failed: " + Accounts.redacted(sender.email), error);
                         failure = error;
                     }
 
@@ -318,47 +289,6 @@ final class MessageCompose {
                 });
     }
 
-    /**
-     * Stages the copy the sender keeps in the account's sent mailbox beside
-     * the submission, so it shows there at once. The sync carries it out:
-     * the provider filing sent mail itself (Gmail, Graph, JMAP), its listing
-     * lands the copy by the `Message-ID`; elsewhere the copy is appended
-     * once the submission went (pimdir SYNC §5).
-     *
-     * <p>None for an account marking no sent mailbox.
-     */
-    private void stageSentCopy(
-            AccountEntry sender,
-            String messageId,
-            String subject,
-            String to,
-            String date,
-            byte[] source)
-            throws JSONException {
-        String sent = host.mail.sentOf(sender.email);
-        if (sent == null) {
-            return;
-        }
-        host.mailEngine(sender.email)
-                .mutateAdd(
-                        sent,
-                        PimdirSummary.bare(messageId),
-                        // NOTE: the composition is 7-bit (RFC 2047 words, a
-                        // quoted-printable body), so its text is its bytes.
-                        new String(source, StandardCharsets.UTF_8),
-                        new JSONArray().put(MailEngine.SEEN),
-                        PimdirSummary.mail(
-                                messageId,
-                                subject,
-                                null,
-                                sender.email,
-                                to.split(",")[0].trim(),
-                                date,
-                                source.length,
-                                false),
-                        PimdirSummary.mailSortKey(date));
-    }
-
     private String value(int id) {
         return ((EditText) host.findViewById(id)).getText().toString().trim();
     }
@@ -366,23 +296,5 @@ final class MessageCompose {
     /** One address field's recipients, comma separated. */
     private String recipients(int id) {
         return ((RecipientField) host.findViewById(id)).value();
-    }
-
-    /** Now, as the date RFC 5322 section 3.3 writes. */
-    private static String now() {
-        java.text.SimpleDateFormat format =
-                new java.text.SimpleDateFormat(DATE_FORMAT, Locale.US);
-        format.setTimeZone(TimeZone.getDefault());
-        return format.format(new java.util.Date());
-    }
-
-    /**
-     * A fresh `Message-ID` under the sender's own domain, which is the
-     * one RFC 5322 section 3.6.4 says whoever mints it should use.
-     */
-    private static String messageId(String email) {
-        int at = email.lastIndexOf('@');
-        String domain = at < 0 ? "pimalaya.android" : email.substring(at + 1);
-        return "<" + UUID.randomUUID() + "@" + domain + ">";
     }
 }

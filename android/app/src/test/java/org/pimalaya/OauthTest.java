@@ -68,4 +68,52 @@ public class OauthTest {
         assertFalse(Oauth.covers(null, GMAIL));
         assertFalse(Oauth.covers(GMAIL, null));
     }
+
+    /**
+     * The app's own clients sign in only to their provider's hosts: a
+     * configuration naming Google's sign-in beside another IMAP host gets a
+     * generic grant, so the token the user consents to never reaches it.
+     */
+    @Test
+    public void theShippedClientSignsInToItsProviderOnly() {
+        assertEquals(
+                Oauth.Shipped.GOOGLE,
+                Oauth.shipped(
+                        Oauth.GOOGLE_AUTH_ENDPOINT,
+                        java.util.List.of("imaps://imap.gmail.com:993", "smtps://smtp.gmail.com:465")));
+        assertNull(
+                Oauth.shipped(
+                        Oauth.GOOGLE_AUTH_ENDPOINT,
+                        java.util.List.of("imaps://imap.evil.example:993")));
+        assertEquals(
+                Oauth.Shipped.MICROSOFT,
+                Oauth.shipped(
+                        Oauth.MICROSOFT_AUTH_ENDPOINT,
+                        java.util.List.of(
+                                "imaps://outlook.office365.com:993", "msgraph://jane@outlook.com")));
+        assertNull(
+                Oauth.shipped(
+                        Oauth.MICROSOFT_AUTH_ENDPOINT,
+                        java.util.List.of("smtps://smtp.evil.example:465")));
+        assertNull(
+                Oauth.shipped(
+                        "https://auth.example.org/authorize",
+                        java.util.List.of("imaps://imap.gmail.com:993")));
+    }
+
+    /** A shipped client asks for its provider's scopes, nothing a configuration adds. */
+    @Test
+    public void theShippedClientAsksForFixedScopes() {
+        assertEquals(
+                GMAIL + " " + CALENDAR,
+                Oauth.fixedScope(
+                        Oauth.Shipped.GOOGLE,
+                        GMAIL + " https://www.googleapis.com/auth/drive " + CALENDAR));
+        assertEquals(
+                "https://outlook.office.com/IMAP.AccessAsUser.All offline_access",
+                Oauth.fixedScope(
+                        Oauth.Shipped.MICROSOFT,
+                        "https://outlook.office.com/IMAP.AccessAsUser.All Files.ReadWrite.All offline_access"));
+        assertNull(Oauth.fixedScope(Oauth.Shipped.GOOGLE, "https://www.googleapis.com/auth/drive"));
+    }
 }

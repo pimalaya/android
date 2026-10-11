@@ -25,8 +25,11 @@ use io_webdav::{
             list::CaldavCalendarList,
         },
         item::{
-            CaldavItemEntry, create::CaldavItemCreate, delete::CaldavItemDelete,
-            multiget::CaldavItemMultiget, update::CaldavItemUpdate,
+            CaldavItemEntry,
+            create::{CaldavItemCreate, CaldavItemCreateOk},
+            delete::CaldavItemDelete,
+            multiget::CaldavItemMultiget,
+            update::CaldavItemUpdate,
         },
     },
     rfc4918::WebdavAuth,
@@ -35,8 +38,8 @@ use io_webdav::{
 use url::Url;
 
 use crate::{
-    client::{Client, USER_AGENT},
-    types::{BridgeError, Calendar, Event},
+    client::{Client, USER_AGENT, trust::trusted_href},
+    types::{BridgeError, Calendar, Event, EventRef},
 };
 
 impl<'a, 'local> Client<'a, 'local> {
@@ -145,9 +148,10 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(self.run(url, coroutine)?.etag)
     }
 
-    /// Creates the object at resource id `id` inside the calendar
-    /// collection at `url`, returning the new ETag when the server
-    /// sends one.
+    /// Creates the object named `id` inside the calendar collection at
+    /// `url`, returning the name the server filed it by
+    /// ([`into_created_event`]) and the new ETag when the server sends
+    /// one.
     ///
     /// The create is guarded on the resource not existing, which
     /// io-webdav puts on the request as `If-None-Match: *`: a `UID`
@@ -159,7 +163,7 @@ impl<'a, 'local> Client<'a, 'local> {
         credentials: &crate::types::Credentials,
         id: &str,
         ical: &str,
-    ) -> Result<Option<String>, BridgeError> {
+    ) -> Result<EventRef, BridgeError> {
         let auth = auth(credentials);
         let coroutine = CaldavItemCreate::new(
             url,
@@ -170,7 +174,7 @@ impl<'a, 'local> Client<'a, 'local> {
             ical.as_bytes().to_vec(),
         );
 
-        Ok(self.run(url, coroutine)?.etag)
+        Ok(into_created_event(self.run(url, coroutine)?))
     }
 
     /// Deletes the object at resource id `id` inside the calendar
@@ -190,15 +194,17 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(())
     }
 
-    /// PROPFIND the principal for `CALDAV:calendar-home-set`.
+    /// PROPFIND the principal for `CALDAV:calendar-home-set`, on a server
+    /// the credential may follow to ([`trusted_href`]).
     fn calendar_home_set(
         &mut self,
         principal: &Url,
         auth: &WebdavAuth,
     ) -> Result<Option<Url>, BridgeError> {
-        self.run_redirect(principal, |url| {
+        let home = self.run_redirect(principal, |url| {
             CaldavCalendarHomeSet::new(url, auth, USER_AGENT, url.path())
-        })
+        })?;
+        home.map(|home| trusted_href(principal, home)).transpose()
     }
 }
 
@@ -241,3 +247,20 @@ fn into_event(entry: CaldavItemEntry) -> Event {
         ical: String::from_utf8_lossy(&entry.data).into_owned(),
     }
 }
+
+/// A created object under the resource name the server filed it by: the
+/// name asked for, or the one its `Location` header answered. Google
+/// files an event under a name of its own, and a binding kept on the
+/// name asked for addresses a resource that does not exist: its delete
+/// answers 404, read as converged, and the next listing brings the
+/// event back.
+fn into_created_event(created: CaldavItemCreateOk) -> EventRef {
+    EventRef {
+        id: created.id,
+        etag: created.etag,
+    }
+}
+
+#[cfg(test)]
+#[path = "caldav_tests.rs"]
+mod tests;

@@ -7,7 +7,9 @@ import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteCursor;
 import io.requery.android.database.sqlite.SQLiteDatabase;
+import io.requery.android.database.sqlite.SQLiteProgram;
 import io.requery.android.database.sqlite.SQLiteQuery;
+import io.requery.android.database.sqlite.SQLiteStatement;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -21,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiPredicate;
+import java.util.regex.Pattern;
 
 /**
  * The mail side of the pimdir store: mailboxes as collections of kind
@@ -77,11 +80,20 @@ final class MailStore {
     /** Which accounts are listed account-wide, by account id. */
     private static final String ACCOUNT_WIDE_PREFS = "mail-account-wide";
 
+    /** Which accounts had their cross-linked bodies released, by account id. */
+    private static final String LINKS_REPAIRED_PREFS = "mail-links-repaired";
+
     /** Which accounts' servers erase no single message (no UIDPLUS), by account id. */
     private static final String MARKING_PREFS = "mail-marks-deleted";
 
     /** Which sent copies a provider filed under its own Message-ID, by that id. */
     private static final String SENT_ALIAS_PREFS = "mail-sent-alias";
+
+    /**
+     * What a parked submission's reason starts with when the message may
+     * have gone ({@link #parkUncertain}), rather than been refused.
+     */
+    static final String UNCERTAIN = "uncertain: ";
 
     private final PimdirItems items;
     private final PimdirDb store;
@@ -418,6 +430,13 @@ final class MailStore {
         final boolean failed;
 
         /**
+         * Whether its row was parked because the message may have gone: the
+         * whole of it was handed over and no verdict came back. Sent again
+         * only when somebody says so ({@link MailStore#resendOutgoing}).
+         */
+        final boolean uncertain;
+
+        /**
          * Whether the message is waiting to go out, which is what a row
          * says of itself rather than something a caller works out: it is the
          * one state where the store holds a message no server has.
@@ -456,6 +475,27 @@ final class MailStore {
                 long queued,
                 String objectHash,
                 boolean failed) {
+            this(accountEmail, collection, mailbox, id, subject, fromName, fromAddress, stamp,
+                    seen, answered, flagged, hasAttachment, queued, objectHash, failed, false);
+        }
+
+        StoredMessage(
+                String accountEmail,
+                String collection,
+                String mailbox,
+                String id,
+                String subject,
+                String fromName,
+                String fromAddress,
+                long stamp,
+                boolean seen,
+                boolean answered,
+                boolean flagged,
+                boolean hasAttachment,
+                long queued,
+                String objectHash,
+                boolean failed,
+                boolean uncertain) {
             this.accountEmail = accountEmail;
             this.collection = collection;
             this.mailbox = mailbox;
@@ -475,6 +515,7 @@ final class MailStore {
             this.queued = queued;
             this.objectHash = objectHash;
             this.failed = failed;
+            this.uncertain = uncertain;
             this.pending = queued != 0;
             this.sortKey = "";
             this.seq = 0;
@@ -525,6 +566,7 @@ final class MailStore {
             this.queued = 0;
             this.objectHash = null;
             this.failed = false;
+            this.uncertain = false;
             this.pending = false;
             this.unsynced = unsynced;
             this.refused = refused;
@@ -589,7 +631,8 @@ final class MailStore {
                 false,
                 action.id,
                 action.objectHash,
-                !action.pending());
+                !action.pending(),
+                action.error != null && action.error.startsWith(UNCERTAIN));
     }
 
     /**
@@ -878,7 +921,7 @@ final class MailStore {
             return 0;
         }
         PimdirSql.Bound bound = query.pattern == null && query.hidden == null
-                ? PimdirSql.bind("COUNT_MAIL", query.values(null, -1))
+                ? unjoined(PimdirSql.bind("COUNT_MAIL", query.values(null, -1)), query.attachment)
                 : around("SELECT count(*) FROM (", listed(query), ")");
         try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
             return cursor.moveToFirst() ? cursor.getLong(0) : 0;
@@ -917,7 +960,7 @@ final class MailStore {
         if (query.pattern == null && query.hidden == null) {
             Map<String, Object> values = query.values(null, -1);
             values.put("shift", shift);
-            bound = PimdirSql.bind("COUNT_MAIL_BY_DAY", values);
+            bound = unjoined(PimdirSql.bind("COUNT_MAIL_BY_DAY", values), query.attachment);
         } else {
             PimdirSql.Bound search = listed(query);
             Object[] args = new Object[search.args.length + 1];
@@ -949,7 +992,7 @@ final class MailStore {
         values.put("collections", query.collections);
         values.put("attachment", null);
         values.put("since", query.since);
-        PimdirSql.Bound bound = PimdirSql.bind("COUNT_UNREAD", values);
+        PimdirSql.Bound bound = unjoined(PimdirSql.bind("COUNT_UNREAD", values), null);
         long unread = 0;
         try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
@@ -1000,40 +1043,47 @@ final class MailStore {
     }
 
     /**
-     * The sort key of the query's newest message dated below {@code floor},
-     * under its chips, null when none is stored: one row of
+     * The sort keys of the query's {@code count} newest messages dated below
+     * {@code floor}, under its chips, newest first, an undated one left out:
      * {@code list_mail_page_filtered} read after a cursor sorting before
-     * every row dated at the floor.
+     * every row dated at the floor. What a step from the store moves a
+     * frontier by ({@link WidenStep}).
      */
-    String newestBelow(Query query, String floor) {
+    List<String> datesBelow(Query query, String floor, int count) {
+        List<String> dates = new ArrayList<>();
         if (query.size == 0 || floor == null) {
-            return null;
+            return dates;
         }
-        Map<String, Object> values = query.values(null, 1);
+        Map<String, Object> values = query.values(null, count);
         values.put("since", null);
         values.put("after_key", floor);
         values.put("after_seq", Long.MIN_VALUE);
         values.put("after_collection", "");
-        PimdirSql.Bound bound = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
+        PimdirSql.Bound bound = below(PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values), floor);
         try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
-            return cursor.moveToFirst() && !cursor.isNull(5) ? cursor.getString(5) : null;
+            while (cursor.moveToNext()) {
+                if (!cursor.isNull(5) && !cursor.getString(5).isEmpty()) {
+                    dates.add(cursor.getString(5));
+                }
+            }
         }
+        return dates;
     }
 
     /**
      * One page of the query, newest first: after {@code after} when given
      * (the keyset, what a scroll reads next), else from {@code offset} rows
-     * in (what a fling lands on).
+     * in.
      *
      * <p>The keyset is {@code list_mail_page_filtered}'s and
-     * {@code search_mail}'s own; an offset reads the same statement as a
-     * subquery, which costs the rows it skips and is taken only where no
-     * neighbouring page is loaded to read after.
+     * {@code search_mail}'s own, bounded on the sort key ({@link #below}) so
+     * a page deep in the list costs its own rows. An offset reads the same
+     * statement as a subquery, which costs the rows it skips: a fling reads
+     * from the day it lands on instead ({@link #pageBelow}).
      */
     List<StoredMessage> page(Query query, StoredMessage after, long offset, int limit) {
-        List<StoredMessage> messages = new ArrayList<>(limit);
         if (query.size == 0 || limit <= 0) {
-            return messages;
+            return new ArrayList<>();
         }
         String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
         PimdirSql.Bound bound;
@@ -1042,17 +1092,46 @@ final class MailStore {
             // cut out of it is still a whole one.
             PimdirSql.Bound read =
                     PimdirSql.bind(statement, query.values(after, limit + query.hiding));
-            bound = hiding(read, query, limit);
+            bound = below(hiding(read, query, limit), after == null ? null : after.sortKey);
         } else {
-            PimdirSql.Bound inner = listed(query);
-            Object[] args = new Object[inner.args.length + 2];
-            System.arraycopy(inner.args, 0, args, 0, inner.args.length);
-            args[inner.args.length] = limit;
-            args[inner.args.length + 1] = offset;
-            bound = new PimdirSql.Bound(
-                    "SELECT * FROM (" + inner.sql + ") LIMIT ? OFFSET ?", args);
+            bound = skipping(listed(query), offset, limit);
         }
+        return rows(bound, limit);
+    }
 
+    /**
+     * One page of the query, newest first, {@code skip} rows into those
+     * sorting below {@code key} (a sort key, null for the top): what a fling
+     * lands on, from the start of the day it reaches ({@link MailList}),
+     * costing the rows of that day it skips rather than every row above it.
+     */
+    List<StoredMessage> pageBelow(Query query, String key, long skip, int limit) {
+        if (query.size == 0 || limit <= 0) {
+            return new ArrayList<>();
+        }
+        String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
+        Map<String, Object> values = query.values(null, skip + limit + query.hiding);
+        if (key != null) {
+            values.put("after_key", key);
+            values.put("after_seq", Long.MIN_VALUE);
+            values.put("after_collection", "");
+        }
+        PimdirSql.Bound read = hiding(PimdirSql.bind(statement, values), query, skip + limit);
+        return rows(below(skipping(read, skip, limit), key), limit);
+    }
+
+    /** A read narrowed to {@code limit} of its rows past the first {@code skip}. */
+    private static PimdirSql.Bound skipping(PimdirSql.Bound inner, long skip, int limit) {
+        Object[] args = new Object[inner.args.length + 2];
+        System.arraycopy(inner.args, 0, args, 0, inner.args.length);
+        args[inner.args.length] = limit;
+        args[inner.args.length + 1] = skip;
+        return new PimdirSql.Bound("SELECT * FROM (" + inner.sql + ") LIMIT ? OFFSET ?", args);
+    }
+
+    /** The rows of a page read as a list shows them. */
+    private List<StoredMessage> rows(PimdirSql.Bound bound, int limit) {
+        List<StoredMessage> messages = new ArrayList<>(limit);
         Map<String, PimdirCollections.Stored> mailboxes = mailboxes();
         try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
@@ -1063,6 +1142,47 @@ final class MailStore {
             }
         }
         return messages;
+    }
+
+    /**
+     * A newest-first keyset read with the bound its cursor implies stated on
+     * the sort key, so the index serves it: {@code sort_key <= key} on
+     * {@code items}, read through a common table expression of that name
+     * which the canonical statement then reads in its place, and which
+     * SQLite flattens into it. Without it the cursor's row comparison
+     * stays out of {@code items_by_sort_global}, and every page walks from
+     * the newest row down to its own (pimdir's statements are to state the
+     * bound themselves; see cairn/changes/store-performance). A null key
+     * reads the statement as it is.
+     */
+    static PimdirSql.Bound below(PimdirSql.Bound inner, String key) {
+        if (key == null) {
+            return inner;
+        }
+        Object[] args = new Object[inner.args.length + 1];
+        args[0] = key;
+        System.arraycopy(inner.args, 0, args, 1, inner.args.length);
+        return new PimdirSql.Bound(
+                "WITH items AS (SELECT * FROM main.items WHERE sort_key <= ?) " + inner.sql,
+                args);
+    }
+
+    /**
+     * A count read without the summary join it does not need: with the
+     * attachment chip off, {@code count_mail}, {@code count_mail_by_day} and
+     * {@code count_unread} read {@code mail_summary} for that chip alone, so
+     * an empty relation of that name stands in for it and every row skips
+     * the probe (MailStoreTest pins that they read nothing else of it).
+     * With the chip on, the statement as it is.
+     */
+    static PimdirSql.Bound unjoined(PimdirSql.Bound inner, Integer attachment) {
+        if (attachment != null) {
+            return inner;
+        }
+        return new PimdirSql.Bound(
+                "WITH mail_summary(collection, link_id, attachment)"
+                        + " AS (SELECT NULL, NULL, NULL WHERE 0) " + inner.sql,
+                inner.args);
     }
 
     /**
@@ -1128,7 +1248,10 @@ final class MailStore {
         values.put("after_collection", null);
         values.put("limit", 500);
         while (true) {
-            PimdirSql.Bound bound = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
+            PimdirSql.Bound bound =
+                    below(
+                            PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values),
+                            (String) values.get("after_key"));
             int read = 0;
             try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
                 while (cursor.moveToNext()) {
@@ -1257,7 +1380,29 @@ final class MailStore {
                 null);
     }
 
-    private static void bind(SQLiteQuery query, Object[] args) {
+    /**
+     * Runs a canonical write for its effect alone, answering how many rows
+     * it changed ({@code changes()}), its {@code RETURNING} clause dropped.
+     *
+     * <p>Never read a write through a cursor: a cursor runs its statement
+     * again each time it refills its window (2 MB), skipping the rows it
+     * already handed out, so a {@code DELETE ... RETURNING} past one window
+     * deletes again from the top and its rows past the first window come
+     * back as none, or never end.
+     */
+    static int changed(SQLiteDatabase db, PimdirSql.Bound bound) {
+        String sql = RETURNING.matcher(bound.sql).replaceFirst("");
+        try (SQLiteStatement statement = db.compileStatement(sql)) {
+            bind(statement, bound.args);
+            return statement.executeUpdateDelete();
+        }
+    }
+
+    /** A trailing {@code RETURNING} clause, which {@link #changed} drops. */
+    private static final Pattern RETURNING =
+            Pattern.compile("\\s+RETURNING\\s[^;]*;?\\s*$", Pattern.CASE_INSENSITIVE);
+
+    private static void bind(SQLiteProgram query, Object[] args) {
         for (int index = 0; index < args.length; index++) {
             Object value = args[index];
             int position = index + 1;
@@ -1370,49 +1515,39 @@ final class MailStore {
      * when nothing limits it: the most recent of their floors, every older
      * message of one mailbox waiting on the others' chunks to reach it, and
      * of the windows of the accounts they belong to, so the list stays
-     * continuous by date across accounts. A mailbox kept whole brings no
-     * window. Over {@code edges}, as {@link #edges} reads them.
+     * continuous by date across accounts, a mailbox stepped alone reaching
+     * down to its own ({@link #mailboxWindow}). A mailbox kept whole brings
+     * no window; a mailbox of an account stepped through account-wide
+     * (Gmail) no floor, its steps alone deciding what it holds. Over
+     * {@code edges}, as {@link #edges} reads them.
      */
     String floorOf(Query query, List<Edge> edges) {
         List<String> floors = new ArrayList<>();
-        Map<String, String> windows = new HashMap<>();
         for (Edge edge : edges) {
             if (!query.holds(edge.collection)) {
                 continue;
             }
-            floors.add(edge.limit);
+            if (!edge.accountWide) {
+                floors.add(edge.limit);
+            }
             if (!MailOffline.whole(context, edge.collection)) {
-                floors.add(windows.computeIfAbsent(edge.accountEmail, this::windowOf));
+                floors.add(mailboxWindow(edge.collection));
             }
         }
         return MailWindow.latest(floors);
     }
 
-    /**
-     * The query's mailboxes whose bodies download ({@link
-     * MailBodies#downloads}): what moving a window back would take in.
-     */
-    Query downloading(Query query) {
-        Map<String, String> roles = roles();
-        return query.only(
-                collection ->
-                        MailBodies.downloads(
-                                roles.get(collection), MailOffline.whole(context, collection)));
-    }
-
-    /** Whether a mailbox of the query still has headers to list below its floor. */
-    static boolean listing(Query query, List<Edge> edges) {
-        for (Edge edge : edges) {
-            if (query.holds(edge.collection) && edge.limit != null) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     /** An account's window today, null for all mail ({@link MailWindow#since}). */
     String windowOf(String accountEmail) {
         return MailWindow.since(context, accounts.idOf(accountEmail));
+    }
+
+    /**
+     * A mailbox's window today, null for all mail: the older of its own, a
+     * step over it alone left, and its account's.
+     */
+    String mailboxWindow(String collection) {
+        return MailWindow.since(context, PimdirAccount.accountIdOf(collection), collection);
     }
 
     /**
@@ -1610,12 +1745,7 @@ final class MailStore {
                 Map<String, Object> values = new HashMap<>();
                 values.put("collection", stored.id);
                 values.put("before", before);
-                PimdirSql.Bound bound = PimdirSql.bind("COLLECT_BEFORE", values);
-                try (Cursor cursor = typed(db, bound.sql, bound.args)) {
-                    while (cursor.moveToNext()) {
-                        collected++;
-                    }
-                }
+                collected += changed(db, PimdirSql.bind("COLLECT_BEFORE", values));
             }
             // NOTE: the cascade drops pins no statement returns, so the
             // counts are recomputed before the collector reads them.
@@ -1659,12 +1789,7 @@ final class MailStore {
         try {
             PimdirSql.Bound bases = PimdirSql.bind("RELEASE_BASES_BEFORE", values);
             db.execSQL(bases.sql, bases.args);
-            PimdirSql.Bound bodies = PimdirSql.bind("RELEASE_BEFORE", values);
-            try (Cursor cursor = typed(db, bodies.sql, bodies.args)) {
-                while (cursor.moveToNext()) {
-                    released++;
-                }
-            }
+            released = changed(db, PimdirSql.bind("RELEASE_BEFORE", values));
             db.execSQL(PimdirSql.split(PimdirSql.of("RECOMPUTE_REFCOUNTS"))[0]);
             items.collectGarbage(db);
             db.setTransactionSuccessful();
@@ -1672,6 +1797,89 @@ final class MailStore {
             db.endTransaction();
         }
         items.unlinkCollected();
+        return released;
+    }
+
+    /**
+     * Frees the bodies of one account's mail that another collection holds
+     * under the same link id, each item back to its summary for the body
+     * step to read again: what the store-wide lookup linked across IMAP
+     * mailboxes while it read a UID as an identity, another mailbox's
+     * message of the same UID standing in for the one listed. Both sides
+     * of a link go, which one is right being unknown without the bytes; a
+     * message the store still needs the body of stays, on {@code
+     * release_before}'s terms (pimdir STORAGE section 11.4). Answers how
+     * many were freed.
+     */
+    int releaseCrossLinked(String accountId) {
+        SQLiteDatabase db = items.writable();
+        int released = 0;
+        db.beginTransaction();
+        try {
+            List<String[]> linked = new ArrayList<>();
+            try (Cursor cursor =
+                    db.rawQuery(
+                            "SELECT i.collection, i.link_id, i.object_hash FROM items i"
+                                    + " JOIN collections c ON c.id = i.collection"
+                                    + " WHERE c.account = ? AND c.kind = ?"
+                                    + " AND i.deleted = 0 AND i.conflicted = 0"
+                                    + " AND i.object_hash IS NOT NULL"
+                                    + " AND EXISTS (SELECT 1 FROM items o"
+                                    + " WHERE o.link_id = i.link_id AND o.collection <> i.collection"
+                                    + " AND o.object_hash = i.object_hash)"
+                                    + " AND EXISTS (SELECT 1 FROM bindings b"
+                                    + " WHERE b.collection = i.collection AND b.link_id = i.link_id)"
+                                    + " AND NOT EXISTS (SELECT 1 FROM bindings b"
+                                    + " WHERE b.collection = i.collection AND b.link_id = i.link_id"
+                                    + " AND (b.conflicted = 1"
+                                    + " OR NOT (b.base_present = 1 OR b.base_flags IS NOT NULL"
+                                    + " OR b.base_object IS NOT NULL OR b.base_revision IS NOT NULL)"
+                                    + " OR (b.base_object IS NOT NULL"
+                                    + " AND b.base_object != i.object_hash)))",
+                            new String[] {accountId, PimdirSummary.MAIL})) {
+                while (cursor.moveToNext()) {
+                    linked.add(
+                            new String[] {
+                                cursor.getString(0), cursor.getString(1), cursor.getString(2)
+                            });
+                }
+            }
+            for (String[] item : linked) {
+                db.execSQL(
+                        "UPDATE bindings SET base_object = NULL, base_present = 1"
+                                + " WHERE collection = ? AND link_id = ? AND base_object = ?",
+                        item);
+                db.execSQL(
+                        "UPDATE items SET object_hash = NULL, level = 1"
+                                + " WHERE collection = ? AND link_id = ?",
+                        new String[] {item[0], item[1]});
+                released++;
+            }
+            if (released > 0) {
+                db.execSQL(PimdirSql.split(PimdirSql.of("RECOMPUTE_REFCOUNTS"))[0]);
+                items.collectGarbage(db);
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        items.unlinkCollected();
+        return released;
+    }
+
+    /**
+     * {@link #releaseCrossLinked} once per account, for an account whose
+     * link ids name a message in its own mailbox alone; answers how many
+     * were freed, 0 once done.
+     */
+    int repairLinks(String accountId) {
+        SharedPreferences prefs =
+                context.getSharedPreferences(LINKS_REPAIRED_PREFS, Context.MODE_PRIVATE);
+        if (prefs.getBoolean(accountId, false)) {
+            return 0;
+        }
+        int released = releaseCrossLinked(accountId);
+        prefs.edit().putBoolean(accountId, true).apply();
         return released;
     }
 
@@ -1731,6 +1939,15 @@ final class MailStore {
     /** Files the message a reader just fetched, against its envelope. */
     void saveSource(String collection, String id, byte[] source) {
         items.putObject(collection, id, source);
+    }
+
+    /**
+     * Files the message a reader just fetched into {@code file}, hashed by the
+     * bridge as {@code hash}, against its envelope: moved into the blob store,
+     * never read on this side.
+     */
+    void saveSource(String collection, String id, String hash, java.io.File file) {
+        items.putObject(collection, id, hash, file);
     }
 
     /** One message waiting to be sent: what the drain hands over. */
@@ -1828,6 +2045,42 @@ final class MailStore {
     /** Records why a submission will not be tried again. */
     void parkOutgoing(long queued, String reason) {
         queue.park(queued, reason);
+    }
+
+    /**
+     * Parks a submission that may have gone: the whole message was handed
+     * over and no verdict came back. Not sent again on its own, which could
+     * deliver it twice, but only once the user asks
+     * ({@link #resendOutgoing}).
+     */
+    void parkUncertain(long queued, String reason) {
+        queue.park(queued, UNCERTAIN + reason);
+    }
+
+    /**
+     * Queues a parked submission again as a new row, at the end of the
+     * queue, and drops the parked one: the user checked the message did not
+     * go and asked for it to be sent. The new row is appended before the old
+     * one goes, so its body stays pinned throughout.
+     */
+    void resendOutgoing(long queued) {
+        for (PimdirQueue.Action action : queue.parked()) {
+            if (action.id != queued || !PimdirQueue.SUBMIT.equals(action.kind)) {
+                continue;
+            }
+            byte[] source = queue.body(action.objectHash);
+            if (source == null) {
+                throw new IllegalStateException("The message to send again is gone");
+            }
+            queue.enqueue(
+                    action.collection,
+                    action.payload.optString("from"),
+                    PimdirQueue.SUBMIT,
+                    action.payload,
+                    source);
+            queue.acknowledge(action.id);
+            return;
+        }
     }
 
     /** Counts one failed attempt, leaving the message where it is. */

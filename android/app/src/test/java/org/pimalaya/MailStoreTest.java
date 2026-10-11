@@ -330,6 +330,37 @@ public class MailStoreTest {
     }
 
     @Test
+    public void anUncertainSubmissionWaitsForTheUserToSendItAgain() {
+        mailboxes(ONE, "INBOX");
+        store.queueSubmission(
+                ONE,
+                "maybe@example.org",
+                "Maybe",
+                DATE,
+                SOURCE.getBytes(StandardCharsets.UTF_8));
+
+        long queued = store.outgoing(ONE).get(0).id;
+        store.parkUncertain(queued, "Reached unexpected EOF on SMTP stream");
+
+        // Never handed over again on its own, which could deliver it twice.
+        assertTrue(store.outgoing(ONE).isEmpty());
+        MailStore.StoredMessage row = store.loadMerged(10).get(0);
+        assertTrue(row.uncertain);
+        assertTrue(row.failed);
+
+        store.resendOutgoing(row.queued);
+
+        List<MailStore.Outgoing> waiting = store.outgoing(ONE);
+        assertEquals(1, waiting.size());
+        assertEquals("maybe@example.org", waiting.get(0).messageId);
+        assertEquals(SOURCE, new String(waiting.get(0).source, StandardCharsets.UTF_8));
+        MailStore.StoredMessage again = store.loadMerged(10).get(0);
+        assertFalse(again.uncertain);
+        assertFalse(again.failed);
+        assertEquals("one body, still pinned", 1, scalar("SELECT count(*) FROM objects"));
+    }
+
+    @Test
     public void anActionOfAnotherKindIsLeftAlone() {
         mailboxes(ONE, "INBOX");
         store.queueSubmission(
@@ -522,10 +553,11 @@ public class MailStoreTest {
                 store.sum(query, "2026-02-01T00:00:00Z", "2026-03-02T00:00:00Z", null);
         assertEquals(58, unknown.count);
         assertEquals(58, unknown.unknown);
-        assertTrue(
-                "the newest below a floor",
-                store.newestBelow(query, "2026-03-02T00:00:00Z").startsWith("2026-03-01"));
-        assertNull(store.newestBelow(query, "2026-01-01T00:00:00Z"));
+        List<String> below = store.datesBelow(query, "2026-03-02T00:00:00Z", 3);
+        assertEquals("the newest below a floor, newest first", 3, below.size());
+        assertTrue(below.get(0).startsWith("2026-03-01"));
+        assertTrue(below.get(0).compareTo(below.get(2)) > 0);
+        assertTrue(store.datesBelow(query, "2026-01-01T00:00:00Z", 3).isEmpty());
     }
 
     @Test

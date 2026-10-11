@@ -22,8 +22,8 @@ import org.pimalaya.client.ServerMetadata;
  * the OS-routed redirects come back through the host's onNewIntent into
  * {@link #handleRedirect}, and the redeemed tokens land back in the
  * connection flow through {@link #onConnected}. The in-flight grant
- * persists to preferences because the browser hop routinely outlives
- * the process.
+ * persists, sealed under the account key, because the browser hop
+ * routinely outlives the process.
  */
 final class OauthFlow {
     /** Lands a redeemed grant back in the connection flow. */
@@ -38,10 +38,10 @@ final class OauthFlow {
                 String scope);
     }
 
-    /** Name of the preferences holding the in-flight OAuth grant. */
-    private static final String OAUTH_PREFS = "pimalaya.oauth";
-
     private final MainActivity host;
+
+    /** The in-flight grant as persisted, sealed across the browser hop. */
+    private final PendingGrantStore grants;
 
     /** Wired by the host after construction (the two flows reference
      *  each other, so one side binds late). */
@@ -63,11 +63,30 @@ final class OauthFlow {
     private String pendingClientId;
     private String pendingClientSecret;
 
+    /**
+     * The issuer an issuer-flow grant started at, which its redirect must not
+     * contradict (RFC 9207); null for the shipped and custom clients.
+     */
+    private String pendingIssuer;
+
+    /** The redirect URI the in-flight grant waits on. */
+    private String pendingRedirectUri;
+
+    /** When the in-flight grant started, in wall-clock milliseconds. */
+    private long pendingSince;
+
+    /** How long an in-flight grant waits before it is abandoned. */
+    static final long GRANT_TTL_MS = 15 * 60 * 1000;
+
+    /** How long a loopback connection may take to send its request line. */
+    private static final int LOOPBACK_READ_TIMEOUT_MS = 10_000;
+
     /** The loopback redirect listener, closed with the activity. */
     private java.net.ServerSocket loopbackServer;
 
     OauthFlow(MainActivity host) {
         this.host = host;
+        this.grants = new PendingGrantStore(host);
     }
 
     /**
@@ -85,6 +104,7 @@ final class OauthFlow {
         pendingAccountEmail = email;
         pendingClientId = Oauth.GOOGLE_CLIENT_ID;
         pendingClientSecret = null;
+        pendingIssuer = null;
 
         // NOTE: access_type=offline + prompt=consent make Google issue a
         // refresh token; include_granted_scopes keeps what the account
@@ -105,7 +125,7 @@ final class OauthFlow {
             String url = pendingOauth.authorizeUrl(Oauth.GOOGLE_AUTH_ENDPOINT, extras);
             persistPendingOauth(Oauth.GOOGLE_CLIENT_ID, Oauth.GOOGLE_REDIRECT_URI);
             onBusy.run();
-            host.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            browse(url);
         } catch (Exception error) {
             abort(error);
         }
@@ -126,6 +146,7 @@ final class OauthFlow {
         pendingAccountEmail = email;
         pendingClientId = Oauth.MICROSOFT_CLIENT_ID;
         pendingClientSecret = null;
+        pendingIssuer = null;
 
         // NOTE: the refresh token comes from the offline_access scope,
         // no extra parameter needed; login_hint preselects the account.
@@ -141,10 +162,52 @@ final class OauthFlow {
             String url = pendingOauth.authorizeUrl(Oauth.MICROSOFT_AUTH_ENDPOINT, extras);
             persistPendingOauth(Oauth.MICROSOFT_CLIENT_ID, Oauth.MICROSOFT_REDIRECT_URI);
             onBusy.run();
-            host.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            browse(url);
         } catch (Exception error) {
             abort(error);
         }
+    }
+
+    /**
+     * Whether an intent's URL is the pending grant's redirect: the redirect
+     * URI exactly, up to its query, and the grant's state in that query.
+     */
+    static boolean isRedirectOf(String url, String redirectUri, String state) {
+        if (redirectUri == null || redirectUri.isEmpty() || state == null || state.isEmpty()) {
+            return false;
+        }
+        int end = url.length();
+        for (char mark : new char[] {'?', '#'}) {
+            int at = url.indexOf(mark);
+            if (at >= 0 && at < end) {
+                end = at;
+            }
+        }
+        // NOTE: Entra answers an authority-only redirect URI with an empty
+        // path as `/` (pimalaya://oauth2redirect/?code=...), so an empty
+        // path and `/` name the same redirect.
+        if (!withoutRootSlash(url.substring(0, end)).equals(withoutRootSlash(redirectUri))) {
+            return false;
+        }
+        try {
+            return state.equals(Uri.parse(url).getQueryParameter("state"));
+        } catch (UnsupportedOperationException opaque) {
+            return false;
+        }
+    }
+
+    /** A redirect URI with the lone `/` path of a `scheme://authority/` form dropped. */
+    private static String withoutRootSlash(String uri) {
+        int authority = uri.indexOf("://");
+        if (authority >= 0 && uri.endsWith("/") && uri.indexOf('/', authority + 3) == uri.length() - 1) {
+            return uri.substring(0, uri.length() - 1);
+        }
+        return uri;
+    }
+
+    /** Whether a grant started at {@code since} was abandoned by {@code now}. */
+    static boolean expired(long since, long now) {
+        return now - since > GRANT_TTL_MS || now < since;
     }
 
     /**
@@ -172,10 +235,20 @@ final class OauthFlow {
         if (data == null) {
             return;
         }
-        if (pendingOauth == null) {
+        if (pendingOauth == null || expired(pendingSince, System.currentTimeMillis())) {
+            pendingOauth = null;
             restorePendingOauth();
         }
         if (pendingOauth == null) {
+            return;
+        }
+
+        // NOTE: any app can send this activity a VIEW intent; only the
+        // grant's own redirect URI carrying the grant's state redeems (and
+        // so ends) it, anything else leaves the grant waiting.
+        String redirectUrl = data.toString();
+        if (!isRedirectOf(redirectUrl, pendingRedirectUri, pendingOauth.state())) {
+            Log.w("pimalaya", "ignoring an intent that is not this grant's redirect");
             return;
         }
 
@@ -185,7 +258,7 @@ final class OauthFlow {
         String email = pendingAccountEmail;
         String clientId = pendingClientId;
         String clientSecret = pendingClientSecret;
-        String redirectUrl = data.toString();
+        String issuer = pendingIssuer;
         pendingOauth = null;
         clearPendingOauth();
 
@@ -198,7 +271,7 @@ final class OauthFlow {
         host.io.execute(
                 () -> {
                     try {
-                        OauthTokens tokens = session.redeem(tokenEndpoint, redirectUrl);
+                        OauthTokens tokens = session.redeem(tokenEndpoint, redirectUrl, issuer);
                         host.main.post(
                                 () ->
                                         onConnected.connect(
@@ -309,7 +382,8 @@ final class OauthFlow {
                                 auth,
                                 token,
                                 scopes,
-                                resource);
+                                resource,
+                                null);
                     } else {
                         host.toast(host.getString(R.string.oauth_redirect_invalid));
                     }
@@ -412,7 +486,8 @@ final class OauthFlow {
                                                 metadata.authorizationEndpoint,
                                                 metadata.tokenEndpoint,
                                                 scope,
-                                                resource));
+                                                resource,
+                                                metadata.issuer));
                     } catch (Exception error) {
                         Log.w("pimalaya", "issuer oauth failed", error);
                         host.main.post(
@@ -445,7 +520,7 @@ final class OauthFlow {
      * whose redirect is the app scheme (for servers that reject a
      * loopback redirect).
      */
-    private void launchSchemeGrant(
+    void launchSchemeGrant(
             String email,
             String baseUrl,
             String clientId,
@@ -453,8 +528,10 @@ final class OauthFlow {
             String authEndpoint,
             String tokenEndpoint,
             String scope,
-            String resource) {
+            String resource,
+            String issuer) {
         pendingOauth = new OauthSession(clientId, clientSecret, Oauth.REDIRECT_URI, scope);
+        pendingIssuer = issuer;
         pendingTokenEndpoint = tokenEndpoint;
         pendingBaseUrl = baseUrl;
         pendingAccountEmail = email;
@@ -481,7 +558,8 @@ final class OauthFlow {
             String url = pendingOauth.authorizeUrl(authEndpoint, extras);
             Log.d("pimalaya", "scheme grant authorize url: " + url);
             persistPendingOauth(clientId, Oauth.REDIRECT_URI);
-            host.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            onBusy.run();
+            browse(url);
         } catch (Exception error) {
             abort(error);
         }
@@ -489,11 +567,14 @@ final class OauthFlow {
 
     /**
      * Runs a custom-client grant against an http loopback redirect URI:
-     * binds its port, opens the browser, and serves the single redirect
-     * the browser lands on, reconstructing its URL to redeem for
-     * tokens. The listener lives on its own thread until the redirect
-     * arrives or the wait times out; it dies with the process (a custom
-     * grant is not persisted, having no OS-routed redirect to resume
+     * binds its port, opens the browser, and serves the redirect the
+     * browser lands on (its path and state, see {@link LoopbackRedirect}),
+     * reconstructing its URL to redeem for tokens. The redirect host is the
+     * 127.0.0.1 literal (RFC 8252 section 8.3): a typed localhost may
+     * resolve to ::1 first, where another app could listen. The listener
+     * runs on a thread of its own, never the io executor, until the
+     * redirect arrives or the wait times out; it dies with the process (a
+     * custom grant is not persisted, having no OS-routed redirect to resume
      * through).
      */
     private void startLoopbackOauth(
@@ -509,17 +590,19 @@ final class OauthFlow {
         String secret = clientSecret.isEmpty() ? null : clientSecret;
 
         Uri redirect = Uri.parse(redirectUri);
-        String redirectHost = redirect.getHost();
-        if (redirectHost == null
-                || !(redirectHost.equals("127.0.0.1") || redirectHost.equals("localhost"))) {
+        if (!"127.0.0.1".equals(redirect.getHost())) {
             host.toast(host.getString(R.string.oauth_redirect_invalid));
             return;
         }
         int port = redirect.getPort() == -1 ? 80 : redirect.getPort();
+        String path =
+                redirect.getPath() == null || redirect.getPath().isEmpty()
+                        ? "/"
+                        : redirect.getPath();
 
         // NOTE: origin the browser's request target is appended to when
         // rebuilding the redirect URL; the typed URI may carry a path.
-        String origin = "http://" + redirectHost + (redirect.getPort() == -1 ? "" : ":" + port);
+        String origin = "http://127.0.0.1" + (redirect.getPort() == -1 ? "" : ":" + port);
 
         java.net.ServerSocket server;
         try {
@@ -532,6 +615,11 @@ final class OauthFlow {
         loopbackServer = server;
 
         OauthSession session = new OauthSession(clientId, secret, redirectUri, scope);
+        String done =
+                "<html><body style='font-family:sans-serif;text-align:center;"
+                        + "margin-top:4em'>"
+                        + host.getString(R.string.oauth_loopback_done)
+                        + "</body></html>";
 
         // NOTE: access_type=offline + prompt=consent make Google-style
         // servers issue a refresh token (ignored by servers that do not
@@ -546,85 +634,57 @@ final class OauthFlow {
         } catch (JSONException ignored) {
         }
 
-        host.io.execute(
-                () -> {
-                    try {
-                        String authUrl = session.authorizeUrl(authEndpoint, extras);
-                        host.main.post(
-                                () -> {
-                                    onBusy.run();
-                                    host.startActivity(
-                                            new Intent(Intent.ACTION_VIEW, Uri.parse(authUrl)));
-                                });
+        Thread listener =
+                new Thread(
+                        () -> {
+                            try {
+                                String authUrl = session.authorizeUrl(authEndpoint, extras);
+                                host.main.post(
+                                        () -> {
+                                            onBusy.run();
+                                            try {
+                                                browse(authUrl);
+                                            } catch (IllegalStateException refused) {
+                                                closeLoopback();
+                                                onAborted.run();
+                                                host.showError(refused, R.string.connect_failed);
+                                            }
+                                        });
 
-                        String redirectUrl = awaitLoopbackRedirect(server, origin);
-                        OauthTokens tokens = session.redeem(tokenEndpoint, redirectUrl);
-                        host.main.post(
-                                () ->
-                                        onConnected.connect(
-                                                new Account(baseUrl, "", tokens.accessToken),
-                                                email,
-                                                tokens.refreshToken,
-                                                tokenEndpoint,
-                                                clientId,
-                                                secret,
-                                                grantedScope(tokens, session)));
-                    } catch (Exception error) {
-                        Log.w("pimalaya", "custom oauth failed", error);
-                        host.main.post(
-                                () -> {
-                                    onAborted.run();
-                                    host.showError(error, R.string.connect_failed);
-                                });
-                    } finally {
-                        closeLoopback();
-                    }
-                });
-    }
-
-    /**
-     * Accepts the one browser redirect on the loopback socket, answers
-     * a close-this-tab page, and rebuilds the redirect URL from the
-     * given origin and the request target so it can be validated and
-     * redeemed.
-     */
-    private String awaitLoopbackRedirect(java.net.ServerSocket server, String origin)
-            throws java.io.IOException {
-        try (java.net.Socket socket = server.accept()) {
-            java.io.BufferedReader reader =
-                    new java.io.BufferedReader(
-                            new java.io.InputStreamReader(
-                                    socket.getInputStream(),
-                                    java.nio.charset.StandardCharsets.UTF_8));
-            String requestLine = reader.readLine();
-
-            String body =
-                    "<html><body style='font-family:sans-serif;text-align:center;"
-                            + "margin-top:4em'>"
-                            + host.getString(R.string.oauth_loopback_done)
-                            + "</body></html>";
-            String response =
-                    "HTTP/1.1 200 OK\r\n"
-                            + "Content-Type: text/html; charset=utf-8\r\n"
-                            + "Content-Length: "
-                            + body.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
-                            + "\r\n"
-                            + "Connection: close\r\n\r\n"
-                            + body;
-            socket.getOutputStream()
-                    .write(response.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-
-            // NOTE: "GET /?code=..&state=.. HTTP/1.1" -> parts[1] is the
-            // request target (the path and query the browser hit).
-            String target = "/";
-            if (requestLine != null) {
-                String[] parts = requestLine.split(" ");
-                if (parts.length >= 2) {
-                    target = parts[1];
-                }
-            }
-            return origin + target;
-        }
+                                String redirectUrl =
+                                        LoopbackRedirect.await(
+                                                server,
+                                                origin,
+                                                path,
+                                                session.state(),
+                                                LOOPBACK_READ_TIMEOUT_MS,
+                                                done);
+                                OauthTokens tokens = session.redeem(tokenEndpoint, redirectUrl);
+                                host.main.post(
+                                        () ->
+                                                onConnected.connect(
+                                                        new Account(
+                                                                baseUrl, "", tokens.accessToken),
+                                                        email,
+                                                        tokens.refreshToken,
+                                                        tokenEndpoint,
+                                                        clientId,
+                                                        secret,
+                                                        grantedScope(tokens, session)));
+                            } catch (Exception error) {
+                                Log.w("pimalaya", "custom oauth failed", error);
+                                host.main.post(
+                                        () -> {
+                                            onAborted.run();
+                                            host.showError(error, R.string.connect_failed);
+                                        });
+                            } finally {
+                                closeLoopback();
+                            }
+                        },
+                        "oauth-loopback");
+        listener.setDaemon(true);
+        listener.start();
     }
 
     /**
@@ -632,51 +692,62 @@ final class OauthFlow {
      * the process (the system reclaims backgrounded apps), and without
      * the state and PKCE verifier the redirect could not be redeemed.
      */
-    private void persistPendingOauth(String clientId, String redirectUri) {
-        host.getSharedPreferences(OAUTH_PREFS, android.content.Context.MODE_PRIVATE)
-                .edit()
-                .putString("clientId", clientId)
-                .putString("clientSecret", pendingClientSecret == null ? "" : pendingClientSecret)
-                .putString("redirectUri", redirectUri)
-                .putString("state", pendingOauth.state())
-                .putString("verifier", pendingOauth.pkceVerifier())
-                .putString("tokenEndpoint", pendingTokenEndpoint)
-                .putString("baseUrl", pendingBaseUrl)
-                .putString("email", pendingAccountEmail)
-                .apply();
+    private void persistPendingOauth(String clientId, String redirectUri) throws Exception {
+        pendingRedirectUri = redirectUri;
+        pendingSince = System.currentTimeMillis();
+        grants.save(
+                new JSONObject()
+                        .put("clientId", clientId)
+                        .put("clientSecret", pendingClientSecret == null ? "" : pendingClientSecret)
+                        .put("redirectUri", redirectUri)
+                        .put("state", pendingOauth.state())
+                        .put("verifier", pendingOauth.pkceVerifier())
+                        .put("tokenEndpoint", pendingTokenEndpoint)
+                        .put("baseUrl", pendingBaseUrl)
+                        .put("email", pendingAccountEmail)
+                        .put("issuer", pendingIssuer == null ? "" : pendingIssuer)
+                        .put(PendingGrantStore.SAVED_AT, pendingSince));
     }
 
     /** Restores the persisted grant into the pending fields, if any. */
     private void restorePendingOauth() {
-        android.content.SharedPreferences prefs =
-                host.getSharedPreferences(OAUTH_PREFS, android.content.Context.MODE_PRIVATE);
-        String state = prefs.getString("state", null);
-        if (state == null) {
+        JSONObject grant = grants.load();
+        if (grant == null || grant.optString("state").isEmpty()) {
             return;
         }
 
-        String secret = prefs.getString("clientSecret", "");
+        String secret = grant.optString("clientSecret");
         pendingOauth =
                 new OauthSession(
-                        prefs.getString("clientId", ""),
+                        grant.optString("clientId"),
                         secret,
-                        prefs.getString("redirectUri", ""),
+                        grant.optString("redirectUri"),
                         "",
-                        state,
-                        prefs.getString("verifier", ""));
-        pendingTokenEndpoint = prefs.getString("tokenEndpoint", "");
-        pendingBaseUrl = prefs.getString("baseUrl", "");
-        pendingAccountEmail = prefs.getString("email", "");
-        pendingClientId = prefs.getString("clientId", "");
+                        grant.optString("state"),
+                        grant.optString("verifier"));
+        pendingTokenEndpoint = grant.optString("tokenEndpoint");
+        pendingBaseUrl = grant.optString("baseUrl");
+        pendingAccountEmail = grant.optString("email");
+        pendingClientId = grant.optString("clientId");
         pendingClientSecret = secret.isEmpty() ? null : secret;
+        String issuer = grant.optString("issuer");
+        pendingIssuer = issuer.isEmpty() ? null : issuer;
+        pendingRedirectUri = grant.optString("redirectUri");
+        pendingSince = grant.optLong(PendingGrantStore.SAVED_AT);
     }
 
-    /** Drops the persisted grant (redeemed, or aborted). */
+    /** Drops the persisted grant (redeemed, cancelled or aborted). */
     private void clearPendingOauth() {
-        host.getSharedPreferences(OAUTH_PREFS, android.content.Context.MODE_PRIVATE)
-                .edit()
-                .clear()
-                .apply();
+        grants.clear();
+    }
+
+    /**
+     * The user left the grant behind (closed or stepped back out of the
+     * connection flow): forget it, so a late redirect redeems nothing.
+     */
+    void cancel() {
+        pendingOauth = null;
+        clearPendingOauth();
     }
 
     /** A grant that never reached the browser: drop it and report. */
@@ -685,6 +756,24 @@ final class OauthFlow {
         clearPendingOauth();
         onAborted.run();
         host.showError(error, R.string.connect_failed);
+    }
+
+    /**
+     * Opens an authorization URL in the browser, https only: a plain one
+     * would carry the request in clear, and any other scheme is another
+     * app's to handle, which hostile metadata could aim anywhere. Plain http
+     * is left to a loopback host, a custom client's own test server.
+     */
+    private void browse(String url) {
+        Uri uri = Uri.parse(url);
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(java.util.Locale.ROOT);
+        String authority = uri.getHost() == null ? "" : uri.getHost();
+        boolean loopback =
+                authority.equals("127.0.0.1") || authority.equals("localhost") || authority.equals("[::1]");
+        if (!scheme.equals("https") && !(scheme.equals("http") && loopback)) {
+            throw new IllegalStateException("Refused to open a non-https authorization URL");
+        }
+        host.startActivity(new Intent(Intent.ACTION_VIEW, uri));
     }
 
     /** A free loopback TCP port, for the redirect prefill. */

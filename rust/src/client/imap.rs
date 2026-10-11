@@ -12,6 +12,12 @@
 //! than for a window of every mailbox, every pass.
 
 use core::num::{NonZeroU32, NonZeroU64};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs::{self, File},
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use io_imap::{
     codec::fragmentizer::Fragmentizer,
@@ -19,16 +25,23 @@ use io_imap::{
     rfc3501::{
         append::{ImapMessageAppend, ImapMessageAppendOptions},
         copy::{ImapMessageCopy, ImapMessageCopyOptions},
-        examine::{ExamineData, ImapMailboxExamine, ImapMailboxExamineOptions},
-        fetch::{ImapMessageFetch, ImapMessageFetchOptions},
+        examine::{
+            ExamineData, ImapMailboxExamine, ImapMailboxExamineError, ImapMailboxExamineOptions,
+        },
+        fetch::{ImapMessageFetch, ImapMessageFetchError, ImapMessageFetchOptions},
+        fetch_stream_batch::{
+            ImapMessageFetchStreamBatch, ImapMessageFetchStreamBatchError,
+            ImapMessageFetchStreamBatchOptions, ImapMessageFetchStreamBatchYield,
+        },
         greeting::{ImapGreetingGet, ImapGreetingGetOptions},
         list::ImapMailboxList,
         search::{ImapMessageSearch, ImapMessageSearchOptions},
-        select::{ImapMailboxSelect, ImapMailboxSelectOptions},
+        select::{ImapMailboxSelect, ImapMailboxSelectError, ImapMailboxSelectOptions},
         store::{ImapMessageStoreOptions, ImapMessageStoreSilent},
     },
     rfc4315::expunge_uid::ImapMessageExpungeUid,
     rfc5161::enable::ImapExtensionEnable,
+    rfc5256::sort::{ImapMessageSort, ImapMessageSortOptions},
     rfc6851::r#move::{ImapMessageMove, ImapMessageMoveOptions},
     sasl::{
         auth_plain::{ImapAuthPlain, ImapAuthPlainOptions},
@@ -39,7 +52,10 @@ use io_imap::{
         command::SelectParameter,
         core::{AString, Atom, Vec1},
         datetime::NaiveDate,
-        extensions::enable::CapabilityEnable,
+        extensions::{
+            enable::CapabilityEnable,
+            sort::{SortCriterion, SortKey},
+        },
         fetch::{MacroOrMessageDataItemNames, MessageDataItem, MessageDataItemName, Section},
         flag::{Flag, FlagFetch, FlagNameAttribute, StoreType},
         mailbox::{ListMailbox, Mailbox},
@@ -52,21 +68,47 @@ use io_pimdir::summary::{
     PimdirSummary,
     mail::{PimdirMailSummary, derive_meta},
 };
+use jiff::{SignedDuration, Timestamp};
 use url::Url;
 
 use crate::{
     client::{
         Client,
+        gmail::source_path,
         listing::{
             Floor, IMAP_PAGE, Listing, MailPage, MailRequest, Named, SENT_MARGIN_DAYS, Scope,
         },
+        trust::require_tls,
         url_user,
     },
+    mail,
     types::{BridgeError, Credentials, Mailbox as MailboxEntry},
 };
 
 /// io-imap's own fragmentizer ceiling, 100 MiB per message.
 const MAX_MESSAGE_SIZE: u32 = 100 * 1024 * 1024;
+
+/// How far below its ceiling a sorted floor looks, widened until its chunk
+/// is full: 90 days, a year, then all mail.
+const SORT_WINDOWS_DAYS: [Option<i64>; 3] = [Some(90), Some(365), None];
+
+/// How many times an unsorted floor doubles its sample of the newest UIDs
+/// past the first chunk: 50, 100, 200, 400 then 800 header reads at most.
+const SAMPLE_WIDENINGS: usize = 4;
+
+/// The status a mailbox the server refused to open crosses with, as an
+/// HTTP backend's missing resource would: a `NO` to `EXAMINE` or `SELECT`,
+/// which RFC 3501 6.3.1 answers for a mailbox that does not exist or
+/// cannot be accessed (Gmail's `Unknown Mailbox`, Exchange's `doesn't
+/// exist`, RFC 5530's `[NONEXISTENT]`), the connection standing.
+const MAILBOX_REFUSED: u16 = 404;
+
+/// The most messages one streamed body fetch reads.
+const BODY_BATCH: usize = 50;
+
+/// About how many bytes one streamed body fetch reads, by the sizes the
+/// server declares; a message past it is read alone.
+const BODY_BATCH_BYTES: u64 = 12 * 1024 * 1024;
 
 /// The header fields a listing reads off every message: what Annex A's
 /// summary and addresses are derived from, `Content-Type` for the
@@ -116,10 +158,34 @@ pub struct ImapState {
     /// happened; a read and a write select the mailbox differently, so
     /// which of the two it was is recorded with it.
     selected: Option<(String, Access)>,
-    /// The UIDs the last `UID SEARCH` found in a scope, newest first,
-    /// keyed by the mailbox, its UIDVALIDITY and the scope: a round's
-    /// pages walk them down without searching again.
-    searched: Option<((String, u32, String), Vec<u32>)>,
+    /// What was read of the mailbox last examined, while it has not
+    /// moved ([`Cache`]).
+    cache: Option<Cache>,
+}
+
+/// What was read of one mailbox, kept while its UIDVALIDITY and stamp
+/// hold: the UIDs a `UID SEARCH` or `UID SORT` found per scope, so a
+/// round's pages walk them down without searching again, and the header
+/// fields a floor read, so the round after it reads them no more.
+struct Cache {
+    mailbox: String,
+    validity: u32,
+    /// UIDNEXT, HIGHESTMODSEQ and EXISTS at its EXAMINE: a message in,
+    /// out or remarked moves one of them.
+    stamp: (Option<u32>, Option<u64>, Option<u32>),
+    searched: HashMap<String, Vec<u32>>,
+    /// Kept only where the server reports a HIGHESTMODSEQ: without one,
+    /// a marker moving moves nothing in the stamp.
+    headers: HashMap<u32, Header>,
+}
+
+/// What a listing reads of one message: its markers, the summary its
+/// header fields derive, and when the server received it.
+#[derive(Clone)]
+struct Header {
+    flags: Vec<String>,
+    summary: PimdirMailSummary,
+    received: Option<Timestamp>,
 }
 
 /// How a mailbox was opened, since the two are not interchangeable.
@@ -139,7 +205,7 @@ impl ImapState {
             url: url.to_string(),
             capabilities: Vec::new(),
             selected: None,
-            searched: None,
+            cache: None,
         }
     }
 
@@ -147,39 +213,120 @@ impl ImapState {
     pub fn expunges_one(&self) -> bool {
         disposal(&self.capabilities) == Disposal::Expunge
     }
+
+    /// Keeps what was read of `mailbox` while its EXAMINE says it has not
+    /// moved since, and starts afresh otherwise: another mailbox, another
+    /// UIDVALIDITY, a message in, out or remarked.
+    fn observe(&mut self, mailbox: &str, data: &ExamineData) {
+        let validity = data.uid_validity.map(NonZeroU32::get).unwrap_or(0);
+        let stamp = (
+            data.uid_next.map(NonZeroU32::get),
+            data.highest_mod_seq.filter(|modseq| *modseq > 0),
+            data.exists,
+        );
+        let holds = self.cache.as_ref().is_some_and(|cache| {
+            cache.mailbox == mailbox
+                && cache.validity == validity
+                && cache.stamp == stamp
+                && cache.stamp.1.is_some()
+        });
+        if holds {
+            return;
+        }
+        // NOTE: without a HIGHESTMODSEQ, the searches stand while the
+        // UIDs do, and the header fields go with every EXAMINE.
+        let same = self.cache.as_ref().is_some_and(|cache| {
+            cache.mailbox == mailbox && cache.validity == validity && cache.stamp == stamp
+        });
+        match (same, self.cache.as_mut()) {
+            (true, Some(cache)) => cache.headers.clear(),
+            _ => {
+                self.cache = Some(Cache {
+                    mailbox: mailbox.to_string(),
+                    validity,
+                    stamp,
+                    searched: HashMap::new(),
+                    headers: HashMap::new(),
+                })
+            }
+        }
+    }
+
+    /// The cache of `mailbox` under `validity`, when it holds one.
+    fn cache_of(&mut self, mailbox: &str, validity: u32) -> Option<&mut Cache> {
+        self.cache
+            .as_mut()
+            .filter(|cache| cache.mailbox == mailbox && cache.validity == validity)
+    }
+
+    /// Whether the server advertises SORT (RFC 5256).
+    fn sorts(&self) -> bool {
+        self.capabilities
+            .iter()
+            .any(|capability| matches!(capability, Capability::Sort(_)))
+    }
+}
+
+/// The transport an IMAP session runs over: the Java one a native call
+/// hands in ([`Client`]), or a scripted server in tests.
+pub trait ImapWire {
+    /// Reads the next chunk from `url`'s stream, empty at its end.
+    fn imap_read(&mut self, url: &str) -> Result<Vec<u8>, BridgeError>;
+
+    /// Writes bytes to `url`'s stream.
+    fn imap_write(&mut self, url: &str, bytes: &[u8]) -> Result<(), BridgeError>;
+}
+
+impl ImapWire for Client<'_, '_> {
+    fn imap_read(&mut self, url: &str) -> Result<Vec<u8>, BridgeError> {
+        self.read(url)
+    }
+
+    fn imap_write(&mut self, url: &str, bytes: &[u8]) -> Result<(), BridgeError> {
+        self.write(url, bytes)
+    }
 }
 
 /// One session bound to one native call: the state that outlives the
-/// call, and the JNI client that does not.
-pub struct ImapSession<'a, 'b, 'local> {
-    client: &'a mut Client<'b, 'local>,
+/// call, and the transport that does not.
+pub struct ImapSession<'a> {
+    wire: &'a mut dyn ImapWire,
     state: &'a mut ImapState,
 }
 
-impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
+impl<'a> ImapSession<'a> {
     /// Binds a held session to the call that is about to use it.
-    pub fn bind(client: &'a mut Client<'b, 'local>, state: &'a mut ImapState) -> Self {
-        Self { client, state }
+    pub fn bind(wire: &'a mut dyn ImapWire, state: &'a mut ImapState) -> Self {
+        Self { wire, state }
     }
 
     /// Drives a coroutine to completion, servicing every read and write
     /// yield through the Java transport's stream for this URL.
-    fn run<C, T, E>(&mut self, mut coroutine: C) -> Result<T, BridgeError>
+    fn run<C, T, E>(&mut self, coroutine: C) -> Result<T, BridgeError>
     where
         C: ImapCoroutine<Yield = ImapYield, Return = Result<T, E>>,
         E: core::fmt::Display,
+    {
+        self.attempt(coroutine)?
+            .map_err(|err| err.to_string().into())
+    }
+
+    /// [`Self::run`], the server's answer kept apart from the wire's
+    /// failure, so a refusal can be told from a dead connection.
+    fn attempt<C, T, E>(&mut self, mut coroutine: C) -> Result<Result<T, E>, BridgeError>
+    where
+        C: ImapCoroutine<Yield = ImapYield, Return = Result<T, E>>,
     {
         let mut arg: Option<Vec<u8>> = None;
 
         loop {
             match coroutine.resume(&mut self.state.fragmentizer, arg.as_deref()) {
-                ImapCoroutineState::Complete(Ok(value)) => return Ok(value),
-                ImapCoroutineState::Complete(Err(err)) => return Err(err.to_string().into()),
+                ImapCoroutineState::Complete(result) => return Ok(result),
                 ImapCoroutineState::Yielded(ImapYield::WantsRead) => {
-                    arg = Some(self.client.read(&self.state.url)?);
+                    arg = Some(self.wire.imap_read(&self.state.url)?);
                 }
                 ImapCoroutineState::Yielded(ImapYield::WantsWrite(bytes)) => {
-                    self.client.write(&self.state.url, &bytes)?;
+                    self.wire.imap_write(&self.state.url, &bytes)?;
                     arg = None;
                 }
             }
@@ -193,6 +340,10 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
     /// takes XOAUTH2 as the user the URL names, which is what Google and
     /// Microsoft accept, the latter nothing else.
     pub fn connect(&mut self, credentials: &Credentials) -> Result<(), BridgeError> {
+        // NOTE: the bridge speaks no IMAP STARTTLS, so a plain imap:// URL
+        // could only ever sign in in clear.
+        require_tls(&self.state.url)?;
+
         self.run(ImapGreetingGet::new(ImapGreetingGetOptions {
             ensure_capabilities: true,
         }))?;
@@ -330,7 +481,12 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
                 {
                     let mut items = Vec::with_capacity(delta.changed.len());
                     for chunk in delta.changed.chunks(IMAP_PAGE) {
-                        items.extend(self.fetch_named(mailbox, chunk, &request.scope)?);
+                        items.extend(self.fetch_named(
+                            mailbox,
+                            validity.get(),
+                            chunk,
+                            &request.scope,
+                        )?);
                     }
                     return Ok(MailPage::delta(items, delta.vanished, delta.checkpoint));
                 }
@@ -374,7 +530,7 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         let page: Vec<u32> = remaining.by_ref().take(IMAP_PAGE).collect();
         let more = remaining.next().is_some();
 
-        let items = self.fetch_named(mailbox, &page, scope)?;
+        let items = self.fetch_named(mailbox, validity, &page, scope)?;
         let next = match (more, page.last()) {
             (true, Some(lowest)) => Some(encode_cursor(validity, u64::from(*lowest))),
             _ => None,
@@ -387,31 +543,168 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         Ok(MailPage::round(items, next, checkpoint))
     }
 
-    /// Takes the newest messages below the floor's ceiling until its chunk
-    /// is full: the UIDs `UID SEARCH` finds below it (`SENTBEFORE` a day
-    /// above it, `ALL` without one), read for their headers a chunk at a
-    /// time, newest first, until the chunk is full or the mailbox runs out.
+    /// The floor of the mailbox's next chunk below the floor's ceiling: the
+    /// `Date` of its `count`th newest message by `Date`, an order
+    /// statistic rather than the oldest date among the newest UIDs, which
+    /// one imported message dated years back would drag down.
+    ///
+    /// Where the server sorts (RFC 5256), `UID SORT (REVERSE DATE)` below
+    /// the ceiling within a window widened until the chunk is full
+    /// ([`SORT_WINDOWS_DAYS`]); otherwise a sample of the newest UIDs
+    /// ([`Self::sampled_floor`]).
     pub fn floor(&mut self, mailbox: &str, floor: &mut Floor) -> Result<(), BridgeError> {
         let data = self.examine(mailbox)?;
         if data.exists.unwrap_or(0) == 0 {
             return Ok(());
         }
         let validity = data.uid_validity.map(NonZeroU32::get).unwrap_or(0);
+        if self.state.sorts() {
+            return self.sorted_floor(mailbox, validity, floor);
+        }
+        self.sampled_floor(mailbox, validity, floor)
+    }
+
+    /// [`Self::floor`] without `SORT`: the newest UIDs below the ceiling
+    /// read for their header fields, `count` of them then a sample doubled
+    /// at most [`SAMPLE_WIDENINGS`] times, every one offered to the floor
+    /// ([`Floor::offer`]). The sample is settled once the last part read
+    /// holds no message dated or received at or above the `count`th newest
+    /// `Date` so far: UIDs grow with arrival, so below it lies older mail,
+    /// whatever the imports among the newest UIDs.
+    fn sampled_floor(
+        &mut self,
+        mailbox: &str,
+        validity: u32,
+        floor: &mut Floor,
+    ) -> Result<(), BridgeError> {
         let scope = floor.scope().clone();
         let uids = self.scoped_uids(mailbox, validity, &scope)?;
+        let mut read = 0;
+        let mut part = floor.count().min(IMAP_PAGE);
+        for _ in 0..=SAMPLE_WIDENINGS {
+            let chunk = &uids[read..uids.len().min(read + part)];
+            if chunk.is_empty() {
+                return Ok(());
+            }
+            let mut newer = false;
+            let mut received = Vec::with_capacity(chunk.len());
+            for (_, header) in self.fetch_headers(mailbox, validity, chunk)? {
+                newer |= floor.offer(header.summary.date.as_deref());
+                received.extend(header.received);
+            }
+            read += chunk.len();
+            part = read.min(IMAP_PAGE);
 
-        for chunk in uids.chunks(floor.count().min(IMAP_PAGE)) {
-            let mut listed = self.fetch_listed(mailbox, chunk)?;
-            listed.sort_by_key(|(named, _)| {
-                core::cmp::Reverse(named.handle.parse::<u32>().unwrap_or(0))
-            });
-            for (_, summary) in listed {
-                if floor.take(summary.date.as_deref()) {
-                    return Ok(());
+            let at = floor.floor().and_then(|at| at.parse::<Timestamp>().ok());
+            let settled = at.is_some_and(|at| !newer && received.iter().all(|r| *r < at));
+            if settled {
+                return Ok(());
+            }
+        }
+        if read < uids.len() {
+            log::debug!(
+                "{mailbox}: floor sampled from the newest {read} of {} UIDs",
+                uids.len()
+            );
+        }
+        Ok(())
+    }
+
+    /// [`Self::floor`] by `UID SORT`: the messages below the ceiling in
+    /// `Date` order, newest first, within 90 days of it, then a year, then
+    /// all of them, until `count` dated ones are found.
+    fn sorted_floor(
+        &mut self,
+        mailbox: &str,
+        validity: u32,
+        floor: &mut Floor,
+    ) -> Result<(), BridgeError> {
+        let ceiling = floor.scope().until.clone();
+        let count = floor.count();
+        for window in SORT_WINDOWS_DAYS {
+            let mut attempt = Floor::new(ceiling.as_deref(), count);
+            let uids = self.sorted_uids(mailbox, validity, ceiling.as_deref(), window)?;
+            'read: for chunk in uids.chunks(count.min(IMAP_PAGE)) {
+                for (_, header) in self.fetch_headers(mailbox, validity, chunk)? {
+                    if attempt.take(header.summary.date.as_deref()) {
+                        break 'read;
+                    }
                 }
+            }
+            if attempt.full() || window.is_none() {
+                *floor = attempt;
+                return Ok(());
             }
         }
         Ok(())
+    }
+
+    /// The UIDs below `ceiling` (RFC 3339, none for no ceiling) in `Date`
+    /// order, newest first: `UID SORT (REVERSE DATE) UTF-8 SENTBEFORE` a
+    /// day above the ceiling, `SENTSINCE` `window` days below it (or below
+    /// today), sorted once per session and scope.
+    fn sorted_uids(
+        &mut self,
+        mailbox: &str,
+        validity: u32,
+        ceiling: Option<&str>,
+        window: Option<i64>,
+    ) -> Result<Vec<u32>, BridgeError> {
+        let key = format!(
+            "sort:{}:{}",
+            ceiling.unwrap_or_default(),
+            window.unwrap_or_default()
+        );
+        if let Some(uids) = self
+            .state
+            .cache_of(mailbox, validity)
+            .and_then(|cache| cache.searched.get(&key))
+        {
+            return Ok(uids.clone());
+        }
+
+        let top = ceiling.and_then(|ceiling| ceiling.parse::<Timestamp>().ok());
+        let mut criteria = Vec::new();
+        if let Some(top) = top {
+            let before = top
+                .checked_add(SignedDuration::from_hours(24 * SENT_MARGIN_DAYS))
+                .map_err(|err| err.to_string())?;
+            criteria.push(SearchKey::SentBefore(imap_date(before)?));
+        }
+        if let Some(days) = window {
+            let since = top
+                .unwrap_or_else(Timestamp::now)
+                .checked_sub(SignedDuration::from_hours(24 * days))
+                .map_err(|err| err.to_string())?;
+            criteria.push(SearchKey::SentSince(imap_date(since)?));
+        }
+        if criteria.is_empty() {
+            criteria.push(SearchKey::All);
+        }
+        let criteria = Vec1::try_from(criteria).expect("one criterion at least");
+        let order = Vec1::try_from(vec![SortCriterion {
+            reverse: true,
+            key: SortKey::Date,
+        }])
+        .expect("one sort criterion");
+
+        let uids: Vec<u32> = self
+            .run(ImapMessageSort::new(
+                order,
+                criteria,
+                ImapMessageSortOptions {
+                    uid: true,
+                    fallback: false,
+                },
+            ))?
+            .into_iter()
+            .map(NonZeroU32::get)
+            .collect();
+
+        if let Some(cache) = self.state.cache_of(mailbox, validity) {
+            cache.searched.insert(key, uids.clone());
+        }
+        Ok(uids)
     }
 
     /// The UIDs of the scope, newest first, searched once per session.
@@ -421,9 +714,11 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         validity: u32,
         scope: &Scope,
     ) -> Result<Vec<u32>, BridgeError> {
-        let key = (mailbox.to_string(), validity, scope.key());
-        if let Some((held, uids)) = &self.state.searched
-            && *held == key
+        let key = scope.key();
+        if let Some(uids) = self
+            .state
+            .cache_of(mailbox, validity)
+            .and_then(|cache| cache.searched.get(&key))
         {
             return Ok(uids.clone());
         }
@@ -451,7 +746,9 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
         uids.sort_unstable_by(|a, b| b.cmp(a));
         uids.dedup();
 
-        self.state.searched = Some((key, uids.clone()));
+        if let Some(cache) = self.state.cache_of(mailbox, validity) {
+            cache.searched.insert(key, uids.clone());
+        }
         Ok(uids)
     }
 
@@ -464,40 +761,69 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
     fn fetch_named(
         &mut self,
         mailbox: &str,
+        validity: u32,
         uids: &[u32],
         scope: &Scope,
     ) -> Result<Vec<Named>, BridgeError> {
         Ok(self
-            .fetch_listed(mailbox, uids)?
+            .fetch_headers(mailbox, validity, uids)?
             .into_iter()
-            .filter(|(_, summary)| scope.contains(summary.date.as_deref()))
-            .map(|(named, _)| named)
+            .filter(|(_, header)| scope.contains(header.summary.date.as_deref()))
+            .map(|(uid, header)| Named::new(uid.to_string(), header.flags, header.summary))
             .collect())
     }
 
-    /// The members behind some UIDs of the open mailbox, each with the
-    /// summary it was named by, whatever its date.
-    fn fetch_listed(
+    /// What a listing reads of some UIDs of the mailbox, in their order,
+    /// whatever their date: the header fields a floor read already taken
+    /// from the cache, the others fetched. A UID gone is left out.
+    fn fetch_headers(
+        &mut self,
+        mailbox: &str,
+        validity: u32,
+        uids: &[u32],
+    ) -> Result<Vec<(u32, Header)>, BridgeError> {
+        let mut known: HashMap<u32, Header> = HashMap::new();
+        if let Some(cache) = self.state.cache_of(mailbox, validity) {
+            for uid in uids {
+                if let Some(header) = cache.headers.get(uid) {
+                    known.insert(*uid, header.clone());
+                }
+            }
+        }
+        let missing: Vec<u32> = uids
+            .iter()
+            .copied()
+            .filter(|uid| !known.contains_key(uid))
+            .collect();
+        if !missing.is_empty() {
+            let fetched = self.fetch_header_fields(mailbox, &missing)?;
+            let keeps = self
+                .state
+                .cache
+                .as_ref()
+                .is_some_and(|cache| cache.stamp.1.is_some());
+            if keeps && let Some(cache) = self.state.cache_of(mailbox, validity) {
+                cache.headers.extend(fetched.clone());
+            }
+            known.extend(fetched);
+        }
+        Ok(uids
+            .iter()
+            .filter_map(|uid| known.remove(uid).map(|header| (*uid, header)))
+            .collect())
+    }
+
+    /// `UID FETCH` of the markers, size, `INTERNALDATE` and header fields
+    /// of some UIDs of the mailbox, opened if it is not.
+    fn fetch_header_fields(
         &mut self,
         mailbox: &str,
         uids: &[u32],
-    ) -> Result<Vec<(Named, PimdirMailSummary)>, BridgeError> {
-        if uids.is_empty() {
-            return Ok(Vec::new());
-        }
+    ) -> Result<Vec<(u32, Header)>, BridgeError> {
         if !self.opened(mailbox) {
             self.examine(mailbox)?;
         }
 
-        let set = uids
-            .iter()
-            .map(u32::to_string)
-            .collect::<Vec<_>>()
-            .join(",");
-        let sequence_set: SequenceSet = set
-            .as_str()
-            .try_into()
-            .map_err(|_| format!("Invalid sequence set `{set}`"))?;
         let fields = HEADER_FIELDS
             .iter()
             .map(|field| AString::try_from(*field).expect("a header name is an IMAP atom"))
@@ -506,6 +832,7 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
             MessageDataItemName::Uid,
             MessageDataItemName::Flags,
             MessageDataItemName::Rfc822Size,
+            MessageDataItemName::InternalDate,
             MessageDataItemName::BodyExt {
                 section: Some(Section::HeaderFields(
                     None,
@@ -516,18 +843,34 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
             },
         ]);
 
-        let fetched = self.run(ImapMessageFetch::new(
-            sequence_set,
+        let fetched = match self.attempt(ImapMessageFetch::new(
+            sequence_set(uids)?,
             items,
             ImapMessageFetchOptions {
                 uid: true,
                 ..Default::default()
             },
-        ))?;
+        ))? {
+            Ok(fetched) => fetched,
+            // NOTE: Gmail answers NO when a message of the set went
+            // meanwhile, naming none: the set is halved until it does.
+            Err(ImapMessageFetchError::No(text)) if uids.len() > 1 => {
+                log::debug!("{mailbox}: {} headers refused: {text}", uids.len());
+                let (newer, older) = uids.split_at(uids.len() / 2);
+                let mut headers = self.fetch_header_fields(mailbox, newer)?;
+                headers.extend(self.fetch_header_fields(mailbox, older)?);
+                return Ok(headers);
+            }
+            Err(ImapMessageFetchError::No(text)) => {
+                log::debug!("{mailbox}: header of {uids:?} refused: {text}");
+                return Ok(Vec::new());
+            }
+            Err(err) => return Err(err.to_string().into()),
+        };
 
         Ok(fetched
             .into_values()
-            .filter_map(|items| named(items.into_inner()))
+            .filter_map(|items| header(items.into_inner()))
             .collect())
     }
 
@@ -574,6 +917,7 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
             }
         };
         self.state.selected = Some((mailbox.into(), Access::Write));
+        self.state.observe(mailbox, &data);
 
         // A new UIDVALIDITY means every UID this side holds names another
         // message now (RFC 3501 2.3.1.1), so the delta describes a
@@ -605,7 +949,7 @@ impl<'a, 'b, 'local> ImapSession<'a, 'b, 'local> {
 /// merged list does not mark it read behind the reader's back: what
 /// marks a message read is a decision the app has not made yet, and a
 /// fetch is the wrong place to make it silently.
-impl ImapSession<'_, '_, '_> {
+impl ImapSession<'_> {
     pub fn fetch_raw(&mut self, mailbox: &str, uid: &str) -> Result<Vec<u8>, BridgeError> {
         // Whichever way the mailbox is already open: both a SELECT and an
         // EXAMINE allow a FETCH, so reading one message after another in
@@ -647,13 +991,277 @@ impl ImapSession<'_, '_, '_> {
     }
 }
 
+/// Some messages read whole into files, a batch at a time: what the
+/// body step and a step store (`fetchMessageSources`).
+impl ImapSession<'_> {
+    /// Reads the messages `ids` names of `mailbox` whole, one file each in
+    /// `dir`: their sizes first (`UID FETCH <set> (UID RFC822.SIZE)`), then
+    /// one streamed `UID FETCH <set> (UID BODY.PEEK[])` per batch of at most
+    /// [`BODY_BATCH`] messages and about [`BODY_BATCH_BYTES`], a message past
+    /// it read alone, each body written to its file as it streams. A message
+    /// gone is left out; a batch the server refuses is read one message
+    /// after another, one it fails to hand over left out.
+    pub fn fetch_sources(
+        &mut self,
+        mailbox: &str,
+        ids: &[String],
+        dir: &Path,
+    ) -> Result<Vec<ImapSource>, BridgeError> {
+        let uids: Vec<u32> = ids.iter().filter_map(|id| id.parse().ok()).collect();
+        if uids.is_empty() {
+            return Ok(Vec::new());
+        }
+        if !self.opened(mailbox) {
+            self.examine(mailbox)?;
+        }
+
+        let sizes = self.sizes(&uids)?;
+        let mut written = Vec::with_capacity(sizes.len());
+        for batch in batches(&uids, &sizes) {
+            match self.stream_batch(&batch, &sizes, dir, &mut written) {
+                Ok(()) => {}
+                Err(Refusal::Refused(err)) => {
+                    log::warn!("batch of {} refused in {mailbox}: {err}", batch.len());
+                    for uid in batch {
+                        if written.iter().any(|source| source.id == uid.to_string()) {
+                            continue;
+                        }
+                        match self.fetch_raw(mailbox, &uid.to_string()) {
+                            Ok(bytes) => written.push(write_source(dir, uid, &bytes)?),
+                            Err(err) => log::warn!("source of {uid} not read: {err}"),
+                        }
+                    }
+                }
+                Err(Refusal::Failed(err)) => return Err(err),
+            }
+        }
+        Ok(written)
+    }
+
+    /// The sizes the server declares for some UIDs of the open mailbox,
+    /// a UID gone left out.
+    fn sizes(&mut self, uids: &[u32]) -> Result<HashMap<u32, u64>, BridgeError> {
+        let items = MacroOrMessageDataItemNames::MessageDataItemNames(vec![
+            MessageDataItemName::Uid,
+            MessageDataItemName::Rfc822Size,
+        ]);
+        let fetched = self.run(ImapMessageFetch::new(
+            sequence_set(uids)?,
+            items,
+            ImapMessageFetchOptions {
+                uid: true,
+                ..Default::default()
+            },
+        ))?;
+
+        let mut sizes = HashMap::new();
+        for items in fetched.into_values() {
+            let mut uid = None;
+            let mut size = 0;
+            for item in items.into_inner() {
+                match item {
+                    MessageDataItem::Uid(value) => uid = Some(value.get()),
+                    MessageDataItem::Rfc822Size(value) => size = u64::from(value),
+                    _ => {}
+                }
+            }
+            if let Some(uid) = uid {
+                sizes.insert(uid, size);
+            }
+        }
+        Ok(sizes)
+    }
+
+    /// One streamed `UID FETCH <set> (UID BODY.PEEK[])`, each body written
+    /// to its file in `dir` as its octets arrive, never held whole, and
+    /// refused past its declared size ([`literal_bound`]).
+    fn stream_batch(
+        &mut self,
+        uids: &[u32],
+        sizes: &HashMap<u32, u64>,
+        dir: &Path,
+        written: &mut Vec<ImapSource>,
+    ) -> Result<(), Refusal> {
+        let opts = ImapMessageFetchStreamBatchOptions {
+            uid: true,
+            max_literal_len: MAX_MESSAGE_SIZE,
+            sizes: uids
+                .iter()
+                .filter_map(|uid| Some((*uid, literal_bound(*sizes.get(uid)?))))
+                .collect::<BTreeMap<_, _>>(),
+        };
+        let mut coroutine = ImapMessageFetchStreamBatch::new(sequence_set(uids)?, opts);
+        let mut arg: Option<Vec<u8>> = None;
+        let mut current: Option<(u32, File, u64)> = None;
+        // NOTE: the octets a stream read past a body's end, handed back to
+        // the coroutine once that body closes.
+        let mut past = Vec::new();
+
+        loop {
+            let state = coroutine.resume(&mut self.state.fragmentizer, arg.take().as_deref());
+            match state {
+                ImapCoroutineState::Complete(Ok(())) => return Ok(()),
+                ImapCoroutineState::Complete(Err(err)) => {
+                    if let Some((uid, _, _)) = current {
+                        let _ = fs::remove_file(source_path(dir, &uid.to_string()));
+                    }
+                    return Err(match err {
+                        ImapMessageFetchStreamBatchError::No(_)
+                        | ImapMessageFetchStreamBatchError::Bad(_) => {
+                            Refusal::Refused(err.to_string().into())
+                        }
+                        _ => Refusal::Failed(err.to_string().into()),
+                    });
+                }
+                ImapCoroutineState::Yielded(ImapMessageFetchStreamBatchYield::WantsRead) => {
+                    arg = Some(self.wire.imap_read(&self.state.url)?);
+                }
+                ImapCoroutineState::Yielded(ImapMessageFetchStreamBatchYield::WantsWrite(
+                    bytes,
+                )) => {
+                    self.wire.imap_write(&self.state.url, &bytes)?;
+                }
+                ImapCoroutineState::Yielded(ImapMessageFetchStreamBatchYield::MessageStart {
+                    uid,
+                }) => {
+                    let path = source_path(dir, &uid.to_string());
+                    let file = File::create(&path)
+                        .map_err(|err| format!("Could not write `{uid}`: {err}"))?;
+                    current = Some((uid, file, 0));
+                }
+                ImapCoroutineState::Yielded(ImapMessageFetchStreamBatchYield::BodyChunk(bytes)) => {
+                    append(&mut current, &bytes)?;
+                }
+                ImapCoroutineState::Yielded(ImapMessageFetchStreamBatchYield::WantsStream {
+                    len,
+                }) => {
+                    let mut left = len as usize;
+                    while left > 0 {
+                        let chunk = self.wire.imap_read(&self.state.url)?;
+                        if chunk.is_empty() {
+                            break;
+                        }
+                        let take = left.min(chunk.len());
+                        append(&mut current, &chunk[..take])?;
+                        past.extend_from_slice(&chunk[take..]);
+                        left -= take;
+                    }
+                    // NOTE: an empty slice tells the coroutine the stream
+                    // ran short of the body.
+                    arg = (left > 0).then(Vec::new);
+                }
+                ImapCoroutineState::Yielded(ImapMessageFetchStreamBatchYield::MessageEnd) => {
+                    if let Some((uid, file, size)) = current.take() {
+                        file.sync_all()
+                            .map_err(|err| format!("Could not write `{uid}`: {err}"))?;
+                        written.push(ImapSource {
+                            id: uid.to_string(),
+                            path: source_path(dir, &uid.to_string()),
+                            size,
+                        });
+                    }
+                    if !past.is_empty() {
+                        arg = Some(core::mem::take(&mut past));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One message read whole into a file.
+#[derive(Debug)]
+pub struct ImapSource {
+    pub id: String,
+    pub path: PathBuf,
+    pub size: u64,
+}
+
+/// Why a streamed batch stopped short.
+enum Refusal {
+    /// The server answered NO or BAD: the connection stands, and the batch
+    /// can be read one message after another.
+    Refused(BridgeError),
+    /// The connection or the disk failed: nothing more is read.
+    Failed(BridgeError),
+}
+
+impl From<BridgeError> for Refusal {
+    fn from(err: BridgeError) -> Self {
+        Self::Failed(err)
+    }
+}
+
+impl From<String> for Refusal {
+    fn from(err: String) -> Self {
+        Self::Failed(err.into())
+    }
+}
+
+/// The most octets a body declared `size` octets long may stream: twice
+/// its `RFC822.SIZE` and 64 KiB more, since some servers (Exchange) state an
+/// estimate, within [`MAX_MESSAGE_SIZE`].
+fn literal_bound(size: u64) -> u32 {
+    let bound = size.saturating_mul(2).saturating_add(64 * 1024);
+    u32::try_from(bound)
+        .unwrap_or(u32::MAX)
+        .min(MAX_MESSAGE_SIZE)
+}
+
+/// Some UIDs cut into the batches a streamed fetch reads, in their order:
+/// at most [`BODY_BATCH`] messages and about [`BODY_BATCH_BYTES`] by the
+/// sizes the server declared, a message past it alone, a UID it declared
+/// no size for (gone) left out.
+fn batches(uids: &[u32], sizes: &HashMap<u32, u64>) -> Vec<Vec<u32>> {
+    let mut batches = Vec::new();
+    let mut batch: Vec<u32> = Vec::new();
+    let mut bytes = 0;
+    for uid in uids {
+        let Some(size) = sizes.get(uid).copied() else {
+            continue;
+        };
+        if !batch.is_empty() && (batch.len() >= BODY_BATCH || bytes + size > BODY_BATCH_BYTES) {
+            batches.push(core::mem::take(&mut batch));
+            bytes = 0;
+        }
+        batch.push(*uid);
+        bytes += size;
+    }
+    if !batch.is_empty() {
+        batches.push(batch);
+    }
+    batches
+}
+
+/// Appends a stretch of body to the message streaming.
+fn append(current: &mut Option<(u32, File, u64)>, bytes: &[u8]) -> Result<(), BridgeError> {
+    let Some((uid, file, size)) = current.as_mut() else {
+        return Err("Body octets outside a message".into());
+    };
+    file.write_all(bytes)
+        .map_err(|err| format!("Could not write `{uid}`: {err}"))?;
+    *size += bytes.len() as u64;
+    Ok(())
+}
+
+/// Writes one message read alone to its file in `dir`.
+fn write_source(dir: &Path, uid: u32, bytes: &[u8]) -> Result<ImapSource, BridgeError> {
+    let path = source_path(dir, &uid.to_string());
+    fs::write(&path, bytes).map_err(|err| format!("Could not write `{uid}`: {err}"))?;
+    Ok(ImapSource {
+        id: uid.to_string(),
+        path,
+        size: bytes.len() as u64,
+    })
+}
+
 /// The write verbs: what a push carries out on a message (pimdir SYNC §4).
 ///
 /// SELECT rather than the EXAMINE the reads use, since a read-only
 /// mailbox refuses both a STORE and a MOVE. Silent variants throughout:
 /// the app already knows what it asked for, and the untagged FETCH the
 /// echoing form brings back is a response to parse for nothing.
-impl ImapSession<'_, '_, '_> {
+impl ImapSession<'_> {
     /// SELECT a mailbox, then add or remove one marker on one message,
     /// addressed by UID.
     pub fn store_flag(
@@ -686,6 +1294,11 @@ impl ImapSession<'_, '_, '_> {
     /// Relocates one message into `target` (pimdir SYNC §4): MOVE (RFC
     /// 6851) where the server has it, else COPY then the disposal of the
     /// original [`Self::destroy`] makes.
+    ///
+    /// The COPY is skipped when `target` already holds the message's
+    /// `Message-ID`: the caller runs a relocation again on a new connection
+    /// when the last one died, and a COPY whose answer was lost with it has
+    /// already filed the copy.
     pub fn relocate(&mut self, mailbox: &str, uid: &str, target: &str) -> Result<(), BridgeError> {
         self.select(mailbox)?;
 
@@ -698,16 +1311,57 @@ impl ImapSession<'_, '_, '_> {
                 ))?;
             }
             Relocation::CopyThenDispose => {
-                self.run(ImapMessageCopy::new(
-                    uids(uid)?,
-                    mailbox_name(target)?,
-                    ImapMessageCopyOptions { uid: true },
-                ))?;
+                if !self.copied(mailbox, uid, target)? {
+                    self.select(mailbox)?;
+                    self.run(ImapMessageCopy::new(
+                        uids(uid)?,
+                        mailbox_name(target)?,
+                        ImapMessageCopyOptions { uid: true },
+                    ))?;
+                }
+                self.select(mailbox)?;
                 self.dispose(uid)?;
             }
         }
 
         Ok(())
+    }
+
+    /// Whether `target` holds a message with the `Message-ID` of message
+    /// `uid` of `mailbox`; false when it carries none, which nothing could
+    /// tell apart.
+    fn copied(&mut self, mailbox: &str, uid: &str, target: &str) -> Result<bool, BridgeError> {
+        let number: u32 = uid
+            .parse()
+            .map_err(|_| format!("Invalid message id `{uid}`"))?;
+        let id = self
+            .fetch_header_fields(mailbox, &[number])?
+            .into_iter()
+            .next()
+            .and_then(|(_, header)| header.summary.message_id);
+        match id {
+            Some(id) => self.holds(target, &id),
+            None => Ok(false),
+        }
+    }
+
+    /// Whether `mailbox` holds a message whose `Message-ID` is `id` (its
+    /// angle brackets off), by `UID SEARCH HEADER`.
+    fn holds(&mut self, mailbox: &str, id: &str) -> Result<bool, BridgeError> {
+        self.examine(mailbox)?;
+
+        let field = AString::try_from("MESSAGE-ID").expect("a header name is an IMAP atom");
+        let value = AString::try_from(format!("<{id}>").as_str())
+            .map_err(|_| format!("Invalid Message-ID `{id}`"))?
+            .into_static();
+        let criteria =
+            Vec1::try_from(vec![SearchKey::Header(field, value)]).expect("one criterion");
+
+        let found = self.run(ImapMessageSearch::new(
+            criteria,
+            ImapMessageSearchOptions { uid: true },
+        ))?;
+        Ok(!found.is_empty())
     }
 
     /// Copies one message into `target`, the original kept.
@@ -751,12 +1405,23 @@ impl ImapSession<'_, '_, '_> {
 
     /// Appends one message to `mailbox` with `flags`, the push of a create
     /// staged with no origin: the sent copy of a submitted message.
+    ///
+    /// Skipped when `mailbox` already holds the message's `Message-ID`: an
+    /// append whose answer was lost stays staged and comes back on the next
+    /// pass, and a server filing sent mail itself holds the copy already.
     pub fn append(
         &mut self,
         mailbox: &str,
         message: Vec<u8>,
         flags: &[String],
     ) -> Result<(), BridgeError> {
+        if let Some(id) = mail::message_id(&message)
+            && self.holds(mailbox, &id)?
+        {
+            log::debug!("{mailbox}: holds <{id}> already, not appended");
+            return Ok(());
+        }
+
         let mut owned = Vec::with_capacity(flags.len());
         // NOTE: `\Recent` is the server's alone (RFC 3501 section 2.3.2),
         // refused on an APPEND.
@@ -801,11 +1466,17 @@ impl ImapSession<'_, '_, '_> {
             .map_err(|_| format!("Invalid mailbox name `{mailbox}`"))?;
 
         self.state.selected = None;
-        let data = self.run(ImapMailboxExamine::new(
+        let examined = self.attempt(ImapMailboxExamine::new(
             name,
             ImapMailboxExamineOptions::default(),
         ))?;
+        let data = match examined {
+            Ok(data) => data,
+            Err(err @ ImapMailboxExamineError::No(_)) => return Err(refused(&err)),
+            Err(err) => return Err(err.to_string().into()),
+        };
         self.state.selected = Some((mailbox.into(), Access::Read));
+        self.state.observe(mailbox, &data);
 
         Ok(data)
     }
@@ -826,13 +1497,28 @@ impl ImapSession<'_, '_, '_> {
         // nobody can name, and claiming the old one is still open would
         // send the next command somewhere it was never meant to go.
         self.state.selected = None;
-        self.run(ImapMailboxSelect::new(
+        // NOTE: a write moves what a read cached, and no EXAMINE says so
+        // before the next read.
+        self.state.cache = None;
+        match self.attempt(ImapMailboxSelect::new(
             name,
             ImapMailboxSelectOptions::default(),
-        ))?;
+        ))? {
+            Ok(_) => {}
+            Err(err @ ImapMailboxSelectError::No(_)) => return Err(refused(&err)),
+            Err(err) => return Err(err.to_string().into()),
+        }
         self.state.selected = Some((mailbox.into(), Access::Write));
 
         Ok(())
+    }
+}
+
+/// A mailbox the server refused to open ([`MAILBOX_REFUSED`]).
+fn refused(err: &impl core::fmt::Display) -> BridgeError {
+    BridgeError {
+        message: err.to_string(),
+        status: Some(MAILBOX_REFUSED),
     }
 }
 
@@ -883,37 +1569,57 @@ fn disposal(capabilities: &[Capability<'static>]) -> Disposal {
     }
 }
 
-/// One FETCH response's items as the member they name, with the
-/// summary its header fields derive; [`None`] when it carried no UID,
-/// which is nothing this can address.
-fn named(items: Vec<MessageDataItem<'static>>) -> Option<(Named, PimdirMailSummary)> {
+/// One FETCH response's items as the UID it names and what a listing
+/// reads of it, the summary derived from its header fields; [`None`] when
+/// it carried no UID, which is nothing this can address.
+fn header(items: Vec<MessageDataItem<'static>>) -> Option<(u32, Header)> {
     let mut uid = None;
     let mut flags = Vec::new();
     let mut size = None;
-    let mut header = Vec::new();
+    let mut received = None;
+    let mut fields = Vec::new();
 
     for item in items {
         match item {
             MessageDataItem::Uid(value) => uid = Some(value.get()),
             MessageDataItem::Flags(fetched) => flags = flag_names(&fetched),
             MessageDataItem::Rfc822Size(value) => size = Some(u64::from(value)),
+            MessageDataItem::InternalDate(date) => {
+                received = Timestamp::from_second(date.as_ref().timestamp()).ok();
+            }
             MessageDataItem::BodyExt { data, .. } => {
                 if let Some(bytes) = data.0 {
-                    header = bytes.into_inner().into_owned();
+                    fields = bytes.into_inner().into_owned();
                 }
             }
             _ => {}
         }
     }
 
-    let derivation = derive_meta(&header, size, None);
+    let derivation = derive_meta(&fields, size, None);
     let Some(PimdirSummary::Mail(summary)) = derivation.summary else {
         return None;
     };
     Some((
-        Named::new(uid?.to_string(), flags, summary.clone()),
-        summary,
+        uid?,
+        Header {
+            flags,
+            summary,
+            received,
+        },
     ))
+}
+
+/// Some UIDs as the sequence set a UID command takes.
+fn sequence_set(uids: &[u32]) -> Result<SequenceSet, BridgeError> {
+    let set = uids
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    set.as_str()
+        .try_into()
+        .map_err(|_| BridgeError::from(format!("Invalid sequence set `{set}`")))
 }
 
 /// The markers of a FETCH response, as the store spells them.
@@ -947,21 +1653,6 @@ fn imap_date(instant: jiff::Timestamp) -> Result<NaiveDate, BridgeError> {
     .ok_or_else(|| BridgeError::from(format!("No IMAP date for {instant}")))
 }
 
-/// Reads one message whole: connect, EXAMINE its mailbox and fetch it,
-/// as the bytes the server holds.
-///
-/// The MIME tree is nobody's business here. What a reader draws is
-/// derived from these bytes by [`crate::mail::parse`], and derived again
-/// from the same bytes once the store holds them, which is what makes
-/// opening a message a second time cost nothing.
-pub fn fetch_source(
-    session: &mut ImapSession<'_, '_, '_>,
-    mailbox: &str,
-    id: &str,
-) -> Result<Vec<u8>, BridgeError> {
-    session.fetch_raw(mailbox, id)
-}
-
 /// Opens a session on `url` and authenticates it, for a caller that will
 /// hold it across calls.
 pub fn open(
@@ -982,9 +1673,7 @@ pub fn open(
 /// per-mailbox verb would have been a per-mailbox login; a session lasts
 /// the pass now, so each mailbox is enumerated when its turn comes and
 /// only what changed is read.
-pub fn list_mailboxes(
-    session: &mut ImapSession<'_, '_, '_>,
-) -> Result<Vec<MailboxEntry>, BridgeError> {
+pub fn list_mailboxes(session: &mut ImapSession<'_>) -> Result<Vec<MailboxEntry>, BridgeError> {
     Ok(session
         .list()?
         .into_iter()
@@ -1053,74 +1742,5 @@ fn decode_cursor(cursor: &str) -> Option<(u32, u64)> {
 }
 
 #[cfg(test)]
-mod tests {
-    use core::num::NonZeroU32;
-
-    use io_imap::types::{
-        core::NString,
-        fetch::{MessageDataItem, Section},
-        flag::{Flag, FlagFetch},
-    };
-
-    use super::{Capability, Disposal, Relocation, disposal, named, relocation};
-
-    #[test]
-    fn a_server_with_move_relocates_in_one_command() {
-        let capabilities = [Capability::Move, Capability::UidPlus];
-        assert_eq!(relocation(&capabilities), Relocation::Move);
-    }
-
-    #[test]
-    fn a_server_without_move_copies_then_disposes() {
-        assert_eq!(
-            relocation(&[Capability::UidPlus]),
-            Relocation::CopyThenDispose
-        );
-        assert_eq!(relocation(&[]), Relocation::CopyThenDispose);
-    }
-
-    #[test]
-    fn only_uidplus_expunges_one_message() {
-        assert_eq!(disposal(&[Capability::UidPlus]), Disposal::Expunge);
-        assert_eq!(
-            disposal(&[Capability::Move]),
-            Disposal::Mark,
-            "a plain EXPUNGE would take every message marked"
-        );
-    }
-
-    #[test]
-    fn a_fetched_header_block_names_the_member() {
-        let header = b"Date: Wed, 07 Oct 2026 10:00:00 +0200\r\n\
-From: =?UTF-8?Q?Ren=C3=A9?= <Rene@Example.org>\r\n\
-Subject: Hello\r\n\
-Message-ID: <m1@example.org>\r\n\
-Content-Type: multipart/mixed; boundary=x\r\n\r\n"
-            .to_vec();
-        let items = vec![
-            MessageDataItem::Uid(NonZeroU32::new(42).unwrap()),
-            MessageDataItem::Flags(vec![FlagFetch::Flag(Flag::Seen)]),
-            MessageDataItem::Rfc822Size(1234),
-            MessageDataItem::BodyExt {
-                section: Some(Section::Header(None)),
-                origin: None,
-                data: NString::try_from(header).unwrap(),
-            },
-        ];
-
-        let (named, summary) = named(items).expect("a UID names a member");
-        assert_eq!(named.handle, "42");
-        assert_eq!(named.link_id, "42", "the UID is the identity, as ever");
-        assert_eq!(named.flags, vec![String::from("\\Seen")]);
-        assert_eq!(named.sort_key, "2026-10-07T08:00:00Z");
-        assert_eq!(summary.subject, "Hello");
-        assert_eq!(summary.sender.as_deref(), Some("rene@example.org"));
-        assert_eq!(summary.sender_name.as_deref(), Some("René"));
-        assert_eq!(summary.size, Some(1234));
-        assert_eq!(
-            summary.attachment,
-            Some(true),
-            "multipart/mixed, without the body"
-        );
-    }
-}
+#[path = "imap_tests.rs"]
+mod tests;

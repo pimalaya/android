@@ -153,19 +153,24 @@ impl<'a, 'b, 'local> SmtpSession<'a, 'b, 'local> {
             SmtpMessageSendOptions::default(),
         );
         let mut arg: Option<Vec<u8>> = None;
+        // NOTE: set once the data's final `.` is on its way: from there a
+        // failure with no reply cannot tell a message the server took from
+        // one it never saw.
+        let mut handed_over = false;
 
         loop {
             match send.resume(arg.as_deref()) {
                 SmtpCoroutineState::Complete(Ok(_)) => break,
-                SmtpCoroutineState::Complete(Err(err)) => return Err(refusal(err)),
+                SmtpCoroutineState::Complete(Err(err)) => return Err(refusal(err, handed_over)),
                 SmtpCoroutineState::Yielded(SmtpYield::WantsRead) => {
                     let read = self.client.read(&self.url);
-                    arg = Some(read.map_err(SmtpSendError::transient)?);
+                    arg = Some(read.map_err(|err| SmtpSendError::lost(err, handed_over))?);
                 }
                 SmtpCoroutineState::Yielded(SmtpYield::WantsWrite(bytes)) => {
+                    handed_over |= handed(&bytes);
                     self.client
                         .write(&self.url, &bytes)
-                        .map_err(SmtpSendError::transient)?;
+                        .map_err(|err| SmtpSendError::lost(err, handed_over))?;
                     arg = None;
                 }
             }
@@ -175,10 +180,12 @@ impl<'a, 'b, 'local> SmtpSession<'a, 'b, 'local> {
         // never told the session ended keeps it open until its own
         // timeout, and the transport pools by origin, so the next send
         // of the same run would meet a connection the server has half
-        // forgotten.
-        self.run(SmtpQuit::new())
-            .map(|_| ())
-            .map_err(SmtpSendError::transient)
+        // forgotten. The message was accepted: a failed QUIT is no failed
+        // send, which would queue it to go again.
+        if let Err(err) = self.run(SmtpQuit::new()) {
+            log::debug!("quit after an accepted message failed: {err}");
+        }
+        Ok(())
     }
 }
 
@@ -193,6 +200,9 @@ pub enum SmtpSendError {
     Refused(String),
     /// Anything else: no network, TLS, authentication, a 4yz reply.
     Transient(String),
+    /// The whole message went over and no verdict came back: the server
+    /// may have taken it, so sending it again may deliver it twice.
+    Uncertain(String),
 }
 
 impl SmtpSendError {
@@ -201,15 +211,31 @@ impl SmtpSendError {
         matches!(self, Self::Refused(_))
     }
 
+    /// Whether the message may have been taken although the send failed.
+    pub fn is_uncertain(&self) -> bool {
+        matches!(self, Self::Uncertain(_))
+    }
+
     fn transient(err: impl Display) -> Self {
         Self::Transient(err.to_string())
+    }
+
+    /// A failure with no reply, before the message was handed over
+    /// (transient) or after (uncertain).
+    fn lost(err: impl Display, handed_over: bool) -> Self {
+        match handed_over {
+            true => Self::Uncertain(err.to_string()),
+            false => Self::Transient(err.to_string()),
+        }
     }
 }
 
 impl Display for SmtpSendError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> FmtResult {
         match self {
-            Self::Refused(message) | Self::Transient(message) => formatter.write_str(message),
+            Self::Refused(message) | Self::Transient(message) | Self::Uncertain(message) => {
+                formatter.write_str(message)
+            }
         }
     }
 }
@@ -219,9 +245,10 @@ impl Display for SmtpSendError {
 /// A 5yz reply is the server's final word on this message and a 4yz one
 /// asks for the same message later (RFC 5321 section 4.2.1), which is
 /// exactly the difference between parking the action and leaving it
-/// pending. Anything with no reply code at all never reached a verdict,
-/// so it is the environment's failure and retries.
-fn refusal(err: SmtpMessageSendError) -> SmtpSendError {
+/// pending. Anything with no reply code at all never reached a verdict:
+/// before the message was `handed_over` it is the environment's failure
+/// and retries, after it the message may have gone.
+fn refusal(err: SmtpMessageSendError, handed_over: bool) -> SmtpSendError {
     let code = match &err {
         SmtpMessageSendError::MailFrom(SmtpMailError::Rejected { code, .. })
         | SmtpMessageSendError::RcptTo(SmtpRcptError::Rejected { code, .. })
@@ -232,9 +259,17 @@ fn refusal(err: SmtpMessageSendError) -> SmtpSendError {
 
     if (500..600).contains(&code) {
         SmtpSendError::Refused(err.to_string())
+    } else if code == 0 {
+        SmtpSendError::lost(err, handed_over)
     } else {
         SmtpSendError::Transient(err.to_string())
     }
+}
+
+/// Whether a write carries the end of a message's data, its final `.`
+/// line (RFC 5321 section 4.1.1.4).
+fn handed(bytes: &[u8]) -> bool {
+    bytes.ends_with(b"\r\n.\r\n")
 }
 
 /// The `EHLO` name, built each time it is needed: the type borrows, and
@@ -274,9 +309,10 @@ mod tests {
     use io_smtp::{
         message::SmtpMessageSendError,
         rfc5321::{data::SmtpDataError, mail::SmtpMailError, rcpt::SmtpRcptError},
+        send::SmtpCommandSendError,
     };
 
-    use super::refusal;
+    use super::{handed, refusal};
 
     #[test]
     fn a_5yz_reply_is_the_servers_last_word() {
@@ -285,7 +321,7 @@ mod tests {
             message: "No such recipient".into(),
         });
 
-        assert!(refusal(err).is_permanent(), "expected a refusal");
+        assert!(refusal(err, false).is_permanent(), "expected a refusal");
     }
 
     #[test]
@@ -296,7 +332,7 @@ mod tests {
         });
 
         assert!(
-            !refusal(err).is_permanent(),
+            !refusal(err, false).is_permanent(),
             "a temporary reply keeps the message queued"
         );
     }
@@ -309,8 +345,35 @@ mod tests {
         });
 
         assert!(
-            refusal(err).is_permanent(),
+            refusal(err, false).is_permanent(),
             "the verdict is the reply code, whichever step earned it"
         );
+    }
+
+    /// The connection ending after the final dot leaves no telling whether
+    /// the server took the message; before it, nothing was handed over.
+    #[test]
+    fn a_reply_lost_after_the_data_is_uncertain() {
+        let eof = || SmtpMessageSendError::Data(SmtpDataError::Send(SmtpCommandSendError::Eof));
+
+        assert!(refusal(eof(), true).is_uncertain());
+        assert!(!refusal(eof(), false).is_uncertain());
+        assert!(!refusal(eof(), false).is_permanent());
+
+        let busy = SmtpMessageSendError::Data(SmtpDataError::BodyRejected {
+            code: 451,
+            message: "Try later".into(),
+        });
+        assert!(
+            !refusal(busy, true).is_uncertain(),
+            "a 4yz reply says the message was not taken"
+        );
+    }
+
+    #[test]
+    fn the_final_dot_hands_the_message_over() {
+        assert!(handed(b"Subject: x\r\n\r\n..hello\r\n.\r\n"));
+        assert!(!handed(b"DATA\r\n"));
+        assert!(!handed(b"RCPT TO:<a@b.c>\r\n"));
     }
 }

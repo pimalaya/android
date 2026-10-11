@@ -132,6 +132,16 @@ abstract class PimdirEngine implements OfflineDriver {
     }
 
     /**
+     * The bodies the store holds under some link ids, as the reply to the
+     * lookup an upgrade asks before fetching ({@link
+     * PimdirStorage#lookupObjects}): a driver whose link ids name nothing
+     * outside its own collection answers fewer.
+     */
+    protected JSONObject lookup(JSONArray links) throws JSONException {
+        return offline.lookupObjects(links);
+    }
+
+    /**
      * Whether reading the bodies of {@code collection} is a download to
      * tell, for a driver that reports one.
      */
@@ -237,7 +247,7 @@ abstract class PimdirEngine implements OfflineDriver {
                 }
                 case "lookup":
                     synchronized (STORE) {
-                        reply = offline.lookupObjects(yielded.getJSONArray("links")).toString();
+                        reply = lookup(yielded.getJSONArray("links")).toString();
                     }
                     break;
                 case "write":
@@ -273,6 +283,9 @@ abstract class PimdirEngine implements OfflineDriver {
                     reply = pushed.toString();
                     break;
                 }
+                case "held":
+                    reply = held(yielded).toString();
+                    break;
                 default:
                     reply = error("Unsupported engine yield " + op);
             }
@@ -292,6 +305,15 @@ abstract class PimdirEngine implements OfflineDriver {
      */
     protected void applied(JSONArray effects) throws JSONException {}
 
+    /**
+     * Which of a mail step's listed handles the store holds, as the reply
+     * to the bridge's {@code held} yield ({@code {held}}); only a mail
+     * driver steps.
+     */
+    protected JSONObject held(JSONObject yielded) throws JSONException {
+        throw new UnsupportedOperationException("Only a mail driver steps");
+    }
+
     /** The collection's member spine, as the reply to an enumerate yield. */
     protected abstract JSONObject enumerate(JSONObject yielded) throws JSONException;
 
@@ -305,6 +327,44 @@ abstract class PimdirEngine implements OfflineDriver {
         return false;
     }
 
+    /**
+     * A fetch reply whose members this source already binds keep the
+     * identity the store files them under, whatever identity their body
+     * states now.
+     *
+     * <p>A bound handle whose body names another identity is the same
+     * resource rewritten, not a second one: Google rewrites a card's UID to
+     * its own on every PUT, and a calendar entry is named by its resource,
+     * which a create lands under the name the server chose. Read as a new
+     * identity, the store retires the bound item (STORAGE §10), and with it
+     * what was staged on it since: an edit is lost, a removal never pushed.
+     */
+    protected JSONObject keepBoundNames(String collection, JSONObject reply)
+            throws JSONException {
+        JSONArray items = reply.optJSONArray("items");
+        if (items == null || items.length() == 0) {
+            return reply;
+        }
+
+        List<String> handles = new ArrayList<>(items.length());
+        for (int index = 0; index < items.length(); index++) {
+            handles.add(items.getJSONObject(index).getString("handle"));
+        }
+        java.util.Map<String, String[]> bound;
+        synchronized (STORE) {
+            bound = offline.bound(collection, handles);
+        }
+
+        for (int index = 0; index < items.length(); index++) {
+            JSONObject item = items.getJSONObject(index);
+            String[] held = bound.get(item.getString("handle"));
+            if (held != null && held[0] != null) {
+                item.put("linkId", held[0]);
+            }
+        }
+        return reply;
+    }
+
     /** How many bodies one naming read asks for: the DAV multiget batch. */
     private static final int NAMING_BATCH = 64;
 
@@ -314,7 +374,8 @@ abstract class PimdirEngine implements OfflineDriver {
      * has not moved is named by the link id the store holds, and every
      * other one, new or changed, carries its body, read through this
      * driver's own {@link #fetch} 64 at a time, with the identity, summary
-     * and sort key derived from it.
+     * and sort key derived from it, a changed one keeping the identity it is
+     * filed under ({@link #keepBoundNames}).
      *
      * <p>Where the meta of a DAV kind is its body, this is the read that
      * names it; it replaces the probe the store used to keep and the
@@ -354,6 +415,10 @@ abstract class PimdirEngine implements OfflineDriver {
             } else if (!item.has("body")) {
                 item.remove("linkId");
                 unread.add(item.getString("handle"));
+            } else if (held != null && held[0] != null) {
+                // NOTE: a bound member keeps its identity, as a fetch's does
+                // (keepBoundNames).
+                item.put("linkId", held[0]);
             }
         }
         if (unread.isEmpty()) {

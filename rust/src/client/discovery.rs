@@ -48,7 +48,11 @@ use secrecy::SecretString;
 use url::Url;
 
 use crate::{
-    client::{Client, USER_AGENT, convert::coroutine_error},
+    client::{
+        Client, USER_AGENT,
+        convert::coroutine_error,
+        trust::{require_https, trusted_href},
+    },
     oauth::parse_pkce_verifier,
     types::BridgeError,
 };
@@ -80,7 +84,10 @@ impl<'a, 'local> Client<'a, 'local> {
         let resolver = Url::parse(resolver)
             .map_err(|err| format!("Invalid DNS resolver URL `{resolver}`: {err}"))?;
 
-        let coroutine = DiscoveryDavResolve::new(domain, DiscoveryDavService::Carddav, resolver);
+        // NOTE: secure only, a plain SRV record handing the credential an
+        // http origin.
+        let coroutine = DiscoveryDavResolve::new(domain, DiscoveryDavService::Carddav, resolver)
+            .with_secure_only(true);
         let srv_err = match self.run_discovery(coroutine) {
             Ok(url) => return Ok(url),
             Err(err) => err,
@@ -165,7 +172,8 @@ impl<'a, 'local> Client<'a, 'local> {
             &domain,
             DiscoveryDavService::Carddav,
             self.search_resolver(resolver)?,
-        );
+        )
+        .with_secure_only(true);
         let url = self.run_mechanism(resolve)?;
 
         Ok(vec![DiscoveryServiceConfig::from_dav(
@@ -187,7 +195,8 @@ impl<'a, 'local> Client<'a, 'local> {
             &domain,
             DiscoveryDavService::Caldav,
             self.search_resolver(resolver)?,
-        );
+        )
+        .with_secure_only(true);
         let url = self.run_mechanism(resolve)?;
 
         Ok(vec![DiscoveryServiceConfig::from_dav(
@@ -226,9 +235,12 @@ impl<'a, 'local> Client<'a, 'local> {
 
         // NOTE: the mailconf TXT record names where the document lives
         // rather than carrying it, so it is one lookup and then the same
-        // fetch as the three fixed locations.
+        // fetch as the three fixed locations. Https only: the record is free
+        // to name an http URL, which an on-path attacker would answer.
         let mailconf = DiscoveryMailconf::new(&domain, self.search_resolver(resolver)?);
-        if let Ok(url) = self.run_mechanism(mailconf) {
+        if let Ok(url) = self.run_mechanism(mailconf)
+            && url.scheme() == "https"
+        {
             located.push((url, DiscoveryConfigSource::Mailconf));
         }
 
@@ -299,8 +311,18 @@ impl<'a, 'local> Client<'a, 'local> {
     /// issuer, trying the `oauth-authorization-server` well-known
     /// first and falling back to the OpenID Connect Discovery
     /// document (the mailmaint OAuth draft requires servers to serve
-    /// at least one).
+    /// at least one). Refused unless it is the issuer's own, over https
+    /// ([`trusted_metadata`]).
     pub fn oauth_server_metadata(
+        &mut self,
+        issuer: &Url,
+    ) -> Result<DiscoveryOauthServerMetadata, BridgeError> {
+        require_https(issuer, "issuer")?;
+        let metadata = self.fetch_oauth_server_metadata(issuer)?;
+        trusted_metadata(issuer, metadata)
+    }
+
+    fn fetch_oauth_server_metadata(
         &mut self,
         issuer: &Url,
     ) -> Result<DiscoveryOauthServerMetadata, BridgeError> {
@@ -326,6 +348,7 @@ impl<'a, 'local> Client<'a, 'local> {
         registration_endpoint: &Url,
         params: &Oauth20ClientRegisterParams,
     ) -> Result<Oauth20ClientInformation, BridgeError> {
+        require_https(registration_endpoint, "registration endpoint")?;
         let request = oauth_post_request(registration_endpoint);
         let mut coroutine =
             Oauth20ClientRegister::new(request, params).map_err(|err| err.to_string())?;
@@ -365,6 +388,7 @@ impl<'a, 'local> Client<'a, 'local> {
         redirect_uri: &str,
         pkce_verifier: &str,
     ) -> Result<Oauth20AccessTokenSuccessParams, BridgeError> {
+        require_https(token_endpoint, "token endpoint")?;
         let verifier = parse_pkce_verifier(pkce_verifier)?;
         let params = Oauth20AccessTokenRequestParams {
             code: code.into(),
@@ -408,6 +432,7 @@ impl<'a, 'local> Client<'a, 'local> {
         refresh_token: &str,
         scope: &str,
     ) -> Result<Oauth20AccessTokenSuccessParams, BridgeError> {
+        require_https(token_endpoint, "token endpoint")?;
         let mut params = Oauth20AccessTokenRefreshParams::new(client_id, refresh_token);
         params.client_secret = client_secret.map(SecretString::from);
         params.scopes = scope.split_whitespace().map(Cow::Borrowed).collect();
@@ -438,26 +463,32 @@ impl<'a, 'local> Client<'a, 'local> {
 /// CardDAV discovery walk steps: the PROPFIND probes that resolve the
 /// principal and its addressbook home set.
 impl<'a, 'local> Client<'a, 'local> {
-    /// PROPFIND the context root for `DAV:current-user-principal`.
+    /// PROPFIND the context root for `DAV:current-user-principal`, on a
+    /// server the credential may follow to ([`trusted_href`]).
     pub(crate) fn principal(
         &mut self,
         base_url: &Url,
         auth: &WebdavAuth,
     ) -> Result<Option<Url>, BridgeError> {
-        self.run_redirect(base_url, |url| {
+        let principal = self.run_redirect(base_url, |url| {
             WebdavCurrentUserPrincipal::new(url, auth, USER_AGENT)
-        })
+        })?;
+        principal
+            .map(|principal| trusted_href(base_url, principal))
+            .transpose()
     }
 
-    /// PROPFIND the principal for `CARDDAV:addressbook-home-set`.
+    /// PROPFIND the principal for `CARDDAV:addressbook-home-set`, on a
+    /// server the credential may follow to ([`trusted_href`]).
     pub(crate) fn addressbook_home_set(
         &mut self,
         principal: &Url,
         auth: &WebdavAuth,
     ) -> Result<Option<Url>, BridgeError> {
-        self.run_redirect(principal, |url| {
+        let home = self.run_redirect(principal, |url| {
             CarddavAddressbookHomeSet::new(url, auth, USER_AGENT, url.path())
-        })
+        })?;
+        home.map(|home| trusted_href(principal, home)).transpose()
     }
 }
 
@@ -534,6 +565,42 @@ fn oauth_post_request(endpoint: &Url) -> HttpRequest {
         body: Vec::new(),
     }
     .header("Host", format!("{host}:{port}"))
+}
+
+/// The metadata fetched for `issuer`, when it is that issuer's: RFC 8414
+/// section 3.3 requires the `issuer` it names to be the one asked for, or
+/// a host serving another's metadata steers the grant to that other. Its
+/// endpoints must be https ([`require_https`]): the browser opens one,
+/// and the code, the verifier and every refresh token go to the others.
+pub(crate) fn trusted_metadata(
+    issuer: &Url,
+    metadata: DiscoveryOauthServerMetadata,
+) -> Result<DiscoveryOauthServerMetadata, BridgeError> {
+    if metadata.issuer != *issuer {
+        return Err(format!(
+            "Authorization server metadata for {issuer} names another issuer, {}",
+            metadata.issuer
+        )
+        .into());
+    }
+
+    let endpoints = [
+        (&metadata.authorization_endpoint, "authorization endpoint"),
+        (&metadata.token_endpoint, "token endpoint"),
+        (&metadata.registration_endpoint, "registration endpoint"),
+        (
+            &metadata.device_authorization_endpoint,
+            "device authorization endpoint",
+        ),
+    ];
+    for (endpoint, what) in endpoints {
+        let Some(endpoint) = endpoint else {
+            continue;
+        };
+        require_https(endpoint, what)?;
+    }
+
+    Ok(metadata)
 }
 
 /// Formats an RFC 6749 §5.2 token error response.

@@ -11,13 +11,14 @@
 use io_pimdir::summary::derive;
 use jni::{
     EnvUnowned,
-    errors::{Error, LogErrorAndDefault},
+    errors::Error,
     objects::{JByteArray, JClass, JObject, JString},
 };
 use serde_json::{Map, Value, json, to_string};
 
 use crate::{
-    ffi::{error_json, read_string},
+    ffi::{ErrorReply, error_json, read_string},
+    mail::derivable,
     summary::SummaryJson,
 };
 
@@ -42,7 +43,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirSql<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.pimdirMigrations`: every canonical migration in order, as a JSON
@@ -66,17 +67,18 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirMigrations<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.pimdirVersion`: the schema version the compiled-in SQL is, which the
 /// caller stamps into `PRAGMA user_version` and checks on open.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_pimdirVersion<'local>(
-    _env: EnvUnowned<'local>,
+    mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
 ) -> i32 {
-    io_pimdir::sql::VERSION as i32
+    env.with_env(|_| -> Result<i32, Error> { Ok(io_pimdir::sql::VERSION as i32) })
+        .resolve::<ErrorReply>()
 }
 
 /// `Native.pimdirDerive`: what STORAGE Annex A derives from one body of
@@ -97,7 +99,13 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirDerive<'local>(
         let kind = read_string(env, &kind);
         let body = env.convert_byte_array(&body).unwrap_or_default();
 
-        let json = match derive(&kind, &body) {
+        // NOTE: a mail too deep for the library's walk is derived from
+        // its header alone (`mail::derivable`).
+        let body = match kind.eq_ignore_ascii_case("message/rfc822") {
+            true => derivable(&body),
+            false => &body,
+        };
+        let json = match derive(&kind, body) {
             None => error_json(format!("No pimdir derivation for {kind}")),
             Some(derived) => json!({
                 "linkId": derived.link_id.0,
@@ -109,5 +117,5 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pimdirDerive<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }

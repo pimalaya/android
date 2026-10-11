@@ -28,6 +28,9 @@ import java.util.Map;
  * statement with their messages, newest first, a folder's files A to Z.
  */
 final class FilesList {
+    /** The prefix of the copy an import stages in the cache ({@link CacheSweep}). */
+    static final String STAGED = "import";
+
     /** The kind chips: folders, attachments. */
     private static final int FOLDERS = 0;
 
@@ -99,7 +102,7 @@ final class FilesList {
 
     void setUp() {
         ListView list = host.findViewById(R.id.files_list);
-        header = new ListHeader(host, list, MainActivity.PANEL_FILES);
+        header = new ListHeader(host, list, MainActivity.PANEL_FILES, null);
         header.empty(host.findViewById(R.id.files_empty));
         header.search(
                 R.string.files_search,
@@ -531,7 +534,7 @@ final class FilesList {
                 () -> {
                     java.io.File staged = null;
                     try {
-                        staged = java.io.File.createTempFile("import", null, host.getCacheDir());
+                        staged = java.io.File.createTempFile(STAGED, null, host.getCacheDir());
                         try (InputStream in = host.getContentResolver().openInputStream(source);
                                 java.io.OutputStream out = new java.io.FileOutputStream(staged)) {
                             if (in == null) {

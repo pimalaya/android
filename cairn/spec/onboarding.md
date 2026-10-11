@@ -133,12 +133,17 @@ The protocol sweep SHALL run the fixed provider rules (by domain, then by MX) be
 - THEN mail (IMAP, Gmail API), sending (SMTP), contacts (CardDAV, People API) and calendars (CalDAV, Calendar API) are offered
 
 ### Requirement: A provider grant is the app's own
-A browser grant against Google's or Microsoft's authorization server SHALL run with the app's registered client and SHALL NOT send an RFC 8707 resource. Domains SHALL share one grant only when their scopes address the same API.
+A browser grant against Google's or Microsoft's authorization server SHALL run with the app's registered client only when every endpoint the token will be presented to (each domain's base and the submission server) is that provider's own, and SHALL then ask only for that provider's fixed scopes; any other SHALL run as a generic grant. It SHALL NOT send an RFC 8707 resource. Domains SHALL share one grant only when their scopes address the same API.
 
 #### Scenario: Microsoft mail and calendars
 - GIVEN mail and calendars both connected through Microsoft
 - WHEN the sign-in sequence runs
 - THEN it asks for two consents, Outlook's and Graph's
+
+#### Scenario: A configuration pairing Google's sign-in with another host
+- GIVEN an autoconfig naming Google's authorization endpoint beside `imaps://imap.evil.example:993`
+- WHEN the browser card runs
+- THEN the app's Google client is not used, the generic client page opens instead
 
 ### Requirement: A permission is asked only as its option is turned on
 The app SHALL ask the contacts, calendar and notifications permissions only when the user turns on an option needing them: a phone box or the notifications box of a setup, or the matching option in an account's settings. A refusal SHALL turn that option back off. Nothing else SHALL prompt: not continuing a setup, not opening the app, not a sync. An option whose permission was revoked in the system settings SHALL read as off, and turning it on SHALL ask again.
@@ -173,3 +178,82 @@ The standard setup SHALL open with every domain unticked, so each ticked one sho
 - GIVEN an address offering mail, contacts and calendars
 - WHEN the standard setup is shown
 - THEN no domain is ticked, no option row shows, and Continue is disabled
+
+### Requirement: An in-flight OAuth grant never sits on disk in clear
+The app SHALL persist a grant that goes through the browser only sealed under the same Keystore key as the accounts, client secret, CSRF state and PKCE verifier included, and SHALL abort the grant rather than persist it in clear. It SHALL drop the persisted grant once its own redirect arrives (An OAuth redirect is the grant's own), before the code is exchanged, when the grant aborts, when the user leaves or steps back in the connection flow, and once it is 15 minutes old. A grant an older version persisted in clear SHALL be wiped when the app next starts, and one that no longer decrypts SHALL be dropped.
+
+#### Scenario: The process dies in the browser
+- GIVEN a Google grant started, the app reclaimed while the user signs in
+- WHEN the redirect brings the app back
+- THEN the grant is restored from its sealed copy and dropped from disk before the exchange
+
+#### Scenario: The user walks away
+- GIVEN a grant persisted for the browser
+- WHEN the user closes the connection flow or steps back in it
+- THEN the persisted grant is gone, and a late redirect redeems nothing
+
+#### Scenario: An upgrade over a plaintext grant
+- GIVEN the plaintext preferences an older version wrote for a grant
+- WHEN the app starts
+- THEN they are wiped
+
+### Requirement: Setup accepts encrypted servers only
+The connection flow SHALL keep a discovered HTTP endpoint only when it is https, SHALL resolve DAV SRV records secure-only, and SHALL fetch an autoconfig named by a `mailconf=` TXT record only over https. A typed mail server SHALL be `imaps` (a bare host gets port 993), a typed DAV URL `https`, a typed submission server `smtps` or `smtp`; anything else SHALL be refused on its card, nothing sent.
+
+#### Scenario: A typed plain IMAP server
+- GIVEN the advanced setup with mail entered by hand as `imap://mail.example.org:143`
+- WHEN Connect is pressed
+- THEN the card says only encrypted servers are accepted, and no password is sent
+
+### Requirement: The user sees where a password goes
+A sign-in card asking for a password or token SHALL name, before it is sent, each endpoint it signs in to by scheme and host, and SHALL flag in the error colour an endpoint whose host is outside the address's domain.
+
+#### Scenario: Mail hosted elsewhere
+- GIVEN `jane@example.org` whose autoconfig names `imaps://imap.fastmail.com:993`
+- WHEN the sign-in card shows
+- THEN it reads that the password is sent to `imaps://imap.fastmail.com:993`, not on `example.org`, flagged
+
+### Requirement: OAuth servers are checked
+The issuer, every endpoint its metadata names and the authorization URL the browser opens SHALL be https (http only on a loopback host); the metadata's `issuer` SHALL be the issuer asked for (RFC 8414 section 3.3); an issuer-flow redirect whose `iss` names another issuer SHALL be refused before the code is exchanged (RFC 9207). No error SHALL carry the redirect URL, which holds the code.
+
+#### Scenario: A mix-up redirect
+- GIVEN a grant started at issuer A
+- WHEN the redirect comes back with `iss` naming issuer B
+- THEN it is refused and nothing is exchanged
+
+### Requirement: Nothing leaves the phone by backup or transfer
+The app SHALL exclude every file from cloud backup and from a device transfer. Accounts the Keystore key cannot open for good (a failed tag, a lost key) SHALL be dropped once and the user asked to add them again; a Keystore failing for now SHALL leave the app starting with no account rather than failing.
+
+#### Scenario: A phone migrated by the maker's tool
+- GIVEN accounts sealed on another phone
+- WHEN the app starts
+- THEN it opens, asks to add the accounts again, and starts every time after
+
+### Requirement: The sync adapters serve their own accounts alone
+The contacts sync adapter SHALL run only for one of the app's accounts and the contacts authority, the calendar one only for one of the app's accounts and the calendar authority; any other request, a missing account included, SHALL do nothing.
+
+#### Scenario: Another app asks for a sync
+- GIVEN an app calling the calendar adapter for a book's account and the contacts authority
+- WHEN the adapter runs
+- THEN the book's contacts sync is left as it was
+
+### Requirement: An OAuth redirect is the grant's own
+An intent SHALL redeem, and so end, the in-flight grant only when its URL is the grant's redirect URI exactly, up to its query, and its query carries the grant's state; any other intent reaching the app SHALL leave the grant waiting. A grant started more than 15 minutes ago SHALL be abandoned: dropped when a redirect arrives, when it is loaded and when the app starts. A grant over the app's own scheme SHALL show the step's loader while the browser is out.
+
+#### Scenario: Another app fires the redirect scheme
+- GIVEN a grant waiting in the browser
+- WHEN another app or a link in a message opens `org.pimalaya:/oauth2redirect?code=x&state=forged`
+- THEN nothing is redeemed and the real redirect still completes the grant
+
+#### Scenario: A grant left in the browser
+- GIVEN a grant started and never finished
+- WHEN the app starts 20 minutes later
+- THEN the sealed grant is gone
+
+### Requirement: A custom client's loopback waits for its own redirect
+The loopback redirect of a custom client SHALL be `http://127.0.0.1` (RFC 8252 section 8.3), a typed `localhost` refused. Its listener SHALL run on a thread of its own, give each connection 10 s and 8 KiB to send its request line, answer 400 to any request but a `GET` of the redirect's path carrying the grant's state, and keep waiting for that one until its 300 s pass.
+
+#### Scenario: A local app connects first
+- GIVEN a custom-client grant waiting on its loopback port
+- WHEN another app connects and sends nothing, then the browser lands
+- THEN the silent connection is dropped after its timeout and the browser's redirect completes the grant, the app's sync never held

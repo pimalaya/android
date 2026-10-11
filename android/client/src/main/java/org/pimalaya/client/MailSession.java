@@ -31,6 +31,9 @@ public final class MailSession implements AutoCloseable {
     private long run;
     private boolean expungesOne;
 
+    /** The transport's losses when a verb last answered ({@link #answered}). */
+    private int answeredLosses;
+
     MailSession(Account account, Transport transport, long handle, boolean expungesOne) {
         this.account = account;
         this.transport = transport;
@@ -55,6 +58,21 @@ public final class MailSession implements AutoCloseable {
     /** The transport its sockets live in, for the verbs that run on it. */
     Transport transport() {
         return transport;
+    }
+
+    /**
+     * Whether its transport lost a connection since the last verb that
+     * answered ({@link Transport#losses}): a failure since is read as the
+     * connection's, an IMAP session on a lost socket being dead whichever
+     * verb lost it.
+     */
+    boolean lostSinceAnswered() {
+        return transport != null && transport.losses() != answeredLosses;
+    }
+
+    /** Notes that a verb answered, on whatever connections are held now. */
+    void answered() {
+        answeredLosses = transport == null ? 0 : transport.losses();
     }
 
     /** The bridge's session, for the verbs that run on it. */
@@ -89,6 +107,7 @@ public final class MailSession implements AutoCloseable {
         this.transport = opened.transport;
         this.handle = opened.handle;
         this.expungesOne = opened.expungesOne;
+        this.answeredLosses = 0;
         // The freshly opened one must not free what this one now owns.
         opened.handle = 0;
         opened.transport = null;

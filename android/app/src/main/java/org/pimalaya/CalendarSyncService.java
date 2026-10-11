@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.content.SyncResult;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.provider.CalendarContract;
 import android.util.Log;
 
 /**
@@ -43,6 +44,19 @@ public class CalendarSyncService extends Service {
         return adapter.getSyncAdapterBinder();
     }
 
+    /**
+     * Whether a sync asked of the adapter is one it runs: a calendar sync
+     * of one of the app's own accounts. The service is exported for the
+     * system to bind, and on Android before the 2022 security patch any
+     * app could ask it for a sync of any account and authority, which
+     * would have turned another authority's sync off for a book.
+     */
+    static boolean serves(Account account, String authority) {
+        return account != null
+                && Accounts.TYPE.equals(account.type)
+                && CalendarContract.AUTHORITY.equals(authority);
+    }
+
     private static final class Adapter extends AbstractThreadedSyncAdapter {
         Adapter(Context context) {
             super(context, true);
@@ -55,6 +69,9 @@ public class CalendarSyncService extends Service {
                 String authority,
                 ContentProviderClient provider,
                 SyncResult result) {
+            if (!serves(account, authority)) {
+                return;
+            }
             Context context = getContext();
 
             // NOTE: a book's account, asked whether it syncs calendars (an
@@ -75,7 +92,7 @@ public class CalendarSyncService extends Service {
                     }
                 }
             } catch (Exception error) {
-                Log.w("pimalaya", "calendar phone sync failed for " + account.name + ": " + error);
+                Log.w("pimalaya", "calendar phone sync failed: " + error);
                 result.stats.numIoExceptions++;
             }
         }

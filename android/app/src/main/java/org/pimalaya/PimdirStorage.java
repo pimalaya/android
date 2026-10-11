@@ -72,13 +72,6 @@ final class PimdirStorage {
      */
     private static final String PROVISIONAL = String.valueOf((char) 0x01);
 
-    /**
-     * The longest scope list a load narrows on, past which it reads the whole
-     * collection. A handle scope binds its list twice, so the bound stays well
-     * under SQLite's variable limit.
-     */
-    private static final int SCOPE_MAX = 400;
-
     private final PimdirDb store;
     private final PimdirBlobs blobs;
     private final PimdirItems items;
@@ -158,9 +151,9 @@ final class PimdirStorage {
      *
      * <p>{@code scope} narrows the read to the rows the engine is about to
      * touch, so a flag change on one message costs one row rather than the size
-     * of the mailbox. It is a floor and not a ceiling: answering more than it
-     * asks for stays correct, which is what {@link #scopeClause} falls back to
-     * when the list is longer than one statement can bind.
+     * of the mailbox and a listing's page of 1000 costs its 1000 rows, however
+     * long the list ({@link #scopeClause}). It is a floor and not a ceiling:
+     * answering more than it asks for stays correct.
      */
     JSONObject loadCollection(String collection, JSONObject scope) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -186,7 +179,7 @@ final class PimdirStorage {
         }
 
         List<String> args = new ArrayList<>(List.of(source, stored));
-        String narrowed = scopeClause(scope, args);
+        String narrowed = scopeClause(scope, stored, source, args);
 
         try (Cursor cursor =
                 db.rawQuery(
@@ -329,46 +322,50 @@ final class PimdirStorage {
      * The extra {@code WHERE} the load scope asks for, appending its binds to
      * {@code args}, or the empty string for a whole-collection read.
      *
-     * <p>A list longer than {@link #SCOPE_MAX} widens back to the whole
-     * collection rather than being chunked: SQLite binds a bounded number of
-     * variables per statement, and over-answering a floor is correct where a
-     * truncated list would silently hide rows from the merge.
+     * <p>The list binds once, as a JSON array read through {@code json_each},
+     * so no length widens it back to the whole collection: SQLite's variable
+     * limit never applies, and a listing's page of 1000 reads its 1000 rows. A
+     * link scope seeks the items' key; a handle scope seeks the source's
+     * bindings by handle ({@code bindings_by_handle}), never walking the
+     * collection.
      */
-    private static String scopeClause(JSONObject scope, List<String> args) throws JSONException {
+    private static String scopeClause(
+            JSONObject scope, String collection, String source, List<String> args)
+            throws JSONException {
         if (scope == null) {
             return "";
         }
 
         String kind = scope.optString("kind", "all");
         JSONArray values = scope.optJSONArray("handles".equals(kind) ? "handles" : "links");
-        if (values == null || values.length() == 0 || values.length() > SCOPE_MAX) {
+        if (values == null || values.length() == 0) {
             return "";
         }
 
-        StringBuilder marks = new StringBuilder();
-        for (int index = 0; index < values.length(); index++) {
-            marks.append(index == 0 ? "?" : ",?");
-        }
-
         if (!"handles".equals(kind)) {
-            for (int index = 0; index < values.length(); index++) {
-                args.add(values.getString(index));
-            }
-            return " AND i.link_id IN (" + marks + ")";
+            args.add(values.toString());
+            return " AND i.link_id IN (SELECT value FROM json_each(?))";
         }
 
         // NOTE: an unbound row is placed under its provisional handle
         // (placementOf), so a handle scope has to reach it under the identity
         // that handle spells, or the row the engine staged and is now editing
-        // comes back missing.
+        // comes back missing. A row that name reaches but whose binding holds
+        // another handle is not one asked for.
+        JSONArray names = new JSONArray();
         for (int index = 0; index < values.length(); index++) {
-            args.add(values.getString(index));
+            names.put(nameOf(values.getString(index)));
         }
-        for (int index = 0; index < values.length(); index++) {
-            args.add(nameOf(values.getString(index)));
-        }
-        return " AND (b.handle IN (" + marks + ")"
-                + " OR (b.handle IS NULL AND i.link_id IN (" + marks + ")))";
+        args.add(collection);
+        args.add(source);
+        args.add(values.toString());
+        args.add(names.toString());
+        args.add(values.toString());
+        return " AND i.link_id IN (SELECT link_id FROM bindings"
+                + " WHERE collection = ? AND source = ?"
+                + " AND handle IN (SELECT value FROM json_each(?))"
+                + " UNION ALL SELECT value FROM json_each(?))"
+                + " AND (b.handle IS NULL OR b.handle IN (SELECT value FROM json_each(?)))";
     }
 
     /**
@@ -592,6 +589,15 @@ final class PimdirStorage {
      * Mail and calendar bodies are immutable under their link id, so they dedup.
      */
     JSONObject lookupObjects(JSONArray links) throws JSONException {
+        return lookupObjects(links, null);
+    }
+
+    /**
+     * {@link #lookupObjects(JSONArray)} within one account's collections
+     * (STORAGE §14 binds the caller's account), every account's for a null
+     * one: across accounts a link id is not a fact.
+     */
+    JSONObject lookupObjects(JSONArray links, String account) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         JSONObject objects = new JSONObject();
 
@@ -602,8 +608,12 @@ final class PimdirStorage {
                             "SELECT i.object_hash, o.size FROM items i"
                                     + " JOIN collections c ON c.id = i.collection"
                                     + " JOIN objects o ON o.hash = i.object_hash"
-                                    + " WHERE i.link_id = ? AND c.kind <> ? LIMIT 1",
-                            new String[] {linkId, PimdirSummary.CONTACT})) {
+                                    + " WHERE i.link_id = ? AND c.kind <> ?"
+                                    + (account == null ? "" : " AND c.account = ?")
+                                    + " LIMIT 1",
+                            account == null
+                                    ? new String[] {linkId, PimdirSummary.CONTACT}
+                                    : new String[] {linkId, PimdirSummary.CONTACT, account})) {
                 if (cursor.moveToFirst() && blobs.has(cursor.getString(0))) {
                     // The size is the witness an immutable link needs (SYNC §6):
                     // the engine records the object without ever reading it.
@@ -796,6 +806,15 @@ final class PimdirStorage {
     private void storeObject(SQLiteDatabase db, JSONObject op, Map<String, byte[]> bodies)
             throws JSONException {
         String hash = op.getString("hash");
+        // NOTE: a body the driver filed as it fetched it (a message read
+        // into a file) is in the blob store already: its row alone.
+        if (op.optBoolean("persisted")) {
+            db.execSQL(
+                    "INSERT INTO objects(hash, size, refcount) VALUES(?, ?, 0)"
+                            + " ON CONFLICT(hash) DO NOTHING",
+                    new Object[] {hash, op.getLong("size")});
+            return;
+        }
         // NOTE: a body that is not UTF-8 (a message's 8-bit parts) comes
         // as base64, so it is stored as the bytes it was fetched as.
         byte[] body =
@@ -1298,6 +1317,53 @@ final class PimdirStorage {
         }
     }
 
+    /** Whether this source binds anything in a collection: one indexed probe. */
+    boolean bindsAny(String engineCollection) {
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT EXISTS (SELECT 1 FROM bindings"
+                                + " WHERE collection = ? AND source = ?)",
+                        new String[] {
+                            collectionOf(engineCollection), sourceOf(engineCollection)
+                        })) {
+            return cursor.moveToFirst() && cursor.getInt(0) == 1;
+        }
+    }
+
+    /**
+     * Which of some handles the source binds in some collections: what a
+     * step leaves out of the page it lists, the messages the store already
+     * holds. One seek per handle on {@code bindings_by_handle}, however many
+     * the collections hold.
+     */
+    Set<String> heldOf(List<String> engineCollections, List<String> handles) {
+        Set<String> held = new HashSet<>();
+        if (engineCollections.isEmpty() || handles.isEmpty()) {
+            return held;
+        }
+        JSONArray collections = new JSONArray();
+        for (String engineCollection : engineCollections) {
+            collections.put(collectionOf(engineCollection));
+        }
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT DISTINCT handle FROM bindings"
+                                + " WHERE collection IN (SELECT value FROM json_each(?))"
+                                + " AND source = ? AND handle IN (SELECT value FROM json_each(?))",
+                        new String[] {
+                            collections.toString(),
+                            sourceOf(engineCollections.get(0)),
+                            new JSONArray(handles).toString()
+                        })) {
+            while (cursor.moveToNext()) {
+                held.add(cursor.getString(0));
+            }
+        }
+        return held;
+    }
+
     /**
      * What this source holds of some handles: for each one it binds, the
      * link id it is filed under and the revision last agreed on (null for
@@ -1308,32 +1374,27 @@ final class PimdirStorage {
      * only a new or changed one needs its body read to be named.
      */
     Map<String, String[]> bound(String engineCollection, List<String> handles) {
-        SQLiteDatabase db = store.getReadableDatabase();
-        String collection = collectionOf(engineCollection);
-        String source = sourceOf(engineCollection);
-
         Map<String, String[]> bound = new HashMap<>();
-        for (int from = 0; from < handles.size(); from += SCOPE_MAX) {
-            List<String> chunk = handles.subList(from, Math.min(handles.size(), from + SCOPE_MAX));
-            StringBuilder marks = new StringBuilder();
-            List<String> args = new ArrayList<>(List.of(collection, source));
-            for (String handle : chunk) {
-                marks.append(marks.length() == 0 ? "?" : ",?");
-                args.add(handle);
-            }
-            try (Cursor cursor =
-                    db.rawQuery(
-                            "SELECT handle, link_id, base_revision FROM bindings"
-                                    + " WHERE collection = ? AND source = ? AND handle IN ("
-                                    + marks + ")",
-                            args.toArray(new String[0]))) {
-                while (cursor.moveToNext()) {
-                    bound.put(
-                            cursor.getString(0),
-                            new String[] {
-                                cursor.getString(1), cursor.isNull(2) ? null : cursor.getString(2)
-                            });
-                }
+        if (handles.isEmpty()) {
+            return bound;
+        }
+        SQLiteDatabase db = store.getReadableDatabase();
+        try (Cursor cursor =
+                db.rawQuery(
+                        "SELECT handle, link_id, base_revision FROM bindings"
+                                + " WHERE collection = ? AND source = ?"
+                                + " AND handle IN (SELECT value FROM json_each(?))",
+                        new String[] {
+                            collectionOf(engineCollection),
+                            sourceOf(engineCollection),
+                            new JSONArray(handles).toString()
+                        })) {
+            while (cursor.moveToNext()) {
+                bound.put(
+                        cursor.getString(0),
+                        new String[] {
+                            cursor.getString(1), cursor.isNull(2) ? null : cursor.getString(2)
+                        });
             }
         }
         return bound;

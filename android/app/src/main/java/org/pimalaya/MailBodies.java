@@ -3,22 +3,25 @@ package org.pimalaya;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
-import java.util.Iterator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Which bodies download without being opened, and the step that downloads
- * them: each account's window ({@link MailWindow}) and its mailboxes kept
- * whole ({@link MailOffline}), carried out after each pass and fill step
- * while the app is open, never as periodic work.
+ * them: what each account holds from its frontier ({@link MailWindow}) on,
+ * its mailboxes kept whole ({@link MailOffline}), and what is owed whatever
+ * its date ({@link MailOwed}), carried out after each pass, step and fill
+ * step while the app is open on Wi-Fi, never as periodic work.
  *
  * <p>A body is raised to {@code Full} through the engine's upgrade
  * ({@link MailEngine#download}), which links a body the store already holds
  * under the same link id rather than fetching it again. Newest first, the
- * shown mailboxes before the others. On a metered network only bodies up to
- * {@link #CAP} download; the others wait for an unmetered one.
+ * shown mailboxes before the others.
  */
 final class MailBodies {
     private MailBodies() {}
@@ -26,11 +29,15 @@ final class MailBodies {
     /** Bodies one step downloads per account, before checking it may go on. */
     static final int CHUNK = 24;
 
+    /** How many times one run tries a body before marking it failed. */
+    static final int ATTEMPTS = 3;
+
     /**
-     * The largest body a metered network downloads, in bytes: enough for
-     * the text of recent mail, a guess to measure on real accounts.
+     * The messages whose body failed every attempt of a run, by
+     * {@link MailOwed#key}: their row says so rather than dimming silently,
+     * until a later run brings them. Kept for the process.
      */
-    static final long CAP = 256 * 1024;
+    static final Set<String> FAILED = ConcurrentHashMap.newKeySet();
 
     /** One stored message, as the plan reads it. */
     static final class Row {
@@ -49,6 +56,12 @@ final class MailBodies {
         /** Its attachment mark: 1 with, 0 without, null never examined. */
         final Integer attachment;
 
+        /**
+         * Whether it downloads whatever its date: one a step brought, one
+         * owed ({@link MailOwed}).
+         */
+        final boolean always;
+
         Row(
                 String collection,
                 String linkId,
@@ -56,12 +69,24 @@ final class MailBodies {
                 boolean bodied,
                 Long size,
                 Integer attachment) {
+            this(collection, linkId, sortKey, bodied, size, attachment, false);
+        }
+
+        Row(
+                String collection,
+                String linkId,
+                String sortKey,
+                boolean bodied,
+                Long size,
+                Integer attachment,
+                boolean always) {
             this.collection = collection;
             this.linkId = linkId;
             this.sortKey = sortKey == null ? "" : sortKey;
             this.bodied = bodied;
             this.size = size;
             this.attachment = attachment;
+            this.always = always;
         }
     }
 
@@ -112,28 +137,20 @@ final class MailBodies {
         return merged;
     }
 
-    /**
-     * Whether a body a metered network may download: one of known size up
-     * to {@link #CAP}, or of unknown size whose attachment mark says it
-     * carries none.
-     */
-    static boolean fits(Long size, Integer attachment) {
-        return size != null ? size <= CAP : attachment != null && attachment == 0;
-    }
-
     /** What a step reaches for, so the step itself can be tested. */
     interface Host {
         /**
          * Whether an account's bodies may download now: the app in the
-         * foreground, no sync running, the account on, and a network.
+         * foreground, no sync running, the account on, and Wi-Fi.
          */
         boolean allowed(String accountEmail);
 
-        /** Whether the network is metered, holding the larger bodies back. */
-        boolean metered();
-
-        /** Downloads some of an account's bodies, blocking until they are in. */
-        void download(String accountEmail, List<Row> rows) throws Exception;
+        /**
+         * Downloads some of an account's bodies, blocking until they are in,
+         * and answers the rows whose body did not land; throws when the
+         * download failed as a whole (no session, an expired token).
+         */
+        List<Row> download(String accountEmail, List<Row> rows) throws Exception;
 
         /** How many of an account's bodies are left, 0 once it is done. */
         default void progress(String accountEmail, int left) {}
@@ -142,6 +159,12 @@ final class MailBodies {
     /** What is left to download, by account: one run's plan. */
     static final class Run {
         final Map<String, Deque<Row>> left = new LinkedHashMap<>();
+
+        /** How many times each row was tried this run, by {@link MailOwed#key}. */
+        final Map<String, Integer> attempts = new HashMap<>();
+
+        /** How many downloads in a row of each account failed as a whole. */
+        final Map<String, Integer> broken = new HashMap<>();
 
         /** Plans an account's bodies: the rows wanted, in the order given. */
         void plan(String accountEmail, List<Row> wanted) {
@@ -160,25 +183,25 @@ final class MailBodies {
     enum Step {
         /** Some bodies landed or were tried; another step follows. */
         AGAIN,
-        /** Nothing may download now (background, a sync, the network): resumed later. */
+        /** Nothing may download now (background, a sync, no Wi-Fi): resumed later. */
         PAUSED,
         /** Nothing is left of the plan. */
         DONE
     }
 
     /**
-     * One step: up to {@link #CHUNK} bodies of every account allowed now,
-     * taken off the plan whether they landed or not, so a body that fails
-     * is tried again by the next run rather than at once. On a metered
-     * network the larger bodies stay in the plan, an account left with
-     * those alone waiting. An account whose download fails as a whole
-     * leaves the run.
+     * One step: up to {@link #CHUNK} bodies of every account allowed now.
+     * A body that did not land goes back to the end of its account's plan,
+     * tried again later in the run on the sessions the host reopens, at most
+     * {@link #ATTEMPTS} times, then marked failed ({@link #FAILED}). A
+     * download failing as a whole puts its rows back the same way, so an
+     * expired token is renewed and the run goes on; an account failing so
+     * twice in a row leaves the run, the next one planning it again.
      */
     static Step step(Run run, Host host) {
         if (run.drained()) {
             return Step.DONE;
         }
-        boolean metered = host.metered();
         boolean moved = false;
         List<String> done = new ArrayList<>();
         for (Map.Entry<String, Deque<Row>> account : run.left.entrySet()) {
@@ -188,24 +211,41 @@ final class MailBodies {
             }
             Deque<Row> rows = account.getValue();
             List<Row> chunk = new ArrayList<>(CHUNK);
-            for (Iterator<Row> next = rows.iterator(); chunk.size() < CHUNK && next.hasNext(); ) {
-                Row row = next.next();
-                if (!metered || fits(row.size, row.attachment)) {
-                    chunk.add(row);
-                    next.remove();
-                }
-            }
-            if (chunk.isEmpty()) {
-                continue;
+            while (chunk.size() < CHUNK && !rows.isEmpty()) {
+                chunk.add(rows.poll());
             }
             moved = true;
+            List<Row> failed;
             try {
-                host.download(email, chunk);
+                failed = host.download(email, chunk);
+                run.broken.remove(email);
             } catch (Exception failure) {
-                // NOTE: the account is left for this run (no session, a
-                // revoked token); the next run plans it again.
-                android.util.Log.w("pimalaya", "mail bodies stopped for " + email, failure);
-                rows.clear();
+                android.util.Log.w("pimalaya", "mail bodies failed for " + Accounts.redacted(email), failure);
+                if (run.broken.merge(email, 1, Integer::sum) >= 2) {
+                    // NOTE: twice in a row (no session, the server down): the
+                    // account leaves the run, the next run plans it again.
+                    rows.clear();
+                    done.add(email);
+                    host.progress(email, 0);
+                    continue;
+                }
+                failed = chunk;
+            }
+            Set<String> retried = new HashSet<>();
+            for (Row row : failed) {
+                String key = MailOwed.key(row.collection, row.linkId);
+                retried.add(key);
+                if (run.attempts.merge(key, 1, Integer::sum) < ATTEMPTS) {
+                    rows.add(row);
+                } else {
+                    FAILED.add(key);
+                }
+            }
+            for (Row row : chunk) {
+                String key = MailOwed.key(row.collection, row.linkId);
+                if (!retried.contains(key)) {
+                    FAILED.remove(key);
+                }
             }
             host.progress(email, rows.size());
             if (rows.isEmpty()) {

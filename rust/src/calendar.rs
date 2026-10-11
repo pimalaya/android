@@ -15,6 +15,8 @@ pub mod phone;
 mod series;
 mod zone;
 
+use std::time::{Duration, Instant};
+
 use ical::{
     component::{IcalComponent, IcalComponentKind, IcalComponentName},
     param::IcalParam,
@@ -57,6 +59,27 @@ pub use zone::{EventTime, EventTimeKind};
 /// even at `FREQ=HOURLY`; the cap is what keeps a `FREQ=SECONDLY` event
 /// from filling the agenda with a million rows.
 const MAX_OCCURRENCES: usize = 1024;
+
+/// How many occurrences one series is walked through, placed or not.
+///
+/// A walk jumps to its window ([`IcalRecurSetExpand::skip_to`]) but for
+/// a rule bounded by `COUNT`, which still steps from DTSTART, so
+/// `FREQ=SECONDLY;COUNT=...` from 1970 is billions of steps before the
+/// first one placed; past this bound (about 50 ms of walking) the series
+/// places nothing more.
+const MAX_WALKED: usize = 200_000;
+
+/// How long one expansion may walk, all its series together: the
+/// backstop of [`MAX_WALKED`] for an object carrying many series.
+const MAX_EXPANSION: Duration = Duration::from_secs(2);
+
+/// A day, in seconds: the slack an expansion's skip keeps below its
+/// window for an override told on another clock.
+const DAY_SECONDS: i64 = 86_400;
+
+/// How deep components may nest in an object read here: RFC 5545 needs
+/// three (`VCALENDAR`, `VEVENT`, `VALARM`; `VTIMEZONE`, `STANDARD`).
+const MAX_NESTING: usize = 16;
 
 /// What every object this side composes names as its producer.
 const PRODID: &str = "-//Pimalaya//Pimalaya for Android//EN";
@@ -174,7 +197,7 @@ pub struct EventAttendee {
 /// occurrence a reader opened looks like. Either way the rule is the
 /// series', since an override repeats nothing.
 pub fn read(ical: &str, recurrence_id: &str) -> Result<EventDetail, BridgeError> {
-    let cst = IcalCst::parse(ical).map_err(|err| err.to_string())?;
+    let cst = cst_of(ical)?;
     let decoded = cst.decode();
     let zones = Zones::of(&decoded);
 
@@ -364,7 +387,7 @@ pub fn create(
     // NOTE: parsed back rather than returned as built. The values come
     // from the caller, and an object this refused to read would be one
     // the page then opens on nothing.
-    let cst = IcalCst::parse(object.as_str()).map_err(|err| err.to_string())?;
+    let cst = cst_of(object.as_str())?;
     if !tzid.is_empty() && start.len() != 8 && Zones::of_cst(&cst).find(tzid).is_none() {
         return Err(format!("No definition of the zone `{tzid}`").into());
     }
@@ -390,7 +413,7 @@ pub fn create(
 pub fn write(ical: &str, edit: &str) -> Result<String, BridgeError> {
     let edit: EventEdit = serde_json::from_str(edit).map_err(|err| err.to_string())?;
 
-    let cst = IcalCst::parse(ical).map_err(|err| err.to_string())?;
+    let cst = cst_of(ical)?;
     let mut cst = cst.into_static();
 
     match edit.scope {
@@ -595,9 +618,7 @@ fn define_zone(cst: &mut IcalCst<'static>, edit: &EventEdit) -> Result<(), Bridg
         return Ok(());
     };
 
-    let zone = IcalCst::parse(definition)
-        .map_err(|err| err.to_string())?
-        .into_static();
+    let zone = cst_of(definition)?.into_static();
     let tzid = line(&zone, "TZID")
         .map(|line| line.value.decode().into_owned())
         .ok_or("The zone definition carries no TZID")?;
@@ -685,6 +706,40 @@ fn child_mut<'c>(cst: &'c mut IcalCst<'static>, index: usize) -> &'c mut IcalCst
         IcalItem::Component(child) => child,
         _ => unreachable!("not a component"),
     }
+}
+
+/// A calendar object's syntax tree, refused when its components nest
+/// deeper than [`MAX_NESTING`]: the parser and every walk of the tree
+/// here recurse once per level, which a few hundred levels overflow on
+/// a 1 MiB Java thread (a SIGSEGV no panic guard catches).
+pub(crate) fn cst_of(ical: &str) -> Result<IcalCst<'_>, String> {
+    // NOTE: each line's start, unfolded (RFC 5545 section 3.1), is
+    // enough to tell a BEGIN or an END: a name folded across lines
+    // still counts.
+    let mut depth = 0usize;
+    let mut head = String::new();
+    for line in ical.lines().chain([""]) {
+        if let Some(folded) = line.strip_prefix([' ', '\t']) {
+            if head.len() < 8 {
+                head.extend(folded.chars().take(8));
+            }
+            continue;
+        }
+        let name = head.split([':', ';']).next().unwrap_or_default();
+        if name.eq_ignore_ascii_case("BEGIN") {
+            depth += 1;
+            if depth > MAX_NESTING {
+                return Err(format!(
+                    "Calendar object nests components deeper than {MAX_NESTING}"
+                ));
+            }
+        } else if name.eq_ignore_ascii_case("END") {
+            depth = depth.saturating_sub(1);
+        }
+        head.clear();
+        head.extend(line.chars().take(8));
+    }
+    IcalCst::parse(ical).map_err(|err| err.to_string())
 }
 
 /// A calendar's text.
@@ -800,7 +855,7 @@ fn organizes(organizer: &str, attendees: bool, addresses: &[String]) -> bool {
 /// with attendees ([`organizes`]), which is when a write of it is
 /// announced to them; an object that does not parse is not.
 pub fn organized(ical: &str, addresses: &[String]) -> bool {
-    let Ok(cst) = IcalCst::parse(ical) else {
+    let Ok(cst) = cst_of(ical) else {
         return false;
     };
     let cst = cst.into_static();
@@ -839,7 +894,7 @@ pub fn expand(ical: &str, from: &str, until: &str) -> Result<Vec<Occurrence>, Br
     let from = IcalRecurDateTime::parse(from).map_err(|err| err.to_string())?;
     let until = IcalRecurDateTime::parse(until).map_err(|err| err.to_string())?;
 
-    let cst = IcalCst::parse(ical).map_err(|err| err.to_string())?;
+    let cst = cst_of(ical)?;
     let decoded = cst.decode();
     let zones = Zones::of(&decoded);
 
@@ -848,7 +903,11 @@ pub fn expand(ical: &str, from: &str, until: &str) -> Result<Vec<Occurrence>, Br
         collect_scheduled(component, &mut found);
     }
 
-    let window = Window { from, until };
+    let window = Window {
+        from,
+        until,
+        deadline: Instant::now() + MAX_EXPANSION,
+    };
     let mut occurrences = Vec::new();
     for &(component, kind) in &found {
         let uid = text_of(component, IcalPropKind::Uid);
@@ -887,6 +946,8 @@ pub fn expand(ical: &str, from: &str, until: &str) -> Result<Vec<Occurrence>, Br
 struct Window {
     from: IcalRecurDateTime,
     until: IcalRecurDateTime,
+    /// When the expansion stops walking ([`MAX_EXPANSION`]).
+    deadline: Instant,
 }
 
 impl Window {
@@ -951,13 +1012,45 @@ impl Window {
             .map(|(id, _)| IcalRecurDateTime::from_seconds(id.seconds() + 1))
             .fold(self.until, IcalRecurDateTime::max);
 
-        let walk = match zones.find(&start.tzid) {
+        // NOTE: the walk jumps to the first identity whose occurrence can
+        // start in the window: one length below it, less the furthest an
+        // override moves an instance forward (its own, or a range's), and a
+        // day for an override told on another clock.
+        let forward = replaced
+            .iter()
+            .filter_map(|(id, over)| Some(moved_of(over, kind)?.1.seconds() - id.seconds()))
+            .chain(
+                set.overrides
+                    .iter()
+                    .map(|over| over.start.seconds() - over.id.seconds()),
+            )
+            .fold(0, i64::max);
+        let skip = self.from.seconds() - length - forward - DAY_SECONDS;
+
+        let mut walk = match zones.find(&start.tzid) {
             Some(zone) if start.kind == EventTimeKind::Zoned => set.expand_in_zone(zone),
             _ => set.expand(),
         };
+        // NOTE: a rule bounded by `COUNT` cannot jump, and skipping it
+        // walks every earlier occurrence unbounded: it is walked instead,
+        // under [`MAX_WALKED`].
+        if set
+            .rules
+            .iter()
+            .chain(&set.exrules)
+            .all(|rule| rule.count.is_none())
+        {
+            walk.skip_to(IcalRecurDateTime::from_seconds(skip));
+        }
 
         let mut placed = 0;
-        for occurrence in walk.take_while(|occurrence| occurrence.id < cutoff) {
+        let walk = walk.take_while(|occurrence| occurrence.id < cutoff);
+        for (walked, occurrence) in walk.take(MAX_WALKED).enumerate() {
+            // NOTE: the clock is read once every 4096 steps, a read per
+            // step costing more than the step.
+            if walked % 4096 == 4095 && Instant::now() >= self.deadline {
+                break;
+            }
             let id = Some(start.at(occurrence.id));
             let over = occurrence.over.and_then(|index| {
                 let id = set.overrides[index].id;
@@ -1105,6 +1198,8 @@ fn raw_value(prop: &IcalProp) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+
     use super::*;
 
     pub(super) fn object(body: &str) -> String {
@@ -1766,5 +1861,93 @@ mod tests {
             "ORGANIZER:mailto:boss@example.com\r\n{ada}"
         )));
         assert!(!super::organized("not a calendar", &addresses));
+    }
+
+    #[test]
+    fn a_secondly_series_from_1970_jumps_to_the_window() {
+        let ical = object(
+            "BEGIN:VEVENT\r\nUID:1\r\nDTSTART:19700101T000000\r\n\
+             SUMMARY:Tick\r\nRRULE:FREQ=SECONDLY\r\nEND:VEVENT\r\n",
+        );
+
+        let started = Instant::now();
+        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
+
+        assert_eq!(found.len(), MAX_OCCURRENCES);
+        assert_eq!(found[0].start.time, "20260101T000000");
+        assert!(started.elapsed() < MAX_EXPANSION);
+    }
+
+    #[test]
+    fn a_counted_secondly_series_from_1970_walks_a_bounded_number_of_steps() {
+        let ical = object(
+            "BEGIN:VEVENT\r\nUID:1\r\nDTSTART:19700101T000000\r\n\
+             SUMMARY:Tick\r\nRRULE:FREQ=SECONDLY;COUNT=4000000000\r\nEND:VEVENT\r\n",
+        );
+
+        let started = Instant::now();
+        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
+
+        assert!(found.is_empty());
+        assert!(started.elapsed() < MAX_EXPANSION);
+    }
+
+    #[test]
+    fn an_instance_moved_from_years_back_into_the_window_is_placed() {
+        let ical = object(
+            "BEGIN:VEVENT\r\nUID:s\r\nDTSTART:20000103T090000\r\n\
+             DTEND:20000103T100000\r\nSUMMARY:Weekly\r\nRRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\n\
+             BEGIN:VEVENT\r\nUID:s\r\nRECURRENCE-ID:20100104T090000\r\n\
+             DTSTART:20260114T150000\r\nDTEND:20260114T160000\r\nSUMMARY:Moved\r\nEND:VEVENT\r\n",
+        );
+
+        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
+
+        assert!(found.iter().any(|occurrence| occurrence.summary == "Moved"
+            && occurrence.start.time == "20260114T150000"));
+        assert_eq!(found.iter().filter(|o| o.summary == "Weekly").count(), 4);
+    }
+
+    #[test]
+    fn a_secondly_series_starting_in_the_window_still_places_its_cap() {
+        let ical = object(
+            "BEGIN:VEVENT\r\nUID:1\r\nDTSTART:20260105T090000\r\n\
+             SUMMARY:Tick\r\nRRULE:FREQ=SECONDLY\r\nEND:VEVENT\r\n",
+        );
+
+        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
+
+        assert_eq!(found.len(), MAX_OCCURRENCES);
+    }
+
+    #[test]
+    fn a_hostile_nesting_is_refused_on_a_java_stack() {
+        let nested = |begin: &str| {
+            let mut ical = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n");
+            for _ in 0..2_000 {
+                ical.push_str(begin);
+            }
+            for _ in 0..2_000 {
+                ical.push_str("END:VEVENT\r\n");
+            }
+            ical + "END:VCALENDAR\r\n"
+        };
+        let plain = nested("BEGIN:VEVENT\r\nUID:1\r\n");
+        let folded = nested("BEG\r\n IN:VEVENT\r\nUID:1\r\n");
+
+        let refused = thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(move || {
+                let range = ("20260101T000000", "20260201T000000");
+                (
+                    expand(&plain, range.0, range.1).is_err(),
+                    expand(&folded, range.0, range.1).is_err(),
+                )
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+
+        assert_eq!(refused, (true, true));
     }
 }

@@ -30,8 +30,7 @@ pub const IMAP_PAGE: usize = 500;
 pub const GRAPH_PAGE: u32 = 1000;
 
 /// Message ids per Gmail `messages.list`, the API's ceiling: the
-/// account's listing and a label's alike, their metadata read 50 to a
-/// batch under the account's pacing.
+/// account's listing a step walks and a label's alike.
 pub const GMAIL_PAGE: u32 = 500;
 
 /// Emails per JMAP `Email/query`, capped by the server's own
@@ -59,6 +58,11 @@ pub struct MailRequest {
     /// band) from the round that makes its delta link.
     #[serde(default)]
     pub covered: bool,
+    /// The oldest reception the account holds, in milliseconds since
+    /// the epoch: where a Gmail round over a label lists from, so it
+    /// names every message held and few others.
+    #[serde(default)]
+    pub received: Option<i64>,
 }
 
 /// What is listed: a delta from the checkpoint, or a round over the
@@ -154,7 +158,7 @@ pub fn utc(raw: &str) -> Option<String> {
 }
 
 /// The floor of a mailbox's next chunk: the `count` newest messages dated
-/// before a ceiling, and the oldest `Date` among them.
+/// before a ceiling, and the `Date` of the oldest of them.
 ///
 /// A chunk is a number of messages, never a span of time: the floor a
 /// chunk leaves is all that is kept, and the next chunk is the `count`
@@ -162,15 +166,18 @@ pub fn utc(raw: &str) -> Option<String> {
 /// being in every scope already. Fewer than `count` dated messages below
 /// the ceiling leaves no floor: the mailbox is whole below it.
 ///
-/// "Newest" is the source's own recency order (UIDs, Gmail's list, JMAP's
-/// `receivedAt`, Graph's `sentDateTime`), the floor the oldest `Date`
-/// among what that order names, so the scope from it holds at least those.
+/// A source walking its own recency order (IMAP's `SORT` by `Date`,
+/// Gmail's list, JMAP's `receivedAt`, Graph's `sentDateTime`) takes the
+/// first `count` ([`Floor::take`]); one reading a sample in no such order
+/// (IMAP's newest UIDs) offers every message and keeps the `count` newest
+/// by `Date` ([`Floor::offer`]), an order statistic one old message
+/// cannot drag down.
 #[derive(Debug)]
 pub struct Floor {
     until: Scope,
     count: usize,
-    taken: usize,
-    oldest: Option<String>,
+    /// The `count` newest dates kept, newest first.
+    dates: Vec<String>,
 }
 
 impl Floor {
@@ -182,8 +189,7 @@ impl Floor {
                 until: before.filter(|before| !before.is_empty()).map(String::from),
             },
             count: count.max(1),
-            taken: 0,
-            oldest: None,
+            dates: Vec::new(),
         }
     }
 
@@ -200,46 +206,62 @@ impl Floor {
     /// Takes the next message's date in the source's recency order,
     /// answering whether the chunk is full.
     pub fn take(&mut self, date: Option<&str>) -> bool {
-        if self.full() {
-            return true;
+        if !self.full() {
+            self.offer(date);
         }
+        self.full()
+    }
+
+    /// Offers a message's date in no particular order, keeping the
+    /// `count` newest below the ceiling; answers whether it is among them.
+    pub fn offer(&mut self, date: Option<&str>) -> bool {
         let Some(date) = date.filter(|date| !date.is_empty()) else {
             return false;
         };
         if !self.until.contains(Some(date)) {
             return false;
         }
-        self.taken += 1;
-        let older = self
-            .oldest
-            .as_deref()
-            .is_none_or(|oldest| instant(date) < instant(oldest));
-        if older {
-            self.oldest = Some(date.to_string());
+        let at = self
+            .dates
+            .iter()
+            .position(|held| instant(date) > instant(held))
+            .unwrap_or(self.dates.len());
+        if at >= self.count {
+            return false;
         }
-        self.full()
+        self.dates.insert(at, date.to_string());
+        self.dates.truncate(self.count);
+        true
     }
 
     /// Whether `count` dated messages were taken.
     pub fn full(&self) -> bool {
-        self.taken >= self.count
+        self.dates.len() >= self.count
+    }
+
+    /// The floor once full: the `Date` of the `count`th newest.
+    pub fn floor(&self) -> Option<&str> {
+        self.dates.get(self.count - 1).map(String::as_str)
     }
 
     /// The reply on the JSON wire: the floor once full, none otherwise.
     pub fn reply(&self) -> FloorReply {
         FloorReply {
-            floor: self.full().then(|| self.oldest.clone()).flatten(),
-            dated: self.taken,
+            floor: self.floor().map(String::from),
+            dated: self.dates.len(),
+            dates: self.dates.clone(),
         }
     }
 }
 
 /// A chunk's floor on the JSON wire: `floor` null when the mailbox is
-/// whole below the ceiling, `dated` how many dated messages were taken.
+/// whole below the ceiling, `dated` how many dated messages were taken,
+/// `dates` their dates, newest first.
 #[derive(Clone, Debug, Serialize)]
 pub struct FloorReply {
     pub floor: Option<String>,
     pub dated: usize,
+    pub dates: Vec<String>,
 }
 
 /// One page of a mail listing on the JSON wire.
@@ -470,17 +492,46 @@ mod tests {
     }
 
     #[test]
+    fn a_sample_keeps_the_newest_by_date_whatever_its_order() {
+        let mut floor = Floor::new(Some("2026-10-01T00:00:00Z"), 3);
+        assert!(floor.offer(Some("2019-03-01T00:00:00Z")), "kept while room");
+        assert!(floor.offer(Some("2026-09-10T08:00:00Z")));
+        assert!(floor.offer(Some("2026-09-20T00:00:00Z")));
+        assert!(floor.offer(Some("2026-09-09T20:00:00Z")), "the import goes");
+        assert!(
+            !floor.offer(Some("2018-01-01T00:00:00Z")),
+            "below the third"
+        );
+        assert!(
+            !floor.offer(Some("2026-10-05T00:00:00Z")),
+            "above the ceiling"
+        );
+        assert!(!floor.offer(None));
+
+        let reply = floor.reply();
+        assert_eq!(reply.floor.as_deref(), Some("2026-09-09T20:00:00Z"));
+        assert_eq!(
+            reply.dates,
+            [
+                "2026-09-20T00:00:00Z",
+                "2026-09-10T08:00:00Z",
+                "2026-09-09T20:00:00Z"
+            ]
+        );
+    }
+
+    #[test]
     fn fewer_than_the_chunk_leaves_no_floor() {
         let mut floor = Floor::new(Some("2026-10-01T00:00:00Z"), 50);
-        for day in 1..=20 {
+        for day in 1..=3 {
             floor.take(Some(&format!("2026-09-{day:02}T00:00:00Z")));
         }
         let reply = floor.reply();
         assert_eq!(reply.floor, None, "the mailbox is whole below the ceiling");
-        assert_eq!(reply.dated, 20);
+        assert_eq!(reply.dated, 3);
         assert_eq!(
             serde_json::to_string(&reply).unwrap(),
-            r#"{"floor":null,"dated":20}"#
+            r#"{"floor":null,"dated":3,"dates":["2026-09-03T00:00:00Z","2026-09-02T00:00:00Z","2026-09-01T00:00:00Z"]}"#
         );
     }
 

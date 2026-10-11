@@ -229,7 +229,8 @@ final class AccountSettings {
                                         scope,
                                         picked -> bound(email, MailScope.MONTHS[picked]))));
 
-        // NOTE: back takes in more, later frees the bodies below, asked first.
+        // NOTE: later frees the bodies below, asked first; "Load more" alone
+        // takes in older mail.
         String window = host.mail.windowOf(email);
         rows.add(
                 sections.row(
@@ -251,8 +252,6 @@ final class AccountSettings {
                                                 ""),
                                         window,
                                         List.of(email),
-                                        collection -> true,
-                                        true,
                                         () -> renderIfOpen(email))));
 
         // NOTE: JMAP, Graph and Gmail submit through the account they read
@@ -795,8 +794,12 @@ final class AccountSettings {
                 field,
                 () -> {
                     String entered = field.text();
-                    host.store.submitThrough(
-                            email, entered.isEmpty() ? null : PimalayaClient.submitUrl(entered));
+                    String url = entered.isEmpty() ? null : Endpoints.submitUrl(entered);
+                    if (!entered.isEmpty() && url == null) {
+                        host.toast(host.getString(R.string.server_insecure));
+                        return;
+                    }
+                    host.store.submitThrough(email, url);
                     render();
                 });
     }
@@ -918,7 +921,7 @@ final class AccountSettings {
                 }
                 Accounts.reconcile(host, phoneBooks);
             } catch (Exception error) {
-                Log.w("pimalaya", "account purge failed for " + email + ": " + error);
+                Log.w("pimalaya", "account purge failed for " + Accounts.redacted(email) + ": " + error);
             }
         });
         // NOTE: its calendar account goes the same way, the store having

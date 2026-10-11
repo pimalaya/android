@@ -742,6 +742,51 @@ public class CalendarMappingTest {
         assertFalse(before.equals(CalendarMapping.fingerprint(rows)));
     }
 
+    @Test
+    public void aHostileEventReachesThePhoneBounded() throws Exception {
+        StringBuilder alarms = new StringBuilder();
+        for (int minutes = 1; minutes <= 50; minutes++) {
+            alarms.append("BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT")
+                    .append(minutes)
+                    .append("M\r\nEND:VALARM\r\n");
+        }
+        // NOTE: the cut falls inside a pair, which is left out whole.
+        String smile = new String(Character.toChars(0x1F600));
+        String title = "a" + smile.repeat(CalendarMapping.SHORT_TEXT);
+        String ical =
+                object(
+                        "BEGIN:VEVENT\r\nUID:h\r\nDTSTAMP:20260101T000000Z\r\n"
+                                + "DTSTART:20261012T090000Z\r\nDTEND:20261012T100000Z\r\n"
+                                + "SUMMARY:" + title + "\r\n"
+                                + "DESCRIPTION:" + "d".repeat(100_000) + "\r\n"
+                                + alarms
+                                + "END:VEVENT\r\n");
+
+        Row row = rows(ical).get(0);
+
+        assertEquals(CalendarMapping.MAX_REMINDERS, row.reminders.size());
+        String clipped = (String) row.values.get(Events.TITLE);
+        assertEquals(CalendarMapping.SHORT_TEXT - 1, clipped.length());
+        assertFalse(Character.isHighSurrogate(clipped.charAt(clipped.length() - 1)));
+        assertEquals(
+                CalendarMapping.LONG_TEXT, ((String) row.values.get(Events.DESCRIPTION)).length());
+    }
+
+    @Test
+    public void aSecondlySeriesIsListedRatherThanExpandedByTheProvider() throws Exception {
+        String ical =
+                object(
+                        "BEGIN:VEVENT\r\nUID:t\r\nDTSTAMP:20260101T000000Z\r\n"
+                                + "DTSTART:20261009T115000Z\r\nDURATION:PT1S\r\n"
+                                + "RRULE:FREQ=SECONDLY\r\nEND:VEVENT\r\n");
+
+        Map<String, Object> event = rows(ical).get(0).values;
+
+        assertNull(event.get(Events.RRULE));
+        assertNotNull(event.get(Events.RDATE));
+    }
+
+
     private static Map<String, Object> reminder(long id, long minutes, int method) {
         Map<String, Object> reminder = new LinkedHashMap<>();
         if (id >= 0) {

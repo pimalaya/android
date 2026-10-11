@@ -418,8 +418,6 @@ dependencies = [
 [[package]]
 name = "ical-rs"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fba02e1edb03610da538c688781b184333d8687b1a77e93c2e6f411bd94bfcdd"
 dependencies = [
  "jiff",
  "memchr",
@@ -618,8 +616,6 @@ dependencies = [
 [[package]]
 name = "io-http"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fe2064378f85c13e3f3aca141308fa541c4478ff5cf5ebadd7dcbcce1a44281"
 dependencies = [
  "base64 0.23.1",
  "httparse",
@@ -633,8 +629,6 @@ dependencies = [
 [[package]]
 name = "io-imap"
 version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df059b417ac8888b21787a4464a146260aba38d59f0d1945cd3b727777eb8297"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -648,8 +642,7 @@ dependencies = [
 [[package]]
 name = "io-jmap"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "388647709d786c59635ca1749f51169896e3d043edb529d293aadf8a39f1cf7c"
+source = "git+https://github.com/pimalaya/io-jmap?rev=919eab465ab620b323f9191ab8de2f640bc4a1d2#919eab465ab620b323f9191ab8de2f640bc4a1d2"
 dependencies = [
  "io-http",
  "log",
@@ -663,8 +656,7 @@ dependencies = [
 [[package]]
 name = "io-msgraph"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aae4ecde2c789d9dd0d8298d986bead64422404cb1b821768e77fb13d26e9de8"
+source = "git+https://github.com/pimalaya/io-msgraph?rev=2ae26370aefa671c16316dbad98107634436bce6#2ae26370aefa671c16316dbad98107634436bce6"
 dependencies = [
  "base64 0.23.1",
  "ical-rs",
@@ -715,8 +707,7 @@ dependencies = [
 
 [[package]]
 name = "io-pimdir"
-version = "0.7.0"
-source = "git+https://github.com/pimalaya/io-pimdir?rev=c03a269dddaf51c8558e5b24c7dbd193a8aedec5#c03a269dddaf51c8558e5b24c7dbd193a8aedec5"
+version = "0.8.0"
 dependencies = [
  "blake3",
  "fs4",
@@ -757,8 +748,6 @@ dependencies = [
 [[package]]
 name = "io-webdav"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0910be6c0a525345eed08d5a7e411e5ad67c83e57e1aa141c720419ce5682fa9"
 dependencies = [
  "io-http",
  "log",

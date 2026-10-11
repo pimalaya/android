@@ -3,15 +3,30 @@
 //! Without a logger every `log` call in this crate and in the libraries
 //! under it is dropped, a throttled request and its wait included. The
 //! logger is installed once, when the JVM loads the library
-//! ([`JNI_OnLoad`]): debug and above for this crate, info and above for
-//! the libraries, whose debug records narrate every chunk a stream
-//! reads. On Android it writes through liblog's `__android_log_write`;
-//! anywhere else (the unit tests' host JVM) to standard error.
+//! ([`JNI_OnLoad`]), at warnings and above: the library is always built
+//! in release, so the build cannot tell, and a release app's logcat is
+//! what a bug report carries. A debug app turns verbose logs on
+//! ([`Java_org_pimalaya_client_Native_debugLogs`]): debug and above for
+//! this crate, info and above for the libraries, whose debug records
+//! narrate every chunk a stream reads. On Android it writes through
+//! liblog's `__android_log_write`; anywhere else (the unit tests' host
+//! JVM) to standard error.
 
-use std::ffi::c_void;
+use std::{
+    ffi::c_void,
+    panic::catch_unwind,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
-use jni::sys::{JNI_VERSION_1_6, JavaVM, jint};
+use jni::{
+    EnvUnowned,
+    errors::Error,
+    objects::JClass,
+    sys::{JNI_VERSION_1_6, JavaVM, jboolean, jint},
+};
 use log::{Level, LevelFilter, Log, Metadata, Record};
+
+use crate::ffi::ErrorReply;
 
 /// The tag the app's own Java logs use, so one filter shows both.
 const TAG: &str = "pimalaya";
@@ -21,14 +36,39 @@ const CRATE: &str = env!("CARGO_CRATE_NAME");
 
 static LOGGER: Logcat = Logcat;
 
+/// Whether debug logs are on ([`Java_org_pimalaya_client_Native_debugLogs`]).
+static VERBOSE: AtomicBool = AtomicBool::new(false);
+
 /// Called by the JVM when it loads the library: installs the logger, a
-/// second load keeping the first.
+/// second load keeping the first. A panic must not unwind into the JVM,
+/// so one leaves the library without a logger.
 #[unsafe(no_mangle)]
 pub extern "system" fn JNI_OnLoad(_vm: *mut JavaVM, _reserved: *mut c_void) -> jint {
-    if log::set_logger(&LOGGER).is_ok() {
-        log::set_max_level(LevelFilter::Debug);
-    }
+    let _ = catch_unwind(|| {
+        if log::set_logger(&LOGGER).is_ok() {
+            log::set_max_level(LevelFilter::Warn);
+        }
+    });
     JNI_VERSION_1_6
+}
+
+/// `Native.debugLogs`: turns the debug logs on or off, which a debug app
+/// does once the library is loaded.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_pimalaya_client_Native_debugLogs<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    on: jboolean,
+) {
+    env.with_env(|_| -> Result<(), Error> {
+        VERBOSE.store(on, Ordering::Relaxed);
+        log::set_max_level(match on {
+            true => LevelFilter::Debug,
+            false => LevelFilter::Warn,
+        });
+        Ok(())
+    })
+    .resolve::<ErrorReply>()
 }
 
 /// Writes every record to logcat, or to standard error off Android.
@@ -37,7 +77,12 @@ struct Logcat;
 impl Log for Logcat {
     fn enabled(&self, metadata: &Metadata) -> bool {
         let own = metadata.target().split("::").next() == Some(CRATE);
-        metadata.level() <= if own { Level::Debug } else { Level::Info }
+        let floor = match (VERBOSE.load(Ordering::Relaxed), own) {
+            (false, _) => Level::Warn,
+            (true, true) => Level::Debug,
+            (true, false) => Level::Info,
+        };
+        metadata.level() <= floor
     }
 
     fn log(&self, record: &Record) {

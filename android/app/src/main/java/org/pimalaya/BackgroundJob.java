@@ -141,7 +141,12 @@ public class BackgroundJob extends JobService {
                 floors.put(inbox, mail.coverage(inbox).since);
             }
         }
-        RemotePass.MailPass pass = remote.mailPass(mailScope);
+        // NOTE: a run lists no mail on a metered network, the outbox going
+        // out all the same; the next run on Wi-Fi brings what arrived.
+        android.net.ConnectivityManager connectivity =
+                context.getSystemService(android.net.ConnectivityManager.class);
+        boolean listing = connectivity != null && !connectivity.isActiveNetworkMetered();
+        RemotePass.MailPass pass = remote.mailPass(mailScope, listing);
         if (pass.failure != null) {
             Log.w("pimalaya", "background mail sync failed", pass.failure);
         }

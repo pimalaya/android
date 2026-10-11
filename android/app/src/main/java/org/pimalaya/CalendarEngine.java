@@ -331,7 +331,8 @@ final class CalendarEngine extends PimdirEngine {
     protected JSONObject fetch(JSONObject yielded) throws JSONException {
         String collection = yielded.getString("collection");
         if (PimdirStorage.isPhoneCollection(collection)) {
-            return phone.fetch(collection, yielded.getJSONArray("handles"));
+            return keepBoundNames(
+                    collection, phone.fetch(collection, yielded.getJSONArray("handles")));
         }
         List<String> handles = stringsOf(yielded.getJSONArray("handles"));
 
@@ -346,7 +347,7 @@ final class CalendarEngine extends PimdirEngine {
 
         JSONObject reply = new JSONObject();
         reply.put("items", items);
-        return reply;
+        return keepBoundNames(collection, reply);
     }
 
     /** One entry at its full tier, as a read or a whole listing hands it over. */
@@ -417,8 +418,9 @@ final class CalendarEngine extends PimdirEngine {
                 // The resource name, never the handle: a staged create waits
                 // under a provisional handle until this push assigns a real
                 // one (SYNC §2), and the name it goes out under is the entry's
-                // own, which is what a later listing brings back. Graph names
-                // its events itself, so the handle is whatever came back.
+                // own. The handle is whatever came back: the name a CalDAV
+                // server filed it by, which Google chooses itself, or the id
+                // Graph, Google or JMAP minted.
                 String name = PimdirStorage.nameOf(handle);
                 try {
                     EventRef created =
@@ -429,7 +431,8 @@ final class CalendarEngine extends PimdirEngine {
                                     name,
                                     row.getString("vcard"),
                                     address);
-                    return result(handle, true, created.id, created.etag);
+                    return result(
+                            handle, true, created.id, landed(url, created.id, created.etag));
                 } catch (RuntimeException failure) {
                     // The resource is already there, which `If-None-Match: *`
                     // is exactly what asks: the create is refused rather than
@@ -458,7 +461,7 @@ final class CalendarEngine extends PimdirEngine {
                                     row.getString("vcard"),
                                     ifMatch,
                                     address);
-                    return result(handle, true, null, etag);
+                    return result(handle, true, null, landed(url, handle, etag));
                 } catch (RuntimeException failure) {
                     if (isPreconditionFailure(failure)) {
                         return result(handle, false, null, null);
@@ -501,6 +504,30 @@ final class CalendarEngine extends PimdirEngine {
                 // NOTE: no flags on any calendar backend, so a flag change is
                 // nothing to carry rather than something to refuse.
                 return result(handle, true, null, null);
+        }
+    }
+
+    /**
+     * The revision a write landed at: the ETag the server answered, else the
+     * one it holds the entry at now, read back.
+     *
+     * <p>A server storing something other than what it was sent answers no
+     * ETag (RFC 4791 section 5.3.4), and Google's CalDAV answers none to any
+     * PUT. A base kept with no revision reads the next listing's as a change
+     * made elsewhere, which undoes a removal staged before it: the entry is
+     * pulled back rather than deleted. A read that fails leaves the revision
+     * unknown, as before, rather than failing a write that landed.
+     */
+    private String landed(String url, String id, String answered) {
+        if (answered != null) {
+            return answered;
+        }
+        try {
+            List<Event> read = client.multigetEvents(transport, account, url, List.of(id));
+            return read.isEmpty() ? null : read.get(0).etag;
+        } catch (RuntimeException failure) {
+            Log.w("pimalaya", "revision of " + id + " not read back", failure);
+            return null;
         }
     }
 

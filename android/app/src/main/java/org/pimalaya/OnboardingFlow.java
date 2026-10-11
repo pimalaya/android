@@ -1522,7 +1522,7 @@ final class OnboardingFlow {
                         Integer.compare(domain.rank(left.service), domain.rank(right.service)));
 
         for (ServiceConfig config : configs) {
-            String baseUrl = endpointUrl(config);
+            String baseUrl = endpointUrl(config, pendingEmail);
             if (baseUrl == null) {
                 continue;
             }
@@ -1907,6 +1907,10 @@ final class OnboardingFlow {
         header.setMinimumHeight(0);
         header.setForeground(null);
         card.addView(header);
+        View sentTo = sentTo(step);
+        if (sentTo != null) {
+            card.addView(sentTo);
+        }
 
         PimDomain first = step.domains.get(0);
         if (step.oauth()) {
@@ -2017,6 +2021,59 @@ final class OnboardingFlow {
         return card;
     }
 
+    /**
+     * Where a card's password or token goes, shown before it does: each
+     * endpoint's scheme and host, flagged when it sits outside the address's
+     * domain, which is what a forged configuration would point at. Null for a
+     * browser card, whose secret the app never holds, and for a server entered
+     * by hand, which the user just named.
+     */
+    private View sentTo(AuthStep step) {
+        if (step.oauth() || step.option.isManual()) {
+            return null;
+        }
+        List<String> urls = new ArrayList<>();
+        for (PimDomain domain : step.domains) {
+            urls.add(setups.get(domain).selected.baseUrl);
+        }
+        DomainSetup mail = setups.get(PimDomain.MAIL);
+        if (step.domains.contains(PimDomain.MAIL)
+                && sends(mail)
+                && mail.submitSelected != null
+                && !mail.submitSelected.manual
+                && mail.submitSelected.url != null) {
+            urls.add(mail.submitSelected.url);
+        }
+
+        String email = pendingEmail == null ? "" : pendingEmail;
+        String domain = email.substring(email.lastIndexOf('@') + 1);
+        java.util.Set<String> shown = new java.util.LinkedHashSet<>();
+        boolean flagged = false;
+        for (String url : urls) {
+            String destination = Endpoints.destination(url);
+            if (destination == null) {
+                continue;
+            }
+            if (Endpoints.otherDomain(url, email)) {
+                flagged = true;
+                destination = host.getString(R.string.signin_other_domain, destination, domain);
+            }
+            shown.add(destination);
+        }
+        if (shown.isEmpty()) {
+            return null;
+        }
+
+        TextView line = new TextView(host);
+        line.setText(host.getString(R.string.signin_sent_to, String.join(", ", shown)));
+        line.setTextSize(13);
+        line.setTextColor(
+                host.ui.resolveColor(
+                        flagged ? android.R.attr.colorError : android.R.attr.textColorSecondary));
+        line.setPadding(host.ui.dp(16), 0, host.ui.dp(16), host.ui.dp(4));
+        return line;
+    }
+
     /** A card's domains, by name: "Contacts, Calendar". */
     private String domainNames(AuthStep step) {
         List<String> names = new ArrayList<>();
@@ -2122,6 +2179,16 @@ final class OnboardingFlow {
     }
 
     /**
+     * A server typed on a card that cannot be signed in to encrypted (plain
+     * {@code imap://} or {@code http://}, say): said on the card, and nothing
+     * is sent.
+     */
+    private void insecure(AuthStep step) {
+        status(step, host.getString(R.string.server_insecure), true);
+        resetConfigContinue();
+    }
+
+    /**
      * Connect on the sign-in page: tries every card still to sign in, side
      * by side, reporting each on its card; once every one has, runs the
      * browser cards left, then commits.
@@ -2133,7 +2200,11 @@ final class OnboardingFlow {
         List<Probe> probes = new ArrayList<>();
         for (AuthStep step : authSteps) {
             if (step.submit != null) {
-                mail.submitSelected.url = submitUrl(step.submit.text());
+                mail.submitSelected.url = Endpoints.submitUrl(step.submit.text());
+                if (mail.submitSelected.url == null) {
+                    insecure(step);
+                    return;
+                }
             }
             if (step.signed || step.oauth()) {
                 continue;
@@ -2144,8 +2215,12 @@ final class OnboardingFlow {
             for (PimDomain domain : step.domains) {
                 String baseUrl =
                         step.option.isManual()
-                                ? manualUrl(domain, step.server.text())
+                                ? Endpoints.manualUrl(domain, step.server.text())
                                 : setups.get(domain).selected.baseUrl;
+                if (baseUrl == null) {
+                    insecure(step);
+                    return;
+                }
                 probes.add(new Probe(step, domain, baseUrl, login, secret));
             }
         }
@@ -2162,10 +2237,8 @@ final class OnboardingFlow {
             // NOTE: a token signs in to IMAP with SASL XOAUTH2, which names
             // its user in the URL, as the stored account will.
             String url =
-                    probe.domain == PimDomain.MAIL
-                                    && probe.login.isEmpty()
-                                    && probe.baseUrl.startsWith("imap")
-                            ? PimalayaClient.withUser(probe.baseUrl, pendingEmail)
+                    probe.domain == PimDomain.MAIL && probe.login.isEmpty()
+                            ? asUser(probe.baseUrl, pendingEmail)
                             : probe.baseUrl;
             Account account = new Account(url, probe.login, probe.secret);
             probe.result = pool.submit(() -> probe(probe.domain, account));
@@ -2280,14 +2353,17 @@ final class OnboardingFlow {
         oauthGroup.clear();
 
         java.util.Set<String> scopes = new java.util.LinkedHashSet<>();
+        List<String> endpoints = new ArrayList<>();
         for (PimDomain domain : step.domains) {
             DomainSetup setup = setups.get(domain);
             oauthGroup.put(domain, setup.selected.baseUrl);
+            endpoints.add(setup.selected.baseUrl);
             addScopes(scopes, setup.selected.method.scope);
             // NOTE: submission signs in with mail's credential, so the grant
             // that reads mail has to cover sending it too.
             if (domain == PimDomain.MAIL && sends(setup) && setup.submitSelected != null) {
                 addScopes(scopes, setup.submitSelected.scope);
+                endpoints.add(setup.submitSelected.url);
             }
         }
 
@@ -2295,8 +2371,11 @@ final class OnboardingFlow {
         String heading =
                 domainNames(step) + " · " + (option.detail != null ? option.detail : hostOf(option.baseUrl));
         // NOTE: Google and Microsoft register no client dynamically, so their
-        // grants run with the app's own registration.
-        if (!own && Oauth.isGoogle(option.method.authorizationEndpoint)) {
+        // grants run with the app's own registration, and only for their own
+        // hosts: any other falls to a generic grant (Oauth.shipped).
+        Oauth.Shipped shipped =
+                own ? null : Oauth.shipped(option.method.authorizationEndpoint, endpoints);
+        if (shipped == Oauth.Shipped.GOOGLE) {
             // NOTE: a domain added onto an account Google already granted
             // asks for the union, so the one new grant replaces the old one
             // on every domain rather than living beside it.
@@ -2304,11 +2383,13 @@ final class OnboardingFlow {
             if (existing != null) {
                 scope = Oauth.union(existing.grantedScope(Oauth.GOOGLE_CLIENT_ID), scope);
             }
-            oauth.startGoogleOauth(pendingEmail, scope, option.baseUrl);
+            oauth.startGoogleOauth(
+                    pendingEmail, Oauth.fixedScope(shipped, scope), option.baseUrl);
             return;
         }
-        if (!own && Oauth.MICROSOFT_AUTH_ENDPOINT.equals(option.method.authorizationEndpoint)) {
-            oauth.startMicrosoftOauth(pendingEmail, scope, option.baseUrl);
+        if (shipped == Oauth.Shipped.MICROSOFT) {
+            oauth.startMicrosoftOauth(
+                    pendingEmail, Oauth.fixedScope(shipped, scope), option.baseUrl);
             return;
         }
         if (option.method.type == AuthMethod.Type.OAUTH_ISSUER) {
@@ -2385,20 +2466,6 @@ final class OnboardingFlow {
                 ? Oauth.audience(null, option.resource, null)
                 : Oauth.audience(
                         option.method.authorizationEndpoint, option.resource, option.method.scope);
-    }
-
-    /**
-     * What was typed, as the URL the domain's client connects to: implicit-TLS
-     * IMAP on its default port for mail, the URL itself for a DAV collection.
-     */
-    private static String manualUrl(PimDomain domain, String entered) {
-        if (domain != PimDomain.MAIL) {
-            return entered.contains("://") ? entered : "https://" + entered;
-        }
-        if (entered.contains("://")) {
-            return entered;
-        }
-        return entered.contains(":") ? "imaps://" + entered : "imaps://" + entered + ":993";
     }
 
     /**
@@ -2851,17 +2918,9 @@ final class OnboardingFlow {
                     setup.domain == PimDomain.MAIL && sends(setup) && setup.submitSelected != null
                             ? setup.submitSelected.url
                             : null;
-            // NOTE: a token signs in to IMAP and SMTP with SASL XOAUTH2,
-            // which names its user beside the token; the URL is where that
-            // user lives (RFC 5092 section 3.2), the credential staying the
-            // bare token every other protocol sends.
             if (setup.domain == PimDomain.MAIL && setup.credential.login.isEmpty()) {
-                if (baseUrl.startsWith("imap")) {
-                    baseUrl = PimalayaClient.withUser(baseUrl, connectedEmail);
-                }
-                if (submitUrl != null && submitUrl.startsWith("smtp")) {
-                    submitUrl = PimalayaClient.withUser(submitUrl, connectedEmail);
-                }
+                baseUrl = asUser(baseUrl, connectedEmail);
+                submitUrl = submitUrl == null ? null : asUser(submitUrl, connectedEmail);
             }
             if (connectedAccount == null) {
                 connectedAccount = AccountEntry.empty(connectedEmail);
@@ -3143,16 +3202,6 @@ final class OnboardingFlow {
     }
 
     /**
-     * The URL an account connects to for one discovered config, or null when
-     * this app cannot drive it.
-     *
-     * <p>An HTTP endpoint arrives ready to use. A TCP one does not: discovery
-     * reports a host, a port and a security mode, and the scheme is the client's
-     * to choose. Only implicit TLS is offered, because the IMAP client has no
-     * STARTTLS step, and a {@code starttls} endpoint driven as if it were
-     * implicit would connect in the clear rather than fail.
-     */
-    /**
      * Everywhere this address submits mail, from the same discovery run
      * that found where it reads it, best first.
      *
@@ -3166,19 +3215,12 @@ final class OnboardingFlow {
         List<SubmitOption> upgraded = new ArrayList<>();
 
         for (ServiceConfig config : searchedConfigs) {
-            if (!"smtp".equals(config.service) || config.host == null) {
+            String url = submissionUrl(config);
+            if (url == null) {
                 continue;
             }
-            boolean tls = "tls".equalsIgnoreCase(config.security);
-            if (!tls && !"starttls".equalsIgnoreCase(config.security)) {
-                Log.w(
-                        "pimalaya",
-                        "skip smtp at " + config.host + ": unsupported security "
-                                + config.security);
-                continue;
-            }
+            boolean tls = url.startsWith("smtps:");
             String authority = config.host + ":" + config.port;
-            String url = (tls ? "smtps://" : "smtp://") + authority;
 
             List<AuthMethod> methods = new ArrayList<>(config.auth);
             java.util.Collections.sort(
@@ -3224,19 +3266,64 @@ final class OnboardingFlow {
         return new ArrayList<>(distinct.values());
     }
 
-    /** What was typed, as the endpoint a submission opens. */
-    private static String submitUrl(String entered) {
-        return PimalayaClient.submitUrl(entered);
+    /**
+     * The endpoint one discovered SMTP config submits through, or null when it
+     * is no SMTP config or names a security this client does not drive: an
+     * implicit-TLS one behind {@code smtps://}, a STARTTLS one behind
+     * {@code smtp://}.
+     */
+    static String submissionUrl(ServiceConfig config) {
+        if (!"smtp".equals(config.service) || config.host == null) {
+            return null;
+        }
+        boolean tls = "tls".equalsIgnoreCase(config.security);
+        if (!tls && !"starttls".equalsIgnoreCase(config.security)) {
+            Log.w(
+                    "pimalaya",
+                    "skip smtp at " + config.host + ": unsupported security " + config.security);
+            return null;
+        }
+        return (tls ? "smtps://" : "smtp://") + config.host + ":" + config.port;
     }
 
-    private String endpointUrl(ServiceConfig config) {
+    /**
+     * A mail endpoint signed in to with a token, naming {@code email} as its
+     * user: a token signs in to IMAP and SMTP with SASL XOAUTH2, which names
+     * its user beside the token, and the URL is where that user lives (RFC
+     * 5092 section 3.2), the credential staying the bare token every other
+     * protocol sends. Any other endpoint is returned as it is.
+     */
+    static String asUser(String url, String email) {
+        return url.startsWith("imap") || url.startsWith("smtp")
+                ? PimalayaClient.withUser(url, email)
+                : url;
+    }
+
+    /**
+     * The URL an account for {@code email} connects to for one discovered
+     * config, or null when this app cannot drive it.
+     *
+     * <p>An HTTP endpoint arrives ready to use, when it is https. A TCP one does not: discovery
+     * reports a host, a port and a security mode, and the scheme is the client's
+     * to choose. Only implicit TLS is offered, because the IMAP client has no
+     * STARTTLS step, and a {@code starttls} endpoint driven as if it were
+     * implicit would connect in the clear rather than fail.
+     */
+    static String endpointUrl(ServiceConfig config, String email) {
         if ("msgraph".equals(config.service) || "msgraphCalendar".equals(config.service)) {
-            return PimalayaClient.msgraphBase(pendingEmail);
+            return PimalayaClient.msgraphBase(email);
         }
         if ("gmail".equals(config.service) || "gcal".equals(config.service)) {
-            return PimalayaClient.googleBase(pendingEmail);
+            return PimalayaClient.googleBase(email);
         }
         if (config.url != null) {
+            // NOTE: an HTTP endpoint is https or nothing: a plain one, from a
+            // PACC document or an autoconfig, would carry the password in
+            // clear.
+            if (!"https".equals(Endpoints.scheme(config.url))) {
+                Log.w("pimalaya", "skip " + config.service + ": not https");
+                return null;
+            }
             return "jmap".equals(config.service)
                     ? PimalayaClient.jmapBase(config.url)
                     : config.url;

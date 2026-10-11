@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::BridgeError;
 
-use super::{EventTime, EventTimeKind, SCHEDULED, Zones, scheduled, series, text};
+use super::{EventTime, EventTimeKind, SCHEDULED, Zones, cst_of, scheduled, series, text};
 
 /// What a write stamps rather than what it says.
 const STAMPS: [&str; 3] = ["DTSTAMP", "LAST-MODIFIED", "SEQUENCE"];
@@ -363,9 +363,7 @@ fn settle(base: &str, local: &str, remote: &str) -> Result<Settled, BridgeError>
 
 /// A side's text as a tree, owned.
 fn parse(ical: &str) -> Result<IcalCst<'static>, BridgeError> {
-    Ok(IcalCst::parse(ical)
-        .map_err(|err| err.to_string())?
-        .into_static())
+    Ok(cst_of(ical)?.into_static())
 }
 
 /// What one ical-rs conflict is to a reader: its kind, the field it is

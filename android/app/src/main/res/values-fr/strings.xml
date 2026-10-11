@@ -75,26 +75,14 @@
     </plurals>
     <string name="mail_search">Rechercher dans les e-mails</string>
     <string name="date_unknown">Sans date</string>
-    <string name="mail_window_load">Charger depuis le %1$s</string>
-    <string name="mail_window_choose">Choisir une date</string>
-    <string name="mail_window_confirm">Charger</string>
+    <string name="mail_more_load">Charger plus</string>
+    <string name="mail_more_loading">Chargement en cours</string>
+    <plurals name="mail_more_info">
+        <item quantity="one">Environ %1$d de plus par compte</item>
+        <item quantity="other">Environ %1$d de plus par compte</item>
+    </plurals>
+    <string name="mail_more_wifi">Attend le Wi-Fi</string>
     <string name="mail_window_all">Tous mes e-mails</string>
-    <plurals name="mail_window_size">
-        <item quantity="one">%1$s message · environ %2$s</item>
-        <item quantity="other">%1$s messages · environ %2$s</item>
-    </plurals>
-    <plurals name="mail_window_unknown">
-        <item quantity="one">%1$s message · taille inconnue</item>
-        <item quantity="other">%1$s messages · taille inconnue</item>
-    </plurals>
-    <plurals name="mail_window_unknown_some">
-        <item quantity="one">%1$s message · %2$s, taille inconnue pour %3$s</item>
-        <item quantity="other">%1$s messages · %2$s, taille inconnue pour %3$s</item>
-    </plurals>
-    <string name="mail_window_syncing">En-têtes plus anciens en cours de synchro</string>
-    <string name="mail_window_offline">Téléchargement une fois en ligne</string>
-    <string name="mail_window_wifi">Les plus gros en Wi-Fi</string>
-    <string name="mail_window_widened">Période de synchronisation élargie jusqu\'à cette date</string>
     <string name="mail_window_release_title">Libérer les anciens messages ?</string>
     <string name="mail_window_release_message">Les messages d\'avant le %1$s quittent ce téléphone. Leurs en-têtes restent, la recherche les trouve encore, et en ouvrir un le télécharge à nouveau.</string>
     <string name="mail_window_release">Libérer</string>
@@ -106,7 +94,7 @@
         <item quantity="other">%1$s messages (%2$s) quittent le téléphone, leurs en-têtes restent pour la recherche</item>
     </plurals>
     <string name="mail_row_not_downloaded">Non téléchargé</string>
-    <string name="mail_row_wifi">Se télécharge en Wi-Fi</string>
+    <string name="mail_row_failed">Échec du téléchargement</string>
     <string name="mail_chip_unread">Non lus</string>
     <string name="mail_chip_inbox">Réception</string>
     <string name="mail_chip_sent">Envoyés</string>
@@ -124,7 +112,7 @@
     <string name="filter_download_stop">Arrêter</string>
     <string name="filter_downloaded">Gardée entière hors ligne</string>
     <string name="filter_download_title">Télécharger cette boîte ?</string>
-    <string name="filter_download_message">Tous les messages de %1$s sont listés et téléchargés, au-delà de la période synchronisée du compte, les plus gros en Wi-Fi seulement.</string>
+    <string name="filter_download_message">Tous les messages de %1$s sont listés et téléchargés en Wi-Fi, au-delà de la période synchronisée du compte.</string>
     <string name="filter_reset">Réinitialiser</string>
 
     <!-- Deleted items -->
@@ -295,6 +283,9 @@
     <string name="signin_signed">Connecté</string>
     <string name="signin_manual">Saisi manuellement</string>
     <string name="signin_sends">%1$s, envoie par %2$s</string>
+    <string name="signin_sent_to">Envoyé à %1$s</string>
+    <string name="signin_other_domain">%1$s, hors de %2$s</string>
+    <string name="server_insecure">Seuls les serveurs chiffrés sont acceptés : imaps:// pour le courrier, https:// pour les contacts et les agendas, smtps:// ou smtp:// pour l\'envoi.</string>
     <string name="hint_token">Collez votre jeton d\'API</string>
     <string name="token_refused">Jeton refusé</string>
     <string name="oauth_title">Votre client OAuth</string>
@@ -323,6 +314,7 @@
     <string name="contact_diverged_pending">Des champs divergents attendent une revue</string>
     <string name="sync_busy">Attendez la fin de la synchronisation</string>
     <string name="sync_line_starting">Démarrage de la synchronisation</string>
+    <string name="sync_line_wifi">En attente du Wi-Fi</string>
     <string name="sync_line_mail">Synchronisation des messages</string>
     <string name="sync_line_contacts">Synchronisation des contacts</string>
     <string name="sync_line_calendars">Synchronisation des agendas</string>
@@ -535,6 +527,9 @@
     <string name="message_pending">En attente d\'envoi</string>
     <string name="mail_outbox">Boîte d\'envoi</string>
     <string name="message_send_failed">Refusé par le serveur</string>
+    <string name="message_send_uncertain">Peut-être envoyé</string>
+    <string name="message_send_again">Renvoyer</string>
+    <string name="message_sent_again">Remis en file d\'envoi</string>
 
     <!-- Le compositeur. -->
     <string name="compose_from_title">Envoyer depuis</string>
@@ -619,4 +614,8 @@
         <item quantity="one">%d nouveau message</item>
         <item quantity="other">%d nouveaux messages</item>
     </plurals>
+    <string name="accounts_unreadable">Vos comptes n\'ont pas pu être lus pour l\'instant. Rouvrez l\'application dans un moment.</string>
+    <string name="accounts_lost_title">Ajoutez de nouveau vos comptes</string>
+    <string name="accounts_lost">Vos comptes ont été chiffrés avec une clé qui reste sur le téléphone où ils ont été configurés : ils ne peuvent pas être lus ici. Ajoutez-les de nouveau pour synchroniser.</string>
+    <string name="message_unreadable">Ce message n\'a pas pu être lu : sa lecture a déjà arrêté l\'application.</string>
 </resources>

@@ -12,10 +12,20 @@
 //! 5322 source, so the store and the parser stay the ones the other
 //! backends use.
 
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    fs,
+    path::{Path, PathBuf},
+    thread::sleep,
+    time::Duration,
+};
+
 use io_http::rfc6750::bearer::HttpAuthBearer;
 use io_msgraph::v1::{
     rest::{
-        batch::{MSGRAPH_BATCH_MAX_REQUESTS, MsgraphBatch, MsgraphBatchRequest},
+        batch::{
+            MSGRAPH_BATCH_MAX_REQUESTS, MsgraphBatch, MsgraphBatchRequest, MsgraphBatchResponse,
+        },
         users::{
             mail_folders::{
                 MsgraphMailFolder,
@@ -50,14 +60,17 @@ use io_pimdir::summary::{
     PimdirAddress,
     mail::{PimdirMailSummary, decode},
 };
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::{
     client::{
         Client,
+        gmail::source_path,
         graph::{graph_url, parse_graph_url, relative},
         listing::{Floor, GRAPH_PAGE, Listing, MailPage, MailRequest, Named, Scope, flags, utc},
+        throttle::WAIT_BUDGET,
     },
     types::{BridgeError, Mailbox},
 };
@@ -265,14 +278,6 @@ impl<'a, 'local> Client<'a, 'local> {
         }
     }
 
-    /// Reads one message whole, as the RFC 5322 bytes Graph serves.
-    pub fn fetch_graph_source(&mut self, token: &str, id: &str) -> Result<Vec<u8>, BridgeError> {
-        let auth = HttpAuthBearer::new(token);
-        let coroutine =
-            MsgraphMessageGetRaw::new(&auth, "me", id).map_err(|err| err.to_string())?;
-        self.run_msgraph(coroutine)
-    }
-
     /// Adds or removes one marker on one message.
     ///
     /// `\Seen` is `isRead` and `\Flagged` the follow-up flag. Graph keeps
@@ -421,8 +426,6 @@ pub(crate) struct Band {
     pub since: Option<String>,
     pub until: Option<String>,
     pub inclusive: bool,
-    /// How many messages the page skips (`$skip`), 0 for none.
-    pub skip: u32,
 }
 
 impl Band {
@@ -458,14 +461,6 @@ struct Ceiling {
     inclusive: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     seen: Vec<String>,
-    /// How many of that second's messages a page skips, past a page of
-    /// them all listed already.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    skip: u32,
-}
-
-fn is_zero(skip: &u32) -> bool {
-    *skip == 0
 }
 
 /// One page of a folder's listing (pimdir SYNC §4, §5).
@@ -567,7 +562,6 @@ fn band_page<G: GraphFolder>(
         since: scope.since.clone(),
         until: ceiling.until.clone(),
         inclusive: ceiling.inclusive,
-        skip: ceiling.skip,
     };
     let page = graph.messages(&band, GRAPH_PAGE)?;
 
@@ -608,19 +602,12 @@ fn band_page<G: GraphFolder>(
                 until: Some(oldest),
                 inclusive: true,
                 seen,
-                skip: 0,
             }
         }
         // NOTE: a whole page of one second's messages listed already: that
-        // second holds more than a page, so the next page skips the ones
-        // listed, the one place a band pages by `$skip`.
-        _ if ceiling.inclusive && fresh == 0 && ceiling.skip == 0 => Ceiling {
-            skip: ceiling.seen.len() as u32,
-            ..ceiling
-        },
-        // NOTE: Graph did not answer that second's messages in the same
-        // order twice; the band goes on below it, and the delta's first
-        // pass names what this misses.
+        // second holds more than a page, or Graph did not answer them in
+        // the same order twice; the band goes on below it, never by
+        // offset, and the delta's first pass names what this misses.
         _ if ceiling.inclusive && fresh == 0 => Ceiling {
             until: ceiling.until,
             ..Default::default()
@@ -716,7 +703,6 @@ impl GraphFolder for LiveFolder<'_, '_, '_> {
         let filter = band.filter();
         let params = MsgraphMessagesListParams {
             top: Some(top),
-            skip: (band.skip > 0).then_some(band.skip),
             select: Some(MESSAGE_SELECT),
             expand: Some(MESSAGE_EXPAND),
             filter: filter.as_deref(),
@@ -905,6 +891,540 @@ fn permanent_delete_url(id: &str) -> Result<Url, BridgeError> {
     parse_graph_url(&format!(
         "{MSGRAPH_API_BASE}me/messages/{id}/permanentDelete"
     ))
+}
+
+/// The `$select` of a step's listing: what places a message (its folder),
+/// what orders it and moves the frontier (its `Date`), and its reception,
+/// which tells an import from a timely message. The size rides along as
+/// [`MESSAGE_EXPAND`], for the bodies' batches.
+const STEP_SELECT: &str = "id,sentDateTime,receivedDateTime,parentFolderId";
+
+/// How many more messages than the step's count one listing asks for:
+/// the ids held at the frontier, and those out of scope.
+const STEP_SLACK: usize = 25;
+
+/// The most declared bytes one `$batch` of bodies asks for.
+pub(crate) const BATCH_BYTES: u64 = 4 * 1024 * 1024;
+
+/// A message declared larger than this is read alone, by a plain GET.
+pub(crate) const ALONE_BYTES: u64 = 1024 * 1024;
+
+/// What a step asks: how many messages, below which frontier and from
+/// which bound, in which folders, the store holding which.
+pub(crate) struct StepAsk<'a> {
+    /// The folders stepped, by id: the account's but the trash, the junk,
+    /// the mailboxes kept whole; the one folder a filtered view steps.
+    pub folders: &'a [String],
+    /// Whether the step lists that one folder alone.
+    pub alone: bool,
+    /// The account's frontier, [`None`] for the first step.
+    pub frontier: Option<&'a str>,
+    /// The account's bound, [`None`] for all mail.
+    pub bound: Option<&'a str>,
+    /// About how many messages to bring.
+    pub count: usize,
+}
+
+/// One message a step brought.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct StepMessage {
+    pub id: String,
+    /// Its folder, by id.
+    pub folder: String,
+    /// Its `Date`, as the store sorts it.
+    pub date: String,
+    /// When it was received, in milliseconds since the epoch.
+    pub received: Option<i64>,
+    /// The MAPI size Graph states for it.
+    pub size: Option<u64>,
+    /// Whether the store binds it already: its body is not read again.
+    pub held: bool,
+}
+
+/// What a step brought, and whether nothing older is left.
+#[derive(Debug, Default)]
+pub(crate) struct Stepped {
+    pub messages: Vec<StepMessage>,
+    pub exhausted: bool,
+}
+
+/// One body read whole into a file.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct GraphFetched {
+    pub id: String,
+    pub path: PathBuf,
+    pub size: usize,
+}
+
+/// One item of a `$batch` of `$value` GETs, as the read sorts it.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum Inner {
+    /// The message's bytes.
+    Body(Vec<u8>),
+    /// A 2xx whose body is not a base64 string: read alone.
+    Undecoded,
+    /// Gone (404).
+    Gone,
+    /// Throttled (429), with the seconds its `Retry-After` names.
+    Throttled(Option<u64>),
+    /// Any other failure.
+    Failed(String),
+}
+
+/// The Graph requests a step and a read of bodies are made of, apart so
+/// they can run over a fake.
+pub(crate) trait GraphMail {
+    /// One page of the account's messages, or of one folder's, newest
+    /// `Date` first, within `band`, `top` at most, with [`STEP_SELECT`].
+    fn dated(
+        &mut self,
+        folder: Option<&str>,
+        band: &Band,
+        top: u32,
+    ) -> Result<Vec<MsgraphMessage>, BridgeError>;
+
+    /// One `$batch` of `$value` GETs, each answer by its id.
+    fn batch(&mut self, ids: &[String]) -> Result<Vec<(String, Inner)>, BridgeError>;
+
+    /// One message's bytes, by a plain GET.
+    fn source(&mut self, id: &str) -> Result<Vec<u8>, BridgeError>;
+
+    /// The MAPI size Graph states for each of `ids` (20 to a `$batch`),
+    /// those it states none for left out.
+    fn sizes(&mut self, ids: &[String]) -> Result<HashMap<String, u64>, BridgeError>;
+
+    /// Waits `delay`.
+    fn pause(&mut self, delay: Duration);
+
+    /// Which of `ids` the store holds, asked once per page a step lists.
+    fn held(&mut self, ids: &[String]) -> Result<HashSet<String>, BridgeError>;
+}
+
+/// One step of a Graph account (docs B.13): its messages newest `Date`
+/// first below the frontier, `count` of them and every one sharing the
+/// last one's `Date`, the ones held at the frontier and those out of the
+/// stepped folders left out.
+///
+/// A keyset, never `nextLink`: a request answering as many as it asked
+/// for is followed by one from the oldest `Date` it reached, that second
+/// included and the ids seen left out. On `InefficientFilter` or a 504
+/// the account's listing gives way to each folder's, merged by `Date`.
+pub(crate) fn step<G: GraphMail>(graph: &mut G, ask: &StepAsk) -> Result<Stepped, BridgeError> {
+    if ask.alone {
+        let folder = ask.folders.first().map(String::as_str);
+        return walk(graph, folder, ask);
+    }
+
+    match walk(graph, None, ask) {
+        Err(err) if inefficient(&err) => {
+            log::debug!("graph step lists each folder: {err}");
+        }
+        walked => return walked,
+    }
+
+    let mut merged = Vec::new();
+    let mut exhausted = true;
+    for folder in ask.folders {
+        let walked = walk(graph, Some(folder), ask)?;
+        exhausted &= walked.exhausted;
+        merged.extend(walked.messages);
+    }
+    merged.sort_by(|a, b| b.date.cmp(&a.date));
+    let kept = with_ties(&merged, ask.count);
+    exhausted &= kept == merged.len();
+    merged.truncate(kept);
+    Ok(Stepped {
+        messages: merged,
+        exhausted,
+    })
+}
+
+/// Whether a listing failed the way the per-folder fallback answers: a
+/// filter Graph finds too costly over the whole mailbox, or a timeout.
+fn inefficient(err: &BridgeError) -> bool {
+    err.status == Some(504) || err.message.contains("InefficientFilter")
+}
+
+/// How many of some messages, newest first, a step keeps: `count`, and
+/// every one after sharing the last one's `Date`.
+fn with_ties(newest_first: &[StepMessage], count: usize) -> usize {
+    let Some(last) = count.checked_sub(1).and_then(|at| newest_first.get(at)) else {
+        return newest_first.len();
+    };
+    count
+        + newest_first[count..]
+            .iter()
+            .take_while(|message| message.date == last.date)
+            .count()
+}
+
+/// The keyset walk of one listing, the account's or a folder's.
+fn walk<G: GraphMail>(
+    graph: &mut G,
+    folder: Option<&str>,
+    ask: &StepAsk,
+) -> Result<Stepped, BridgeError> {
+    let top = (ask.count + STEP_SLACK).min(GRAPH_PAGE as usize) as u32;
+    let mut band = Band {
+        since: ask.bound.map(String::from),
+        until: ask.frontier.map(String::from),
+        inclusive: true,
+    };
+    let mut seen = HashSet::new();
+    let mut messages = Vec::new();
+    let mut cut: Option<String> = None;
+
+    loop {
+        let page = graph.dated(folder, &band, top)?;
+        let ids: Vec<String> = page.iter().map(|message| message.id.clone()).collect();
+        let held = graph.held(&ids)?;
+        let full = page.len() >= top as usize;
+        let mut fresh = 0;
+        let mut oldest: Option<String> = None;
+        for message in page {
+            if !seen.insert(message.id.clone()) {
+                continue;
+            }
+            fresh += 1;
+            let Some(date) = message.sent_date_time.as_deref().and_then(utc) else {
+                continue;
+            };
+            if cut.as_deref().is_some_and(|cut| date.as_str() < cut) {
+                return Ok(Stepped {
+                    messages,
+                    exhausted: false,
+                });
+            }
+            oldest = Some(date.clone());
+
+            let Some(parent) = placed(&message, folder, ask) else {
+                continue;
+            };
+            let held = held.contains(&message.id);
+            if held && ask.frontier == Some(date.as_str()) {
+                continue;
+            }
+            messages.push(StepMessage {
+                received: message
+                    .received_date_time
+                    .as_deref()
+                    .and_then(|raw| raw.parse::<Timestamp>().ok())
+                    .map(|received| received.as_millisecond()),
+                size: message
+                    .single_value_extended_properties
+                    .first()
+                    .and_then(|size| size.value.trim().parse().ok()),
+                id: message.id,
+                folder: parent,
+                date: date.clone(),
+                held,
+            });
+            if messages.len() == ask.count {
+                cut = Some(date);
+            }
+        }
+
+        if !full {
+            return Ok(Stepped {
+                messages,
+                exhausted: true,
+            });
+        }
+        match oldest {
+            Some(oldest) if fresh > 0 => {
+                band.until = Some(oldest);
+                band.inclusive = true;
+            }
+            // NOTE: a whole page of one second seen already: on below it.
+            _ if band.inclusive && band.until.is_some() => band.inclusive = false,
+            // NOTE: undated messages alone, which no keyset goes below.
+            _ => {
+                return Ok(Stepped {
+                    messages,
+                    exhausted: true,
+                });
+            }
+        }
+    }
+}
+
+/// The folder a listed message belongs to when the step takes it: the
+/// folder listed, or on the account's listing one of the stepped ones.
+fn placed(message: &MsgraphMessage, folder: Option<&str>, ask: &StepAsk) -> Option<String> {
+    if let Some(folder) = folder {
+        return Some(folder.to_string());
+    }
+    message
+        .parent_folder_id
+        .as_ref()
+        .filter(|parent| ask.folders.contains(parent))
+        .cloned()
+}
+
+/// Reads some messages whole into files of `dir`, each with the size
+/// Graph states (or none): `$batch` calls of up to 20 `$value` GETs and
+/// [`BATCH_BYTES`] declared, one at a time, a message past
+/// [`ALONE_BYTES`] or of no stated size read alone.
+///
+/// An item throttled inside a call waits its `Retry-After` once and goes
+/// in the next call; one gone, or failing otherwise, or throttled twice,
+/// is left out of the answer, for the caller to see which ids came back
+/// with no file. An expired token fails the read.
+pub(crate) fn read_sources<G: GraphMail>(
+    graph: &mut G,
+    wanted: &[(String, Option<u64>)],
+    dir: &Path,
+) -> Result<Vec<GraphFetched>, BridgeError> {
+    let mut alone = Vec::new();
+    let mut batches: VecDeque<Vec<String>> = VecDeque::new();
+    let mut bytes = 0;
+    for (id, size) in wanted {
+        let Some(size) = size.filter(|size| *size <= ALONE_BYTES) else {
+            alone.push(id.clone());
+            continue;
+        };
+        match batches.back_mut() {
+            Some(batch)
+                if batch.len() < MSGRAPH_BATCH_MAX_REQUESTS && bytes + size <= BATCH_BYTES =>
+            {
+                batch.push(id.clone());
+                bytes += size;
+            }
+            _ => {
+                batches.push_back(vec![id.clone()]);
+                bytes = size;
+            }
+        }
+    }
+
+    let mut fetched = Vec::with_capacity(wanted.len());
+    let mut throttled = HashSet::new();
+    while let Some(batch) = batches.pop_front() {
+        let answers = match graph.batch(&batch) {
+            Ok(answers) => answers,
+            Err(err) if err.status == Some(401) => return Err(err),
+            Err(err) => {
+                log::warn!("graph batch of {} bodies failed: {err}", batch.len());
+                continue;
+            }
+        };
+
+        let mut again = Vec::new();
+        let mut wait = 0;
+        for (id, inner) in answers {
+            match inner {
+                Inner::Body(source) => fetched.push(written(dir, id, &source)?),
+                Inner::Undecoded => alone.push(id),
+                Inner::Gone => (),
+                Inner::Throttled(after) if throttled.insert(id.clone()) => {
+                    wait = wait.max(after.unwrap_or(1));
+                    again.push(id);
+                }
+                Inner::Throttled(_) => log::warn!("body of {id} throttled twice"),
+                Inner::Failed(reason) => log::warn!("body of {id} not read: {reason}"),
+            }
+        }
+        if !again.is_empty() {
+            let delay = Duration::from_secs(wait).min(WAIT_BUDGET);
+            log::debug!("graph batch: {} throttled, waiting {delay:?}", again.len());
+            graph.pause(delay);
+            batches.push_front(again);
+        }
+    }
+
+    for id in alone {
+        match graph.source(&id) {
+            Ok(source) => fetched.push(written(dir, id, &source)?),
+            Err(err) if err.status == Some(401) => return Err(err),
+            Err(err) if err.status == Some(404) => (),
+            Err(err) => log::warn!("body of {id} not read: {err}"),
+        }
+    }
+    Ok(fetched)
+}
+
+/// Writes one message's bytes to its file of `dir`.
+fn written(dir: &Path, id: String, source: &[u8]) -> Result<GraphFetched, BridgeError> {
+    let path = source_path(dir, &id);
+    fs::write(&path, source).map_err(|err| format!("Could not write `{id}`: {err}"))?;
+    Ok(GraphFetched {
+        id,
+        path,
+        size: source.len(),
+    })
+}
+
+/// How one inner answer of a `$batch` of `$value` GETs reads.
+fn inner(reply: MsgraphBatchResponse) -> Inner {
+    match reply.status {
+        404 => Inner::Gone,
+        429 => Inner::Throttled(reply.retry_after()),
+        200..300 => match reply.bytes() {
+            Ok(bytes) => Inner::Body(bytes),
+            Err(_) => Inner::Undecoded,
+        },
+        status => Inner::Failed(format!("HTTP {status}")),
+    }
+}
+
+/// The live Graph of one account's mail.
+struct LiveMail<'c, 'a, 'local> {
+    client: &'c mut Client<'a, 'local>,
+    auth: HttpAuthBearer,
+}
+
+impl LiveMail<'_, '_, '_> {
+    /// Sends one `$batch` of GETs at `urls`, each answer by its index.
+    fn send_batch(&mut self, urls: &[Url]) -> Result<Vec<MsgraphBatchResponse>, BridgeError> {
+        let requests: Vec<MsgraphBatchRequest> = urls
+            .iter()
+            .enumerate()
+            .map(|(index, url)| MsgraphBatchRequest {
+                id: index.to_string(),
+                method: String::from("GET"),
+                url: relative(url),
+                ..Default::default()
+            })
+            .collect();
+        let coroutine = MsgraphBatch::new(&self.auth, &requests).map_err(|err| err.to_string())?;
+        Ok(self.client.run_msgraph(coroutine)?.responses)
+    }
+}
+
+impl GraphMail for LiveMail<'_, '_, '_> {
+    fn dated(
+        &mut self,
+        folder: Option<&str>,
+        band: &Band,
+        top: u32,
+    ) -> Result<Vec<MsgraphMessage>, BridgeError> {
+        let filter = band.filter();
+        let params = MsgraphMessagesListParams {
+            top: Some(top),
+            select: Some(STEP_SELECT),
+            expand: Some(MESSAGE_EXPAND),
+            filter: filter.as_deref(),
+            orderby: Some("sentDateTime desc"),
+            ..Default::default()
+        };
+        let coroutine = MsgraphMessagesList::new(&self.auth, "me", folder, &params)
+            .map_err(|err| err.to_string())?;
+        Ok(self.client.run_msgraph(coroutine)?.value)
+    }
+
+    fn batch(&mut self, ids: &[String]) -> Result<Vec<(String, Inner)>, BridgeError> {
+        let urls = ids
+            .iter()
+            .map(|id| graph_url(&format!("me/messages/{id}/$value")))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut answers = Vec::with_capacity(ids.len());
+        for reply in self.send_batch(&urls)? {
+            let Some(id) = reply.id.parse::<usize>().ok().and_then(|at| ids.get(at)) else {
+                continue;
+            };
+            answers.push((id.clone(), inner(reply)));
+        }
+        Ok(answers)
+    }
+
+    fn source(&mut self, id: &str) -> Result<Vec<u8>, BridgeError> {
+        let coroutine =
+            MsgraphMessageGetRaw::new(&self.auth, "me", id).map_err(|err| err.to_string())?;
+        self.client.run_msgraph(coroutine)
+    }
+
+    fn sizes(&mut self, ids: &[String]) -> Result<HashMap<String, u64>, BridgeError> {
+        let mut sizes = HashMap::with_capacity(ids.len());
+        for chunk in ids.chunks(MSGRAPH_BATCH_MAX_REQUESTS) {
+            let urls = chunk
+                .iter()
+                .map(|id| {
+                    let mut url = graph_url(&format!("me/messages/{id}"))?;
+                    url.query_pairs_mut()
+                        .append_pair("$select", "id")
+                        .append_pair("$expand", MESSAGE_EXPAND);
+                    Ok(url)
+                })
+                .collect::<Result<Vec<_>, BridgeError>>()?;
+            for reply in self.send_batch(&urls)? {
+                let Some(id) = reply.id.parse::<usize>().ok().and_then(|at| chunk.get(at)) else {
+                    continue;
+                };
+                let size = reply.parse::<MsgraphMessage>().ok().and_then(|message| {
+                    message
+                        .single_value_extended_properties
+                        .first()
+                        .and_then(|size| size.value.trim().parse().ok())
+                });
+                if let Some(size) = size {
+                    sizes.insert(id.clone(), size);
+                }
+            }
+        }
+        Ok(sizes)
+    }
+
+    fn pause(&mut self, delay: Duration) {
+        sleep(delay);
+    }
+
+    fn held(&mut self, ids: &[String]) -> Result<HashSet<String>, BridgeError> {
+        self.client.held(ids)
+    }
+}
+
+impl<'a, 'local> Client<'a, 'local> {
+    /// One step of a Graph account ([`step`]), its bodies not held read
+    /// into files of `dir` ([`read_sources`]) with the sizes its listing
+    /// stated.
+    pub fn graph_step(
+        &mut self,
+        token: &str,
+        ask: &StepAsk,
+        dir: &Path,
+    ) -> Result<(Stepped, Vec<GraphFetched>), BridgeError> {
+        let mut graph = LiveMail {
+            client: self,
+            auth: HttpAuthBearer::new(token),
+        };
+        let stepped = step(&mut graph, ask)?;
+        let wanted: Vec<(String, Option<u64>)> = stepped
+            .messages
+            .iter()
+            .filter(|message| !message.held)
+            .map(|message| (message.id.clone(), message.size))
+            .collect();
+        let fetched = read_sources(&mut graph, &wanted, dir)?;
+        Ok((stepped, fetched))
+    }
+
+    /// Some messages read whole into files of `dir`: their sizes first,
+    /// 20 to a `$batch`, then their bodies batched by them
+    /// ([`read_sources`]).
+    pub fn graph_sources(
+        &mut self,
+        token: &str,
+        ids: &[String],
+        dir: &Path,
+    ) -> Result<Vec<GraphFetched>, BridgeError> {
+        let mut graph = LiveMail {
+            client: self,
+            auth: HttpAuthBearer::new(token),
+        };
+        let sizes = match graph.sizes(ids) {
+            Ok(sizes) => sizes,
+            Err(err) if err.status == Some(401) => return Err(err),
+            Err(err) => {
+                log::warn!("graph sizes not read: {err}");
+                HashMap::new()
+            }
+        };
+        let wanted: Vec<(String, Option<u64>)> = ids
+            .iter()
+            .map(|id| (id.clone(), sizes.get(id).copied()))
+            .collect();
+        read_sources(&mut graph, &wanted, dir)
+    }
 }
 
 #[cfg(test)]

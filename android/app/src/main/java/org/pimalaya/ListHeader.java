@@ -27,12 +27,22 @@ import java.util.function.Consumer;
  * and never lost. The extended add button folds to its glyph while the
  * list scrolls down and unfolds when it comes back up, the way a
  * reader's attention moves.
+ *
+ * <p>It also draws the sync strip pinned above its list rather than in
+ * it (sync_strip.xml), so a pass, or the mail downloading behind the
+ * list, shows however far the list is scrolled.
  */
 final class ListHeader {
     private final MainActivity host;
     private final int panel;
     final View view;
     private final ListView list;
+
+    /**
+     * The sync strip pinned above the list (sync_strip.xml), shown wherever
+     * the list is scrolled; null on a list that has none.
+     */
+    private final View strip;
 
     /** Whether the large title is scrolled out of sight. */
     private boolean scrolled;
@@ -50,10 +60,11 @@ final class ListHeader {
     /** Debounced search, so typing does not re-render per keystroke. */
     private Runnable pendingSearch;
 
-    ListHeader(MainActivity host, ListView list, int panel) {
+    ListHeader(MainActivity host, ListView list, int panel, View strip) {
         this.host = host;
         this.panel = panel;
         this.list = list;
+        this.strip = strip;
         view = LayoutInflater.from(host).inflate(R.layout.list_header, list, false);
         list.addHeaderView(view, null, false);
         ((TextView) view.findViewById(R.id.header_title)).setText(Domains.titleOf(panel));
@@ -105,13 +116,85 @@ final class ListHeader {
         ((TextView) view.findViewById(R.id.header_meta)).setText(meta);
     }
 
+    /** Whether the strip shows a pass, or why one waits. */
+    private boolean passing;
+
+    /** Whether older mail downloads in the background. */
+    private boolean fill;
+
+    /** The bodies the background download landed of those it planned. */
+    private int fillLanded;
+
+    private int fillPlanned;
+
+    /** The background bar in thousandths, which only grows while it runs. */
+    private int fillShown;
+
     /**
-     * Shows or hides the glyph beside the meta line saying older mail is
-     * downloading in the background. It pulses gently, and holds still when
-     * the system removes animations.
+     * Says older mail is downloading in the background, on the strip while
+     * no pass holds it: a line beside a glyph pulsing gently, holding still
+     * when the system removes animations.
      */
     void filling(boolean shown) {
-        ImageView glyph = view.findViewById(R.id.header_fill);
+        if (shown == fill) {
+            return;
+        }
+        fill = shown;
+        if (!shown) {
+            fillLanded = 0;
+            fillPlanned = 0;
+            fillShown = 0;
+        }
+        if (!passing) {
+            renderFill();
+        }
+    }
+
+    /**
+     * How many bodies the background download landed of those it planned,
+     * the strip's bar while it shows, none for a plan of none.
+     */
+    void filled(int landed, int planned) {
+        fillLanded = landed;
+        fillPlanned = planned;
+        if (fill && !passing) {
+            renderFill();
+        }
+    }
+
+    /** Draws the background download on the strip, or hides it. */
+    private void renderFill() {
+        if (strip == null) {
+            return;
+        }
+        if (!fill) {
+            glyph(false);
+            strip.setVisibility(View.GONE);
+            return;
+        }
+        strip.findViewById(R.id.header_sync_account).setVisibility(View.GONE);
+        ((TextView) strip.findViewById(R.id.header_sync_detail))
+                .setText(R.string.mail_filling);
+        glyph(true);
+        ProgressBar bar = strip.findViewById(R.id.header_sync_bar);
+        if (fillPlanned > 0) {
+            fillShown =
+                    Math.max(
+                            fillShown,
+                            (int) ((long) Math.min(fillLanded, fillPlanned) * bar.getMax()
+                                    / fillPlanned));
+            bar.setIndeterminate(false);
+            bar.setProgress(fillShown);
+            bar.setVisibility(View.VISIBLE);
+        } else {
+            bar.setVisibility(View.GONE);
+        }
+        strip.setVisibility(View.VISIBLE);
+    }
+
+    /** Shows or hides the strip's download glyph, pulsing while shown. */
+    private void glyph(boolean shown) {
+        ImageView glyph = strip.findViewById(R.id.header_fill);
         if (shown == (glyph.getVisibility() == View.VISIBLE)) {
             return;
         }
@@ -138,32 +221,50 @@ final class ListHeader {
     private ObjectAnimator pulse;
 
     /**
-     * Shows the sync strip in place of the meta line, the search field and
-     * the chips: the account the pass is on (none before it reaches one),
-     * the step it stands at, over a bar filled to {@code done} of {@code
-     * total}, or running indeterminate while the pass cannot count (a total
-     * of zero). A search field holding a query or the cursor stays: hidden,
-     * it would filter the list with nothing saying so.
+     * Shows the sync strip, the search field and the chips stepping aside:
+     * the account the pass is on (none before it reaches one), the step it
+     * stands at, over a bar filled to {@code done} of {@code total}, or
+     * running indeterminate while the pass cannot count (a total of zero).
+     * A search field holding a query or the cursor stays: hidden, it would
+     * filter the list with nothing saying so.
      */
     void sync(String account, String detail, int done, int total) {
-        TextView whose = view.findViewById(R.id.header_sync_account);
+        passing = true;
+        TextView whose = strip.findViewById(R.id.header_sync_account);
         whose.setText(account);
         whose.setVisibility(account == null ? View.GONE : View.VISIBLE);
-        view.findViewById(R.id.header_meta_row).setVisibility(View.GONE);
-        view.findViewById(R.id.header_sync).setVisibility(View.VISIBLE);
-        ((TextView) view.findViewById(R.id.header_sync_detail)).setText(detail);
-        ProgressBar bar = view.findViewById(R.id.header_sync_bar);
+        ((TextView) strip.findViewById(R.id.header_sync_detail)).setText(detail);
+        glyph(false);
+        ProgressBar bar = strip.findViewById(R.id.header_sync_bar);
+        bar.setVisibility(View.VISIBLE);
         bar.setIndeterminate(total <= 0);
         if (total > 0) {
             bar.setProgress((int) ((long) Math.min(done, total) * bar.getMax() / total));
         }
+        strip.setVisibility(View.VISIBLE);
         controls(false);
     }
 
-    /** Puts the meta line, the search field and the chips back once the sync is over. */
+    /**
+     * Shows the strip saying why the sync waits ({@code detail}), with no
+     * bar, until a sync starts or {@link #synced} hides it.
+     */
+    void waiting(String detail) {
+        passing = true;
+        strip.findViewById(R.id.header_sync_account).setVisibility(View.GONE);
+        ((TextView) strip.findViewById(R.id.header_sync_detail)).setText(detail);
+        glyph(false);
+        strip.findViewById(R.id.header_sync_bar).setVisibility(View.GONE);
+        strip.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * Puts the search field and the chips back once the sync is over, the
+     * strip then saying what downloads in the background, if anything.
+     */
     void synced() {
-        view.findViewById(R.id.header_sync).setVisibility(View.GONE);
-        view.findViewById(R.id.header_meta_row).setVisibility(View.VISIBLE);
+        passing = false;
+        renderFill();
         controls(true);
     }
 

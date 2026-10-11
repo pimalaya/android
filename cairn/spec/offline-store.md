@@ -75,7 +75,7 @@ The store SHALL record what a reader lists an item from in its kind's summary ta
 - THEN the stored summary is kept, on the same terms as the sort key
 
 ### Requirement: A placement no source binds is offered under its provisional handle
-The store SHALL hand out `U+0001` followed by the link id as the handle of a placement the source does not bind (SYNC §2), and SHALL resolve that handle back to the identity it spells. A push SHALL name the resource by that identity, never by the provisional handle.
+The store SHALL hand out `U+0001` followed by the link id as the handle of a placement the source does not bind (SYNC §2), and SHALL resolve that handle back to the identity it spells. A push SHALL name the resource by that identity, never by the provisional handle, and the binding SHALL take the name the server filed the create by, which a server may choose itself.
 
 #### Scenario: A card staged for a book the phone has never seen
 - GIVEN an item with no binding for the phone spoke
@@ -86,6 +86,11 @@ The store SHALL hand out `U+0001` followed by the link id as the handle of a pla
 - GIVEN a staged create under its provisional handle
 - WHEN the push offers it to the server
 - THEN the resource is named after the card, and the binding takes whatever handle the push assigns
+
+#### Scenario: The server files the create under a name of its own
+- GIVEN a card created on the phone, pushed to Google's CardDAV, which files it under its own name and says so in `Location`
+- WHEN the card is deleted on the phone
+- THEN the next pass deletes the resource Google named, and the card is not listed back
 
 ### Requirement: One identity under two handles
 A write resolving an existing `(collection, link_id, source)` binding to a different handle SHALL be refused, unless the same batch supersedes the handle it holds. The store SHALL NOT record the incoming handle in the bound one's place, and SHALL NOT freeze the item.
@@ -227,11 +232,11 @@ Submitting a message SHALL NOT be retried: a submission whose reply was lost is 
 - THEN nothing is sent a second time
 
 ### Requirement: A sync says what it is working on, in every domain
-A running sync SHALL show, under the large title of every list, a strip naming what the pass is on over one thin bar: the account on a first line once the pass reaches one (*me@example.org*), the domain on the line below (*Syncing contacts*), never the engine's steps. The three domains SHALL report alike, so a wait reads the same whichever one is being synced.
+A running sync SHALL show, pinned under the app bar of every list (mail, contacts, calendars) and above the list, so it shows wherever the list is scrolled, a strip naming what the pass is on over one thin bar: the account on a first line once the pass reaches one (*me@example.org*), the domain on the line below (*Syncing contacts*), never the engine's steps. The three domains SHALL report alike, so a wait reads the same whichever one is being synced. The strip SHALL hide when nothing runs.
 
-The bar SHALL be one progress over the whole pass, every account and every domain it runs, and SHALL never move back while the pass runs. Before it starts, the pass SHALL be sized in sections, one per domain and account, each weighing the collections stored for it, one at least; a section SHALL fill its weight however many collections its listing turns up, and sections MAY fill at different speeds. Within a section, the pass SHALL tell how many collections it will run before the first one runs, and each collection SHALL fill its share as it lands; within it, a step moving items batch by batch, the members a listing did not carry being read or the contacts and events being written to the phone, SHALL fill part of that share, the download the first three fifths and the phone the rest where the domain has a phone mirror, the download all of it for mail; a calendar's steps only while that calendar runs alone. The bar SHALL run indeterminate only before anything is counted, its line then saying the sync is starting (*Starting the sync*) rather than naming a domain, and SHALL keep the determinate bar's track, height and margins.
+The bar SHALL be one progress over the whole pass, every account and every domain it runs, and SHALL never move back while the pass runs. Before it starts, the pass SHALL be sized in sections, one per domain and account, each weighing the collections stored for it, one at least, an account's mail step weighing one; a section SHALL fill its weight however many collections its listing turns up, and sections MAY fill at different speeds. Within a section, the pass SHALL tell how many collections it will run before the first one runs, and each collection SHALL fill its share as it lands; within it, a step moving items batch by batch, the members a listing did not carry being read or the contacts and events being written to the phone, SHALL fill part of that share, the download the first three fifths and the phone the rest where the domain has a phone mirror, the download all of it for mail; a calendar's steps only while that calendar runs alone; a mail step its bodies (A mail step counts the bodies it brings). The bar SHALL run indeterminate only before anything is counted, its line then saying the sync is starting (*Starting the sync*) rather than naming a domain, and SHALL keep the determinate bar's track, height and margins.
 
-While the strip shows, the list's search field and its chips SHALL be hidden, and SHALL come back when it goes; a search field holding a query SHALL stay.
+While the strip shows a pass, the list's search field and its chips SHALL be hidden, and SHALL come back when it goes; a search field holding a query SHALL stay. The list's count line SHALL stay.
 
 The strip SHALL NOT block the app: the lists, the reader and the composer stay usable while it runs, the lists refreshing when the pass ends. One pass SHALL run at a time, a pull or the drawer's sync asked for meanwhile doing nothing, and an account SHALL NOT be deleted while a pass runs. The strip's line SHALL never be empty: it SHALL open saying the sync is starting, and SHALL follow the pass to the next account and domain once something is counted.
 
@@ -262,10 +267,15 @@ The strip SHALL NOT block the app: the lists, the reader and the composer stay u
 - WHEN the others check the server or download at once
 - THEN the bar stands at two fifths at least
 
+#### Scenario: Scrolled to the end
+- GIVEN the mail list scrolled to its last message
+- WHEN *Load more* is tapped
+- THEN the strip shows under the app bar, its bar filling, without scrolling back up
+
 #### Scenario: The controls step aside
 - GIVEN the mail list with an empty search field and its chips
 - WHEN a pass starts
-- THEN the strip shows where the search field and the chips were
+- THEN the strip shows above the list, the search field and the chips hidden, the count line kept
 - AND both come back once the pass ends
 
 #### Scenario: Reading while it runs
@@ -568,3 +578,48 @@ Every caller in the process, the activity, the sync adapters, the background job
 - GIVEN an address book mirrored on the phone
 - WHEN the system runs its sync adapter
 - THEN the adapter uses the process's store, and no SQLite connection is reported leaked
+
+### Requirement: A write records the revision the server holds
+A pushed create or edit SHALL record the revision the server holds the item at: the ETag the write answered, read as the string it is (quotes of its own included), or, when the write answered none, the one a read of that member answers. A read that fails SHALL leave the revision unknown and SHALL NOT fail the write.
+
+#### Scenario: A server answering no ETag
+- GIVEN a CalDAV server that answers a PUT with no ETag, as Google's does
+- WHEN an entry created on the phone is pushed, then deleted on the phone
+- THEN the pass after the delete pushes it, rather than reading the listing as a change made elsewhere and pulling the entry back
+
+#### Scenario: An ETag carrying quotes
+- GIVEN a Google Calendar event edited on the phone, whose new ETag is `"3583433504310878"`
+- WHEN the edit is pushed
+- THEN the binding's revision is `"3583433504310878"`, the one the next listing names, and a delete staged after it is pushed
+
+### Requirement: A bound member keeps its identity
+A contacts or calendar driver SHALL name a member its source already binds by the identity the store files it under, whatever identity its body states now, so the store never retires an item for its body alone.
+
+#### Scenario: Google rewrites a card's UID
+- GIVEN a card created on the phone, which Google stored with its UID rewritten to its own id
+- WHEN the card is edited elsewhere while the phone stages an edit of its own
+- THEN the two edits merge onto the same card and the merge is pushed, rather than the card being replaced and the phone's edit dropped
+
+### Requirement: A scoped load reads what it names
+A load scoped to some handles or link ids SHALL read those rows alone, whatever the length of the list: the list SHALL be bound as one value (a JSON array read through `json_each`), never widened back to the whole collection, and a handle scope SHALL seek the source's bindings by handle rather than walk the collection. An unbound row SHALL still be reached under the provisional handle of its link id.
+
+#### Scenario: A listing page of a thousand
+- GIVEN a mailbox of 275k messages
+- WHEN a round's page of 1000 members is loaded by handle
+- THEN 1000 placements come back, read by key, and the page costs what it holds rather than the mailbox
+
+### Requirement: A store write is never read through a cursor
+A write SHALL run as a statement and count what it changed (`changes()`), its `RETURNING` clause dropped, never stepped through a cursor: a cursor runs its statement again each time it refills its window, so a delete read through one runs again past its first window. A purge whose pins a statement would return SHALL leave them to the collector's recount.
+
+#### Scenario: Narrowing a large account
+- GIVEN 120k messages below a new bound
+- WHEN the bound is narrowed
+- THEN all 120k are collected once and counted, in one pass
+
+### Requirement: A deep read seeks where it lands
+A keyset page, the frontier's dates and the body plan SHALL state the bound their cursor implies on the sort key, so the index serves them from the cursor down rather than from the newest row. A count with no attachment chip SHALL NOT read the summary. A page reached with no page above it read (a fling) SHALL read from the start of the day its first row falls on, by the per-day counts the list already holds, paying for that day's rows ahead of it and no more.
+
+#### Scenario: A fling to the end of a million messages
+- GIVEN a merged list of 1M stored messages
+- WHEN it is flung to its last page
+- THEN that page reads from its own day, in milliseconds

@@ -27,32 +27,41 @@ pub(crate) mod gmail_sync;
 mod google;
 mod graph;
 mod graph_calendar;
-mod graph_mail;
+pub(crate) mod graph_mail;
 pub(crate) mod imap;
 mod jmap;
+pub(crate) mod jmap_sync;
 pub(crate) mod listing;
 pub(crate) mod smtp;
 mod sync_collection;
 mod throttle;
+pub(crate) mod trust;
 
 use core::error::Error as StdError;
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use io_webdav::{
     coroutine::{WebdavCoroutine, WebdavCoroutineState, WebdavYield},
     rfc4918::coroutine::WebdavRedirectYield,
 };
 use jni::{
-    Env, JValue,
+    Env, JValue, JValueOwned,
     errors::Error,
     jni_sig, jni_str,
-    objects::{JByteArray, JObject},
+    objects::{JByteArray, JObject, JString},
+    signature::MethodSignature,
+    strings::JNIStr,
 };
 use percent_encoding::percent_decode_str;
+use serde_json::{Value, from_str, json};
 use url::Url;
 
 use crate::{
-    client::{convert::coroutine_error, throttle::Exchange},
+    client::{
+        convert::coroutine_error,
+        throttle::{Exchange, Wire, throttled_read, throttled_write},
+        trust::{CrossOrigin, Redirects, refuse_cleartext_credential},
+    },
     types::BridgeError,
 };
 
@@ -77,6 +86,13 @@ pub struct Client<'a, 'local> {
     /// being opened, rather than background work: its Gmail requests
     /// skip the pacing queue ([`throttle::pace_gmail`]).
     pub(crate) urgent: bool,
+    /// The URLs whose plain stream STARTTLS upgraded ([`Self::starttls`]):
+    /// a credential may go out on those.
+    upgraded: Vec<String>,
+    /// The store's driver (`OfflineDriver`) a mail step asks which of a
+    /// listed page the store holds ([`Self::held`]); [`None`] outside a
+    /// step.
+    pub(crate) store: Option<&'a JObject<'local>>,
 }
 
 impl<'a, 'local> Client<'a, 'local> {
@@ -89,6 +105,8 @@ impl<'a, 'local> Client<'a, 'local> {
             waited: Duration::ZERO,
             gmail_pace: None,
             urgent: false,
+            upgraded: Vec::new(),
+            store: None,
         }
     }
 }
@@ -121,9 +139,9 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 
     /// Drives a redirect-aware coroutine, rebuilding it against the
-    /// new target whenever the server answers 3xx; the transport pools
-    /// one connection per origin, so a cross-origin redirect just
-    /// opens a new socket.
+    /// new target whenever the server answers 3xx, within the bounds of
+    /// [`Redirects`]: a WebDAV request carries the account's credential,
+    /// so a redirect to another server is refused.
     pub(crate) fn run_redirect<C, T, E>(
         &mut self,
         start: &Url,
@@ -133,30 +151,45 @@ impl<'a, 'local> Client<'a, 'local> {
         C: WebdavCoroutine<Yield = WebdavRedirectYield, Return = Result<T, E>>,
         E: StdError + 'static,
     {
-        let mut target = start.clone();
+        run_webdav_redirect(self, start, make)
+    }
+}
+
+/// [`Client::run_redirect`] over any [`Wire`].
+pub(crate) fn run_webdav_redirect<W, C, T, E>(
+    wire: &mut W,
+    start: &Url,
+    make: impl Fn(&Url) -> C,
+) -> Result<T, BridgeError>
+where
+    W: Wire,
+    C: WebdavCoroutine<Yield = WebdavRedirectYield, Return = Result<T, E>>,
+    E: StdError + 'static,
+{
+    let mut redirects = Redirects::new(start, CrossOrigin::Refuse);
+    let mut target = start.clone();
+
+    loop {
+        let mut coroutine = make(&target);
+        let mut arg: Option<Vec<u8>> = None;
 
         loop {
-            let mut coroutine = make(&target);
-            let mut arg: Option<Vec<u8>> = None;
-
-            loop {
-                match coroutine.resume(arg.as_deref()) {
-                    WebdavCoroutineState::Complete(Ok(value)) => return Ok(value),
-                    WebdavCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
-                    WebdavCoroutineState::Yielded(WebdavRedirectYield::WantsWrite(bytes)) => {
-                        self.http_write(target.as_str(), &bytes)?;
-                        arg = None;
-                    }
-                    WebdavCoroutineState::Yielded(WebdavRedirectYield::WantsRead) => {
-                        arg = Some(self.http_read(target.as_str())?);
-                    }
-                    WebdavCoroutineState::Yielded(WebdavRedirectYield::WantsRedirect {
-                        url,
-                        ..
-                    }) => {
-                        target = url;
-                        break;
-                    }
+            match coroutine.resume(arg.as_deref()) {
+                WebdavCoroutineState::Complete(Ok(value)) => return Ok(value),
+                WebdavCoroutineState::Complete(Err(err)) => return Err(coroutine_error(&err)),
+                WebdavCoroutineState::Yielded(WebdavRedirectYield::WantsWrite(bytes)) => {
+                    throttled_write(wire, target.as_str(), &redirects.request(&bytes))?;
+                    arg = None;
+                }
+                WebdavCoroutineState::Yielded(WebdavRedirectYield::WantsRead) => {
+                    arg = Some(throttled_read(wire, target.as_str())?);
+                }
+                WebdavCoroutineState::Yielded(WebdavRedirectYield::WantsRedirect {
+                    url, ..
+                }) => {
+                    redirects.follow(&target, &url)?;
+                    target = url;
+                    break;
                 }
             }
         }
@@ -168,7 +201,18 @@ impl<'a, 'local> Client<'a, 'local> {
 impl<'a, 'local> Client<'a, 'local> {
     /// Upcalls the Java transport to read the next chunk from the
     /// stream open on `url`.
+    ///
+    /// Any failure drops the connection ([`Self::reset`]), so the next
+    /// use opens another rather than talking on a dead or desynced one.
     pub(crate) fn read(&mut self, url: &str) -> Result<Vec<u8>, BridgeError> {
+        let read = self.read_upcall(url);
+        if read.is_err() {
+            self.reset(url);
+        }
+        read
+    }
+
+    fn read_upcall(&mut self, url: &str) -> Result<Vec<u8>, BridgeError> {
         // NOTE: an empty slice signals EOF to the coroutine.
         let url = self.env.new_string(url).map_err(|err| err.to_string())?;
         let value = self
@@ -189,8 +233,23 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 
     /// Upcalls the Java transport to write and flush bytes to the
-    /// stream open on `url`.
+    /// stream open on `url`, dropping the connection on a failure.
+    ///
+    /// Every byte the bridge sends comes through here, so this is where
+    /// a credential is refused an unencrypted connection
+    /// ([`refuse_cleartext_credential`]).
     pub(crate) fn write(&mut self, url: &str, bytes: &[u8]) -> Result<(), BridgeError> {
+        let upgraded = self.upgraded.iter().any(|done| done == url);
+        refuse_cleartext_credential(url, bytes, upgraded)?;
+
+        let written = self.write_upcall(url, bytes);
+        if written.is_err() {
+            self.reset(url);
+        }
+        written
+    }
+
+    fn write_upcall(&mut self, url: &str, bytes: &[u8]) -> Result<(), BridgeError> {
         let url = self.env.new_string(url).map_err(|err| err.to_string())?;
         let array = self
             .env
@@ -209,21 +268,121 @@ impl<'a, 'local> Client<'a, 'local> {
         Ok(())
     }
 
+    /// Opens a new HTTP request on `url`'s origin: the transport drops
+    /// a connection whose last answer was not read to its end, and
+    /// answers whether the request goes out on one that served another.
+    pub(crate) fn begin(&mut self, url: &str) -> bool {
+        self.upcall(url, jni_str!("begin"), jni_sig!("(Ljava/lang/String;)Z"))
+            .and_then(|value| value.z().ok())
+            .unwrap_or(false)
+    }
+
+    /// Marks the answer on `url`'s connection read to its end.
+    pub(crate) fn settle(&mut self, url: &str) {
+        self.upcall(url, jni_str!("settle"), jni_sig!("(Ljava/lang/String;)V"));
+    }
+
+    /// Drops `url`'s connection, the next use opening another.
+    pub(crate) fn reset(&mut self, url: &str) {
+        self.upgraded.retain(|done| done != url);
+        log::debug!(
+            "connection to {} reset",
+            url.split('?').next().unwrap_or(url)
+        );
+        self.upcall(url, jni_str!("reset"), jni_sig!("(Ljava/lang/String;)V"));
+    }
+
+    /// One bookkeeping upcall taking the URL alone, none of whose
+    /// failures is the caller's: logged, its exception cleared.
+    fn upcall<'sig, 'args, N, S>(
+        &mut self,
+        url: &str,
+        name: N,
+        sig: S,
+    ) -> Option<JValueOwned<'local>>
+    where
+        N: AsRef<JNIStr>,
+        S: AsRef<MethodSignature<'sig, 'args>>,
+    {
+        let called = self.env.new_string(url).and_then(|url| {
+            self.env
+                .call_method(self.transport, name, sig, &[JValue::Object(&url)])
+        });
+        match called {
+            Ok(value) => Some(value),
+            Err(err) => {
+                let failed = clear_and_fail(self.env, "transport upcall", err);
+                log::warn!("{failed}");
+                None
+            }
+        }
+    }
+
     /// Upgrades the URL's plain stream to TLS in place (RFC 3207), the
     /// handshake verifying the URL's host.
     pub(crate) fn starttls(&mut self, url: &str) -> Result<(), BridgeError> {
-        let url = self.env.new_string(url).map_err(|err| err.to_string())?;
+        let jurl = self.env.new_string(url).map_err(|err| err.to_string())?;
 
         self.env
             .call_method(
                 self.transport,
                 jni_str!("starttls"),
                 jni_sig!("(Ljava/lang/String;)V"),
-                &[JValue::Object(&url)],
+                &[JValue::Object(&jurl)],
             )
             .map_err(|err| clear_and_fail(self.env, "transport starttls", err))?;
 
+        self.upgraded.push(url.to_string());
         Ok(())
+    }
+}
+
+/// The store upcall: what a mail step asks the app's store.
+impl<'a, 'local> Client<'a, 'local> {
+    /// Which of `ids` the store holds, asked of the store's driver
+    /// (`OfflineDriver.serve` with `{"op": "held", "handles"}`, answered
+    /// `{"held"}`): a step asks it once per page it lists, so no step
+    /// carries every handle the account holds. Fails outside a step.
+    pub(crate) fn held(&mut self, ids: &[String]) -> Result<HashSet<String>, BridgeError> {
+        if ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+        let store = self.store.ok_or("No store to ask what it holds")?;
+        let request = json!({ "op": "held", "handles": ids }).to_string();
+        let request = self
+            .env
+            .new_string(request)
+            .map_err(|err| err.to_string())?;
+        let value = self
+            .env
+            .call_method(
+                store,
+                jni_str!("serve"),
+                jni_sig!("(Ljava/lang/String;)Ljava/lang/String;"),
+                &[JValue::Object(&request)],
+            )
+            .map_err(|err| clear_and_fail(self.env, "store held", err))?;
+        let object = value.l().map_err(|err| err.to_string())?;
+        let reply = unsafe { JString::from_raw(self.env, object.into_raw()) };
+        let reply = reply
+            .try_to_string(self.env)
+            .map_err(|err| err.to_string())?;
+
+        let reply: Value = from_str(&reply).map_err(|err| err.to_string())?;
+        if let Some(error) = reply.get("error") {
+            let error = error
+                .as_str()
+                .map_or_else(|| error.to_string(), String::from);
+            return Err(error.into());
+        }
+        Ok(reply
+            .get("held")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(String::from)
+            .collect())
     }
 }
 

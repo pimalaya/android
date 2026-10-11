@@ -17,6 +17,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 /**
@@ -32,8 +33,8 @@ public final class OpenedFiles extends ContentProvider {
     /** The cache directory the copies are written under. */
     private static final String DIRECTORY = "opened";
 
-    /** The longest name a copy keeps, its extension included. */
-    private static final int LONGEST = 120;
+    /** The most bytes a copy's name takes in UTF-8, its extension included. */
+    private static final int LONGEST = 200;
 
     /**
      * Copies one file into the cache, a buffer at a time, under a directory
@@ -59,22 +60,59 @@ public final class OpenedFiles extends ContentProvider {
     }
 
     /**
-     * A name a file may go by: no separator, no leading dot, and at most
-     * {@link #LONGEST} characters, the extension kept when it is cut.
+     * A name a file may go by: no separator, no control or format character
+     * (a right-to-left override, U+202E, before {@code fdp.apk} shows it as
+     * {@code kpa.pdf}), no leading dot, and at most {@link #LONGEST}
+     * bytes in UTF-8, which is what the file system counts, cut between
+     * characters and keeping the extension.
      */
     static String safe(String name) {
-        String safe = name.replace('/', '_').replace('\\', '_').trim();
+        StringBuilder kept = new StringBuilder(name.length());
+        name.codePoints()
+                .forEach(
+                        point -> {
+                            int type = Character.getType(point);
+                            if (type == Character.CONTROL || type == Character.FORMAT) {
+                                return;
+                            }
+                            kept.appendCodePoint(point == '/' || point == '\\' ? '_' : point);
+                        });
+        String safe = kept.toString().trim();
         if (safe.isEmpty() || safe.startsWith(".")) {
             safe = "file" + safe;
         }
-        if (safe.length() > LONGEST) {
-            String extension = extensionOf(safe);
-            String tail = extension.isEmpty() ? "" : "." + extension;
-            safe = tail.length() >= LONGEST
-                    ? safe.substring(0, LONGEST)
-                    : safe.substring(0, LONGEST - tail.length()) + tail;
+        if (bytes(safe) > LONGEST) {
+            int dot = safe.lastIndexOf('.');
+            String tail = dot <= 0 ? "" : safe.substring(dot);
+            if (bytes(tail) >= LONGEST / 2) {
+                tail = "";
+            }
+            String head = safe.substring(0, safe.length() - tail.length());
+            safe = cut(head, LONGEST - bytes(tail)) + tail;
         }
         return safe;
+    }
+
+    /** How many bytes a text takes in UTF-8. */
+    private static int bytes(String text) {
+        return text.getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    /** The longest start of a text taking at most {@code limit} bytes in UTF-8. */
+    private static String cut(String text, int limit) {
+        StringBuilder cut = new StringBuilder();
+        int used = 0;
+        for (int index = 0; index < text.length(); ) {
+            int point = text.codePointAt(index);
+            String character = new String(Character.toChars(point));
+            used += bytes(character);
+            if (used > limit) {
+                break;
+            }
+            cut.append(character);
+            index += Character.charCount(point);
+        }
+        return cut.toString();
     }
 
     /** The extension of a name, after its last dot, lowercased; empty for none. */

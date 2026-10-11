@@ -23,8 +23,9 @@ import java.util.List;
 /**
  * A Graph delta lists a message by id and markers alone: one the store binds
  * keeps the summary it holds, every other one is read with its summary, one
- * gone since is left out; and a round over a scope the store covers is told
- * apart from a first chunk, which lists its band.
+ * gone since is left out; a Gmail round names only what the account holds
+ * elsewhere and what arrived ahead of it; and a round over a scope the
+ * store covers is told apart from a first chunk, which lists its band.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailNamingTest {
@@ -44,16 +45,22 @@ public class MailNamingTest {
         inbox = store.collectionOf(EMAIL, "Inbox");
     }
 
-    /** A mailbox holding one message, {@code 1}, that reads ids from a list. */
+    /** A mailbox holding one message, {@code 1} unless named, that reads ids from a list. */
     private final class Server extends MailEngine {
         final List<List<String>> reads = new ArrayList<>();
+        final String listed;
 
         Server() {
+            this("1");
+        }
+
+        Server(String listed) {
             super(
                     pimdir,
                     new PimalayaClient(),
                     null,
                     new PimdirAccount(RuntimeEnvironment.getApplication()).idOf(EMAIL));
+            this.listed = listed;
         }
 
         @Override
@@ -64,7 +71,7 @@ public class MailNamingTest {
         @Override
         protected JSONObject enumerate(JSONObject yielded) throws JSONException {
             return new JSONObject()
-                    .put("items", new JSONArray().put(named("1")))
+                    .put("items", new JSONArray().put(named(listed)))
                     .put("vanished", new JSONArray())
                     .put("complete", true)
                     .put("last", true)
@@ -126,7 +133,7 @@ public class MailNamingTest {
                                         .put(unnamed("1"))
                                         .put(unnamed("2"))
                                         .put(unnamed("3")));
-        server.nameUnnamed(inbox, page);
+        server.nameUnnamed(inbox, new JSONObject().put("kind", "delta"), page);
 
         assertEquals(List.of(List.of("2", "3")), server.reads);
         JSONArray items = page.getJSONArray("items");
@@ -140,6 +147,46 @@ public class MailNamingTest {
         JSONObject read = items.getJSONObject(1);
         assertEquals("2", read.getString("handle"));
         assertTrue(read.has("summary"));
+    }
+
+    @Test
+    public void aGmailRoundNamesWhatIsHeldElsewhereAndWhatArrivedAhead() throws Exception {
+        Context context = RuntimeEnvironment.getApplication();
+        store.replaceMailboxes(
+                EMAIL, List.of(new Mailbox("Inbox", "inbox"), new Mailbox("Clients", "")));
+        String clients = store.collectionOf(EMAIL, "Clients");
+        MailStore.markAccountWide(context, new PimdirAccount(context).idOf(EMAIL), true);
+        Server server = new Server();
+        server.sync(inbox);
+        new Server("5").sync(clients);
+
+        // NOTE: newest received first: 9 arrived after 1, the first held; 5
+        // is held in another mailbox; 7 is older mail no step brought.
+        JSONObject round =
+                new JSONObject().put("kind", "round").put("cursor", JSONObject.NULL);
+        JSONObject page =
+                new JSONObject()
+                        .put("complete", true)
+                        .put(
+                                "items",
+                                new JSONArray()
+                                        .put(unnamed("9"))
+                                        .put(unnamed("1"))
+                                        .put(unnamed("5"))
+                                        .put(unnamed("7")));
+        server.nameUnnamed(inbox, round, page);
+        assertEquals(List.of(List.of("9", "5")), server.reads);
+        JSONArray items = page.getJSONArray("items");
+        assertEquals(1, items.length());
+        assertEquals("1", items.getJSONObject(0).getString("handle"));
+
+        // NOTE: a band round names no arrival.
+        server.reads.clear();
+        page.put(
+                "items",
+                new JSONArray().put(unnamed("9")).put(unnamed("5")).put(unnamed("7")));
+        server.nameUnnamed(inbox, round.put("band", true), page);
+        assertEquals(List.of(List.of("5")), server.reads);
     }
 
     @Test

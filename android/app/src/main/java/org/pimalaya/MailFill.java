@@ -16,7 +16,8 @@ import java.util.function.ToIntFunction;
  * draws from the input whose head is next.
  *
  * <p>A chunk is a number of messages, never a span of time: a step of the
- * fill widens by {@link MailEngine#fillChunk}.
+ * fill widens by {@link MailEngine#FILL_CHUNK}. An account stepped through
+ * account-wide (Gmail) is not filled ({@link MailStep}).
  */
 final class MailFill {
     private MailFill() {}
@@ -65,9 +66,7 @@ final class MailFill {
     /**
      * The mailboxes one step of the fill widens side by side: the next ones
      * in the fill's order ({@link #next}), as many of an account as it runs
-     * sessions at once ({@code room}), every unfinished one of an account
-     * listed account-wide, whose mailboxes widen one listing together.
-     * Empty once every mailbox is whole.
+     * sessions at once ({@code room}). Empty once every mailbox is whole.
      */
     static List<MailStore.Edge> batch(
             List<MailStore.Edge> edges, ToIntFunction<String> room) {
@@ -78,7 +77,7 @@ final class MailFill {
         while ((edge = next(left)) != null) {
             left.remove(edge);
             int used = taken.getOrDefault(edge.accountEmail, 0);
-            if (edge.accountWide || used < room.applyAsInt(edge.accountEmail)) {
+            if (used < room.applyAsInt(edge.accountEmail)) {
                 picked.add(edge);
                 taken.put(edge.accountEmail, used + 1);
             }

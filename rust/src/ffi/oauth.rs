@@ -3,14 +3,14 @@
 use io_oauth::rfc7591::register::{Oauth20ClientInformation, Oauth20ClientRegisterParams};
 use jni::{
     EnvUnowned,
-    errors::{Error, LogErrorAndDefault},
+    errors::Error,
     objects::{JClass, JObject, JString},
 };
 use serde_json::{json, to_string};
 
 use crate::{
     client::Client,
-    ffi::{error_json, parse_url, read_string},
+    ffi::{ErrorReply, error_json, parse_url, read_string},
     oauth::{authorize_url, domain_scope, session_params, validate_redirect},
 };
 
@@ -54,32 +54,34 @@ pub extern "system" fn Java_org_pimalaya_client_Native_oauthAuthorizeUrl<'local>
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.oauthValidateRedirect`: validates the authorization
-/// redirect against the expected CSRF state and extracts the
-/// authorization code; pure computation, no transport. Returns
-/// `{"code": ".."}`.
+/// redirect against the expected CSRF state and, when `issuer` is not
+/// empty, its RFC 9207 `iss`, and extracts the authorization code; pure
+/// computation, no transport. Returns `{"code": ".."}`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_oauthValidateRedirect<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,
     redirect_url: JString<'local>,
     state: JString<'local>,
+    issuer: JString<'local>,
 ) -> JObject<'local> {
     env.with_env(|env| -> Result<JObject<'local>, Error> {
         let redirect_url = read_string(env, &redirect_url);
         let state = read_string(env, &state);
+        let issuer = read_string(env, &issuer);
 
-        let json = match validate_redirect(&redirect_url, &state) {
+        let json = match validate_redirect(&redirect_url, &state, &issuer) {
             Ok(code) => json!({ "code": code }).to_string(),
             Err(err) => error_json(err),
         };
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.oauthSessionParams`: generates one authorization session's
@@ -96,7 +98,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_oauthSessionParams<'local
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.oauthDomainScope`: the scope a client requests of an
@@ -119,7 +121,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_oauthDomainScope<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.oauthRequestAccessToken`: exchanges an authorization code
@@ -166,7 +168,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_oauthRequestAccessToken<'
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.oauthServerMetadata`: fetches an authorization server's
@@ -196,7 +198,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_oauthServerMetadata<'loca
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.oauthRegisterClient`: registers a public client at an
@@ -231,7 +233,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_oauthRegisterClient<'loca
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.oauthRefreshAccessToken`: refreshes tokens against the
@@ -274,7 +276,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_oauthRefreshAccessToken<'
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// Public-client registration params: a loopback redirect, no secret,

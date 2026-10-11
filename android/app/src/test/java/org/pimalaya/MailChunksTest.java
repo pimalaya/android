@@ -205,8 +205,7 @@ public class MailChunksTest {
     }
 
     @Test
-    public void theListReachesDownToTheMergedFloorAndAReachListsTheBandToADate()
-            throws Exception {
+    public void theListReachesDownToTheMergedFloor() throws Exception {
         String accountId = new PimdirAccount(context).idOf(EMAIL);
         MailWindow.set(context, accountId, null);
         Server inboxServer = new Server(120, 1);
@@ -235,22 +234,9 @@ public class MailChunksTest {
         MailOffline.setWhole(context, sent, false);
         MailWindow.set(context, accountId, null);
 
-        // NOTE: a window moved back to a date lists a chunk at a time, the
-        // band alone each time, and never below the date.
-        String date = inboxServer.dateOf(41);
-        assertTrue(inboxServer.widen(inbox, 10, date));
-        JSONObject band = inboxServer.asked.get(inboxServer.asked.size() - 1);
-        assertTrue(band.getJSONObject("listing").getBoolean("band"));
-        assertEquals(inboxServer.dateOf(71), band.getJSONObject("scope").getString("until"));
-        assertEquals(60, stored(inbox));
-        assertTrue(inboxServer.widen(inbox, MailEngine.FILL_CHUNK, date));
-        assertEquals(80, stored(inbox));
-        assertFalse("nothing above the date left", inboxServer.widen(inbox, 10, date));
-        assertEquals(date, store.floorOf(query, store.edges()));
-
         // NOTE: a mailbox the filter hides limits nothing.
         assertEquals(
-                inboxServer.dateOf(41),
+                inboxServer.dateOf(71),
                 store.floorOf(
                         store.query(
                                 (account, collection) -> collection.equals(inbox),
@@ -259,6 +245,38 @@ public class MailChunksTest {
                                 ""),
                         store.edges()));
     }
+    /**
+     * A step from the store widens the mailbox holding the most recent
+     * floor until a step's worth lies between it and the frontier, then
+     * moves the frontier to the {@link MailStep#COUNT}th newest below the
+     * old one; the step that lists the last of the mailbox says so.
+     */
+    @Test
+    public void aStepFromTheStoreWidensUntilFiftyLieBelowTheFrontier() throws Exception {
+        String accountId = new PimdirAccount(context).idOf(EMAIL);
+        Server server = new Server(120, 1);
+        server.sync(inbox);
+        MailWindow.set(context, accountId, server.dateOf(71));
+
+        MailStep.Outcome first = new WidenStep().run(server, EMAIL, List.of(inbox), null, false);
+        assertEquals(100, stored(inbox));
+        assertEquals(server.dateOf(21), first.frontier);
+        assertEquals(50, first.brought);
+        assertFalse(first.exhausted);
+        JSONObject band = server.asked.get(server.asked.size() - 1);
+        assertTrue("the band alone", band.getJSONObject("listing").getBoolean("band"));
+
+        MailWindow.moveBack(context, accountId, first.frontier);
+        MailStep.Outcome last = new WidenStep().run(server, EMAIL, List.of(inbox), null, false);
+        assertEquals(120, stored(inbox));
+        assertEquals(server.dateOf(1), last.frontier);
+        assertTrue("the mailbox is listed whole", last.exhausted);
+
+        // NOTE: what lies at or above a floor counts, all of it with none.
+        assertEquals(0, WidenStep.within(List.of("2026-01-02", "2026-01-01"), "2026-01-03"));
+        assertEquals(2, WidenStep.within(List.of("2026-01-02", "2026-01-01"), null));
+    }
+
     /**
      * The store's load carries a message's date for the engine to scope a
      * round by, and nothing of it is ever written back: a marker staged on a

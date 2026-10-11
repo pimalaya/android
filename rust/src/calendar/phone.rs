@@ -34,8 +34,8 @@ use serde::{Deserialize, Serialize};
 use crate::types::BridgeError;
 
 use super::{
-    EventTime, EventTimeKind, PRODID, Zones, child, child_mut, date_prop, decoded, line, line_mut,
-    organizes, prop, raw_value, remove_named, scheduled,
+    EventTime, EventTimeKind, PRODID, Zones, child, child_mut, cst_of, date_prop, decoded, line,
+    line_mut, organizes, prop, raw_value, remove_named, scheduled,
     series::{Series, set_of, set_rule},
     text, user_address,
     zone::stamp,
@@ -192,9 +192,7 @@ pub struct PhoneEdit {
 /// The view of a calendar object, `now` a UTC stamp placing the window
 /// a series the provider cannot show is listed over.
 pub fn project(ical: &str, now: &str) -> Result<PhoneEvent, BridgeError> {
-    let cst = IcalCst::parse(ical)
-        .map_err(|err| err.to_string())?
-        .into_static();
+    let cst = cst_of(ical)?.into_static();
     Ok(View::of(&cst, moment(now)?).event())
 }
 
@@ -209,9 +207,7 @@ pub fn apply(ical: &str, edit: &str) -> Result<String, BridgeError> {
         true => skeleton(&edit)?,
         false => ical.to_string(),
     };
-    let mut cst = IcalCst::parse(source.as_str())
-        .map_err(|err| err.to_string())?
-        .into_static();
+    let mut cst = cst_of(source.as_str())?.into_static();
 
     let now = moment(&edit.stamp).unwrap_or(IcalRecurDateTime::from_seconds(0));
     let view = View::of(&cst, now);
@@ -762,8 +758,10 @@ fn instances(
 /// Whether the provider refuses or misexpands a series: `RSCALE` and
 /// `SKIP` (RFC 7529), a `BYSETPOS` other than a monthly one over plain
 /// weekdays, `BYWEEKNO`, an infinite rule beside `RDATE`s, an `RDATE`
-/// period, a `THISANDFUTURE` override, or more periods of a rule's
-/// frequency before `from` than the provider walks.
+/// period, a `THISANDFUTURE` override, a rule recurring every second or
+/// minute, which the provider would expand into thousands of instances a
+/// day, or more periods of a rule's frequency before `from` than the
+/// provider walks.
 fn hidden(
     set: &IcalRecurSet,
     raw: &[String],
@@ -792,6 +790,7 @@ fn hidden(
             && rule.by_minute.is_empty()
             && rule.by_second.is_empty();
         (!rule.by_set_pos.is_empty() && !plain_weekdays)
+            || matches!(rule.freq, IcalRecurFreq::Secondly | IcalRecurFreq::Minutely)
             || !rule.by_week_no.is_empty()
             || (rule.until.is_none() && rule.count.is_none() && !set.dates.is_empty())
             || walked(rule, first, from) > PERIODS_MAX
@@ -1486,7 +1485,7 @@ impl Patcher<'_> {
                 .edit
                 .vtimezones
                 .iter()
-                .filter_map(|text| IcalCst::parse(text.as_str()).ok().map(IcalCst::into_static))
+                .filter_map(|text| cst_of(text.as_str()).ok().map(IcalCst::into_static))
                 .find(|zone| line(zone, "TZID").is_some_and(|line| line.value.decode() == *tzid))
                 .ok_or_else(|| format!("No definition of the zone `{tzid}`"))?;
             let at = scheduled(cst).first().copied().unwrap_or(cst.items.len());
@@ -2467,6 +2466,8 @@ mod tests {
             "FREQ=MONTHLY;BYDAY=MO,TU;BYSETPOS=-1;RSCALE=GREGORIAN;SKIP=FORWARD",
             "FREQ=YEARLY;BYWEEKNO=20;BYDAY=MO",
             "FREQ=MONTHLY;BYMONTHDAY=1,15;BYSETPOS=1",
+            "FREQ=SECONDLY;INTERVAL=30",
+            "FREQ=MINUTELY;INTERVAL=15",
         ] {
             let ical = object(&format!(
                 "BEGIN:VEVENT\r\nUID:l\r\nDTSTART:20261001T090000Z\r\nDURATION:PT1H\r\n\

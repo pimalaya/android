@@ -2,7 +2,7 @@
 
 use jni::{
     EnvUnowned,
-    errors::{Error, LogErrorAndDefault},
+    errors::Error,
     objects::{JClass, JObject, JString},
 };
 use serde_json::{from_str, json, to_string};
@@ -10,7 +10,7 @@ use serde_json::{from_str, json, to_string};
 use crate::{
     account::{self, Backend},
     client::Client,
-    ffi::{error_json, parse_books, parse_strings, parse_url, read_string},
+    ffi::{ErrorReply, error_json, parse_books, parse_strings, parse_url, read_string},
     types::{BridgeError, CardDelta, Credentials, PushChange},
 };
 
@@ -59,7 +59,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_accountInfo<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.accountBase`: builds an account base URL of the given kind
@@ -84,7 +84,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_accountBase<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.jmapCapabilities`: the capability URNs a JMAP account's
@@ -120,7 +120,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_jmapCapabilities<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.listAddressbooks`: lists the account's addressbooks, the
@@ -151,7 +151,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listAddressbooks<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.listAccountCards`: lists every card of an account-level
@@ -183,7 +183,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listAccountCards<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.listCards`: lists the cards of the addressbook collection,
@@ -220,7 +220,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_listCards<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.createCard`: creates the card in the addressbook
@@ -264,7 +264,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createCard<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.readCard`: reads the card at the given resource name (as
@@ -304,7 +304,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_readCard<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.updateCard`: updates the card at the given resource name
@@ -361,7 +361,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateCard<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.deleteCard`: deletes the card at the given resource name
@@ -409,7 +409,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteCard<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.createCards`: creates a batch of cards (a JSON array of
@@ -450,7 +450,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_createCards<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.deleteCards`: deletes a batch of cards (a JSON array of
@@ -488,7 +488,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_deleteCards<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.pushCards`: pushes a round of changes (a JSON array of
@@ -537,7 +537,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_pushCards<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.syncCards`: lists the collection's changes since the given
@@ -583,7 +583,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_syncCards<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.multigetCards`: batch-fetches the cards at the given
@@ -625,7 +625,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_multigetCards<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.readGraphCards`: reads the Graph contacts named by id (a JSON
@@ -659,7 +659,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_readGraphCards<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.readGoogleCards`: reads the People contacts named by id (a
@@ -693,7 +693,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_readGoogleCards<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// `Native.updateCardBooks`: adds and removes the card's addressbook
@@ -741,7 +741,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_updateCardBooks<'local>(
 
         Ok(env.new_string(json)?.into())
     })
-    .resolve::<LogErrorAndDefault>()
+    .resolve::<ErrorReply>()
 }
 
 /// Serializes any backend's delta.

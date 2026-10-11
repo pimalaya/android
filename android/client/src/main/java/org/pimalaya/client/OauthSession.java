@@ -113,8 +113,21 @@ public final class OauthSession {
      * exchanges its authorization code for tokens.
      */
     public OauthTokens redeem(String tokenEndpoint, String redirectUrl) {
+        return redeem(tokenEndpoint, redirectUrl, null);
+    }
+
+    /**
+     * {@link #redeem(String, String)}, the redirect also refused when its
+     * RFC 9207 {@code iss} names another server than {@code issuer}, the
+     * one the grant started at (null when unknown): that is the mix-up
+     * attack, a server bouncing the browser to another so that the code
+     * lands at its own token endpoint.
+     */
+    public OauthTokens redeem(String tokenEndpoint, String redirectUrl, String issuer) {
         JSONObject validated =
-                PimalayaClient.object(Native.oauthValidateRedirect(redirectUrl, state));
+                PimalayaClient.object(
+                        Native.oauthValidateRedirect(
+                                redirectUrl, state, issuer == null ? "" : issuer));
         String code = PimalayaClient.string(validated, "code");
 
         Transport transport = new Transport();

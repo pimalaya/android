@@ -121,6 +121,39 @@ tasks.withType<Test>().configureEach {
     }
     val libraryPath = listOfNotNull(file("../../rust/target/debug").absolutePath, hostSqlite)
     systemProperty("java.library.path", libraryPath.joinToString(File.pathSeparator))
+    if (name != "e2eTest") {
+        exclude("org/pimalaya/E2e*")
+    }
+}
+
+// The end-to-end suite (cairn/changes/e2e-suite): the engines driven
+// headlessly against the Pimalaya test accounts. Its classes compile with
+// the unit tests, being package-private neighbours of the engines, and run
+// only here, never under testDebugUnitTest or CI. Targets and credentials
+// come from -Pe2e.targets and the environment; with none, every test skips.
+android.sourceSets["test"].java.srcDir("src/e2eTest/java")
+
+tasks.register<Test>("e2eTest") {
+    description = "Runs the end-to-end suite against the targets in -Pe2e.targets."
+    group = "verification"
+    val unit = tasks.named<Test>("testDebugUnitTest")
+    dependsOn(unit.map { it.dependsOn })
+    testClassesDirs = files(unit.map { it.testClassesDirs })
+    classpath = files(unit.map { it.classpath })
+    include("org/pimalaya/E2e*")
+    for (option in listOf("e2e.targets", "e2e.only", "e2e.patience", "e2e.log")) {
+        providers.gradleProperty(option).orNull?.let { systemProperty(option, it) }
+    }
+    systemProperty("e2e.report", layout.buildDirectory.dir("reports/e2e").get().asFile.path)
+    // NOTE: the servers are the state, so a run is never up to date.
+    outputs.upToDateWhen { false }
+    // NOTE: one test at a time: the targets are shared accounts, and
+    // Gmail's per-user quota is the binding limit.
+    maxParallelForks = 1
+    testLogging {
+        events("passed", "skipped", "failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
 }
 
 dependencies {

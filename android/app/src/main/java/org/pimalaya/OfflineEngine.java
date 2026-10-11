@@ -532,15 +532,16 @@ final class OfflineEngine extends PimdirEngine {
 
     /**
      * Services a fetch yield: the full bodies of the given handles, each
-     * with its link id (the vCard UID), the summary STORAGE Annex A
-     * derives from it, and its content hash.
+     * with its link id (the vCard UID, or the identity a bound handle is
+     * already filed under: {@link #keepBoundNames}), the summary STORAGE
+     * Annex A derives from it, and its content hash.
      */
     @Override
     protected JSONObject fetch(JSONObject yielded) throws JSONException {
         String url = yielded.getString("collection");
         JSONArray handles = yielded.getJSONArray("handles");
         if (CardStore.isPhoneCollection(url)) {
-            return phone.fetch(url, handles);
+            return keepBoundNames(url, phone.fetch(url, handles));
         }
 
         JSONArray items = new JSONArray();
@@ -575,7 +576,7 @@ final class OfflineEngine extends PimdirEngine {
 
         JSONObject reply = new JSONObject();
         reply.put("items", items);
-        return reply;
+        return keepBoundNames(url, reply);
     }
 
     /**
@@ -1139,7 +1140,8 @@ final class OfflineEngine extends PimdirEngine {
                     transport, account, created.id, List.of(postCreate.optString(index)), List.of());
         }
 
-        return result(handle, true, created.uri, created.etag);
+        return result(
+                handle, true, created.uri, landed(transport, url, created.uri, created.etag));
     }
 
     /** Pushes a staged content edit, guarded by the base revision. */
@@ -1161,7 +1163,7 @@ final class OfflineEngine extends PimdirEngine {
                             url,
                             new Card(row.getString("id"), handle, ifMatch, row.getString("vcard")),
                             baseVcard);
-            return result(handle, true, null, updated.etag);
+            return result(handle, true, null, landed(transport, url, handle, updated.etag));
         } catch (RuntimeException failure) {
             if (!isPreconditionFailure(failure)) {
                 throw failure;
@@ -1183,7 +1185,7 @@ final class OfflineEngine extends PimdirEngine {
                             url,
                             new Card(row.getString("id"), handle, null, row.getString("vcard")),
                             baseVcard);
-            return result(handle, true, null, updated.etag);
+            return result(handle, true, null, landed(transport, url, handle, updated.etag));
         }
     }
 
@@ -1228,6 +1230,31 @@ final class OfflineEngine extends PimdirEngine {
             }
         }
         return result(handle, true, null, null);
+    }
+
+    /**
+     * The revision a CardDAV write landed at: the ETag the server answered,
+     * else the one it holds the card at now, read back. The other backends
+     * answer theirs.
+     *
+     * <p>A server storing something other than what it was sent answers no
+     * ETag, as CalDAV's RFC 4791 section 5.3.4 has it, and a base kept with
+     * no revision reads the next listing's as a change made elsewhere, which
+     * undoes a removal staged before it: the card is pulled back rather than
+     * deleted. A read that fails leaves the revision unknown, as before,
+     * rather than failing a write that landed.
+     */
+    private String landed(Transport transport, String url, String uri, String answered) {
+        if (answered != null || !CardStore.isCarddavUrl(url)) {
+            return answered;
+        }
+        try {
+            List<Card> read = client.multigetCards(transport, account, url, List.of(uri));
+            return read.isEmpty() ? null : read.get(0).etag;
+        } catch (RuntimeException failure) {
+            Log.w("pimalaya", "revision of " + uri + " not read back", failure);
+            return null;
+        }
     }
 
     /** How many resource names one addressbook-multiget carries. */

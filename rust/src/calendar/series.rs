@@ -29,9 +29,9 @@ use ical::{
 use crate::types::BridgeError;
 
 use super::{
-    DateEdit, EventEdit, EventScope, EventTime, EventTimeKind, Zones, child, child_mut, date_prop,
-    decoded, define_zone, has, line, line_mut, patch, prop, remove_named, scheduled, text, touch,
-    zone::stamp,
+    DateEdit, EventEdit, EventScope, EventTime, EventTimeKind, MAX_WALKED, Zones, child, child_mut,
+    cst_of, date_prop, decoded, define_zone, has, line, line_mut, patch, prop, remove_named,
+    scheduled, text, touch, zone::stamp,
 };
 
 /// Seconds in a day.
@@ -492,7 +492,9 @@ impl Series {
                 }
                 let before = walk
                     .take_while(|moment| *moment < id)
-                    .take(count as usize)
+                    // NOTE: a COUNT runs to u32::MAX; past MAX_WALKED the
+                    // rest is counted as left rather than walked.
+                    .take((count as usize).min(MAX_WALKED))
                     .count() as u32;
                 Some(count - before)
             })
@@ -596,9 +598,7 @@ pub(super) fn restore(cst: &mut IcalCst<'static>, uid: &str, id: &IcalLine<'stat
 /// which makes the edit one of all of it.
 pub fn split(ical: &str, edit: &str) -> Result<(String, Option<String>), BridgeError> {
     let edit: EventEdit = serde_json::from_str(edit).map_err(|err| err.to_string())?;
-    let mut cst = IcalCst::parse(ical)
-        .map_err(|err| err.to_string())?
-        .into_static();
+    let mut cst = cst_of(ical)?.into_static();
 
     let series = Series::of(&cst)?;
     let id = identity(&edit)?;
@@ -624,9 +624,7 @@ pub fn split(ical: &str, edit: &str) -> Result<(String, Option<String>), BridgeE
 /// following from its first occurrence, removes the entry.
 pub fn remove(ical: &str, edit: &str) -> Result<Option<String>, BridgeError> {
     let edit: EventEdit = serde_json::from_str(edit).map_err(|err| err.to_string())?;
-    let mut cst = IcalCst::parse(ical)
-        .map_err(|err| err.to_string())?
-        .into_static();
+    let mut cst = cst_of(ical)?.into_static();
 
     let series = Series::of(&cst)?;
     let id = identity(&edit)?;
@@ -909,6 +907,8 @@ fn days_in_month(year: i32, month: u8) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use serde_json::json;
 
     use super::{
@@ -1354,5 +1354,29 @@ mod tests {
         // A date start takes a date UNTIL (RFC 5545 3.3.10).
         assert!(left.contains("UNTIL=20260106\r\n"));
         assert_eq!(starts(&left), ["20260105", "20260106"]);
+    }
+
+    #[test]
+    fn a_split_far_into_a_huge_count_walks_a_bounded_number_of_steps() {
+        let ical = object(
+            "BEGIN:VEVENT\r\nUID:s\r\nDTSTAMP:20260101T000000Z\r\n\
+             DTSTART:20260105T090000\r\nDTEND:20260105T090001\r\nSUMMARY:Tick\r\n\
+             RRULE:FREQ=SECONDLY;COUNT=4294967295\r\nEND:VEVENT\r\n",
+        );
+        let edit = json!({
+            "scope": "following",
+            "recurrenceId": "20300105T090000",
+            "start": {"time": "20300105T100000"},
+            "end": {"time": "20300105T100001"},
+            "uid": "s-2",
+            "stamp": "20260102T000000Z",
+        });
+
+        let started = Instant::now();
+        let (_, series) = split(&ical, &edit.to_string()).unwrap();
+
+        assert!(started.elapsed() < Duration::from_secs(2));
+        let left = u32::MAX as usize - super::MAX_WALKED;
+        assert!(series.unwrap().contains(&format!("COUNT={left}\r\n")));
     }
 }

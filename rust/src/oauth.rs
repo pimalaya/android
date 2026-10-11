@@ -25,6 +25,8 @@ use serde::{
 use serde_json::from_str;
 use url::Url;
 
+use crate::client::trust::require_https;
+
 /// Builds the RFC 6749 §4.1.1 authorization URL with PKCE (S256) and
 /// CSRF state. `extras` carries provider-specific query parameters as
 /// a JSON object string (e.g. Google's access_type=offline and
@@ -42,6 +44,10 @@ pub fn authorize_url(
     let endpoint = Url::parse(authorization_endpoint).map_err(|err| {
         format!("Invalid authorization endpoint `{authorization_endpoint}`: {err}")
     })?;
+    // NOTE: the URL this builds is what the browser opens, so it is https
+    // and nothing else: not plain http, and not a scheme another app
+    // handles.
+    require_https(&endpoint, "authorization endpoint")?;
 
     let state = parse_state(state)?;
     let verifier = parse_pkce_verifier(pkce_verifier)?;
@@ -74,16 +80,46 @@ pub fn authorize_url(
 
 /// Validates the RFC 6749 §4.1.2 authorization redirect against the
 /// expected CSRF state and returns the authorization code.
-pub fn validate_redirect(redirect_url: &str, state: &str) -> Result<String, String> {
-    let url = Url::parse(redirect_url)
-        .map_err(|err| format!("Invalid redirect URL `{redirect_url}`: {err}"))?;
+///
+/// `issuer` is the authorization server the grant was started at, empty
+/// when unknown. A redirect naming another in its RFC 9207 `iss` is
+/// refused: that is the mix-up attack, a server bouncing the browser to
+/// another one so that the code lands at its own token endpoint.
+///
+/// No error names the redirect URL, which carries the code.
+pub fn validate_redirect(redirect_url: &str, state: &str, issuer: &str) -> Result<String, String> {
+    let url = Url::parse(redirect_url).map_err(|err| format!("Invalid redirect URL: {err}"))?;
 
     let state = parse_state(state)?;
+
+    if !issuer.is_empty() {
+        let named = url
+            .query_pairs()
+            .find(|(key, _)| key == "iss")
+            .map(|(_, value)| value.into_owned());
+        if let Some(named) = named
+            && !same_issuer(&named, issuer)
+        {
+            return Err(format!(
+                "Authorization response from {named}, not from {issuer}"
+            ));
+        }
+    }
 
     Oauth20AuthParams::from(&url)
         .validate(Some(&state))
         .map(|code| code.into_owned())
         .map_err(|err| err.to_string())
+}
+
+/// Whether two issuer identifiers name the same server: equal once parsed
+/// (RFC 9207 section 2.4 compares them as strings, and a parse only
+/// settles a trailing slash on a bare origin).
+fn same_issuer(left: &str, right: &str) -> bool {
+    match (Url::parse(left), Url::parse(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
 }
 
 /// Generates one authorization session's CSRF state (32 chars) and
@@ -241,6 +277,7 @@ mod tests {
              &state=stateABCDEF0123456789abcdef012345\
              &iss=https%3A%2F%2Fapi.fastmail.com",
             "stateABCDEF0123456789abcdef012345",
+            "https://api.fastmail.com/",
         );
 
         assert_eq!(code.unwrap(), "abc123");
@@ -298,9 +335,73 @@ mod tests {
              ?error=invalid_request\
              &state=stateABCDEF0123456789abcdef012345",
             "stateABCDEF0123456789abcdef012345",
+            "",
         )
         .unwrap_err();
 
         assert_eq!(err, "Authorization error: InvalidRequest");
+    }
+
+    /// RFC 9207: a redirect naming another issuer than the one the grant
+    /// started at is the mix-up attack, refused before any exchange; one
+    /// naming none passes, the parameter being optional.
+    #[test]
+    fn validate_redirect_refuses_another_issuer() {
+        const STATE: &str = "stateABCDEF0123456789abcdef012345";
+        let redirect =
+            |iss: &str| format!("org.pimalaya:/oauth2redirect?code=abc123&state={STATE}{iss}");
+
+        let err = validate_redirect(
+            &redirect("&iss=https%3A%2F%2Fevil.example"),
+            STATE,
+            "https://api.fastmail.com",
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "Authorization response from https://evil.example, not from https://api.fastmail.com"
+        );
+
+        assert!(validate_redirect(&redirect(""), STATE, "https://api.fastmail.com").is_ok());
+        assert!(validate_redirect(&redirect("&iss=https%3A%2F%2Fevil.example"), STATE, "").is_ok());
+    }
+
+    /// No failure names the redirect URL, which carries the code: the
+    /// error lands in the log and on screen.
+    #[test]
+    fn validate_redirect_errors_never_carry_the_code() {
+        let err = validate_redirect("not a url ?code=secretcode", "s", "").unwrap_err();
+        assert!(!err.contains("secretcode"), "{err}");
+
+        let err = validate_redirect(
+            "org.pimalaya:/oauth2redirect?code=secretcode&state=other",
+            "stateABCDEF0123456789abcdef012345",
+            "",
+        )
+        .unwrap_err();
+        assert!(!err.contains("secretcode"), "{err}");
+    }
+
+    /// The browser opens what this builds: an authorization endpoint that
+    /// is not https, or names another app's scheme, is refused; a loopback
+    /// one passes for a custom client's own test server.
+    #[test]
+    fn authorize_url_opens_https_only() {
+        let build = |endpoint: &str| {
+            authorize_url(
+                endpoint,
+                "client",
+                "org.pimalaya:/oauth2redirect",
+                "mail",
+                "stateABCDEF0123456789abcdef012345",
+                "verifierABCDEF0123456789abcdef0123456789ABCDEF0123456789abcdef01",
+                "",
+            )
+        };
+
+        assert!(build("http://auth.example.org/authorize").is_err());
+        assert!(build("intent://auth#Intent;scheme=x;end").is_err());
+        assert!(build("http://127.0.0.1:8080/authorize").is_ok());
+        assert!(build("https://auth.example.org/authorize").is_ok());
     }
 }

@@ -337,6 +337,10 @@ final class DeletedItems {
      * the pins it held, and the bodies nothing references any more are
      * reclaimed. A row a source still binds is never reached. Returns how
      * many items went.
+     *
+     * <p>The pins are recounted by the collector rather than read back off
+     * the statement's {@code RETURNING} ({@link MailStore#changed}): a purge
+     * of more rows than a cursor window holds would run again on its refill.
      */
     int purgeBefore(String cutoff) {
         SQLiteDatabase db = store.getWritableDatabase();
@@ -345,20 +349,7 @@ final class DeletedItems {
         try {
             Map<String, Object> values = new HashMap<>();
             values.put("cutoff", cutoff);
-            JSONArray pinned = new JSONArray();
-            try (Cursor cursor = query(db, "PURGE_RETAINED_BEFORE", values)) {
-                while (cursor.moveToNext()) {
-                    purged++;
-                    for (int column = 0; column < cursor.getColumnCount(); column++) {
-                        if (!cursor.isNull(column)) {
-                            pinned.put(cursor.getString(column));
-                        }
-                    }
-                }
-            }
-            Map<String, Object> pins = new HashMap<>();
-            pins.put("hashes", pinned.toString());
-            exec(db, "RELEASE_PINS", pins);
+            purged = MailStore.changed(db, PimdirSql.bind("PURGE_RETAINED_BEFORE", values));
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();

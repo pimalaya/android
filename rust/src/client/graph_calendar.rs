@@ -41,7 +41,6 @@ use io_msgraph::{
             },
             events::{
                 MsgraphEvent, MsgraphEventType,
-                create::MsgraphEventCreate,
                 delete::MsgraphEventDelete,
                 get::MsgraphEventGet,
                 ical::{MSGRAPH_EVENT_ICAL_SELECT, MSGRAPH_EVENT_STASH_EXPAND},
@@ -54,6 +53,8 @@ use io_msgraph::{
     },
 };
 use jiff::{Timestamp, ToSpan, civil::Date, tz::TimeZone};
+use serde_json::{Map, Value, to_value};
+use sha2::{Digest, Sha256};
 use url::Url;
 
 use crate::{
@@ -75,9 +76,8 @@ const LIST_SELECT: &str = "id,changeKey,type,seriesMasterId";
 /// The page size asked for when listing events.
 const PAGE_SIZE: u32 = 500;
 
-/// How far either side of today an open-ended series is searched for
-/// exceptions.
-const OPEN_SERIES_YEARS: i16 = 5;
+/// How far either side of today a series is searched for exceptions.
+const SERIES_YEARS: i16 = 5;
 
 /// The longest window Graph lists a series' instances over.
 const MAX_WINDOW_YEARS: i16 = 5;
@@ -158,6 +158,10 @@ impl<'a, 'local> Client<'a, 'local> {
     /// Creates an event from an iCalendar object in a calendar, answering
     /// the id Graph gave it and its revision.
     ///
+    /// The request carries a `transactionId` ([`create_body`]), so a create
+    /// whose answer was lost and that is sent again lands on the event the
+    /// first made rather than a second one, inviting its attendees twice.
+    ///
     /// The event is read back with its stash: one whose UID did not
     /// survive would read back under Graph's own `iCalUId`, a second event
     /// for every other client, so it is deleted again and the write
@@ -173,8 +177,10 @@ impl<'a, 'local> Client<'a, 'local> {
             MsgraphEvent::create_from_ical(ical.as_bytes()).map_err(|err| err.to_string())?;
         let uid = event.stashed_uid();
 
-        let coroutine = MsgraphEventCreate::new(&auth, "me", Some(calendar), &event)
-            .map_err(|err| err.to_string())?;
+        let url = graph_url(&format!("me/calendars/{calendar}/events"))?;
+        let coroutine =
+            MsgraphSend::<MsgraphEvent>::post_json(&auth, url, &create_body(&event, ical))
+                .map_err(|err| err.to_string())?;
         let created = self.run_msgraph(coroutine)?;
         let stored = self.graph_event(&auth, &created.id)?;
 
@@ -601,6 +607,22 @@ fn graph_calendar(calendar: MsgraphCalendar) -> Option<Calendar> {
     })
 }
 
+/// The body of an event create: the event and a `transactionId` Graph
+/// answers a second create carrying it with the event the first made. It is
+/// the object's digest, the same for every attempt of one staged create.
+fn create_body(event: &MsgraphEvent, ical: &str) -> Value {
+    let mut body = to_value(event).unwrap_or_else(|_| Value::Object(Map::new()));
+    if let Value::Object(fields) = &mut body {
+        let digest = Sha256::digest(ical.as_bytes());
+        let id: String = digest[..16]
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        fields.insert("transactionId".into(), Value::String(id));
+    }
+    body
+}
+
 /// The address one event is read at: the read [`MsgraphEventGet`] sends.
 fn event_url(id: &str) -> Result<Url, BridgeError> {
     let mut url = graph_url(&format!("me/events/{id}"))?;
@@ -766,20 +788,21 @@ fn unique(events: Vec<MsgraphEvent>) -> Result<Vec<MsgraphEvent>, BridgeError> {
 /// five years Graph allows an instances listing (it answers 400 past
 /// them).
 ///
-/// A bounded series is read over its whole range, an open-ended one
-/// within [`OPEN_SERIES_YEARS`] either side of `today`: a birthday from
-/// 1604, Outlook's year for one without a year, would otherwise take
-/// dozens of requests for exceptions nobody looks at.
+/// Any series is read within [`SERIES_YEARS`] either side of `today`,
+/// bounded or not: a birthday from 1604, Outlook's year for one without
+/// a year, or an invitation running from 1601 to 9000 would otherwise take
+/// dozens to thousands of requests for exceptions nobody looks at. A
+/// series ended before that range reads none.
 fn series_windows(master: &MsgraphEvent, today: Date) -> Option<Vec<(String, String)>> {
     let (start, end) = master.recurrence.as_option()?.bounds()?;
-    let (start, end) = match end {
-        Some(end) => (start, end.checked_add(1.day()).ok()?),
-        None => {
-            let years = OPEN_SERIES_YEARS.years();
-            let floor = today.checked_sub(years).ok()?;
-            (start.max(floor), today.checked_add(years).ok()?)
-        }
+    let years = SERIES_YEARS.years();
+    let floor = today.checked_sub(years).ok()?;
+    let ceiling = today.checked_add(years).ok()?;
+    let end = match end {
+        Some(end) => end.min(ceiling).checked_add(1.day()).ok()?,
+        None => ceiling,
     };
+    let start = start.max(floor);
 
     let instant = |date: Date| -> Option<String> {
         let timestamp = date.to_zoned(TimeZone::UTC).ok()?.timestamp();
@@ -838,6 +861,29 @@ mod tests {
     use serde_json::{from_value, json};
 
     use super::*;
+
+    /// A create sent again after a lost answer names the same transaction,
+    /// another create another one.
+    #[test]
+    fn a_create_names_one_transaction_per_object() {
+        let ical = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u1\r\nSUMMARY:Lunch\r\n\
+                    DTSTART:20261012T120000Z\r\nDTEND:20261012T130000Z\r\nEND:VEVENT\r\n\
+                    END:VCALENDAR\r\n";
+        let other = ical.replace("Lunch", "Dinner");
+        let event = MsgraphEvent::create_from_ical(ical.as_bytes()).unwrap();
+
+        let first = create_body(&event, ical);
+        let again = create_body(&event, ical);
+        let id = first["transactionId"].as_str().unwrap();
+
+        assert_eq!(id.len(), 32);
+        assert_eq!(again["transactionId"], first["transactionId"]);
+        assert_ne!(
+            create_body(&event, &other)["transactionId"],
+            first["transactionId"]
+        );
+        assert_eq!(first["subject"], "Lunch");
+    }
 
     /// The default calendar says so; a calendar shared read only takes
     /// no event.
@@ -916,6 +962,42 @@ mod tests {
                 pair("2026-10-03", "2031-10-02"),
                 pair("2031-10-02", "2031-10-04"),
             ]
+        );
+    }
+
+    #[test]
+    fn a_bounded_series_is_read_around_today() {
+        let series = |from: &str, to: &str| MsgraphEvent {
+            recurrence: MsgraphField::Set(MsgraphPatternedRecurrence {
+                range: MsgraphRecurrenceRange {
+                    range_type: Some(MsgraphRecurrenceRangeType::EndDate),
+                    start_date: Some(from.into()),
+                    end_date: Some(to.into()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let today: Date = "2026-10-04".parse().unwrap();
+        let pair = |from: &str, to: &str| (format!("{from}T00:00:00Z"), format!("{to}T00:00:00Z"));
+
+        assert_eq!(
+            series_windows(&series("1601-01-01", "9000-12-31"), today).unwrap(),
+            [
+                pair("2021-10-04", "2026-10-03"),
+                pair("2026-10-03", "2031-10-02"),
+                pair("2031-10-02", "2031-10-05"),
+            ]
+        );
+        assert_eq!(
+            series_windows(&series("2026-01-01", "2026-03-31"), today).unwrap(),
+            [pair("2026-01-01", "2026-04-01")]
+        );
+        assert!(
+            series_windows(&series("1990-01-01", "2000-12-31"), today)
+                .unwrap()
+                .is_empty()
         );
     }
 }

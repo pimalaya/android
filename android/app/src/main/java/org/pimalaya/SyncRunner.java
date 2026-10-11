@@ -262,7 +262,7 @@ final class SyncRunner {
                 if (expiredToken(error)) {
                     throw error;
                 }
-                Log.w("pimalaya", "addressbook roles failed for " + email, error);
+                Log.w("pimalaya", "addressbook roles failed for " + Accounts.redacted(email), error);
             }
 
             OfflineEngine engine = engine(primary, account);
@@ -306,30 +306,30 @@ final class SyncRunner {
      * copies were exactly what could not be kept in step.
      */
     AccountEntry refreshed(AccountEntry entry, PimDomain domain) {
-        AccountCredential credential = entry.credential(domain);
-        OauthTokens tokens;
-        try (Transport transport = new Transport()) {
-            tokens =
-                    client.oauthRefresh(
-                            transport,
-                            credential.tokenEndpoint,
-                            credential.clientId,
-                            credential.clientSecret,
-                            credential.refreshToken,
-                            null);
-        }
-
-        // One write. Every domain signing in with this credential is
-        // renewed by it, because there is only ever the one copy.
+        // NOTE: one renewal per credential at a time, across the workers of a
+        // pass: a rotating provider retires a refresh token on its first use
+        // (TokenRenewal). One write, and every domain signing in with this
+        // credential is renewed by it, there being only the one copy.
         AccountEntry updated =
-                entry.refreshed(
+                TokenRenewal.renew(
+                        store,
+                        entry,
                         domain,
-                        tokens.accessToken,
-                        tokens.refreshToken != null
-                                ? tokens.refreshToken
-                                : credential.refreshToken);
+                        credential -> {
+                            try (Transport transport = new Transport()) {
+                                OauthTokens tokens =
+                                        client.oauthRefresh(
+                                                transport,
+                                                credential.tokenEndpoint,
+                                                credential.clientId,
+                                                credential.clientSecret,
+                                                credential.refreshToken,
+                                                null);
+                                return new TokenRenewal.Renewed(
+                                        tokens.accessToken, tokens.refreshToken);
+                            }
+                        });
 
-        store.add(updated);
         if (observer != null) {
             observer.accountRefreshed(updated);
         }

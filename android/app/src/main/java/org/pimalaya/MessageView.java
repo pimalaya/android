@@ -19,14 +19,14 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import org.json.JSONObject;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.client.PimdirSql;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * The reader for one message: the header card, then the message itself.
@@ -153,45 +153,14 @@ final class MessageView {
                     boolean fetched = false;
                     Exception failure = null;
                     try {
-                        byte[] source = host.mail.source(message);
-                        if (source == null && message.pending) {
-                            // NOTE: never fetched. A message waiting to go out
-                            // is nothing but the body its queue row carries, so
-                            // there is no server that has it and no mailbox to
-                            // ask: a missing body here is a lost message, not a
-                            // message yet to be read.
+                        MailReader.Read read =
+                                reader(message).read(message, () -> openOnline(message, account));
+                        if (read.body == null) {
                             throw new IllegalStateException(
                                     host.getString(R.string.message_failed));
                         }
-                        if (source == null && !host.online()) {
-                            // NOTE: not on the phone, and no network to
-                            // fetch it: within its window the body step
-                            // brings it once back online, else an open does.
-                            boolean taken =
-                                    MailBodies.takes(
-                                            message.sortKey,
-                                            host.mail.windowOf(message.accountEmail),
-                                            host.mail.roles().get(message.collection),
-                                            MailOffline.whole(host, message.collection));
-                            throw new IllegalStateException(
-                                    host.getString(
-                                            taken
-                                                    ? R.string.message_not_on_phone
-                                                    : R.string.message_not_on_phone_later));
-                        }
-                        if (source == null) {
-                            source = fetch(message, account);
-                            fetched = true;
-                        }
-                        loaded = host.client.parseMessage(source);
-                        if (!message.pending) {
-                            synchronized (PimdirEngine.STORE) {
-                                host.files.recordAttachments(
-                                        host.mail.accountIdOf(message.accountEmail),
-                                        message.id,
-                                        loaded.attachments);
-                            }
-                        }
+                        loaded = read.body;
+                        fetched = read.fetched;
                     } catch (Exception error) {
                         Log.w("pimalaya", "message fetch failed: " + message.id, error);
                         failure = error;
@@ -241,26 +210,32 @@ final class MessageView {
                 });
     }
 
-    /** Fetches one message the store does not hold, files it and restates its summary. */
-    private byte[] fetch(MailStore.StoredMessage message, AccountEntry account) {
-        String[] address = addressOf(message);
-        byte[] source;
-        // NOTE: a connection of its own, opened and closed around this one
-        // read. A reader opening a message is not a pass, and holding one
-        // open for the time someone spends reading would be holding it for
-        // no work at all.
-        try (MailSession session = host.openMail(account)) {
-            source = host.client.fetchMessageSource(session, address[0], address[1]);
+    /** The reader of one message's account ({@link MailReader}). */
+    private MailReader reader(MailStore.StoredMessage message) {
+        return new MailReader(
+                host.mail, host.files, host.client, host.mailEngine(message.accountEmail));
+    }
+
+    /**
+     * A session on the message's account for the reader to fetch it on, when
+     * there is a network: else it is not on the phone, and within its window
+     * the body step brings it once back online, else an open does.
+     */
+    private MailSession openOnline(MailStore.StoredMessage message, AccountEntry account) {
+        if (!host.online()) {
+            boolean taken =
+                    MailBodies.takes(
+                            message.sortKey,
+                            host.mail.mailboxWindow(message.collection),
+                            host.mail.roles().get(message.collection),
+                            MailOffline.whole(host, message.collection));
+            throw new IllegalStateException(
+                    host.getString(
+                            taken
+                                    ? R.string.message_not_on_phone
+                                    : R.string.message_not_on_phone_later));
         }
-        // NOTE: the listing read the summary without the body; the body
-        // just stored restates it. One writer: a fill or body step may be
-        // writing beside this open.
-        JSONObject summary = PimdirSql.derive(PimdirSummary.MAIL, source).optJSONObject("summary");
-        synchronized (PimdirEngine.STORE) {
-            host.mail.saveSource(message.collection, message.id, source);
-            host.mail.restateFromBody(message.collection, message.id, summary);
-        }
-        return source;
+        return host.openMail(account);
     }
 
     /**
@@ -347,7 +322,7 @@ final class MessageView {
                 throw new IllegalStateException(
                         host.getString(R.string.message_not_on_phone_later));
             }
-            fetch(message, account);
+            reader(message).fetch(message, () -> host.openMail(account));
             host.postAlive(host.mailList::reload);
             source = host.mail.sourceFile(message);
             if (source == null) {
@@ -385,16 +360,57 @@ final class MessageView {
 
         host.findViewById(R.id.message_view_delete).setOnClickListener(view -> confirmDelete());
 
-        // A message still waiting to go out has nothing to answer yet.
+        // A message still waiting to go out has nothing to answer yet; one
+        // that may have gone is sent again only when the user says so.
+        boolean uncertain = current != null && current.uncertain;
         host.findViewById(R.id.message_view_replies)
-                .setVisibility(pending ? View.GONE : View.VISIBLE);
+                .setVisibility(pending && !uncertain ? View.GONE : View.VISIBLE);
         TextView reply = host.findViewById(R.id.message_view_reply);
         reply.setTextColor(host.accentContrast());
         reply.setCompoundDrawableTintList(
                 android.content.res.ColorStateList.valueOf(host.accentContrast()));
-        reply.setOnClickListener(view -> host.compose.open(reply(current, loaded)));
-        host.findViewById(R.id.message_view_forward)
-                .setOnClickListener(view -> host.compose.open(forward(current, loaded)));
+        reply.setText(uncertain ? R.string.message_send_again : R.string.message_reply);
+        reply.setOnClickListener(
+                view -> {
+                    if (uncertain) {
+                        sendAgain(current);
+                    } else {
+                        host.compose.open(reply(current, loaded));
+                    }
+                });
+        View forward = host.findViewById(R.id.message_view_forward);
+        forward.setVisibility(uncertain ? View.GONE : View.VISIBLE);
+        forward.setOnClickListener(view -> host.compose.open(forward(current, loaded)));
+    }
+
+    /**
+     * Queues a message that may have gone to be sent again, the user having
+     * found it did not, then leaves the reader.
+     */
+    private void sendAgain(MailStore.StoredMessage message) {
+        host.io.execute(
+                () -> {
+                    Exception failure = null;
+                    try {
+                        host.mail.resendOutgoing(message.queued);
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "send again failed", error);
+                        failure = error;
+                    }
+                    Exception error = failure;
+                    host.postAlive(
+                            () -> {
+                                if (error != null) {
+                                    host.showError(error, R.string.message_write_failed);
+                                    return;
+                                }
+                                host.toast(host.getString(R.string.message_sent_again));
+                                host.mailList.reload();
+                                if (current == message) {
+                                    host.showBack(MainActivity.PANEL_MAIL);
+                                }
+                            });
+                });
     }
 
     /**
@@ -559,14 +575,7 @@ final class MessageView {
                             continue;
                         }
                         try {
-                            MailEngine engine = host.mailEngine(message.accountEmail);
-                            engine.mutateFlags(
-                                    message.collection,
-                                    engine.offline.handleFor(message.collection, message.id),
-                                    MailEngine.withFlag(
-                                            host.mail.flagsOf(message.collection, message.id),
-                                            flag,
-                                            add));
+                            host.mailEngine(message.accountEmail).stageFlag(message, flag, add);
                         } catch (Exception error) {
                             Log.w("pimalaya", "message flag failed: " + message.id, error);
                             if (failure == null) {
@@ -752,29 +761,6 @@ final class MessageView {
         }
     }
 
-    /**
-     * Where the server holds a message, as {@code [mailbox, id]}: where it
-     * is listed, or for the target of a move not carried out yet, the
-     * mailbox it is moving from.
-     */
-    private String[] addressOf(MailStore.StoredMessage message) {
-        MailEngine engine = host.mailEngine(message.accountEmail);
-        String[] source = null;
-        synchronized (PimdirEngine.STORE) {
-            if (engine.offline.isPendingCreate(message.collection, message.id)) {
-                source = engine.offline.moveSourceOf(message.collection, message.id);
-            }
-        }
-        if (source == null) {
-            return new String[] {message.mailbox, message.id};
-        }
-        return new String[] {
-            PimdirAccount.nameOf(
-                    host.mail.accountIdOf(message.accountEmail), source[0]),
-            source[1]
-        };
-    }
-
     /** The account the message came from, null when it is gone. */
     private AccountEntry accountOf(String email) {
         for (AccountEntry account : host.accountsFor(PimDomain.MAIL)) {
@@ -891,13 +877,22 @@ final class MessageView {
         view.getSettings().setUseWideViewPort(true);
         view.getSettings().setLoadWithOverviewMode(true);
 
-        // A link opens where links open, which is not inside a message.
+        // A link opens where links open, which is not inside a message;
+        // only one the reader tapped, in the message itself
+        // (linkIntent), never a refresh or a frame loading on its own.
         view.setWebViewClient(
                 new WebViewClient() {
                     @Override
                     public boolean shouldOverrideUrlLoading(
                             WebView view, WebResourceRequest request) {
-                        open(request.getUrl());
+                        Intent intent =
+                                linkIntent(
+                                        request.getUrl(),
+                                        request.hasGesture(),
+                                        request.isForMainFrame());
+                        if (intent != null) {
+                            open(intent);
+                        }
                         return true;
                     }
                 });
@@ -906,13 +901,39 @@ final class MessageView {
         return view;
     }
 
+    /** The schemes a link in a message may open. */
+    private static final Set<String> LINK_SCHEMES = Set.of("http", "https", "mailto");
+
+    /**
+     * The intent a link in a message opens, null when it opens nothing:
+     * one the reader did not tap (a meta refresh opens a tracker on its
+     * own), one in a frame, or one of a scheme other than the web's and
+     * mail's (another app's deep link). Browsable only, as a browser
+     * would open it, so it never reaches an activity no browser could.
+     */
+    static Intent linkIntent(Uri url, boolean gesture, boolean mainFrame) {
+        String scheme = url == null ? null : url.getScheme();
+        if (!gesture
+                || !mainFrame
+                || scheme == null
+                || !LINK_SCHEMES.contains(scheme.toLowerCase(Locale.ROOT))) {
+            return null;
+        }
+        Intent intent = new Intent(Intent.ACTION_VIEW, url);
+        intent.addCategory(Intent.CATEGORY_BROWSABLE);
+        intent.setComponent(null);
+        intent.setSelector(null);
+        return intent;
+    }
+
     /** Hands a link to whatever handles it, and says nothing when
-     *  nothing does: a message must not crash the reader. */
-    private void open(Uri url) {
+     *  nothing does: a message must not crash the reader. The link itself
+     *  stays out of the log, a sign-in or reset link carrying its token. */
+    private void open(Intent intent) {
         try {
-            host.startActivity(new Intent(Intent.ACTION_VIEW, url));
+            host.startActivity(intent);
         } catch (Exception error) {
-            Log.w("pimalaya", "no handler for " + url, error);
+            Log.w("pimalaya", "no handler for a " + intent.getScheme() + " link", error);
         }
     }
 

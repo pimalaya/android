@@ -110,6 +110,34 @@ final class PimdirBlobs {
         }
     }
 
+    /**
+     * Files a file under its hash by moving it there, on {@link
+     * #put(String, byte[])}'s terms: synced, then renamed into its shard, so
+     * a body the bridge wrote is never read again to be stored. Where the
+     * rename cannot (another file system), it is copied ({@link
+     * #put(String, File)}). The source is gone either way.
+     */
+    void adopt(String hash, File source) throws IOException {
+        try {
+            File target = pathOf(hash);
+            if (target.isFile()) {
+                return;
+            }
+            File shard = target.getParentFile();
+            if (shard != null && !shard.isDirectory() && !shard.mkdirs()) {
+                throw new IOException("Could not create the blob shard " + shard);
+            }
+            try (RandomAccessFile synced = new RandomAccessFile(source, "rw")) {
+                synced.getFD().sync();
+            }
+            if (!source.renameTo(target)) {
+                put(hash, source);
+            }
+        } finally {
+            source.delete();
+        }
+    }
+
     /** Files text, the shape every current kind stores. */
     void putText(String hash, String body) throws IOException {
         put(hash, body.getBytes(StandardCharsets.UTF_8));

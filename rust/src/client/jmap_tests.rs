@@ -1342,3 +1342,39 @@ fn an_answer_to_someone_elses_invitation_is_not_scheduled() {
     destroy_event(&mut account, "ev1", listed.etag.as_deref(), &jane()).unwrap();
     assert!(!scheduled(&account));
 }
+
+/// One email of a mail delta, filed in `mailboxes`.
+fn filed(id: &str, mailboxes: &[&str]) -> JmapEmail {
+    let mailbox_ids: BTreeMap<&str, bool> = mailboxes.iter().map(|id| (*id, true)).collect();
+    from_value(json!({
+        "id": id,
+        "mailboxIds": mailbox_ids,
+        "subject": id,
+        "sentAt": "2026-10-10T12:00:00Z",
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_mailbox_projects_the_account_changes_by_mailbox_ids() {
+    let delta = JmapDelta {
+        next: "s2".into(),
+        emails: vec![
+            filed("m1", &["inbox", "clients"]),
+            filed("m2", &["archive"]),
+        ],
+        gone: vec!["m3".into()],
+    };
+
+    let inbox = project(&delta, "inbox", &Scope::default());
+    let archive = project(&delta, "archive", &Scope::default());
+
+    let members = |page: &MailPage| -> Vec<String> {
+        page.items.iter().map(|item| item.handle.clone()).collect()
+    };
+    assert_eq!(members(&inbox), ["m1"]);
+    assert_eq!(inbox.vanished, ["m3", "m2"]);
+    assert_eq!(inbox.checkpoint.as_deref(), Some("s2"));
+    assert_eq!(members(&archive), ["m2"]);
+    assert_eq!(archive.vanished, ["m3", "m1"]);
+}

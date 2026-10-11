@@ -25,6 +25,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // Native reads BuildConfig.DEBUG to turn the bridge's debug logs on.
+    buildFeatures { buildConfig = true }
+
     // libpimalaya.so lands here, one folder per ABI (see cargoNdkBuild).
     sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
 }

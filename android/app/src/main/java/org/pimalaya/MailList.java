@@ -14,6 +14,8 @@ import android.widget.TextView;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -41,10 +43,10 @@ import java.util.function.Consumer;
  * over them, with the account and mailbox shown per row and filterable on
  * both axes.
  *
- * <p>It shows the windows ({@link MailWindow}): down to its floor, the
- * most recent of the shown accounts' windows and of the shown mailboxes'
- * coverage, so what it shows is on the phone, and it ends on a footer
- * moving the windows back. It loads lazily. Its size is a count of what
+ * <p>It shows what the steps brought ({@link MailStep}): down to its floor,
+ * the most recent of the shown accounts' frontiers and of the shown
+ * mailboxes' coverage, so what it shows is on the phone, and it ends on a
+ * footer loading more. It loads lazily. Its size is a count of what
  * the filter, the chips, the search and the floor let through, its day
  * headers are placed from one count per day, and its rows are read a page
  * at a time around the scroll position, far pages evicted, a placeholder
@@ -175,7 +177,12 @@ final class MailList {
 
     void setUp() {
         ListView list = host.findViewById(R.id.mail_list);
-        header = new ListHeader(host, list, MainActivity.PANEL_MAIL);
+        header =
+                new ListHeader(
+                        host,
+                        list,
+                        MainActivity.PANEL_MAIL,
+                        host.findViewById(R.id.mail_strip));
         header.empty(host.findViewById(R.id.mail_empty));
         header.search(
                 R.string.mail_search,
@@ -287,7 +294,6 @@ final class MailList {
         boolean attachments = attachmentsOnly;
         String outboxLabel = store.outboxName();
         String undated = host.getString(R.string.date_unknown);
-        boolean metered = host.metered();
 
         reads.execute(
                 () -> {
@@ -297,21 +303,24 @@ final class MailList {
                     List<MailStore.Edge> edges = store.edges();
 
                     Map<String, String> windows = new HashMap<>();
+                    Map<String, String> mailboxWindows = new HashMap<>();
                     for (MailStore.Edge edge : edges) {
                         if (!windows.containsKey(edge.accountEmail)) {
                             windows.put(edge.accountEmail, store.windowOf(edge.accountEmail));
                         }
+                        mailboxWindows.put(edge.collection, store.mailboxWindow(edge.collection));
                     }
                     long badge = badge(filter, windows);
 
                     // NOTE: a search covers every stored message; the list
                     // reaches down to its floor otherwise, ending on the
-                    // footer that moves the windows back.
+                    // footer that loads more.
+                    Map<String, String> alone = alone(wanted, edges, roles);
                     String floor = null;
                     Footer footer = null;
                     if (words.trim().isEmpty()) {
                         floor = store.floorOf(wanted, edges);
-                        footer = footerOf(wanted, edges, floor);
+                        footer = footerOf(wanted, edges, roles);
                     }
                     MailStore.Query listed = wanted.since(floor);
 
@@ -325,18 +334,15 @@ final class MailList {
                         }
                     }
 
-                    List<MailStore.Day> days = store.countByDay(listed, shift());
+                    int minutes = offsetMinutes();
+                    List<MailStore.Day> days = store.countByDay(listed, shift(minutes));
                     long shownUnread = store.count(listed.unread());
                     Layout next = Layout.of(host, outbox, outboxLabel, undated, days, shownUnread);
-                    // NOTE: nothing shown and nothing older stored: the
-                    // empty state alone, not a lone "Choose a date".
-                    next.footer =
-                            footer != null && footer.date == null && next.rows() == 0
-                                    ? null
-                                    : footer;
-                    next.windows = windows;
+                    next.days = days;
+                    next.minutes = minutes;
+                    next.footer = footer;
+                    next.windows = mailboxWindows;
                     next.roles = roles;
-                    next.metered = metered;
 
                     // NOTE: the pages around where the list stands, read
                     // before the swap, so the rows on screen stay drawn.
@@ -347,8 +353,7 @@ final class MailList {
                         if ((long) page * PAGE >= next.synced) {
                             break;
                         }
-                        List<MailStore.StoredMessage> rows =
-                                store.page(listed, after, (long) page * PAGE, PAGE);
+                        List<MailStore.StoredMessage> rows = read(listed, next, after, page);
                         read.put(page, rows);
                         after = rows.size() < PAGE ? null : rows.get(rows.size() - 1);
                     }
@@ -365,6 +370,7 @@ final class MailList {
                                 pages.putAll(read);
                                 host.showMailBadge((int) Math.min(Integer.MAX_VALUE, badge));
                                 render();
+                                host.listAlone(alone);
                             });
                 });
     }
@@ -382,7 +388,7 @@ final class MailList {
                         ? resources.getQuantityString(
                                 R.plurals.mail_meta_unread, unread, unread, rows)
                         : resources.getQuantityString(R.plurals.mail_meta, rows, rows));
-        // NOTE: an empty window over older mail shows its footer instead.
+        // NOTE: an empty list with more to load shows its footer instead.
         host.findViewById(R.id.mail_empty)
                 .setVisibility(rows == 0 && layout.footer == null ? View.VISIBLE : View.GONE);
     }
@@ -390,71 +396,92 @@ final class MailList {
     // ---- the footer -------------------------------------------------------
 
     /**
-     * What the list's footer offers, read with the layout: the date it
-     * moves the windows back to (null for none, "Choose a date" alone),
-     * what that takes in, the floor it reaches down from, whether shown
-     * mailboxes still have headers to list below it, and the accounts whose
-     * windows move.
+     * What the list's footer offers, read with the layout: the accounts a
+     * step brings more ({@link MailStep}), and for each the one mailbox it
+     * steps when the list shows that one alone.
      */
     private static final class Footer {
-        final String date;
-        final MailStore.Sum sum;
-        final String floor;
-        final boolean listing;
         final List<String> accounts;
+        final Map<String, String> only;
 
-        Footer(
-                String date,
-                MailStore.Sum sum,
-                String floor,
-                boolean listing,
-                List<String> accounts) {
-            this.date = date;
-            this.sum = sum;
-            this.floor = floor;
-            this.listing = listing;
+        Footer(List<String> accounts, Map<String, String> only) {
             this.accounts = accounts;
+            this.only = only;
         }
     }
 
     /**
-     * The footer under {@code wanted}, null for none: the next date
-     * ({@link MailWindow#next}) when one is worth a tap, "Choose a date"
-     * while a shown account is bounded. Only accounts showing a mailbox not
-     * kept whole have a window to move.
+     * The footer under {@code wanted}, null for none: every shown account
+     * that is on and has more to load ({@link MailWindow#more}), a mailbox
+     * kept whole or one that downloads nothing (junk, trash) taking no part.
+     * An account whose shown mailboxes are one of several it steps steps
+     * that one.
      */
-    private Footer footerOf(MailStore.Query wanted, List<MailStore.Edge> edges, String floor) {
-        boolean listing = false;
-        boolean bounded = false;
-        List<String> accounts = new ArrayList<>();
+    private Footer footerOf(
+            MailStore.Query wanted, List<MailStore.Edge> edges, Map<String, String> roles) {
+        Map<String, List<String>> shown = new LinkedHashMap<>();
+        Map<String, Integer> stepped = new HashMap<>();
         for (MailStore.Edge edge : edges) {
-            // NOTE: an account that is off moves no window.
-            if (!wanted.holds(edge.collection)
-                    || !AccountActivation.enabled(host, edge.accountEmail)) {
+            if (MailOffline.whole(host, edge.collection)
+                    || !MailBodies.downloads(roles.get(edge.collection), false)) {
                 continue;
             }
-            listing |= edge.limit != null;
-            if (!MailOffline.whole(host, edge.collection)
-                    && !accounts.contains(edge.accountEmail)) {
-                accounts.add(edge.accountEmail);
-                bounded |= store.monthsOf(edge.accountEmail) > 0;
+            stepped.merge(edge.accountEmail, 1, Integer::sum);
+            // NOTE: an account that is off loads nothing.
+            if (wanted.holds(edge.collection)
+                    && AccountActivation.enabled(host, edge.accountEmail)
+                    && MailWindow.more(host, store.accountIdOf(edge.accountEmail))) {
+                shown.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>())
+                        .add(edge.collection);
             }
         }
-        if (accounts.isEmpty()) {
+        if (shown.isEmpty()) {
             return null;
         }
-        String date =
-                MailWindow.next(
-                        store.newestBelow(wanted, floor),
-                        floor,
-                        listing,
-                        java.time.ZoneId.systemDefault());
-        if (date == null && !bounded) {
+        Map<String, String> only = new HashMap<>();
+        List<String> loading = new ArrayList<>();
+        for (Map.Entry<String, List<String>> account : shown.entrySet()) {
+            String email = account.getKey();
+            if (account.getValue().size() == 1 && stepped.get(email) > 1) {
+                String alone = account.getValue().get(0);
+                // NOTE: a mailbox stepped alone down to all of its mail has
+                // nothing more to load, whatever its account's others hold.
+                if (!MailWindow.more(host, store.accountIdOf(email), alone)) {
+                    continue;
+                }
+                only.put(email, alone);
+            }
+            loading.add(email);
+        }
+        if (loading.isEmpty()) {
             return null;
         }
-        MailStore.Sum sum =
-                date == null ? null : store.sum(store.downloading(wanted), date, floor, 0);
-        return new Footer(date, sum, floor, listing, accounts);
+        return new Footer(loading, only);
+    }
+
+    /**
+     * The junk and trash mailboxes the list shows alone, each its account's
+     * only shown one and not kept whole, by collection to the account's
+     * address: opening one lists it ({@link MainActivity#listAlone}).
+     */
+    private Map<String, String> alone(
+            MailStore.Query wanted, List<MailStore.Edge> edges, Map<String, String> roles) {
+        Map<String, List<MailStore.Edge>> shown = new LinkedHashMap<>();
+        for (MailStore.Edge edge : edges) {
+            if (wanted.holds(edge.collection)) {
+                shown.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>()).add(edge);
+            }
+        }
+        Map<String, String> alone = new LinkedHashMap<>();
+        for (List<MailStore.Edge> account : shown.values()) {
+            MailStore.Edge edge = account.get(0);
+            if (account.size() == 1
+                    && !MailBodies.downloads(roles.get(edge.collection), false)
+                    && !MailOffline.whole(host, edge.collection)) {
+                alone.put(edge.collection, edge.accountEmail);
+            }
+        }
+        return alone;
     }
 
     /**
@@ -477,43 +504,62 @@ final class MailList {
         return badge;
     }
 
-    /** The list's footer: the button, the line under it, and "Choose a date". */
+    /**
+     * The line under the footer's button: about how many messages a step
+     * brings each account, and that it waits for Wi-Fi when there is none.
+     */
+    static String info(android.content.Context context, boolean wifi) {
+        String line =
+                context.getResources()
+                        .getQuantityString(R.plurals.mail_more_info, MailStep.COUNT, MailStep.COUNT);
+        return wifi ? line : line + " · " + context.getString(R.string.mail_more_wifi);
+    }
+
+    /** What the footer's button offers. */
+    enum FooterState {
+        /** Load more: a tap takes the next step. */
+        LOAD,
+        /** A step or another pass holds the sync: disabled, saying it is loading. */
+        LOADING,
+        /** No Wi-Fi: disabled, its line saying it waits for it. */
+        WIFI
+    }
+
+    /**
+     * The footer's state: waiting off Wi-Fi, where no step runs; loading
+     * while the sync is held ({@code busy}), so a second tap queues
+     * nothing; else ready to load.
+     */
+    static FooterState footerState(boolean wifi, boolean busy) {
+        if (!wifi) {
+            return FooterState.WIFI;
+        }
+        return busy ? FooterState.LOADING : FooterState.LOAD;
+    }
+
+    /** Redraws the footer, a sync having started or ended. */
+    void redrawFooter() {
+        if (layout.footer != null) {
+            adapter.notifyDataSetChanged();
+        }
+    }
+
+    /** The list's footer: "Load more" and the line under it. */
     private View footer(View recycled, ViewGroup parent) {
         View view = recycled;
         if (view == null) {
             view = LayoutInflater.from(host).inflate(R.layout.item_mail_window, parent, false);
         }
         Footer footer = layout.footer;
-        java.util.function.Predicate<String> shown = currentQuery::holds;
-
+        boolean wifi = host.wifi();
+        FooterState state = footerState(wifi, host.syncHeld());
         android.widget.Button load = view.findViewById(R.id.mail_window_load);
-        load.setVisibility(footer.date != null ? View.VISIBLE : View.GONE);
-        TextView info = view.findViewById(R.id.mail_window_info);
-        info.setVisibility(footer.date != null ? View.VISIBLE : View.GONE);
-        if (footer.date != null) {
-            load.setText(
-                    host.getString(
-                            R.string.mail_window_load, WindowPicker.label(host, footer.date)));
-            load.setOnClickListener(
-                    tapped -> WindowPicker.apply(host, footer.accounts, footer.date, shown, null));
-            info.setText(
-                    WindowPicker.info(
-                            host, footer.sum, footer.listing, host.online(), host.metered()));
-        }
-
-        MailStore.Query query = currentQuery;
-        view.findViewById(R.id.mail_window_choose)
-                .setOnClickListener(
-                        tapped ->
-                                WindowPicker.open(
-                                        host,
-                                        reads,
-                                        query,
-                                        footer.floor,
-                                        footer.accounts,
-                                        shown,
-                                        false,
-                                        null));
+        load.setEnabled(state == FooterState.LOAD);
+        load.setAlpha(state == FooterState.LOAD ? 1f : 0.6f);
+        load.setText(
+                state == FooterState.LOADING ? R.string.mail_more_loading : R.string.mail_more_load);
+        load.setOnClickListener(tapped -> host.loadMore(footer.accounts, footer.only));
+        ((TextView) view.findViewById(R.id.mail_window_info)).setText(info(host, wifi));
         return view;
     }
 
@@ -521,10 +567,59 @@ final class MailList {
      * The SQLite modifier moving a UTC instant onto the device's wall clock
      * today, so a day header falls where the reader's midnight does.
      */
-    private static String shift() {
-        int minutes = TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000;
+    private static String shift(int minutes) {
         return String.format(Locale.ROOT, "%+d minutes", minutes);
     }
+
+    /** The device's offset from UTC today, in minutes. */
+    private static int offsetMinutes() {
+        return TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000;
+    }
+
+    /** Where a page's read starts: below a sort key, past some of its rows. */
+    static final class Seek {
+        final String key;
+        final long skip;
+
+        Seek(String key, long skip) {
+            this.key = key;
+            this.skip = skip;
+        }
+    }
+
+    /**
+     * Where the list's synced row {@code row} is read from, by the per-day
+     * counts it was laid out from ({@code days}, newest first, undated last,
+     * counted {@code minutes} off UTC): below the first instant of the day
+     * after its own, past the rows of its day ahead of it. An undated row
+     * reads below {@link #UNDATED}. Null past the counted rows.
+     */
+    static Seek seek(List<MailStore.Day> days, int minutes, long row) {
+        long before = 0;
+        for (MailStore.Day day : days) {
+            if (row < before + day.count) {
+                String key = day.day == null ? UNDATED : keyAfter(day.day, minutes);
+                return new Seek(key, row - before);
+            }
+            before += day.count;
+        }
+        return null;
+    }
+
+    /**
+     * The sort key of the first instant of the day after {@code day} on a
+     * wall clock {@code minutes} off UTC, in the shape the store writes keys.
+     */
+    private static String keyAfter(String day, int minutes) {
+        return LocalDate.parse(day)
+                .plusDays(1)
+                .atStartOfDay(ZoneOffset.UTC)
+                .minusMinutes(minutes)
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ROOT));
+    }
+
+    /** A sort key above the undated one ('') and below every date. */
+    static final String UNDATED = "0";
 
     /** Whether the search finds a waiting message in its sender or subject. */
     private static boolean matches(MailStore.StoredMessage message, String words) {
@@ -560,16 +655,24 @@ final class MailList {
         /** The footer the list ends on, null for none. */
         Footer footer;
 
-        /** Each account's window, null for all mail: what a row not on the phone says. */
+        /** Each mailbox's frontier, null for all mail: what a row not on the phone says. */
         Map<String, String> windows = Map.of();
 
         /** Each mailbox's role, by collection id. */
         Map<String, String> roles = Map.of();
 
-        /** Whether the network was metered when read, holding the larger bodies back. */
-        boolean metered;
-
         int size;
+
+        /** The per-day counts it was laid out from, newest day first, undated last. */
+        List<MailStore.Day> days = List.of();
+
+        /** The wall clock's offset from UTC the days were counted on, in minutes. */
+        int minutes;
+
+        /** Where the synced row {@code row} is read from ({@link MailList#seek}). */
+        Seek seek(long row) {
+            return MailList.seek(days, minutes, row);
+        }
 
         private Layout(List<MailStore.StoredMessage> outbox, long synced, long unread) {
             this.outbox = outbox;
@@ -737,8 +840,8 @@ final class MailList {
 
     /**
      * Reads one page: after the page before it when that one is read (a
-     * keyset, what a scroll costs), from its offset otherwise (what a fling
-     * to the far end costs).
+     * keyset, what a scroll costs), from the start of the day it lands on
+     * otherwise (what a fling costs: the rows of that day before it).
      */
     private void load(int page) {
         if (pages.containsKey(page) || currentQuery == null || !loading.add(page)) {
@@ -746,14 +849,14 @@ final class MailList {
         }
         int asked = generation;
         MailStore.Query listed = currentQuery;
+        Layout shown = layout;
         List<MailStore.StoredMessage> previous = pages.get(page - 1);
         MailStore.StoredMessage after =
                 previous == null || previous.size() < PAGE ? null : previous.get(PAGE - 1);
 
         reads.execute(
                 () -> {
-                    List<MailStore.StoredMessage> rows =
-                            store.page(listed, after, (long) page * PAGE, PAGE);
+                    List<MailStore.StoredMessage> rows = read(listed, shown, after, page);
                     host.main.post(
                             () -> {
                                 if (asked != generation) {
@@ -764,6 +867,23 @@ final class MailList {
                                 adapter.notifyDataSetChanged();
                             });
                 });
+    }
+
+    /**
+     * One page of the list: after {@code after} when the page before it is
+     * read, else from the start of the day its first row falls on, which the
+     * layout's day counts place ({@link Layout#seek}).
+     */
+    private List<MailStore.StoredMessage> read(
+            MailStore.Query listed, Layout shown, MailStore.StoredMessage after, int page) {
+        long first = (long) page * PAGE;
+        if (after != null || first == 0) {
+            return store.page(listed, after, first, PAGE);
+        }
+        Seek seek = shown.seek(first);
+        return seek == null
+                ? store.page(listed, null, first, PAGE)
+                : store.pageBelow(listed, seek.key, seek.skip, PAGE);
     }
 
     /**
@@ -889,9 +1009,9 @@ final class MailList {
 
     /**
      * What a row whose body the phone does not hold says, 0 for nothing: a
-     * message within its account's window (outside the junk and the trash)
-     * is on its way, saying so only while a metered network holds a large
-     * one back; any other is not downloaded.
+     * message whose body failed every attempt of a run says so; one from its
+     * mailbox's frontier on (outside the junk and the trash), or one owed
+     * ({@link MailOwed}), is on its way; any other is not downloaded.
      */
     private int notOnPhone(MailStore.StoredMessage message) {
         if (message.bodied) {
@@ -900,15 +1020,15 @@ final class MailList {
         boolean taken =
                 MailBodies.takes(
                         message.sortKey,
-                        layout.windows.get(message.accountEmail),
+                        layout.windows.get(message.collection),
                         layout.roles.get(message.collection),
                         MailOffline.whole(host, message.collection));
-        if (!taken) {
-            return R.string.mail_row_not_downloaded;
+        String key = MailOwed.key(message.collection, message.id);
+        if (MailBodies.FAILED.contains(key) || MailPoison.poisoned(host, key)) {
+            return R.string.mail_row_failed;
         }
-        return layout.metered && !MailBodies.fits(message.size, message.attachment)
-                ? R.string.mail_row_wifi
-                : 0;
+        boolean owed = MailOwed.owed(host, message.collection, message.id);
+        return taken || owed ? 0 : R.string.mail_row_not_downloaded;
     }
 
     /** One message's row. */
@@ -971,6 +1091,9 @@ final class MailList {
 
     /** What a row says of where its message stands. */
     private String state(MailStore.StoredMessage message) {
+        if (message.uncertain) {
+            return host.getString(R.string.message_send_uncertain);
+        }
         if (message.failed) {
             return host.getString(R.string.message_send_failed);
         }
