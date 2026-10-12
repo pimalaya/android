@@ -55,7 +55,7 @@ public class E2eContactsTest extends E2eCase {
         phone.contacts().save(url, new Card(uid, null, null, vcard(uid, subject("created"))));
         List<PimdirContacts.Indexed> staged = phone.cards(url, subject("created"));
         assertEquals("shown at once", 1, staged.size());
-        assertTrue("pending", staged.get(0).unsynced);
+        assertTrue("pending", phone.owes(url, staged.get(0).card.id));
 
         sync(phone);
         settles(
@@ -183,7 +183,7 @@ public class E2eContactsTest extends E2eCase {
     private String names(E2eDevice device, String url) {
         List<String> names = new java.util.ArrayList<>();
         for (PimdirContacts.Indexed indexed : device.cards(url, tag)) {
-            names.add(indexed.name + (indexed.unsynced ? " (staged)" : ""));
+            names.add(indexed.name + (device.owes(url, indexed.card.id) ? " (staged)" : ""));
         }
         return names.toString();
     }

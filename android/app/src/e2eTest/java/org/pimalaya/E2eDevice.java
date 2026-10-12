@@ -5,9 +5,12 @@ import static org.robolectric.Shadows.shadowOf;
 import android.content.Context;
 import android.content.ContextWrapper;
 import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 
+import org.json.JSONArray;
+import org.json.JSONException;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
 import org.robolectric.shadows.ShadowNetworkInfo;
@@ -327,6 +330,58 @@ final class E2eDevice {
             throw new AssertionError(found.size() + " messages named " + subject + " in " + collection);
         }
         return found.isEmpty() ? null : found.get(0);
+    }
+
+    /**
+     * Whether an item owes its server a push, read off the store: no base
+     * agreed yet (a create, a move's target), markers past the agreed ones,
+     * or, outside mail, a body past the agreed one.
+     */
+    boolean owes(String collection, String linkId) {
+        try (Cursor cursor =
+                pimdir.getReadableDatabase()
+                        .rawQuery(
+                                "SELECT i.flags, i.object_hash, b.link_id, b.base_present,"
+                                        + " b.base_flags, b.base_object, c.kind"
+                                        + " FROM items i"
+                                        + " JOIN collections c ON c.id = i.collection"
+                                        + " LEFT JOIN bindings b ON b.collection = i.collection"
+                                        + " AND b.link_id = i.link_id AND b.source = ?"
+                                        + " WHERE i.collection = ? AND i.link_id = ?",
+                                new String[] {
+                                    PimdirStorage.sourceOf(collection),
+                                    PimdirStorage.collectionOf(collection),
+                                    linkId
+                                })) {
+            if (!cursor.moveToFirst()) {
+                return false;
+            }
+            if (cursor.isNull(2) || cursor.getInt(3) == 0) {
+                return true;
+            }
+            boolean flagsMoved =
+                    !cursor.isNull(0)
+                            && !cursor.isNull(4)
+                            && !flagSet(cursor.getString(0)).equals(flagSet(cursor.getString(4)));
+            boolean bodyMoved =
+                    !PimdirSummary.MAIL.equals(cursor.getString(6))
+                            && !cursor.isNull(1)
+                            && !cursor.getString(1).equals(cursor.getString(5));
+            return flagsMoved || bodyMoved;
+        }
+    }
+
+    private static Set<String> flagSet(String json) {
+        try {
+            JSONArray array = new JSONArray(json);
+            Set<String> flags = new HashSet<>();
+            for (int index = 0; index < array.length(); index++) {
+                flags.add(array.getString(index));
+            }
+            return flags;
+        } catch (JSONException error) {
+            throw new AssertionError(error);
+        }
     }
 
     /** A driver that only stages, as the reader's and the composer's are. */

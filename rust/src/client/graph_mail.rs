@@ -67,6 +67,7 @@ use url::Url;
 use crate::{
     client::{
         Client,
+        convert::converged,
         gmail::source_path,
         graph::{graph_url, parse_graph_url, relative},
         listing::{Floor, GRAPH_PAGE, Listing, MailPage, MailRequest, Named, Scope, flags, utc},
@@ -278,7 +279,8 @@ impl<'a, 'local> Client<'a, 'local> {
         }
     }
 
-    /// Adds or removes one marker on one message.
+    /// Adds or removes one marker on one message; one gone stays gone
+    /// ([`converged`]).
     ///
     /// `\Seen` is `isRead` and `\Flagged` the follow-up flag. Graph keeps
     /// no answered marker and no deleted one, so the other two are
@@ -309,11 +311,12 @@ impl<'a, 'local> Client<'a, 'local> {
         let auth = HttpAuthBearer::new(token);
         let coroutine =
             MsgraphMessageUpdate::new(&auth, "me", id, &patch).map_err(|err| err.to_string())?;
-        self.run_msgraph(coroutine)?;
+        converged(self.run_msgraph(coroutine))?;
         Ok(())
     }
 
-    /// Moves one message into the folder `to` (a folder id).
+    /// Moves one message into the folder `to` (a folder id); one gone
+    /// stays gone ([`converged`]).
     pub fn relocate_graph_message(
         &mut self,
         token: &str,
@@ -323,11 +326,12 @@ impl<'a, 'local> Client<'a, 'local> {
         let auth = HttpAuthBearer::new(token);
         let coroutine =
             MsgraphMessageMove::new(&auth, "me", id, to).map_err(|err| err.to_string())?;
-        self.run_msgraph(coroutine)?;
+        converged(self.run_msgraph(coroutine))?;
         Ok(())
     }
 
-    /// Copies one message into the folder `to` (a folder id).
+    /// Copies one message into the folder `to` (a folder id), failing
+    /// with the 404 of a message gone for the caller to refuse.
     pub fn copy_graph_message(
         &mut self,
         token: &str,
@@ -342,7 +346,8 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 
     /// Deletes one message for good, past `Recoverable Items`
-    /// (`permanentDelete`), which io-msgraph has no coroutine for.
+    /// (`permanentDelete`), which io-msgraph has no coroutine for; one
+    /// gone already is deleted ([`converged`]).
     pub fn destroy_graph_message(&mut self, token: &str, id: &str) -> Result<(), BridgeError> {
         let auth = HttpAuthBearer::new(token);
         let send = MsgraphSend::<MsgraphNoResponse>::with_method(
@@ -352,7 +357,7 @@ impl<'a, 'local> Client<'a, 'local> {
             None,
             Vec::new(),
         );
-        self.run_msgraph(send)?;
+        converged(self.run_msgraph(send))?;
         Ok(())
     }
 

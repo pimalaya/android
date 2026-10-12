@@ -2,6 +2,7 @@ package org.pimalaya;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -16,12 +17,15 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.PimalayaException;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Every mail action is a pimdir mutation shown at once, and the sync
@@ -47,6 +51,9 @@ public class MailMoveTest {
         final List<String> calls = new ArrayList<>();
         JSONArray listed = new JSONArray();
 
+        /** The handles the server no longer holds: a write on one answers 404. */
+        final Set<String> gone = new HashSet<>();
+
         Server() {
             super(pimdir, new PimalayaClient(), null, accountId);
         }
@@ -66,22 +73,31 @@ public class MailMoveTest {
 
         @Override
         protected void relocate(String mailbox, String handle, String target) {
+            refuseGone(handle);
             calls.add("relocate " + mailbox + " " + handle + " " + target);
         }
 
         @Override
         protected void copy(String mailbox, String handle, String target) {
+            refuseGone(handle);
             calls.add("copy " + mailbox + " " + handle + " " + target);
         }
 
         @Override
         protected void destroy(String mailbox, String handle) {
+            refuseGone(handle);
             calls.add("destroy " + mailbox + " " + handle);
         }
 
         @Override
         protected void append(String mailbox, byte[] source, JSONArray flags) {
             calls.add("append " + mailbox);
+        }
+
+        private void refuseGone(String handle) {
+            if (gone.contains(handle)) {
+                throw new PimalayaException("Requested entity was not found.", 404);
+            }
         }
     }
 
@@ -175,7 +191,6 @@ public class MailMoveTest {
         List<MailStore.StoredMessage> rows = store.loadMerged(10);
         assertEquals(1, rows.size());
         assertEquals("Trash", rows.get(0).mailbox);
-        assertTrue("marked pending", rows.get(0).unsynced);
     }
 
     @Test
@@ -259,7 +274,6 @@ public class MailMoveTest {
         // stays, saying so, rather than leaving and coming back.
         MailStore.StoredMessage row = rowIn("Trash");
         assertTrue(row.deleted);
-        assertTrue(row.unsynced);
         assertEquals("not a tombstone", "0",
                 scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '7'", trash));
     }
@@ -303,7 +317,7 @@ public class MailMoveTest {
 
         store.acknowledge(store.outgoing().get(0).queued);
 
-        assertTrue("shown once the submission went", rowIn("Sent").unsynced);
+        assertNotNull("shown once the submission went", rowIn("Sent"));
         assertEquals(2, store.count(store.query((account, mailbox) -> true, false, false, "")));
     }
 
@@ -322,6 +336,52 @@ public class MailMoveTest {
     }
 
     @Test
+    public void aDeleteOfAMessageGoneIsAcceptedAndThePageStillLands() throws Exception {
+        file(trash, named("7", "Old"));
+        stager().mutateRemove(trash, "7");
+
+        // Purged from the trash by another client between the listing and
+        // the push.
+        Server server = new Server();
+        server.gone.add("7");
+        server.listed = new JSONArray().put(named("7", "Old")).put(named("8", "New"));
+        String report = sync(server, trash);
+
+        assertFalse("no failure: " + report, report.contains("error"));
+        assertTrue("accepted: " + report, report.contains("\"pushed\":1"));
+        assertEquals("the page landed", "0",
+                scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '8'", trash));
+        assertNull("the removal converged",
+                scalar("SELECT handle FROM bindings WHERE collection = ? AND link_id = '7'",
+                        trash));
+    }
+
+    @Test
+    public void aMoveOfAMessageGoneIsAcceptedAndItsTargetWithdrawn() throws Exception {
+        stager().mutateMove(inbox, "42", trash);
+
+        Server server = new Server();
+        server.gone.add("42");
+        server.listed = new JSONArray().put(named("42", "Hello"));
+        String report = sync(server, inbox);
+
+        assertTrue("accepted: " + report, report.contains("\"pushed\":1"));
+        assertNull("nothing moves into the target",
+                scalar("SELECT link_id FROM items WHERE collection = ?", trash));
+    }
+
+    @Test
+    public void aCopyOfAMessageGoneIsRefused() throws Exception {
+        stager().mutateCopy(inbox, "42", trash);
+
+        Server server = new Server();
+        server.gone.add("42");
+        String report = sync(server, trash);
+
+        assertTrue("rejected: " + report, report.contains("\"rejected\":1"));
+    }
+
+    @Test
     public void aSentCopyLandsOnTheArrivalCarryingItsMessageId() throws Exception {
         String date = "2026-10-08T09:00:00Z";
         String body = "Message-ID: <m1@example.com>\r\nSubject: Hi\r\n\r\nbody\r\n";
@@ -333,7 +393,6 @@ public class MailMoveTest {
                 PimdirSummary.mail("m1@example.com", "Hi", null, EMAIL, "bob@example.org",
                         date, body.length(), false),
                 PimdirSummary.mailSortKey(date));
-        assertTrue(store.loadMerged(10).get(0).unsynced);
 
         // The provider filed it itself under its own handle.
         JSONObject arrival =
@@ -356,7 +415,6 @@ public class MailMoveTest {
         assertEquals("1", scalar("SELECT count(*) FROM items WHERE collection = ?", sent));
         assertEquals("Hi",
                 scalar("SELECT subject FROM mail_summary WHERE collection = ?", sent));
-        assertFalse(store.loadMerged(10).get(0).unsynced);
     }
 
     @Test
@@ -382,6 +440,5 @@ public class MailMoveTest {
 
         JSONObject result = reply.getJSONArray("results").getJSONObject(0);
         assertFalse("refused rather than deleted", result.getBoolean("accepted"));
-        assertTrue(Refusals.refused(context, calendar, "a.ics"));
     }
 }

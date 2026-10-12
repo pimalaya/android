@@ -43,7 +43,7 @@ public class E2eMailSendTest extends E2eCase {
         assertEquals("queued", 1, phone.mail.outgoing(address).size());
         MailStore.StoredMessage staged = phone.message(sent, subject);
         assertNotNull("in Sent at once", staged);
-        assertTrue("marked pending", staged.unsynced);
+        assertTrue("marked pending", phone.owes(sent, staged.id));
         E2eDevice.network(RuntimeEnvironment.getApplication(), E2eDevice.Network.WIFI);
 
         if (target.smtp) {
@@ -53,7 +53,7 @@ public class E2eMailSendTest extends E2eCase {
             RemotePass.MailPass failed = phone.sync(address, List.of(outbox, sent));
             assertNotNull("the drain failed", failed.failure);
             assertEquals("still queued", 1, phone.mail.outgoing(address).size());
-            assertTrue("the copy still pending", phone.message(sent, subject).unsynced);
+            assertTrue("the copy still pending", phone.owes(sent, phone.message(sent, subject).id));
             phone.accounts.add(account);
         }
 
@@ -82,7 +82,7 @@ public class E2eMailSendTest extends E2eCase {
                 () -> {
                     pass(phone, sent);
                     List<MailStore.StoredMessage> copies = phone.messages(sent, subject);
-                    return copies.size() == 1 && !copies.get(0).unsynced;
+                    return copies.size() == 1 && !phone.owes(sent, copies.get(0).id);
                 });
         assertEquals("the phone's Sent holds one", 1, phone.messages(sent, subject).size());
 

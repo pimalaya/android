@@ -132,20 +132,20 @@ final class PimdirQueue {
         String account = accounts.idOf(accountEmail);
         String hash = body == null ? null : PimdirHash.of(body);
 
-        if (hash != null) {
-            try {
-                blobs.put(hash, body);
-            } catch (IOException error) {
-                throw new IllegalStateException("Could not store the body " + hash, error);
-            }
-        }
-
         SQLiteDatabase db = store.getWritableDatabase();
         db.beginTransaction();
         try {
             run(db, "ENSURE_COLLECTION", values("collection", collection, "account", account));
 
+            // NOTE: filed inside the transaction, so no collector unlinks
+            // the file of an object row it reads gone before this one lands
+            // (PimdirItems.unlinkCollected).
             if (hash != null) {
+                try {
+                    blobs.put(hash, body);
+                } catch (IOException error) {
+                    throw new IllegalStateException("Could not store the body " + hash, error);
+                }
                 run(db, "STORE_OBJECT", values("hash", hash, "size", body.length));
                 run(db, "PIN_OBJECT", values("hash", hash));
             }

@@ -138,7 +138,6 @@ public class DeletedItemsTest {
                 string("SELECT handle FROM bindings WHERE link_id = 'u1'"));
         List<PimdirContacts.Indexed> listed = contacts.list(BOOK);
         assertEquals(1, listed.size());
-        assertTrue("pending upload", listed.get(0).unsynced);
         assertTrue(deleted.list().isEmpty());
     }
 

@@ -48,9 +48,9 @@ tempfile = { version = "3", default-features = false }
 [patch.crates-io]
 io-jmap = { git = "https://github.com/pimalaya/io-jmap", rev = "919eab465ab620b323f9191ab8de2f640bc4a1d2" }
 io-msgraph = { git = "https://github.com/pimalaya/io-msgraph", rev = "2ae26370aefa671c16316dbad98107634436bce6" }
-# NOTE: local fixes, to be replaced by released versions before commit.
-ical-rs = { path = "../../ical" }
-io-http = { path = "../../io-http" }
-io-imap = { path = "../../io-imap" }
-io-pimdir = { path = "../../io-pimdir" }
-io-webdav = { path = "../../io-webdav" }
+# NOTE: unreleased fixes, to be replaced by released versions.
+ical-rs = { git = "https://github.com/pimalaya/ical", rev = "caa14225152a7aff6d8c86cef1f95e800dd77d20" }
+io-http = { git = "https://github.com/pimalaya/io-http", rev = "e1815307771c1ec65a86b77256d46c33241d3038" }
+io-imap = { git = "https://github.com/pimalaya/io-imap", rev = "b1ab38ea9f24578b46dda56aa009600571b6b9ef" }
+io-pimdir = { git = "https://github.com/pimalaya/io-pimdir", rev = "189db408bdbeee33c1c535709c5f40f3464c7ecb" }
+io-webdav = { git = "https://github.com/pimalaya/io-webdav", rev = "62fad898d1ecb3ebb25c37826a79eb72fcd54d7f" }

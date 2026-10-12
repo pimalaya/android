@@ -293,10 +293,6 @@ public class MailBodiesTest {
 
         server.sync(inbox);
         assertTrue("nothing pushed: " + server.pushed, server.pushed.isEmpty());
-        MailStore.Query all = store.query((account, collection) -> true, false, false, "");
-        for (MailStore.StoredMessage message : store.all(all)) {
-            assertFalse("no change owed for " + message.id, message.unsynced);
-        }
     }
 
     /** Steps a run until it is done, at most {@code steps} times. */

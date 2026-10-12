@@ -664,8 +664,6 @@ final class CalendarList {
             // row came from.
             ((TextView) view.findViewById(R.id.event_origin))
                     .setText(row.calendar.name + " · " + row.calendar.accountEmail);
-            host.ui.syncMark(
-                    view.findViewById(R.id.event_unsynced), row.event.unsynced, row.event.refused);
 
             // The disc stands for the calendar, initial and colour both,
             // the way the mail row's disc stands for its sender; the

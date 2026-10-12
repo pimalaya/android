@@ -87,6 +87,18 @@ pub(crate) fn required<'a>(
         .ok_or_else(|| format!("Push {op} change is missing its {name}").into())
 }
 
+/// A write on one message, a message the server no longer holds (404:
+/// deleted, purged, or a draft saved under a new id since it was
+/// listed) answered as converged, [`None`]: a removal, a move or a
+/// marker has nothing left to apply to. Any other failure stays one.
+pub(crate) fn converged<T>(result: Result<T, BridgeError>) -> Result<Option<T>, BridgeError> {
+    match result {
+        Ok(done) => Ok(Some(done)),
+        Err(err) if err.status == Some(404) => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
 /// One rejected push outcome carrying what the server objected.
 pub(crate) fn rejected(reference: String, error: String) -> PushOutcome {
     PushOutcome {

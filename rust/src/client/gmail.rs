@@ -60,7 +60,7 @@ use io_pimdir::summary::{
 use crate::{
     client::{
         Client,
-        convert::coroutine_error,
+        convert::{converged, coroutine_error},
         listing::{GMAIL_PAGE, Named, Scope, flags},
         throttle,
     },
@@ -828,7 +828,7 @@ impl<'a, 'local> Client<'a, 'local> {
     }
 
     /// Adds or removes one marker on one message, answering its labels
-    /// after the change.
+    /// after the change, none for a message gone ([`converged`]).
     ///
     /// `\Seen` is the absence of `UNREAD` and `\Flagged` is `STARRED`.
     /// Gmail keeps no answered marker and deletes by label, so the other
@@ -855,13 +855,15 @@ impl<'a, 'local> Client<'a, 'local> {
         let auth = HttpAuthBearer::new(token);
         let coroutine =
             GmailMessageModify::new(&auth, "me", id, add, remove).map_err(|err| err.to_string())?;
-        Ok(self
-            .run_gmail(token, quota::MESSAGES_MODIFY, coroutine)?
-            .label_ids)
+        let modified = converged(self.run_gmail(token, quota::MESSAGES_MODIFY, coroutine))?;
+        Ok(modified
+            .map(|message| message.label_ids)
+            .unwrap_or_default())
     }
 
     /// Relocates one message from the label `from` to the label `to`, the
-    /// way [`relocation`] says Gmail does it.
+    /// way [`relocation`] says Gmail does it; a message gone stays gone
+    /// ([`converged`]).
     pub fn relocate_gmail_message(
         &mut self,
         token: &str,
@@ -874,22 +876,26 @@ impl<'a, 'local> Client<'a, 'local> {
             GmailRelocation::Trash => {
                 let coroutine =
                     GmailMessageTrash::new(&auth, "me", id).map_err(|err| err.to_string())?;
-                self.run_gmail(token, quota::MESSAGES_TRASH, coroutine)?;
+                converged(self.run_gmail(token, quota::MESSAGES_TRASH, coroutine))?;
             }
             GmailRelocation::Untrash { add } => {
                 let coroutine =
                     GmailMessageUntrash::new(&auth, "me", id).map_err(|err| err.to_string())?;
-                self.run_gmail(token, quota::MESSAGES_UNTRASH, coroutine)?;
-                self.modify_gmail_labels(token, id, &add, &[])?;
+                if converged(self.run_gmail(token, quota::MESSAGES_UNTRASH, coroutine))?.is_some() {
+                    converged(self.modify_gmail_labels(token, id, &add, &[]))?;
+                }
             }
             GmailRelocation::Modify { add, remove } => {
-                self.modify_gmail_labels(token, id, &add, &remove)?;
+                converged(self.modify_gmail_labels(token, id, &add, &remove))?;
             }
         }
         Ok(())
     }
 
     /// Files one message under the label `to` too, the copy a label is.
+    ///
+    /// A message gone fails with its 404: a copy of nothing has no
+    /// arrival to wait for, so the caller refuses it.
     pub fn copy_gmail_message(
         &mut self,
         token: &str,
@@ -899,11 +905,12 @@ impl<'a, 'local> Client<'a, 'local> {
         self.modify_gmail_labels(token, id, &[to.to_string()], &[])
     }
 
-    /// Deletes one message for good, bypassing the trash.
+    /// Deletes one message for good, bypassing the trash; one gone
+    /// already is deleted ([`converged`]).
     pub fn destroy_gmail_message(&mut self, token: &str, id: &str) -> Result<(), BridgeError> {
         let auth = HttpAuthBearer::new(token);
         let coroutine = GmailMessageDelete::new(&auth, "me", id).map_err(|err| err.to_string())?;
-        self.run_gmail(token, quota::MESSAGES_DELETE, coroutine)?;
+        converged(self.run_gmail(token, quota::MESSAGES_DELETE, coroutine))?;
         Ok(())
     }
 

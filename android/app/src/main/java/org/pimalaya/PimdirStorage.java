@@ -808,7 +808,12 @@ final class PimdirStorage {
         String hash = op.getString("hash");
         // NOTE: a body the driver filed as it fetched it (a message read
         // into a file) is in the blob store already: its row alone.
+        // A row without its file would be a body lost behind a level that
+        // says full: refused, the batch rolls back and the body stays owed.
         if (op.optBoolean("persisted")) {
+            if (!blobs.has(hash)) {
+                throw new PimalayaException("The body " + hash + " is not in the blob store");
+            }
             db.execSQL(
                     "INSERT INTO objects(hash, size, refcount) VALUES(?, ?, 0)"
                             + " ON CONFLICT(hash) DO NOTHING",
@@ -910,6 +915,30 @@ final class PimdirStorage {
         boolean exists = held != null;
         String previousObject = held == null || held.isEmpty() ? null : held;
 
+        // NOTE: a message's body never changes under its link id, so an
+        // upsert carrying none below the level the row holds is one the
+        // engine loaded before the body was filed (a reader opening it, a
+        // fill chunk landing) and merged while its network ran: it never
+        // takes the body away. Releasing one is RELEASE_BEFORE's,
+        // releaseCrossLinked's and the collectors' to do, a staged
+        // removal's and a conflict's the engine's to say.
+        String kept = null;
+        if (mail && previousObject != null && object == null && !tombstone
+                && !"conflict".equals(placement.optString("status", "clean"))) {
+            int heldLevel =
+                    Integer.parseInt(
+                            one(
+                                    db,
+                                    "SELECT level FROM items WHERE collection = ?"
+                                            + " AND link_id = ?",
+                                    collection, linkId));
+            if (level < heldLevel) {
+                kept = previousObject;
+                object = previousObject;
+                level = heldLevel;
+            }
+        }
+
         if (!exists) {
             db.execSQL(
                     "INSERT INTO items(collection, link_id, seq, flags, object_hash,"
@@ -961,7 +990,7 @@ final class PimdirStorage {
             PimdirSummary.write(db, collection, linkId, summary, !exists);
         }
         links.add(collection + "\n" + linkId);
-        writeBinding(db, collection, source, linkId, handle, placement, superseded, !exists);
+        writeBinding(db, collection, source, linkId, handle, placement, superseded, !exists, kept);
         adjustRefcount(db, previousObject, object);
 
         if (!exists) {
@@ -982,10 +1011,13 @@ final class PimdirStorage {
      * licensed rebind, a placeholder reconciled to its assigned handle or a
      * spine rebuilt onto a new handle space, and the batch says so by
      * superseding the old handle in the same write.
+     *
+     * <p>{@code kept} is the body {@link #applyUpsert} kept against a
+     * placement carrying none, null when it kept nothing.
      */
     private void writeBinding(SQLiteDatabase db, String collection, String source, String linkId,
-            String handle, JSONObject placement, Set<String> superseded, boolean fresh)
-            throws JSONException {
+            String handle, JSONObject placement, Set<String> superseded, boolean fresh,
+            String kept) throws JSONException {
         JSONObject base = placement.optJSONObject("base");
         String baseFlags = base == null || base.optJSONArray("flags") == null
                 ? null
@@ -1023,6 +1055,10 @@ final class PimdirStorage {
         String previousBase = fresh ? null : baseObjectOf(db, collection, linkId, source);
         String previousConflict =
                 fresh ? null : conflictObjectOf(db, collection, linkId, source);
+        // NOTE: the body applyUpsert kept, the base agreed on it kept too.
+        if (kept != null && baseObject == null && kept.equals(previousBase)) {
+            baseObject = previousBase;
+        }
 
         db.execSQL(
                 "INSERT INTO bindings(collection, link_id, source, handle, base_flags,"
@@ -1546,20 +1582,6 @@ final class PimdirStorage {
 
     // ---- staged moves and creates -----------------------------------------
 
-    /** The link id an engine handle names on this source, or null. */
-    String linkOfHandle(String engineCollection, String handle) {
-        SQLiteDatabase db = store.getReadableDatabase();
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT link_id FROM bindings WHERE collection = ? AND source = ?"
-                                + " AND handle = ?",
-                        new String[] {
-                            collectionOf(engineCollection), sourceOf(engineCollection), handle
-                        })) {
-            return cursor.moveToFirst() ? cursor.getString(0) : nameOf(handle);
-        }
-    }
-
     /**
      * The handle the engine addresses an item by on this source: the one it
      * binds, else the provisional handle its create waits under (SYNC §2).
@@ -1760,46 +1782,6 @@ final class PimdirStorage {
             }
         }
         return creates;
-    }
-
-    /**
-     * Whether an item owes the source a push: no base agreed on it yet (a
-     * create, a move's target), markers moved past the ones agreed, or a
-     * body past the agreed one where the kind is edited in place. False for
-     * an item the source does not know at all being no item of a synced
-     * collection.
-     */
-    boolean unsynced(String engineCollection, String linkId) {
-        SQLiteDatabase db = store.getReadableDatabase();
-        try (Cursor cursor =
-                db.rawQuery(
-                        "SELECT i.flags, i.object_hash, b.link_id, b.base_present,"
-                                + " b.base_flags, b.base_object, c.kind"
-                                + " FROM items i"
-                                + " JOIN collections c ON c.id = i.collection"
-                                + " LEFT JOIN bindings b ON b.collection = i.collection"
-                                + " AND b.link_id = i.link_id AND b.source = ?"
-                                + " WHERE i.collection = ? AND i.link_id = ?",
-                        new String[] {
-                            sourceOf(engineCollection), collectionOf(engineCollection), linkId
-                        })) {
-            if (!cursor.moveToFirst()) {
-                return false;
-            }
-            if (cursor.isNull(2) || cursor.getInt(3) == 0) {
-                return true;
-            }
-            boolean flagsMoved =
-                    !cursor.isNull(0)
-                            && !cursor.isNull(4)
-                            && !sameFlags(cursor.getString(0), cursor.getString(4));
-            boolean bodyMoved =
-                    mutable(cursor.getString(6))
-                            && !cursor.isNull(1)
-                            && (cursor.isNull(5)
-                                    || !cursor.getString(1).equals(cursor.getString(5)));
-            return flagsMoved || bodyMoved;
-        }
     }
 
     /** Whether a stored collection holds mail, read within a write batch. */

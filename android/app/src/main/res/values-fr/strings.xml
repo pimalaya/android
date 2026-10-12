@@ -521,8 +521,6 @@
     <string name="message_deleted_in_place">Marqué supprimé ; il reste où il est</string>
     <string name="message_deleted_for_good">Supprimé définitivement</string>
     <string name="message_marked_deleted">Marqué supprimé</string>
-    <string name="row_unsynced">En attente de synchronisation</string>
-    <string name="row_refused">Refusé par le serveur</string>
     <string name="message_write_failed">Impossible d\'enregistrer la modification</string>
     <string name="message_pending">En attente d\'envoi</string>
     <string name="mail_outbox">Boîte d\'envoi</string>

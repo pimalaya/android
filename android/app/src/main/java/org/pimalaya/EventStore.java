@@ -45,10 +45,8 @@ final class EventStore {
     private final PimdirStorage storage;
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
-    private final Context context;
 
     EventStore(Context context, PimdirDb store) {
-        this.context = context;
         this.items = new PimdirItems(store);
         this.storage = new PimdirStorage(store);
         this.collections = new PimdirCollections(store, context);
@@ -161,17 +159,11 @@ final class EventStore {
         /** The server's validator, empty when it sent none. */
         final String etag;
 
-        /** Whether it holds a change the server has not taken yet. */
-        final boolean unsynced;
-
-        /** Whether the server refused that change for good. */
-        final boolean refused;
-
         /** Whether a source holds it changed differently since their base. */
         final boolean conflicted;
 
         StoredEvent(String collectionId, String id, String handle, String ical, String etag) {
-            this(collectionId, id, handle, ical, etag, false, false, false);
+            this(collectionId, id, handle, ical, etag, false);
         }
 
         StoredEvent(
@@ -180,16 +172,12 @@ final class EventStore {
                 String handle,
                 String ical,
                 String etag,
-                boolean unsynced,
-                boolean refused,
                 boolean conflicted) {
             this.collectionId = collectionId;
             this.id = id;
             this.handle = handle;
             this.ical = ical;
             this.etag = etag;
-            this.unsynced = unsynced;
-            this.refused = refused;
             this.conflicted = conflicted;
         }
     }
@@ -201,7 +189,7 @@ final class EventStore {
                 items.readable()
                         .rawQuery(
                                 "SELECT i.collection, i.link_id, i.object_hash, b.base_revision,"
-                                        + " b.handle, b.base_present, b.base_object"
+                                        + " b.handle"
                                         + " FROM items i"
                                         + " JOIN collections c ON c.id = i.collection"
                                         + " LEFT JOIN bindings b ON b.collection = i.collection"
@@ -212,12 +200,6 @@ final class EventStore {
                                 new String[] {PimdirStorage.SERVER, PimdirSummary.CALENDAR})) {
             while (cursor.moveToNext()) {
                 String id = cursor.getString(1);
-                // NOTE: a create no push carried out, or a body past the
-                // one the server agreed on.
-                boolean unsynced =
-                        cursor.isNull(4)
-                                || cursor.getInt(5) == 0
-                                || !cursor.getString(2).equals(cursor.getString(6));
                 events.add(
                         new StoredEvent(
                                 cursor.getString(0),
@@ -225,8 +207,6 @@ final class EventStore {
                                 CardStore.rowHandle(cursor.isNull(4) ? null : cursor.getString(4), id),
                                 items.body(cursor.getString(2)),
                                 cursor.isNull(3) ? "" : cursor.getString(3),
-                                unsynced,
-                                unsynced && Refusals.refused(context, cursor.getString(0), id),
                                 conflicted.contains(cursor.getString(0) + "\n" + id)));
             }
         }

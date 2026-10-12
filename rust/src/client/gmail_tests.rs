@@ -519,3 +519,62 @@ fn a_raw_read_writes_the_bytes_with_their_labels_and_reception() {
         "the Date header, never the reception"
     );
 }
+
+/// One message write answered `answer`, as the bridge reports it
+/// ([`Client::run_gmail`]) and a removal, a move or a marker takes it.
+fn write_answered<C, T>(coroutine: C, answer: &[u8]) -> Result<Option<T>, BridgeError>
+where
+    C: GmailCoroutine<Yield = GmailYield, Return = Result<GmailSendOutput<T>, GmailSendError>>,
+{
+    let sent = drive(coroutine, answer)
+        .map(|output| output.response)
+        .map_err(|err| coroutine_error(&err));
+    converged(sent)
+}
+
+#[test]
+fn a_write_on_a_message_gone_converges() {
+    let auth = HttpAuthBearer::new("token");
+    let gone = http(
+        "404 Not Found",
+        "application/json",
+        r#"{"error":{"code":404,"message":"Requested entity was not found.","status":"NOT_FOUND"}}"#,
+    );
+    let label = ["STARRED".to_string()];
+
+    // A message deleted for good, a trash or spam purge, a draft saved
+    // under a new id since the listing: nothing is left to write.
+    let delete = GmailMessageDelete::new(&auth, "me", "m1").unwrap();
+    assert!(write_answered(delete, &gone).unwrap().is_none());
+    let trash = GmailMessageTrash::new(&auth, "me", "m1").unwrap();
+    assert!(write_answered(trash, &gone).unwrap().is_none());
+    let untrash = GmailMessageUntrash::new(&auth, "me", "m1").unwrap();
+    assert!(write_answered(untrash, &gone).unwrap().is_none());
+    let modify = GmailMessageModify::new(&auth, "me", "m1", &label, &[]).unwrap();
+    assert!(write_answered(modify, &gone).unwrap().is_none());
+
+    // The 404 crosses as one, for a copy of nothing to be refused.
+    let copy = GmailMessageModify::new(&auth, "me", "m1", &label, &[]).unwrap();
+    let refused = drive(copy, &gone).unwrap_err();
+    assert_eq!(coroutine_error(&refused).status, Some(404));
+}
+
+#[test]
+fn a_write_failing_otherwise_still_fails() {
+    let auth = HttpAuthBearer::new("token");
+    let label = ["STARRED".to_string()];
+
+    let modify = GmailMessageModify::new(&auth, "me", "m1", &label, &[]).unwrap();
+    let busy = http("503 Service Unavailable", "application/json", "{}");
+    let failed = write_answered(modify, &busy).unwrap_err();
+    assert_eq!(failed.status, Some(503));
+
+    let modify = GmailMessageModify::new(&auth, "me", "m1", &label, &[]).unwrap();
+    let done = http(
+        "200 OK",
+        "application/json",
+        r#"{"id":"m1","labelIds":["INBOX","STARRED"]}"#,
+    );
+    let written = write_answered(modify, &done).unwrap().unwrap();
+    assert_eq!(written.label_ids, vec!["INBOX", "STARRED"]);
+}

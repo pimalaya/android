@@ -100,12 +100,10 @@ final class MailStore {
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
     private final PimdirQueue queue;
-    private final PimdirStorage storage;
     private final Context context;
 
     MailStore(Context context, PimdirDb store) {
         this.items = new PimdirItems(store);
-        this.storage = new PimdirStorage(store);
         this.store = store;
         this.collections = new PimdirCollections(store, context);
         this.accounts = new PimdirAccount(context);
@@ -444,16 +442,6 @@ final class MailStore {
         final boolean pending;
 
         /**
-         * Whether the store holds a change of it the server has not taken
-         * yet: a move's target, a sent copy, a marker. Never a message
-         * waiting to go out, which says so on its own.
-         */
-        final boolean unsynced;
-
-        /** Whether the server refused that change for good. */
-        final boolean refused;
-
-        /**
          * Whether it carries {@code \Deleted}: deleted where the server
          * expunges no single message (no UIDPLUS), and so still listed.
          */
@@ -519,8 +507,6 @@ final class MailStore {
             this.pending = queued != 0;
             this.sortKey = "";
             this.seq = 0;
-            this.unsynced = false;
-            this.refused = false;
             this.deleted = false;
         }
 
@@ -539,9 +525,7 @@ final class MailStore {
                 String flags,
                 Integer attachment,
                 Long size,
-                boolean bodied,
-                boolean unsynced,
-                boolean refused) {
+                boolean bodied) {
             this.accountEmail = accountEmail;
             this.collection = collection;
             this.mailbox = mailbox;
@@ -568,8 +552,6 @@ final class MailStore {
             this.failed = false;
             this.uncertain = false;
             this.pending = false;
-            this.unsynced = unsynced;
-            this.refused = refused;
             this.deleted = has(flags, MailEngine.DELETED);
         }
 
@@ -1206,7 +1188,6 @@ final class MailStore {
         if (mailbox == null) {
             return null;
         }
-        boolean unsynced = storage.unsynced(cursor.getString(0), cursor.getString(2));
         return new StoredMessage(
                 mailbox.accountEmail,
                 cursor.getString(0),
@@ -1221,9 +1202,7 @@ final class MailStore {
                 cursor.isNull(3) ? null : cursor.getString(3),
                 cursor.isNull(14) ? null : cursor.getInt(14),
                 cursor.isNull(13) ? null : cursor.getLong(13),
-                !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL,
-                unsynced,
-                unsynced && refused(cursor.getString(0), cursor.getString(2)));
+                !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL);
     }
 
     /**
@@ -1274,11 +1253,6 @@ final class MailStore {
                 return rows;
             }
         }
-    }
-
-    /** Whether the server refused a change of one message for good. */
-    private boolean refused(String collection, String linkId) {
-        return Refusals.refused(context, collection, linkId);
     }
 
     /** Every message of the query, for a selection made of all of it. */

@@ -304,6 +304,8 @@ class MailEngine extends PimdirEngine {
      * {@code SELECT}: deleted since the roster was read, or not yet seen by
      * a new session) as for a Graph folder or a Gmail label gone. A step and
      * a pass skip such a mailbox, the next roster dropping it if it is gone.
+     * Only a mailbox's own reads end up here: a push answers the 404 of a
+     * message gone itself ({@link #gone}).
      */
     static boolean refused(Exception failure) {
         return isGone(failure);
@@ -845,6 +847,9 @@ class MailEngine extends PimdirEngine {
     /** The rows {@link #download} asked for, by handle, while its upgrade runs. */
     private final Map<String, MailBodies.Row> downloading = new HashMap<>();
 
+    /** The bodies {@link #stored} pinned ({@link PimdirItems#pin}), while the upgrade runs. */
+    private final List<String> pinned = new ArrayList<>();
+
     /** The handles the upgrade asked the server for, while it runs. */
     private final Set<String> asked = new HashSet<>();
 
@@ -929,10 +934,20 @@ class MailEngine extends PimdirEngine {
         if (handles.isEmpty()) {
             return List.of();
         }
-        Log.d(
-                "pimalaya",
-                "mail bodies " + collection + " (" + handles.size() + "): "
-                        + client.offlineUpgrade(this, collection, handles));
+        try {
+            Log.d(
+                    "pimalaya",
+                    "mail bodies " + collection + " (" + handles.size() + "): "
+                            + client.offlineUpgrade(this, collection, handles));
+        } finally {
+            // NOTE: every write naming them has returned, committed or not:
+            // one no row names (the write failed) is an orphan to unlink.
+            for (String hash : pinned) {
+                PimdirItems.unpin(hash);
+            }
+            PimdirItems.deferUnlink(pinned);
+            pinned.clear();
+        }
         synchronized (STORE) {
             for (Map.Entry<String, JSONObject> summary : summaries.entrySet()) {
                 mail().restateFromBody(collection, summary.getKey(), summary.getValue());
@@ -1063,6 +1078,10 @@ class MailEngine extends PimdirEngine {
             MailPoison.end(pimdir.context(), key);
         }
         String hash = described.getString("hash");
+        // NOTE: pinned before it is moved in and until the write naming it
+        // has returned (download), so no collector unlinks it meanwhile.
+        PimdirItems.pin(hash);
+        pinned.add(hash);
         try {
             new PimdirBlobs(pimdir.blobs()).adopt(hash, file);
         } catch (IOException unreadable) {
@@ -1301,15 +1320,24 @@ class MailEngine extends PimdirEngine {
             throws JSONException {
         String to = change.isNull("to") ? null : change.optString("to", null);
         if (to == null) {
-            destroy(mailbox, handle);
+            try {
+                destroy(mailbox, handle);
+            } catch (RuntimeException failure) {
+                gone(mailbox, handle, failure);
+            }
             return result(handle, true, null, null);
         }
         if (!ownCollection(to)) {
-            String create = offline.pendingCreateOf(to, change.optString("linkId", handle));
-            return refuse(to, create, handle);
+            return result(handle, false, null, null);
         }
 
-        relocate(mailbox, handle, mailboxOf(to));
+        // NOTE: a message gone is moved nowhere, so its target's create
+        // goes as a delivered move's does.
+        try {
+            relocate(mailbox, handle, mailboxOf(to));
+        } catch (RuntimeException failure) {
+            gone(mailbox, handle, failure);
+        }
         String linkId = change.optString("linkId", handle);
         synchronized (STORE) {
             String create = offline.pendingCreateOf(to, linkId);
@@ -1349,18 +1377,19 @@ class MailEngine extends PimdirEngine {
         if (origin != null) {
             String from = origin.getString("collection");
             if (!ownCollection(from)) {
-                return refuse(collection, linkId, handle);
+                return result(handle, false, null, null);
             }
-            copy(mailboxOf(from), origin.getString("handle"), mailbox);
+            // NOTE: a copy of a message gone has no arrival to wait for.
+            try {
+                copy(mailboxOf(from), origin.getString("handle"), mailbox);
+            } catch (RuntimeException failure) {
+                gone(mailboxOf(from), origin.getString("handle"), failure);
+                return result(handle, false, null, null);
+            }
             return result(handle, true, null, null);
         }
 
-        if (PimalayaClient.submitsOverSession(session.account())) {
-            return "sent".equals(mail().roles().get(collection))
-                    ? result(handle, false, null, null)
-                    : refuse(collection, linkId, handle);
-        }
-        if (mail().submitting(linkId)) {
+        if (PimalayaClient.submitsOverSession(session.account()) || mail().submitting(linkId)) {
             return result(handle, false, null, null);
         }
 
@@ -1418,9 +1447,32 @@ class MailEngine extends PimdirEngine {
             if (base != null && wanted == has(base, flag)) {
                 continue;
             }
-            client.setMessageFlag(session, mailbox, handle, flag, wanted);
+            try {
+                client.setMessageFlag(session, mailbox, handle, flag, wanted);
+            } catch (RuntimeException failure) {
+                gone(mailbox, handle, failure);
+                break;
+            }
         }
         return result(handle, true, null, null);
+    }
+
+    /**
+     * Takes a write on one message failing with a 404 as the message gone
+     * from the server since it was listed (deleted for good, purged from
+     * the trash or the spam, a draft saved under a new id): nothing left
+     * to remove, move or mark, so the change converged, and a copy of it
+     * is refused. Any other failure is thrown on.
+     *
+     * <p>Answered here so a push never fails a pass with a 404, which
+     * {@link #refused} reads as the server refusing the mailbox: a
+     * mailbox gone fails its listing, before anything is pushed.
+     */
+    private static void gone(String mailbox, String handle, RuntimeException failure) {
+        if (!isGone(failure)) {
+            throw failure;
+        }
+        Log.w("pimalaya", "message gone from the server: " + mailbox + " " + handle);
     }
 
     /** Whether a marker set names one marker. */

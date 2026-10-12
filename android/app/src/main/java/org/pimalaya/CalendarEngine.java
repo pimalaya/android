@@ -441,7 +441,7 @@ final class CalendarEngine extends PimdirEngine {
                         return result(handle, false, null, null);
                     }
                     if (isRefusal(failure)) {
-                        return refuse(collection, change.optString("linkId", null), handle);
+                        return result(handle, false, null, null);
                     }
                     throw failure;
                 }
@@ -467,14 +467,9 @@ final class CalendarEngine extends PimdirEngine {
                         return result(handle, false, null, null);
                     }
                     // A 422 is a part of the edit the server refuses for
-                    // good, whatever else of it landed: rejected, and the
-                    // row says so rather than waiting.
+                    // good, whatever else of it landed: rejected.
                     if (isRefusal(failure)) {
-                        String linkId;
-                        synchronized (STORE) {
-                            linkId = offline.linkOfHandle(collection, handle);
-                        }
-                        return refuse(collection, linkId, handle);
+                        return result(handle, false, null, null);
                     }
                     throw failure;
                 }
@@ -484,7 +479,7 @@ final class CalendarEngine extends PimdirEngine {
                 // connector that cannot MUST refuse rather than delete
                 // (pimdir SYNC §4): the destination has not received it.
                 if (!change.isNull("to") && change.has("to")) {
-                    return refuse(collection, change.optString("linkId", null), handle);
+                    return result(handle, false, null, null);
                 }
                 try {
                     client.deleteEvent(transport, account, url, handle, ifMatch, address);
@@ -494,7 +489,7 @@ final class CalendarEngine extends PimdirEngine {
                     } else if (isPreconditionFailure(failure)) {
                         return result(handle, false, null, null);
                     } else if (isRefusal(failure)) {
-                        return refuse(collection, change.optString("linkId", null), handle);
+                        return result(handle, false, null, null);
                     } else {
                         throw failure;
                     }

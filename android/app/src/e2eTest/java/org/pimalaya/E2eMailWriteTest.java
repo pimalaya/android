@@ -45,10 +45,10 @@ public class E2eMailWriteTest extends E2eCase {
         MailStore.StoredMessage staged = phone.message(collection, subject("junk"));
         assertTrue("starred at once", staged.flagged);
         assertTrue("read at once", staged.seen);
-        assertTrue("pending", staged.unsynced);
+        assertTrue("pending", phone.owes(collection, staged.id));
 
         pass(phone, collection);
-        assertFalse("pushed", phone.message(collection, subject("junk")).unsynced);
+        assertFalse("pushed", phone.owes(collection, staged.id));
 
         E2eDevice observer = observer();
         String seen = observer.collection(address, mailbox);
@@ -103,7 +103,7 @@ public class E2eMailWriteTest extends E2eCase {
         assertNull("gone from its mailbox at once", phone.message(collection, subject("deleted")));
         MailStore.StoredMessage moving = phone.message(trash, subject("deleted"));
         assertNotNull("in the trash at once", moving);
-        assertTrue("pending", moving.unsynced);
+        assertTrue("pending", phone.owes(trash, moving.id));
 
         pass(phone, collection, trash);
         assertNull("not resurrected", phone.message(collection, subject("deleted")));
@@ -143,7 +143,7 @@ public class E2eMailWriteTest extends E2eCase {
                 () -> {
                     pass(phone, trash);
                     MailStore.StoredMessage there = phone.message(trash, subject("deleted"));
-                    return there != null && !there.unsynced;
+                    return there != null && !phone.owes(trash, there.id);
                 });
         MailStore.StoredMessage inTrash = phone.message(trash, subject("deleted"));
         MailEngine.Deletion erased = phone.stager(address).stageDelete(inTrash);

@@ -119,11 +119,11 @@ public class E2eMailListTest extends E2eCase {
         phone.stager(address).stageFlag(listed, MailEngine.SEEN, true);
         MailStore.StoredMessage staged = phone.message(collection, subject("unread"));
         assertTrue("read at once", staged.seen);
-        assertTrue("pending until a sync", staged.unsynced);
+        assertTrue("pending until a sync", phone.owes(collection, staged.id));
 
         pass(phone, collection);
         MailStore.StoredMessage synced = phone.message(collection, subject("unread"));
-        assertFalse("pushed", synced.unsynced);
+        assertFalse("pushed", phone.owes(collection, synced.id));
         assertTrue("the refresh kept the body", phone.mail.holdsBody(synced));
 
         E2eDevice observer = observer();

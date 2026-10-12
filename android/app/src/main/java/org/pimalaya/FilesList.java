@@ -639,7 +639,6 @@ final class FilesList {
             view.findViewById(R.id.event_divider)
                     .setVisibility(sections.opensCard(position) ? View.GONE : View.VISIBLE);
             view.findViewById(R.id.event_conflicted).setVisibility(View.GONE);
-            view.findViewById(R.id.event_unsynced).setVisibility(View.GONE);
 
             Row row = sections.row(position);
             TextView avatar = view.findViewById(R.id.event_avatar);

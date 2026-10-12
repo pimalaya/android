@@ -445,8 +445,6 @@
     <string name="message_deleted_in_place">Marked deleted; it stays where it is</string>
     <string name="message_deleted_for_good">Deleted for good</string>
     <string name="message_marked_deleted">Marked deleted</string>
-    <string name="row_unsynced">Waiting to sync</string>
-    <string name="row_refused">Refused by the server</string>
     <string name="message_write_failed">Could not write the change</string>
     <string name="message_pending">Waiting to be sent</string>
     <string name="mail_outbox">Outbox</string>

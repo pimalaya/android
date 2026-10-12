@@ -86,13 +86,7 @@ final class PimdirContacts {
          *  so the divergence is the user's to settle. */
         final boolean conflicted;
 
-        /**
-         * True when the card holds a change its server has not taken: a
-         * create no push has carried out, or a body past the agreed one.
-         */
-        final boolean unsynced;
-
-        Indexed(Card card, JSONObject index, boolean conflicted, boolean unsynced) {
+        Indexed(Card card, JSONObject index, boolean conflicted) {
             this.card = card;
             this.name = index.optString("name");
             this.email = index.optString("email");
@@ -101,7 +95,6 @@ final class PimdirContacts {
             this.uid = index.optString("uid");
             this.hash = index.optString("hash");
             this.conflicted = conflicted;
-            this.unsynced = unsynced;
         }
     }
 
@@ -126,8 +119,7 @@ final class PimdirContacts {
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT i.link_id, i.object_hash, b.conflicted,"
-                                + " b.conflict_object, b.handle, b.base_revision,"
-                                + " b.base_present, b.base_object"
+                                + " b.conflict_object, b.handle, b.base_revision"
                                 + " FROM items i"
                                 + " LEFT JOIN bindings b ON b.collection = i.collection"
                                 + " AND b.link_id = i.link_id AND b.source = ?"
@@ -144,11 +136,7 @@ final class PimdirContacts {
                                 cursor.isNull(5) ? null : cursor.getString(5),
                                 items.body(cursor.getString(1)));
                 boolean conflicted = cursor.getInt(2) == 1 && !cursor.isNull(3);
-                boolean unsynced =
-                        cursor.isNull(4)
-                                || cursor.getInt(6) == 0
-                                || !cursor.getString(1).equals(cursor.getString(7));
-                cards.add(new Indexed(card, indexOf(card.vcard), conflicted, unsynced));
+                cards.add(new Indexed(card, indexOf(card.vcard), conflicted));
             }
             return cards;
         }

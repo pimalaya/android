@@ -94,7 +94,7 @@ public class BackgroundCheckTest {
     private static MailStore.StoredMessage unread(String id, String sortKey) {
         return new MailStore.StoredMessage(
                 JANE, "inbox", "INBOX", "Inbox", id, "Subject", "", "a@example.org", sortKey, 1,
-                "[]", 0, null, false, false, false);
+                "[]", 0, null, false);
     }
 
     @Test

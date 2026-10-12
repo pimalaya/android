@@ -39,13 +39,7 @@ final class ContactPool {
         List<Entry> entries = new ArrayList<>();
         for (BookEntry entry : base.loadSubscribedAddressbooks()) {
             for (PimdirContacts.Indexed indexed : contacts.list(entry.book.url)) {
-                // NOTE: a book reaching no server owes it nothing: the
-                // on-device one, or one whose remote sync is off.
-                boolean unsynced =
-                        indexed.unsynced
-                                && entry.remoteSynced
-                                && !LocalBook.is(entry.accountEmail);
-                entries.add(new Entry(entry.book, entry.accountEmail, indexed, unsynced));
+                entries.add(new Entry(entry.book, entry.accountEmail, indexed));
             }
         }
         return entries;

@@ -68,7 +68,7 @@ use crate::{
     calendar::organized,
     client::{
         Client,
-        convert::{REFUSED, coroutine_error, rejected, required},
+        convert::{REFUSED, converged, coroutine_error, rejected, required},
         jmap_sync::{
             JmapDelta, JmapRun, JmapStepReads, JmapStepped, Source, Start, StepItem, StepQuery,
             StepRequest, received, sources, step,
@@ -887,7 +887,8 @@ impl<'a, 'local> Client<'a, 'local> {
             args.unset_keyword(id, keyword);
         }
 
-        self.run_email_set(&session, &auth, &api_url, args, id)
+        converged(self.run_email_set(&session, &auth, &api_url, args, id))?;
+        Ok(())
     }
 
     /// Relocates one message from the mailbox `from` to the mailbox `to`
@@ -901,10 +902,12 @@ impl<'a, 'local> Client<'a, 'local> {
         to: &str,
     ) -> Result<(), BridgeError> {
         let args = relocation_args(id, from, to);
-        self.write_jmap_message(session_url, credentials, id, args)
+        converged(self.write_jmap_message(session_url, credentials, id, args))?;
+        Ok(())
     }
 
-    /// Files one message in the mailbox `to` (a mailbox id) too.
+    /// Files one message in the mailbox `to` (a mailbox id) too, failing
+    /// with the 404 of a message gone for the caller to refuse.
     pub fn copy_jmap_message(
         &mut self,
         session_url: &Url,
@@ -924,7 +927,8 @@ impl<'a, 'local> Client<'a, 'local> {
         id: &str,
     ) -> Result<(), BridgeError> {
         let args = destroy_args(id);
-        self.write_jmap_message(session_url, credentials, id, args)
+        converged(self.write_jmap_message(session_url, credentials, id, args))?;
+        Ok(())
     }
 
     /// Runs one message's `Email/set`.
@@ -947,9 +951,10 @@ impl<'a, 'local> Client<'a, 'local> {
     /// change it was given, so a bare `Ok` would claim a write nobody
     /// made.
     ///
-    /// A message the server no longer finds is the exception: whatever
-    /// the change was, there is nothing left for it to apply to, so it
-    /// converged, as a destroyed ContactCard does.
+    /// A message the server no longer finds fails with 404, as Gmail and
+    /// Graph answer one: a removal, a move or a keyword converged
+    /// ([`converged`]), there being nothing left to apply them to, and a
+    /// copy of nothing is refused.
     fn run_email_set(
         &mut self,
         session: &JmapSession,
@@ -961,10 +966,21 @@ impl<'a, 'local> Client<'a, 'local> {
         let coroutine = JmapEmailSet::new(session, auth, args).map_err(|err| err.to_string())?;
         let out = self.run_jmap(api_url, coroutine)?;
 
-        match out.not_updated.get(id).or(out.not_destroyed.get(id)) {
-            Some(JmapEmailSetItemError::NotFound { .. }) | None => Ok(()),
-            Some(refused) => Err(format!("The server refused the change: {refused}").into()),
-        }
+        email_set_refusal(id, out.not_updated.get(id).or(out.not_destroyed.get(id)))
+    }
+}
+
+/// What one message's `Email/set` answers for its refusal, if any: a
+/// message the server no longer finds as the 404 Gmail and Graph answer
+/// ([`converged`]), any other refusal as the error it is.
+fn email_set_refusal(id: &str, refusal: Option<&JmapEmailSetItemError>) -> Result<(), BridgeError> {
+    match refusal {
+        None => Ok(()),
+        Some(JmapEmailSetItemError::NotFound { .. }) => Err(BridgeError {
+            message: format!("No message {id} on the server"),
+            status: Some(404),
+        }),
+        Some(refused) => Err(format!("The server refused the change: {refused}").into()),
     }
 }
 
@@ -1698,13 +1714,14 @@ impl JmapSubmit for JmapCalls<'_, '_, '_> {
     }
 
     fn destroy(&mut self, id: &str) -> Result<(), BridgeError> {
-        self.client.run_email_set(
+        converged(self.client.run_email_set(
             &self.session,
             &self.auth,
             &self.session.api_url,
             destroy_args(id),
             id,
-        )
+        ))?;
+        Ok(())
     }
 }
 

@@ -1378,3 +1378,18 @@ fn a_mailbox_projects_the_account_changes_by_mailbox_ids() {
     assert_eq!(members(&archive), ["m2"]);
     assert_eq!(archive.vanished, ["m3", "m1"]);
 }
+
+#[test]
+fn an_email_set_on_a_message_gone_answers_404_for_the_caller_to_converge() {
+    let gone = JmapEmailSetItemError::NotFound { description: None };
+    let failed = email_set_refusal("m1", Some(&gone)).unwrap_err();
+    assert_eq!(failed.status, Some(404));
+    assert!(converged(Err::<(), _>(failed)).unwrap().is_none());
+
+    let refused = JmapEmailSetItemError::TooManyKeywords { description: None };
+    assert_eq!(
+        email_set_refusal("m1", Some(&refused)).unwrap_err().status,
+        None
+    );
+    assert!(email_set_refusal("m1", None).is_ok());
+}

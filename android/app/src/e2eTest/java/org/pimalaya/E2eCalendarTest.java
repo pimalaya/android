@@ -58,7 +58,7 @@ public class E2eCalendarTest extends E2eCase {
                 .mutateAdd(calendar.id, uid + ".ics", ical, new JSONArray(), null, "");
         List<EventStore.StoredEvent> staged = phone.events(calendar.id, subject("created"));
         assertEquals("shown at once", 1, staged.size());
-        assertTrue("pending", staged.get(0).unsynced);
+        assertTrue("pending", phone.owes(calendar.id, staged.get(0).id));
 
         sync();
         settles(

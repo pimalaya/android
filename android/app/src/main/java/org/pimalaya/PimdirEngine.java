@@ -35,9 +35,6 @@ abstract class PimdirEngine implements OfflineDriver {
 
     protected final PimalayaClient client;
 
-    /** The store, for the app's own records beside it ({@link Refusals}). */
-    private final PimdirDb db;
-
     /**
      * The store's one writer: every storage yield of every driver (a load,
      * a lookup, a write) is answered holding it.
@@ -103,7 +100,6 @@ abstract class PimdirEngine implements OfflineDriver {
     protected PimdirEngine(PimdirDb pimdir, PimalayaClient client) {
         this.offline = new PimdirStorage(pimdir);
         this.client = client;
-        this.db = pimdir;
     }
 
     /**
@@ -277,12 +273,9 @@ abstract class PimdirEngine implements OfflineDriver {
                 case "fetch":
                     reply = fetch(yielded).toString();
                     break;
-                case "push": {
-                    JSONObject pushed = push(yielded);
-                    forgetRefusals(yielded.getString("collection"), pushed);
-                    reply = pushed.toString();
+                case "push":
+                    reply = push(yielded).toString();
                     break;
-                }
                 case "held":
                     reply = held(yielded).toString();
                     break;
@@ -596,37 +589,6 @@ abstract class PimdirEngine implements OfflineDriver {
 
     /** A mutation was staged on the collection, for a driver that follows writes. */
     protected void staged(String collection) {}
-
-    /**
-     * A change the remote refuses for good: rejected as any other is, and
-     * remembered against the item it stands on ({@link Refusals}) so its
-     * row says so. Not for a change that waits, which is rejected alone.
-     */
-    protected JSONObject refuse(String collection, String linkId, String handle)
-            throws JSONException {
-        if (linkId != null) {
-            Refusals.refuse(db.context(), collection, linkId);
-        }
-        return result(handle, false, null, null);
-    }
-
-    /** Forgets the refusal of every item a push carried out. */
-    private void forgetRefusals(String collection, JSONObject pushed) throws JSONException {
-        JSONArray results = pushed.optJSONArray("results");
-        for (int index = 0; results != null && index < results.length(); index++) {
-            JSONObject result = results.getJSONObject(index);
-            if (!result.optBoolean("accepted")) {
-                continue;
-            }
-            String linkId;
-            synchronized (STORE) {
-                linkId = offline.linkOfHandle(collection, result.getString("handle"));
-            }
-            if (linkId != null) {
-                Refusals.clear(db.context(), collection, linkId);
-            }
-        }
-    }
 
     // ---- the wire shapes --------------------------------------------------
 

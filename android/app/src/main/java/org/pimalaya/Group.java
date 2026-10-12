@@ -30,14 +30,4 @@ final class Group {
         }
         return false;
     }
-
-    /** True when any replica holds a change its server has not taken. */
-    boolean unsynced() {
-        for (Entry entry : replicas) {
-            if (entry.unsynced) {
-                return true;
-            }
-        }
-        return false;
-    }
 }

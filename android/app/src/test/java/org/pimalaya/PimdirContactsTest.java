@@ -118,18 +118,6 @@ public class PimdirContactsTest {
     }
 
     @Test
-    public void aCardIsUnsyncedUntilItsServerAgreesOnIt() {
-        contacts.save(BOOK, new Card("u7", null, null, vcard("u7", "Gil")));
-        assertTrue("a create no push carried out", contacts.list(BOOK).get(0).unsynced);
-
-        bind(BOOK, "u7", "c7.vcf", "etag-7");
-        assertFalse(contacts.list(BOOK).get(0).unsynced);
-
-        contacts.save(BOOK, new Card("u7", null, null, vcard("u7", "Gilbert")));
-        assertTrue("an edit past the agreed body", contacts.list(BOOK).get(0).unsynced);
-    }
-
-    @Test
     public void anEditMovesTheBodyAndLeavesTheBaseAlone() {
         contacts.save(BOOK, new Card("u2", null, null, vcard("u2", "Bob")));
         bind(BOOK, "u2", "c2.vcf", "etag-1");
