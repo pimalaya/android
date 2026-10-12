@@ -11,6 +11,10 @@ on:
 jobs:
   tests:
     runs-on: ubuntu-24.04
+    env:
+      # The devshell moves Gradle's home into the repository (flake.nix);
+      # setup-gradle caches the one this names, so both agree.
+      GRADLE_USER_HOME: ${{ github.workspace }}/android/.gradle-home
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
@@ -21,6 +25,13 @@ jobs:
           name: soywod
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           extraPullNames: nix-community
+      # NOTE: the runner's own cargo computes the key, so the flake lock
+      # joins it: a toolchain bump in the devshell starts a fresh cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: ${{ hashFiles('flake.lock') }}
+      - uses: gradle/actions/setup-gradle@v6
       - name: Clippy
         run: nix develop --command bash -c 'cd rust && cargo clippy --all-targets --locked -- -D warnings'
       - name: Rust tests

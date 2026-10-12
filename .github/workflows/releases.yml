@@ -11,6 +11,9 @@ jobs:
   apk:
     runs-on: ubuntu-24.04
     env:
+      # The devshell moves Gradle's home into the repository (flake.nix);
+      # setup-gradle caches the one this names, so both agree.
+      GRADLE_USER_HOME: ${{ github.workspace }}/android/.gradle-home
       # android/app/build.gradle.kts reads PIMALAYA_*, the key alias
       # defaulting to pimalaya.
       PIMALAYA_KEYSTORE_PASSWORD: ${{ secrets.PIMALAYA_KEYSTORE_PASSWORD }}
@@ -19,11 +22,18 @@ jobs:
       - uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: experimental-features = nix-command flakes
-      - uses: cachix/cachix-action@v16
+      - uses: cachix/cachix-action@v17
         with:
           name: soywod
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
           extraPullNames: nix-community
+      # NOTE: the runner's own cargo computes the key, so the flake lock
+      # joins it: a toolchain bump in the devshell starts a fresh cache.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: ${{ hashFiles('flake.lock') }}
+      - uses: gradle/actions/setup-gradle@v6
       # Decode the keystore only when the secret is present; otherwise the
       # build proceeds and emits an unsigned APK.
       - name: Decode signing keystore
