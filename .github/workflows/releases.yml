@@ -11,10 +11,10 @@ jobs:
   apk:
     runs-on: ubuntu-24.04
     env:
-      # The repository's signing secrets keep the app's former name: they
-      # hold the keystore the cardamum builds were signed with, whose key
-      # alias is cardamum. android/app/build.gradle.kts reads PIMALAYA_*.
-      PIMALAYA_KEYSTORE_PASSWORD: ${{ secrets.CARDAMUM_KEYSTORE_PASSWORD }}
+      # The keystore the cardamum builds were signed with, whose key alias
+      # keeps the app's former name. android/app/build.gradle.kts reads
+      # PIMALAYA_*.
+      PIMALAYA_KEYSTORE_PASSWORD: ${{ secrets.PIMALAYA_KEYSTORE_PASSWORD }}
       PIMALAYA_KEYSTORE_ALIAS: cardamum
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
       # build proceeds and emits an unsigned APK.
       - name: Decode signing keystore
         env:
-          KEYSTORE_BASE64: ${{ secrets.CARDAMUM_KEYSTORE_BASE64 }}
+          KEYSTORE_BASE64: ${{ secrets.PIMALAYA_KEYSTORE_BASE64 }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/pimalaya.jks"
