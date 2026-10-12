@@ -34,21 +34,28 @@ jobs:
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/pimalaya.jks"
             echo "PIMALAYA_KEYSTORE=$RUNNER_TEMP/pimalaya.jks" >> "$GITHUB_ENV"
           fi
-      - name: Assemble release APKs
-        run: nix develop --command bash -c 'cd android && gradle :app:assembleRelease'
+      # The APKs for direct installs, the bundle for Google Play, which
+      # serves each phone its own ABI from it.
+      - name: Assemble release APKs and bundle
+        run: nix develop --command bash -c 'cd android && gradle :app:assembleRelease :app:bundleRelease'
       # Rename each split (and the universal) to its published name; the
       # *.apk glob absorbs the -unsigned suffix when no keystore is set.
-      - name: Collect the APKs
+      - name: Collect the APKs and the bundle
         run: |
           out=android/app/build/outputs/apk/release
           cp "$out"/app-universal-release*.apk pimalaya.apk
           for abi in arm64-v8a armeabi-v7a x86_64 x86; do
             cp "$out/app-$abi-release"*.apk "pimalaya-$abi.apk"
           done
+          cp android/app/build/outputs/bundle/release/app-release.aab pimalaya.aab
       - uses: actions/upload-artifact@v4
         with:
           name: pimalaya
           path: pimalaya.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pimalaya-aab
+          path: pimalaya.aab
       - uses: actions/upload-artifact@v4
         with:
           name: pimalaya-arm64-v8a

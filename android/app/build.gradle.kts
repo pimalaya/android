@@ -15,6 +15,8 @@ android {
     // Pinned to the one build-tools the devshell installs (see flake.nix),
     // newer than AGP's default, so AGP finds it instead of a missing one.
     buildToolsVersion = "36.1.0"
+    // The devshell NDK (see flake.nix), so AGP can strip the Rust .so.
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
         applicationId = "org.pimalaya"
@@ -24,7 +26,7 @@ android {
         // on.
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
+        versionCode = 1
         versionName = "0.1.0"
     }
 

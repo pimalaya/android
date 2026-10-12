@@ -37,69 +37,35 @@
 
 ## Features
 
-- **Mail, contacts and calendars in one app**: three lists behind a bottom bar, over one account list, plus a Files tab for your attachments and folders.
-- **Every account in one list**: each list merges every account and every mailbox, address book or calendar, narrowed by a filter or a chip.
-- **Many providers**: IMAP and SMTP, JMAP (Fastmail), CardDAV and CalDAV, Google (Gmail, Contacts, Calendar) and Microsoft 365, side by side.
-- **Automatic setup**: type an email address and the servers and sign-in are found for you, including for custom domains hosted by Google or Microsoft.
-- **Sign in your way**: password, app password or token, or OAuth 2.0 with the built-in Google and Microsoft sign-ins or your own; credentials are encrypted on the phone.
-- **Offline first**: everything is stored on the phone and opens at once; reading, writing, deleting and editing work with no network and go out on the next sync.
-- **Light on your quota**: mail comes in steps of about 50 messages, only the mailboxes you tick are synced, and each sync asks only for what changed.
-- **Mail you can work with**: read, reply, forward, star, delete into the trash, and write new messages; attachments open in your apps or save to the phone.
-- **Calendars you can edit**: create, edit and delete events, to-dos and journal entries, with recurring series shown in the agenda.
-- **A complete contact editor**: a form for every common field, an advanced editor for every vCard property, and a raw source editor.
-- **Duplicates handled**: contacts merged across accounts, a duplicate finder, manual linking, vCard import and export, and the next birthday at a glance.
-- **Phone integration**: show your address books and calendars in Android's own Contacts and Calendar apps, both ways, and get notified of new mail.
-- **Background sync**: accounts sync on their own while the app is closed, as Android allows.
-- **Safe conflicts**: when the phone and the server both changed the same field, nothing is overwritten blindly and you choose what stays.
-- **Deleted items**: deleted messages, contacts and events wait in one list, to restore or to free for good.
-- **Links between items**: a message links to its sender's contact and to the event it invites to, and an attachment to its message.
-- **Private by design**: no account with us, no analytics, no ads; the app talks only to your providers (see the [privacy policy](./PRIVACY.md)).
+- **All in one**: mail, contacts, calendars and your attachments in a single app.
+- **Merged accounts**: one list per domain across every account, narrowed by filters and chips.
+- **Automatic setup**: type your email address, the servers and the sign-in are found for you.
+- **Offline first**: everything lives on the phone, and changes sync once the network is back.
+- **Light syncs**: mail in steps of about 50, only the mailboxes you tick, only what changed.
+- **Mail**: read, reply, forward, star and delete, and open or save attachments.
+- **Contacts**: a complete vCard editor, duplicates merged, import and export.
+- **Calendars**: create, edit and delete events, to-dos and journal entries.
+- **Phone integration**: contacts and calendars in Android's own apps, new-mail notifications.
+- **Private**: no account with us, no analytics, no ads; the app talks only to your providers.
 
 ## Coverage
 
-| Standard or API | What is covered |
-|-----------------|-----------------|
-| [IMAP4rev1][rfc3501] | Mail: every mailbox listed and synced, messages read whole, and the marks, moves, deletes and appends the app writes back |
-| [CONDSTORE and QRESYNC][rfc7162] | Asking a mailbox only for what changed since the last sync |
-| [UIDPLUS][rfc4315], [MOVE][rfc6851] and [SORT][rfc5256] | Deleting one message alone, moving without a copy, and finding the newest messages on servers that sort |
-| [Special-use mailboxes][rfc6154] | Which mailbox is the inbox, the sent mail, the trash or the junk, asked of the server rather than guessed from its name |
-| [SMTP][rfc5321] and [SMTP authentication][rfc4954] | Sending the messages you write through your account's server |
-| [Internet Message Format][rfc5322], [MIME][rfc2045] and [encoded words][rfc2047] | Composing messages and reading their parts and attachments |
-| [JMAP][rfc8620], [JMAP for Mail][rfc8621] and [JMAP for Contacts][rfc9610] | Mail and contacts over one JMAP session, as Fastmail serves them |
-| [JMAP for Calendars][jmapcal] | Calendars over the same JMAP session |
-| [vCard 4.0][rfc6350] | Contacts: every property kept as is, and edited by form or by hand |
-| [CardDAV][rfc6352] | Address books on any standard server |
-| [iCalendar][rfc5545] | Calendars: events, to-dos and journal entries, recurrence rules expanded into the agenda |
-| [CalDAV][rfc4791] and [WebDAV sync][rfc6578] | Calendars on any standard server, synced by what changed |
-| [CardDAV and CalDAV discovery][rfc6764] and [PACC][pacc] | Finding your servers from an email address or a bare domain |
-| [Mozilla autoconfig][autoconfig] and [DNS over HTTPS][rfc8484] | Finding mail servers from your provider's or Thunderbird's database, asked through an encrypted resolver |
-| [OAuth 2.0][rfc6749], [PKCE][rfc7636], [server metadata][rfc8414] and [dynamic client registration][rfc7591] | Signing in without a password, even on servers that need no provider console |
-| [Gmail API][gmail], [Google People API][people] and [Google Calendar API][gcal] | Mail, contacts and calendars of Google accounts |
-| [Microsoft Graph][msgraph] | Mail, contacts and calendars of Microsoft 365 and Outlook.com accounts |
+| Provider | Mail | Contacts | Calendars |
+|----------|------|----------|-----------|
+| Gmail and Google Workspace | [Gmail API][gmail] | [People API][people] | [Calendar API][gcal] |
+| Outlook.com and Microsoft 365 | [Microsoft Graph][msgraph] | [Microsoft Graph][msgraph] | [Microsoft Graph][msgraph] |
+| Fastmail, and any JMAP server | [JMAP][rfc8621] | [JMAP][rfc9610] | [JMAP][jmapcal] |
+| Posteo, and any standard provider | [IMAP][rfc3501] and [SMTP][rfc5321] | [CardDAV][rfc6352] | [CalDAV][rfc4791] |
 
-[rfc2045]: https://www.rfc-editor.org/rfc/rfc2045
-[rfc2047]: https://www.rfc-editor.org/rfc/rfc2047
+Signing in works with a password, an app password, or [OAuth 2.0][rfc6749], including your provider's own when it supports [dynamic registration][rfc7591]. Servers are found from your address through [autoconfig][autoconfig], [PACC][pacc] and [DNS discovery][rfc6764].
+
 [rfc3501]: https://www.rfc-editor.org/rfc/rfc3501
-[rfc4315]: https://www.rfc-editor.org/rfc/rfc4315
 [rfc4791]: https://www.rfc-editor.org/rfc/rfc4791
-[rfc4954]: https://www.rfc-editor.org/rfc/rfc4954
-[rfc5256]: https://www.rfc-editor.org/rfc/rfc5256
 [rfc5321]: https://www.rfc-editor.org/rfc/rfc5321
-[rfc5322]: https://www.rfc-editor.org/rfc/rfc5322
-[rfc5545]: https://www.rfc-editor.org/rfc/rfc5545
-[rfc6154]: https://www.rfc-editor.org/rfc/rfc6154
-[rfc6350]: https://www.rfc-editor.org/rfc/rfc6350
 [rfc6352]: https://www.rfc-editor.org/rfc/rfc6352
-[rfc6578]: https://www.rfc-editor.org/rfc/rfc6578
 [rfc6749]: https://www.rfc-editor.org/rfc/rfc6749
 [rfc6764]: https://www.rfc-editor.org/rfc/rfc6764
-[rfc6851]: https://www.rfc-editor.org/rfc/rfc6851
-[rfc7162]: https://www.rfc-editor.org/rfc/rfc7162
 [rfc7591]: https://www.rfc-editor.org/rfc/rfc7591
-[rfc7636]: https://www.rfc-editor.org/rfc/rfc7636
-[rfc8414]: https://www.rfc-editor.org/rfc/rfc8414
-[rfc8484]: https://www.rfc-editor.org/rfc/rfc8484
-[rfc8620]: https://www.rfc-editor.org/rfc/rfc8620
 [rfc8621]: https://www.rfc-editor.org/rfc/rfc8621
 [rfc9610]: https://www.rfc-editor.org/rfc/rfc9610
 [jmapcal]: https://datatracker.ietf.org/doc/html/draft-ietf-jmap-calendars
@@ -116,23 +82,19 @@ The app needs Android 8.0 or newer.
 
 ### Google Play
 
-Pimalaya is in beta on [Google Play](https://play.google.com/store/apps/details?id=org.pimalaya): open its page and join the beta to install it and get updates automatically.
+Join the beta on [Google Play](https://play.google.com/store/apps/details?id=org.pimalaya) to get updates automatically.
 
 ### APK
 
-Every [release](https://github.com/pimalaya/android/releases) ships the APKs: pimalaya-arm64-v8a.apk suits most phones, pimalaya.apk works on any phone at about four times the size. Download one on your phone and open it, allowing your browser to install apps when Android asks.
-
-The APKs are signed with the Pimalaya certificate, whose SHA-256 fingerprint is `2F:FD:69:7B:0A:C2:88:B6:A0:A2:24:AD:E9:73:53:B3:A2:77:E4:16:9A:37:50:BA:5C:55:75:43:3E:4A:FB:4D`.
-
-An APK update installs over the previous one, keeping your accounts and data. The Play and APK installs are signed apart, so moving from one to the other means uninstalling first.
+Download an APK from the [latest release](https://github.com/pimalaya/android/releases/latest) and open it on your phone: pimalaya-arm64-v8a.apk suits most phones, pimalaya.apk all of them. The certificate's SHA-256 fingerprint is `2F:FD:69:7B:0A:C2:88:B6:A0:A2:24:AD:E9:73:53:B3:A2:77:E4:16:9A:37:50:BA:5C:55:75:43:3E:4A:FB:4D`.
 
 ### Development builds
 
-Every change to the master branch builds the APKs in the [releases workflow](https://github.com/pimalaya/android/actions/workflows/releases.yml): open the latest run and download an APK from its *Artifacts* section, which needs a GitHub account. These builds carry the latest changes, and the latest bugs.
+The latest run of the [releases workflow](https://github.com/pimalaya/android/actions/workflows/releases.yml) holds the APKs of the master branch under *Artifacts* (a GitHub account is needed).
 
 ### Sources
 
-See the [contributing guide](./CONTRIBUTING.md) to build the app yourself.
+See the [contributing guide](./CONTRIBUTING.md).
 
 ## License
 
