@@ -11,7 +11,7 @@ val releaseKeystore = System.getenv("PIMALAYA_KEYSTORE")?.let { file(it) }
 
 android {
     namespace = "org.pimalaya"
-    compileSdk = 35
+    compileSdk = 36
     // Pinned to the one build-tools the devshell installs (see flake.nix),
     // newer than AGP's default, so AGP finds it instead of a missing one.
     buildToolsVersion = "36.1.0"
@@ -25,7 +25,7 @@ android {
         // servers) fail the platform TLS validation the transport relies
         // on.
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 2
         versionName = "0.1.0"
         // The app's own languages: drops the other locales libraries
@@ -198,5 +198,5 @@ dependencies {
     // runtime on the host JVM: the SQLite store and the framework pieces
     // CardStore and OfflineEngine touch, combined with the real Rust
     // bridge loaded from the host cargo build (see cargoHostBuild).
-    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("org.robolectric:robolectric:4.16.1")
 }

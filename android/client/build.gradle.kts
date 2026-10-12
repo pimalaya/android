@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace = "org.pimalaya.client"
-    compileSdk = 35
+    compileSdk = 36
     buildToolsVersion = "36.1.0"
     // The devshell NDK (see flake.nix), so AGP can strip the Rust .so.
     ndkVersion = "29.0.14206865"

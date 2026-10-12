@@ -58,7 +58,7 @@
         ndkVersion = "29.0.14206865";
 
         androidComposition = pkgs.androidenv.composeAndroidPackages {
-          platformVersions = [ "35" ];
+          platformVersions = [ "36" ];
           buildToolsVersions = [ buildToolsVersion ];
           includeNDK = true;
           ndkVersions = [ ndkVersion ];

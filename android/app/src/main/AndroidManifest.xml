@@ -26,8 +26,11 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- NOTE: predictive back stays off: from API 36 it stops calling
+         onBackPressed, which MainActivity steps its pages back with. -->
     <application
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@drawable/ic_launcher"
