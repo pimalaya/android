@@ -469,7 +469,7 @@ final class AccountSettings {
      * Writes a book's switches; the contacts root and the phone follow them.
      * Turned on for the phone while the contacts permission is missing, it
      * is asked first, and refused leaves the book off it; the projection
-     * follows on the strip. Turned off, the phone's copy goes after one
+     * follows on the dock. Turned off, the phone's copy goes after one
      * last pass.
      */
     private void setBook(BookEntry entry, boolean enabled, boolean remote, boolean local) {

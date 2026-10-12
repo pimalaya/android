@@ -112,8 +112,32 @@ public class MailWindowTest {
         assertNull(MailWindow.reach(context, ACCOUNT));
     }
 
+    /**
+     * Off Gmail, where mailboxes step one by one after the account's first
+     * step, a mailbox with a frontier of its own reads that one alone, even
+     * newer than its account's: one ticked later starts where its own first
+     * chunk reached.
+     */
+    @Test
+    public void offGmailAMailboxReadsItsOwnFrontier() {
+        String sent = PimdirAccount.collectionId(ACCOUNT, "Sent");
+        String inbox = PimdirAccount.collectionId(ACCOUNT, "INBOX");
+        MailWindow.stepped(context, ACCOUNT, null, new MailStep.Outcome("2026-08-01T00:00:00Z", false, 50));
+        MailWindow.moveBackMailbox(context, sent, "2026-10-01T00:00:00Z");
+
+        assertEquals("2026-10-01T00:00:00Z", MailWindow.since(context, ACCOUNT, sent));
+        assertEquals("2026-08-01T00:00:00Z", MailWindow.since(context, ACCOUNT, inbox));
+        assertTrue(MailWindow.more(context, ACCOUNT, sent));
+
+        MailWindow.stepped(context, ACCOUNT, null, new MailStep.Outcome(null, true, 3));
+        assertTrue("its own, whatever its account's", MailWindow.more(context, ACCOUNT, sent));
+        assertFalse(MailWindow.more(context, ACCOUNT, inbox));
+    }
+
     @Test
     public void aStepOverOneMailboxMovesItsOwnFrontierAndNotTheAccounts() {
+        // NOTE: a Gmail account, whose mailboxes read the older of the two.
+        MailStore.markAllMail(context, ACCOUNT, true);
         String clients = PimdirAccount.collectionId(ACCOUNT, "Clients");
         String inbox = PimdirAccount.collectionId(ACCOUNT, "INBOX");
         MailWindow.stepped(context, ACCOUNT, null, new MailStep.Outcome("2026-10-01T00:00:00Z", false, 50));

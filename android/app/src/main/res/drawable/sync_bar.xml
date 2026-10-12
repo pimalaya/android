@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The sync strip's determinate bar: the accent filling a surface-tone
+<!-- The sync sheet's determinate bar: the accent filling a surface-tone
      track, both with rounded ends. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:id="@android:id/background">

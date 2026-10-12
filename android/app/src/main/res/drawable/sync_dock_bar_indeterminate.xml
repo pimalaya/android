@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The sync dock's indeterminate bar: the determinate one's track at
+     its full height, an accent segment sliding across it, so the bar
+     keeps its size when it starts counting. -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+    <aapt:attr name="android:drawable">
+        <vector
+            android:width="360dp"
+            android:height="3dp"
+            android:viewportWidth="360"
+            android:viewportHeight="3">
+            <path
+                android:fillColor="@color/divider_light"
+                android:pathData="M0,0 H360 V3 H0 Z" />
+            <group
+                android:name="segment"
+                android:translateX="-120">
+                <path
+                    android:fillColor="?android:attr/colorAccent"
+                    android:pathData="M0,0 H120 V3 H0 Z" />
+            </group>
+        </vector>
+    </aapt:attr>
+    <target android:name="segment">
+        <aapt:attr name="android:animation">
+            <objectAnimator
+                android:duration="1500"
+                android:interpolator="@android:interpolator/linear"
+                android:propertyName="translateX"
+                android:repeatCount="infinite"
+                android:valueFrom="-120"
+                android:valueTo="360"
+                android:valueType="floatType" />
+        </aapt:attr>
+    </target>
+</animated-vector>

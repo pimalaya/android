@@ -14,13 +14,14 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * The sync strip is the app bar's extension: showing it, with its line, its
- * glyph and its bar, moves neither the bar's title nor the content below.
+ * The sync dock sits on top of the bottom navigation: showing it, with its
+ * lines and its bar, moves neither the app bar's title nor the content's
+ * top, the content ending above it.
  */
 @RunWith(RobolectricTestRunner.class)
-public class SyncStripLayoutTest {
+public class SyncDockLayoutTest {
     @Test
-    public void showingTheStripMovesNothing() {
+    public void showingTheDockMovesNothing() {
         View activity =
                 LayoutInflater.from(
                                 new ContextThemeWrapper(
@@ -33,33 +34,42 @@ public class SyncStripLayoutTest {
         View appBar = root.findViewById(R.id.app_bar);
         View title = root.findViewById(R.id.bar_title);
         View content = root.findViewById(R.id.flipper);
+        View nav = root.findViewById(R.id.bottom_nav);
+        View dock = root.findViewById(R.id.sync_dock);
 
         lay(root);
         int barHeight = appBar.getHeight();
         int titleTop = top(title, root);
         int contentTop = top(content, root);
+        int contentBottom = contentTop + content.getHeight();
+        int navTop = top(nav, root);
         assertTrue(barHeight > 0);
 
-        ((TextView) root.findViewById(R.id.bar_strip_line)).setText("Syncing mail · me@example.org");
-        root.findViewById(R.id.bar_strip_glyph).setVisibility(View.VISIBLE);
-        root.findViewById(R.id.bar_strip).setVisibility(View.VISIBLE);
-        ProgressBar bar = root.findViewById(R.id.bar_strip_bar);
-        bar.setIndeterminate(true);
-        bar.setVisibility(View.VISIBLE);
+        ((TextView) root.findViewById(R.id.sync_dock_account)).setText("me@example.org");
+        TextView line = root.findViewById(R.id.sync_dock_line);
+        line.setText("Syncing mail · Downloading 42 messages");
+        line.setVisibility(View.VISIBLE);
+        TextView count = root.findViewById(R.id.sync_dock_count);
+        count.setText("1 of 2");
+        count.setVisibility(View.VISIBLE);
+        ((ProgressBar) root.findViewById(R.id.sync_bar)).setIndeterminate(true);
+        dock.setVisibility(View.VISIBLE);
         lay(root);
         assertEquals(barHeight, appBar.getHeight());
         assertEquals(titleTop, top(title, root));
         assertEquals(contentTop, top(content, root));
-        View line = root.findViewById(R.id.bar_strip);
-        assertTrue(line.getHeight() > 0 && bar.getHeight() > 0);
-        assertTrue(top(line, root) + line.getHeight() <= top(appBar, root) + barHeight);
-        assertEquals(top(appBar, root) + barHeight, top(bar, root) + bar.getHeight());
+        assertEquals(navTop, top(nav, root));
+        assertTrue(dock.getHeight() > 0);
+        assertEquals(top(dock, root) + dock.getHeight(), navTop);
+        assertEquals(top(content, root) + content.getHeight(), top(dock, root));
+        View bar = root.findViewById(R.id.sync_bar);
+        assertEquals(top(dock, root), top(bar, root));
 
-        root.findViewById(R.id.bar_strip).setVisibility(View.GONE);
-        bar.setVisibility(View.GONE);
+        dock.setVisibility(View.GONE);
         lay(root);
         assertEquals(titleTop, top(title, root));
         assertEquals(contentTop, top(content, root));
+        assertEquals(contentBottom, top(content, root) + content.getHeight());
     }
 
     private static void lay(View root) {

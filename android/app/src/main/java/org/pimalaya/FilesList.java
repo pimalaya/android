@@ -102,7 +102,7 @@ final class FilesList {
 
     void setUp() {
         ListView list = host.findViewById(R.id.files_list);
-        header = new ListHeader(host, list, MainActivity.PANEL_FILES, false);
+        header = new ListHeader(host, list, MainActivity.PANEL_FILES);
         header.empty(host.findViewById(R.id.files_empty));
         header.search(
                 R.string.files_search,

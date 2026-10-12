@@ -40,19 +40,36 @@ final class GmailStep implements MailStep {
             String only,
             boolean first)
             throws JSONException {
+        // NOTE: an account step names the mailboxes it takes, which a JMAP
+        // account's query keeps to (Gmail lists All Mail whatever).
+        JSONObject request = engine.stepRequest(only);
+        if (only == null) {
+            JSONArray names = new JSONArray();
+            for (String collection : collections) {
+                if (!collection.equals(MailStore.allMailOf(engine.accountId()))) {
+                    names.put(engine.mailboxOf(collection));
+                }
+            }
+            request.put("mailboxes", names);
+        }
         File dir = engine.scratch();
         try {
             JSONObject step =
                     engine.stepRead(
                             only == null ? null : engine.mailboxOf(only),
                             collections,
-                            engine.stepRequest(only),
+                            request,
                             dir);
             JSONArray items = step.getJSONArray("items");
             Map<String, JSONArray> members = new LinkedHashMap<>();
             for (String collection : collections) {
                 members.put(collection, new JSONArray());
             }
+            // NOTE: every message lands in All Mail where the step holds by
+            // it, an archived one there alone, so the next step finds it
+            // held and does not read it again (MailStore.ALL_MAIL).
+            String allMail = MailStore.allMailOf(engine.accountId());
+            JSONArray all = members.get(allMail);
             Map<String, File> files = new HashMap<>();
             Map<String, Long> sizes = new HashMap<>();
             List<Brought> brought = new ArrayList<>();
@@ -66,6 +83,9 @@ final class GmailStep implements MailStep {
                 brought.add(new Brought(item.optString("sortKey"), received));
                 if (received != null && (reach == null || received < reach)) {
                     reach = received;
+                }
+                if (all != null) {
+                    all.put(named(item));
                 }
                 JSONArray mailboxes = item.optJSONArray("mailboxes");
                 for (int at = 0; mailboxes != null && at < mailboxes.length(); at++) {
@@ -87,6 +107,10 @@ final class GmailStep implements MailStep {
             engine.fetched(files);
             try {
                 for (Map.Entry<String, JSONArray> mailbox : members.entrySet()) {
+                    // NOTE: All Mail holds no body, being shown nowhere.
+                    if (mailbox.getKey().equals(allMail)) {
+                        continue;
+                    }
                     List<MailBodies.Row> rows = rows(mailbox.getKey(), mailbox.getValue(), sizes);
                     if (rows.isEmpty()) {
                         continue;

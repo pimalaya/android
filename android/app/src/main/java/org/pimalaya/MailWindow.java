@@ -83,30 +83,50 @@ final class MailWindow {
     }
 
     /**
-     * A mailbox's frontier today, null for all mail: the older of its own,
-     * which steps over it alone moved ({@link #moveBackMailbox}), and its
-     * account's, raised to the account's bound.
+     * A mailbox's frontier today, null for all mail. On Gmail, listed whole
+     * through All Mail, the older of its own, which steps over it alone
+     * moved ({@link #moveBackMailbox}), and its account's. Elsewhere, where
+     * mailboxes step one by one after the account's first step, its own
+     * once it has one, else its account's. Raised to the account's bound.
      */
     static String since(Context context, String accountId, String collection) {
         String account = since(context, accountId);
         String own = mailboxes(context).getString(collection, null);
-        if (account == null || own == null) {
+        if (own == null) {
             return account;
         }
         String mailbox =
                 MailScope.clamp(ALL.equals(own) ? null : own, MailScope.sinceOf(context, accountId));
+        if (!MailStore.keepsAllMail(context, accountId) || account == null) {
+            return mailbox;
+        }
         return mailbox == null || mailbox.compareTo(account) < 0 ? mailbox : account;
     }
 
     /**
-     * Whether a step over one mailbox alone may bring it more: its account
-     * may ({@link #more}), and the mailbox's own frontier, where it holds
-     * one, is not all mail and lies above the bound's floor.
+     * Whether a step over one mailbox may bring it more: its own frontier,
+     * where it holds one, is not all mail and lies above the bound's floor;
+     * on Gmail its account may too ({@link #more}), and elsewhere a mailbox
+     * with no frontier of its own may while its account may.
      */
     static boolean more(Context context, String accountId, String collection) {
-        if (!more(context, accountId)) {
-            return false;
+        String own = mailboxes(context).getString(collection, null);
+        boolean mailbox =
+                own == null
+                        || (!ALL.equals(own)
+                                && MailScope.limits(own, MailScope.sinceOf(context, accountId)));
+        if (own != null && !MailStore.keepsAllMail(context, accountId)) {
+            return mailbox;
         }
+        return more(context, accountId) && mailbox;
+    }
+
+    /**
+     * Whether a step over the junk or the trash alone may bring it more:
+     * its own frontier alone, which none of its account's steps moves; one
+     * never stepped may.
+     */
+    static boolean moreAlone(Context context, String accountId, String collection) {
         String own = mailboxes(context).getString(collection, null);
         return own == null
                 || (!ALL.equals(own) && MailScope.limits(own, MailScope.sinceOf(context, accountId)));

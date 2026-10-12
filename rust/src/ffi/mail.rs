@@ -328,7 +328,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_mailStep<'local>(
 /// below and the account's `bound` Graph, JMAP paging from the frontier
 /// once no anchor is left;
 /// the `anchors` the last step answered, oldest first, JMAP; the
-/// `mailboxes` stepped, by name, Graph.
+/// `mailboxes` stepped, by name, Graph and a JMAP account step.
 #[derive(Deserialize)]
 struct MailStepRequest {
     count: usize,
@@ -422,9 +422,16 @@ fn jmap_step(
     dir: &Path,
 ) -> Result<Value, BridgeError> {
     let listed = http_roster(client, session)?;
+    // NOTE: an account step naming its mailboxes (the ones the filter
+    // ticks) leaves every other out, so it brings nothing no mailbox it
+    // takes would file.
     let excluded = listed
         .iter()
-        .filter(|(_, listed)| listed.role == "trash" || listed.role == "junk")
+        .filter(|(_, listed)| {
+            listed.role == "trash"
+                || listed.role == "junk"
+                || (!request.mailboxes.is_empty() && !request.mailboxes.contains(&listed.name))
+        })
         .map(|(id, _)| id.clone())
         .collect();
     let names: HashMap<String, String> = listed

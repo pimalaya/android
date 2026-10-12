@@ -222,6 +222,33 @@ public class MailStepTest {
                 Long.valueOf(next.received.toEpochMilli()), MailWindow.reach(context, accountId));
     }
 
+
+    @Test
+    public void anArchivedMessageIsHeldInAllMailAndNotReadAgain() throws Exception {
+        Instant now = Instant.parse("2026-10-09T12:00:00Z");
+        Server server = new Server();
+        store.ensureAllMail(EMAIL);
+        String allMail = MailStore.allMailOf(accountId);
+        List<String> collections = new ArrayList<>(mailboxes());
+        collections.add(allMail);
+        Mail archived = new Mail("a1", "2026-10-09T10:00:00Z", now);
+        Mail inboxed = new Mail("m1", "2026-10-09T11:00:00Z", now, "INBOX");
+        server.next = List.of(inboxed, archived);
+
+        new GmailStep().run(server, EMAIL, collections, null, true);
+
+        assertEquals(1, held(inbox));
+        assertNull("All Mail holds no body", store.storedSource(allMail, "a1"));
+        for (PimdirCollections.Stored shown : new PimdirCollections(pimdir, context)
+                .list(PimdirSummary.MAIL)) {
+            assertFalse("All Mail is never listed", shown.id.equals(allMail));
+        }
+
+        // NOTE: the next step finds the archived message held.
+        server.next = List.of();
+        new GmailStep().run(server, EMAIL, collections, null, false);
+        assertEquals(Set.of("m1", "a1"), server.held.get(1));
+    }
     @Test
     public void aStepsBodyThatDidNotLandIsOwed() throws Exception {
         Instant now = Instant.parse("2026-10-09T12:00:00Z");
@@ -277,9 +304,11 @@ public class MailStepTest {
 
     @Test
     public void theFooterSaysWhatAStepBringsAndThatItWaitsForWifi() {
-        assertEquals("About 50 more per account", MailList.info(context, true));
+        assertEquals("About 50 more per account", MailList.info(context, true, false));
         assertEquals(
-                "About 50 more per account · Waits for Wi-Fi", MailList.info(context, false));
+                "About 50 more per account · Waits for Wi-Fi",
+                MailList.info(context, false, false));
+        assertEquals("About 50 more per mailbox", MailList.info(context, true, true));
     }
 
     @Test

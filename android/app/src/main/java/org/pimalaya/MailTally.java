@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * How many bodies a mail step or a body run has landed out of what it
- * planned, for the strip's bar.
+ * planned, for the dock's bar.
  *
  * <p>A body counts once its file is written: every backend writes one file
  * per message into the directory a bridge call is given ({@link

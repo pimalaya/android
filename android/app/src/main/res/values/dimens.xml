@@ -44,4 +44,8 @@
     <!-- The extended FAB's distance from the bottom: the navigation's
          height plus the usual FAB margin. -->
     <dimen name="fab_above_nav">96dp</dimen>
+
+    <!-- The sync dock's height, which the extended FAB rises by while it
+         shows. -->
+    <dimen name="sync_dock_height">64dp</dimen>
 </resources>

@@ -2,6 +2,7 @@ package org.pimalaya;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
 
@@ -78,7 +79,11 @@ public class MailFilterTest {
         return store.count(store.query(shown, false, false, ""));
     }
 
-    /** Unticking one account's Archive leaves the other's showing. */
+    /**
+     * Each account shows its inbox alone to begin with; ticking one account's
+     * Archive leaves the other's hidden, and the Archive chip, a view of its
+     * own, shows both.
+     */
     @Test
     public void twoAccountsArchivesAreTwoCollections() {
         String hers = store.collectionOf(JANE, "Archive");
@@ -87,27 +92,28 @@ public class MailFilterTest {
 
         filter.toggleCollection(hers);
 
-        assertEquals(5, count(filter::accepts));
+        assertEquals(3, count(filter::accepts));
+        assertTrue(filter.accepts(JANE, hers));
+        assertFalse(filter.accepts(JOHN, his));
         BiPredicate<String, String> archives =
-                MailList.narrowed(filter::accepts, "archive", store.roles());
-        assertEquals(1, count(archives));
-        MailStore.Query query = store.query(archives, false, false, "");
-        assertEquals(his, store.page(query, null, 0, 1).get(0).collection);
+                MailList.narrowed(filter, "archive", store.roles())::collection;
+        assertEquals(2, count(archives));
     }
 
-    /** The Trash chip is every shown account's trash, merged. */
+    /** The Trash chip is every shown account's trash, merged, ticked or not. */
     @Test
     public void aRoleChipNarrowsToThatRoleAcrossAccounts() {
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
 
-        assertEquals(2, count(MailList.narrowed(filter::accepts, "trash", store.roles())));
-        assertEquals(2, count(MailList.narrowed(filter::accepts, "inbox", store.roles())));
-        assertEquals(0, count(MailList.narrowed(filter::accepts, "sent", store.roles())));
-        assertEquals(6, count(MailList.narrowed(filter::accepts, null, store.roles())));
+        assertEquals(2, count(MailList.narrowed(filter, "trash", store.roles())::collection));
+        assertEquals(2, count(MailList.narrowed(filter, "inbox", store.roles())::collection));
+        assertEquals(0, count(MailList.narrowed(filter, "sent", store.roles())::collection));
+        // NOTE: no chip on, each account shows its inbox alone by default.
+        assertEquals(2, count(MailList.narrowed(filter, null, store.roles())::collection));
 
         // NOTE: a hidden account's trash is not one the chip shows.
         filter.toggleAccount(JOHN);
-        assertEquals(1, count(MailList.narrowed(filter::accepts, "trash", store.roles())));
+        assertEquals(1, count(MailList.narrowed(filter, "trash", store.roles())::collection));
     }
 
     /** The outbox is a collection of each account of its own, never a role's. */
@@ -119,7 +125,8 @@ public class MailFilterTest {
         assertEquals(8, listed.size());
 
         BiPredicate<String, String> trash =
-                MailList.narrowed((account, collection) -> true, "trash", store.roles());
+                MailList.narrowed(MergedFilter.of(context, PimDomain.MAIL), "trash", store.roles())
+                        ::collection;
         assertFalse(trash.test(JANE, store.outboxOf(JANE)));
     }
 }

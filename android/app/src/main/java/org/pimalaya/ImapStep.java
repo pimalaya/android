@@ -35,7 +35,12 @@ final class ImapStep implements MailStep {
             String only,
             boolean first)
             throws Exception {
-        String before = first ? null : MailWindow.since(engine.context(), engine.accountId());
+        String before =
+                first
+                        ? null
+                        : only == null
+                                ? MailWindow.since(engine.context(), engine.accountId())
+                                : MailWindow.since(engine.context(), engine.accountId(), only);
         Outcome outcome =
                 first
                         ? opening(engine, collections)

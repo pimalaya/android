@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The sync strip's indeterminate bar: the determinate one's track and
+<!-- The sync sheet's indeterminate bar: the determinate one's track and
      rounded ends at its full height, an accent segment sliding across it,
      so the bar keeps its size when it starts counting. -->
 <animated-vector xmlns:android="http://schemas.android.com/apk/res/android"

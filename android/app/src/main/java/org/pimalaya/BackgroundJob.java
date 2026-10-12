@@ -34,7 +34,7 @@ public class BackgroundJob extends JobService {
     /** When a run last synced, for the app to reload what it wrote. */
     static volatile long ran;
 
-    /** Whether a run is syncing, for the app's strip. */
+    /** Whether a run is syncing, for the app's dock. */
     static volatile boolean running;
 
     /** Called on the run's thread when it ends; the app's, while it lives. */
@@ -172,6 +172,8 @@ public class BackgroundJob extends JobService {
      */
     private static SyncScope scope(Context context, PimDomain domain, Set<String> due) {
         List<String> owing = FirstSync.owing(context, domain);
+        // NOTE: a mailbox the mail filter unticks neither shows nor syncs.
+        MergedFilter mail = domain == PimDomain.MAIL ? MergedFilter.of(context, domain) : null;
         return new SyncScope() {
             @Override
             public boolean account(String email) {
@@ -182,7 +184,7 @@ public class BackgroundJob extends JobService {
 
             @Override
             public boolean collection(String email, String collection) {
-                return account(email);
+                return account(email) && (mail == null || mail.chosen(collection));
             }
         };
     }

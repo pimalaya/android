@@ -1,13 +1,16 @@
 package org.pimalaya;
 
+import android.content.res.Resources;
+
 /**
- * What the sync strip says and how full its bar is.
+ * What the sync dock says and how full its bar is.
  *
- * <p>The line names the domain being synced and nothing of the engine's
- * steps: a pass reads as one wait. The bar is one progress over an
- * account's collections, each counted step filling its share of the
- * collection it runs in: the download first, then the projection onto the
- * phone for the domains that have one.
+ * <p>The line names the domain being synced, then the engine's step in
+ * that domain's own words: a calendar pass downloads events and a mail
+ * pass messages. The bar is one progress over an account's collections,
+ * each counted step filling its share of the collection it runs in: the
+ * download first, then the projection onto the phone for the domains that
+ * have one.
  */
 final class SyncSteps {
     private SyncSteps() {}
@@ -18,7 +21,7 @@ final class SyncSteps {
      */
     static final double DOWNLOAD_SHARE = 0.6;
 
-    /** The strip's line for a pass over {@code domain}. */
+    /** The dock's domain for a pass over {@code domain}. */
     static int lineOf(PimDomain domain) {
         switch (domain) {
             case MAIL:
@@ -27,6 +30,84 @@ final class SyncSteps {
                 return R.string.sync_line_calendars;
             default:
                 return R.string.sync_line_contacts;
+        }
+    }
+
+    /**
+     * The words of {@code stage} in {@code domain}, after the domain on the
+     * dock's line: a plural for a counted stage, a string otherwise, 0 when
+     * the domain has no such stage. The phone steps are the two mirrors',
+     * contacts and calendars, so mail has no words for them.
+     */
+    static int textOf(PimDomain domain, int stage) {
+        switch (stage) {
+            case PimdirEngine.Progress.STAGE_SERVER:
+                return R.string.sync_step_server;
+            case PimdirEngine.Progress.STAGE_DOWNLOAD:
+                switch (domain) {
+                    case MAIL:
+                        return R.plurals.sync_step_download_mail;
+                    case CALENDAR:
+                        return R.plurals.sync_step_download_events;
+                    default:
+                        return R.plurals.sync_step_download_contacts;
+                }
+            case PimdirEngine.Progress.STAGE_UPLOAD:
+                return R.plurals.sync_step_upload;
+            case PimdirEngine.Progress.STAGE_PHONE:
+                switch (domain) {
+                    case CONTACTS:
+                        return R.string.sync_step_phone;
+                    case CALENDAR:
+                        return R.string.sync_step_phone_calendar;
+                    default:
+                        return 0;
+                }
+            case PimdirEngine.Progress.STAGE_PROJECT:
+                switch (domain) {
+                    case CONTACTS:
+                        return R.plurals.sync_step_project;
+                    case CALENDAR:
+                        return R.plurals.sync_step_project_events;
+                    default:
+                        return 0;
+                }
+            case PimdirEngine.Progress.STAGE_RESOLVE:
+                return R.plurals.sync_step_resolve;
+            default:
+                return 0;
+        }
+    }
+
+    /** Whether a stage's words carry its count, a plural resource. */
+    static boolean counted(int stage) {
+        return stage != PimdirEngine.Progress.STAGE_SERVER
+                && stage != PimdirEngine.Progress.STAGE_PHONE;
+    }
+
+    /** The words of a stage, or null when the domain has no such stage. */
+    static String text(Resources resources, PimDomain domain, int stage, int count) {
+        int text = textOf(domain, stage);
+        if (text == 0) {
+            return null;
+        }
+        return counted(stage)
+                ? resources.getQuantityString(text, count, count)
+                : resources.getString(text);
+    }
+
+    /**
+     * The step counting an account's collections as they land: its
+     * mailboxes, address books or calendars.
+     */
+    static int collectionsOf(PimDomain domain) {
+        switch (domain) {
+            case MAIL:
+                return R.string.sync_step_mailboxes;
+            case CALENDAR:
+                return R.string.sync_step_calendars;
+            default:
+                return R.string.sync_step_books;
         }
     }
 
@@ -76,7 +157,7 @@ final class SyncSteps {
     }
 
     /**
-     * Whether {@code done} of {@code total} is worth telling the strip: the
+     * Whether {@code done} of {@code total} is worth telling the dock: the
      * last item, or one crossing a percent. A projection of a thousand
      * contacts moves the bar ten at a time rather than posting a thousand
      * frames.

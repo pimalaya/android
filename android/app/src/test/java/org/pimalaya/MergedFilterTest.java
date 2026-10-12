@@ -185,4 +185,46 @@ public class MergedFilterTest {
         assertTrue(all.account("off@example.net"));
         assertTrue(filter.account("off@example.net"));
     }
+
+    /**
+     * The junk and the trash are hidden the first time a roster lists them,
+     * and only then: ticked back, they stay shown; a Reset hides them again,
+     * and hiding nothing else reads as no filter at all.
+     */
+    @Test
+    public void theJunkAndTheTrashStartHidden() {
+        MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
+
+        filter.quiet(List.of("jane-trash"));
+        assertFalse(filter.accepts(JANE, "jane-trash"));
+        assertFalse(filter.isActive());
+
+        filter.toggleCollection("jane-trash");
+        filter.quiet(List.of("jane-trash"));
+        assertTrue(filter.accepts(JANE, "jane-trash"));
+        assertFalse("showing more hides nothing", filter.isActive());
+        filter.toggleCollection("jane-inbox");
+        assertTrue(filter.isActive());
+
+        filter.reset();
+        assertFalse(filter.accepts(JANE, "jane-trash"));
+        assertTrue(filter.accepts(JANE, "jane-inbox"));
+    }
+
+    /**
+     * The drawer's mail syncs every account that is on, of its mailboxes
+     * those the filter ticks.
+     */
+    @Test
+    public void theDrawersMailSyncsWhatIsTicked() {
+        MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
+        filter.toggleCollection("jane-archive");
+        filter.toggleAccount(JOHN);
+        SyncScope mail = SyncScope.mail(context);
+
+        assertTrue(mail.collection(JANE, "jane-inbox"));
+        assertFalse(mail.collection(JANE, "jane-archive"));
+        assertTrue(mail.account(JOHN));
+        assertTrue(mail.collection(JOHN, "john-inbox"));
+    }
 }

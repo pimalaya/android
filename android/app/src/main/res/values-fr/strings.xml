@@ -81,6 +81,10 @@
         <item quantity="one">Environ %1$d de plus par compte</item>
         <item quantity="other">Environ %1$d de plus par compte</item>
     </plurals>
+    <plurals name="mail_more_info_mailbox">
+        <item quantity="one">Environ %1$d de plus par boîte</item>
+        <item quantity="other">Environ %1$d de plus par boîte</item>
+    </plurals>
     <string name="mail_more_wifi">Attend le Wi-Fi</string>
     <string name="mail_window_all">Tous mes e-mails</string>
     <string name="mail_window_release_title">Libérer les anciens messages ?</string>
@@ -114,6 +118,7 @@
     <string name="filter_download_title">Télécharger cette boîte ?</string>
     <string name="filter_download_message">Tous les messages de %1$s sont listés et téléchargés en Wi-Fi, au-delà de la période synchronisée du compte.</string>
     <string name="filter_reset">Réinitialiser</string>
+    <string name="filter_apply">Appliquer</string>
 
     <!-- Deleted items -->
     <string name="deleted_title">Éléments supprimés</string>
@@ -320,6 +325,49 @@
     <string name="sync_line_contacts">Synchronisation des contacts</string>
     <string name="sync_line_calendars">Synchronisation des agendas</string>
     <string name="mail_filling">Chargement des anciens messages</string>
+    <string name="sync_step_server">Recherche des changements sur le serveur</string>
+    <plurals name="sync_step_download_mail">
+        <item quantity="one">Téléchargement de %1$d message</item>
+        <item quantity="other">Téléchargement de %1$d messages</item>
+    </plurals>
+    <plurals name="sync_step_download_events">
+        <item quantity="one">Téléchargement de %1$d événement</item>
+        <item quantity="other">Téléchargement de %1$d événements</item>
+    </plurals>
+    <plurals name="sync_step_download_contacts">
+        <item quantity="one">Téléchargement de %1$d contact</item>
+        <item quantity="other">Téléchargement de %1$d contacts</item>
+    </plurals>
+    <plurals name="sync_step_upload">
+        <item quantity="one">Envoi de %1$d changement au serveur</item>
+        <item quantity="other">Envoi de %1$d changements au serveur</item>
+    </plurals>
+    <string name="sync_step_phone">Rapprochement avec les contacts du téléphone</string>
+    <plurals name="sync_step_project">
+        <item quantity="one">Écriture de %1$d contact sur le téléphone</item>
+        <item quantity="other">Écriture de %1$d contacts sur le téléphone</item>
+    </plurals>
+    <string name="sync_step_phone_calendar">Rapprochement avec l\'agenda du téléphone</string>
+    <plurals name="sync_step_project_events">
+        <item quantity="one">Écriture de %1$d événement sur le téléphone</item>
+        <item quantity="other">Écriture de %1$d événements sur le téléphone</item>
+    </plurals>
+    <plurals name="sync_step_resolve">
+        <item quantity="one">Résolution de %1$d conflit</item>
+        <item quantity="other">Résolution de %1$d conflits</item>
+    </plurals>
+    <string name="sync_step_mailboxes">Boîtes synchronisées : %1$d sur %2$d</string>
+    <string name="sync_step_books">Carnets synchronisés : %1$d sur %2$d</string>
+    <string name="sync_step_calendars">Agendas synchronisés : %1$d sur %2$d</string>
+    <string name="sync_dock_details">Synchronisation en cours, afficher les détails</string>
+    <string name="sync_dock_fill_details">Chargement des anciens messages, afficher les détails</string>
+    <string name="sync_dock_count">%1$d sur %2$d</string>
+    <string name="sync_dock_title">Synchronisation</string>
+    <string name="sync_dock_percent">%1$d %%</string>
+    <string name="sync_dock_collapse">Réduire</string>
+    <string name="sync_dock_next">Suivant</string>
+    <string name="sync_dock_done">Terminé</string>
+    <string name="sync_dock_recent">Récent</string>
 
     <string name="contacts_sync">Synchroniser</string>
     <string name="birthdays_title">Prochain anniversaire</string>

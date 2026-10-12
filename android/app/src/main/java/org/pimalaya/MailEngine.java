@@ -114,7 +114,7 @@ class MailEngine extends PimdirEngine {
     private final Map<String, JSONObject> listed = new HashMap<>();
 
     /**
-     * Counts the bodies this driver's bridge calls write, for the strip's
+     * Counts the bodies this driver's bridge calls write, for the dock's
      * bar ({@link MailTally}); null when nothing is counting.
      */
     MailTally tally;
@@ -128,7 +128,8 @@ class MailEngine extends PimdirEngine {
 
     /**
      * The account's mailboxes and the role each carries, in one round; a
-     * Gmail or JMAP account's are remembered as listed account-wide, and
+     * Gmail or JMAP account's are remembered as listed account-wide, a
+     * Gmail one's as keeping an All Mail ({@link MailStore#ALL_MAIL}), and
      * whether the server erases one message alone. Any other account's
      * bodies once linked across its mailboxes are released, once
      * ({@link MailStore#repairLinks}).
@@ -138,6 +139,7 @@ class MailEngine extends PimdirEngine {
         Account server = session.account();
         boolean accountWide = PimalayaClient.isGoogle(server) || PimalayaClient.isJmap(server);
         MailStore.markAccountWide(pimdir.context(), accountId, accountWide);
+        MailStore.markAllMail(pimdir.context(), accountId, PimalayaClient.isGoogle(server));
         MailStore.markExpungesOne(pimdir.context(), accountId, session.expungesOne());
         if (!accountWide) {
             int released;
@@ -752,6 +754,11 @@ class MailEngine extends PimdirEngine {
             if (edge.collection.startsWith(prefix)) {
                 collections.add(edge.collection);
             }
+        }
+        // NOTE: an archived message is held in All Mail alone, which no
+        // edge shows.
+        if (MailStore.keepsAllMail(pimdir.context(), accountId)) {
+            collections.add(MailStore.allMailOf(accountId));
         }
         return collections;
     }

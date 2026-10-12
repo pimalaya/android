@@ -38,12 +38,17 @@ Wherever a mailbox is named to the reader (a row, the reader, the filter page, d
 - THEN its row names the mailbox *Envoyés*
 
 ### Requirement: The mail list narrows what it shows
-The mail list SHALL list every stored message of every mailbox the filter lets through, and SHALL offer a search over the sender and the subject, the role chips, an unread chip and an attachments chip, all answered by the store over every stored message. None of these SHALL change what syncs, which the filter alone decides.
+The mail list SHALL list every stored message of every mailbox the filter lets through, and SHALL offer a search over the sender and the subject, the role chips, an unread chip and an attachments chip, all answered by the store over every stored message. None of these SHALL sync by itself: opening a mailbox, or turning a chip on, shows what the store holds. A pull while a role chip is on SHALL sync that role's mailboxes of the shown accounts alone; otherwise what syncs is what the filter ticks.
 
 #### Scenario: Unread only
 - GIVEN read and unread mail in two accounts
 - WHEN the unread chip is on
 - THEN the list shows both accounts' unread messages and nothing else
+
+#### Scenario: The trash opened
+- GIVEN a Gmail account whose trash was never listed
+- WHEN the Trash chip is chosen
+- THEN nothing syncs, and the list shows what the phone holds in it
 
 ### Requirement: The mail list selects
 A long press on a message SHALL start a selection holding it, and while one runs a tap SHALL add or remove a message rather than open it. The bar SHALL then carry the count, read or unread, star or unstar, delete after asking, and select-all, each over the whole selection, a toggle going the way that changes something. The selection SHALL be keyed by store id, and select-all SHALL select what the list's query lets through, read whole only when the bar acts on it. Back SHALL clear the selection.
@@ -67,12 +72,17 @@ A connection SHALL ENABLE CONDSTORE and QRESYNC when it opens, where the server 
 - THEN the mailbox is enumerated whole and the pass carries on
 
 ### Requirement: A sync skips what the filter hides
-A mail pull SHALL list the shown accounts' mailboxes and SHALL NOT reconcile a mailbox the filter hides, by its account or by its collection, nor drain an outbox it hides. The drawer's sync SHALL reconcile every mailbox of every account that is on.
+A mail pull, the drawer's sync and a background run SHALL reconcile the mailboxes the filter ticks and SHALL NOT reconcile a mailbox it unticks, nor drain an outbox it unticks; a pull SHALL also skip the accounts the filter hides, the drawer's sync and a background run taking every account that is on. A pull under a role chip SHALL reconcile that role's mailboxes of the shown accounts, ticked or not, and nothing else.
 
 #### Scenario: A hidden mailbox
 - GIVEN a mailbox unchecked in the filter
-- WHEN the mail list is pulled down
+- WHEN the mail list is pulled down, or the drawer's sync runs
 - THEN the mailbox is still offered by the filter, and nothing in it is read or pushed
+
+#### Scenario: A pull under the Trash chip
+- GIVEN the trash unticked and the Trash chip on
+- WHEN the mail list is pulled down
+- THEN the shown accounts' trashes are reconciled, and no other mailbox
 
 ### Requirement: A mail sync pushes no body
 A mail sync SHALL NOT push content: a message is immutable once sent, and a body the reader stored SHALL NOT be read as an edit. A marker staged on an opened message SHALL be pushed as a marker.
@@ -596,17 +606,17 @@ While the body step runs for an account, the account's pill in the drawer SHALL 
 - THEN its pill counts the messages left, falling as they land
 
 ### Requirement: The mail list shows its background download
-While the background fill downloads older mail or bodies and no pass runs, the mail list's strip in the app bar SHALL read *Loading older mail* beside a download glyph pulsing gently in opacity, holding still when the system removes animations, a long press on the glyph naming it. While bodies download it SHALL show a bar of the bodies landed out of the run's plan, every account's summed, a body counting once its file is written and a replan adding to the plan; the header fill alone has no bar. The bar SHALL never move back while the fill runs. The strip SHALL show only once a step downloaded something, and SHALL go when the fill ends or pauses (the app left, no Wi-Fi).
+While the background fill downloads older mail or bodies and no pass runs, the sync dock SHALL read *Loading older mail* beside a download glyph pulsing gently in opacity, holding still when the system removes animations. While bodies download it SHALL show a bar of the bodies landed out of the run's plan, every account's summed, a body counting once its file is written and a replan adding to the plan; the header fill alone has no bar. The bar SHALL never move back while the fill runs. The dock SHALL show only once a step downloaded something, and SHALL go when the fill ends or pauses (the app left, no Wi-Fi).
 
 #### Scenario: After the first mail sync
 - GIVEN a first mail sync that landed the newest messages of an IMAP account
 - WHEN the fill widens its mailboxes in the background
-- THEN the strip pulses its glyph in the app bar, and goes once the fill stops
+- THEN the dock pulses its glyph above the bottom bar, and goes once the fill stops
 
 #### Scenario: Bodies scrolled past
 - GIVEN 100 bodies left to download and the list scrolled down
 - WHEN 48 have landed
-- THEN the strip shows in the app bar, its bar near one half
+- THEN the dock shows above the bottom bar, its bar near one half
 
 ### Requirement: Opening a message waits on no background work
 Opening a message SHALL NOT queue behind a step of the background fill or of the body download: its read and its fetch SHALL run apart from them, and what it writes to the store SHALL be written under the store's one writer. A Gmail fetch for the reader SHALL go out ahead of the background requests the account's pacing holds (Gmail is paced below its quota).
@@ -625,12 +635,12 @@ The Rust bridge SHALL log to logcat under the app's tag, warnings and above only
 - THEN logcat names the status, the reason and the wait
 
 ### Requirement: Mail syncs on Wi-Fi only
-A mail pass SHALL list nothing, and no step, fill step or body download SHALL run, on a metered network; the outbox SHALL still go out there. The mail list's strip SHALL then say the sync waits for Wi-Fi (*Waiting for Wi-Fi*), and what was asked SHALL run once an unmetered network is back while the app is open. A background run on a metered network SHALL send the outbox and list nothing. Opening one message SHALL fetch it on any network.
+A mail pass SHALL list nothing, and no step, fill step or body download SHALL run, on a metered network; the outbox SHALL still go out there. The sync dock SHALL then say the sync waits for Wi-Fi (*Waiting for Wi-Fi*), and what was asked SHALL run once an unmetered network is back while the app is open. A background run on a metered network SHALL send the outbox and list nothing. Opening one message SHALL fetch it on any network.
 
 #### Scenario: A first sync on mobile data
 - GIVEN an account just connected, on mobile data
 - WHEN the mail tab is opened
-- THEN nothing is listed, the strip says it waits for Wi-Fi, and the first step runs once Wi-Fi is back
+- THEN nothing is listed, the dock says it waits for Wi-Fi, and the first step runs once Wi-Fi is back
 
 #### Scenario: Opening a message on mobile data
 - GIVEN a message not on the phone, on mobile data
@@ -638,12 +648,12 @@ A mail pass SHALL list nothing, and no step, fill step or body download SHALL ru
 - THEN it is fetched and shown
 
 ### Requirement: An account's mail comes in steps
-An account's mail SHALL come in steps: a step SHALL bring about 50 messages of the account whole (headers and body, plain `Full`), older than what the account holds, never counted by an offset, on the account's one session, its reads in small batches one after another. Each backend SHALL decide how a step finds them and batches them. The first sync SHALL be one step. A step SHALL leave out the junk and the trash. A view filtered to one mailbox of an account that has several SHALL step that mailbox alone. A step finding nothing older SHALL leave the account at all mail, or the one mailbox it stepped alone.
+An account's mail SHALL come in steps: a step SHALL bring about 50 messages whole (headers and body, plain `Full`), older than what it holds, never counted by an offset, on the account's one session, its reads in small batches one after another. Each backend SHALL decide how a step finds them and batches them. The first sync SHALL be one step of the account over the mailboxes the filter ticks: the inbox alone on an account other than Gmail, every label but Trash and Spam on Gmail. After it, a Gmail account SHALL step as a whole (All Mail), and any other account mailbox by mailbox. A step SHALL leave out the junk and the trash. A view filtered to one mailbox of an account that has several SHALL step that mailbox alone. A step finding nothing older SHALL leave the account at all mail, or the one mailbox it stepped alone.
 
 #### Scenario: A first sync
 - GIVEN an account just connected, on Wi-Fi
 - WHEN the mail tab's first sync runs
-- THEN about 50 messages are listed and readable offline when it ends
+- THEN about 50 messages of its inbox are listed and readable offline when it ends, and no other mailbox is listed
 
 #### Scenario: A small account
 - GIVEN an account holding 30 messages
@@ -651,7 +661,7 @@ An account's mail SHALL come in steps: a step SHALL bring about 50 messages of t
 - THEN all 30 are on the phone, and the list has nothing more to load
 
 ### Requirement: A mail step counts the bodies it brings
-A mail step SHALL fill its account's part of the strip's bar with the bodies it brought out of the bodies it planned: about 50 for a step the bridge walks (Gmail, Graph, JMAP), what it brought once the walk answers; for IMAP, the bodies its listing left to read, known once its mailboxes are listed. A body SHALL count once its file is written, as the backend writes it (Gmail by batch of 10, Graph by `$batch`, IMAP as each streamed body starts, JMAP one blob at a time). The bar SHALL run indeterminate while the first account lists. A pass of steps over several accounts SHALL weigh each account alike.
+A mail step SHALL fill its account's part of the dock's bar with the bodies it brought out of the bodies it planned: about 50 for a step the bridge walks (Gmail, Graph, JMAP), what it brought once the walk answers; for IMAP, the bodies its listing left to read, known once its mailboxes are listed. A body SHALL count once its file is written, as the backend writes it (Gmail by batch of 10, Graph by `$batch`, IMAP as each streamed body starts, JMAP one blob at a time). The bar SHALL run indeterminate while the first account lists. A pass of steps over several accounts SHALL weigh each account alike.
 
 #### Scenario: Load more on Gmail
 - GIVEN a Gmail account with older mail
@@ -664,7 +674,7 @@ A mail step SHALL fill its account's part of the strip's bar with the bodies it 
 - THEN the bar stands at one half, and B's bodies carry it on
 
 ### Requirement: An account's frontier is where its steps reached
-Each mail account SHALL keep a frontier, as app state beside the account: the `Date` of the oldest message its steps brought, leaving out a message dated more than a day before it was received (an import, a wrong clock), which is held and shown once the list's floor passes it; the oldest of them when every one is such. A step walking by reception (Gmail, JMAP without `sentAt`) SHALL never leave a frontier older than the oldest reception it brought, since a message it left out was received before that and may be dated after its oldest `Date`. A step over one mailbox alone SHALL move that mailbox's own frontier and never the account's, and a mailbox's frontier SHALL be the older of its own and its account's. A step SHALL only move a frontier back; only the account's settings move it later (A window moved later frees the bodies below it), a mailbox's own frontier older than the account's new one then going. The merged list's floor SHALL be the most recent of the shown mailboxes' frontiers and of their coverage floors, a Gmail or JMAP mailbox bringing no coverage floor.
+Each mail account SHALL keep a frontier, as app state beside the account: the `Date` of the oldest message its steps brought, leaving out a message dated more than a day before it was received (an import, a wrong clock), which is held and shown once the list's floor passes it; the oldest of them when every one is such. A step walking by reception (Gmail, JMAP without `sentAt`) SHALL never leave a frontier older than the oldest reception it brought, since a message it left out was received before that and may be dated after its oldest `Date`. A step over one mailbox alone SHALL move that mailbox's own frontier and never the account's. On Gmail a mailbox's frontier SHALL be the older of its own and its account's; on any other account, whose mailboxes step one by one, its own once it holds one, else its account's, and a mailbox with a frontier of its own SHALL have more to load while that one is not all mail. A step SHALL only move a frontier back; only the account's settings move it later (A window moved later frees the bodies below it), a mailbox's own frontier older than the account's new one then going. The merged list's floor SHALL be the most recent of the shown mailboxes' frontiers and of their coverage floors, a Gmail or JMAP mailbox bringing no coverage floor.
 
 #### Scenario: An imported message
 - GIVEN a step bringing messages dated from 8 to 9 October and one dated March 2019 received on 9 October
@@ -681,13 +691,23 @@ Each mail account SHALL keep a frontier, as app state beside the account: the `D
 - WHEN *Load more* brings Clients down to 1 September
 - THEN Clients lists down to 1 September, and the merged view still ends at 1 October
 
+#### Scenario: Sent ticked later
+- GIVEN a Microsoft account whose inbox reached 1 August, its Sent ticked today and first listed down to 1 October
+- WHEN *Load more* is tapped
+- THEN Sent steps from 1 October, not from 1 August
+
 ### Requirement: The mail list ends on Load more
-While a shown account that is on has more to load, the mail list SHALL end on a footer: a button, *Load more*, over a line saying about how many messages a step brings each account (*About 50 more per account*). An account shown by one of its mailboxes alone has more to load while that mailbox's frontier is not all mail. A tap SHALL take one step of each such account, one after another under the sync strip, then read the list again and download the bodies left. While a step or any other pass holds the sync (a tap's, the first sync's, a pull's, the drawer's, a background run's), the button SHALL be disabled and read *Loading more*, so a second tap queues nothing, and SHALL read *Load more* again once every account's step ended. Off Wi-Fi the line SHALL add that it waits for Wi-Fi and the button SHALL be disabled. Junk, trash and mailboxes kept whole SHALL take no part. The footer SHALL hide under a search, and SHALL stand in for an empty list's empty state.
+While a shown account that is on has more to load, the mail list SHALL end on a footer: a button, *Load more*, over a line saying about how many messages a step brings each account, or each mailbox where one steps mailbox by mailbox (*About 50 more per account*, *About 50 more per mailbox*). A Gmail account shown by one of its labels alone has more to load while that label's frontier is not all mail; any other account has more in each shown mailbox whose frontier is not all mail. A tap SHALL take one step of each such Gmail account and of each such mailbox of any other account, one after another under the sync dock, then read the list again and download the bodies left. While a step or any other pass holds the sync (a tap's, the first sync's, a pull's, the drawer's, a background run's), the button SHALL be disabled and read *Loading more*, so a second tap queues nothing, and SHALL read *Load more* again once every account's step ended. Off Wi-Fi the line SHALL add that it waits for Wi-Fi and the button SHALL be disabled. Mailboxes kept whole SHALL take no part. The junk and the trash, which no step of their account brings, SHALL take part only when their account shows one of them alone: a tap SHALL then step it by its label on Gmail (`labelIds` `SPAM` or `TRASH` with `includeSpamTrash`), and elsewhere widen it by its next chunk of headers, its bodies left to opening, until it is listed down to its account's bound. The footer SHALL hide under a search, and SHALL stand in for an empty list's empty state.
 
 #### Scenario: Two accounts
 - GIVEN accounts A and B shown together, both with older mail
 - WHEN *Load more* is tapped
 - THEN the button reads *Loading more* and is disabled while A then B take a step, and the list reaches down to the more recent of their new frontiers
+
+#### Scenario: Gmail's spam
+- GIVEN a Gmail account whose spam was never listed, shown alone
+- WHEN *Load more* is tapped
+- THEN about 50 of its newest spam messages are brought
 
 #### Scenario: During the first sync
 - GIVEN an account's first sync running
@@ -698,6 +718,19 @@ While a shown account that is on has more to load, the mail list SHALL end on a 
 - GIVEN a list on mobile data
 - WHEN its end is reached
 - THEN the footer says it waits for Wi-Fi, and its button does nothing
+
+#### Scenario: Two mailboxes of one Microsoft account
+- GIVEN a Microsoft account whose inbox and Sent are ticked, both with older mail
+- WHEN *Load more* is tapped
+- THEN its inbox then its Sent take a step, about 50 each
+
+### Requirement: A Gmail account keeps its step's messages under the hood
+A Gmail account SHALL hold a hidden collection standing for its account-wide step, Gmail's All Mail, every message a step brings landing in it beside the mailboxes its labels name, a message filed under no mailbox label (archived) landing in it alone, with no body. It SHALL be among the mailboxes a step asks the store whether it holds a message in, so no step reads a message twice, and SHALL NOT be listed: not on the filter page, not under a chip, not in a list or a search. A step over the trash or the junk alone SHALL ask over that mailbox alone, what lies there having been taken out of every other.
+
+#### Scenario: An archived message
+- GIVEN a Gmail message filed under no mailbox label
+- WHEN a step brings it
+- THEN it is stored, no mailbox shows it, and the next step does not read it again
 
 ### Requirement: A Gmail step is a set difference
 A Gmail step SHALL walk the account's `messages.list` (no `labelIds`, `includeSpamTrash=false`, 500 ids a page) from the top, newest received first, keeping the ids the store does not hold anywhere in the account until it holds about 50, and SHALL never filter on a date (`before:` on `internalDate` or `Date`). A view filtered to one label SHALL walk that label's listing (`labelIds`). The account's `historyId` SHALL be taken before the walk. The ids kept SHALL be read with `format=minimal` for their sizes, then with `format=raw` in batches of at most 10 messages and about 8 MB, one batch at a time, a message over about 5 MB read alone. Each message SHALL be read once and placed in every mailbox its `labelIds` name, a message in the trash or the spam in that one alone, its body filed once and linked into the others. The first step SHALL open every label's mailbox, the junk and the trash included, as a round closed on that `historyId`, so the next pass is a history replay; a later one SHALL add to them.
@@ -797,14 +830,6 @@ A message the server answers gone when its body is asked for (a 404 on Gmail or 
 - WHEN the body step asks for it
 - THEN it is asked once, owed no more, and no later run asks for it until its mailbox is listed again
 
-### Requirement: Junk and trash list when opened
-The mail list showing an account's junk or trash alone SHALL list that mailbox once per opening, on Wi-Fi and while no other sync runs: a Gmail one by its label (`labelIds` `SPAM` or `TRASH` with `includeSpamTrash`), a step over that mailbox bringing about 50 messages it does not hold; any other by a pass over that mailbox.
-
-#### Scenario: Gmail's spam
-- GIVEN a Gmail account whose spam was never listed
-- WHEN the mail list is filtered to its spam
-- THEN its newest messages are listed
-
 ### Requirement: An IMAP step widens from the account floor
 An IMAP account's first step SHALL read the 50 newest `Date`s of each mailbox it brings bodies to (A mailbox is listed a chunk at a time), take the 50th newest of them all as its floor, list every mailbox from that floor, the junk and the trash included, so each next pass is a delta, leave that floor as the frontier (all mail when those mailboxes hold 50 or fewer in all), then read whole every message it listed from that floor but the junk's and the trash's: about 50 bodies whatever the mailboxes. A later step SHALL widen the mailbox holding the most recent coverage floor by 50 until about 50 stored messages lie between it and the frontier, move the frontier to the `Date` of the 50th of them by `Date`, ties included, then read whole the messages between the new frontier and the old, one mailbox after another.
 
@@ -827,12 +852,12 @@ The UIDs a `UID SEARCH` or `UID SORT` found SHALL be kept per mailbox, UIDVALIDI
 - THEN no header field is read twice, and a page after the first searches no more
 
 ### Requirement: A JMAP step is one anchored query
-A JMAP step SHALL be one `Email/query` over the account with `inMailboxOtherThan` the trash and the junk (`inMailbox` for a view filtered to one mailbox), sorted by `sentAt` descending when the account's mail capability lists it in `emailQuerySortOptions`, else by `receivedAt`, with `calculateTotal` and `collapseThreads` false and a limit of about 50, its `Email/get` back-referenced for the summary properties, `receivedAt` and `blobId`. The account's `Email` state SHALL be read before it, as the checkpoint. A step SHALL answer the ids its query reached last, oldest first, and the next step SHALL query from the first of them with `anchorOffset` 1; a query refused with `anchorNotFound` SHALL be asked again from the next one, and once none is left SHALL page by `receivedAt` below the frontier, two days of margin above it. Each `Email` the store does not hold SHALL be downloaded by its blob, one after another on the account's session, and placed in every mailbox its `mailboxIds` names; one the store holds SHALL be passed over, a window held whole moving on to the next, a few queries at most. A body that fails SHALL leave the anchors before it, so the next step reads it again. The app SHALL keep the anchors beside the account's frontier, per account and per mailbox a view steps alone, and SHALL save them only once the step landed. A JMAP account SHALL be listed account-wide, as a Gmail one is.
+A JMAP step SHALL be one `Email/query` over the account with `inMailboxOtherThan` the trash, the junk and every mailbox the account's step does not take (`inMailbox` for a step over one mailbox), sorted by `sentAt` descending when the account's mail capability lists it in `emailQuerySortOptions`, else by `receivedAt`, with `calculateTotal` and `collapseThreads` false and a limit of about 50, its `Email/get` back-referenced for the summary properties, `receivedAt` and `blobId`. The account's `Email` state SHALL be read before it, as the checkpoint. A step SHALL answer the ids its query reached last, oldest first, and the next step SHALL query from the first of them with `anchorOffset` 1; a query refused with `anchorNotFound` SHALL be asked again from the next one, and once none is left SHALL page by `receivedAt` below the frontier, two days of margin above it. Each `Email` the store does not hold SHALL be downloaded by its blob, one after another on the account's session, and placed in every mailbox its `mailboxIds` names; one the store holds SHALL be passed over, a window held whole moving on to the next, a few queries at most. A body that fails SHALL leave the anchors before it, so the next step reads it again. The app SHALL keep the anchors beside the account's frontier, per account and per mailbox stepped alone, and SHALL save them only once the step landed. A JMAP account SHALL be listed account-wide, as a Gmail one is.
 
 #### Scenario: A second step
-- GIVEN a JMAP account whose first step brought its 50 newest messages
+- GIVEN a JMAP account whose first step brought its 50 newest inbox messages
 - WHEN *Load more* is tapped
-- THEN one query anchored on the oldest of them answers the next 50, read whole
+- THEN one query over the inbox, anchored on the oldest of them, answers the next 50, read whole
 
 #### Scenario: The anchor deleted
 - GIVEN the oldest message of the last step deleted on the server since

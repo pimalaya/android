@@ -107,7 +107,7 @@ final class CalendarList {
 
     void setUp() {
         ListView list = host.findViewById(R.id.calendar_list);
-        header = new ListHeader(host, list, MainActivity.PANEL_CALENDAR, true);
+        header = new ListHeader(host, list, MainActivity.PANEL_CALENDAR);
         header.empty(host.findViewById(R.id.calendar_empty));
         header.view
                 .findViewById(R.id.header_week_previous)

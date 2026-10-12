@@ -18,4 +18,15 @@
 
     </style>
 
+    <!-- The sync sheet: a floating window on the bottom edge over a scrim,
+         sliding up as the keyboard does, in the app's palette (SyncDock). -->
+    <style name="SyncSheet" parent="AppTheme">
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.4</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.InputMethod</item>
+    </style>
+
 </resources>

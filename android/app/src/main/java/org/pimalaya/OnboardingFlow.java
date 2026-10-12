@@ -237,6 +237,29 @@ final class OnboardingFlow {
                 () -> scroll.smoothScrollTo(0, scroll.getChildAt(0).getHeight()), 300);
     }
 
+    /**
+     * Scrolls the step's page so {@code view}, a domain just ticked or the
+     * card whose configuration was just picked, sits at its top with what it
+     * opened below it. Posted past the layout the tick changes, as the
+     * password's reveal is.
+     */
+    private void reveal(View view) {
+        view.post(
+                () -> {
+                    int top = 0;
+                    View at = view;
+                    while (at.getParent() instanceof View
+                            && !(at.getParent() instanceof android.widget.ScrollView)) {
+                        top += at.getTop();
+                        at = (View) at.getParent();
+                    }
+                    if (at.getParent() instanceof android.widget.ScrollView) {
+                        ((android.widget.ScrollView) at.getParent())
+                                .smoothScrollTo(0, top + at.getTop());
+                    }
+                });
+    }
+
     /** Resets the flow to its first step and shows it. */
     void open() {
         pendingEmail = null;
@@ -830,6 +853,9 @@ final class OnboardingFlow {
                         tick.setChecked(setup.enabled);
                         option.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
                         resetSetupContinue();
+                        if (setup.enabled) {
+                            reveal(view);
+                        }
                     });
             card.addView(row);
             option.setVisibility(setup.enabled ? View.VISIBLE : View.GONE);
@@ -1112,6 +1138,9 @@ final class OnboardingFlow {
                     setup.enabled = checked;
                     renderSection(setup);
                     resetSetupContinue();
+                    if (checked) {
+                        reveal(card);
+                    }
                 });
         LinearLayout header =
                 domainRow(
@@ -1142,6 +1171,7 @@ final class OnboardingFlow {
                                 setup.selected = option;
                                 renderSection(setup);
                                 resetSetupContinue();
+                                reveal(card);
                             });
             setup.buttons.add(button);
         }

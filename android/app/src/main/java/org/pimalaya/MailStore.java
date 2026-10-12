@@ -68,6 +68,24 @@ final class MailStore {
      */
     private static final String OUTBOX = "\u0001outbox";
 
+    /**
+     * The name of the collection a Gmail account files every message its
+     * account-wide step brings in, beside the mailboxes its labels name.
+     *
+     * <p>Gmail's All Mail, kept under the hood: a message filed under no
+     * mailbox label (archived) is stored in it alone, so the store holds
+     * every message a step read and no step reads one twice. It is never
+     * shown ({@link PimdirCollections#list}), and a control character, like
+     * the outbox, so no mailbox a server lists can collide with it.
+     */
+    static final String ALL_MAIL = "\u0001all";
+
+    /** Which accounts keep an All Mail collection (Gmail), by account id. */
+    private static final String ALL_MAIL_PREFS = "mail-all-mail";
+
+    /** Which accounts keep their inbox alone ticked to begin with, by account id. */
+    private static final String INBOX_ONLY_PREFS = "mail-inbox-only";
+
     /** The mail roles pimdir's schema takes (STORAGE section 14). */
     private static final java.util.Set<String> ROLES =
             java.util.Set.of(
@@ -129,8 +147,32 @@ final class MailStore {
         // messages in it.
         migrateOutbox(accountEmail);
 
+        // NOTE: an account's first roster off Gmail keeps its inbox alone
+        // ticked: its mailboxes step one by one, and each costs a listing.
+        boolean fresh = true;
+        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+            if (accountEmail.equals(stored.accountEmail)) {
+                fresh = false;
+                break;
+            }
+        }
+        if (fresh && !keepsAllMail(context, account)) {
+            context.getSharedPreferences(INBOX_ONLY_PREFS, Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(account, true)
+                    .apply();
+        }
+        boolean inboxOnly =
+                context.getSharedPreferences(INBOX_ONLY_PREFS, Context.MODE_PRIVATE)
+                        .getBoolean(account, false);
+
         List<PimdirCollections.Stored> listed =
                 MailEngine.collectionsOf(accountEmail, account, mailboxes);
+        if (keepsAllMail(context, account)) {
+            listed.addAll(
+                    MailEngine.collectionsOf(
+                            accountEmail, account, List.of(new Mailbox(ALL_MAIL, null))));
+        }
 
         collections.replace(accountEmail, PimdirSummary.MAIL, listed);
 
@@ -146,6 +188,19 @@ final class MailStore {
             PimdirSql.Bound bound = PimdirSql.bind("SET_COLLECTION_ROLE", values);
             db.execSQL(bound.sql, bound.args);
         }
+
+        // NOTE: the junk and the trash are hidden the first time a roster
+        // lists them, so neither shows nor syncs until the user ticks it:
+        // Gmail's step leaves both out, and a delete reads as gone. On an
+        // account that keeps its inbox alone, so is every other mailbox.
+        List<String> quiet = new ArrayList<>();
+        for (Mailbox mailbox : mailboxes) {
+            if (!MailBodies.downloads(mailbox.role, false)
+                    || (inboxOnly && !"inbox".equals(mailbox.role))) {
+                quiet.add(PimdirAccount.collectionId(account, mailbox.name));
+            }
+        }
+        MergedFilter.of(context, PimDomain.MAIL).quiet(quiet);
 
         String trash = "";
         for (Mailbox mailbox : mailboxes) {
@@ -187,6 +242,11 @@ final class MailStore {
         MailOffline.forget(context, accounts.idOf(accountEmail));
         MailWindow.forget(context, accounts.idOf(accountEmail));
         markAccountWide(context, accounts.idOf(accountEmail), false);
+        markAllMail(context, accounts.idOf(accountEmail), false);
+        context.getSharedPreferences(INBOX_ONLY_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .remove(accounts.idOf(accountEmail))
+                .apply();
         markExpungesOne(context, accounts.idOf(accountEmail), true);
     }
 
@@ -204,6 +264,39 @@ final class MailStore {
             prefs.remove(accountId);
         }
         prefs.apply();
+    }
+
+    /** Remembers whether an account keeps an All Mail collection ({@link #ALL_MAIL}). */
+    static void markAllMail(Context context, String accountId, boolean allMail) {
+        SharedPreferences.Editor prefs =
+                context.getSharedPreferences(ALL_MAIL_PREFS, Context.MODE_PRIVATE).edit();
+        if (allMail) {
+            prefs.putBoolean(accountId, true);
+        } else {
+            prefs.remove(accountId);
+        }
+        prefs.apply();
+    }
+
+    /** Whether an account keeps an All Mail collection ({@link #markAllMail}). */
+    static boolean keepsAllMail(Context context, String accountId) {
+        return context.getSharedPreferences(ALL_MAIL_PREFS, Context.MODE_PRIVATE)
+                .getBoolean(accountId, false);
+    }
+
+    /** An account's All Mail collection, which it holds only if it keeps one. */
+    static String allMailOf(String accountId) {
+        return PimdirAccount.collectionId(accountId, ALL_MAIL);
+    }
+
+    /**
+     * Makes sure a Gmail account keeps its All Mail, for a step that runs
+     * before the account's roster was read again since it had none.
+     */
+    void ensureAllMail(String accountEmail) {
+        String account = accounts.idOf(accountEmail);
+        markAllMail(context, account, true);
+        collections.ensure(allMailOf(account), accountEmail, PimdirSummary.MAIL, ALL_MAIL);
     }
 
     /** Whether an account's mailboxes are listed account-wide ({@link #markAccountWide}). */
@@ -1710,7 +1803,7 @@ final class MailStore {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
-            for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+            for (PimdirCollections.Stored stored : collections.listAll(PimdirSummary.MAIL)) {
                 // NOTE: a mailbox kept whole is past its account's bound.
                 if (!stored.accountEmail.equals(accountEmail)
                         || MailOffline.whole(context, stored.id)) {
@@ -1745,7 +1838,7 @@ final class MailStore {
      */
     int release(String accountEmail, String until) {
         List<String> ids = new ArrayList<>();
-        for (PimdirCollections.Stored stored : collections.list(PimdirSummary.MAIL)) {
+        for (PimdirCollections.Stored stored : collections.listAll(PimdirSummary.MAIL)) {
             if (stored.accountEmail.equals(accountEmail)
                     && !MailOffline.whole(context, stored.id)) {
                 ids.add(stored.id);

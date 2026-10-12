@@ -54,7 +54,7 @@ final class ContactsList {
     /** Wires the list, its bar buttons, the header search and the pull-down. */
     void setUp() {
         // Pull-to-refresh runs the same syncAll as the drawer; its own
-        // spinner retracts right away, the sync strip carries the wait.
+        // spinner retracts right away, the sync dock carries the wait.
         androidx.swiperefreshlayout.widget.SwipeRefreshLayout refresh =
                 host.findViewById(R.id.contacts_refresh);
         refresh.setColorSchemeColors(host.ui.resolveColor(android.R.attr.colorAccent));
@@ -76,7 +76,7 @@ final class ContactsList {
                 .setOnClickListener(view -> confirmDeleteSelected());
 
         ListView list = host.findViewById(R.id.contacts_list);
-        header = new ListHeader(host, list, MainActivity.PANEL_CONTACTS, true);
+        header = new ListHeader(host, list, MainActivity.PANEL_CONTACTS);
         header.empty(host.findViewById(R.id.contacts_empty));
         header.search(
                 R.string.contacts_search,

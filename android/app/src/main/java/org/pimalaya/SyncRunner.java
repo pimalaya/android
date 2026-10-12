@@ -19,7 +19,7 @@ import org.pimalaya.client.OauthTokens;
  * The one sync path behind the in-app sync: the account lookup, the
  * addressbook self-heal and the refresh-once-and-retry dance exist
  * exactly once. The caller keeps what is its alone: MainActivity the
- * sync strip and its in-memory account cache (fed by the
+ * sync dock and its in-memory account cache (fed by the
  * observer). Everything blocks; callers run it off the main thread.
  */
 final class SyncRunner {

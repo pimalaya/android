@@ -103,18 +103,27 @@ final class MailList {
     };
 
     /**
-     * What a list shows under a role chip: the collections {@code accepts}
-     * lets through, narrowed to those holding {@code role} ({@code roles} by
-     * collection id), all of them with no chip on. The outbox holds no role,
-     * so a chip leaves it out.
+     * What a list shows and a pull syncs under a role chip: every mailbox
+     * holding {@code role} ({@code roles} by collection id) of the accounts
+     * {@code filter} shows, ticked or not, a chip being a view of its own;
+     * what the filter lets through with no chip on. The outbox holds no
+     * role, so a chip leaves it out.
      */
-    static BiPredicate<String, String> narrowed(
-            BiPredicate<String, String> accepts, String role, Map<String, String> roles) {
+    static SyncScope narrowed(MergedFilter filter, String role, Map<String, String> roles) {
         if (role == null) {
-            return accepts;
+            return filter;
         }
-        return (account, collection) ->
-                accepts.test(account, collection) && role.equals(roles.get(collection));
+        return new SyncScope() {
+            @Override
+            public boolean account(String email) {
+                return filter.showsAccount(email);
+            }
+
+            @Override
+            public boolean collection(String email, String collection) {
+                return account(email) && role.equals(roles.get(collection));
+            }
+        };
     }
 
     private final MainActivity host;
@@ -177,7 +186,7 @@ final class MailList {
 
     void setUp() {
         ListView list = host.findViewById(R.id.mail_list);
-        header = new ListHeader(host, list, MainActivity.PANEL_MAIL, true);
+        header = new ListHeader(host, list, MainActivity.PANEL_MAIL);
         header.empty(host.findViewById(R.id.mail_empty));
         header.search(
                 R.string.mail_search,
@@ -247,7 +256,7 @@ final class MailList {
         refresh.setOnRefreshListener(
                 () -> {
                     refresh.setRefreshing(false);
-                    host.syncMail();
+                    host.syncMail(role);
                 });
 
         // NOTE: a first pass lands its pages one write at a time, and the
@@ -293,7 +302,8 @@ final class MailList {
         reads.execute(
                 () -> {
                     Map<String, String> roles = store.roles();
-                    BiPredicate<String, String> shown = narrowed(filter::accepts, narrowing, roles);
+                    BiPredicate<String, String> shown =
+                            narrowed(filter, narrowing, roles)::collection;
                     MailStore.Query wanted = store.query(shown, unread, attachments, words);
                     List<MailStore.Edge> edges = store.edges();
 
@@ -310,7 +320,6 @@ final class MailList {
                     // NOTE: a search covers every stored message; the list
                     // reaches down to its floor otherwise, ending on the
                     // footer that loads more.
-                    Map<String, String> alone = alone(wanted, edges, roles);
                     String floor = null;
                     Footer footer = null;
                     if (words.trim().isEmpty()) {
@@ -365,7 +374,6 @@ final class MailList {
                                 pages.putAll(read);
                                 host.showMailBadge((int) Math.min(Integer.MAX_VALUE, badge));
                                 render();
-                                host.listAlone(alone);
                             });
                 });
     }
@@ -390,93 +398,120 @@ final class MailList {
 
     // ---- the footer -------------------------------------------------------
 
-    /**
-     * What the list's footer offers, read with the layout: the accounts a
-     * step brings more ({@link MailStep}), and for each the one mailbox it
-     * steps when the list shows that one alone.
-     */
-    private static final class Footer {
-        final List<String> accounts;
-        final Map<String, String> only;
+    /** One step the footer's button takes: an account's, or one mailbox's alone. */
+    static final class Step {
+        final String email;
 
-        Footer(List<String> accounts, Map<String, String> only) {
-            this.accounts = accounts;
+        /** The mailbox stepped alone, null for the account's step. */
+        final String only;
+
+        Step(String email, String only) {
+            this.email = email;
             this.only = only;
         }
     }
 
     /**
-     * The footer under {@code wanted}, null for none: every shown account
-     * that is on and has more to load ({@link MailWindow#more}), a mailbox
-     * kept whole or one that downloads nothing (junk, trash) taking no part.
-     * An account whose shown mailboxes are one of several it steps steps
-     * that one.
+     * What the list's footer offers, read with the layout: the steps a tap
+     * takes ({@link MailStep}), and whether any steps one mailbox of an
+     * account stepped mailbox by mailbox, which the line under it says.
      */
-    private Footer footerOf(
-            MailStore.Query wanted, List<MailStore.Edge> edges, Map<String, String> roles) {
-        Map<String, List<String>> shown = new LinkedHashMap<>();
-        Map<String, Integer> stepped = new HashMap<>();
-        for (MailStore.Edge edge : edges) {
-            if (MailOffline.whole(host, edge.collection)
-                    || !MailBodies.downloads(roles.get(edge.collection), false)) {
-                continue;
-            }
-            stepped.merge(edge.accountEmail, 1, Integer::sum);
-            // NOTE: an account that is off loads nothing.
-            if (wanted.holds(edge.collection)
-                    && AccountActivation.enabled(host, edge.accountEmail)
-                    && MailWindow.more(host, store.accountIdOf(edge.accountEmail))) {
-                shown.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>())
-                        .add(edge.collection);
-            }
+    private static final class Footer {
+        final List<Step> steps;
+        final boolean perMailbox;
+
+        Footer(List<Step> steps, boolean perMailbox) {
+            this.steps = steps;
+            this.perMailbox = perMailbox;
         }
-        if (shown.isEmpty()) {
-            return null;
-        }
-        Map<String, String> only = new HashMap<>();
-        List<String> loading = new ArrayList<>();
-        for (Map.Entry<String, List<String>> account : shown.entrySet()) {
-            String email = account.getKey();
-            if (account.getValue().size() == 1 && stepped.get(email) > 1) {
-                String alone = account.getValue().get(0);
-                // NOTE: a mailbox stepped alone down to all of its mail has
-                // nothing more to load, whatever its account's others hold.
-                if (!MailWindow.more(host, store.accountIdOf(email), alone)) {
-                    continue;
-                }
-                only.put(email, alone);
-            }
-            loading.add(email);
-        }
-        if (loading.isEmpty()) {
-            return null;
-        }
-        return new Footer(loading, only);
     }
 
     /**
-     * The junk and trash mailboxes the list shows alone, each its account's
-     * only shown one and not kept whole, by collection to the account's
-     * address: opening one lists it ({@link MainActivity#listAlone}).
+     * The footer under {@code wanted}, null for none, over the shown
+     * accounts that are on, a mailbox kept whole taking no part. A Gmail
+     * account, listed whole through All Mail, takes one step while it has
+     * more to load ({@link MailWindow#more}), of the one label it shows
+     * alone if it does. Any other account takes one step of each mailbox it
+     * shows that has more ({@link MailWindow#more(android.content.Context,
+     * String, String)}). The junk or the trash, which no step of its account
+     * brings, loads more only when its account shows it alone, by itself
+     * ({@link #moreAlone}).
      */
-    private Map<String, String> alone(
+    private Footer footerOf(
             MailStore.Query wanted, List<MailStore.Edge> edges, Map<String, String> roles) {
-        Map<String, List<MailStore.Edge>> shown = new LinkedHashMap<>();
+        Map<String, List<String>> gmail = new LinkedHashMap<>();
+        Map<String, Integer> stepped = new HashMap<>();
+        Map<String, List<MailStore.Edge>> quiet = new LinkedHashMap<>();
+        Set<String> showing = new HashSet<>();
+        List<Step> steps = new ArrayList<>();
+        boolean perMailbox = false;
         for (MailStore.Edge edge : edges) {
-            if (wanted.holds(edge.collection)) {
-                shown.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>()).add(edge);
+            // NOTE: an account that is off loads nothing.
+            boolean held =
+                    wanted.holds(edge.collection)
+                            && AccountActivation.enabled(host, edge.accountEmail);
+            if (MailOffline.whole(host, edge.collection)) {
+                continue;
+            }
+            if (!MailBodies.downloads(roles.get(edge.collection), false)) {
+                if (held) {
+                    quiet.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>())
+                            .add(edge);
+                }
+                continue;
+            }
+            String accountId = store.accountIdOf(edge.accountEmail);
+            boolean whole = MailStore.keepsAllMail(host, accountId);
+            stepped.merge(edge.accountEmail, 1, Integer::sum);
+            if (held) {
+                showing.add(edge.accountEmail);
+            }
+            if (held && whole && MailWindow.more(host, accountId)) {
+                gmail.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>())
+                        .add(edge.collection);
+            } else if (held && !whole && MailWindow.more(host, accountId, edge.collection)) {
+                steps.add(new Step(edge.accountEmail, edge.collection));
+                perMailbox = true;
             }
         }
-        Map<String, String> alone = new LinkedHashMap<>();
-        for (List<MailStore.Edge> account : shown.values()) {
-            MailStore.Edge edge = account.get(0);
-            if (account.size() == 1
-                    && !MailBodies.downloads(roles.get(edge.collection), false)
-                    && !MailOffline.whole(host, edge.collection)) {
-                alone.put(edge.collection, edge.accountEmail);
+        for (Map.Entry<String, List<MailStore.Edge>> account : quiet.entrySet()) {
+            String email = account.getKey();
+            MailStore.Edge alone = account.getValue().get(0);
+            if (!showing.contains(email) && account.getValue().size() == 1 && moreAlone(alone)) {
+                steps.add(new Step(email, alone.collection));
             }
         }
-        return alone;
+        for (Map.Entry<String, List<String>> account : gmail.entrySet()) {
+            String email = account.getKey();
+            String only = null;
+            if (account.getValue().size() == 1 && stepped.get(email) > 1) {
+                only = account.getValue().get(0);
+                // NOTE: a label stepped alone down to all of its mail has
+                // nothing more to load, whatever its account's others hold.
+                if (!MailWindow.more(host, store.accountIdOf(email), only)) {
+                    continue;
+                }
+            }
+            steps.add(new Step(email, only));
+        }
+        if (steps.isEmpty()) {
+            return null;
+        }
+        return new Footer(steps, perMailbox);
+    }
+
+    /**
+     * Whether the junk or the trash shown alone has more to load: on Gmail,
+     * where it is stepped by its label, while its own frontier is not all
+     * mail; elsewhere, where it is widened chunk by chunk, until it is
+     * listed down to its account's bound.
+     */
+    private boolean moreAlone(MailStore.Edge edge) {
+        String accountId = store.accountIdOf(edge.accountEmail);
+        if (MailStore.keepsAllMail(host, accountId)) {
+            return MailWindow.moreAlone(host, accountId, edge.collection);
+        }
+        return !edge.listed || edge.limit != null;
     }
 
     /**
@@ -501,12 +536,19 @@ final class MailList {
 
     /**
      * The line under the footer's button: about how many messages a step
-     * brings each account, and that it waits for Wi-Fi when there is none.
+     * brings each account, or each mailbox where one is stepped mailbox by
+     * mailbox ({@code perMailbox}), and that it waits for Wi-Fi when there
+     * is none.
      */
-    static String info(android.content.Context context, boolean wifi) {
+    static String info(android.content.Context context, boolean wifi, boolean perMailbox) {
         String line =
                 context.getResources()
-                        .getQuantityString(R.plurals.mail_more_info, MailStep.COUNT, MailStep.COUNT);
+                        .getQuantityString(
+                                perMailbox
+                                        ? R.plurals.mail_more_info_mailbox
+                                        : R.plurals.mail_more_info,
+                                MailStep.COUNT,
+                                MailStep.COUNT);
         return wifi ? line : line + " · " + context.getString(R.string.mail_more_wifi);
     }
 
@@ -553,8 +595,9 @@ final class MailList {
         load.setAlpha(state == FooterState.LOAD ? 1f : 0.6f);
         load.setText(
                 state == FooterState.LOADING ? R.string.mail_more_loading : R.string.mail_more_load);
-        load.setOnClickListener(tapped -> host.loadMore(footer.accounts, footer.only));
-        ((TextView) view.findViewById(R.id.mail_window_info)).setText(info(host, wifi));
+        load.setOnClickListener(tapped -> host.loadMore(footer.steps));
+        ((TextView) view.findViewById(R.id.mail_window_info))
+                .setText(info(host, wifi, footer.perMailbox));
         return view;
     }
 

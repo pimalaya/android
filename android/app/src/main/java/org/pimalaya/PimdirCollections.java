@@ -169,9 +169,19 @@ final class PimdirCollections {
      *
      * <p>A collection whose account this device no longer knows keeps its store
      * id as its address, so it stays visible rather than silently dropping out
-     * of a listing that is meant to show everything.
+     * of a listing that is meant to show everything. A Gmail account's All
+     * Mail ({@link MailStore#ALL_MAIL}) is never listed: it is the store's
+     * own, for what a step already read, and no list, filter or chip shows
+     * it ({@link #listAll}).
      */
     List<Stored> list(String kind) {
+        List<Stored> shown = listAll(kind);
+        shown.removeIf(stored -> MailStore.ALL_MAIL.equals(stored.name));
+        return shown;
+    }
+
+    /** Every collection of one kind, a Gmail account's All Mail among them. */
+    List<Stored> listAll(String kind) {
         // NOTE: pimdir's own roster read, LIST_COLLECTIONS: id, account,
         // kind, name, parent, color, description, sort order, generation,
         // role, then the coverage.

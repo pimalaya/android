@@ -237,29 +237,27 @@ Submitting a message SHALL NOT be retried: a submission whose reply was lost is 
 - THEN nothing is sent a second time
 
 ### Requirement: A sync says what it is working on, in every domain
-A running sync SHALL show, as an extension of the app bar of every list (mail, contacts, calendars), so it shows wherever the list is scrolled, a strip naming what the pass is on: one line in the bar's lower part under its title, the domain (*Syncing contacts*) followed by the account once the pass reaches one (*Syncing contacts · me@example.org*), never the engine's steps, over one thin bar on the app bar's bottom edge. The strip SHALL be drawn within the app bar's height: showing, updating or hiding it SHALL change neither the bar's height nor its title's position nor the list's. The three domains SHALL report alike, so a wait reads the same whichever one is being synced. The strip SHALL hide when nothing runs, the app bar then as it is without it, and SHALL not show on screens other than the lists.
+A running sync SHALL show, docked on top of the bottom navigation of every list the bottom bar shows, so it shows whichever list is open and however far it is scrolled, a dock naming what the pass is on: the account in a first line (*Starting the sync* before the pass reaches one), then a second line naming the engine's current step (*Downloading 42 messages*), after the domain where the pass runs several (*Syncing mail · Downloading 42 messages*) and the domain alone before a step is named, the count of accounts when there are several (*1 of 2*), over one thin bar on the dock's top edge. Showing, updating or hiding the dock SHALL move neither the app bar, nor the list's large title, search field, chips or rows; the extended add button SHALL rise above it while it shows. The three domains SHALL report alike, so a wait reads the same whichever one is being synced. The dock SHALL hide when nothing runs and SHALL NOT show on screens other than the lists. The app bar SHALL carry no part of it.
 
-The bar SHALL be one progress over the whole pass, every account and every domain it runs, and SHALL never move back while the pass runs. Before it starts, the pass SHALL be sized in sections, one per domain and account, each weighing the collections stored for it, one at least, an account's mail step weighing one; a section SHALL fill its weight however many collections its listing turns up, and sections MAY fill at different speeds. Within a section, the pass SHALL tell how many collections it will run before the first one runs, and each collection SHALL fill its share as it lands; within it, a step moving items batch by batch, the members a listing did not carry being read or the contacts and events being written to the phone, SHALL fill part of that share, the download the first three fifths and the phone the rest where the domain has a phone mirror, the download all of it for mail; a calendar's steps only while that calendar runs alone; a mail step its bodies (A mail step counts the bodies it brings). The bar SHALL run indeterminate only before anything is counted, its line then saying the sync is starting (*Starting the sync*) rather than naming a domain, and SHALL keep the determinate bar's track and height.
+The bar SHALL be one progress over the whole pass, every account and every domain it runs, and SHALL never move back while the pass runs. Before it starts, the pass SHALL be sized in sections, one per domain and account, each weighing the collections stored for it, one at least, an account's mail step weighing one; a section SHALL fill its weight however many collections its listing turns up, and sections MAY fill at different speeds. Within a section, the pass SHALL tell how many collections it will run before the first one runs, and each collection SHALL fill its share as it lands; within it, a step moving items batch by batch, the members a listing did not carry being read or the contacts and events being written to the phone, SHALL fill part of that share, the download the first three fifths and the phone the rest where the domain has a phone mirror, the download all of it for mail; a calendar's steps only while that calendar runs alone; a mail step its bodies (A mail step counts the bodies it brings). The bar SHALL run indeterminate only before anything is counted, the dock then saying the sync is starting, and SHALL keep the determinate bar's track and height.
 
-The list's search field, its chips and its count line SHALL stay while the strip shows.
-
-The strip SHALL NOT block the app: the lists, the reader and the composer stay usable while it runs, the lists refreshing when the pass ends. One pass SHALL run at a time, a pull or the drawer's sync asked for meanwhile doing nothing, and an account SHALL NOT be deleted while a pass runs. The strip's line SHALL never be empty: it SHALL open saying the sync is starting, and SHALL follow the pass to the next account and domain once something is counted.
+The dock SHALL NOT block the app: the lists, the reader and the composer stay usable while it runs, the lists refreshing when the pass ends. One pass SHALL run at a time, a pull or the drawer's sync asked for meanwhile doing nothing, and an account SHALL NOT be deleted while a pass runs. The dock's lines SHALL never be empty: they SHALL open saying the sync is starting, and SHALL follow the pass to the next account, domain and step once something is counted.
 
 #### Scenario: A pass over every domain
 - GIVEN the drawer's sync
 - WHEN it moves from contacts to mail to calendars
-- THEN the strip's line reads *Syncing contacts*, then *Syncing mail*, then *Syncing calendars*
+- THEN the dock's second line starts with *Syncing contacts*, then *Syncing mail*, then *Syncing calendars*
 - AND one bar fills once across the three
 
 #### Scenario: A pass over several accounts
 - GIVEN two mail accounts
 - WHEN the mail pass moves from the first to the second
-- THEN the strip's line names the first account then the second, and the bar carries on from where the first left it
+- THEN the dock's first line names the first account then the second, its count reads *1 of 2* then *2 of 2*, and the bar carries on from where the first left it
 
 #### Scenario: The first frame
 - GIVEN a sync the user has just asked for
-- WHEN the strip shows, before any round trip
-- THEN its line says the sync is starting, over an indeterminate bar the size of the counting one
+- WHEN the dock shows, before any round trip
+- THEN it says the sync is starting, over an indeterminate bar the size of the counting one
 
 #### Scenario: A book's first download
 - GIVEN an account of one CardDAV book of 230 contacts, mirrored on the phone, synced for the first time
@@ -275,17 +273,25 @@ The strip SHALL NOT block the app: the lists, the reader and the composer stay u
 #### Scenario: Scrolled to the end
 - GIVEN the mail list scrolled to its last message
 - WHEN *Load more* is tapped
-- THEN the strip shows in the app bar, its bar filling, without scrolling back up
+- THEN the dock shows above the bottom bar, just under the button, naming the account and *Loading older mail*
 
 #### Scenario: Nothing moves
 - GIVEN the mail list at its top, its large title, search field and chips shown
 - WHEN a pass starts, counts and ends
-- THEN the strip shows in the app bar and goes, the large title, the search field, the chips and the rows never moving
+- THEN the dock shows and goes, the large title, the search field, the chips and the rows never moving, the add button rising and returning
 
 #### Scenario: Reading while it runs
 - GIVEN a sync running
 - WHEN a message is opened, or a sync pulled for
 - THEN the message opens, and no second pass starts
+
+### Requirement: The sync dock opens onto the pass
+Tapping the sync dock SHALL open a sheet showing the pass's overall progress, one row per account of the pass saying whether it is running (with its current line), next or done, and the pass's recent lines, newest first, each with its time. The lines SHALL be kept in memory for the pass under way only, at most the last 50, and dropped when the next pass starts. The sheet SHALL close on request and when the pass ends.
+
+#### Scenario: Two accounts
+- GIVEN a pass over two mail accounts, the first running
+- WHEN the dock is tapped
+- THEN the sheet shows the first account running with its line, the second as next, and the lines so far
 
 ### Requirement: The drawer's sync covers every domain
 The drawer's sync SHALL reconcile contacts, then mail, then calendars, and SHALL report one failure at most, the contacts one first.
@@ -482,12 +488,12 @@ Every action a user takes on an item (create, edit, flag, delete, send) SHALL be
 - THEN it is listed at once, staged as an `Add`
 
 ### Requirement: The filter lists accounts and their collections
-The filter SHALL be a page per domain listing each account that is on and covers the domain with a checkbox, and its collections indented below it with theirs: the mailboxes and the account's outbox, the calendars, or the subscribed address books, the on-device book listed as an account of its own. It SHALL be keyed by collection id and kept across restarts, per domain, a store with no kept filter showing everything. An account's checkbox SHALL read ticked when all its collections show, partly ticked when some do, unticked when none do or the account is hidden. Unticking an account SHALL hide it and keep its collections' own choices; ticking it back SHALL restore them, or tick them all when they tick none. Ticking a collection of a hidden account SHALL show the account with that collection alone. A Reset SHALL show everything again. Every tick SHALL apply to the list at once. The boxes SHALL be checkboxes, not switches, to stay apart from an account's on and off.
+The filter SHALL be a page per domain listing each account that is on and covers the domain with a checkbox, and its collections indented below it with theirs: the mailboxes and the account's outbox, the calendars, or the subscribed address books, the on-device book listed as an account of its own. It SHALL be keyed by collection id and kept across restarts, per domain. A store with no kept filter SHALL show everything but, on a Gmail account, its trash and its spam, and on any other mail account listed for the first time, every mailbox but its inbox, each unticked the first time a roster lists it (a mailbox the server adds later included) and left as the user ticks it after; a mail account listed before this rule SHALL keep its ticks, its junk and trash aside. An account's checkbox SHALL read ticked when all its collections show, partly ticked when some do, unticked when none do or the account is hidden. Unticking an account SHALL hide it and keep its collections' own choices; ticking it back SHALL restore them, or tick them all when they tick none. Ticking a collection of a hidden account SHALL show the account with that collection alone. A Reset SHALL go back to the default. The boxes SHALL be checkboxes, not switches, to stay apart from an account's on and off. The bar's filter button SHALL read active only when something the default shows is hidden.
 
 #### Scenario: Two accounts with an Archive
-- GIVEN two mail accounts each holding a mailbox named Archive
-- WHEN one account's Archive is unticked
-- THEN the other account's Archive still shows
+- GIVEN two IMAP accounts each holding a mailbox named Archive, their inboxes alone ticked
+- WHEN one account's Archive is ticked and applied
+- THEN the other account's Archive stays hidden
 
 #### Scenario: An account unticked and back
 - GIVEN an account with its Archive unticked
@@ -497,7 +503,25 @@ The filter SHALL be a page per domain listing each account that is on and covers
 #### Scenario: After a restart
 - GIVEN a calendar unticked
 - WHEN the app is restarted
-- THEN the calendar is still hidden, and nothing is hidden in mail or contacts
+- THEN the calendar is still hidden, and nothing is hidden in mail or contacts beyond the default
+
+#### Scenario: A new account
+- GIVEN a Microsoft account just connected, and a Gmail one
+- WHEN the filter is opened
+- THEN the Microsoft account ticks its inbox alone, the Gmail one every label but Trash and Spam
+
+### Requirement: Applying the filter syncs what it newly takes
+The filter page SHALL hold its ticks as a draft, the lists behind it unchanged, until *Apply*, which keeps them; closing the page SHALL drop them. Applying SHALL start, under the sync dock and on Wi-Fi (once it is back otherwise), the first sync of every mailbox newly shown and never listed: its first chunk of about 50 newest headers, its own frontier where that chunk reached, its bodies downloaded after it; a mailbox listed before SHALL be caught up by the next pull. A book or a calendar newly shown SHALL start its domain's pull. A collection unticked SHALL be hidden and synced no more, by any sync, its bodies' download and the background fill included, its stored items kept and what it owes waiting for it.
+
+#### Scenario: Ticking Sent on Microsoft
+- GIVEN a Microsoft account whose Sent was never listed
+- WHEN Sent is ticked and *Apply* pressed
+- THEN Sent's newest messages are listed under the sync dock and their bodies downloaded after
+
+#### Scenario: Closing without applying
+- GIVEN Sent ticked on the filter page
+- WHEN the page is closed by its cross
+- THEN Sent is still unticked, and nothing syncs
 
 ### Requirement: An account that is off takes no part
 An account's settings SHALL switch the account on and off. An account that is off SHALL NOT be synced by any sync (the drawer's, a list's pull, a first sync, the mail fill), SHALL NOT be listed by a filter, and its items SHALL NOT be listed. Its data SHALL stay stored, and switching it back on SHALL bring both back. The phone's mirror of its address books is local and SHALL be left as it is.
@@ -508,12 +532,12 @@ An account's settings SHALL switch the account on and off. An account that is of
 - THEN the account is not contacted, its card says Deactivated, and no list or filter shows it
 
 ### Requirement: A role gives direct access across accounts
-The mail list SHALL offer role chips, Inbox, Sent, Drafts, Trash, Junk and Archive, at most one on: a chip SHALL narrow the collections the filter shows to those holding that role (pimdir's collection role, as the source states it), and no chip on SHALL narrow nothing. The outbox holds no role. Gmail, listed as one account, SHALL hold the roles of its system labels (INBOX, SENT, DRAFT, TRASH and SPAM as inbox, sent, drafts, trash and junk); Gmail has no archive label, so Archive SHALL show none of its mail. Contacts and calendars SHALL offer a Default chip narrowing to the default collection of every shown account. No chip SHALL change what syncs.
+The mail list SHALL offer role chips, Inbox, Sent, Drafts, Trash, Junk and Archive, at most one on: a chip SHALL narrow the list to the mailboxes holding that role (pimdir's collection role, as the source states it) of the accounts the filter shows, ticked or not, a chip being a view of its own, and no chip on SHALL narrow nothing. The outbox holds no role. Gmail, listed as one account, SHALL hold the roles of its system labels (INBOX, SENT, DRAFT, TRASH and SPAM as inbox, sent, drafts, trash and junk); Gmail has no archive label, so Archive SHALL show none of its mail. Contacts and calendars SHALL offer a Default chip narrowing to the default collection of every shown account. A chip SHALL NOT sync by itself; a pull while it is on syncs what it shows.
 
 #### Scenario: Every trash
-- GIVEN three shown mail accounts
+- GIVEN three shown mail accounts, their trashes unticked
 - WHEN the Trash chip is chosen
-- THEN the list shows the three trashes merged
+- THEN the list shows the three trashes merged, and nothing syncs
 
 ### Requirement: The source states a collection's default and whether it takes writes
 Listing an account's calendars or address books SHALL say which one the source writes to when none is named, stored as pimdir's `default` role: JMAP `isDefault`, Graph's `isDefaultCalendar` and its default contacts folder, Google's `primary` calendar and its `myContacts` group. CalDAV and CardDAV state none. It SHALL also say which ones the user may not write into: JMAP `myRights`, Graph `canEdit`, Google's `accessRole` below writer; rights a source leaves unsaid SHALL read as writable. A contacts sync SHALL restate both for the account's books before it reconciles them.
@@ -560,7 +584,7 @@ A drawer row SHALL open Deleted items: every item the store holds deleted, acros
 - THEN the retained items and their bodies go for good, and the waiting one stays
 
 ### Requirement: A sync that went through says nothing
-A sync that went through SHALL NOT pop up a report: no count of what came in or went out, no count of messages sent from the outbox, no count of conflicts left, the lists showing what the pass brought and a conflicted row carrying its own mark. A pull turned down because a background run holds the sync SHALL say nothing either, that run's strip already showing. A failure SHALL still open its error dialog.
+A sync that went through SHALL NOT pop up a report: no count of what came in or went out, no count of messages sent from the outbox, no count of conflicts left, the lists showing what the pass brought and a conflicted row carrying its own mark. A pull turned down because a background run holds the sync SHALL say nothing either, that run's dock already showing. A failure SHALL still open its error dialog.
 
 #### Scenario: A quiet pass
 - GIVEN a contacts pass bringing three cards and leaving one conflict

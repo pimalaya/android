@@ -18,8 +18,9 @@ import java.util.List;
  * <p>Checkboxes rather than switches, to stay apart from an account's on and
  * off in its settings, which decides what syncs at all: an account that is off
  * is not listed here. Unticking an account folds its collections away, each
- * keeping its own box for when the account is ticked again. Every tick applies
- * at once, the list behind narrowing as it goes, and is kept.
+ * keeping its own box for when the account is ticked again. The ticks are a
+ * draft until Apply, which keeps them and syncs what they newly take
+ * ({@link MainActivity#applyFilter}); closing the page drops them.
  *
  * <p>On calendars and address books, the account's default collection says
  * so, and a writable one of an account whose source names no default offers
@@ -56,6 +57,9 @@ final class FilterPage {
     /** Whether the page filters the Files tab, which is no domain. */
     private boolean files;
 
+    /** The filter the page edits, applied by Apply and dropped otherwise. */
+    private MergedFilter draft;
+
     /** The list screen the page was raised over, restored on the way out. */
     private int cameFrom = MainActivity.PANEL_MAIL;
 
@@ -68,9 +72,11 @@ final class FilterPage {
         host.findViewById(R.id.filter_reset)
                 .setOnClickListener(
                         view -> {
-                            filter().reset();
-                            changed();
+                            draft.reset();
+                            render();
                         });
+        ((TextView) host.findViewById(R.id.filter_apply)).setTextColor(host.accentContrast());
+        host.findViewById(R.id.filter_apply).setOnClickListener(view -> apply());
     }
 
     /** Opens the page over the list of {@code domain}. */
@@ -80,6 +86,7 @@ final class FilterPage {
         this.cameFrom = host.screen;
         ((TextView) host.findViewById(R.id.filter_title))
                 .setText(host.getString(R.string.filter_title_of, host.getString(domain.label)));
+        draft = host.filterOf(domain).draft();
         render();
         host.openOverlay(MainActivity.PANEL_FILTER);
     }
@@ -93,24 +100,38 @@ final class FilterPage {
                 .setText(
                         host.getString(
                                 R.string.filter_title_of, host.getString(R.string.files_title)));
+        draft = host.filesFilter().draft();
         render();
         host.openOverlay(MainActivity.PANEL_FILTER);
     }
 
-    /** The filter on the page. */
+    /** The filter on the page, a draft until applied. */
     private MergedFilter filter() {
-        return files ? host.filesFilter() : host.filterOf(domain);
+        return draft;
+    }
+
+    /**
+     * Keeps the page's ticks and closes it: the lists follow, and what the
+     * ticks newly take syncs ({@link MainActivity#applyFilter}).
+     */
+    private void apply() {
+        MergedFilter kept = files ? host.filesFilter() : host.filterOf(domain);
+        PimDomain applied = files ? null : domain;
+        MergedFilter ticks = draft;
+        leave();
+        host.applyFilter(applied, kept, ticks);
     }
 
     /** Closes the page onto the list it was opened over. */
     void leave() {
         domain = null;
+        draft = null;
         host.closeOverlay(MainActivity.PANEL_FILTER);
         host.screen = cameFrom;
         host.applyChrome(cameFrom);
     }
 
-    /** A tick flipped: the page and the lists behind it follow. */
+    /** A default chosen: the page and the lists behind it follow. */
     private void changed() {
         render();
         host.filterChanged();
@@ -136,7 +157,7 @@ final class FilterPage {
                             true,
                             () -> {
                                 filter.toggleAccount(account.email);
-                                changed();
+                                render();
                             },
                             0,
                             null));
@@ -179,7 +200,7 @@ final class FilterPage {
                                 false,
                                 () -> {
                                     filter.toggleCollection(collection.id);
-                                    changed();
+                                    render();
                                 },
                                 defaults
                                         ? R.string.filter_set_default

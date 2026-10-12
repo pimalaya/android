@@ -16,12 +16,12 @@ import org.pimalaya.client.Transport;
  * The mail and calendar halves of a remote sync, the contacts half being
  * {@link SyncRunner}'s: every mail account's outbox drained and mailboxes
  * reconciled, every calendar account's calendars reconciled. The app runs
- * them behind its sync strip, the background check headless; neither needs
+ * them behind its sync dock, the background check headless; neither needs
  * the other's screen. Everything blocks; callers run it off the main
  * thread.
  */
 final class RemotePass {
-    /** What a pass reports as it goes, for the sync strip. */
+    /** What a pass reports as it goes, for the sync dock. */
     interface Progress extends PimdirEngine.Progress {
         /** The pass moved on to one account, null between accounts. */
         void account(String email);
@@ -326,6 +326,57 @@ final class RemotePass {
     }
 
     /**
+     * The first sync of one mailbox the filter newly ticks, never listed,
+     * on the calling thread: its first chunk of about 50 newest headers
+     * ({@link MailEngine#widen}), the floor of what it reached its own
+     * frontier, so the body step downloads their bodies and *Load more*
+     * steps it from there. Answers what went wrong, or null.
+     */
+    Exception firstOf(AccountEntry account, MailSession session, String collection) {
+        progress.account(account.email);
+        try {
+            progress.step(PimDomain.MAIL, PimdirEngine.Progress.STAGE_SERVER, 0);
+            progress.collections(PimDomain.MAIL, 0, 1);
+            new MailEngine(pimdir, client, session, accountIdOf(account.email))
+                    .widen(collection, MailStep.COUNT);
+            MailWindow.moveBackMailbox(context, collection, mail.coverage(collection).since);
+            progress.collections(PimDomain.MAIL, 1, 1);
+            return null;
+        } catch (Exception error) {
+            Log.w("pimalaya", "mailbox first sync failed: " + collection, error);
+            return error;
+        }
+    }
+
+    /**
+     * What *Load more* brings one account, on the calling thread: a step
+     * ({@link #stepMail}) of the account or of the one mailbox {@code only}
+     * names. The junk or the trash, which no step of its account brings, is
+     * stepped by its label on Gmail and elsewhere widened by its next chunk
+     * of headers ({@link MailEngine#widen}), its bodies left to opening.
+     * Answers what went wrong, or null.
+     */
+    Exception loadMore(AccountEntry account, MailSession session, String only) {
+        if (only == null
+                || MailBodies.downloads(mail.roles().get(only), false)
+                || PimalayaClient.isGoogle(account.server(PimDomain.MAIL))) {
+            return stepMail(account, session, only, false);
+        }
+        progress.account(account.email);
+        try {
+            progress.step(PimDomain.MAIL, PimdirEngine.Progress.STAGE_SERVER, 0);
+            progress.collections(PimDomain.MAIL, 0, 1);
+            new MailEngine(pimdir, client, session, accountIdOf(account.email))
+                    .widen(only, MailStep.COUNT);
+            progress.collections(PimDomain.MAIL, 1, 1);
+            return null;
+        } catch (Exception error) {
+            Log.w("pimalaya", "mailbox widen failed: " + only, error);
+            return error;
+        }
+    }
+
+    /**
      * One step of one account's mail ({@link MailStep}) on its session, on
      * the calling thread: for the first sync ({@code first}) after its
      * mailboxes are read and stored, which opens every one of them; else
@@ -360,11 +411,34 @@ final class RemotePass {
             } else {
                 mailboxes = new ArrayList<>();
                 for (PimdirCollections.Stored stored : mail.loadMailboxes(List.of(account.email))) {
+                    // NOTE: the outbox is the app's queue, no mailbox the
+                    // server knows.
+                    if (stored.id.equals(mail.outboxOf(account.email))) {
+                        continue;
+                    }
                     mailboxes.add(new Mailbox(stored.name, stored.role));
                 }
             }
+            // NOTE: the account's step takes what the filter ticks, the inbox
+            // alone to begin with off Gmail; a mailbox's own step holds by
+            // every one of them.
+            MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
             for (Mailbox mailbox : MailEngine.ordered(mailboxes)) {
-                collections.add(mail.collectionOf(account.email, mailbox.name));
+                String collection = mail.collectionOf(account.email, mailbox.name);
+                if (only != null || filter.chosen(collection)) {
+                    collections.add(collection);
+                }
+            }
+            // NOTE: a Gmail step files what it brings in All Mail too, so an
+            // archived message is held and never read again. A step over
+            // the trash or the junk alone holds by that mailbox alone: what
+            // lies there was taken out of every other one.
+            String allMail = MailStore.allMailOf(accountId);
+            if (only != null && !MailBodies.downloads(mail.roles().get(only), false)) {
+                collections = new ArrayList<>(List.of(only));
+            } else if (PimalayaClient.isGoogle(account.server(PimDomain.MAIL))) {
+                mail.ensureAllMail(account.email);
+                collections.add(allMail);
             }
             progress.collections(PimDomain.MAIL, 0, 1);
             MailStep.Outcome outcome =

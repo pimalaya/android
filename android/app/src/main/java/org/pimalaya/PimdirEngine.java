@@ -52,7 +52,7 @@ abstract class PimdirEngine implements OfflineDriver {
      *
      * <p>The first three are every domain's, the last three the phone
      * spokes': books and calendars are reconciled against the phone. Each step
-     * carries the domain of the engine that took it, which the strip names
+     * carries the domain of the engine that took it, which the dock names
      * and weighs its counts by ({@link SyncSteps}).
      */
     interface Progress {
