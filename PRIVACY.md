@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: 9 October 2026
+Last updated: 12 October 2026
 
 This privacy policy describes how the **Pimalaya** Android app (package `org.pimalaya`, the "app") handles your data. Pimalaya is a free and open-source mail, contacts and calendar app published by the Pimalaya project. Its source code is available at https://github.com/pimalaya/android.
 
@@ -10,7 +10,7 @@ Pimalaya does not collect, sell, or share your personal data with us or with any
 
 ## The data the app handles
 
-- **Mail.** The app stores the headers of your messages (sender, subject, date, read state and other marks, and the mailbox each is filed in) so it can list them. It downloads and stores a whole message, attachments included, as the server sent it, when you open it, and also in the background or for whole mailboxes when you choose so in the account's settings. The messages you write are composed and kept on the device until they are sent. Opening a message loads no remote images or other content.
+- **Mail.** The app stores the headers of your messages (sender, subject, date, read state and other marks, and the mailbox each is filed in) so it can list them. It downloads and stores whole messages, attachments included, as the server sent them: the newest messages of the mailboxes your filter shows, more each time you ask for more, in the background on Wi-Fi, every message of a mailbox you choose to keep whole in its settings, and any message you open. The messages of the trash and the junk are downloaded only when you open them. The messages you write are composed and kept on the device until they are sent. Opening a message loads no remote images or other content.
 - **Contacts.** The app stores the full contact data (names, phone numbers, email addresses, postal addresses, organizations, notes, photos, and the other fields of a vCard) of the addressbooks you connect, and of its on-device addressbook, which lives only on your device.
 - **Calendars.** The app stores your calendar entries in full, as your server holds them: title, times and time zones, location, description, recurrence, attendees, reminders, and every other property of the entry.
 - **Deleted items.** When a message, contact or calendar entry is deleted, the app keeps it, with its content when it was stored, so you can restore it from Deleted items. It is kept until you free that space in Deleted items, or remove the account.
@@ -29,7 +29,7 @@ Mail is never written anywhere else on the device.
 
 ## Background activity
 
-Each account syncs in the background at the interval its settings pick (every 15 minutes by default, or off), as Android schedules it. A background sync contacts only that account's servers, exactly as a sync you start in the app does.
+Each account syncs in the background at the interval its settings pick (every 15 minutes by default, or off), as Android schedules it, its mail limited to the mailboxes your filter shows. A background sync contacts only that account's servers, exactly as a sync you start in the app does.
 
 ## What we do not do
 
