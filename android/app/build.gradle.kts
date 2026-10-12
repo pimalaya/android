@@ -67,9 +67,12 @@ android {
 
     // One APK per ABI (smaller per-device downloads) plus a universal APK
     // that runs anywhere; the native libpimalaya.so is the only per-ABI part.
+    // Off for a bundle, which AGP refuses to build beside split APKs
+    // (issuetracker.google.com/402800800): Play splits it per device itself.
+    val bundling = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
     splits {
         abi {
-            isEnable = true
+            isEnable = !bundling
             reset()
             include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
             isUniversalApk = true

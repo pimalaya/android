@@ -45,9 +45,12 @@ jobs:
             echo "PIMALAYA_KEYSTORE=$RUNNER_TEMP/pimalaya.jks" >> "$GITHUB_ENV"
           fi
       # The APKs for direct installs, the bundle for Google Play, which
-      # serves each phone its own ABI from it.
-      - name: Assemble release APKs and bundle
-        run: nix develop --command bash -c 'cd android && gradle :app:assembleRelease :app:bundleRelease'
+      # serves each phone its own ABI from it. Two runs: a bundle build
+      # turns the ABI splits off (android/app/build.gradle.kts).
+      - name: Assemble release APKs
+        run: nix develop --command bash -c 'cd android && gradle :app:assembleRelease'
+      - name: Assemble release bundle
+        run: nix develop --command bash -c 'cd android && gradle :app:bundleRelease'
       # Rename each split (and the universal) to its published name; the
       # *.apk glob absorbs the -unsigned suffix when no keystore is set.
       - name: Collect the APKs and the bundle
