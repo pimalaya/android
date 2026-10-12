@@ -28,9 +28,11 @@ import java.util.function.Consumer;
  * list scrolls down and unfolds when it comes back up, the way a
  * reader's attention moves.
  *
- * <p>It also draws the sync strip pinned above its list rather than in
- * it (sync_strip.xml), so a pass, or the mail downloading behind the
- * list, shows however far the list is scrolled.
+ * <p>It also draws the sync strip into the app bar while its list is the
+ * screen, as the bar's extension (activity_main.xml): a line in the bar's
+ * lower part and a thin bar on its bottom edge, so a pass, or the mail
+ * downloading behind the list, shows however far the list is scrolled,
+ * and never moves the title or the rows.
  */
 final class ListHeader {
     private final MainActivity host;
@@ -38,11 +40,8 @@ final class ListHeader {
     final View view;
     private final ListView list;
 
-    /**
-     * The sync strip pinned above the list (sync_strip.xml), shown wherever
-     * the list is scrolled; null on a list that has none.
-     */
-    private final View strip;
+    /** Whether this list shows the sync strip; the files list does not. */
+    private final boolean strip;
 
     /** Whether the large title is scrolled out of sight. */
     private boolean scrolled;
@@ -52,15 +51,10 @@ final class ListHeader {
 
     private int lastTop;
 
-    /** Whether this list searches, and filters with chips. */
-    private boolean searching;
-
-    private boolean chipping;
-
     /** Debounced search, so typing does not re-render per keystroke. */
     private Runnable pendingSearch;
 
-    ListHeader(MainActivity host, ListView list, int panel, View strip) {
+    ListHeader(MainActivity host, ListView list, int panel, boolean strip) {
         this.host = host;
         this.panel = panel;
         this.list = list;
@@ -119,6 +113,20 @@ final class ListHeader {
     /** Whether the strip shows a pass, or why one waits. */
     private boolean passing;
 
+    /**
+     * What the strip says of the pass: whose account (null before the pass
+     * reaches one), the step, and the bar's {@code passDone} of
+     * {@code passTotal}, a total of zero running it indeterminate and one
+     * below zero hiding it (a wait).
+     */
+    private String passAccount;
+
+    private String passDetail;
+
+    private int passDone;
+
+    private int passTotal;
+
     /** Whether older mail downloads in the background. */
     private boolean fill;
 
@@ -145,9 +153,7 @@ final class ListHeader {
             fillPlanned = 0;
             fillShown = 0;
         }
-        if (!passing) {
-            renderFill();
-        }
+        renderStrip();
     }
 
     /**
@@ -157,92 +163,24 @@ final class ListHeader {
     void filled(int landed, int planned) {
         fillLanded = landed;
         fillPlanned = planned;
-        if (fill && !passing) {
-            renderFill();
+        if (fill) {
+            renderStrip();
         }
     }
-
-    /** Draws the background download on the strip, or hides it. */
-    private void renderFill() {
-        if (strip == null) {
-            return;
-        }
-        if (!fill) {
-            glyph(false);
-            strip.setVisibility(View.GONE);
-            return;
-        }
-        strip.findViewById(R.id.header_sync_account).setVisibility(View.GONE);
-        ((TextView) strip.findViewById(R.id.header_sync_detail))
-                .setText(R.string.mail_filling);
-        glyph(true);
-        ProgressBar bar = strip.findViewById(R.id.header_sync_bar);
-        if (fillPlanned > 0) {
-            fillShown =
-                    Math.max(
-                            fillShown,
-                            (int) ((long) Math.min(fillLanded, fillPlanned) * bar.getMax()
-                                    / fillPlanned));
-            bar.setIndeterminate(false);
-            bar.setProgress(fillShown);
-            bar.setVisibility(View.VISIBLE);
-        } else {
-            bar.setVisibility(View.GONE);
-        }
-        strip.setVisibility(View.VISIBLE);
-    }
-
-    /** Shows or hides the strip's download glyph, pulsing while shown. */
-    private void glyph(boolean shown) {
-        ImageView glyph = strip.findViewById(R.id.header_fill);
-        if (shown == (glyph.getVisibility() == View.VISIBLE)) {
-            return;
-        }
-        if (pulse != null) {
-            pulse.cancel();
-            pulse = null;
-        }
-        glyph.setAlpha(1f);
-        glyph.setVisibility(shown ? View.VISIBLE : View.GONE);
-        if (!shown) {
-            return;
-        }
-        glyph.setTooltipText(glyph.getContentDescription());
-        if (ValueAnimator.areAnimatorsEnabled()) {
-            pulse = ObjectAnimator.ofFloat(glyph, View.ALPHA, 1f, 0.3f);
-            pulse.setDuration(900);
-            pulse.setRepeatCount(ValueAnimator.INFINITE);
-            pulse.setRepeatMode(ValueAnimator.REVERSE);
-            pulse.start();
-        }
-    }
-
-    /** The fill glyph's pulse, null while it is hidden or holds still. */
-    private ObjectAnimator pulse;
 
     /**
-     * Shows the sync strip, the search field and the chips stepping aside:
-     * the account the pass is on (none before it reaches one), the step it
-     * stands at, over a bar filled to {@code done} of {@code total}, or
-     * running indeterminate while the pass cannot count (a total of zero).
-     * A search field holding a query or the cursor stays: hidden, it would
-     * filter the list with nothing saying so.
+     * Shows the sync strip: the step the pass stands at, after it the
+     * account it is on (none before it reaches one), over a bar filled to
+     * {@code done} of {@code total}, or running indeterminate while the
+     * pass cannot count (a total of zero).
      */
     void sync(String account, String detail, int done, int total) {
         passing = true;
-        TextView whose = strip.findViewById(R.id.header_sync_account);
-        whose.setText(account);
-        whose.setVisibility(account == null ? View.GONE : View.VISIBLE);
-        ((TextView) strip.findViewById(R.id.header_sync_detail)).setText(detail);
-        glyph(false);
-        ProgressBar bar = strip.findViewById(R.id.header_sync_bar);
-        bar.setVisibility(View.VISIBLE);
-        bar.setIndeterminate(total <= 0);
-        if (total > 0) {
-            bar.setProgress((int) ((long) Math.min(done, total) * bar.getMax() / total));
-        }
-        strip.setVisibility(View.VISIBLE);
-        controls(false);
+        passAccount = account;
+        passDetail = detail;
+        passDone = done;
+        passTotal = Math.max(0, total);
+        renderStrip();
     }
 
     /**
@@ -251,36 +189,104 @@ final class ListHeader {
      */
     void waiting(String detail) {
         passing = true;
-        strip.findViewById(R.id.header_sync_account).setVisibility(View.GONE);
-        ((TextView) strip.findViewById(R.id.header_sync_detail)).setText(detail);
-        glyph(false);
-        strip.findViewById(R.id.header_sync_bar).setVisibility(View.GONE);
-        strip.setVisibility(View.VISIBLE);
+        passAccount = null;
+        passDetail = detail;
+        passTotal = -1;
+        renderStrip();
     }
 
     /**
-     * Puts the search field and the chips back once the sync is over, the
-     * strip then saying what downloads in the background, if anything.
+     * Ends the pass's strip, which then says what downloads in the
+     * background, if anything.
      */
     void synced() {
         passing = false;
-        renderFill();
-        controls(true);
+        renderStrip();
     }
 
     /**
-     * Shows or hides the search field and the chips this list uses, a
-     * search field holding a query, or the cursor, always shown.
+     * Draws this list's strip into the app bar, while this list is the
+     * screen (the bar is shared): the pass, else the background download,
+     * else nothing. A list without a strip leaves the bar bare.
      */
-    private void controls(boolean shown) {
-        if (searching) {
-            EditText input = view.findViewById(R.id.header_search_input);
-            boolean kept = shown || input.length() > 0 || input.hasFocus();
-            view.findViewById(R.id.header_search).setVisibility(kept ? View.VISIBLE : View.GONE);
+    void renderStrip() {
+        if (host.screen != panel) {
+            return;
         }
-        if (chipping) {
-            view.findViewById(R.id.header_chips_scroll)
-                    .setVisibility(shown ? View.VISIBLE : View.GONE);
+        if (!strip || !passing && !fill) {
+            hideStrip(host);
+            return;
+        }
+        TextView line = host.findViewById(R.id.bar_strip_line);
+        ProgressBar bar = host.findViewById(R.id.bar_strip_bar);
+        if (passing) {
+            line.setText(
+                    passAccount == null
+                            ? passDetail
+                            : host.getString(R.string.sync_line_account, passDetail, passAccount));
+            glyph(host, false);
+            bar.setVisibility(passTotal < 0 ? View.GONE : View.VISIBLE);
+            bar.setIndeterminate(passTotal == 0);
+            if (passTotal > 0) {
+                bar.setProgress(
+                        (int) ((long) Math.min(passDone, passTotal) * bar.getMax() / passTotal));
+            }
+        } else {
+            line.setText(R.string.mail_filling);
+            glyph(host, true);
+            if (fillPlanned > 0) {
+                fillShown =
+                        Math.max(
+                                fillShown,
+                                (int) ((long) Math.min(fillLanded, fillPlanned) * bar.getMax()
+                                        / fillPlanned));
+                bar.setIndeterminate(false);
+                bar.setProgress(fillShown);
+                bar.setVisibility(View.VISIBLE);
+            } else {
+                bar.setVisibility(View.GONE);
+            }
+        }
+        host.findViewById(R.id.bar_strip).setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * Takes the sync strip off the app bar, for a screen that has none:
+     * its line, its bar and the glyph's pulse.
+     */
+    static void hideStrip(MainActivity host) {
+        glyph(host, false);
+        host.findViewById(R.id.bar_strip).setVisibility(View.GONE);
+        host.findViewById(R.id.bar_strip_bar).setVisibility(View.GONE);
+    }
+
+    /**
+     * Shows or hides the strip's download glyph, pulsing while shown. The
+     * pulse rides on the glyph's tag, the glyph being the bar's and not
+     * one list's.
+     */
+    private static void glyph(MainActivity host, boolean shown) {
+        ImageView glyph = host.findViewById(R.id.bar_strip_glyph);
+        if (shown == (glyph.getVisibility() == View.VISIBLE)) {
+            return;
+        }
+        if (glyph.getTag() instanceof ObjectAnimator) {
+            ((ObjectAnimator) glyph.getTag()).cancel();
+            glyph.setTag(null);
+        }
+        glyph.setAlpha(1f);
+        glyph.setVisibility(shown ? View.VISIBLE : View.GONE);
+        if (!shown) {
+            return;
+        }
+        glyph.setTooltipText(glyph.getContentDescription());
+        if (ValueAnimator.areAnimatorsEnabled()) {
+            ObjectAnimator pulse = ObjectAnimator.ofFloat(glyph, View.ALPHA, 1f, 0.3f);
+            pulse.setDuration(900);
+            pulse.setRepeatCount(ValueAnimator.INFINITE);
+            pulse.setRepeatMode(ValueAnimator.REVERSE);
+            pulse.start();
+            glyph.setTag(pulse);
         }
     }
 
@@ -294,7 +300,6 @@ final class ListHeader {
      * cased) to {@code onQuery}.
      */
     void search(int hint, Consumer<String> onQuery) {
-        searching = true;
         view.findViewById(R.id.header_search).setVisibility(View.VISIBLE);
         EditText input = view.findViewById(R.id.header_search_input);
         View clear = view.findViewById(R.id.header_search_clear);
@@ -328,7 +333,6 @@ final class ListHeader {
 
     /** The chip row, shown, for the caller to fill. */
     LinearLayout chips() {
-        chipping = true;
         view.findViewById(R.id.header_chips_scroll).setVisibility(View.VISIBLE);
         return view.findViewById(R.id.header_chips);
     }

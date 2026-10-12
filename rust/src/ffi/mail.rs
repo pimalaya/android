@@ -533,14 +533,15 @@ fn graph_step(
 
 /// `Native.fetchMessageSources`: reads some messages of `mailbox` whole,
 /// one file per message in `dir`, as the bytes the server holds. `ids` is
-/// a JSON array; returns `{items}`, each `{id, path, size}`, with the
-/// `labels` and when it was `received` on Gmail; a message gone or one the
-/// server fails to hand over is left out, an expired token failing the
-/// call. Files, so no message crosses the boundary as a string.
+/// a JSON array; returns `{items, gone}`, each item `{id, path, size}`,
+/// with the `labels` and when it was `received` on Gmail. A message gone
+/// (a 404, an `Email/get` `notFound`, a UID with no size) is left out of
+/// the items and named in `gone`; one the server fails to hand over is
+/// left out of both, an expired token failing the call. Files, so no
+/// message crosses the boundary as a string.
 ///
 /// Gmail and Graph read them in batches ([`Client::gmail_sources`],
-/// [`Client::graph_sources`]), a Graph message failing inside its batch
-/// left out like a gone one; IMAP in streamed `UID FETCH` batches
+/// [`Client::graph_sources`]); IMAP in streamed `UID FETCH` batches
 /// ([`client::imap::ImapSession::fetch_sources`]); JMAP names their blobs
 /// in one `Email/get` and downloads them one after another
 /// ([`Client::jmap_sources`]).
@@ -561,7 +562,7 @@ pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessageSources<'loca
 
         let mut client = Client::new(env, &transport);
         let json = match fetch_sources(&mut client, handle, &mailbox, &ids, Path::new(&dir)) {
-            Ok(items) => json!({ "items": items }).to_string(),
+            Ok((items, gone)) => json!({ "items": items, "gone": gone }).to_string(),
             Err(err) => error_json(err),
         };
 
@@ -571,20 +572,21 @@ pub extern "system" fn Java_org_pimalaya_client_Native_fetchMessageSources<'loca
 }
 
 /// Some messages read whole into files with whichever backend the session
-/// speaks.
+/// speaks, and the ids gone.
 fn fetch_sources(
     client: &mut Client<'_, '_>,
     handle: i64,
     mailbox: &str,
     ids: &str,
     dir: &Path,
-) -> Result<Vec<Value>, BridgeError> {
+) -> Result<(Vec<Value>, Vec<String>), BridgeError> {
     let ids: Vec<String> = from_str(ids).map_err(|err| format!("Invalid message ids: {err}"))?;
     let session = unsafe { session::borrow(handle) }?;
     if session.is_jmap() {
         let url = session.jmap_url()?;
         let read = client.jmap_sources(&url, &session.credentials(), &ids, dir)?;
-        return Ok(read
+        let items = read
+            .fetched
             .into_iter()
             .map(|read| {
                 json!({
@@ -593,15 +595,17 @@ fn fetch_sources(
                     "size": read.size,
                 })
             })
-            .collect());
+            .collect();
+        return Ok((items, read.gone));
     }
     if session.is_gmail() {
         // NOTE: one message on a session of no pool run is the reader's,
         // opening it for someone waiting on it: no queue behind the fill.
         client.urgent = session.alone() && ids.len() == 1;
         let token = session.credentials().password.to_string();
-        let fetched = client.gmail_sources(&token, &ids, dir)?;
-        return Ok(fetched
+        let read = client.gmail_sources(&token, &ids, dir)?;
+        let items = read
+            .fetched
             .into_iter()
             .map(|fetched| {
                 json!({
@@ -612,12 +616,14 @@ fn fetch_sources(
                     "received": fetched.received,
                 })
             })
-            .collect());
+            .collect();
+        return Ok((items, read.gone));
     }
     if session.is_graph() {
         let token = session.credentials().password.to_string();
-        let fetched = client.graph_sources(&token, &ids, dir)?;
-        return Ok(fetched
+        let read = client.graph_sources(&token, &ids, dir)?;
+        let items = read
+            .fetched
             .into_iter()
             .map(|fetched| {
                 json!({
@@ -626,11 +632,13 @@ fn fetch_sources(
                     "size": fetched.size,
                 })
             })
-            .collect());
+            .collect();
+        return Ok((items, read.gone));
     }
 
     let read = session.imap(client)?.fetch_sources(mailbox, &ids, dir)?;
-    Ok(read
+    let items = read
+        .fetched
         .into_iter()
         .map(|source| {
             json!({
@@ -639,7 +647,8 @@ fn fetch_sources(
                 "size": source.size,
             })
         })
-        .collect())
+        .collect();
+    Ok((items, read.gone))
 }
 
 /// `Native.parseMessage`: one stored message to what the reader draws.

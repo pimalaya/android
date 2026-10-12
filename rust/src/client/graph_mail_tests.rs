@@ -1293,7 +1293,9 @@ mod step {
             wanted.push((id, Some(ALONE_BYTES - 1)));
         }
 
-        let fetched = read_sources(&mut graph, &wanted, dir.path()).unwrap();
+        let fetched = read_sources(&mut graph, &wanted, dir.path())
+            .unwrap()
+            .fetched;
         assert_eq!(fetched.len(), 62);
         let sizes: Vec<usize> = graph.batches.iter().map(Vec::len).collect();
         assert_eq!(sizes, vec![20, 20, 13, 4, 3], "twenty, then four megabytes");
@@ -1326,8 +1328,9 @@ mod step {
             .insert("broken".into(), vec![Inner::Failed("HTTP 500".into())]);
         graph.inner.insert("odd".into(), vec![Inner::Undecoded]);
 
-        let fetched = read_sources(&mut graph, &wanted, dir.path()).unwrap();
-        assert_eq!(ids(&fetched), vec!["a", "c", "odd"]);
+        let read = read_sources(&mut graph, &wanted, dir.path()).unwrap();
+        assert_eq!(ids(&read.fetched), vec!["a", "c", "odd"]);
+        assert_eq!(read.gone, vec!["gone"], "gone apart from the failed");
         assert_eq!(
             graph.pauses,
             vec![Duration::from_secs(2)],

@@ -177,12 +177,7 @@ final class MailList {
 
     void setUp() {
         ListView list = host.findViewById(R.id.mail_list);
-        header =
-                new ListHeader(
-                        host,
-                        list,
-                        MainActivity.PANEL_MAIL,
-                        host.findViewById(R.id.mail_strip));
+        header = new ListHeader(host, list, MainActivity.PANEL_MAIL, true);
         header.empty(host.findViewById(R.id.mail_empty));
         header.search(
                 R.string.mail_search,
@@ -1010,7 +1005,8 @@ final class MailList {
      * What a row whose body the phone does not hold says, 0 for nothing: a
      * message whose body failed every attempt of a run says so; one from its
      * mailbox's frontier on (outside the junk and the trash), or one owed
-     * ({@link MailOwed}), is on its way; any other is not downloaded.
+     * ({@link MailOwed}), is on its way; any other is not downloaded, one
+     * the server answered gone ({@link MailBodies#GONE}) included.
      */
     private int notOnPhone(MailStore.StoredMessage message) {
         if (message.bodied) {
@@ -1025,6 +1021,9 @@ final class MailList {
         String key = MailOwed.key(message.collection, message.id);
         if (MailBodies.FAILED.contains(key) || MailPoison.poisoned(host, key)) {
             return R.string.mail_row_failed;
+        }
+        if (MailBodies.GONE.contains(key)) {
+            return R.string.mail_row_not_downloaded;
         }
         boolean owed = MailOwed.owed(host, message.collection, message.id);
         return taken || owed ? 0 : R.string.mail_row_not_downloaded;

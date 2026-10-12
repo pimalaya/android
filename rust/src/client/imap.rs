@@ -999,23 +999,39 @@ impl ImapSession<'_> {
     /// one streamed `UID FETCH <set> (UID BODY.PEEK[])` per batch of at most
     /// [`BODY_BATCH`] messages and about [`BODY_BATCH_BYTES`], a message past
     /// it read alone, each body written to its file as it streams. A message
-    /// gone is left out; a batch the server refuses is read one message
+    /// gone (no size declared for its UID) is left out and named in
+    /// [`ImapSources::gone`]; a batch the server refuses is read one message
     /// after another, one it fails to hand over left out.
     pub fn fetch_sources(
         &mut self,
         mailbox: &str,
         ids: &[String],
         dir: &Path,
-    ) -> Result<Vec<ImapSource>, BridgeError> {
-        let uids: Vec<u32> = ids.iter().filter_map(|id| id.parse().ok()).collect();
+    ) -> Result<ImapSources, BridgeError> {
+        let mut gone: Vec<String> = Vec::new();
+        let mut uids = Vec::with_capacity(ids.len());
+        for id in ids {
+            match id.parse::<u32>() {
+                Ok(uid) => uids.push(uid),
+                Err(_) => gone.push(id.clone()),
+            }
+        }
         if uids.is_empty() {
-            return Ok(Vec::new());
+            return Ok(ImapSources {
+                fetched: Vec::new(),
+                gone,
+            });
         }
         if !self.opened(mailbox) {
             self.examine(mailbox)?;
         }
 
         let sizes = self.sizes(&uids)?;
+        gone.extend(
+            uids.iter()
+                .filter(|uid| !sizes.contains_key(uid))
+                .map(u32::to_string),
+        );
         let mut written = Vec::with_capacity(sizes.len());
         for batch in batches(&uids, &sizes) {
             match self.stream_batch(&batch, &sizes, dir, &mut written) {
@@ -1035,7 +1051,10 @@ impl ImapSession<'_> {
                 Err(Refusal::Failed(err)) => return Err(err),
             }
         }
-        Ok(written)
+        Ok(ImapSources {
+            fetched: written,
+            gone,
+        })
     }
 
     /// The sizes the server declares for some UIDs of the open mailbox,
@@ -1167,6 +1186,16 @@ impl ImapSession<'_> {
             }
         }
     }
+}
+
+/// What a read of some messages brought ([`ImapSession::fetch_sources`]).
+#[derive(Debug, Default)]
+pub struct ImapSources {
+    /// The messages read, each written to its file.
+    pub fetched: Vec<ImapSource>,
+    /// The ids the mailbox holds no message under: expunged since they
+    /// were listed, or no UID at all.
+    pub gone: Vec<String>,
 }
 
 /// One message read whole into a file.

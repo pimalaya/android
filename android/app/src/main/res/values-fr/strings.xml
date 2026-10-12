@@ -314,6 +314,7 @@
     <string name="contact_diverged_pending">Des champs divergents attendent une revue</string>
     <string name="sync_busy">Attendez la fin de la synchronisation</string>
     <string name="sync_line_starting">Démarrage de la synchronisation</string>
+    <string name="sync_line_account">%1$s · %2$s</string>
     <string name="sync_line_wifi">En attente du Wi-Fi</string>
     <string name="sync_line_mail">Synchronisation des messages</string>
     <string name="sync_line_contacts">Synchronisation des contacts</string>

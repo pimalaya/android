@@ -195,6 +195,15 @@ fn marks(labels: &[String]) -> Vec<String> {
     flags(!has(UNREAD), false, has(STARRED))
 }
 
+/// What a raw read of some messages brought ([`read_sources`]).
+#[derive(Clone, Debug, Default)]
+pub struct Sources {
+    /// The messages read, each written to its file.
+    pub fetched: Vec<Fetched>,
+    /// The ids gone since they were listed (404).
+    pub gone: Vec<String>,
+}
+
 /// One message read whole and written to a file.
 #[derive(Clone, Debug)]
 pub struct Fetched {
@@ -493,23 +502,28 @@ pub(crate) fn read_envelopes<B: GmailBatcher>(
 
 /// Reads `ids` whole into files of `dir`, one per message: a `minimal`
 /// pre-pass for their sizes, then their raw bytes ([`read_all`]). A
-/// message gone since it was listed is left out.
+/// message gone since it was listed (404) is left out of the files and
+/// named in [`Sources::gone`]; every other one is read or fails the call.
 pub(crate) fn read_sources<B: GmailBatcher>(
     batcher: &mut B,
     ids: &[String],
     dir: &Path,
-) -> Result<Vec<Fetched>, BridgeError> {
+) -> Result<Sources, BridgeError> {
     let mut sizes = HashMap::new();
     let mut there = Vec::with_capacity(ids.len());
+    let mut gone = Vec::new();
     read_all(
         batcher,
         Read::Minimal,
         ids,
         &HashMap::new(),
         |id, message| {
-            if let Some(message) = message {
-                sizes.insert(id.clone(), message.size_estimate.unwrap_or_default());
-                there.push(id);
+            match message {
+                Some(message) => {
+                    sizes.insert(id.clone(), message.size_estimate.unwrap_or_default());
+                    there.push(id);
+                }
+                None => gone.push(id),
             }
             Ok(())
         },
@@ -517,12 +531,13 @@ pub(crate) fn read_sources<B: GmailBatcher>(
 
     let mut fetched = Vec::with_capacity(there.len());
     read_all(batcher, Read::Raw, &there, &sizes, |id, message| {
-        if let Some(message) = message {
-            fetched.push(written(id, message, dir)?);
+        match message {
+            Some(message) => fetched.push(written(id, message, dir)?),
+            None => gone.push(id),
         }
         Ok(())
     })?;
-    Ok(fetched)
+    Ok(Sources { fetched, gone })
 }
 
 /// One raw read written to its file in `dir`.
@@ -816,7 +831,7 @@ impl<'a, 'local> Client<'a, 'local> {
         token: &str,
         ids: &[String],
         dir: &Path,
-    ) -> Result<Vec<Fetched>, BridgeError> {
+    ) -> Result<Sources, BridgeError> {
         read_sources(
             &mut LiveBatcher {
                 client: self,

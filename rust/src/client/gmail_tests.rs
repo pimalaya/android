@@ -469,7 +469,9 @@ fn raw_batches_hold_about_eight_megabytes_and_a_large_message_goes_alone() {
     };
     let dir = tempfile::tempdir().unwrap();
 
-    let fetched = read_sources(&mut batcher, &ids, dir.path()).unwrap();
+    let fetched = read_sources(&mut batcher, &ids, dir.path())
+        .unwrap()
+        .fetched;
 
     let raw: Vec<Vec<String>> = batcher
         .batches
@@ -495,7 +497,9 @@ fn a_raw_read_writes_the_bytes_with_their_labels_and_reception() {
     let mut batcher = FakeBatcher::default();
     let dir = tempfile::tempdir().unwrap();
 
-    let fetched = read_sources(&mut batcher, &["18b0/a1".to_string()], dir.path()).unwrap();
+    let fetched = read_sources(&mut batcher, &["18b0/a1".to_string()], dir.path())
+        .unwrap()
+        .fetched;
 
     let reads: Vec<Read> = batcher.batches.iter().map(|(read, _)| *read).collect();
     assert_eq!(
@@ -518,6 +522,21 @@ fn a_raw_read_writes_the_bytes_with_their_labels_and_reception() {
         Some("2023-11-14T21:13:20Z"),
         "the Date header, never the reception"
     );
+}
+
+#[test]
+fn a_raw_read_names_a_message_gone_apart_from_the_read() {
+    let mut batcher = FakeBatcher {
+        gone: ["m001".to_string()].into(),
+        ..Default::default()
+    };
+    let dir = tempfile::tempdir().unwrap();
+
+    let read = read_sources(&mut batcher, &ids(3), dir.path()).unwrap();
+
+    let fetched: Vec<&str> = read.fetched.iter().map(|item| item.id.as_str()).collect();
+    assert_eq!(fetched, ["m000", "m002"]);
+    assert_eq!(read.gone, ["m001"], "gone, not failed");
 }
 
 /// One message write answered `answer`, as the bridge reports it

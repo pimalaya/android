@@ -121,7 +121,7 @@ impl GmailSource for LiveGmail<'_, '_, '_> {
     }
 
     fn fetch(&mut self, ids: &[String], dir: &Path) -> Result<Vec<Fetched>, BridgeError> {
-        self.client.gmail_sources(self.token, ids, dir)
+        Ok(self.client.gmail_sources(self.token, ids, dir)?.fetched)
     }
 
     fn held(&mut self, ids: &[String]) -> Result<HashSet<String>, BridgeError> {

@@ -953,6 +953,15 @@ pub(crate) struct Stepped {
     pub exhausted: bool,
 }
 
+/// What a read of some bodies brought ([`read_sources`]).
+#[derive(Debug, Default, Eq, PartialEq)]
+pub(crate) struct GraphSources {
+    /// The bodies read, each written to its file.
+    pub fetched: Vec<GraphFetched>,
+    /// The ids gone since they were listed (404).
+    pub gone: Vec<String>,
+}
+
 /// One body read whole into a file.
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct GraphFetched {
@@ -1172,15 +1181,17 @@ fn placed(message: &MsgraphMessage, folder: Option<&str>, ask: &StepAsk) -> Opti
 /// [`ALONE_BYTES`] or of no stated size read alone.
 ///
 /// An item throttled inside a call waits its `Retry-After` once and goes
-/// in the next call; one gone, or failing otherwise, or throttled twice,
-/// is left out of the answer, for the caller to see which ids came back
-/// with no file. An expired token fails the read.
+/// in the next call; one failing otherwise or throttled twice is left out
+/// of the answer, for the caller to see which ids came back with no file,
+/// and one gone (404) is left out too, named in [`GraphSources::gone`]. An
+/// expired token fails the read.
 pub(crate) fn read_sources<G: GraphMail>(
     graph: &mut G,
     wanted: &[(String, Option<u64>)],
     dir: &Path,
-) -> Result<Vec<GraphFetched>, BridgeError> {
+) -> Result<GraphSources, BridgeError> {
     let mut alone = Vec::new();
+    let mut gone = Vec::new();
     let mut batches: VecDeque<Vec<String>> = VecDeque::new();
     let mut bytes = 0;
     for (id, size) in wanted {
@@ -1220,7 +1231,7 @@ pub(crate) fn read_sources<G: GraphMail>(
             match inner {
                 Inner::Body(source) => fetched.push(written(dir, id, &source)?),
                 Inner::Undecoded => alone.push(id),
-                Inner::Gone => (),
+                Inner::Gone => gone.push(id),
                 Inner::Throttled(after) if throttled.insert(id.clone()) => {
                     wait = wait.max(after.unwrap_or(1));
                     again.push(id);
@@ -1241,11 +1252,11 @@ pub(crate) fn read_sources<G: GraphMail>(
         match graph.source(&id) {
             Ok(source) => fetched.push(written(dir, id, &source)?),
             Err(err) if err.status == Some(401) => return Err(err),
-            Err(err) if err.status == Some(404) => (),
+            Err(err) if err.status == Some(404) => gone.push(id),
             Err(err) => log::warn!("body of {id} not read: {err}"),
         }
     }
-    Ok(fetched)
+    Ok(GraphSources { fetched, gone })
 }
 
 /// Writes one message's bytes to its file of `dir`.
@@ -1399,7 +1410,7 @@ impl<'a, 'local> Client<'a, 'local> {
             .filter(|message| !message.held)
             .map(|message| (message.id.clone(), message.size))
             .collect();
-        let fetched = read_sources(&mut graph, &wanted, dir)?;
+        let fetched = read_sources(&mut graph, &wanted, dir)?.fetched;
         Ok((stepped, fetched))
     }
 
@@ -1411,7 +1422,7 @@ impl<'a, 'local> Client<'a, 'local> {
         token: &str,
         ids: &[String],
         dir: &Path,
-    ) -> Result<Vec<GraphFetched>, BridgeError> {
+    ) -> Result<GraphSources, BridgeError> {
         let mut graph = LiveMail {
             client: self,
             auth: HttpAuthBearer::new(token),

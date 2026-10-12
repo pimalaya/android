@@ -936,6 +936,7 @@ public class MainActivity extends Activity {
         android.net.ConnectivityManager connectivity =
                 getSystemService(android.net.ConnectivityManager.class);
         if (connectivity != null) {
+            unmetered = false;
             connectivity.registerDefaultNetworkCallback(wifiWatch);
         }
         fillMail();
@@ -1404,7 +1405,7 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Shows or hides the sync strip pinned above every list: whose
+     * Shows or hides the sync strip in the app bar of every list: whose
      * and which domain the pass is on, over one thin bar. The lists stay
      * usable behind it, and the screen stays on for the duration.
      */
@@ -1687,7 +1688,7 @@ public class MainActivity extends Activity {
      * Store-to-remote spoke: per addressbook, fetches the remote into
      * the store, pushes the staged local changes, and re-fetches the
      * pushed state. The phone is not touched; that is the local sync.
-     * The shared syncing state drives the strip pinned above the lists.
+     * The shared syncing state drives the strip in the lists' app bar.
      */
     void syncRemote() {
         // NOTE: one pass at a time; the lists stay usable while it runs,
@@ -2136,8 +2137,9 @@ public class MainActivity extends Activity {
      * is on, its mailboxes' messages dated from their frontier on but in the
      * junk and the trash, every message of a mailbox kept whole, and what is
      * owed below its frontier ({@link MailOwed}); the mailboxes the mail
-     * list shows first, each part newest first, the owed ones last. Walked
-     * on the io thread.
+     * list shows first, each part newest first, the owed ones last; none
+     * failed or gone since its mailbox was last listed
+     * ({@link MailBodies.Run#plan}). Walked on the io thread.
      */
     private MailBodies.Run planBodies() {
         MailBodies.Run run = new MailBodies.Run();
@@ -2179,12 +2181,12 @@ public class MainActivity extends Activity {
             List<String> windowed = new ArrayList<>(windowedFirst);
             windowed.addAll(windowedThen);
             wanted.addAll(owed(windowed, skipped));
-            run.plan(email, wanted);
-            planned += wanted.size();
-            if (wanted.isEmpty()) {
+            int taken = run.plan(email, wanted);
+            planned += taken;
+            if (taken == 0) {
                 bodiesLeft.remove(email);
             } else {
-                bodiesLeft.put(email, wanted.size());
+                bodiesLeft.put(email, taken);
             }
         }
         // NOTE: a replan adds to what the loop landed, the bar carrying on.
@@ -2481,17 +2483,36 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** Hears Wi-Fi come back while the app is open. */
+    /**
+     * Whether {@link #wifiWatch} last heard an unmetered network, false
+     * until it hears one after it is registered.
+     */
+    private volatile boolean unmetered;
+
+    /**
+     * Hears Wi-Fi come back while the app is open: once per network
+     * becoming unmetered, never on the capability changes Wi-Fi reports
+     * every few seconds while it stays up (its signal, its bandwidth), each
+     * of which would start the body step and the fill again for nothing.
+     */
     private final android.net.ConnectivityManager.NetworkCallback wifiWatch =
             new android.net.ConnectivityManager.NetworkCallback() {
                 @Override
                 public void onCapabilitiesChanged(
                         android.net.Network network,
                         android.net.NetworkCapabilities capabilities) {
-                    if (capabilities.hasCapability(
-                            android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) {
+                    boolean was = unmetered;
+                    unmetered =
+                            capabilities.hasCapability(
+                                    android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED);
+                    if (unmetered && !was) {
                         main.post(MainActivity.this::wifiBack);
                     }
+                }
+
+                @Override
+                public void onLost(android.net.Network network) {
+                    unmetered = false;
                 }
             };
 
@@ -3543,9 +3564,9 @@ public class MainActivity extends Activity {
     /**
      * The list chrome for one domain: the burger onto the drawer, the
      * domain's name (once its large title scrolls away), the filter
-     * every list shares, and the bottom navigation with this domain on
-     * its indicator. The domain's own actions come after, from its
-     * screen.
+     * every list shares, its sync strip, and the bottom navigation with
+     * this domain on its indicator. The domain's own actions come after,
+     * from its screen.
      */
     private void showDomainBar(int panel) {
         for (int target : Domains.PANELS) {
@@ -3575,6 +3596,7 @@ public class MainActivity extends Activity {
         showDomainTitle(panel);
         findViewById(R.id.bar_menu).setVisibility(View.VISIBLE);
         showFilterButton(panel);
+        headerOf(panel).renderStrip();
     }
 
     /** Retitles the bar, for a page whose own edits change its title. */
@@ -4332,6 +4354,7 @@ public class MainActivity extends Activity {
                     }) {
                 findViewById(id).setVisibility(View.GONE);
             }
+            ListHeader.hideStrip(this);
             TextView title = findViewById(R.id.bar_title);
             title.setVisibility(View.VISIBLE);
             title.animate().cancel();

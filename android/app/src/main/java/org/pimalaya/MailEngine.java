@@ -343,6 +343,7 @@ class MailEngine extends PimdirEngine {
                 "mail sync " + collection + " since " + since + ": "
                         + client.offlineSyncImmutable(this, collection, since, false)
                         + ", the pass so far " + clock);
+        MailBodies.relisted(collection);
     }
 
     /**
@@ -522,6 +523,7 @@ class MailEngine extends PimdirEngine {
                     "pimalaya",
                     "mail step " + collection + " (" + items.length() + "): "
                             + client.offlineSyncImmutable(this, collection, since, false));
+            MailBodies.relisted(collection);
         } finally {
             landing = null;
         }
@@ -895,7 +897,9 @@ class MailEngine extends PimdirEngine {
      *
      * <p>Answers the rows whose body did not land: asked of the server and
      * not handed over, or not stored. A landed one is owed no more
-     * ({@link MailOwed}).
+     * ({@link MailOwed}); nor is one the server answered gone, which is not
+     * a failure: it is marked so ({@link MailBodies#GONE}) and left for the
+     * next listing of its mailbox to take away.
      */
     List<MailBodies.Row> download(String collection, List<MailBodies.Row> rows) {
         downloading.clear();
@@ -903,6 +907,7 @@ class MailEngine extends PimdirEngine {
         attachments.clear();
         asked.clear();
         answered.clear();
+        gone.clear();
         List<String> handles = new ArrayList<>(rows.size());
         // NOTE: read now rather than trusted from the plan: a frontier moved
         // later since frees bodies a stale plan would fetch back.
@@ -964,15 +969,24 @@ class MailEngine extends PimdirEngine {
         }
         List<MailBodies.Row> failed = new ArrayList<>();
         List<String> landed = new ArrayList<>();
+        List<String> vanished = new ArrayList<>();
         for (String handle : handles) {
             MailBodies.Row row = downloading.get(handle);
-            if (asked.contains(handle) && !answered.contains(handle)) {
+            String key = MailOwed.key(collection, row.linkId);
+            if (gone.contains(handle) && !answered.contains(handle)) {
+                vanished.add(key);
+            } else if (asked.contains(handle) && !answered.contains(handle)) {
                 failed.add(row);
             } else {
-                landed.add(MailOwed.key(collection, row.linkId));
+                landed.add(key);
             }
         }
+        MailBodies.GONE.addAll(vanished);
+        landed.addAll(vanished);
         MailOwed.settle(pimdir.context(), landed);
+        if (!vanished.isEmpty()) {
+            Log.i("pimalaya", "mail bodies " + collection + ": " + vanished.size() + " gone");
+        }
         if (!failed.isEmpty()) {
             Log.w("pimalaya", "mail bodies " + collection + ": " + failed.size() + " not landed");
         }
@@ -981,6 +995,7 @@ class MailEngine extends PimdirEngine {
         attachments.clear();
         asked.clear();
         answered.clear();
+        gone.clear();
         return failed;
     }
 
@@ -990,9 +1005,10 @@ class MailEngine extends PimdirEngine {
      * already ({@link #fetched}), filed in the object store under its hash
      * and answered by that hash and its size, with the link id and sort key
      * the store holds, so no body crosses the boundary twice. One the
-     * server no longer has, or fails to hand over, is left out and stays
-     * below {@code Full}, which {@link #download} answers as not landed; an
-     * expired token fails the fetch, for the caller to renew.
+     * server no longer has ({@link #gone}), or fails to hand over, is left
+     * out and stays below {@code Full}, which {@link #download} answers as
+     * gone or as not landed; an expired token fails the fetch, for the
+     * caller to renew.
      */
     private JSONObject fetchBodies(String collection, JSONArray wanted) throws JSONException {
         List<String> missing = new ArrayList<>();
@@ -1176,8 +1192,15 @@ class MailEngine extends PimdirEngine {
     }
 
     /**
+     * The handles {@link #sources} found gone (deleted since they were
+     * listed), apart from those not handed over, while a download runs.
+     */
+    protected final Set<String> gone = new HashSet<>();
+
+    /**
      * Some messages' sources as the server holds them, each read into a
-     * file of {@code dir}, by handle; one gone or not handed over left out.
+     * file of {@code dir}, by handle; one gone left out and added to
+     * {@link #gone}, one not handed over left out.
      */
     protected Map<String, File> sources(String mailbox, List<String> handles, File dir) {
         return sources(session, mailbox, handles, dir);
@@ -1189,13 +1212,18 @@ class MailEngine extends PimdirEngine {
      */
     protected Map<String, File> sources(
             MailSession on, String mailbox, List<String> handles, File dir) {
-        JSONArray read = client.fetchMessageSources(on, mailbox, handles, dir);
+        JSONObject reply = client.fetchMessageSources(on, mailbox, handles, dir);
         Map<String, File> files = new HashMap<>();
-        for (int index = 0; index < read.length(); index++) {
+        JSONArray read = reply.optJSONArray("items");
+        for (int index = 0; read != null && index < read.length(); index++) {
             JSONObject item = read.optJSONObject(index);
             if (item != null) {
                 files.put(item.optString("id"), new File(item.optString("path")));
             }
+        }
+        JSONArray missing = reply.optJSONArray("gone");
+        for (int index = 0; missing != null && index < missing.length(); index++) {
+            gone.add(missing.optString(index));
         }
         return files;
     }

@@ -8,12 +8,6 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <!-- The sync strip, pinned above the list so it shows wherever the
-         list is scrolled (ListHeader). -->
-    <include
-        android:id="@+id/calendar_strip"
-        layout="@layout/sync_strip" />
-
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"

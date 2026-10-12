@@ -35,9 +35,31 @@ final class MailBodies {
     /**
      * The messages whose body failed every attempt of a run, by
      * {@link MailOwed#key}: their row says so rather than dimming silently,
-     * until a later run brings them. Kept for the process.
+     * and no run plans them again until their mailbox is listed anew
+     * ({@link #relisted}), so a run never starts for them alone. Kept for
+     * the process, so the next app start tries them again.
      */
     static final Set<String> FAILED = ConcurrentHashMap.newKeySet();
+
+    /**
+     * The messages the server answered gone when their body was asked for
+     * (deleted since they were listed), by {@link MailOwed#key}: owed no
+     * more, and planned by no run until their mailbox is listed anew
+     * ({@link #relisted}), whose delta takes them away. Kept for the
+     * process.
+     */
+    static final Set<String> GONE = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Forgets what {@link #FAILED} and {@link #GONE} hold of one mailbox,
+     * just listed: what is still there and still without its body is
+     * planned again.
+     */
+    static void relisted(String collection) {
+        String prefix = MailOwed.key(collection, "");
+        FAILED.removeIf(key -> key.startsWith(prefix));
+        GONE.removeIf(key -> key.startsWith(prefix));
+    }
 
     /** One stored message, as the plan reads it. */
     static final class Row {
@@ -147,8 +169,9 @@ final class MailBodies {
 
         /**
          * Downloads some of an account's bodies, blocking until they are in,
-         * and answers the rows whose body did not land; throws when the
-         * download failed as a whole (no session, an expired token).
+         * and answers the rows whose body did not land, a message gone not
+         * among them ({@link MailBodies#GONE}); throws when the download failed as a
+         * whole (no session, an expired token).
          */
         List<Row> download(String accountEmail, List<Row> rows) throws Exception;
 
@@ -166,11 +189,23 @@ final class MailBodies {
         /** How many downloads in a row of each account failed as a whole. */
         final Map<String, Integer> broken = new HashMap<>();
 
-        /** Plans an account's bodies: the rows wanted, in the order given. */
-        void plan(String accountEmail, List<Row> wanted) {
-            if (!wanted.isEmpty()) {
-                left.put(accountEmail, new ArrayDeque<>(wanted));
+        /**
+         * Plans an account's bodies: the rows wanted, in the order given,
+         * but those failed or gone ({@link MailBodies#FAILED}, {@link MailBodies#GONE}).
+         * Answers how many it planned.
+         */
+        int plan(String accountEmail, List<Row> wanted) {
+            Deque<Row> rows = new ArrayDeque<>(wanted.size());
+            for (Row row : wanted) {
+                String key = MailOwed.key(row.collection, row.linkId);
+                if (!FAILED.contains(key) && !GONE.contains(key)) {
+                    rows.add(row);
+                }
             }
+            if (!rows.isEmpty()) {
+                left.put(accountEmail, rows);
+            }
+            return rows.size();
         }
 
         /** Whether nothing is left to download. */
@@ -193,7 +228,8 @@ final class MailBodies {
      * One step: up to {@link #CHUNK} bodies of every account allowed now.
      * A body that did not land goes back to the end of its account's plan,
      * tried again later in the run on the sessions the host reopens, at most
-     * {@link #ATTEMPTS} times, then marked failed ({@link #FAILED}). A
+     * {@link #ATTEMPTS} times, then marked failed ({@link #FAILED}); one
+     * the server answers gone is not tried again ({@link #GONE}). A
      * download failing as a whole puts its rows back the same way, so an
      * expired token is renewed and the run goes on; an account failing so
      * twice in a row leaves the run, the next one planning it again.

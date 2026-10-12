@@ -76,12 +76,7 @@ final class ContactsList {
                 .setOnClickListener(view -> confirmDeleteSelected());
 
         ListView list = host.findViewById(R.id.contacts_list);
-        header =
-                new ListHeader(
-                        host,
-                        list,
-                        MainActivity.PANEL_CONTACTS,
-                        host.findViewById(R.id.contacts_strip));
+        header = new ListHeader(host, list, MainActivity.PANEL_CONTACTS, true);
         header.empty(host.findViewById(R.id.contacts_empty));
         header.search(
                 R.string.contacts_search,

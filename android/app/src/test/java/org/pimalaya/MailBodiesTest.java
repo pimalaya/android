@@ -56,6 +56,7 @@ public class MailBodiesTest {
     @Before
     public void setUp() {
         MailBodies.FAILED.clear();
+        MailBodies.GONE.clear();
         context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
         store = new MailStore(context, pimdir);
@@ -74,6 +75,9 @@ public class MailBodiesTest {
 
         /** How many more reads of a handle the server fails, -1 for all of them. */
         final java.util.Map<String, Integer> refusing = new java.util.HashMap<>();
+
+        /** The handles the server answers gone (deleted since they were listed). */
+        final java.util.Set<String> vanished = new java.util.HashSet<>();
 
 
         Server() {
@@ -107,6 +111,10 @@ public class MailBodiesTest {
             java.util.Map<String, java.io.File> files = new java.util.HashMap<>();
             for (String handle : handles) {
                 read.add(handle);
+                if (vanished.contains(handle)) {
+                    gone.add(handle);
+                    continue;
+                }
                 int refused = refusing.getOrDefault(handle, 0);
                 if (refused != 0) {
                     refusing.put(handle, refused - 1);
@@ -320,7 +328,7 @@ public class MailBodiesTest {
     }
 
     @Test
-    public void aBodyFailingEveryAttemptIsMarkedFailedUntilALaterRunBringsIt() {
+    public void aBodyFailingEveryAttemptIsNotPlannedAgainUntilItsMailboxIsListedAnew() {
         server.refusing.put("3", -1);
         MailBodies.Run run = new MailBodies.Run();
         run.plan(EMAIL, planned(window));
@@ -333,12 +341,52 @@ public class MailBodiesTest {
         assertTrue(MailBodies.FAILED.contains(MailOwed.key(inbox, "3")));
         assertArrayEquals("the others landed", LATIN1, store.storedSource(inbox, "2"));
 
+        // NOTE: what restarted the run every few seconds on the phone: a
+        // new plan right after the last, nothing listed in between.
+        server.read.clear();
+        for (int again = 0; again < 3; again++) {
+            run = new MailBodies.Run();
+            assertEquals("nothing planned", 0, run.plan(EMAIL, planned(window)));
+            assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
+        }
+        assertTrue("never asked again", server.read.isEmpty());
+
         server.refusing.clear();
+        server.sync(inbox);
+        assertFalse("a new listing", MailBodies.FAILED.contains(MailOwed.key(inbox, "3")));
         run = new MailBodies.Run();
-        run.plan(EMAIL, planned(window));
+        assertEquals(1, run.plan(EMAIL, planned(window)));
         drain(run, host(true), 10);
         assertArrayEquals(LATIN1, store.storedSource(inbox, "3"));
         assertFalse(MailBodies.FAILED.contains(MailOwed.key(inbox, "3")));
+    }
+
+    @Test
+    public void aBodyGoneIsOwedNoMoreAndNotTriedAgain() {
+        String key = MailOwed.key(inbox, "3");
+        MailOwed.owe(context, inbox, List.of("3"));
+        server.vanished.add("3");
+        MailBodies.Run run = new MailBodies.Run();
+        run.plan(EMAIL, planned(window));
+        drain(run, host(true), 10);
+
+        assertEquals(
+                "asked once, no attempt after",
+                1,
+                server.read.stream().filter(handle -> handle.equals("3")).count());
+        assertTrue(MailBodies.GONE.contains(key));
+        assertFalse("gone is no failure", MailBodies.FAILED.contains(key));
+        assertFalse("owed no more", MailOwed.owed(context, inbox, "3"));
+        assertArrayEquals("the others landed", LATIN1, store.storedSource(inbox, "2"));
+
+        server.read.clear();
+        run = new MailBodies.Run();
+        assertEquals("nothing planned", 0, run.plan(EMAIL, planned(window)));
+        assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
+        assertTrue(server.read.isEmpty());
+
+        server.sync(inbox);
+        assertFalse("its mailbox listed anew", MailBodies.GONE.contains(key));
     }
 
     @Test

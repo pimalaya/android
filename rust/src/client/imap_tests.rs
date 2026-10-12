@@ -621,9 +621,11 @@ fn bodies_stream_in_one_fetch_straight_to_files() {
         .map(|id| id.to_string())
         .collect();
 
-    let read = ImapSession::bind(&mut server, &mut state)
+    let sources = ImapSession::bind(&mut server, &mut state)
         .fetch_sources("INBOX", &ids, dir.path())
         .unwrap();
+    assert_eq!(sources.gone, ["999"], "gone, not failed");
+    let read = sources.fetched;
 
     let mut got: Vec<&str> = read.iter().map(|source| source.id.as_str()).collect();
     got.sort_unstable();
@@ -653,7 +655,8 @@ fn a_refused_batch_is_read_one_message_after_another() {
 
     let read = ImapSession::bind(&mut server, &mut state)
         .fetch_sources("INBOX", &ids, dir.path())
-        .unwrap();
+        .unwrap()
+        .fetched;
 
     assert_eq!(read.len(), 3);
     for source in &read {

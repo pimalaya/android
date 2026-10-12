@@ -237,11 +237,11 @@ Submitting a message SHALL NOT be retried: a submission whose reply was lost is 
 - THEN nothing is sent a second time
 
 ### Requirement: A sync says what it is working on, in every domain
-A running sync SHALL show, pinned under the app bar of every list (mail, contacts, calendars) and above the list, so it shows wherever the list is scrolled, a strip naming what the pass is on over one thin bar: the account on a first line once the pass reaches one (*me@example.org*), the domain on the line below (*Syncing contacts*), never the engine's steps. The three domains SHALL report alike, so a wait reads the same whichever one is being synced. The strip SHALL hide when nothing runs.
+A running sync SHALL show, as an extension of the app bar of every list (mail, contacts, calendars), so it shows wherever the list is scrolled, a strip naming what the pass is on: one line in the bar's lower part under its title, the domain (*Syncing contacts*) followed by the account once the pass reaches one (*Syncing contacts · me@example.org*), never the engine's steps, over one thin bar on the app bar's bottom edge. The strip SHALL be drawn within the app bar's height: showing, updating or hiding it SHALL change neither the bar's height nor its title's position nor the list's. The three domains SHALL report alike, so a wait reads the same whichever one is being synced. The strip SHALL hide when nothing runs, the app bar then as it is without it, and SHALL not show on screens other than the lists.
 
-The bar SHALL be one progress over the whole pass, every account and every domain it runs, and SHALL never move back while the pass runs. Before it starts, the pass SHALL be sized in sections, one per domain and account, each weighing the collections stored for it, one at least, an account's mail step weighing one; a section SHALL fill its weight however many collections its listing turns up, and sections MAY fill at different speeds. Within a section, the pass SHALL tell how many collections it will run before the first one runs, and each collection SHALL fill its share as it lands; within it, a step moving items batch by batch, the members a listing did not carry being read or the contacts and events being written to the phone, SHALL fill part of that share, the download the first three fifths and the phone the rest where the domain has a phone mirror, the download all of it for mail; a calendar's steps only while that calendar runs alone; a mail step its bodies (A mail step counts the bodies it brings). The bar SHALL run indeterminate only before anything is counted, its line then saying the sync is starting (*Starting the sync*) rather than naming a domain, and SHALL keep the determinate bar's track, height and margins.
+The bar SHALL be one progress over the whole pass, every account and every domain it runs, and SHALL never move back while the pass runs. Before it starts, the pass SHALL be sized in sections, one per domain and account, each weighing the collections stored for it, one at least, an account's mail step weighing one; a section SHALL fill its weight however many collections its listing turns up, and sections MAY fill at different speeds. Within a section, the pass SHALL tell how many collections it will run before the first one runs, and each collection SHALL fill its share as it lands; within it, a step moving items batch by batch, the members a listing did not carry being read or the contacts and events being written to the phone, SHALL fill part of that share, the download the first three fifths and the phone the rest where the domain has a phone mirror, the download all of it for mail; a calendar's steps only while that calendar runs alone; a mail step its bodies (A mail step counts the bodies it brings). The bar SHALL run indeterminate only before anything is counted, its line then saying the sync is starting (*Starting the sync*) rather than naming a domain, and SHALL keep the determinate bar's track and height.
 
-While the strip shows a pass, the list's search field and its chips SHALL be hidden, and SHALL come back when it goes; a search field holding a query SHALL stay. The list's count line SHALL stay.
+The list's search field, its chips and its count line SHALL stay while the strip shows.
 
 The strip SHALL NOT block the app: the lists, the reader and the composer stay usable while it runs, the lists refreshing when the pass ends. One pass SHALL run at a time, a pull or the drawer's sync asked for meanwhile doing nothing, and an account SHALL NOT be deleted while a pass runs. The strip's line SHALL never be empty: it SHALL open saying the sync is starting, and SHALL follow the pass to the next account and domain once something is counted.
 
@@ -254,7 +254,7 @@ The strip SHALL NOT block the app: the lists, the reader and the composer stay u
 #### Scenario: A pass over several accounts
 - GIVEN two mail accounts
 - WHEN the mail pass moves from the first to the second
-- THEN the strip's first line names the first account then the second, and the bar carries on from where the first left it
+- THEN the strip's line names the first account then the second, and the bar carries on from where the first left it
 
 #### Scenario: The first frame
 - GIVEN a sync the user has just asked for
@@ -275,13 +275,12 @@ The strip SHALL NOT block the app: the lists, the reader and the composer stay u
 #### Scenario: Scrolled to the end
 - GIVEN the mail list scrolled to its last message
 - WHEN *Load more* is tapped
-- THEN the strip shows under the app bar, its bar filling, without scrolling back up
+- THEN the strip shows in the app bar, its bar filling, without scrolling back up
 
-#### Scenario: The controls step aside
-- GIVEN the mail list with an empty search field and its chips
-- WHEN a pass starts
-- THEN the strip shows above the list, the search field and the chips hidden, the count line kept
-- AND both come back once the pass ends
+#### Scenario: Nothing moves
+- GIVEN the mail list at its top, its large title, search field and chips shown
+- WHEN a pass starts, counts and ends
+- THEN the strip shows in the app bar and goes, the large title, the search field, the chips and the rows never moving
 
 #### Scenario: Reading while it runs
 - GIVEN a sync running

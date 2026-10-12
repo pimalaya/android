@@ -70,7 +70,7 @@ use crate::{
         Client,
         convert::{REFUSED, converged, coroutine_error, rejected, required},
         jmap_sync::{
-            JmapDelta, JmapRun, JmapStepReads, JmapStepped, Source, Start, StepItem, StepQuery,
+            JmapDelta, JmapRun, JmapStepReads, JmapStepped, Sources, Start, StepItem, StepQuery,
             StepRequest, received, sources, step,
         },
         listing::{
@@ -857,7 +857,7 @@ impl<'a, 'local> Client<'a, 'local> {
         credentials: &Credentials,
         ids: &[String],
         dir: &Path,
-    ) -> Result<Vec<Source>, BridgeError> {
+    ) -> Result<Sources, BridgeError> {
         let mut calls = self.jmap_calls(session_url, credentials)?;
         let chunk = max_objects_in_get(&calls.session) as usize;
         sources(&mut calls, ids, chunk, dir)

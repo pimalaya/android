@@ -33,6 +33,14 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
+    <!-- The app bar, the sync strip its extension: a line in the title's
+         slot and a thin bar on its bottom edge, both drawn within the
+         bar's own height, so showing them moves neither the title nor
+         the content (ListHeader). -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
     <LinearLayout
         android:id="@+id/app_bar"
         android:layout_width="match_parent"
@@ -85,17 +93,59 @@
              contact's name on the editor, the selected count during a
              selection. It ellipsizes rather than pushing the trailing
              buttons off a narrow bar. -->
-        <TextView
-            android:id="@+id/bar_title"
+        <FrameLayout
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:paddingStart="@dimen/app_bar_title_padding"
-            android:paddingEnd="@dimen/app_bar_title_padding"
-            android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
-            android:textColor="?android:attr/textColorPrimary" />
+            android:layout_height="match_parent"
+            android:layout_weight="1">
+
+            <TextView
+                android:id="@+id/bar_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:paddingStart="@dimen/app_bar_title_padding"
+                android:paddingEnd="@dimen/app_bar_title_padding"
+                android:textAppearance="@android:style/TextAppearance.DeviceDefault.Widget.ActionBar.Title"
+                android:textColor="?android:attr/textColorPrimary" />
+
+            <!-- The sync strip's line, in the bar's lower part under the
+                 title: the step, then the account, and on the mail list
+                 the background download's glyph pulsing beside it. -->
+            <LinearLayout
+                android:id="@+id/bar_strip"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom"
+                android:layout_marginBottom="6dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="@dimen/app_bar_title_padding"
+                android:paddingEnd="@dimen/app_bar_title_padding"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/bar_strip_line"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:textSize="12sp" />
+
+                <ImageView
+                    android:id="@+id/bar_strip_glyph"
+                    android:layout_width="14dp"
+                    android:layout_height="14dp"
+                    android:layout_marginStart="4dp"
+                    android:contentDescription="@string/mail_filling"
+                    android:src="@drawable/ic_download"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+
+        </FrameLayout>
 
         <!-- Contacts: the next-birthday dialog. -->
         <ImageButton
@@ -316,6 +366,22 @@
             android:visibility="gone" />
 
     </LinearLayout>
+
+    <!-- The sync strip's bar, on the app bar's bottom edge. -->
+    <ProgressBar
+        android:id="@+id/bar_strip_bar"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="4dp"
+        android:layout_gravity="bottom"
+        android:indeterminateDrawable="@drawable/sync_bar_indeterminate"
+        android:max="1000"
+        android:maxHeight="4dp"
+        android:minHeight="4dp"
+        android:progressDrawable="@drawable/sync_bar"
+        android:visibility="gone" />
+
+    </FrameLayout>
 
     <ViewFlipper
         android:id="@+id/flipper"

@@ -464,7 +464,12 @@ fn blobs_are_named_in_one_get_then_downloaded_one_by_one() {
 
     assert_eq!(account.gets.len(), 1);
     assert_eq!(account.downloads.len(), 10);
-    let read: Vec<&str> = read.iter().map(|source| source.id.as_str()).collect();
+    assert_eq!(read.gone, ["gone"], "gone, not failed");
+    let read: Vec<&str> = read
+        .fetched
+        .iter()
+        .map(|source| source.id.as_str())
+        .collect();
     assert_eq!(read.len(), 9);
     assert!(!read.contains(&"e004"));
 }
@@ -474,7 +479,9 @@ fn blobs_are_named_a_chunk_at_a_time() {
     let mut account = account(20);
     let dir = TempDir::new().unwrap();
 
-    let read = sources(&mut account, &ids(0..10), 4, dir.path()).unwrap();
+    let read = sources(&mut account, &ids(0..10), 4, dir.path())
+        .unwrap()
+        .fetched;
 
     assert_eq!(read.len(), 10);
     let chunks: Vec<usize> = account.gets.iter().map(Vec::len).collect();

@@ -295,6 +295,15 @@ pub(crate) fn step<S: JmapStepReads>(
     })
 }
 
+/// What a read of some messages brought ([`sources`]).
+#[derive(Debug, Default, Eq, PartialEq)]
+pub(crate) struct Sources {
+    /// The messages read, each written to its file.
+    pub fetched: Vec<Source>,
+    /// The ids `Email/get` found no email under (`notFound`).
+    pub gone: Vec<String>,
+}
+
 /// One message read whole into a file.
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct Source {
@@ -305,17 +314,24 @@ pub(crate) struct Source {
 
 /// Some messages read whole into files of `dir`: their blobs named by one
 /// `Email/get` of `chunk` ids at a time, then downloaded one after
-/// another. A message gone, or whose blob fails, is left out; an expired
-/// token fails the read.
+/// another. A message whose blob fails is left out; one gone is left out
+/// too, named in [`Sources::gone`]; an expired token fails the read.
 pub(crate) fn sources<S: JmapStepReads>(
     source: &mut S,
     ids: &[String],
     chunk: usize,
     dir: &Path,
-) -> Result<Vec<Source>, BridgeError> {
+) -> Result<Sources, BridgeError> {
     let mut read = Vec::with_capacity(ids.len());
+    let mut gone = Vec::new();
     for ids in ids.chunks(chunk.max(1)) {
-        for email in source.blobs(ids.to_vec())? {
+        let emails = source.blobs(ids.to_vec())?;
+        gone.extend(
+            ids.iter()
+                .filter(|id| !emails.iter().any(|email| email.id.as_ref() == Some(*id)))
+                .cloned(),
+        );
+        for email in emails {
             let (Some(id), Some(blob)) = (email.id, email.blob_id) else {
                 continue;
             };
@@ -336,7 +352,10 @@ pub(crate) fn sources<S: JmapStepReads>(
             });
         }
     }
-    Ok(read)
+    Ok(Sources {
+        fetched: read,
+        gone,
+    })
 }
 
 /// The `receivedAt` bound a step paged by reception lists below: the

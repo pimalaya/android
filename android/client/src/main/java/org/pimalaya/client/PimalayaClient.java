@@ -551,27 +551,26 @@ public class PimalayaClient {
 
     /**
      * Reads some messages of a mailbox whole into files of {@code dir}, one
-     * per message, as the bytes the server holds: each {@code {id, path,
-     * size}}, a message gone or not handed over left out. Gmail, Graph and
+     * per message, as the bytes the server holds: {@code {items, gone}},
+     * each item {@code {id, path, size}}, a message gone (deleted since it
+     * was listed) left out of the items and named by its id in
+     * {@code gone}, one not handed over left out of both. Gmail, Graph and
      * IMAP read them in batches, JMAP names their blobs in one
      * {@code Email/get} and downloads them one after another.
      */
-    public JSONArray fetchMessageSources(
+    public JSONObject fetchMessageSources(
             MailSession session, String mailbox, List<String> ids, File dir) {
         String asked = new JSONArray(ids).toString();
-        JSONObject reply =
-                object(
-                        on(
-                                session,
-                                open ->
-                                        Native.fetchMessageSources(
-                                                open.transport(),
-                                                open.handle(),
-                                                mailbox,
-                                                asked,
-                                                dir.getAbsolutePath())));
-        JSONArray items = reply.optJSONArray("items");
-        return items == null ? new JSONArray() : items;
+        return object(
+                on(
+                        session,
+                        open ->
+                                Native.fetchMessageSources(
+                                        open.transport(),
+                                        open.handle(),
+                                        mailbox,
+                                        asked,
+                                        dir.getAbsolutePath())));
     }
 
     /**

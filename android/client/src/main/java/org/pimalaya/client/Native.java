@@ -348,9 +348,10 @@ final class Native {
     /**
      * Reads some messages of {@code mailbox} whole, one file per message
      * in {@code dir}, as the bytes the server holds. {@code ids} is a JSON
-     * array; returns {@code {items}}, each {@code {id, path, size}} (with
-     * {@code labels} and {@code received} on Gmail), a message gone or not
-     * handed over left out. Files, so no message crosses as a string.
+     * array; returns {@code {items, gone}}, each item {@code {id, path,
+     * size}} (with {@code labels} and {@code received} on Gmail), a message
+     * gone left out of the items and named in {@code gone}, one not handed
+     * over left out of both. Files, so no message crosses as a string.
      */
     static native String fetchMessageSources(
             Transport transport, long session, String mailbox, String ids, String dir);
