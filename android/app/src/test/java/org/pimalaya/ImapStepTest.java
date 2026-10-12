@@ -310,6 +310,12 @@ public class ImapStepTest {
         assertEquals(24, held(inbox)[1]);
         assertEquals(24, held(sent)[1]);
 
+        // NOTE: the frontier at all mail, so the download takes both bodies
+        // whatever today's date and zone: with none held, its window is the
+        // first of the current month, local midnight, which the sent copy
+        // (twenty minutes before the inbox's, at the turn of a month) falls
+        // below in UTC.
+        MailWindow.set(context, accountId, null);
         server.read.clear();
         for (String collection : List.of(inbox, sent)) {
             List<MailBodies.Row> rows = new ArrayList<>();
