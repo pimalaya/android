@@ -11,11 +11,9 @@ jobs:
   apk:
     runs-on: ubuntu-24.04
     env:
-      # The keystore the cardamum builds were signed with, whose key alias
-      # keeps the app's former name. android/app/build.gradle.kts reads
-      # PIMALAYA_*.
+      # android/app/build.gradle.kts reads PIMALAYA_*, the key alias
+      # defaulting to pimalaya.
       PIMALAYA_KEYSTORE_PASSWORD: ${{ secrets.PIMALAYA_KEYSTORE_PASSWORD }}
-      PIMALAYA_KEYSTORE_ALIAS: cardamum
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
