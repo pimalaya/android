@@ -665,4 +665,113 @@
     <string name="accounts_lost_title">Ajoutez de nouveau vos comptes</string>
     <string name="accounts_lost">Vos comptes ont été chiffrés avec une clé qui reste sur le téléphone où ils ont été configurés : ils ne peuvent pas être lus ici. Ajoutez-les de nouveau pour synchroniser.</string>
     <string name="message_unreadable">Ce message n\'a pas pu être lu : sa lecture a déjà arrêté l\'application.</string>
+
+    <string name="accounts_open">Comptes</string>
+    <string name="compose_new">Nouveau message</string>
+    <string name="compose_queued">Dans la boîte d\'envoi ; il part à la prochaine synchronisation</string>
+    <string name="filter_title">Filtre</string>
+    <string name="mail_empty">Aucun message</string>
+    <string name="calendar_empty">Aucun événement</string>
+    <string name="no">Non</string>
+    <string name="yes">Oui</string>
+
+    <string name="date_now">maintenant</string>
+    <string name="date_today">Aujourd\'hui</string>
+    <string name="date_yesterday">Hier</string>
+    <string name="date_tomorrow">Demain</string>
+    <string name="date_later">Plus tard</string>
+    <string name="date_ago">il y a %s</string>
+    <string name="date_in">dans %s</string>
+    <plurals name="date_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <plurals name="date_hours">
+        <item quantity="one">%d heure</item>
+        <item quantity="other">%d heures</item>
+    </plurals>
+    <plurals name="date_days">
+        <item quantity="one">%d jour</item>
+        <item quantity="other">%d jours</item>
+    </plurals>
+    <plurals name="date_weeks">
+        <item quantity="one">%d semaine</item>
+        <item quantity="other">%d semaines</item>
+    </plurals>
+    <plurals name="date_months">
+        <item quantity="one">%d mois</item>
+        <item quantity="other">%d mois</item>
+    </plurals>
+    <plurals name="date_years">
+        <item quantity="one">%d an</item>
+        <item quantity="other">%d ans</item>
+    </plurals>
+
+    <string name="size_bytes">%d o</string>
+    <string name="size_kilobytes">%d ko</string>
+    <string name="size_megabytes">%d Mo</string>
+
+    <string name="message_to">À : %s</string>
+    <string name="message_cc">Cc : %s</string>
+    <string name="message_no_sender">(Expéditeur inconnu)</string>
+    <string name="message_no_subject">(Sans objet)</string>
+    <string name="message_no_content">Ce message n\'a pas de contenu lisible</string>
+    <string name="message_no_account">Le compte d\'où vient ce message n\'existe plus</string>
+    <string name="message_failed">Impossible de lire le message</string>
+    <string name="message_answered">Répondu</string>
+    <string name="message_flagged">Important</string>
+    <string name="message_attachment_unnamed">(Sans nom)</string>
+    <string name="message_delete_no_trash">Ce compte n\'indique aucune corbeille, et JMAP n\'a pas de marqueur pour supprimer un message sur place</string>
+
+    <string name="event_new">Nouvel événement</string>
+    <string name="event_save">Enregistrer</string>
+    <string name="event_save_failed">Impossible d\'enregistrer l\'entrée</string>
+    <string name="event_unreadable">Cette entrée n\'a pas pu être lue</string>
+    <string name="event_untitled">(Sans titre)</string>
+    <string name="event_unset">Non défini</string>
+    <string name="event_nothing_to_add">Plus rien à ajouter</string>
+    <string name="event_all_day">Toute la journée</string>
+    <string name="event_component_event">Événement</string>
+    <string name="event_component_todo">Tâche</string>
+    <string name="event_component_journal">Entrée de journal</string>
+    <string name="event_duration_days">%1$d jours</string>
+    <string name="event_duration_hours">%1$d h</string>
+    <string name="event_duration_hours_minutes">%1$d h %2$02d</string>
+    <string name="event_duration_minutes">%1$d min</string>
+    <string name="event_percent_hint">0 à 100</string>
+    <string name="event_priority_hint">1 (la plus haute) à 9</string>
+    <string name="event_section_when">Quand</string>
+    <string name="event_section_where">Où</string>
+    <string name="event_section_details">Détails</string>
+    <string name="event_section_people">Personnes</string>
+    <string name="event_section_progress">Avancement</string>
+    <string name="event_section_calendar">Agenda</string>
+    <string name="event_field_summary">Titre</string>
+    <string name="event_field_kind">Type</string>
+    <string name="event_field_all_day">Toute la journée</string>
+    <string name="event_field_start">Début</string>
+    <string name="event_field_end">Fin</string>
+    <string name="event_field_due">Échéance</string>
+    <string name="event_field_scheduled">Prévu</string>
+    <string name="event_field_written">Rédigé</string>
+    <string name="event_field_originally">Initialement</string>
+    <string name="event_field_countdown">Par rapport à maintenant</string>
+    <string name="event_field_repeats">Répétition</string>
+    <string name="event_field_location">Lieu</string>
+    <string name="event_field_url">Lien</string>
+    <string name="event_field_description">Description</string>
+    <string name="event_field_categories">Catégories</string>
+    <string name="event_field_status">Statut</string>
+    <string name="event_field_organizer">Organisateur</string>
+    <string name="event_field_attendee">Participant</string>
+    <string name="event_field_completed">Terminé</string>
+    <string name="event_field_progress">Réalisé</string>
+    <string name="event_field_priority">Priorité</string>
+    <string name="event_field_account">Compte</string>
+    <string name="event_field_calendar">Agenda</string>
+    <string name="event_scope_save">Enregistrer quelles occurrences ?</string>
+    <string name="event_scope_delete">Supprimer quelles occurrences ?</string>
+    <string name="event_scope_this">Cette occurrence</string>
+    <string name="event_scope_following">Celle-ci et les suivantes</string>
+    <string name="event_scope_all">Toutes les occurrences</string>
 </resources>

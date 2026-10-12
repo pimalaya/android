@@ -40,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Added a next-birthday peek computed from the merged cards.
 - Added the packaging: a Nix flake pinning the toolchain and a release workflow assembling one signed APK per ABI plus a universal one, and a bundle for Google Play; the APK for most phones weighs about 11 MB.
 - Set the minimum supported Android version to 8.0 (API 26).
+- Added English and French, French covering every screen; the app ships no other language.
 
 ### Fixed
 

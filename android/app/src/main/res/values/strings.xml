@@ -404,7 +404,6 @@
     <string name="message_no_subject">(No subject)</string>
     <string name="message_answered">Replied</string>
     <string name="message_flagged">Important</string>
-    <string name="message_attachment">Has an attachment</string>
     <string name="message_attachment_chip">Attachment</string>
 
     <!-- The message reader. -->
@@ -523,7 +522,6 @@
     <string name="event_field_scheduled">Scheduled</string>
     <string name="event_field_written">Written</string>
     <string name="event_field_end">Ends</string>
-    <string name="event_field_duration">Lasts</string>
     <string name="event_field_countdown">From now</string>
     <string name="event_field_repeats">Repeats</string>
     <string name="event_field_due">Due</string>
@@ -540,10 +538,8 @@
     <string name="event_field_calendar">Calendar</string>
     <string name="event_field_account">Account</string>
     <string name="event_field_kind">Kind</string>
-    <string name="event_percent">%s%%</string>
 
     <!-- The entry editor. -->
-    <string name="event_edit">Edit</string>
     <string name="event_save">Save</string>
     <string name="event_field_summary">Title</string>
     <string name="event_field_all_day">All day</string>
@@ -597,7 +593,6 @@
     <string name="compose_send">Send</string>
     <string name="compose_queued">In the outbox; it goes out on the next sync</string>
     <string name="compose_failed">Could not write the message</string>
-    <string name="outbox_failed">Could not send from the outbox; the message is still there</string>
     <string name="compose_no_account">No account this app can send from: sending needs an SMTP server, which is discovered when the account is connected</string>
     <string name="compose_no_recipient">Enter at least one recipient</string>
     <string name="compose_discard_confirm">Discard this message?</string>

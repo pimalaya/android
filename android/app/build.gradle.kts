@@ -28,6 +28,10 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        // The app's own languages: drops the other locales libraries
+        // (AndroidX, Material) bring, so the app is not half-translated
+        // into them.
+        resourceConfigurations += listOf("en", "fr")
     }
 
     buildFeatures {
