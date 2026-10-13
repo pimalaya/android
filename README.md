@@ -9,6 +9,9 @@
   </p>
 </div>
 
+> [!WARNING]
+> Pimalaya for Android is in heavy testing: it works day to day, but expect rough edges, and what it stores on the phone may change between versions. To try it, either download the APK from the [latest release build](https://github.com/pimalaya/android/actions/workflows/releases.yml?query=branch%3Amaster+is%3Asuccess) on the CI (under *Artifacts*, a GitHub account is needed), or ask for Google Play early access at [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net). Please report what goes wrong on the [issue tracker](https://github.com/pimalaya/android/issues).
+
 <table>
 <tr>
 <td><img src="screenshots/onboarding.png" width="200" alt="Automatic account setup from an email address" /></td>
@@ -24,9 +27,6 @@
 </tr>
 </table>
 
-> [!WARNING]
-> Pimalaya for Android is in beta: it works day to day, but expect rough edges, and what it stores on the phone may change between versions. Please report what goes wrong on the [issue tracker](https://github.com/pimalaya/android/issues).
-
 ## Table of contents
 
 - [Features](#features)
@@ -34,7 +34,6 @@
 - [Installation](#installation)
   - [Google Play](#google-play)
   - [APK](#apk)
-  - [Development builds](#development-builds)
   - [Sources](#sources)
 - [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
@@ -89,15 +88,11 @@ The app needs Android 8.0 or newer.
 
 ### Google Play
 
-Join the beta on [Google Play](https://play.google.com/store/apps/details?id=org.pimalaya) to get updates automatically.
+Google Play is in early access: ask for it at [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net), then get updates automatically.
 
 ### APK
 
-Download an APK from the [latest release](https://github.com/pimalaya/android/releases/latest) and open it on your phone: pimalaya-arm64-v8a.apk suits most phones, pimalaya.apk all of them. The certificate's SHA-256 fingerprint is `2F:FD:69:7B:0A:C2:88:B6:A0:A2:24:AD:E9:73:53:B3:A2:77:E4:16:9A:37:50:BA:5C:55:75:43:3E:4A:FB:4D`.
-
-### Development builds
-
-The latest run of the [releases workflow](https://github.com/pimalaya/android/actions/workflows/releases.yml) holds the APKs of the master branch under *Artifacts* (a GitHub account is needed).
+Download an APK from the [latest release build](https://github.com/pimalaya/android/actions/workflows/releases.yml?query=branch%3Amaster+is%3Asuccess), under *Artifacts* (a GitHub account is needed), and open it on your phone: pimalaya-arm64-v8a suits most phones, pimalaya all of them. The certificate's SHA-256 fingerprint is `2F:FD:69:7B:0A:C2:88:B6:A0:A2:24:AD:E9:73:53:B3:A2:77:E4:16:9A:37:50:BA:5C:55:75:43:3E:4A:FB:4D`.
 
 ### Sources
 
