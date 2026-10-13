@@ -55,10 +55,12 @@
 //!
 //! ## JSON contract
 //!
-//! Replies are serde types whose fields are declared in alphabetical order
-//! of their keys: the order serde_json's sorted maps always gave them, and
-//! one Java compares printed models in. A typed input models what the Java
-//! producer sends, and nothing more.
+//! Replies keep the bytes Java always saw. Those once built with `json!`
+//! came out in alphabetical key order (serde_json sorts its maps), so their
+//! typed successors declare fields in that order, the one Java compares
+//! printed models in; types typed from the start keep their own.
+//!
+//! A typed input models what the Java producer sends, and nothing more.
 //!
 //! ## Tests
 //!
