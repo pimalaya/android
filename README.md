@@ -10,7 +10,7 @@
 </div>
 
 > [!WARNING]
-> Pimalaya for Android is in heavy testing: it works day to day, but expect rough edges, and what it stores on the phone may change between versions. To try it, either download the APK from the [latest release build](https://github.com/pimalaya/android/actions/workflows/releases.yml?query=branch%3Amaster+is%3Asuccess) on the CI (under *Artifacts*, a GitHub account is needed), or ask for Google Play early access at [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net). Please report what goes wrong on the [issue tracker](https://github.com/pimalaya/android/issues).
+> Pimalaya for Android is in closed alpha: a handful of chosen testers use it day to day while it gets ready for wider testing. Expect rough edges, and what it stores on the phone may change between versions. To apply as a tester, see [Installation](#installation).
 
 <table>
 <tr>
@@ -32,8 +32,7 @@
 - [Features](#features)
 - [Coverage](#coverage)
 - [Installation](#installation)
-  - [Google Play](#google-play)
-  - [APK](#apk)
+  - [Closed alpha](#closed-alpha)
   - [Sources](#sources)
 - [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
@@ -86,13 +85,9 @@ Signing in works with a password, an app password, or [OAuth 2.0][rfc6749], incl
 
 The app needs Android 8.0 or newer.
 
-### Google Play
+### Closed alpha
 
-Google Play is in early access: ask for it at [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net), then get updates automatically.
-
-### APK
-
-Download an APK from the [latest release build](https://github.com/pimalaya/android/actions/workflows/releases.yml?query=branch%3Amaster+is%3Asuccess), under *Artifacts* (a GitHub account is needed), and open it on your phone: pimalaya-arm64-v8a suits most phones, pimalaya all of them. The certificate's SHA-256 fingerprint is `2F:FD:69:7B:0A:C2:88:B6:A0:A2:24:AD:E9:73:53:B3:A2:77:E4:16:9A:37:50:BA:5C:55:75:43:3E:4A:FB:4D`.
+Testers are chosen one by one, for coverage of providers, servers and phones. To apply, write to [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net) with the providers or servers you would use, your phone and Android version, and the Google account of that phone to get the app through Google Play's closed testing. Testers report what goes wrong on the [issue tracker](https://github.com/pimalaya/android/issues).
 
 ### Sources
 
