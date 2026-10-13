@@ -33,6 +33,7 @@
 - [Coverage](#coverage)
 - [Installation](#installation)
   - [Closed alpha](#closed-alpha)
+  - [APK](#apk)
   - [Sources](#sources)
 - [AI policy](https://github.com/pimalaya/.github/blob/master/AI_POLICY.md)
 - [License](#license)
@@ -88,6 +89,10 @@ The app needs Android 8.0 or newer.
 ### Closed alpha
 
 Testers are chosen one by one, for coverage of providers, servers and phones. To apply, write to [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net) with the providers or servers you would use, your phone and Android version, and the Google account of that phone to get the app through Google Play's closed testing. Testers report what goes wrong on the [issue tracker](https://github.com/pimalaya/android/issues).
+
+### APK
+
+To skip Google Play, install the APK yourself from the [latest release build](https://github.com/pimalaya/android/actions/workflows/releases.yml?query=branch%3Amaster+is%3Asuccess), under *Artifacts* (a GitHub account is needed): pimalaya-arm64-v8a suits most phones, pimalaya all of them. Updates are then manual. The certificate's SHA-256 fingerprint is `2F:FD:69:7B:0A:C2:88:B6:A0:A2:24:AD:E9:73:53:B3:A2:77:E4:16:9A:37:50:BA:5C:55:75:43:3E:4A:FB:4D`.
 
 ### Sources
 
