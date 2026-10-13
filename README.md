@@ -9,13 +9,20 @@
   </p>
 </div>
 
-<table><tr>
-<td><img src="screenshots/onboarding.jpg" width="200" alt="Automatic account setup from an email address" /></td>
-<td><img src="screenshots/contacts.jpg" width="200" alt="Merged contact list across every account" /></td>
-<td><img src="screenshots/contact.jpg" width="200" alt="Contact detail with identity and emails" /></td>
-<td><img src="screenshots/accounts.jpg" width="200" alt="Accounts drawer" /></td>
-<td><img src="screenshots/birthday.jpg" width="200" alt="Next birthday reminder" /></td>
-</tr></table>
+<table>
+<tr>
+<td><img src="screenshots/onboarding.png" width="200" alt="Automatic account setup from an email address" /></td>
+<td><img src="screenshots/domains.png" width="200" alt="Pick mail, contacts and calendar per account" /></td>
+<td><img src="screenshots/mail.png" width="200" alt="Mail list across every account" /></td>
+<td><img src="screenshots/contacts.png" width="200" alt="Merged contact list across every account" /></td>
+</tr>
+<tr>
+<td><img src="screenshots/calendar.png" width="200" alt="Week view across every calendar" /></td>
+<td><img src="screenshots/files.png" width="200" alt="Attachments and files across every account" /></td>
+<td><img src="screenshots/accounts.png" width="200" alt="Accounts drawer with sync status" /></td>
+<td><img src="screenshots/account.png" width="200" alt="Per-account sync settings" /></td>
+</tr>
+</table>
 
 > [!WARNING]
 > Pimalaya for Android is in beta: it works day to day, but expect rough edges, and what it stores on the phone may change between versions. Please report what goes wrong on the [issue tracker](https://github.com/pimalaya/android/issues).
