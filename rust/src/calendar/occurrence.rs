@@ -1,7 +1,8 @@
+//! # Occurrences
+//!
 //! The occurrences one object holds otherwise than another, for the
-//! servers that take a series' master and each of its occurrences as
-//! writes of their own (Graph, Google), where CalDAV takes the object
-//! whole.
+//! servers writing a series' master and each occurrence apart (Graph,
+//! Google), where CalDAV takes the object whole.
 //!
 //! An occurrence is told by its identity: the civil time of its original
 //! start in the series' zone, the instance its override or its `EXDATE`
@@ -12,9 +13,10 @@ use ical::{
     tree::cst::{IcalCst, IcalItem},
 };
 
-use crate::types::BridgeError;
-
-use super::{child, cst_of, line, scheduled, series::Series, text, zone::stamp};
+use crate::{
+    calendar::{child, cst_of, line, scheduled, series::Series, text, zone::stamp},
+    error::BridgeError,
+};
 
 /// How far either side of an occurrence its instance is looked for, in
 /// seconds: two days, past the widest UTC offset there is.
@@ -40,16 +42,11 @@ pub enum OccurrenceWrite {
     Delete,
 }
 
-/// Every occurrence `staged` holds otherwise than `server`, in identity
-/// order.
+/// Every occurrence `staged` holds otherwise than `server`, in identity order.
 ///
-/// An override added or edited is an update from the server's state of
-/// that occurrence, and one removed is an update back to the series', so
-/// an exception the edit reverted is reverted on the server too. A new
-/// `EXDATE`, or an override turned `CANCELLED`, removes the occurrence.
-/// An `EXDATE` dropped brings nothing back, neither server restoring an
-/// occurrence it removed. An override the server already holds as staged,
-/// byte for byte, is no change.
+/// An override added or edited updates it, one removed reverts it to the
+/// series', unless the server holds it so byte for byte. A new `EXDATE` or
+/// a `CANCELLED` override deletes it; a dropped `EXDATE` restores nothing.
 pub fn occurrence_changes(
     staged: &str,
     server: &str,
@@ -175,13 +172,11 @@ pub fn occurrence_window(id: IcalRecurDateTime) -> (String, String) {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{
-        super::{
-            remove,
-            tests::{ROMANCE, object},
-            write,
-        },
-        *,
+    use crate::calendar::{
+        edit::write,
+        occurrence::*,
+        series::remove,
+        tests::{ROMANCE, object},
     };
 
     const ZONE: &str = "/example.org/Romance";

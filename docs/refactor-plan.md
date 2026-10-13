@@ -1,5 +1,7 @@
 # Refactor plan: post-review hardening, decomposition and the Rust migration map
 
+> Its Rust parts are superseded by the rust-domain-layout change (cairn/log/2026-10-13-rust-domain-layout.md), which regrouped the crate by domain.
+
 Three independent cold reviews (code quality, Rust/Java separation of concerns, codebase structure) ran on 2026-07-15, each with no prior context, then merged with maintainer knowledge. Their strongest signal is fourfold: the sync path has three unserialized entry points and a logic fork between the in-app path and the worker; error semantics cross the bridge as prose that three layers must preserve verbatim; MainActivity is a ~6,000-line god object; and a shared vocabulary (hashes, enums, TYPE tables) is maintained on both sides of the bridge by convention. This plan sequences the fixes and maps which responsibilities migrate into Rust. Nothing here changes behavior except where a finding is itself a bug.
 
 The io-oauth upgrade this plan was originally gated on landed first (2026-07-15), so the steps that waited for it (the 401 call sites, the SecureStore coordination) shipped with their phase.

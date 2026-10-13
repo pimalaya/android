@@ -1,15 +1,15 @@
+//! # Time zones
+//!
 //! What a calendar date or date-time is relative to, and the offsets an
 //! object's own `VTIMEZONE`s put in force.
 //!
-//! No time-zone database here (docs/pimalaya-android-plan.md): an IANA
-//! or a Windows name is resolved on the Java side, by the platform's
-//! tzdata, and what this resolves is only what the object defines for
-//! itself, through ical-rs's `IcalTz`. That is enough for the two jobs
-//! the library has to do on its own: hand the Java side an offset for a
-//! `TZID` the platform cannot name, and compare two dates spelled in
-//! different zones (a `RECURRENCE-ID` or an `EXDATE` in another zone
-//! than the series). The recurrence set does the latter on its own, its
-//! times told on its start's clock by ical-rs.
+//! No time-zone database here (docs/pimalaya-android-plan.md): IANA and
+//! Windows names resolve on the Java side, by the platform's tzdata. This
+//! resolves only what the object defines itself, through ical-rs's `IcalTz`.
+//!
+//! That is enough for an offset for a `TZID` the platform cannot name, and
+//! for comparing dates spelled in another zone than their series (a
+//! `RECURRENCE-ID`, an `EXDATE`), which the recurrence set does itself.
 
 use ical::{
     component::{IcalComponentKind, IcalComponentName},
@@ -53,6 +53,7 @@ pub struct EventTime {
     pub tzid: String,
     /// The offset in seconds east of UTC that the object's own
     /// `VTIMEZONE` puts in force at this time, when it defines the zone.
+    ///
     /// A time the clock skips takes the offset before the gap and one it
     /// repeats the earlier of the two, as RFC 5545 3.3.5 says.
     pub offset: Option<i32>,
@@ -172,13 +173,11 @@ impl Zones {
         self.0.iter().find(|zone| zone.id == tzid)
     }
 
-    /// A time with the offset its zone puts in force, when the object
-    /// defines that zone.
+    /// A time with the offset its zone puts in force, if the object defines it.
     ///
-    /// Read as RFC 5545 3.3.5 reads a written DATE-TIME, not as 3.3.10
-    /// reads a generated instance: the zoned walk has already dropped
-    /// those a gap swallows, and a literal time in a gap (a `DTSTART`, an
-    /// override's start) still happens, at the offset before it.
+    /// Read as RFC 5545 3.3.5 reads a written DATE-TIME, not as 3.3.10 a
+    /// generated instance: the zoned walk already dropped those a gap
+    /// swallows, and a literal time in a gap still happens, offset before.
     pub fn resolve(&self, mut time: EventTime) -> EventTime {
         if time.kind == EventTimeKind::Zoned
             && let Some(local) = time.civil()
@@ -233,9 +232,9 @@ impl Zones {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        super::tests::{ROMANCE, object},
-        *,
+    use crate::calendar::{
+        tests::{ROMANCE, object},
+        zone::*,
     };
 
     #[test]
@@ -251,8 +250,8 @@ mod tests {
         };
         let at = |stamp: &str| IcalRecurDateTime::parse(stamp).unwrap();
 
-        // 01:30 UTC on 29 March 2026 is 03:30 in Paris, the clock having
-        // skipped from 02:00 to 03:00 half an hour before.
+        // NOTE: 01:30 UTC on 29 March 2026 is 03:30 in Paris, the clock
+        // having skipped from 02:00 to 03:00 half an hour before.
         assert_eq!(
             zones.local(&paris, at("20260329T013000").seconds()),
             Some(at("20260329T033000"))

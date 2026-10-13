@@ -645,8 +645,9 @@ dependencies = [
 [[package]]
 name = "io-jmap"
 version = "0.6.0"
-source = "git+https://github.com/pimalaya/io-jmap?rev=919eab465ab620b323f9191ab8de2f640bc4a1d2#919eab465ab620b323f9191ab8de2f640bc4a1d2"
+source = "git+https://github.com/pimalaya/io-jmap?rev=3d25e2ba5194a494028a04d60a23bfb61b16f5aa#3d25e2ba5194a494028a04d60a23bfb61b16f5aa"
 dependencies = [
+ "ical-rs",
  "io-http",
  "log",
  "secrecy",
@@ -654,6 +655,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "url",
+ "vcard-rs",
 ]
 
 [[package]]
@@ -993,6 +995,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "siphasher",
  "tempfile",
  "url",
  "vcard-rs",
@@ -1228,6 +1231,12 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "siphasher"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
 name = "smallvec"

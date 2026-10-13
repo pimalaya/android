@@ -1,12 +1,13 @@
+//! # Phone view
+//!
 //! The phone's view of a calendar object, both ways: what the calendar
 //! provider's rows carry of it, and that view, edited in a calendar app,
 //! patched back onto the object (docs/calendar-mapping.md).
 //!
-//! The view is the object's and not the provider's: civil times with
-//! what they are relative to, rules as written, alarms as minutes before
-//! the start. Rows and instants are the Java side's, which alone has the
-//! time-zone database; the object is this side's, so a patch touches
-//! the properties the phone changed and every other byte stays.
+//! The view is the object's, not the provider's: civil times with what
+//! they are relative to, rules as written, alarms as minutes before the
+//! start. Rows and instants are Java's, which alone has the tzdata; a
+//! patch touches what the phone changed and every other byte stays.
 
 use std::collections::VecDeque;
 
@@ -31,14 +32,18 @@ use ical::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::types::BridgeError;
-
-use super::{
-    EventTime, EventTimeKind, PRODID, Zones, child, child_mut, cst_of, date_prop, decoded, line,
-    line_mut, organizes, prop, raw_value, remove_named, scheduled,
-    series::{Series, set_of, set_rule},
-    text, user_address,
-    zone::stamp,
+use crate::{
+    calendar::{
+        PRODID, child, child_mut, cst_of, decoded,
+        edit::{date_prop, prop, remove_named},
+        line, line_mut, raw_value,
+        read::{organizes, user_address},
+        scheduled,
+        series::{Series, set_of, set_rule},
+        text,
+        zone::{EventTime, EventTimeKind, Zones, stamp},
+    },
+    error::BridgeError,
 };
 
 /// Seconds in a day.
@@ -583,11 +588,11 @@ fn attendee_of(prop: &IcalProp) -> Option<PhoneAttendee> {
     Some(attendee)
 }
 
-/// One alarm as the phone carries it, `length` the event's in seconds:
-/// a display or audio alarm, triggered relative to the start, to the
-/// end through that length, or at a time on an event that does not
-/// recur. A repeating one fires first at its trigger, which is what the
-/// phone keeps.
+/// One alarm as the phone carries it, `length` the event's in seconds.
+///
+/// A display or audio alarm, triggered off the start, off the end through
+/// that length, or at a time on an event that does not recur. A repeating
+/// one fires first at its trigger, which is what the phone keeps.
 fn alarm_of(alarm: &IcalComponent, length: i64, recurring: bool) -> Option<PhoneAlarm> {
     let action = alarm.props.iter().find_map(|prop| match prop.name {
         IcalPropName::Kind(IcalPropKind::Action) => raw_value(prop),
@@ -653,13 +658,11 @@ fn time_of(value: &str, zone: &EventTime) -> EventTime {
     }
 }
 
-/// The instances of a series the provider cannot show, around now, each
-/// as the time it is listed at and its identity; none for a series the
-/// provider shows as it is.
+/// Instances near now the provider cannot show, as (listed time, identity).
 ///
-/// An instance an override replaces is listed at its identity, which the
-/// override's row hides; any other at the start the recurrence set gives
-/// it, a `THISANDFUTURE` override's shift included.
+/// None for a series the provider shows as it is. One an override replaces is
+/// listed at its identity, which the override's row hides; any other at the
+/// start the recurrence set gives it, a `THISANDFUTURE` shift included.
 fn instances(
     cst: &IcalCst<'static>,
     master: usize,
@@ -755,13 +758,11 @@ fn instances(
     Some(kept)
 }
 
-/// Whether the provider refuses or misexpands a series: `RSCALE` and
-/// `SKIP` (RFC 7529), a `BYSETPOS` other than a monthly one over plain
-/// weekdays, `BYWEEKNO`, an infinite rule beside `RDATE`s, an `RDATE`
-/// period, a `THISANDFUTURE` override, a rule recurring every second or
-/// minute, which the provider would expand into thousands of instances a
-/// day, or more periods of a rule's frequency before `from` than the
-/// provider walks.
+/// Whether the provider refuses or misexpands a series.
+///
+/// One starting more periods before `from` than it walks ([`PERIODS_MAX`]),
+/// `RSCALE`, `SKIP` (RFC 7529), `BYWEEKNO`, `BYSETPOS` but monthly weekdays,
+/// an endless rule with `RDATE`s, `RDATE` periods, `THISANDFUTURE`, sub-hourly.
 fn hidden(
     set: &IcalRecurSet,
     raw: &[String],
@@ -790,6 +791,7 @@ fn hidden(
             && rule.by_minute.is_empty()
             && rule.by_second.is_empty();
         (!rule.by_set_pos.is_empty() && !plain_weekdays)
+            // NOTE: sub-hourly rules make thousands of instances a day.
             || matches!(rule.freq, IcalRecurFreq::Secondly | IcalRecurFreq::Minutely)
             || !rule.by_week_no.is_empty()
             || (rule.until.is_none() && rule.count.is_none() && !set.dates.is_empty())
@@ -877,33 +879,58 @@ impl Patcher<'_> {
             component.push_component(alarm);
         }
 
-        let texts: [(&str, IcalPropKind, &Option<String>, &Option<String>); 8] = [
-            (
-                "SUMMARY",
-                IcalPropKind::Summary,
-                &was.summary,
-                &model.summary,
-            ),
-            (
-                "DESCRIPTION",
-                IcalPropKind::Description,
-                &was.description,
-                &model.description,
-            ),
-            (
-                "LOCATION",
-                IcalPropKind::Location,
-                &was.location,
-                &model.location,
-            ),
-            ("URL", IcalPropKind::Url, &was.url, &model.url),
-            ("STATUS", IcalPropKind::Status, &was.status, &model.status),
-            ("TRANSP", IcalPropKind::Transp, &was.transp, &model.transp),
-            ("CLASS", IcalPropKind::Class, &was.class, &model.class),
-            ("COLOR", IcalPropKind::Color, &was.color, &model.color),
+        let texts: [PropEdit<String>; 8] = [
+            PropEdit {
+                name: "SUMMARY",
+                kind: IcalPropKind::Summary,
+                was: &was.summary,
+                now: &model.summary,
+            },
+            PropEdit {
+                name: "DESCRIPTION",
+                kind: IcalPropKind::Description,
+                was: &was.description,
+                now: &model.description,
+            },
+            PropEdit {
+                name: "LOCATION",
+                kind: IcalPropKind::Location,
+                was: &was.location,
+                now: &model.location,
+            },
+            PropEdit {
+                name: "URL",
+                kind: IcalPropKind::Url,
+                was: &was.url,
+                now: &model.url,
+            },
+            PropEdit {
+                name: "STATUS",
+                kind: IcalPropKind::Status,
+                was: &was.status,
+                now: &model.status,
+            },
+            PropEdit {
+                name: "TRANSP",
+                kind: IcalPropKind::Transp,
+                was: &was.transp,
+                now: &model.transp,
+            },
+            PropEdit {
+                name: "CLASS",
+                kind: IcalPropKind::Class,
+                was: &was.class,
+                now: &model.class,
+            },
+            PropEdit {
+                name: "COLOR",
+                kind: IcalPropKind::Color,
+                was: &was.color,
+                now: &model.color,
+            },
         ];
-        for (name, kind, was, now) in texts {
-            changed |= set_text(component, name, kind, was, now);
+        for text in texts {
+            changed |= set_text(component, text);
         }
         if let Some(organizer) = &model.organizer
             && was.organizer.as_ref() != Some(organizer)
@@ -920,26 +947,32 @@ impl Patcher<'_> {
         if dates {
             changed |= self.time(
                 component,
-                "DTSTART",
-                IcalPropKind::DtStart,
-                &was.start,
-                &model.start,
+                PropEdit {
+                    name: "DTSTART",
+                    kind: IcalPropKind::DtStart,
+                    was: &was.start,
+                    now: &model.start,
+                },
             );
             changed |= self.end(component, was, model);
             changed |= rules(component, &was.rrules, &model.rrules);
             changed |= self.dates(
                 component,
-                "RDATE",
-                IcalPropKind::RDate,
-                &was.rdates,
-                &model.rdates,
+                PropEdit {
+                    name: "RDATE",
+                    kind: IcalPropKind::RDate,
+                    was: &was.rdates,
+                    now: &model.rdates,
+                },
             );
             changed |= self.dates(
                 component,
-                "EXDATE",
-                IcalPropKind::ExDate,
-                &was.exdates,
-                &model.exdates,
+                PropEdit {
+                    name: "EXDATE",
+                    kind: IcalPropKind::ExDate,
+                    was: &was.exdates,
+                    now: &model.exdates,
+                },
             );
         }
 
@@ -1120,14 +1153,13 @@ impl Patcher<'_> {
     }
 
     /// Replaces one date property when the edit moves it.
-    fn time(
-        &mut self,
-        component: &mut IcalCst<'static>,
-        name: &str,
-        kind: IcalPropKind,
-        was: &Option<PhoneTime>,
-        now: &Option<PhoneTime>,
-    ) -> bool {
+    fn time(&mut self, component: &mut IcalCst<'static>, edit: PropEdit<PhoneTime>) -> bool {
+        let PropEdit {
+            name,
+            kind,
+            was,
+            now,
+        } = edit;
         let Some(now) = now else {
             return false;
         };
@@ -1215,14 +1247,13 @@ impl Patcher<'_> {
     /// Patches the dates of an `RDATE` or `EXDATE` list: the values the
     /// edit no longer holds go, each line left empty with them, and those
     /// it adds land on one new line per zone.
-    fn dates(
-        &mut self,
-        component: &mut IcalCst<'static>,
-        name: &str,
-        kind: IcalPropKind,
-        was: &Option<Vec<PhoneTime>>,
-        now: &Option<Vec<PhoneTime>>,
-    ) -> bool {
+    fn dates(&mut self, component: &mut IcalCst<'static>, edit: PropEdit<Vec<PhoneTime>>) -> bool {
+        let PropEdit {
+            name,
+            kind,
+            was,
+            now,
+        } = edit;
         let Some(now) = now else {
             return false;
         };
@@ -1362,10 +1393,11 @@ impl Patcher<'_> {
         changed
     }
 
-    /// Patches the alarms the phone carried, matched by offset: an
-    /// unchanged one stays byte for byte, a changed one gets a trigger
-    /// relative to the start, a removed one and a new display alarm are
-    /// left for `later`. An alarm the phone never saw is never touched.
+    /// Patches the alarms the phone carried, matched by offset.
+    ///
+    /// An unchanged one stays byte for byte, a changed one triggers off the
+    /// start, a removed one and a new display alarm are left for `later`.
+    /// An alarm the phone never saw is never touched.
     fn alarms(
         &mut self,
         component: &mut IcalCst<'static>,
@@ -1542,15 +1574,23 @@ fn position(component: &IcalCst<'static>, name: &str) -> Option<usize> {
     )
 }
 
+/// One property an edit may move, with its value before and after it.
+struct PropEdit<'a, T> {
+    name: &'a str,
+    kind: IcalPropKind,
+    was: &'a Option<T>,
+    now: &'a Option<T>,
+}
+
 /// Replaces a text property's value in place, its parameters kept;
 /// empty removes it.
-fn set_text(
-    component: &mut IcalCst<'static>,
-    name: &str,
-    kind: IcalPropKind,
-    was: &Option<String>,
-    now: &Option<String>,
-) -> bool {
+fn set_text(component: &mut IcalCst<'static>, edit: PropEdit<String>) -> bool {
+    let PropEdit {
+        name,
+        kind,
+        was,
+        now,
+    } = edit;
     let Some(now) = now else {
         return false;
     };
@@ -1663,8 +1703,10 @@ fn set_param(line: &mut IcalLine<'static>, name: &str, value: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::calendar::tests::{ROMANCE, object};
+    use crate::calendar::{
+        phone::*,
+        tests::{ROMANCE, object},
+    };
 
     const NOW: &str = "20261009T120000Z";
 
@@ -2174,8 +2216,9 @@ mod tests {
                     minutes: Some(5),
                     absolute: None
                 },
-                // NOTE: ten minutes before the end of an hour is fifty after the
-                // start, which the provider fires as negative minutes.
+                // NOTE: ten minutes before the end of an hour is fifty
+                // after the start, which the provider fires as negative
+                // minutes.
                 PhoneAlarm {
                     minutes: Some(-50),
                     absolute: None

@@ -73,6 +73,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Fixed a second copy of a message appearing when a move on a server without MOVE, or the copy kept in Sent, was carried out again after a lost answer: the app now looks for the message in the target first.
 - Fixed a Microsoft 365 event created on the phone being created twice, its attendees invited twice, when the answer to its creation was lost.
 - Fixed a slow server write being sent again after 30 seconds without an answer, and a send or other non-repeatable request being repeated after a 503.
+- Fixed a JMAP account whose sign-in expired during a mail download marking every message it was downloading as failed: the download now stops for the sign-in to be renewed, then carries on.
 
 ### Security
 

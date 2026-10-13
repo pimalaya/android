@@ -1,16 +1,15 @@
-//! The bridge's `log` records, to logcat under the app's tag.
+//! # Logging
 //!
-//! Without a logger every `log` call in this crate and in the libraries
-//! under it is dropped, a throttled request and its wait included. The
-//! logger is installed once, when the JVM loads the library
-//! ([`JNI_OnLoad`]), at warnings and above: the library is always built
-//! in release, so the build cannot tell, and a release app's logcat is
-//! what a bug report carries. A debug app turns verbose logs on
-//! ([`Java_org_pimalaya_client_Native_debugLogs`]): debug and above for
-//! this crate, info and above for the libraries, whose debug records
-//! narrate every chunk a stream reads. On Android it writes through
-//! liblog's `__android_log_write`; anywhere else (the unit tests' host
-//! JVM) to standard error.
+//! The bridge's `log` records, to logcat under the app's tag (liblog's
+//! `__android_log_write`), or to standard error off Android.
+//!
+//! Installed when the JVM loads the library ([`JNI_OnLoad`]) at warnings:
+//! the library is always built in release, so the build cannot tell, and
+//! a release app's logcat is what a bug report carries.
+//!
+//! A debug app turns on debug for this crate and info for the libraries
+//! ([`Java_org_pimalaya_client_Native_debugLogs`]), whose debug records
+//! narrate every chunk a stream reads.
 
 use std::{
     ffi::c_void,
@@ -39,9 +38,9 @@ static LOGGER: Logcat = Logcat;
 /// Whether debug logs are on ([`Java_org_pimalaya_client_Native_debugLogs`]).
 static VERBOSE: AtomicBool = AtomicBool::new(false);
 
-/// Called by the JVM when it loads the library: installs the logger, a
-/// second load keeping the first. A panic must not unwind into the JVM,
-/// so one leaves the library without a logger.
+/// Installs the logger when the JVM loads the library, once.
+///
+/// A panic must not unwind into the JVM, so one leaves no logger.
 #[unsafe(no_mangle)]
 pub extern "system" fn JNI_OnLoad(_vm: *mut JavaVM, _reserved: *mut c_void) -> jint {
     let _ = catch_unwind(|| {
@@ -52,8 +51,7 @@ pub extern "system" fn JNI_OnLoad(_vm: *mut JavaVM, _reserved: *mut c_void) -> j
     JNI_VERSION_1_6
 }
 
-/// `Native.debugLogs`: turns the debug logs on or off, which a debug app
-/// does once the library is loaded.
+/// `Native.debugLogs`: turns the debug logs on or off, for a debug app.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_pimalaya_client_Native_debugLogs<'local>(
     mut env: EnvUnowned<'local>,

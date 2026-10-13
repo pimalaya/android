@@ -1,74 +1,82 @@
-//! JNI bridge for the Pimalaya Android :client module.
+//! # Pimalaya Android
 //!
-//! TLS and TCP live in Java (SSLSocket); this crate is a pure protocol
-//! state machine running io-pim-discovery's discovery, io-oauth's OAuth 2.0 and
-//! io-webdav's sans-io CardDAV coroutines, doing all socket I/O by
-//! upcalling a Java `Transport` on each yield.
+//! The Rust half of Pimalaya Android, loaded by the app's `:client` module
+//! as libpimalaya.so: every protocol, document format and sync decision,
+//! driven over JNI by a Java side that owns the sockets and the store.
 //!
-//! ## Operations
+//! ## Boundary
 //!
-//! It exposes one entry point per operation, per domain.
+//! Java owns everything with a platform behind it: TCP and TLS, the SQLite
+//! pimdir store, the scheduler, the phone's contacts and calendars. This
+//! crate performs no I/O: every byte goes out through a [`client::Host`],
+//! and [`ffi`] holds the only implementation over JNI and every export.
 //!
-//! Setup: `search` turns an email into service configs with their
-//! authentication methods (`discover` is the older context-root-only
-//! flavor), and the `oauth*` entry points cover the authorization code
-//! grant with PKCE (authorize URL, redirect validation, code exchange,
-//! token refresh).
+//! An export decodes its JNI strings, builds an account and the params of
+//! one operation, calls it, and encodes the reply as JSON: a value, or
+//! `{"error", "status"?}` ([`error::BridgeError`]), whose HTTP status is
+//! what Java branches on (401 renews a token, 412 retries, 404 converges).
 //!
-//! Contacts: `listAddressbooks` lists the account's collections
-//! (doubling as the onboarding connection check), and `listCards` /
-//! `createCard` / `updateCard` / `deleteCard` are the vCard CRUD the
-//! contact screens build on.
+//! ## Layout
 //!
-//! Mail: `syncMail` walks an account's mailboxes, `fetchMessageSource`
-//! reads one whole and `parseMessage` turns those bytes into what a
-//! reader draws, `setMessageFlag`, `relocateMessage`, `copyMessage`,
-//! `destroyMessage` and `appendMessage` are what a push writes back,
-//! and `sendMessage` composes a draft to RFC 5322 and hands it to the
-//! account's submission server.
+//! The three domains are [`contact`], [`calendar`] and [`mail`]. Each owns
+//! its types, a router ([`contact::Contacts`], [`calendar::Calendars`],
+//! [`mail::session::Mail`]) dispatching an operation on the account's
+//! backend, and one file per backend named after the io- crate it drives.
 //!
-//! Calendar: `listCalendars` and `listEvents` read, `expandEvent` and
-//! `readEvent` project one object for the page that shows it, and
-//! `newEvent` / `createEvent` / `updateEvent` / `deleteEvent` are the
-//! iCalendar CRUD behind it.
+//! Four modules cut across them. [`account`] tells backends apart and
+//! holds onboarding (discovery, OAuth); [`client`] the transport policy
+//! (throttling, trust) and the protocol plumbing several domains share;
+//! [`offline`] the io-pimdir engine; [`ffi`] the JNI surface.
 //!
 //! ## Backends
 //!
-//! Every account operation takes the account's base URL and dispatches
-//! on the backend behind it (the account module owns the sentinel
-//! schemes, opaque to Java): CardDAV runs io-webdav's coroutines,
-//! Microsoft Graph runs io-msgraph's with the msgraph module projecting
-//! Graph contact resources to and from the vCard document of record,
-//! JMAP runs io-jmap's RFC 9610 coroutines with the jmap module
-//! converting ContactCards to and from vCards via vcard-rs (RFC 9555),
-//! and Google runs io-gpeople's coroutines with the google module
-//! projecting People person resources to and from vCards.
+//! An account is a base URL: a CardDAV or CalDAV context root, or a
+//! sentinel scheme (`msgraph://`, `jmap://`, `google://`) standing for an
+//! API with no root to name, opaque to Java ([`account::Backend`]).
 //!
-//! Mail and calendar dispatch the same way, over two backends each:
-//! IMAP over io-imap and CalDAV over io-webdav, or the RFC 8621 and
-//! draft-ietf-jmap-calendars verbs behind the `jmap://` marker.
-//! Submission is the one place the account carries a second endpoint,
-//! since IMAP reads and SMTP (io-smtp) writes, and they are two servers.
+//! A backend is a struct holding the client and the credential every verb
+//! needs (`Webdav`, `Msgraph`, `Jmap`, `Gpeople`, `Gcal`, `Gmail`). One
+//! serving several domains lives in [`client`], and each domain adds its
+//! verbs in its own file; IMAP and SMTP are sessions in [`mail`].
+//!
+//! ## Calls and sessions
+//!
+//! A native call builds a [`client::Client`], runs one operation and drops
+//! it; the transport pools the sockets underneath. Mail keeps a session
+//! across calls instead ([`mail::session`]), handed to Java as a handle,
+//! holding the protocol state an IMAP conversation needs.
 //!
 //! ## Offline engine
 //!
-//! The `offline*` entry points run io-pimdir's sync engine (sync,
-//! upgrade, mutate), upcalling a Java `OfflineDriver` on each yield so
-//! storage stays in the Java pimdir store and remote operations reuse the
-//! backend clients; `syncCards` and `multigetCards` are the CardDAV
-//! primitives its remote seam builds on (RFC 6578 sync-collection with a
-//! full-enumeration fallback, and addressbook-multiget body fetches).
+//! The `offline*` exports run io-pimdir's sync engine through
+//! [`offline::Driver`]: every yield goes to the Java `OfflineDriver` as
+//! one JSON envelope ([`offline::wire`]), storage yields served by the
+//! store and remote ones by the domain exports above.
+//!
+//! ## JSON contract
+//!
+//! Replies are serde types whose fields are declared in alphabetical order
+//! of their keys: the order serde_json's sorted maps always gave them, and
+//! one Java compares printed models in. A typed input models what the Java
+//! producer sends, and nothing more.
+//!
+//! ## Tests
+//!
+//! Tests drive the real backend structs through the real client over
+//! `client::fake::FakeServer`, a host answering HTTP from the test's
+//! model of the provider; IMAP tests script the bytes of a server. The app
+//! side's JVM tests load this library too.
+
+// NOTE: a cdylib whose every module is private; its docs are read with
+// `cargo doc --document-private-items`, where these links resolve.
+#![allow(rustdoc::private_intra_doc_links)]
 
 mod account;
 mod calendar;
 mod client;
+mod contact;
+mod error;
 mod ffi;
-mod jmap;
 mod logger;
 mod mail;
-mod oauth;
 mod offline;
-mod project;
-mod store;
-mod summary;
-mod types;

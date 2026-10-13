@@ -1,11 +1,11 @@
-//! Where a credential may go.
+//! # Trust
 //!
-//! Two rules, each enforced once. Every byte the bridge writes passes
-//! [`refuse_cleartext_credential`] ([`Client::write`]): a credential
-//! never leaves over a connection that is not encrypted. Every redirect
-//! an HTTP runner follows passes [`Redirects::follow`]: at most
-//! [`MAX_REDIRECTS`], never from https to anything else, and never with
-//! the credential to another origin.
+//! Where a credential may go: two rules, each enforced once.
+//!
+//! Every byte written passes [`refuse_cleartext_credential`]
+//! ([`Client::write`]): no credential over an unencrypted connection.
+//! Every redirect passes [`Redirects::follow`]: at most [`MAX_REDIRECTS`],
+//! never off https, never with the credential to another origin.
 //!
 //! [`Client::write`]: crate::client::Client::write
 
@@ -13,27 +13,28 @@ use std::borrow::Cow;
 
 use url::{Host, Origin, Url};
 
-use crate::types::BridgeError;
+use crate::error::BridgeError;
 
-/// The most redirects one request follows (RFC 9110 section 15.4 leaves
-/// the bound to the client; browsers stop near 20, a sync needs far fewer).
-pub(crate) const MAX_REDIRECTS: usize = 5;
+/// The most redirects one request follows.
+///
+/// RFC 9110 section 15.4 leaves the bound to the client; browsers stop
+/// near 20, a sync needs far fewer.
+const MAX_REDIRECTS: usize = 5;
 
 /// What a redirect to another origin does to a credentialed request.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CrossOrigin {
-    /// Refused: the request means nothing without its credential, and a
-    /// server sending it elsewhere is not one to trust with it.
+pub enum CrossOrigin {
+    /// Refused: a server sending the credential elsewhere is not trusted.
     Refuse,
-    /// Followed without the credential, as fetch does: a JMAP download
-    /// URL answered from a CDN is the case, its redirect target carrying
-    /// its own authorization.
+    /// Followed without the credential, as fetch does.
+    ///
+    /// A JMAP download answered from a CDN, the target carrying its own
+    /// authorization.
     Anonymous,
 }
 
-/// One request's redirect chain: the origin its credential belongs to, the
-/// hops taken, and whether the credential still rides along.
-pub(crate) struct Redirects {
+/// One request's redirect chain, from the origin its credential belongs to.
+pub struct Redirects {
     origin: Origin,
     cross_origin: CrossOrigin,
     hops: usize,
@@ -42,7 +43,7 @@ pub(crate) struct Redirects {
 
 impl Redirects {
     /// A chain starting at `start`, credentialed.
-    pub(crate) fn new(start: &Url, cross_origin: CrossOrigin) -> Self {
+    pub fn new(start: &Url, cross_origin: CrossOrigin) -> Self {
         Self {
             origin: start.origin(),
             cross_origin,
@@ -52,7 +53,7 @@ impl Redirects {
     }
 
     /// Takes one redirect from `from` to `to`, or refuses it.
-    pub(crate) fn follow(&mut self, from: &Url, to: &Url) -> Result<(), BridgeError> {
+    pub fn follow(&mut self, from: &Url, to: &Url) -> Result<(), BridgeError> {
         self.hops += 1;
         if self.hops > MAX_REDIRECTS {
             return Err(format!(
@@ -98,9 +99,8 @@ impl Redirects {
         Ok(())
     }
 
-    /// The request bytes to write: as they are while credentialed, without
-    /// their `Authorization` header once not.
-    pub(crate) fn request<'b>(&self, bytes: &'b [u8]) -> Cow<'b, [u8]> {
+    /// The request bytes to write, without `Authorization` once uncredentialed.
+    pub fn request<'b>(&self, bytes: &'b [u8]) -> Cow<'b, [u8]> {
         if self.credentialed {
             Cow::Borrowed(bytes)
         } else {
@@ -109,14 +109,12 @@ impl Redirects {
     }
 }
 
-/// Refuses to write `bytes` to `url` when they carry a credential and the
-/// connection is not encrypted: plain `http`, or `imap` and `smtp` not
-/// `upgraded` by STARTTLS.
+/// Refuses `bytes` carrying a credential to an unencrypted `url`.
 ///
-/// A credential is an HTTP `Authorization` header, an IMAP `AUTHENTICATE`
-/// or `LOGIN` command, an SMTP `AUTH` command. A TLS scheme (`https`,
-/// `imaps`, `smtps`) passes, and so does `tcp`, the DNS resolver's.
-pub(crate) fn refuse_cleartext_credential(
+/// A credential is an `Authorization` header, an IMAP `AUTHENTICATE` or
+/// `LOGIN`, an SMTP `AUTH`. Unencrypted is plain `http`, or `imap` and
+/// `smtp` not `upgraded` by STARTTLS; `tcp` (the DNS resolver's) passes.
+pub fn refuse_cleartext_credential(
     url: &str,
     bytes: &[u8],
     upgraded: bool,
@@ -139,8 +137,7 @@ pub(crate) fn refuse_cleartext_credential(
     Ok(())
 }
 
-/// The scheme, host and port of `url`, its userinfo, path and query left
-/// out, for an error to name.
+/// The scheme, host and port of `url`, for an error to name.
 fn server(url: &str) -> String {
     match Url::parse(url) {
         Ok(url) => {
@@ -154,10 +151,10 @@ fn server(url: &str) -> String {
     }
 }
 
-/// Refuses a credential to `url` unless the connection is encrypted from
-/// its first byte (`https`, `imaps`, `smtps`) or upgraded before any
-/// credential goes out (`smtp`, which the bridge always upgrades).
-pub(crate) fn require_tls(url: &str) -> Result<(), BridgeError> {
+/// Refuses a credential to `url` unless encrypted from its first byte.
+///
+/// `smtp` passes too: the bridge always upgrades it before any credential.
+pub fn require_tls(url: &str) -> Result<(), BridgeError> {
     let scheme = url
         .split_once("://")
         .map_or("", |(scheme, _)| scheme)
@@ -168,10 +165,11 @@ pub(crate) fn require_tls(url: &str) -> Result<(), BridgeError> {
     }
 }
 
-/// Refuses an OAuth endpoint (`what` names it) that is not https: the code,
-/// the PKCE verifier and every refresh token travel to it. Plain http is
-/// left to a loopback host, which a custom client's own test server is.
-pub(crate) fn require_https(url: &Url, what: &str) -> Result<(), String> {
+/// Refuses an OAuth endpoint (`what` names it) that is not https.
+///
+/// The code, the PKCE verifier and every refresh token travel to it. Plain
+/// http is left to a loopback host, a custom client's own test server.
+pub fn require_https(url: &Url, what: &str) -> Result<(), String> {
     let loopback = match url.host() {
         Some(Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
         Some(Host::Ipv4(ip)) => ip.is_loopback(),
@@ -188,12 +186,12 @@ pub(crate) fn require_https(url: &Url, what: &str) -> Result<(), String> {
     }
 }
 
-/// A server-named href (a principal, a home set) a credential may follow:
-/// one on the origin that named it, or over https on a sibling host under
-/// the same parent domain, which is how iCloud names a calendar home on
-/// `p42-caldav.icloud.com` from `caldav.icloud.com`. Any other is refused,
-/// an absolute href being able to name any host and scheme.
-pub(crate) fn trusted_href(base: &Url, href: Url) -> Result<Url, BridgeError> {
+/// A server-named href (a principal, a home set) a credential may follow.
+///
+/// On the naming origin, or over https on a sibling host under the same
+/// parent domain (iCloud's `p42-caldav` homes from `caldav.icloud.com`):
+/// an absolute href can name any host and scheme.
+pub fn trusted_href(base: &Url, href: Url) -> Result<Url, BridgeError> {
     if href.origin() == base.origin() {
         return Ok(href);
     }
@@ -218,9 +216,9 @@ pub(crate) fn trusted_href(base: &Url, href: Url) -> Result<Url, BridgeError> {
     .into())
 }
 
-/// The domain a host sits under, when that is a site rather than a public
-/// suffix: two labels at least, and not a generic second level such as
-/// `co.uk`.
+/// The domain a host sits under, when a site rather than a public suffix.
+///
+/// Two labels at least, and not a generic second level such as `co.uk`.
 fn parent(host: &str) -> Option<&str> {
     const GENERIC: [&str; 12] = [
         "ac", "co", "com", "edu", "gob", "gov", "ltd", "me", "ne", "net", "or", "org",
@@ -244,8 +242,7 @@ fn under(host: &str, domain: &str) -> bool {
         })
 }
 
-/// The header lines of an HTTP request head, when `bytes` start with one;
-/// a chunk of a body is none.
+/// The header lines of the HTTP request head `bytes` start with, if any.
 fn http_head(bytes: &[u8]) -> Option<Vec<&[u8]>> {
     let mut lines = lines(bytes);
     let request = lines.next()?;
@@ -260,8 +257,7 @@ fn authorization(line: &[u8]) -> bool {
     starts_with_ignore_case(line, b"authorization:")
 }
 
-/// `bytes` without the `Authorization` header of the request head they
-/// start with; borrowed as they are when there is none.
+/// `bytes` without their request head's `Authorization` header.
 fn strip_authorization(bytes: &[u8]) -> Cow<'_, [u8]> {
     let Some(head) = http_head(bytes) else {
         return Cow::Borrowed(bytes);
@@ -290,8 +286,7 @@ fn strip_authorization(bytes: &[u8]) -> Cow<'_, [u8]> {
     Cow::Owned(stripped)
 }
 
-/// Whether one IMAP line is a credential command: `<tag> AUTHENTICATE` or
-/// `<tag> LOGIN` (RFC 9051 section 6.2).
+/// Whether an IMAP line is `AUTHENTICATE` or `LOGIN` (RFC 9051 sec. 6.2).
 fn imap_credential(line: &[u8]) -> bool {
     let mut words = line
         .split(|byte| *byte == b' ')
@@ -314,5 +309,4 @@ fn starts_with_ignore_case(line: &[u8], prefix: &[u8]) -> bool {
 }
 
 #[cfg(test)]
-#[path = "trust_tests.rs"]
 mod tests;

@@ -11,7 +11,7 @@ ContactsContract rows  <-- Java -->  neutral field model  <-- Rust (vcard-rs) --
 ```
 
 - **Java** reads and writes ContactsContract (the only side that can) and converts rows to and from a neutral field model (a flat JSON-friendly structure mirroring the tables below). The in-app edit form speaks the same model.
-- **Rust** owns the vCard side (rust/src/project.rs): `project` maps a vCard onto the field model, and `apply` patches an edited model back onto the stored vCard as a **patch** through the vcard-rs CST, preserving everything the model cannot represent (unknown properties, parameters, property groups, ordering, folding). Both the edit form and, later, the phone-edit merge go through `apply`, so there is exactly one write path onto a vCard.
+- **Rust** owns the vCard side (rust/src/contact/fields.rs): `ContactFields::project` maps a vCard onto the field model, and `ContactFields::apply` patches an edited model back onto the stored vCard as a **patch** through the vcard-rs CST, preserving everything the model cannot represent (unknown properties, parameters, property groups, ordering, folding). Both the edit form and, later, the phone-edit merge go through `ContactFields::apply`, so there is exactly one write path onto a vCard.
 
 The base vCard in CardStore is the document of record; the phone is a lossy projection of it. A phone edit never regenerates the vCard, it edits the base document.
 

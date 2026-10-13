@@ -1,671 +1,554 @@
-//! Calendar reading and writing: one calendar object's occurrences
-//! inside a window, and the edits its entry page makes.
+//! # Calendars
 //!
-//! The parsing half is ical-rs's decoded model and syntax tree, the
-//! recurrence half its recurrence set. Expansion is civil, as RFC 5545
-//! defines it: an event at 09:00 recurs at 09:00 on the wall clock of
-//! its start. Every time crosses the bridge with what it is civil in
-//! ([`EventTime`]), and the Java side makes it an instant with the
-//! platform's time-zone database; this side resolves only the zones an
-//! object defines for itself ([`zone`]).
+//! The calendar domain: calendars and events as they cross the bridge,
+//! and the [`Calendars`] router dispatching each operation on its backend.
+//!
+//! [`caldav`], [`msgraph`], [`jmap`] and [`gcal`] add the event verbs to
+//! their backend; [`phone`] maps objects to the phone's calendar rows. The
+//! rest works on iCalendar text alone: [`read`], [`expand`], [`series`],
+//! [`occurrence`], [`zone`], [`edit`] and the merge ([`conflict`]).
+//!
+//! Expansion is civil (RFC 5545): an event at 09:00 recurs at 09:00 on
+//! its start's wall clock. Times cross the bridge with their zone
+//! ([`EventTime`]) for Java to resolve with the platform's tzdata; this
+//! side resolves only the zones an object defines itself ([`zone`]).
 
-mod conflict;
+mod caldav;
+pub mod conflict;
+pub mod edit;
+pub mod expand;
+pub mod gcal;
+mod jmap;
+mod msgraph;
 mod occurrence;
 pub mod phone;
-mod series;
+pub mod read;
+pub mod series;
 mod zone;
-
-use std::time::{Duration, Instant};
 
 use ical::{
     component::{IcalComponent, IcalComponentKind, IcalComponentName},
-    param::IcalParam,
-    prop::{
-        IcalProp, IcalPropKind, IcalPropName, categories::CATEGORIES, description::DESCRIPTION,
-        location::LOCATION, percent_complete::PERCENT_COMPLETE, priority::PRIORITY, status::STATUS,
-        summary::SUMMARY, url::URL,
-    },
-    recur::IcalRecurDateTime,
+    prop::{IcalProp, IcalPropKind, IcalPropName},
     tree::{
         cst::{IcalCst, IcalItem},
         line::IcalLine,
-        prop::lens::IcalPropLens,
-        value::cursor::IcalValueCursor,
     },
-    value::{
-        IcalValue,
-        datetime::{IcalDate, IcalDateTime},
-        integer::IcalInteger,
-        text::{IcalText, IcalTextList},
-        uri::IcalUri,
-    },
+    value::IcalValue,
     version::IcalVersion,
 };
-use serde::{Deserialize, Serialize};
+use io_webdav::rfc6578::sync_collection::WebdavSyncDelta;
+use serde::Serialize;
 
-use crate::types::BridgeError;
-
-pub use conflict::{merge, resolve};
-pub use occurrence::{
-    OccurrenceChange, OccurrenceWrite, occurrence_changes, occurrence_window, occurrences,
+use crate::{
+    account::{self, Account, Backend},
+    calendar::{gcal::Gcal, zone::EventTime},
+    client::{
+        Client, Host,
+        jmap::Jmap,
+        msgraph::Msgraph,
+        parse_url,
+        webdav::{Webdav, href_resource},
+    },
+    error::BridgeError,
 };
-pub use series::{remove, split};
-use zone::Zones;
-pub use zone::{EventTime, EventTimeKind};
-
-/// How many occurrences one event may contribute to a window.
-///
-/// A window is a month at most, so a legitimate rule cannot exceed this
-/// even at `FREQ=HOURLY`; the cap is what keeps a `FREQ=SECONDLY` event
-/// from filling the agenda with a million rows.
-const MAX_OCCURRENCES: usize = 1024;
-
-/// How many occurrences one series is walked through, placed or not.
-///
-/// A walk jumps to its window ([`IcalRecurSetExpand::skip_to`]) but for
-/// a rule bounded by `COUNT`, which still steps from DTSTART, so
-/// `FREQ=SECONDLY;COUNT=...` from 1970 is billions of steps before the
-/// first one placed; past this bound (about 50 ms of walking) the series
-/// places nothing more.
-const MAX_WALKED: usize = 200_000;
-
-/// How long one expansion may walk, all its series together: the
-/// backstop of [`MAX_WALKED`] for an object carrying many series.
-const MAX_EXPANSION: Duration = Duration::from_secs(2);
-
-/// A day, in seconds: the slack an expansion's skip keeps below its
-/// window for an override told on another clock.
-const DAY_SECONDS: i64 = 86_400;
 
 /// How deep components may nest in an object read here: RFC 5545 needs
 /// three (`VCALENDAR`, `VEVENT`, `VALARM`; `VTIMEZONE`, `STANDARD`).
 const MAX_NESTING: usize = 16;
 
 /// What every object this side composes names as its producer.
-const PRODID: &str = "-//Pimalaya//Pimalaya for Android//EN";
+pub const PRODID: &str = "-//Pimalaya//Pimalaya for Android//EN";
 
 /// The components an agenda places on a day: everything RFC 5545 dates,
 /// minus the two that describe rather than schedule (VFREEBUSY reports
 /// busy time, VTIMEZONE defines offsets).
-const SCHEDULED: [IcalComponentKind; 3] = [
+pub const SCHEDULED: [IcalComponentKind; 3] = [
     IcalComponentKind::VEvent,
     IcalComponentKind::VTodo,
     IcalComponentKind::VJournal,
 ];
 
-/// One rendered occurrence of a calendar component.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Occurrence {
-    /// The component this came out of, as its wire name: `VEVENT`,
-    /// `VTODO` or `VJOURNAL`. An agenda row shows all three the same
-    /// way apart from its glyph, so the kind crosses rather than three
-    /// separate lists.
-    pub component: String,
-    /// When it starts: where the rules placed it, or where an override
-    /// moved it, in that override's own zone.
-    pub start: EventTime,
-    /// When it ends; the start on a zero-length component, which is
-    /// every journal entry and most to-dos.
-    pub end: EventTime,
-    /// Which instance of its series it is: the value a `RECURRENCE-ID`
-    /// naming it carries, in the series' zone. Absent on an entry that
-    /// does not recur, which is what tells the page there is no series
-    /// to ask about.
-    pub recurrence_id: Option<EventTime>,
-    /// `SUMMARY`, empty when the component carries none.
-    pub summary: String,
-    /// `LOCATION`, empty when the component carries none.
-    pub location: String,
-    /// Whether the start is a DATE rather than a DATE-TIME.
-    pub all_day: bool,
-}
-
-/// One calendar component read whole, for the page that shows it.
+/// One calendar surfaced to the Java client.
 ///
-/// A projection rather than the object: everything RFC 5545 lets a
-/// VEVENT, VTODO or VJOURNAL carry that a reader would look for, in the
-/// one shape all three share, with the properties only one of them has
-/// left empty by the other two. One struct and not three, because the
-/// page differs by which sections it draws and not by what it can be
-/// handed.
+/// Shaped as [`crate::contact::Addressbook`] by coincidence, and kept
+/// apart: a calendar grows a default time zone and a component set that
+/// an addressbook never will.
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EventDetail {
-    /// The component's wire name: `VEVENT`, `VTODO` or `VJOURNAL`.
-    pub component: String,
-    /// `UID`, the identity every replica of this component shares.
-    pub uid: String,
-    /// `SUMMARY`, empty when the component carries none.
-    pub summary: String,
-    /// `DESCRIPTION`, empty when the component carries none.
-    pub description: String,
-    /// `LOCATION`, empty when the component carries none.
-    pub location: String,
-    /// `URL`, empty when the component carries none.
-    pub url: String,
-    /// `STATUS`, as written: the vocabulary differs per component.
-    pub status: String,
-    /// `CATEGORIES`, comma separated as the property spells them.
-    pub categories: String,
-    /// `DTSTART`; a to-do need not carry one.
-    pub start: Option<EventTime>,
-    /// `DTEND`; only a VEVENT has one.
-    pub end: Option<EventTime>,
-    /// `DUE`; only a VTODO has one.
-    pub due: Option<EventTime>,
-    /// `COMPLETED`; only a VTODO has one.
-    pub completed: Option<EventTime>,
-    /// Whether the placing date, the start or a to-do's DUE, is a DATE
-    /// rather than a DATE-TIME.
-    pub all_day: bool,
-    /// The series' `RRULE`, raw, empty when it does not repeat.
-    pub recurrence: String,
-    /// `PRIORITY`, as written.
-    pub priority: String,
-    /// `PERCENT-COMPLETE`, as written; only a VTODO has one.
-    pub percent_complete: String,
-    /// `ORGANIZER`, the address alone.
-    pub organizer: String,
-    /// Every `ATTENDEE`, in the order the object lists them.
-    pub attendees: Vec<EventAttendee>,
-    /// `CREATED`, raw.
-    pub created: String,
-    /// `LAST-MODIFIED`, raw.
-    pub last_modified: String,
-    /// The `RECURRENCE-ID` of the override read, absent when what was
-    /// read is the series or an entry that does not recur.
-    pub recurrence_id: Option<EventTime>,
-}
-
-/// One `ATTENDEE` of a component: who, and where they stand.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EventAttendee {
-    /// The `CN` parameter, empty when the property carries none.
+pub struct Calendar {
+    /// Last non-empty path segment of the collection URL.
+    pub id: String,
+    /// Human-readable name (display name, falling back to the id).
     pub name: String,
-    /// The calendar user address, `mailto:` stripped.
-    pub address: String,
-    /// The `PARTSTAT` parameter, empty when the property carries none.
-    pub status: String,
-}
-
-/// Reads one component of a calendar object whole.
-///
-/// The series' own component, or the override of the instance a
-/// `recurrence_id` names when the object holds one: that is what the
-/// occurrence a reader opened looks like. Either way the rule is the
-/// series', since an override repeats nothing.
-pub fn read(ical: &str, recurrence_id: &str) -> Result<EventDetail, BridgeError> {
-    let cst = cst_of(ical)?;
-    let decoded = cst.decode();
-    let zones = Zones::of(&decoded);
-
-    let mut found = Vec::new();
-    for component in &decoded.components {
-        collect_scheduled(component, &mut found);
-    }
-
-    let (master, kind) = found
-        .iter()
-        .find(|(component, _)| !has(component, IcalPropKind::RecurrenceId))
-        .or(found.first())
-        .copied()
-        .ok_or_else(|| BridgeError::from("The object holds nothing to show"))?;
-
-    let mut component = master;
-    if let Ok(id) = IcalRecurDateTime::parse(recurrence_id)
-        && let Some(start) = start_of(master, kind)
-    {
-        let uid = text_of(master, IcalPropKind::Uid);
-        let replaced = found.iter().find(|(other, _)| {
-            text_of(other, IcalPropKind::Uid) == uid
-                && time_of(other, IcalPropKind::RecurrenceId)
-                    .and_then(|raw| Some(zones.convert(raw.civil()?, &raw, &start)))
-                    == Some(id)
-        });
-        if let Some((over, _)) = replaced {
-            component = over;
-        }
-    }
-
-    let placing = start_of(component, kind);
-
-    Ok(EventDetail {
-        component: kind.to_string(),
-        uid: text_of(component, IcalPropKind::Uid).unwrap_or_default(),
-        summary: text_of(component, IcalPropKind::Summary).unwrap_or_default(),
-        description: text_of(component, IcalPropKind::Description).unwrap_or_default(),
-        location: text_of(component, IcalPropKind::Location).unwrap_or_default(),
-        url: text_of(component, IcalPropKind::Url).unwrap_or_default(),
-        status: text_of(component, IcalPropKind::Status).unwrap_or_default(),
-        categories: text_of(component, IcalPropKind::Categories).unwrap_or_default(),
-        all_day: placing.is_some_and(|start| start.kind == EventTimeKind::Date),
-        start: time_of(component, IcalPropKind::DtStart).map(|time| zones.resolve(time)),
-        end: time_of(component, IcalPropKind::DtEnd).map(|time| zones.resolve(time)),
-        due: time_of(component, IcalPropKind::Due).map(|time| zones.resolve(time)),
-        completed: time_of(component, IcalPropKind::Completed),
-        recurrence: text_of(master, IcalPropKind::RRule).unwrap_or_default(),
-        priority: text_of(component, IcalPropKind::Priority).unwrap_or_default(),
-        percent_complete: text_of(component, IcalPropKind::PercentComplete).unwrap_or_default(),
-        organizer: address_of(text_of(component, IcalPropKind::Organizer).unwrap_or_default()),
-        attendees: attendees_of(component),
-        created: text_of(component, IcalPropKind::Created).unwrap_or_default(),
-        last_modified: text_of(component, IcalPropKind::LastModified).unwrap_or_default(),
-        recurrence_id: time_of(component, IcalPropKind::RecurrenceId)
-            .map(|time| zones.resolve(time)),
-    })
-}
-
-/// What one edit changes on a component.
-///
-/// Every field is optional, and an absent one is left alone: the form
-/// sends what it changed, so a to-do's edit never mentions an end and a
-/// journal entry's never mentions a due date. A present field that is
-/// empty <em>removes</em> the property, which is how a form clears a
-/// value.
-#[derive(Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct EventEdit {
-    pub summary: Option<String>,
+    /// Absolute collection URL, the target of every event operation.
+    pub url: String,
+    /// Free-form description, when the server exposes one.
     pub description: Option<String>,
-    pub location: Option<String>,
-    pub url: Option<String>,
-    pub status: Option<String>,
-    pub categories: Option<String>,
-    pub priority: Option<String>,
-    pub start: Option<DateEdit>,
-    pub end: Option<DateEdit>,
-    pub due: Option<DateEdit>,
-    /// Civil UTC, whatever the rest of the component is: `COMPLETED` is
-    /// a UTC DATE-TIME by RFC 5545 3.8.2.1.
-    pub completed: Option<DateEdit>,
-    pub percent_complete: Option<String>,
-    /// Now, as a UTC `YYYYMMDDTHHMMSSZ` stamp, for the two properties
-    /// that record when the object was last touched. Passed in rather
-    /// than read here, so this stays a pure function of its inputs.
-    pub stamp: Option<String>,
-    /// Which occurrences of a series the edit applies to.
-    pub scope: EventScope,
-    /// The occurrence the page was opened on: its identity, as
-    /// [`Occurrence::recurrence_id`] gave it. With it, the dates of an
-    /// edit are that occurrence's, and an edit of the whole series moves
-    /// the series by as much as the occurrence moved.
-    pub recurrence_id: Option<String>,
-    /// That identity's instant, a UTC stamp, which the Java side reads
-    /// off the platform's database: what a split's `UNTIL` is computed
-    /// from when the zone is not one the object defines.
-    pub recurrence_instant: Option<String>,
-    /// The `UID` of the series a split starts, minted by the caller.
-    pub uid: Option<String>,
-    /// The `VTIMEZONE` of a zone the edit writes a date in, inserted when
-    /// the object does not define that zone yet (RFC 5545 3.2.19).
-    pub vtimezone: Option<String>,
+    /// Display colour (`#RRGGBB`), when the server exposes one.
+    pub color: Option<String>,
+    /// What the source says the calendar is for, as
+    /// [`crate::contact::Addressbook::role`].
+    pub role: String,
+    /// Whether the user may write into it, true where the source says
+    /// nothing.
+    pub writable: bool,
 }
 
-/// One date an edit writes.
-#[derive(Clone, Default, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct DateEdit {
-    /// The new value, civil, `YYYYMMDD` or `YYYYMMDDTHHMMSS`; empty
-    /// removes the property.
-    pub time: String,
-    /// What the value is relative to. Absent, it is relative to what the
-    /// replaced property already was, `TZID` and `VALUE` kept.
-    pub kind: Option<EventTimeKind>,
-    /// The `TZID` of a zoned value.
-    pub tzid: String,
+/// One calendar item surfaced to the Java client, raw.
+///
+/// The text stays unparsed: expanding a series depends on the window
+/// rendered, so decoding happens where that window is known.
+#[derive(Serialize)]
+pub struct Event {
+    /// Display identifier (resource name with any `.ics` stripped).
+    pub id: String,
+    /// Entity tag guarding concurrent updates, when the server sent one.
+    pub etag: Option<String>,
+    /// Raw iCalendar text, one VCALENDAR.
+    pub ical: String,
 }
 
-/// Which occurrences of a series an edit applies to.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum EventScope {
-    /// The series itself, which is all an entry that does not recur has.
-    #[default]
-    All,
-    /// The occurrence named, through an override or an `EXDATE`.
-    This,
-    /// The occurrence named and every later one, by splitting the series.
-    Following,
+/// One incremental round of a calendar collection, surfaced to Java.
+///
+/// As [`crate::contact::CardDelta`]: the members that moved, the merge reading
+/// the bodies it needs after. A round that read them anyway (Google's, JMAP's
+/// complete ones) hands them in [`Self::bodies`], not to read each twice.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventDelta {
+    /// Resource names created or updated since the cursor, with their
+    /// ETags; no body, which is the point.
+    pub changed: Vec<EventRef>,
+    /// The bodies the round already held, as named in [`Self::changed`];
+    /// empty where it listed names alone (CalDAV, Graph).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub bodies: Vec<Event>,
+    /// Resource names removed since the cursor.
+    pub vanished: Vec<String>,
+    /// The next cursor, when the backend issued one.
+    pub token: Option<String>,
+    /// True when the round listed the complete member set (an initial
+    /// round, or an expired cursor re-run as one).
+    pub complete: bool,
 }
 
-/// The object a new entry starts from: one component carrying the three
-/// properties RFC 5545 requires of it, and the `VTIMEZONE` its start's
-/// zone needs.
-///
-/// `UID` identifies it (section 3.8.4.7), `DTSTAMP` says when it was
-/// composed (section 3.8.7.2), and `DTSTART` places it, which every one
-/// of the three components an agenda shows needs to appear on a day. A
-/// to-do could be placed by `DUE` instead, but a page that opens with
-/// neither has nowhere to put the entry, so the start is what a new one
-/// carries and the page moves it.
-///
-/// The start is a date, a floating time, or a time in the zone `tzid`
-/// names, which `vtimezone` defines: every `TZID` an object uses owes
-/// it a definition (section 3.2.19), and this side has no database to
-/// write one from, so the caller does.
-///
-/// Both stamps are the caller's, like the edit's, so this stays a pure
-/// function of its inputs: nothing here reads a clock or mints an id.
-pub fn create(
-    component: &str,
-    uid: &str,
-    stamp: &str,
-    start: &str,
-    tzid: &str,
-    vtimezone: &str,
-) -> Result<String, BridgeError> {
-    let kind = match component {
-        "VEVENT" | "VTODO" | "VJOURNAL" => component,
-        other => return Err(format!("Cannot create a `{other}`").into()),
-    };
-
-    let (dtstart, zone) = match (start.len(), tzid.is_empty()) {
-        (8, _) => (format!("DTSTART;VALUE=DATE:{start}"), ""),
-        (_, true) => (format!("DTSTART:{start}"), ""),
-        _ => (format!("DTSTART;TZID={tzid}:{start}"), vtimezone.trim_end()),
-    };
-    let zone = match zone.is_empty() {
-        true => String::new(),
-        false => format!("{zone}\r\n"),
-    };
-
-    let object = format!(
-        "BEGIN:VCALENDAR\r\n\
-         VERSION:2.0\r\n\
-         PRODID:{PRODID}\r\n\
-         {zone}\
-         BEGIN:{kind}\r\n\
-         UID:{uid}\r\n\
-         DTSTAMP:{stamp}\r\n\
-         {dtstart}\r\n\
-         END:{kind}\r\n\
-         END:VCALENDAR\r\n"
-    );
-
-    // NOTE: parsed back rather than returned as built. The values come
-    // from the caller, and an object this refused to read would be one
-    // the page then opens on nothing.
-    let cst = cst_of(object.as_str())?;
-    if !tzid.is_empty() && start.len() != 8 && Zones::of_cst(&cst).find(tzid).is_none() {
-        return Err(format!("No definition of the zone `{tzid}`").into());
-    }
-
-    Ok(object)
+/// One member of an enumerated calendar: what it is called and what it
+/// stands at.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventRef {
+    pub id: String,
+    pub etag: Option<String>,
 }
 
-/// Applies one edit to a calendar object, returning the new iCalendar.
-///
-/// A patch and not a rebuild: the object is walked as a concrete syntax
-/// tree and only the edited properties are replaced, so everything the
-/// form does not manage (VALARMs, X- properties, the ATTENDEE list, the
-/// parameters on the lines it leaves alone) survives byte for byte.
-/// That is the same rule the vCard side follows, and for the same
-/// reason: a client that rewrites what it does not understand loses
-/// other clients' data.
-///
-/// An edit of one occurrence patches its override, written first when
-/// the object has none. An edit of the whole series opened on one of
-/// its occurrences moves the series' dates by as much as that
-/// occurrence's moved. Splitting a series is [`split`], since it writes
-/// two objects.
-pub fn write(ical: &str, edit: &str) -> Result<String, BridgeError> {
-    let edit: EventEdit = serde_json::from_str(edit).map_err(|err| err.to_string())?;
-
-    let cst = cst_of(ical)?;
-    let mut cst = cst.into_static();
-
-    match edit.scope {
-        EventScope::All => series::all(&mut cst, &edit)?,
-        EventScope::This => series::this(&mut cst, &edit)?,
-        EventScope::Following => return Err("Splitting a series writes two objects".into()),
-    }
-    define_zone(&mut cst, &edit)?;
-
-    text(&cst)
+/// One account's calendars and events, as the bridge routes them.
+pub struct Calendars<'c, H> {
+    /// The client the requests go through.
+    pub client: &'c mut Client<H>,
+    /// The account whose backend serves every operation.
+    pub account: &'c Account<'c>,
 }
 
-/// Replaces every edited property of one component, in place.
-fn patch(component: &mut IcalCst<'static>, edit: &EventEdit) {
-    replace_text::<SUMMARY>(component, IcalPropKind::Summary, &edit.summary);
-    replace_text::<DESCRIPTION>(component, IcalPropKind::Description, &edit.description);
-    replace_text::<LOCATION>(component, IcalPropKind::Location, &edit.location);
-    replace_text::<STATUS>(component, IcalPropKind::Status, &edit.status);
+/// The object [`Calendars::create_event`] files.
+pub struct EventCreate<'a> {
+    /// The resource name asked for, which only CalDAV takes.
+    pub id: &'a str,
+    /// The iCalendar text.
+    pub ical: &'a str,
+    /// The account's address, which Google and JMAP announce a meeting
+    /// the user organizes by.
+    pub address: &'a str,
+}
 
-    if let Some(value) = &edit.url {
-        component.remove::<URL>();
-        if !value.is_empty() {
-            component.push(prop(
-                IcalPropKind::Url,
-                Vec::new(),
-                IcalValue::Uri(IcalUri(value.clone().into())),
-            ));
+/// The object [`Calendars::update_event`] writes.
+pub struct EventUpdate<'a> {
+    /// The event's resource name or server id.
+    pub id: &'a str,
+    /// The edited iCalendar text.
+    pub ical: &'a str,
+    /// The ETag guarding the write, [`None`] when unknown.
+    pub etag: Option<&'a str>,
+    /// The account's address, as [`EventCreate::address`].
+    pub address: &'a str,
+}
+
+/// The object [`Calendars::delete_event`] removes.
+pub struct EventDelete<'a> {
+    /// The event's resource name or server id.
+    pub id: &'a str,
+    /// The ETag guarding the deletion, [`None`] when unknown.
+    pub etag: Option<&'a str>,
+    /// The account's address, as [`EventCreate::address`].
+    pub address: &'a str,
+}
+
+/// The protocol-agnostic calendar API, each method routed to the CalDAV,
+/// Graph, JMAP or Google backend behind the account's base URL.
+impl<H: Host> Calendars<'_, H> {
+    /// Lists the account's calendars, each carrying the URL its events
+    /// are listed from: the CalDAV collection URL, or the calendar id
+    /// behind the account's marker.
+    pub fn list_calendars(&mut self) -> Result<Vec<Calendar>, BridgeError> {
+        let account = self.account;
+
+        match account.backend {
+            Backend::Jmap => {
+                let session_url = account::jmap_session_url(account.base_url)?;
+                let mut calendars = Jmap {
+                    client: self.client,
+                    session_url,
+                    auth: account.auth,
+                }
+                .list_calendars()?;
+                for calendar in &mut calendars {
+                    // NOTE: the listing already put the account-scoped path
+                    // there; only the base is missing.
+                    calendar.url = format!("{}/{}", account.base_url, calendar.url);
+                }
+                Ok(calendars)
+            }
+            Backend::Graph => {
+                let mut calendars = Msgraph {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .list_calendars()?;
+                for calendar in &mut calendars {
+                    calendar.url = format!("{}/{}", account.base_url, calendar.id);
+                }
+                Ok(calendars)
+            }
+            Backend::Google => {
+                let mut calendars = Gcal {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .list_calendars()?;
+                for calendar in &mut calendars {
+                    calendar.url = format!("{}/{}", account.base_url, calendar.id);
+                }
+                Ok(calendars)
+            }
+            // NOTE: a calendar account with no sentinel is a CalDAV context
+            // root, the only other endpoint the connection flow builds.
+            _ => Webdav {
+                client: self.client,
+                auth: account.auth,
+            }
+            .list_calendars(&parse_url(account.base_url)?),
         }
     }
 
-    if let Some(value) = &edit.categories {
-        component.remove::<CATEGORIES>();
-        let items: Vec<_> = value
-            .split(',')
-            .map(str::trim)
-            .filter(|item| !item.is_empty())
-            .map(|item| item.to_string().into())
-            .collect();
-        if !items.is_empty() {
-            component.push(prop(
-                IcalPropKind::Categories,
-                Vec::new(),
-                IcalValue::TextList(IcalTextList(items)),
-            ));
+    /// One calendar's incremental round, rerun in full on a rejected cursor.
+    ///
+    /// As [`crate::contact::Contacts::sync_cards`]: a still-rejected
+    /// initial round errors, since an empty collection would read as every
+    /// event deleted.
+    pub fn sync_events(
+        &mut self,
+        calendar_url: &str,
+        cursor: Option<&str>,
+    ) -> Result<EventDelta, BridgeError> {
+        if let Some(mut delta) = self.sync_events_round(calendar_url, cursor)? {
+            // NOTE: a JMAP round has no cursor and lists in full, and only
+            // it knows whether the listing reached its end.
+            if self.account.backend != Backend::Jmap {
+                delta.complete = cursor.is_none();
+            }
+            return Ok(delta);
+        }
+
+        match self.sync_events_round(calendar_url, None)? {
+            Some(mut delta) => {
+                delta.complete = true;
+                Ok(delta)
+            }
+            None => Err(format!("Initial sync round rejected for {calendar_url}").into()),
         }
     }
 
-    replace_number::<PRIORITY>(component, IcalPropKind::Priority, &edit.priority);
-    replace_number::<PERCENT_COMPLETE>(
-        component,
-        IcalPropKind::PercentComplete,
-        &edit.percent_complete,
-    );
+    /// One round on the base URL's backend; [`None`] if the cursor is rejected.
+    ///
+    /// JMAP has no incremental read wired (the draft's
+    /// `CalendarEvent/changes` would go here): it lists in full with no
+    /// cursor, complete unless the server capped the listing.
+    fn sync_events_round(
+        &mut self,
+        calendar_url: &str,
+        cursor: Option<&str>,
+    ) -> Result<Option<EventDelta>, BridgeError> {
+        let account = self.account;
 
-    if let Some(date) = &edit.start {
-        replace_date(component, IcalPropKind::DtStart, date);
-    }
-    if let Some(date) = &edit.end {
-        replace_date(component, IcalPropKind::DtEnd, date);
-    }
-    if let Some(date) = &edit.due {
-        replace_date(component, IcalPropKind::Due, date);
-    }
-    if let Some(date) = &edit.completed {
-        let utc = DateEdit {
-            kind: Some(EventTimeKind::Utc),
-            ..date.clone()
-        };
-        replace_date(component, IcalPropKind::Completed, &utc);
+        match account.backend {
+            Backend::Jmap => {
+                let session_url = account::jmap_session_url(account.base_url)?;
+                let calendar_id = account::jmap_collection_id(calendar_url);
+                let (events, complete) = Jmap {
+                    client: self.client,
+                    session_url,
+                    auth: account.auth,
+                }
+                .list_events(calendar_id)?;
+
+                Ok(Some(listed(events, complete)))
+            }
+            // NOTE: Graph's event delta runs over a time window only, and
+            // an event leaving the window would read as deleted, so every
+            // round is a complete listing with no cursor.
+            Backend::Graph => Ok(Some(EventDelta {
+                changed: Msgraph {
+                    client: self.client,
+                    token: account.auth.secret(),
+                }
+                .list_events(account::book_segment(account.base_url, calendar_url))?,
+                bodies: Vec::new(),
+                vanished: Vec::new(),
+                token: None,
+                complete: true,
+            })),
+            // NOTE: Google's sync token reports instances, and an instance
+            // moving is its series moving, so a changed instance reads its
+            // series again; every body comes with the round.
+            Backend::Google => Gcal {
+                client: self.client,
+                token: account.auth.secret(),
+            }
+            .sync_events(
+                account::book_segment(account.base_url, calendar_url),
+                cursor,
+            ),
+            _ => {
+                let url = parse_url(calendar_url)?;
+                let delta = Webdav {
+                    client: self.client,
+                    auth: account.auth,
+                }
+                .sync_events(&url, cursor)?;
+                Ok(delta.map(into_event_delta))
+            }
+        }
     }
 
-    touch(component, edit);
+    /// The bodies of the named events, on any backend.
+    ///
+    /// JMAP has no multiget either, so it re-lists and picks what was
+    /// asked for: one request rather than one per event.
+    pub fn multiget_events(
+        &mut self,
+        calendar_url: &str,
+        ids: &[&str],
+    ) -> Result<Vec<Event>, BridgeError> {
+        let account = self.account;
+
+        match account.backend {
+            Backend::Jmap => {
+                let session_url = account::jmap_session_url(account.base_url)?;
+                let calendar_id = account::jmap_collection_id(calendar_url);
+                let (events, _) = Jmap {
+                    client: self.client,
+                    session_url,
+                    auth: account.auth,
+                }
+                .list_events(calendar_id)?;
+
+                Ok(events
+                    .into_iter()
+                    .filter(|event| ids.contains(&event.id.as_str()))
+                    .collect())
+            }
+            Backend::Graph => Msgraph {
+                client: self.client,
+                token: account.auth.secret(),
+            }
+            .read_events(ids),
+            Backend::Google => Gcal {
+                client: self.client,
+                token: account.auth.secret(),
+            }
+            .read_events(account::book_segment(account.base_url, calendar_url), ids),
+            _ => {
+                let url = parse_url(calendar_url)?;
+                Webdav {
+                    client: self.client,
+                    auth: account.auth,
+                }
+                .multiget_events(&url, ids)
+            }
+        }
+    }
+
+    /// Files one new object, answering the resource it landed under: on
+    /// CalDAV the name asked for or the one the server filed it by, the id
+    /// Graph, Google or the JMAP server minted.
+    pub fn create_event(
+        &mut self,
+        calendar_url: &str,
+        event: &EventCreate,
+    ) -> Result<EventRef, BridgeError> {
+        let account = self.account;
+
+        match account.backend {
+            Backend::Jmap => Jmap {
+                client: self.client,
+                session_url: account::jmap_session_url(account.base_url)?,
+                auth: account.auth,
+            }
+            .create_event(
+                account::jmap_collection_id(calendar_url),
+                event.ical,
+                event.address,
+            ),
+            Backend::Graph => Msgraph {
+                client: self.client,
+                token: account.auth.secret(),
+            }
+            .create_event(
+                account::book_segment(account.base_url, calendar_url),
+                event.ical,
+            ),
+            Backend::Google => Gcal {
+                client: self.client,
+                token: account.auth.secret(),
+            }
+            .create_event(
+                account::book_segment(account.base_url, calendar_url),
+                event.ical,
+                event.address,
+            ),
+            _ => Webdav {
+                client: self.client,
+                auth: account.auth,
+            }
+            .create_event(&parse_url(calendar_url)?, event.id, event.ical),
+        }
+    }
+
+    /// Pushes one edited object back to its calendar, answering its new
+    /// ETag.
+    pub fn update_event(
+        &mut self,
+        calendar_url: &str,
+        event: &EventUpdate,
+    ) -> Result<Option<String>, BridgeError> {
+        let account = self.account;
+
+        match account.backend {
+            Backend::Jmap => Jmap {
+                client: self.client,
+                session_url: account::jmap_session_url(account.base_url)?,
+                auth: account.auth,
+            }
+            .update_event(event.id, event.ical, event.etag, event.address),
+            Backend::Graph => Msgraph {
+                client: self.client,
+                token: account.auth.secret(),
+            }
+            .update_event(event.id, event.ical, event.etag),
+            Backend::Google => Gcal {
+                client: self.client,
+                token: account.auth.secret(),
+            }
+            .update_event(account::book_segment(account.base_url, calendar_url), event),
+            _ => Webdav {
+                client: self.client,
+                auth: account.auth,
+            }
+            .update_event(&parse_url(calendar_url)?, event.id, event.ical, event.etag),
+        }
+    }
+
+    /// Removes one object from its calendar.
+    pub fn delete_event(
+        &mut self,
+        calendar_url: &str,
+        event: &EventDelete,
+    ) -> Result<(), BridgeError> {
+        let account = self.account;
+
+        match account.backend {
+            Backend::Jmap => Jmap {
+                client: self.client,
+                session_url: account::jmap_session_url(account.base_url)?,
+                auth: account.auth,
+            }
+            .delete_event(event.id, event.etag, event.address),
+            Backend::Graph => Msgraph {
+                client: self.client,
+                token: account.auth.secret(),
+            }
+            .delete_event(event.id, event.etag),
+            Backend::Google => Gcal {
+                client: self.client,
+                token: account.auth.secret(),
+            }
+            .delete_event(
+                account::book_segment(account.base_url, calendar_url),
+                event.id,
+                event.etag,
+                event.address,
+            ),
+            _ => Webdav {
+                client: self.client,
+                auth: account.auth,
+            }
+            .delete_event(&parse_url(calendar_url)?, event.id, event.etag),
+        }
+    }
 }
 
-/// Stamps a component as edited now.
-///
-/// RFC 5545 3.8.7.2 and 3.8.7.3: an edit is when the object was last
-/// built, and when it last changed. Both, because a server and another
-/// client read different ones.
-fn touch(component: &mut IcalCst<'static>, edit: &EventEdit) {
-    let Some(stamp) = &edit.stamp else {
-        return;
-    };
-
-    let utc = DateEdit {
-        time: stamp.trim_end_matches(['Z', 'z']).to_string(),
-        kind: Some(EventTimeKind::Utc),
-        tzid: String::new(),
-    };
-    replace_date(component, IcalPropKind::DtStamp, &utc);
-    replace_date(component, IcalPropKind::LastModified, &utc);
-}
-
-/// Replaces a text property, removing it when the edit clears it.
-fn replace_text<L: IcalPropLens>(
-    component: &mut IcalCst<'static>,
-    kind: IcalPropKind,
-    value: &Option<String>,
-) {
-    let Some(value) = value else {
-        return;
-    };
-
-    component.remove::<L>();
-    if !value.is_empty() {
-        component.push(prop(
-            kind,
-            Vec::new(),
-            IcalValue::Text(IcalText(value.clone().into())),
-        ));
-    }
-}
-
-/// The same for an integer property, ignoring anything unreadable
-/// rather than writing a number the property cannot hold.
-fn replace_number<L: IcalPropLens>(
-    component: &mut IcalCst<'static>,
-    kind: IcalPropKind,
-    value: &Option<String>,
-) {
-    let Some(value) = value else {
-        return;
-    };
-
-    component.remove::<L>();
-    if value.parse::<i64>().is_ok() {
-        component.push(prop(
-            kind,
-            Vec::new(),
-            IcalValue::Integer(IcalInteger(value.clone().into())),
-        ));
-    }
-}
-
-/// Replaces a date property.
-///
-/// A value relative to nothing new keeps the line it replaces, `TZID`
-/// and `VALUE` and position included, and only its digits change: an
-/// event at 09:00 New York moved to 10:00 is still in New York. A value
-/// naming its own zone, or one of the other shape (a date replacing a
-/// date-time), is written fresh, with the parameters its zone needs:
-/// without `VALUE=DATE` a bare `YYYYMMDD` is not a legal DATE-TIME and
-/// servers reject the object.
-fn replace_date(component: &mut IcalCst<'static>, kind: IcalPropKind, date: &DateEdit) {
-    let name = kind.to_string();
-    if date.time.is_empty() {
-        remove_named(component, &name);
-        return;
-    }
-
-    if date.kind.is_none()
-        && let Some(line) = line_mut(component, &name)
-        && let Some(old) = EventTime::of_line(line)
-        && (old.kind == EventTimeKind::Date) == (date.time.len() == 8)
-    {
-        let value = EventTime {
-            time: date.time.clone(),
-            ..old
-        };
-        IcalValueCursor { line }.set_bytes(value.wire());
-        return;
-    }
-
-    let time = EventTime {
-        time: date.time.clone(),
-        kind: date.kind.unwrap_or(match date.time.len() {
-            8 => EventTimeKind::Date,
-            _ => EventTimeKind::Floating,
-        }),
-        tzid: date.tzid.clone(),
-        offset: None,
-    };
-    remove_named(component, &name);
-    component.push(date_prop(kind, &time));
-}
-
-/// A date property carrying one time, with the parameters its zone
-/// needs.
-fn date_prop(kind: IcalPropKind, time: &EventTime) -> IcalProp<'static> {
-    let (params, value) = match time.kind {
-        EventTimeKind::Date => (
-            vec![IcalParam::Value("DATE".into())],
-            IcalValue::Date(IcalDate(time.time.clone().into())),
-        ),
-        EventTimeKind::Zoned => (
-            vec![IcalParam::TzId(time.tzid.clone().into())],
-            IcalValue::DateTime(IcalDateTime(time.time.clone().into())),
-        ),
-        _ => (
-            Vec::new(),
-            IcalValue::DateTime(IcalDateTime(time.wire().into())),
-        ),
-    };
-
-    prop(kind, params, value)
-}
-
-/// Inserts the `VTIMEZONE` an edit carries when a date it writes is in
-/// that zone and the object does not define it yet.
-fn define_zone(cst: &mut IcalCst<'static>, edit: &EventEdit) -> Result<(), BridgeError> {
-    let Some(definition) = edit.vtimezone.as_deref().filter(|text| !text.is_empty()) else {
-        return Ok(());
-    };
-
-    let zone = cst_of(definition)?.into_static();
-    let tzid = line(&zone, "TZID")
-        .map(|line| line.value.decode().into_owned())
-        .ok_or("The zone definition carries no TZID")?;
-
-    let named = [&edit.start, &edit.end, &edit.due]
+/// One WebDAV sync round as the calendar delta it stands for.
+fn into_event_delta(delta: WebdavSyncDelta) -> EventDelta {
+    let changed = delta
+        .changed
         .into_iter()
-        .flatten()
-        .any(|date| date.kind == Some(EventTimeKind::Zoned) && date.tzid == tzid);
-    if !named || Zones::of_cst(cst).find(&tzid).is_some() {
-        return Ok(());
-    }
+        .filter_map(|change| {
+            Some(EventRef {
+                id: href_resource(&change.href)?,
+                etag: change.etag,
+            })
+        })
+        .collect();
+    let vanished = delta
+        .vanished
+        .iter()
+        .filter_map(|href| href_resource(href))
+        .collect();
 
-    // NOTE: before the components that use it, where every producer
-    // puts it, though RFC 5545 does not require the order.
-    let at = scheduled(cst).first().copied().unwrap_or(cst.items.len());
-    cst.items.insert(at, IcalItem::Component(Box::new(zone)));
-    Ok(())
-}
-
-fn prop(
-    kind: IcalPropKind,
-    params: Vec<IcalParam<'static>>,
-    value: IcalValue<'static>,
-) -> IcalProp<'static> {
-    IcalProp {
-        name: IcalPropName::Kind(kind),
-        params,
-        value,
+    EventDelta {
+        changed,
+        bodies: Vec::new(),
+        vanished,
+        token: delta.sync_token,
+        complete: false,
     }
 }
 
-/// Drops every line of one property from a component.
-fn remove_named(component: &mut IcalCst<'static>, name: &str) {
-    component.items.retain(
-        |item| !matches!(item, IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case(name)),
-    );
+/// A round that listed events whole: their names and revisions, the
+/// bodies with them, and whether the listing reached its end.
+fn listed(events: Vec<Event>, complete: bool) -> EventDelta {
+    EventDelta {
+        changed: events
+            .iter()
+            .map(|event| EventRef {
+                id: event.id.clone(),
+                etag: event.etag.clone(),
+            })
+            .collect(),
+        bodies: events,
+        vanished: Vec::new(),
+        token: None,
+        complete,
+    }
 }
 
 /// The first line of one property of a component.
-fn line<'c>(component: &'c IcalCst<'static>, name: &str) -> Option<&'c IcalLine<'static>> {
+pub fn line<'c>(component: &'c IcalCst<'static>, name: &str) -> Option<&'c IcalLine<'static>> {
     component.items.iter().find_map(|item| match item {
         IcalItem::Prop(line) if line.name.get().eq_ignore_ascii_case(name) => Some(line),
         _ => None,
     })
 }
 
-fn line_mut<'c>(
+pub fn line_mut<'c>(
     component: &'c mut IcalCst<'static>,
     name: &str,
 ) -> Option<&'c mut IcalLine<'static>> {
@@ -676,7 +559,7 @@ fn line_mut<'c>(
 }
 
 /// Where every scheduled component sits among the calendar's items.
-fn scheduled(cst: &IcalCst) -> Vec<usize> {
+pub fn scheduled(cst: &IcalCst) -> Vec<usize> {
     cst.items
         .iter()
         .enumerate()
@@ -694,25 +577,26 @@ fn scheduled(cst: &IcalCst) -> Vec<usize> {
 }
 
 /// The component at one of the calendar's items.
-fn child<'c>(cst: &'c IcalCst<'static>, index: usize) -> &'c IcalCst<'static> {
+pub fn child<'c>(cst: &'c IcalCst<'static>, index: usize) -> &'c IcalCst<'static> {
     match &cst.items[index] {
         IcalItem::Component(child) => child,
         _ => unreachable!("not a component"),
     }
 }
 
-fn child_mut<'c>(cst: &'c mut IcalCst<'static>, index: usize) -> &'c mut IcalCst<'static> {
+pub fn child_mut<'c>(cst: &'c mut IcalCst<'static>, index: usize) -> &'c mut IcalCst<'static> {
     match &mut cst.items[index] {
         IcalItem::Component(child) => child,
         _ => unreachable!("not a component"),
     }
 }
 
-/// A calendar object's syntax tree, refused when its components nest
-/// deeper than [`MAX_NESTING`]: the parser and every walk of the tree
-/// here recurse once per level, which a few hundred levels overflow on
-/// a 1 MiB Java thread (a SIGSEGV no panic guard catches).
-pub(crate) fn cst_of(ical: &str) -> Result<IcalCst<'_>, String> {
+/// A calendar object's syntax tree, refused past [`MAX_NESTING`] levels.
+///
+/// The parser and every walk here recurse once per level, which a few
+/// hundred levels overflow on a 1 MiB Java thread (a SIGSEGV no panic
+/// guard catches).
+pub fn cst_of(ical: &str) -> Result<IcalCst<'_>, String> {
     // NOTE: each line's start, unfolded (RFC 5545 section 3.1), is
     // enough to tell a BEGIN or an END: a name folded across lines
     // still counts.
@@ -743,12 +627,12 @@ pub(crate) fn cst_of(ical: &str) -> Result<IcalCst<'_>, String> {
 }
 
 /// A calendar's text.
-fn text(cst: &IcalCst) -> Result<String, BridgeError> {
+pub fn text(cst: &IcalCst) -> Result<String, BridgeError> {
     String::from_utf8(cst.to_bytes()).map_err(|err| err.to_string().into())
 }
 
 /// A component of the syntax tree decoded on its own.
-fn decoded<'c>(component: &'c IcalCst<'static>) -> IcalComponent<'c> {
+pub fn decoded<'c>(component: &'c IcalCst<'static>) -> IcalComponent<'c> {
     let mut props = Vec::new();
     let mut components = Vec::new();
     for item in &component.items {
@@ -773,7 +657,7 @@ fn decoded<'c>(component: &'c IcalCst<'static>) -> IcalComponent<'c> {
 }
 
 /// Every scheduled component of a tree, outermost first.
-fn collect_scheduled<'a>(
+pub fn collect_scheduled<'a>(
     component: &'a IcalComponent<'a>,
     out: &mut Vec<(&'a IcalComponent<'a>, IcalComponentKind)>,
 ) {
@@ -790,346 +674,15 @@ fn collect_scheduled<'a>(
     }
 }
 
-/// Every `ATTENDEE` of a component, name and standing included.
-fn attendees_of(component: &IcalComponent) -> Vec<EventAttendee> {
-    component
-        .props
-        .iter()
-        .filter(|prop| matches!(&prop.name, IcalPropName::Kind(IcalPropKind::Attendee)))
-        .map(|prop| EventAttendee {
-            name: param_of(prop, |param| match param {
-                IcalParam::Cn(value) => Some(value.to_string()),
-                _ => None,
-            }),
-            address: address_of(raw_value(prop).unwrap_or_default()),
-            status: param_of(prop, |param| match param {
-                IcalParam::PartStat(value) => Some(value.to_string()),
-                _ => None,
-            }),
-        })
-        .collect()
-}
-
-/// The first parameter a picker matches, empty when none does.
-fn param_of(prop: &IcalProp, pick: impl Fn(&IcalParam) -> Option<String>) -> String {
-    prop.params.iter().find_map(pick).unwrap_or_default()
-}
-
-/// A calendar user address without its `mailto:` scheme, which is a
-/// wire detail and not something a reader is asking to see.
-fn address_of(value: String) -> String {
-    match value.split_once(':') {
-        Some((scheme, address)) if scheme.eq_ignore_ascii_case("mailto") => address.to_string(),
-        _ => value,
-    }
-}
-
-/// The user a calendar-user address names: a `mailto:` address, or the
-/// `EMAIL` parameter of any other URI.
-fn user_address(prop: &IcalProp) -> Option<String> {
-    let value = raw_value(prop)?;
-    match value.split_once(':') {
-        Some((scheme, _)) if !scheme.eq_ignore_ascii_case("mailto") => {
-            prop.params.iter().find_map(|param| match param {
-                IcalParam::Email(email) => Some(email.to_string()),
-                _ => None,
-            })
-        }
-        _ => Some(address_of(value)),
-    }
-}
-
-/// Whether the user organizes an event with attendees, which is when a
-/// change of it is theirs to announce (RFC 5546): the `organizer` is one
-/// of their `addresses`, compared case-insensitively, or nobody, the
-/// server then filling the owner.
-fn organizes(organizer: &str, attendees: bool, addresses: &[String]) -> bool {
-    attendees
-        && (organizer.is_empty()
-            || addresses
-                .iter()
-                .any(|address| address.eq_ignore_ascii_case(organizer)))
-}
-
-/// Whether the user organizes one of an object's scheduled components
-/// with attendees ([`organizes`]), which is when a write of it is
-/// announced to them; an object that does not parse is not.
-pub fn organized(ical: &str, addresses: &[String]) -> bool {
-    let Ok(cst) = cst_of(ical) else {
-        return false;
-    };
-    let cst = cst.into_static();
-
-    scheduled(&cst).into_iter().any(|index| {
-        let component = decoded(child(&cst, index));
-        let named = |kind: IcalPropKind| {
-            component
-                .props
-                .iter()
-                .filter(move |prop| prop.name == IcalPropName::Kind(kind))
-                .filter_map(user_address)
-                .filter(|address| !address.is_empty())
-        };
-        let organizer = named(IcalPropKind::Organizer).next().unwrap_or_default();
-
-        organizes(
-            &organizer,
-            named(IcalPropKind::Attendee).next().is_some(),
-            addresses,
-        )
-    })
-}
-
-/// Expands every scheduled component of one calendar object into the
-/// occurrences starting inside `[from, until)`, both civil `YYYYMMDD` or
-/// `YYYYMMDDTHHMMSS` stamps.
-///
-/// A series is walked as the recurrence set RFC 5545 3.8.5 composes:
-/// its rules and dates, less its `EXDATE`s, each instance an override
-/// replaces taken from that override, and an override cancelling its
-/// instance leaving it out. The window is compared with each start as
-/// written, so a caller widens it by the largest offset it can meet and
-/// sorts the instants out itself.
-pub fn expand(ical: &str, from: &str, until: &str) -> Result<Vec<Occurrence>, BridgeError> {
-    let from = IcalRecurDateTime::parse(from).map_err(|err| err.to_string())?;
-    let until = IcalRecurDateTime::parse(until).map_err(|err| err.to_string())?;
-
-    let cst = cst_of(ical)?;
-    let decoded = cst.decode();
-    let zones = Zones::of(&decoded);
-
-    let mut found = Vec::new();
-    for component in &decoded.components {
-        collect_scheduled(component, &mut found);
-    }
-
-    let window = Window {
-        from,
-        until,
-        deadline: Instant::now() + MAX_EXPANSION,
-    };
-    let mut occurrences = Vec::new();
-    for &(component, kind) in &found {
-        let uid = text_of(component, IcalPropKind::Uid);
-        let mut overrides = Vec::new();
-        let mut series = false;
-        for (other, _) in &found {
-            if uid.is_none() || text_of(other, IcalPropKind::Uid) != uid {
-                continue;
-            }
-            match has(other, IcalPropKind::RecurrenceId) {
-                true => overrides.push(*other),
-                false => series = true,
-            }
-        }
-
-        // NOTE: an override is placed by the walk of the series it
-        // belongs to. One whose series the object does not hold (an
-        // invitation to a single instance) is all there is of it, and
-        // stands alone.
-        if has(component, IcalPropKind::RecurrenceId) {
-            if !series {
-                window.place(component, kind, &[], &zones, &mut occurrences);
-            }
-            continue;
-        }
-
-        window.place(component, kind, &overrides, &zones, &mut occurrences);
-    }
-
-    occurrences.sort_by(|left, right| left.start.time.cmp(&right.start.time));
-    Ok(occurrences)
-}
-
-/// The civil span an expansion keeps the starts of.
-#[derive(Clone, Copy)]
-struct Window {
-    from: IcalRecurDateTime,
-    until: IcalRecurDateTime,
-    /// When the expansion stops walking ([`MAX_EXPANSION`]).
-    deadline: Instant,
-}
-
-impl Window {
-    fn holds(&self, moment: IcalRecurDateTime) -> bool {
-        moment >= self.from && moment < self.until
-    }
-
-    /// Places one series, or one lone component, on the window.
-    fn place(
-        &self,
-        component: &IcalComponent,
-        kind: IcalComponentKind,
-        overrides: &[&IcalComponent],
-        zones: &Zones,
-        out: &mut Vec<Occurrence>,
-    ) {
-        let Some(start) = start_of(component, kind) else {
-            return;
-        };
-        let Some(first) = start.civil() else {
-            return;
-        };
-
-        // The length, carried forward onto every occurrence: RFC 5545
-        // recurs the start and keeps the duration, so only the start
-        // needs expanding.
-        let end = end_of(component, kind).filter(|end| end.civil().is_some());
-        let length = end
-            .as_ref()
-            .and_then(EventTime::civil)
-            .map(|end| (end.seconds() - first.seconds()).max(0))
-            .unwrap_or(0);
-
-        let rendered = |source: &IcalComponent,
-                        start: EventTime,
-                        end: EventTime,
-                        id: Option<EventTime>| Occurrence {
-            component: kind.to_string(),
-            all_day: start.kind == EventTimeKind::Date,
-            start: zones.resolve(start),
-            end: zones.resolve(end),
-            recurrence_id: id.map(|id| zones.resolve(id)),
-            summary: text_of(source, IcalPropKind::Summary).unwrap_or_default(),
-            location: text_of(source, IcalPropKind::Location).unwrap_or_default(),
-        };
-
-        let (set, replaced) = series::set_of(component, overrides, zones);
-        if set.rules.is_empty() && set.dates.is_empty() && replaced.is_empty() {
-            if self.holds(first) {
-                let end = end.unwrap_or_else(|| start.clone());
-                out.push(rendered(component, start, end, None));
-            }
-            return;
-        }
-
-        // NOTE: an override can move an instance into the window from
-        // past it, so the walk runs on to the last identity such a move
-        // comes from.
-        let cutoff = replaced
-            .iter()
-            .filter(|(_, over)| moved_of(over, kind).is_some_and(|(_, at)| at < self.until))
-            .map(|(id, _)| IcalRecurDateTime::from_seconds(id.seconds() + 1))
-            .fold(self.until, IcalRecurDateTime::max);
-
-        // NOTE: the walk jumps to the first identity whose occurrence can
-        // start in the window: one length below it, less the furthest an
-        // override moves an instance forward (its own, or a range's), and a
-        // day for an override told on another clock.
-        let forward = replaced
-            .iter()
-            .filter_map(|(id, over)| Some(moved_of(over, kind)?.1.seconds() - id.seconds()))
-            .chain(
-                set.overrides
-                    .iter()
-                    .map(|over| over.start.seconds() - over.id.seconds()),
-            )
-            .fold(0, i64::max);
-        let skip = self.from.seconds() - length - forward - DAY_SECONDS;
-
-        let mut walk = match zones.find(&start.tzid) {
-            Some(zone) if start.kind == EventTimeKind::Zoned => set.expand_in_zone(zone),
-            _ => set.expand(),
-        };
-        // NOTE: a rule bounded by `COUNT` cannot jump, and skipping it
-        // walks every earlier occurrence unbounded: it is walked instead,
-        // under [`MAX_WALKED`].
-        if set
-            .rules
-            .iter()
-            .chain(&set.exrules)
-            .all(|rule| rule.count.is_none())
-        {
-            walk.skip_to(IcalRecurDateTime::from_seconds(skip));
-        }
-
-        let mut placed = 0;
-        let walk = walk.take_while(|occurrence| occurrence.id < cutoff);
-        for (walked, occurrence) in walk.take(MAX_WALKED).enumerate() {
-            // NOTE: the clock is read once every 4096 steps, a read per
-            // step costing more than the step.
-            if walked % 4096 == 4095 && Instant::now() >= self.deadline {
-                break;
-            }
-            let id = Some(start.at(occurrence.id));
-            let over = occurrence.over.and_then(|index| {
-                let id = set.overrides[index].id;
-                replaced.iter().find(|(other, _)| *other == id)
-            });
-
-            match over {
-                Some((_, over)) => {
-                    if text_of(over, IcalPropKind::Status)
-                        .is_some_and(|status| status.eq_ignore_ascii_case("CANCELLED"))
-                    {
-                        continue;
-                    }
-                    let Some((moved, at)) = moved_of(over, kind).filter(|(_, at)| self.holds(*at))
-                    else {
-                        continue;
-                    };
-                    let finish = end_of(over, kind).unwrap_or_else(|| {
-                        moved.at(IcalRecurDateTime::from_seconds(at.seconds() + length))
-                    });
-                    out.push(rendered(over, moved, finish, id));
-                }
-                None if !self.holds(occurrence.start) => continue,
-                None => {
-                    let shift = occurrence.start.seconds() - first.seconds();
-                    let finish = match (&end, end.as_ref().and_then(EventTime::civil)) {
-                        (Some(end), Some(civil)) => {
-                            end.at(IcalRecurDateTime::from_seconds(civil.seconds() + shift))
-                        }
-                        _ => start.at(occurrence.start),
-                    };
-                    out.push(rendered(component, start.at(occurrence.start), finish, id));
-                }
-            }
-
-            placed += 1;
-            if placed == MAX_OCCURRENCES {
-                break;
-            }
-        }
-    }
-}
-
-/// Where an override moved its instance to, read off its own start as
-/// written: the recurrence set tells it on the series' clock instead.
-fn moved_of(
-    over: &IcalComponent,
-    kind: IcalComponentKind,
-) -> Option<(EventTime, IcalRecurDateTime)> {
-    let moved = start_of(over, kind)?;
-    let at = moved.civil()?;
-    Some((moved, at))
-}
-
 /// The time a component's row is placed at.
 ///
-/// A to-do need not carry a DTSTART (RFC 5545 3.6.2 makes both dates
-/// optional), and one that carries only a DUE belongs on the day it is
-/// due: that is the date a person looks for, and dropping the to-do
-/// because the other property is absent would hide it entirely.
-fn start_of(component: &IcalComponent, kind: IcalComponentKind) -> Option<EventTime> {
+/// A to-do need not carry a DTSTART (RFC 5545 3.6.2), and one with only a
+/// DUE belongs on the day it is due rather than hidden entirely.
+pub fn start_of(component: &IcalComponent, kind: IcalComponentKind) -> Option<EventTime> {
     match kind {
         IcalComponentKind::VTodo => time_of(component, IcalPropKind::DtStart)
             .or_else(|| time_of(component, IcalPropKind::Due)),
         _ => time_of(component, IcalPropKind::DtStart),
-    }
-}
-
-/// The time a component's row ends at, when it has one.
-///
-/// A journal entry never does (RFC 5545 3.6.3 gives it no end), and a
-/// to-do's DUE is an end only when a DTSTART placed the row somewhere
-/// else; otherwise DUE is the start and the row has no length.
-fn end_of(component: &IcalComponent, kind: IcalComponentKind) -> Option<EventTime> {
-    match kind {
-        IcalComponentKind::VEvent => time_of(component, IcalPropKind::DtEnd),
-        IcalComponentKind::VTodo => time_of(component, IcalPropKind::DtStart)
-            .and_then(|_| time_of(component, IcalPropKind::Due)),
-        _ => None,
     }
 }
 
@@ -1138,7 +691,7 @@ fn is_kind(name: &IcalComponentName, kind: IcalComponentKind) -> bool {
 }
 
 /// Whether a component carries a property.
-fn has(component: &IcalComponent, kind: IcalPropKind) -> bool {
+pub fn has(component: &IcalComponent, kind: IcalPropKind) -> bool {
     props(component, kind).next().is_some()
 }
 
@@ -1154,19 +707,19 @@ fn props<'c>(
 }
 
 /// The first date property of one kind, with its zone.
-fn time_of(component: &IcalComponent, kind: IcalPropKind) -> Option<EventTime> {
+pub fn time_of(component: &IcalComponent, kind: IcalPropKind) -> Option<EventTime> {
     props(component, kind).next().and_then(EventTime::of_prop)
 }
 
 /// The raw text of a property's value, whatever value type it decoded to.
-fn text_of(component: &IcalComponent, kind: IcalPropKind) -> Option<String> {
+pub fn text_of(component: &IcalComponent, kind: IcalPropKind) -> Option<String> {
     props(component, kind).next().and_then(raw_value)
 }
 
-fn raw_value(prop: &IcalProp) -> Option<String> {
-    // CATEGORIES is the one value the reader's page asks for that is a
-    // list rather than a string, and it reads as the line it was
-    // written on.
+/// A property's value as text, [`None`] when empty or not textual.
+pub fn raw_value(prop: &IcalProp) -> Option<String> {
+    // NOTE: CATEGORIES is the one list the reader's page asks for, and it
+    // reads as the line it was written on.
     if let IcalValue::TextList(values) = &prop.value {
         let joined = values.0.join(", ");
         return match joined.is_empty() {
@@ -1181,9 +734,8 @@ fn raw_value(prop: &IcalProp) -> Option<String> {
         IcalValue::Date(value) => value.0.as_ref(),
         IcalValue::Recur(value) => value.0.as_ref(),
         IcalValue::Duration(value) => value.0.as_ref(),
-        // PRIORITY and PERCENT-COMPLETE are numbers, URL and the two
-        // calendar-user addresses are URIs: none of them is a value an
-        // agenda row ever needed, and all of them are on the page.
+        // NOTE: numbers (PRIORITY, PERCENT-COMPLETE) and URIs (URL, the
+        // calendar-user addresses) serve the page, never an agenda row.
         IcalValue::Integer(value) => value.0.as_ref(),
         IcalValue::Uri(value) => value.0.as_ref(),
         IcalValue::CalAddress(value) => value.0.as_ref(),
@@ -1200,725 +752,20 @@ fn raw_value(prop: &IcalProp) -> Option<String> {
 mod tests {
     use std::thread;
 
-    use super::*;
+    use crate::calendar::expand::expand;
 
-    pub(super) fn object(body: &str) -> String {
+    pub fn object(body: &str) -> String {
         format!("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n{body}END:VCALENDAR\r\n")
     }
 
     /// A zone defined by the object alone, under a name no database
     /// knows: the rules of Paris since 1996.
-    pub(super) const ROMANCE: &str = "BEGIN:VTIMEZONE\r\nTZID:/example.org/Romance\r\n\
+    pub const ROMANCE: &str = "BEGIN:VTIMEZONE\r\nTZID:/example.org/Romance\r\n\
          BEGIN:DAYLIGHT\r\nDTSTART:19810329T020000\r\nTZOFFSETFROM:+0100\r\n\
          TZOFFSETTO:+0200\r\nRRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU\r\nEND:DAYLIGHT\r\n\
          BEGIN:STANDARD\r\nDTSTART:19961027T030000\r\nTZOFFSETFROM:+0200\r\n\
          TZOFFSETTO:+0100\r\nRRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU\r\nEND:STANDARD\r\n\
          END:VTIMEZONE\r\n";
-
-    fn starts(found: &[Occurrence]) -> Vec<&str> {
-        found.iter().map(|one| one.start.time.as_str()).collect()
-    }
-
-    #[test]
-    fn expands_a_weekly_event_inside_the_window() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:1\r\nDTSTART:20260105T090000\r\nDTEND:20260105T100000\r\n\
-             SUMMARY:Standup\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nEND:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert_eq!(
-            starts(&found),
-            [
-                "20260105T090000",
-                "20260112T090000",
-                "20260119T090000",
-                "20260126T090000"
-            ]
-        );
-        assert_eq!(found[0].component, "VEVENT");
-        assert_eq!(found[0].summary, "Standup");
-        assert_eq!(found[0].end.time, "20260105T100000");
-        assert_eq!(found[0].start.kind, EventTimeKind::Floating);
-        assert!(!found[0].all_day);
-        // Each one names the instance it is, which is what an edit of it
-        // alone is written against.
-        assert_eq!(
-            found[1].recurrence_id.as_ref().unwrap().time,
-            "20260112T090000"
-        );
-    }
-
-    #[test]
-    fn an_entry_that_does_not_recur_names_no_instance() {
-        let ical = object("BEGIN:VEVENT\r\nUID:1\r\nDTSTART:20260105T090000Z\r\nEND:VEVENT\r\n");
-
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert!(found[0].recurrence_id.is_none());
-        // The start keeps its Z as what it is relative to, the time
-        // itself staying civil.
-        assert_eq!(found[0].start.time, "20260105T090000");
-        assert_eq!(found[0].start.kind, EventTimeKind::Utc);
-    }
-
-    #[test]
-    fn places_a_todo_at_its_due_when_it_has_no_start() {
-        let ical = object(
-            "BEGIN:VTODO\r\nUID:7\r\nDUE:20260115T170000\r\nSUMMARY:File taxes\r\nEND:VTODO\r\n",
-        );
-
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].component, "VTODO");
-        assert_eq!(found[0].start.time, "20260115T170000");
-        // The due date placed the row, so it cannot also end it: a
-        // zero-length to-do is one moment, not one that runs to itself.
-        assert_eq!(found[0].end.time, "20260115T170000");
-    }
-
-    #[test]
-    fn runs_a_todo_from_its_start_to_its_due() {
-        let ical = object(
-            "BEGIN:VTODO\r\nUID:8\r\nDTSTART:20260115T090000\r\nDUE:20260115T170000\r\n\
-             END:VTODO\r\n",
-        );
-
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert_eq!(found[0].start.time, "20260115T090000");
-        assert_eq!(found[0].end.time, "20260115T170000");
-    }
-
-    #[test]
-    fn renders_a_journal_entry_on_its_day() {
-        let ical = object(
-            "BEGIN:VJOURNAL\r\nUID:9\r\nDTSTART;VALUE=DATE:20260115\r\nSUMMARY:Notes\r\n\
-             END:VJOURNAL\r\n",
-        );
-
-        let found = expand(&ical, "20260101", "20260201").unwrap();
-
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].component, "VJOURNAL");
-        assert_eq!(found[0].start.kind, EventTimeKind::Date);
-        assert!(found[0].all_day);
-    }
-
-    #[test]
-    fn leaves_out_what_an_agenda_cannot_place() {
-        // A time zone definition carries DTSTARTs of its own (the rules
-        // its offsets take effect on), and expanding those would put a
-        // row on the agenda for every zone change since 1970.
-        let ical = object(
-            "BEGIN:VTIMEZONE\r\nTZID:Europe/Paris\r\nBEGIN:STANDARD\r\n\
-             DTSTART:20260105T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\n\
-             END:STANDARD\r\nEND:VTIMEZONE\r\n",
-        );
-
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert!(found.is_empty());
-    }
-
-    #[test]
-    fn keeps_the_length_of_every_occurrence() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:2\r\nDTSTART:20260131T230000\r\nDTEND:20260201T003000\r\n\
-             RRULE:FREQ=DAILY;COUNT=2\r\nEND:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260101T000000", "20260301T000000").unwrap();
-
-        // The second occurrence crosses midnight exactly as the first does.
-        assert_eq!(found[0].end.time, "20260201T003000");
-        assert_eq!(found[1].start.time, "20260201T230000");
-        assert_eq!(found[1].end.time, "20260202T003000");
-    }
-
-    #[test]
-    fn windows_out_what_falls_outside() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:3\r\nDTSTART:20260105T090000\r\n\
-             RRULE:FREQ=WEEKLY;BYDAY=MO\r\nEND:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260113T000000", "20260121T000000").unwrap();
-
-        assert_eq!(starts(&found), ["20260119T090000"]);
-    }
-
-    #[test]
-    fn reads_a_single_all_day_event() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:4\r\nDTSTART;VALUE=DATE:20260214\r\n\
-             SUMMARY:Holiday\r\nLOCATION:Home\r\nEND:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260201", "20260301").unwrap();
-
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].start.time, "20260214");
-        assert_eq!(found[0].location, "Home");
-        assert!(found[0].all_day);
-    }
-
-    #[test]
-    fn sorts_across_the_events_of_one_object() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:5\r\nDTSTART:20260120T090000\r\nEND:VEVENT\r\n\
-             BEGIN:VEVENT\r\nUID:6\r\nDTSTART:20260110T090000\r\nEND:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert_eq!(starts(&found), ["20260110T090000", "20260120T090000"]);
-    }
-
-    #[test]
-    fn an_exdate_takes_its_occurrence_out() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:s\r\nDTSTART:20260105T090000\r\n\
-             RRULE:FREQ=WEEKLY;COUNT=4\r\nEXDATE:20260112T090000\r\nEND:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert_eq!(
-            starts(&found),
-            ["20260105T090000", "20260119T090000", "20260126T090000"]
-        );
-    }
-
-    #[test]
-    fn a_moved_occurrence_shows_once_at_its_new_time() {
-        // The delta's scenario: a weekly series whose Tuesday occurrence
-        // an override moved to Wednesday.
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:s\r\nDTSTART:20260106T090000\r\nDTEND:20260106T100000\r\n\
-             SUMMARY:Sync\r\nRRULE:FREQ=WEEKLY;BYDAY=TU\r\nEND:VEVENT\r\n\
-             BEGIN:VEVENT\r\nUID:s\r\nRECURRENCE-ID:20260113T090000\r\n\
-             DTSTART:20260114T110000\r\nDTEND:20260114T120000\r\nSUMMARY:Sync, moved\r\n\
-             END:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260112T000000", "20260119T000000").unwrap();
-
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].start.time, "20260114T110000");
-        assert_eq!(found[0].end.time, "20260114T120000");
-        assert_eq!(found[0].summary, "Sync, moved");
-        // Still the Tuesday instance, which is what an edit of it names.
-        assert_eq!(
-            found[0].recurrence_id.as_ref().unwrap().time,
-            "20260113T090000"
-        );
-    }
-
-    #[test]
-    fn an_occurrence_moved_into_the_window_from_past_it_shows() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:s\r\nDTSTART:20260106T090000\r\n\
-             RRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\n\
-             BEGIN:VEVENT\r\nUID:s\r\nRECURRENCE-ID:20260120T090000\r\n\
-             DTSTART:20260115T090000\r\nEND:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260112T000000", "20260119T000000").unwrap();
-
-        assert_eq!(starts(&found), ["20260113T090000", "20260115T090000"]);
-    }
-
-    #[test]
-    fn a_cancelled_override_takes_its_occurrence_out() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:s\r\nDTSTART:20260105T090000\r\n\
-             RRULE:FREQ=WEEKLY;COUNT=3\r\nEND:VEVENT\r\n\
-             BEGIN:VEVENT\r\nUID:s\r\nRECURRENCE-ID:20260112T090000\r\n\
-             DTSTART:20260112T090000\r\nSTATUS:CANCELLED\r\nEND:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert_eq!(starts(&found), ["20260105T090000", "20260119T090000"]);
-    }
-
-    #[test]
-    fn a_this_and_future_override_moves_every_later_occurrence() {
-        // Written by another client: from the third Monday on, an hour
-        // later.
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:s\r\nDTSTART:20260105T090000\r\n\
-             RRULE:FREQ=WEEKLY;COUNT=4\r\nEND:VEVENT\r\n\
-             BEGIN:VEVENT\r\nUID:s\r\nRECURRENCE-ID;RANGE=THISANDFUTURE:20260119T090000\r\n\
-             DTSTART:20260119T100000\r\nEND:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert_eq!(
-            starts(&found),
-            [
-                "20260105T090000",
-                "20260112T090000",
-                "20260119T100000",
-                "20260126T100000"
-            ]
-        );
-    }
-
-    #[test]
-    fn a_zone_only_the_object_defines_is_resolved_from_it() {
-        let ical = object(&format!(
-            "{ROMANCE}BEGIN:VEVENT\r\nUID:z\r\nDTSTART;TZID=/example.org/Romance:20260706T090000\r\n\
-             DTEND;TZID=/example.org/Romance:20260706T100000\r\n\
-             RRULE:FREQ=MONTHLY;COUNT=6\r\nEND:VEVENT\r\n"
-        ));
-
-        let found = expand(&ical, "20260701T000000", "20261201T000000").unwrap();
-
-        // Summer time, then winter time from the last Sunday of October:
-        // the zone's own rules, with no database behind them.
-        assert_eq!(found[0].start.kind, EventTimeKind::Zoned);
-        assert_eq!(found[0].start.tzid, "/example.org/Romance");
-        assert_eq!(found[0].start.offset, Some(7200));
-        assert_eq!(found[0].end.offset, Some(7200));
-        assert_eq!(found[4].start.time, "20261106T090000");
-        assert_eq!(found[4].start.offset, Some(3600));
-    }
-
-    #[test]
-    fn a_time_the_clock_skips_takes_the_offset_before_the_gap() {
-        let ical = object(&format!(
-            "{ROMANCE}BEGIN:VEVENT\r\nUID:z\r\nDTSTART;TZID=/example.org/Romance:20260329T023000\r\n\
-             END:VEVENT\r\nBEGIN:VEVENT\r\nUID:y\r\n\
-             DTSTART;TZID=/example.org/Romance:20261025T023000\r\nEND:VEVENT\r\n"
-        ));
-
-        let found = expand(&ical, "20260301T000000", "20261101T000000").unwrap();
-
-        // RFC 5545 3.3.5: a skipped time is read at the offset before
-        // the gap, a repeated one at its first occurrence.
-        assert_eq!(found[0].start.offset, Some(3600));
-        assert_eq!(found[1].start.offset, Some(7200));
-    }
-
-    #[test]
-    fn a_utc_until_against_a_zoned_start_keeps_its_last_occurrence() {
-        // RFC 5545 3.3.10 has a zoned series end on a UTC time: 07:00Z is
-        // 09:00 in Paris in summer, which a comparison of the two as
-        // written would read as two hours too early.
-        let ical = object(&format!(
-            "{ROMANCE}BEGIN:VEVENT\r\nUID:z\r\nDTSTART;TZID=/example.org/Romance:20260706T090000\r\n\
-             RRULE:FREQ=DAILY;UNTIL=20260708T070000Z\r\nEND:VEVENT\r\n"
-        ));
-
-        let found = expand(&ical, "20260701T000000", "20260801T000000").unwrap();
-
-        assert_eq!(
-            starts(&found),
-            ["20260706T090000", "20260707T090000", "20260708T090000"]
-        );
-    }
-
-    #[test]
-    fn an_exdate_in_utc_against_a_zoned_start_still_takes_it_out() {
-        let ical = object(&format!(
-            "{ROMANCE}BEGIN:VEVENT\r\nUID:z\r\nDTSTART;TZID=/example.org/Romance:20260706T090000\r\n\
-             RRULE:FREQ=DAILY;COUNT=3\r\nEXDATE:20260707T070000Z\r\nEND:VEVENT\r\n\
-             BEGIN:VEVENT\r\nUID:z\r\nRECURRENCE-ID:20260708T070000Z\r\n\
-             DTSTART;TZID=/example.org/Romance:20260708T150000\r\nEND:VEVENT\r\n"
-        ));
-
-        let found = expand(&ical, "20260701T000000", "20260801T000000").unwrap();
-
-        // The override is written in UTC too, and still replaces the
-        // instance it names rather than adding a second one.
-        assert_eq!(starts(&found), ["20260706T090000", "20260708T150000"]);
-    }
-
-    #[test]
-    fn reads_a_whole_event_including_its_attendees() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:42\r\nDTSTART:20260105T090000\r\nDTEND:20260105T100000\r\n\
-             SUMMARY:Standup\r\nDESCRIPTION:Daily sync\r\nLOCATION:Room 3\r\n\
-             CATEGORIES:work,team\r\nSTATUS:CONFIRMED\r\nPRIORITY:5\r\n\
-             RRULE:FREQ=WEEKLY;BYDAY=MO\r\nORGANIZER:mailto:alice@example.org\r\n\
-             ATTENDEE;CN=Bob;PARTSTAT=ACCEPTED:mailto:bob@example.org\r\n\
-             ATTENDEE:mailto:carol@example.org\r\nEND:VEVENT\r\n",
-        );
-
-        let detail = read(&ical, "").unwrap();
-
-        assert_eq!(detail.component, "VEVENT");
-        assert_eq!(detail.uid, "42");
-        assert_eq!(detail.summary, "Standup");
-        assert_eq!(detail.description, "Daily sync");
-        assert_eq!(detail.location, "Room 3");
-        assert_eq!(detail.categories, "work, team");
-        assert_eq!(detail.status, "CONFIRMED");
-        assert_eq!(detail.priority, "5");
-        assert_eq!(detail.recurrence, "FREQ=WEEKLY;BYDAY=MO");
-        // The scheme is a wire detail rather than something a reader
-        // asked to see, so it goes on both sides.
-        assert_eq!(detail.organizer, "alice@example.org");
-        assert_eq!(detail.attendees.len(), 2);
-        assert_eq!(detail.attendees[0].name, "Bob");
-        assert_eq!(detail.attendees[0].address, "bob@example.org");
-        assert_eq!(detail.attendees[0].status, "ACCEPTED");
-        assert_eq!(detail.attendees[1].name, "");
-        assert!(!detail.all_day);
-    }
-
-    #[test]
-    fn reads_the_override_of_the_occurrence_opened() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:s\r\nDTSTART:20260105T090000\r\nSUMMARY:Standup\r\n\
-             RRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\n\
-             BEGIN:VEVENT\r\nUID:s\r\nRECURRENCE-ID:20260112T090000\r\n\
-             DTSTART:20260112T100000\r\nSUMMARY:Standup, later\r\nEND:VEVENT\r\n",
-        );
-
-        let moved = read(&ical, "20260112T090000").unwrap();
-        assert_eq!(moved.summary, "Standup, later");
-        assert_eq!(moved.start.unwrap().time, "20260112T100000");
-        // The rule is the series', since an override repeats nothing.
-        assert_eq!(moved.recurrence, "FREQ=WEEKLY");
-        // And it says it is the override, which a conflict on it is shown on.
-        assert_eq!(moved.recurrence_id.unwrap().time, "20260112T090000");
-
-        let series = read(&ical, "20260119T090000").unwrap();
-        assert_eq!(series.summary, "Standup");
-        assert!(series.recurrence_id.is_none());
-    }
-
-    #[test]
-    fn reads_a_todo_placed_at_its_due_date() {
-        let ical = object(
-            "BEGIN:VTODO\r\nUID:7\r\nDUE;VALUE=DATE:20260115\r\nSUMMARY:File taxes\r\n\
-             PERCENT-COMPLETE:40\r\nEND:VTODO\r\n",
-        );
-
-        let detail = read(&ical, "").unwrap();
-
-        assert_eq!(detail.component, "VTODO");
-        assert_eq!(detail.due.unwrap().time, "20260115");
-        assert_eq!(detail.percent_complete, "40");
-        // A to-do carrying no DTSTART is placed at its DUE, and a
-        // date-only DUE makes the page an all-day one; it still has no
-        // start, or an edit would write one.
-        assert!(detail.start.is_none());
-        assert!(detail.all_day);
-    }
-
-    #[test]
-    fn an_edit_patches_and_leaves_everything_else_alone() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:42\r\nDTSTART:20260105T090000\r\nDTEND:20260105T100000\r\n\
-             SUMMARY:Standup\r\nLOCATION:Room 3\r\nX-VENDOR-FLAG:keep me\r\n\
-             BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT10M\r\nEND:VALARM\r\n\
-             END:VEVENT\r\n",
-        );
-
-        let written = write(
-            &ical,
-            r#"{"summary":"Daily standup","location":"","stamp":"20260809T150000Z"}"#,
-        )
-        .unwrap();
-
-        assert!(written.contains("SUMMARY:Daily standup"));
-        assert!(!written.contains("Standup\r\n"));
-        // Cleared, so the property goes rather than being written empty.
-        assert!(!written.contains("LOCATION"));
-        // A client that rewrites what it does not understand loses other
-        // clients' data, so none of this may move.
-        assert!(written.contains("X-VENDOR-FLAG:keep me"));
-        assert!(written.contains("BEGIN:VALARM"));
-        assert!(written.contains("TRIGGER:-PT10M"));
-        assert!(written.contains("UID:42"));
-        assert!(written.contains("DTSTART:20260105T090000"));
-        assert!(written.contains("LAST-MODIFIED:20260809T150000Z"));
-        // RFC 5545 3.6.1 lists an event's properties before its alarms.
-        assert!(written.find("SUMMARY").unwrap() < written.find("BEGIN:VALARM").unwrap());
-        assert!(written.find("DTSTAMP").unwrap() < written.find("BEGIN:VALARM").unwrap());
-
-        // The result is a calendar object the reader can read back.
-        let detail = read(&written, "").unwrap();
-        assert_eq!(detail.summary, "Daily standup");
-        assert_eq!(detail.location, "");
-    }
-
-    #[test]
-    fn a_written_line_is_folded_and_an_untouched_one_kept() {
-        let long = "x".repeat(90);
-        let ical = object(&format!(
-            "BEGIN:VEVENT\r\nUID:42\r\nDTSTART:20260105T090000\r\nX-VENDOR:{long}\r\nEND:VEVENT\r\n"
-        ));
-        let edit = serde_json::json!({"summary": long});
-
-        let written = write(&ical, &edit.to_string()).unwrap();
-
-        // RFC 5545 3.1: 75 octets a line, the rest on a line of its own
-        // after a space.
-        let summary = format!("SUMMARY:{long}");
-        assert!(written.contains(&format!("{}\r\n {}\r\n", &summary[..75], &summary[75..])));
-        assert!(written.contains(&format!("X-VENDOR:{long}\r\n")));
-        assert_eq!(read(&written, "").unwrap().summary, long);
-    }
-
-    #[test]
-    fn a_replaced_date_keeps_its_zone_and_its_value_type() {
-        let ical = object(&format!(
-            "{ROMANCE}BEGIN:VEVENT\r\nUID:z\r\n\
-             DTSTART;TZID=/example.org/Romance:20260706T090000\r\n\
-             DTEND;TZID=/example.org/Romance:20260706T100000\r\nEND:VEVENT\r\n\
-             BEGIN:VTODO\r\nUID:t\r\nDUE;VALUE=DATE:20260710\r\nEND:VTODO\r\n"
-        ));
-
-        let written = write(
-            &ical,
-            r#"{"start":{"time":"20260706T100000"},"end":{"time":"20260706T110000"}}"#,
-        )
-        .unwrap();
-
-        assert!(written.contains("DTSTART;TZID=/example.org/Romance:20260706T100000\r\n"));
-        assert!(written.contains("DTEND;TZID=/example.org/Romance:20260706T110000\r\n"));
-
-        let utc = object("BEGIN:VEVENT\r\nUID:u\r\nDTSTART:20260706T070000Z\r\nEND:VEVENT\r\n");
-        let written = write(&utc, r#"{"start":{"time":"20260706T080000"}}"#).unwrap();
-        assert!(written.contains("DTSTART:20260706T080000Z\r\n"));
-
-        let date = object(
-            "BEGIN:VEVENT\r\nUID:d\r\nDTSTART;VALUE=DATE:20260706\r\n\
-             X-KEEP;VALUE=TEXT:me\r\nEND:VEVENT\r\n",
-        );
-        let written = write(&date, r#"{"start":{"time":"20260707"}}"#).unwrap();
-        assert!(written.contains("DTSTART;VALUE=DATE:20260707\r\n"));
-    }
-
-    #[test]
-    fn a_date_naming_its_own_zone_is_written_in_it() {
-        let ical = object("BEGIN:VEVENT\r\nUID:9\r\nDTSTART:20260105T090000\r\nEND:VEVENT\r\n");
-
-        let written = write(&ical, r#"{"start":{"time":"20260105","kind":"date"}}"#).unwrap();
-        // Without VALUE=DATE a bare YYYYMMDD is not a legal DATE-TIME and
-        // servers reject the object.
-        assert!(written.contains("DTSTART;VALUE=DATE:20260105"));
-        assert!(read(&written, "").unwrap().all_day);
-
-        let edit = serde_json::json!({
-            "start": {"time": "20260105T090000", "kind": "zoned", "tzid": "/example.org/Romance"},
-            "vtimezone": ROMANCE,
-        });
-        let zoned = write(&written, &edit.to_string()).unwrap();
-        assert!(zoned.contains("DTSTART;TZID=/example.org/Romance:20260105T090000\r\n"));
-        // RFC 5545 3.2.19: a TZID owes its definition, which the edit
-        // brought, written once and before the event.
-        assert_eq!(zoned.matches("BEGIN:VTIMEZONE").count(), 1);
-        assert!(zoned.find("BEGIN:VTIMEZONE").unwrap() < zoned.find("BEGIN:VEVENT").unwrap());
-        let again = write(&zoned, &edit.to_string()).unwrap();
-        assert_eq!(again.matches("BEGIN:VTIMEZONE").count(), 1);
-    }
-
-    #[test]
-    fn an_edit_reaches_a_todo_and_a_journal_entry_too() {
-        let todo = object("BEGIN:VTODO\r\nUID:7\r\nDUE:20260115T170000\r\nEND:VTODO\r\n");
-        let written = write(&todo, r#"{"summary":"File taxes","percentComplete":"40"}"#).unwrap();
-        assert!(written.contains("SUMMARY:File taxes"));
-        assert!(written.contains("PERCENT-COMPLETE:40"));
-
-        let journal = object("BEGIN:VJOURNAL\r\nUID:3\r\nDTSTART:20260105\r\nEND:VJOURNAL\r\n");
-        let written = write(&journal, r#"{"description":"Notes, and more"}"#).unwrap();
-        // The comma is data, not a separator, so it escapes on the wire.
-        assert!(written.contains("DESCRIPTION:Notes\\, and more"));
-        assert_eq!(read(&written, "").unwrap().description, "Notes, and more");
-    }
-
-    #[test]
-    fn a_completion_is_written_in_utc() {
-        let todo = object("BEGIN:VTODO\r\nUID:7\r\nDUE:20260115T170000\r\nEND:VTODO\r\n");
-
-        let written = write(&todo, r#"{"completed":{"time":"20260115T160000"}}"#).unwrap();
-
-        assert!(written.contains("COMPLETED:20260115T160000Z\r\n"));
-    }
-
-    #[test]
-    fn reading_an_object_with_nothing_scheduled_fails() {
-        let ical = object("BEGIN:VTIMEZONE\r\nTZID:Europe/Paris\r\nEND:VTIMEZONE\r\n");
-
-        assert!(read(&ical, "").is_err());
-    }
-
-    #[test]
-    fn a_new_object_is_one_the_page_can_open_and_edit() {
-        let created = create(
-            "VEVENT",
-            "abc-123",
-            "20260105T080000Z",
-            "20260105T090000",
-            "",
-            "",
-        )
-        .unwrap();
-
-        // What a new entry has to be is readable by the page that opens
-        // it and placed on a day by the agenda that lists it, which is
-        // the whole reason it carries a DTSTART it did not have to.
-        let detail = read(&created, "").unwrap();
-        assert_eq!(detail.component, "VEVENT");
-        assert_eq!(detail.uid, "abc-123");
-        assert_eq!(detail.start.unwrap().time, "20260105T090000");
-        assert!(detail.summary.is_empty());
-        assert_eq!(
-            1,
-            expand(&created, "20260101T000000", "20260201T000000")
-                .unwrap()
-                .len()
-        );
-
-        // And an edit patches it like any other object.
-        let written = write(&created, r#"{"summary":"Dentist"}"#).unwrap();
-        assert_eq!(read(&written, "").unwrap().summary, "Dentist");
-    }
-
-    #[test]
-    fn a_new_object_starts_in_its_zone_with_the_definition_beside_it() {
-        let created = create(
-            "VEVENT",
-            "abc-123",
-            "20260105T080000Z",
-            "20260706T090000",
-            "/example.org/Romance",
-            ROMANCE,
-        )
-        .unwrap();
-
-        assert!(created.contains("DTSTART;TZID=/example.org/Romance:20260706T090000\r\n"));
-        let found = expand(&created, "20260701T000000", "20260801T000000").unwrap();
-        assert_eq!(found[0].start.offset, Some(7200));
-
-        // A zone nobody defined is one no reader can place.
-        assert!(
-            create(
-                "VEVENT",
-                "1",
-                "20260105T080000Z",
-                "20260706T090000",
-                "Europe/Paris",
-                ""
-            )
-            .is_err()
-        );
-        // A date is in no zone, so it needs no definition.
-        let day = create(
-            "VEVENT",
-            "1",
-            "20260105T080000Z",
-            "20260706",
-            "Europe/Paris",
-            ROMANCE,
-        )
-        .unwrap();
-        assert!(day.contains("DTSTART;VALUE=DATE:20260706\r\n"));
-        assert!(!day.contains("VTIMEZONE"));
-    }
-
-    #[test]
-    fn only_the_three_scheduled_components_can_be_created() {
-        let new = |component, start| create(component, "1", "20260105T080000Z", start, "", "");
-
-        assert!(new("VTODO", "20260105T090000").is_ok());
-        assert!(new("VJOURNAL", "20260105").is_ok());
-        assert!(new("VTIMEZONE", "20260105T090000").is_err());
-    }
-
-    #[test]
-    fn an_object_is_organized_by_one_of_the_users_addresses_or_nobody() {
-        let addresses = ["jane@example.com".to_string()];
-        let organized = |people: &str| {
-            let event = format!(
-                "BEGIN:VEVENT\r\nUID:1\r\nDTSTART:20261012T090000Z\r\n{people}END:VEVENT\r\n"
-            );
-            super::organized(&object(&event), &addresses)
-        };
-        let ada = "ATTENDEE:mailto:ada@example.com\r\n";
-
-        assert!(organized(&format!(
-            "ORGANIZER:mailto:JANE@example.COM\r\n{ada}"
-        )));
-        assert!(organized(ada), "the server fills the owner");
-        assert!(organized(&format!(
-            "ORGANIZER;EMAIL=jane@example.com:urn:uuid:jane\r\n{ada}"
-        )));
-        assert!(!organized("ORGANIZER:mailto:jane@example.com\r\n"));
-        assert!(!organized(
-            "ORGANIZER:mailto:jane@example.com\r\nATTENDEE:urn:uuid:nobody\r\n"
-        ));
-        assert!(!organized(&format!(
-            "ORGANIZER:mailto:boss@example.com\r\n{ada}"
-        )));
-        assert!(!super::organized("not a calendar", &addresses));
-    }
-
-    #[test]
-    fn a_secondly_series_from_1970_jumps_to_the_window() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:1\r\nDTSTART:19700101T000000\r\n\
-             SUMMARY:Tick\r\nRRULE:FREQ=SECONDLY\r\nEND:VEVENT\r\n",
-        );
-
-        let started = Instant::now();
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert_eq!(found.len(), MAX_OCCURRENCES);
-        assert_eq!(found[0].start.time, "20260101T000000");
-        assert!(started.elapsed() < MAX_EXPANSION);
-    }
-
-    #[test]
-    fn a_counted_secondly_series_from_1970_walks_a_bounded_number_of_steps() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:1\r\nDTSTART:19700101T000000\r\n\
-             SUMMARY:Tick\r\nRRULE:FREQ=SECONDLY;COUNT=4000000000\r\nEND:VEVENT\r\n",
-        );
-
-        let started = Instant::now();
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert!(found.is_empty());
-        assert!(started.elapsed() < MAX_EXPANSION);
-    }
-
-    #[test]
-    fn an_instance_moved_from_years_back_into_the_window_is_placed() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:s\r\nDTSTART:20000103T090000\r\n\
-             DTEND:20000103T100000\r\nSUMMARY:Weekly\r\nRRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\n\
-             BEGIN:VEVENT\r\nUID:s\r\nRECURRENCE-ID:20100104T090000\r\n\
-             DTSTART:20260114T150000\r\nDTEND:20260114T160000\r\nSUMMARY:Moved\r\nEND:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert!(found.iter().any(|occurrence| occurrence.summary == "Moved"
-            && occurrence.start.time == "20260114T150000"));
-        assert_eq!(found.iter().filter(|o| o.summary == "Weekly").count(), 4);
-    }
-
-    #[test]
-    fn a_secondly_series_starting_in_the_window_still_places_its_cap() {
-        let ical = object(
-            "BEGIN:VEVENT\r\nUID:1\r\nDTSTART:20260105T090000\r\n\
-             SUMMARY:Tick\r\nRRULE:FREQ=SECONDLY\r\nEND:VEVENT\r\n",
-        );
-
-        let found = expand(&ical, "20260101T000000", "20260201T000000").unwrap();
-
-        assert_eq!(found.len(), MAX_OCCURRENCES);
-    }
 
     #[test]
     fn a_hostile_nesting_is_refused_on_a_java_stack() {

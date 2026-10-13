@@ -1,13 +1,15 @@
+//! # Conflicts
+//!
 //! A calendar object both sides edited since the base they agreed on:
 //! what the merge settles alone, and what a person is asked.
 //!
 //! ical-rs's three-way merge does the merging ([`IcalMerge`]); this side
-//! decides what its collisions are to a reader. A collision is one field
-//! of the entry page: a property of one component, or one occurrence of a
-//! series as a whole, offering what each side holds. The stamps a write
-//! leaves behind (`DTSTAMP`, `LAST-MODIFIED`, `SEQUENCE`), the producer
-//! and the zone definitions are not fields, and settle themselves: the
-//! later stamp, every zone a date names.
+//! makes each collision one field of the entry page (a property of one
+//! component, or one occurrence of a series whole), offering each side.
+//!
+//! The stamps (`DTSTAMP`, `LAST-MODIFIED`, `SEQUENCE`), the producer and
+//! the zone definitions are no fields and settle themselves: the later
+//! stamp, every zone a date names.
 //!
 //! The newer side, by `LAST-MODIFIED` and else `DTSTAMP`, holds a
 //! collision until a person picks, except that an update is never held
@@ -30,9 +32,13 @@ use ical::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::types::BridgeError;
-
-use super::{EventTime, EventTimeKind, SCHEDULED, Zones, cst_of, scheduled, series, text};
+use crate::{
+    calendar::{
+        SCHEDULED, cst_of, scheduled, series, text,
+        zone::{EventTime, EventTimeKind, Zones},
+    },
+    error::BridgeError,
+};
 
 /// What a write stamps rather than what it says.
 const STAMPS: [&str; 3] = ["DTSTAMP", "LAST-MODIFIED", "SEQUENCE"];
@@ -99,11 +105,11 @@ pub struct EventConflict {
     /// The occurrence it is on, as its override's `RECURRENCE-ID` names
     /// it; absent on a series or an entry that does not recur.
     pub recurrence_id: Option<EventTime>,
-    /// What it is: the edit object's key for a property the page edits
-    /// (`summary`, `start`, `recurrence` for the rule), `when` for a start
-    /// and an end that collide only together, `occurrence` for
-    /// one occurrence whole, `entry` for the component whole, else the
-    /// property or nested component's name as written.
+    /// What it is, as the form names it.
+    ///
+    /// The edit object's key for a page field (`summary`, `start`,
+    /// `recurrence`), `when` for a start and end colliding only together,
+    /// `occurrence` or `entry` for one whole, else the name as written.
     pub field: String,
     /// The side that changed the series, on a recurrence conflict.
     pub series: Option<EventSide>,
@@ -191,9 +197,10 @@ struct Settled {
     collisions: Vec<Collision>,
 }
 
-/// Merges a conflicted object: the body staged here and the one its
-/// source holds, against the base both came from (empty when none was
-/// agreed). Answers the merged object and every collision left to ask.
+/// Merges the body staged here with the one its source holds.
+///
+/// Against the base both came from (empty when none was agreed),
+/// answering the merged object and every collision left to ask.
 pub fn merge(base: &str, local: &str, remote: &str) -> Result<EventMerge, BridgeError> {
     let mut settled = settle(base, local, remote)?;
     let held: Vec<EventSide> = settled
@@ -217,9 +224,10 @@ pub fn merge(base: &str, local: &str, remote: &str) -> Result<EventMerge, Bridge
     })
 }
 
-/// The resolution of a conflicted object: its merge, each conflict
-/// `picks` names taking that side, every other the side it was
-/// pre-filled with. `picks` is a JSON object of side by conflict id.
+/// The resolution of a conflicted object.
+///
+/// Its merge, each conflict `picks` (a JSON object of side by conflict
+/// id) names taking that side, every other its pre-filled side.
 pub fn resolve(base: &str, local: &str, remote: &str, picks: &str) -> Result<String, BridgeError> {
     let picks: BTreeMap<usize, EventSide> =
         serde_json::from_str(picks).map_err(|err| err.to_string())?;
@@ -517,14 +525,11 @@ fn latest(cst: &IcalCst<'static>) -> Option<i64> {
         .max()
 }
 
-/// Settles which side a collision holds, moving the preferred side's
-/// value into the merged object when the merge kept the other one, and
-/// answers the sides to offer, the held one first.
+/// Settles which side a collision holds, answering the sides to offer.
 ///
-/// An update is not replaced by a removal: the merge keeps it whichever
-/// side it came from, and so does the pre-fill. Nor is a span the merge
-/// made of one side's start and the other's end held, which neither of
-/// them wrote.
+/// The held side comes first, moved into the merged object if the merge kept
+/// the other. Never held: a removal over an update (merge or pre-fill), or a
+/// span neither wrote, made of one side's start and the other's end.
 fn choose(
     merged: &mut IcalCst<'static>,
     local: &IcalCst<'static>,
@@ -985,12 +990,11 @@ fn keyed(component: &IcalCst<'static>) -> bool {
     prop_lines(component).any(|line| line.name.get().eq_ignore_ascii_case("UID"))
 }
 
-/// The base two sides that agreed on none are merged against: every
-/// component both hold, by its identity alone, so every property either
-/// wrote is an addition and two that differ collide.
+/// The base for sides that agreed on none: each component both hold, bare.
 ///
-/// Without it a merge against nothing would hold one side's component
-/// whole and drop the other's, which is a side lost silently.
+/// Bare (its identity alone), every property either wrote is an addition and
+/// two that differ collide. Against nothing, a merge would hold one side's
+/// component whole and drop the other's, a side lost silently.
 fn skeleton(local: &IcalCst<'static>, remote: &IcalCst<'static>) -> IcalCst<'static> {
     let mut base = IcalCst::v2();
     for item in &local.items {
@@ -1015,14 +1019,11 @@ fn skeleton(local: &IcalCst<'static>, remote: &IcalCst<'static>) -> IcalCst<'sta
     base
 }
 
-/// Gives the base the override each side wrote of one occurrence on its
-/// own: the series carried to that occurrence, which is what both
-/// started from.
+/// Gives the base, for an override absent from it, the series at that point.
 ///
-/// Without it two overrides of one occurrence, neither in the base, are
-/// two additions of one component, and the merge keeps one whole: an
-/// edit of its title here and of its place there would collide rather
-/// than merge.
+/// That is what both sides started from. Without it, two overrides of one
+/// occurrence absent from the base are two additions and the merge keeps one
+/// whole: a title edited here and a place there would collide, not merge.
 fn instances(base: &mut IcalCst<'static>, local: &IcalCst<'static>, remote: &IcalCst<'static>) {
     for item in &local.items {
         let IcalItem::Component(component) = item else {
@@ -1054,11 +1055,11 @@ fn instances(base: &mut IcalCst<'static>, local: &IcalCst<'static>, remote: &Ica
     }
 }
 
-/// Puts the later stamp and the greater sequence of both sides on a
-/// component taken whole from one of them (RFC 5545 3.8.7, RFC 5546
-/// 2.1.4): the merge settles them so on what it merges, and a component
-/// taken whole comes with the stamps its side wrote, which can be the
-/// earlier.
+/// Puts both sides' later stamp and greater sequence on a component
+/// taken whole from one (RFC 5545 3.8.7, RFC 5546 2.1.4).
+///
+/// The merge settles them so on what it merges, but a component taken
+/// whole brings the stamps its side wrote, which can be the earlier.
 fn restamp(
     merged: &mut IcalCst<'static>,
     path: &[Step],
@@ -1149,13 +1150,13 @@ fn zones_named(component: &IcalCst<'static>, out: &mut Vec<String>) {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::{
-        super::{
-            expand, read, remove,
-            tests::{ROMANCE, object},
-            write,
-        },
-        EventConflictKind, EventSide, merge, resolve,
+    use crate::calendar::{
+        conflict::{EventConflictKind, EventSide, merge, resolve},
+        edit::write,
+        expand::expand,
+        read::read,
+        series::remove,
+        tests::{ROMANCE, object},
     };
 
     /// An entry that does not recur, as both sides last agreed on it.
@@ -1212,8 +1213,8 @@ mod tests {
         let entry = read(&merged.ical, "").unwrap();
         assert_eq!(entry.summary, "Standup, late");
         assert_eq!(entry.location, "Room 2");
-        // Both sides stamped their write, which is no question either: the
-        // later stamp stands, once.
+        // NOTE: both sides stamped their write, which is no question
+        // either: the later stamp stands, once.
         assert_eq!(merged.ical.matches("DTSTAMP").count(), 1);
         assert!(merged.ical.contains("DTSTAMP:20260201T110000Z\r\n"));
         assert!(merged.ical.contains("LAST-MODIFIED:20260201T110000Z\r\n"));
@@ -1245,7 +1246,6 @@ mod tests {
         );
         assert_eq!(read(&merged.ical, "").unwrap().summary, "There");
 
-        // Picking the other side is the resolution, and nothing else moves.
         let picked = resolve(&base, &local, &remote, r#"{"0": "local"}"#).unwrap();
         let entry = read(&picked, "").unwrap();
         assert_eq!(entry.summary, "Here");
@@ -1259,8 +1259,8 @@ mod tests {
     #[test]
     fn the_newer_side_is_told_by_dtstamp_without_last_modified() {
         let base = single();
-        // Edited here an hour earlier, and elsewhere by a client that writes
-        // DTSTAMP alone.
+        // NOTE: edited here an hour earlier, and elsewhere by a client that
+        // writes DTSTAMP alone.
         let local = edited(&base, json!({"summary": "Here"}), "20260201T100000Z");
         let remote = base
             .replace("DTSTAMP:20260101T000000Z", "DTSTAMP:20260201T110000Z")
@@ -1270,7 +1270,6 @@ mod tests {
         assert_eq!(merged.conflicts[0].choices[0].side, EventSide::Remote);
         assert_eq!(read(&merged.ical, "").unwrap().summary, "There");
 
-        // The other way round, the edit here is the later one.
         let remote = remote.replace("DTSTAMP:20260201T110000Z", "DTSTAMP:20260201T090000Z");
         let merged = merge(&base, &local, &remote).unwrap();
         assert_eq!(merged.conflicts[0].choices[0].side, EventSide::Local);
@@ -1332,8 +1331,8 @@ mod tests {
 
         let merged = merge(&base, &local, &remote).unwrap();
 
-        // The removal is the newer write, and still does not take the edit
-        // with it: the override stays, and the occurrence is asked.
+        // NOTE: the removal is the newer write, and still does not take
+        // the edit with it: the override stays, and the occurrence is asked.
         assert!(!merged.resolved);
         assert_eq!(
             read(&merged.ical, "20260112T090000").unwrap().summary,
@@ -1355,8 +1354,8 @@ mod tests {
                 .any(|choice| choice.side == EventSide::Local && choice.value.is_empty())
         );
         assert!(occurrence.choices[0].value.contains("SUMMARY:There"));
-        // Kept, it is in its series again: the EXDATE its removal came with
-        // goes with the removal.
+        // NOTE: kept, it is in its series again: the EXDATE its removal
+        // came with goes with the removal.
         assert!(!merged.ical.contains("EXDATE"));
         let found = expand(&merged.ical, "20260101T000000", "20270101T000000").unwrap();
         assert!(found.iter().any(|one| one.summary == "There"));
@@ -1388,14 +1387,16 @@ mod tests {
             conflict.recurrence_id.as_ref().unwrap().time,
             "20260112T090000"
         );
-        // Both changes stand until someone picks, the occurrence's newer.
+        // NOTE: both changes stand until someone picks, the occurrence's
+        // newer.
         assert!(merged.ical.contains("COUNT=3"));
         assert_eq!(
             read(&merged.ical, "20260112T090000").unwrap().summary,
             "There"
         );
 
-        // Following the series takes the occurrence as the series' side has it.
+        // NOTE: following the series takes the occurrence as the series'
+        // side has it.
         let picks = json!({conflict.id.to_string(): "local"}).to_string();
         let followed = resolve(&base, &local, &remote, &picks).unwrap();
         assert!(followed.contains("COUNT=3"));
@@ -1403,7 +1404,7 @@ mod tests {
             read(&followed, "20260112T090000").unwrap().summary,
             "Standup, moved"
         );
-        // Taken whole, it keeps the later stamp the other side wrote on it.
+        // NOTE: taken whole, it keeps the later stamp the other side wrote.
         assert!(followed.contains("DTSTAMP:20260201T100000Z\r\n"));
     }
 
@@ -1416,8 +1417,8 @@ mod tests {
 
         let merged = merge("", &first, &second).unwrap();
 
-        // With no base, neither title is lost: the one both share is no
-        // question, the one they differ on is.
+        // NOTE: with no base, neither title is lost: the one both share is
+        // no question, the one they differ on is.
         let fields: Vec<_> = merged
             .conflicts
             .iter()
@@ -1455,7 +1456,7 @@ mod tests {
 
         let merged = merge(&base, &local, &remote).unwrap();
 
-        // The two zones are no question, the two starts one.
+        // NOTE: the two zones are no question, the two starts one.
         assert_eq!(merged.conflicts.len(), 1);
         let conflict = &merged.conflicts[0];
         assert_eq!(conflict.field, "start");
@@ -1470,7 +1471,7 @@ mod tests {
                 .contains("DTSTART;TZID=/example.org/Fixed:20260105T080000\r\n")
         );
 
-        // The start taken from there brings the zone it is in.
+        // NOTE: the start taken from there brings the zone it is in.
         let picked = resolve(&base, &local, &remote, r#"{"0": "remote"}"#).unwrap();
         assert!(picked.contains("DTSTART;TZID=/example.org/Romance:20260105T100000\r\n"));
         assert!(picked.contains("BEGIN:VTIMEZONE\r\nTZID:/example.org/Romance\r\n"));
@@ -1495,8 +1496,8 @@ mod tests {
 
         let merged = merge(&base, &local, &remote).unwrap();
 
-        // The merge alone would write 08:00 in Romance, which neither side
-        // said: the newer side's start is held whole instead.
+        // NOTE: the merge alone would write 08:00 in Romance, which neither
+        // side said: the newer side's start is held whole instead.
         assert_eq!(merged.conflicts[0].field, "start");
         assert_eq!(merged.conflicts[0].choices[0].side, EventSide::Local);
         assert!(merged.ical.contains("DTSTART:20260105T080000\r\n"));
@@ -1518,8 +1519,8 @@ mod tests {
 
         let merged = merge(&base, &local, &remote).unwrap();
 
-        // Neither date collides, yet 09:45 to 09:30 is no span: the dates
-        // are asked as one, each side's pair whole, the newer held.
+        // NOTE: neither date collides, yet 09:45 to 09:30 is no span: the
+        // dates are asked as one, each side's pair whole, the newer held.
         assert!(!merged.resolved);
         assert_eq!(merged.conflicts.len(), 1);
         let conflict = &merged.conflicts[0];

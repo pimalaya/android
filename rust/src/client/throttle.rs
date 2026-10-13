@@ -1,60 +1,32 @@
-//! Throttling, in one place for every HTTP backend: Graph, Gmail,
-//! Google Calendar and People, CalDAV, CardDAV and JMAP.
+//! # Throttling
 //!
-//! A server that throttles answers 429 or 503, often with a
-//! `Retry-After`; Google answers its rate limits with a 429, or a 403
-//! whose reason is `rateLimitExceeded` or `userRateLimitExceeded`. Each
-//! of those means the request was not served, so it is sent again after
-//! a wait rather than failing the sync pass: the server's `Retry-After`
-//! (or the instant Gmail's message names, `Retry after …`), else a short
-//! exponential back-off. Almost every such refusal is a per-second or a
-//! concurrency limit, gone within a second or two. An answer that names
-//! a per-minute quota (`Quota exceeded for quota metric … Units per
-//! minute per user`) waits for the next minute, but on Gmail, whose quota
-//! refills by the second, a few seconds more each retry.
+//! Retries throttled HTTP answers and paces Gmail, in one place for every
+//! HTTP backend.
 //!
-//! Gmail is also paced before it is asked ([`pace_gmail`]), per account:
-//! a rate of quota units per second and a per-minute ceiling below the
-//! project's quota ([`quota`]), shared by every worker, the body
-//! downloads and the reader, so a long pass waits for its quota rather
-//! than drawing refusals. A request someone is waiting on (a message
-//! being opened) skips the queue the background work forms.
+//! A 429, a 503 or a Google rate-limit 403 means the request was not
+//! served: it goes again after the `Retry-After` (or Gmail's `Retry after`
+//! instant), else a jittered back-off. A per-minute quota waits for the
+//! next minute, except on Gmail, whose quota refills by the second.
 //!
-//! **Why at the transport.** A coroutine is consumed by its run and
-//! cannot be rewound, and the HTTP runners number in the dozens. An
-//! HTTP request is a fixed sequence of bytes, though, so
-//! [`Client::http_write`] records the bytes of the round in flight and
-//! [`Client::http_read`] reads the head of its answer before the
-//! coroutine sees any of it. A throttled answer is read to its end, so
-//! the connection stays in step, the wait is taken, and the same bytes
-//! are written again; the coroutine only ever sees the answer that was
-//! not throttled, or the last throttled one once the budget is spent.
+//! Gmail is also paced per account below the project's quota
+//! ([`pace_gmail`], [`quota`]), every worker sharing it, so a long pass
+//! waits for its quota rather than drawing refusals. A request someone
+//! waits on skips the queue the background work forms.
 //!
-//! **Bounded.** A phone sync never hangs on a throttling server: at
-//! most [`MAX_RETRIES`] retries per request and [`WAIT_BUDGET`] of
-//! waiting per native call, and a `Retry-After` longer than what is
-//! left of it is not waited at all. Past either bound the throttled
-//! answer reaches the coroutine, which reports the error as it would
-//! have without any of this.
+//! It sits at the transport because a coroutine cannot be rewound and the
+//! runners number in dozens, but a request is fixed bytes:
+//! [`Client::http_write`] records them, and [`Client::http_read`] reads a
+//! throttled answer to its end and writes them again.
 //!
-//! An answer that cannot be read to its end with certainty (no
-//! `Content-Length` nor chunked framing, a `Connection: close`, a head
-//! or a body past the caps) is never retried, since writing again on a
-//! connection the server is closing or still talking on would desync
-//! it: it passes through untouched, bytes already read included.
+//! Bounded so a sync never hangs ([`MAX_RETRIES`] per request,
+//! [`WAIT_BUDGET`] per native call): past it, the coroutine gets the
+//! throttled answer. An answer whose end is uncertain is never retried,
+//! as writing on a connection the server still talks on would desync it.
 //!
-//! Every wait, a pacing one or a throttled one, is logged at debug.
-//!
-//! **Connections.** The transport keeps one connection per origin across
-//! requests, and a server closes one it left idle (Graph after about two
-//! minutes). Each answer is followed to its end by its framing and only
-//! then settled ([`Wire::wire_settle`]): a connection whose last answer was
-//! not read to its end (a coroutine that stopped half-way, a read that
-//! timed out, a body with no framing, a `Connection: close`) is dropped
-//! before the next request ([`Wire::wire_begin`]), so no answer is ever
-//! read as another's. A reused connection that ends or fails before the
-//! first byte of an answer to an idempotent request is reset and the
-//! request sent again once (RFC 9112 section 9.3.1).
+//! An answer is settled ([`Host::settle`]) once read to its end, and an
+//! unsettled connection dropped before the next request ([`Host::begin`]),
+//! so no answer reads as another's. An idempotent request a reused
+//! connection dropped unanswered goes again once (RFC 9112 section 9.3.1).
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -66,91 +38,88 @@ use io_gmail::v1::send::GmailApiError;
 use jiff::{Timestamp, fmt::rfc2822::DateTimeParser};
 
 use crate::{
-    client::{
-        Client,
-        gmail::{minute_pause, quota},
-    },
-    types::BridgeError,
+    client::{Client, Host},
+    error::BridgeError,
+    mail::gmail::{minute_pause, quota},
 };
 
 /// How many times one request is sent again after a throttled answer.
 const MAX_RETRIES: u32 = 4;
 
 /// How long one native call waits on throttling servers in total.
+///
 /// Past it, the throttled answer is the call's answer.
-pub(crate) const WAIT_BUDGET: Duration = Duration::from_secs(30);
+pub const WAIT_BUDGET: Duration = Duration::from_secs(30);
 
-/// How long one native call waits in total once a server refused it a
-/// per-minute quota: room for one wait to the next minute and a short
-/// one after it. Larger than [`WAIT_BUDGET`] because a minute's quota
-/// cannot come back sooner than the minute does.
-pub(crate) const QUOTA_WAIT_BUDGET: Duration = Duration::from_secs(75);
+/// [`WAIT_BUDGET`] once a server refused a per-minute quota.
+///
+/// Room for one wait to the next minute and a short one after it: a
+/// minute's quota cannot come back sooner than the minute does.
+const QUOTA_WAIT_BUDGET: Duration = Duration::from_secs(75);
 
-/// The first back-off when the server names no `Retry-After`, doubled
-/// on each retry up to [`BACKOFF_MAX`], each wait jittered down to half
-/// of it so workers throttled together do not come back together.
+/// The first back-off when the server names no `Retry-After`.
+///
+/// Doubled on each retry up to [`BACKOFF_MAX`], each wait jittered down to
+/// half so workers throttled together do not come back together.
 const BACKOFF_BASE: Duration = Duration::from_secs(1);
 
 /// The longest single back-off when the server names no `Retry-After`.
 const BACKOFF_MAX: Duration = Duration::from_secs(16);
 
-/// The most a wait to the next minute is pushed past it, at random, so
-/// workers refused together do not come back together.
+/// The most a wait to the next minute is pushed past it, at random.
+///
+/// Workers refused together then do not come back together.
 const MINUTE_JITTER: Duration = Duration::from_secs(1);
 
 /// The longest response head read before giving up on parsing it.
 const HEAD_CAP: usize = 64 * 1024;
 
-/// The longest throttled body read to its end; a longer one passes
-/// through rather than being buffered.
+/// The longest throttled body read to its end; a longer one passes.
 const BODY_CAP: usize = 256 * 1024;
 
-/// The largest chunk a chunked body is followed through: a larger chunk
-/// size is broken framing, so the answer passes through untouched and
-/// its connection is not reused.
+/// The largest chunk a chunked body is followed through.
+///
+/// A larger size is broken framing: the answer passes through untouched
+/// and its connection is not reused.
 const CHUNK_CAP: usize = 64 * 1024 * 1024;
 
 /// The longest reason a throttled answer is logged with.
 const REASON_CAP: usize = 160;
 
-/// Gmail quota units per second an account is held near
-/// ([`quota::UNITS_PER_SECOND`]). A batch is paced by the units of every
-/// call it carries.
-pub(crate) const GMAIL_UNITS_PER_SECOND: u32 = quota::UNITS_PER_SECOND;
+/// Gmail quota units per second an account is held near.
+///
+/// A batch is paced by the units of every call it carries.
+const GMAIL_UNITS_PER_SECOND: u32 = quota::UNITS_PER_SECOND;
 
-/// The units an account's pacing lets through at once after a pause, on
-/// top of the request's own ([`quota::BURST_UNITS`]).
+/// The units let through at once after a pause, on top of the request's.
 const GMAIL_BURST_UNITS: u32 = quota::BURST_UNITS;
 
-/// The quota units background Gmail requests may spend in any sixty
-/// seconds: the project's quota less a fifth, so the two sides' clocks
-/// and the requests still in flight never carry a pass over it.
-pub(crate) const GMAIL_UNITS_PER_MINUTE: u32 = quota::UNITS_PER_MINUTE_PER_USER / 5 * 4;
+/// The units background Gmail requests may spend in any sixty seconds.
+///
+/// The project's quota less a fifth, so the two sides' clocks and the
+/// requests still in flight never carry a pass over it.
+const GMAIL_UNITS_PER_MINUTE: u32 = quota::UNITS_PER_MINUTE_PER_USER / 5 * 4;
 
-/// The quota units urgent Gmail requests may spend in any sixty seconds:
-/// the fifth the background ceiling leaves.
+/// The units urgent Gmail requests may spend in any sixty seconds.
 const GMAIL_URGENT_UNITS_PER_MINUTE: u32 =
     quota::UNITS_PER_MINUTE_PER_USER - GMAIL_UNITS_PER_MINUTE;
 
-/// How long an account's pacing is kept unused before it is dropped:
-/// past a minute, nothing it holds bears on the next request.
+/// How long an unused pacing is kept: past a minute it bears on nothing.
 const GMAIL_PACE_IDLE: Duration = Duration::from_secs(120);
 
 /// The Gmail pacing of every account, by the key its requests carry.
 static GMAIL_PACES: LazyLock<Mutex<HashMap<String, GmailPace>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// The request in flight on a [`Client`]: what was written, to which
-/// URL, and whether its answer started.
+/// The request in flight on a [`Client`] and how far its answer came.
 #[derive(Default)]
-pub(crate) struct Exchange {
+pub struct Exchange {
     url: String,
     request: Vec<u8>,
     answering: bool,
-    /// Whether the request went out on a connection that served one
-    /// before, which the server may have closed while it idled.
+    /// Whether it went out on a connection the server may have idled out.
     reused: bool,
-    /// Whether the request was sent again on a new connection already.
+    /// Whether it was sent again on a new connection already.
     resent: bool,
     /// Whether any byte of its answer came.
     heard: bool,
@@ -159,284 +128,194 @@ pub(crate) struct Exchange {
 }
 
 impl Exchange {
-    /// Whether the request was written whole and no byte of its answer
-    /// came ([`Client::unanswered`]).
+    /// Whether the request was written whole and no answer byte came.
     fn unanswered(&self) -> bool {
         self.answering && !self.heard
     }
 }
 
-/// What a throttled exchange needs of a connection: the bare transport,
-/// the request in flight, the waiting already done, and the clock.
-///
-/// [`Client`] is the one connection the app runs; the trait exists so
-/// the retry can be driven without a JVM, by a scripted server and a
-/// clock that does not sleep.
-pub(crate) trait Wire {
-    /// Reads the next chunk from `url`'s stream, empty at its end.
-    fn wire_read(&mut self, url: &str) -> Result<Vec<u8>, BridgeError>;
-
-    /// Writes bytes to `url`'s stream.
-    fn wire_write(&mut self, url: &str, bytes: &[u8]) -> Result<(), BridgeError>;
-
-    /// Opens a new request on `url`'s origin, dropping a connection whose
-    /// last answer was not read to its end; answers whether the request
-    /// goes out on a connection that served one before.
-    fn wire_begin(&mut self, url: &str) -> bool;
-
-    /// Marks the answer on `url`'s connection read to its end.
-    fn wire_settle(&mut self, url: &str);
-
-    /// Drops `url`'s connection.
-    fn wire_reset(&mut self, url: &str);
-
-    /// The request in flight.
-    fn exchange(&mut self) -> &mut Exchange;
-
-    /// The time this native call has spent waiting on throttling.
-    fn waited(&mut self) -> &mut Duration;
-
-    /// The Gmail account the request in flight is paced under, none for
-    /// any other request.
-    fn paced(&self) -> Option<String> {
-        None
-    }
-
-    /// Waits `delay`.
-    fn sleep(&mut self, delay: Duration) {
-        std::thread::sleep(delay);
-    }
-
-    /// The time now, for `Retry-After` dates and waits to the next minute.
-    fn now(&self) -> Timestamp {
-        Timestamp::now()
-    }
-}
-
-impl Wire for Client<'_, '_> {
-    fn wire_read(&mut self, url: &str) -> Result<Vec<u8>, BridgeError> {
-        self.read(url)
-    }
-
-    fn wire_write(&mut self, url: &str, bytes: &[u8]) -> Result<(), BridgeError> {
-        self.write(url, bytes)
-    }
-
-    fn wire_begin(&mut self, url: &str) -> bool {
-        self.begin(url)
-    }
-
-    fn wire_settle(&mut self, url: &str) {
-        self.settle(url)
-    }
-
-    fn wire_reset(&mut self, url: &str) {
-        self.reset(url)
-    }
-
-    fn exchange(&mut self) -> &mut Exchange {
-        &mut self.exchange
-    }
-
-    fn waited(&mut self) -> &mut Duration {
-        &mut self.waited
-    }
-
-    fn paced(&self) -> Option<String> {
-        self.gmail_pace.clone()
-    }
-}
-
-/// HTTP exchange with throttling, used by every HTTP runner in place of
-/// the bare transport `read` and `write`.
-impl<'a, 'local> Client<'a, 'local> {
-    /// Whether the last request was written whole and no byte of its
-    /// answer came: a server may have carried it out, so a failed write
-    /// that is not idempotent (a send) may have happened.
-    pub(crate) fn unanswered(&self) -> bool {
+/// HTTP exchange with throttling, every HTTP runner's `read` and `write`.
+impl<H: Host> Client<H> {
+    /// Whether the last request was written whole and no answer byte came.
+    ///
+    /// The server may have carried it out, so a failed request that is not
+    /// idempotent (a send) may have happened.
+    pub fn unanswered(&self) -> bool {
         self.exchange.unanswered()
     }
 
-    /// Writes request bytes to `url`, recording them so a throttled
-    /// answer can be retried. A write after the answer started, or to
-    /// another URL, opens a new request.
-    pub(crate) fn http_write(&mut self, url: &str, bytes: &[u8]) -> Result<(), BridgeError> {
-        throttled_write(self, url, bytes)
-    }
-
-    /// Reads the next chunk of the answer from `url`. The first read of
-    /// an answer reads its head, and the whole of it when it may be a
-    /// throttled one, retrying that request within the bounds.
-    pub(crate) fn http_read(&mut self, url: &str) -> Result<Vec<u8>, BridgeError> {
-        throttled_read(self, url)
-    }
-
-    /// Paces the Gmail request about to go out under the account `key`
-    /// names, costing `units` ([`pace_gmail`]), and has its throttled
-    /// answers hold that account's pacing; answers the wait.
-    pub(crate) fn pace_gmail(&mut self, key: &str, units: u32) -> Duration {
-        self.gmail_pace = Some(key.to_string());
-        pace_gmail(key, units, self.urgent)
-    }
-}
-
-/// [`Client::http_write`] over any [`Wire`].
-///
-/// A new request begins on its origin ([`Wire::wire_begin`]). A write that
-/// fails on a reused connection, for an idempotent request, is sent again
-/// whole on a new one, once.
-pub(crate) fn throttled_write<W: Wire>(
-    wire: &mut W,
-    url: &str,
-    bytes: &[u8],
-) -> Result<(), BridgeError> {
-    let exchange = wire.exchange();
-    if exchange.answering || exchange.url != url || exchange.request.is_empty() {
-        exchange.url.clear();
-        exchange.url.push_str(url);
-        exchange.request.clear();
-        exchange.answering = false;
-        exchange.resent = false;
-        exchange.follow = Follow::Unknown;
-        exchange.heard = false;
-        let reused = wire.wire_begin(url);
-        wire.exchange().reused = reused;
-    }
-    wire.exchange().request.extend_from_slice(bytes);
-
-    match wire.wire_write(url, bytes) {
-        Err(err) if !resendable(wire.exchange()) => Err(err),
-        Err(err) => {
-            log::debug!("{} write failed ({err}), sending again", short(url));
-            resend(wire, url)
+    /// Writes request bytes to `url`, recorded for a throttled retry.
+    ///
+    /// A write after the answer started, or to another URL, begins a new
+    /// request ([`Host::begin`]). An idempotent request failing on a reused
+    /// connection is sent again whole on a new one, once.
+    pub fn http_write(&mut self, url: &str, bytes: &[u8]) -> Result<(), BridgeError> {
+        let exchange = &mut self.exchange;
+        if exchange.answering || exchange.url != url || exchange.request.is_empty() {
+            exchange.url.clear();
+            exchange.url.push_str(url);
+            exchange.request.clear();
+            exchange.answering = false;
+            exchange.resent = false;
+            exchange.follow = Follow::Unknown;
+            exchange.heard = false;
+            let reused = self.host.begin(url);
+            self.exchange.reused = reused;
         }
-        Ok(()) => Ok(()),
-    }
-}
+        self.exchange.request.extend_from_slice(bytes);
 
-/// [`Client::http_read`] over any [`Wire`].
-pub(crate) fn throttled_read<W: Wire>(wire: &mut W, url: &str) -> Result<Vec<u8>, BridgeError> {
-    let exchange = wire.exchange();
-    let fresh = !exchange.answering
-        && exchange.url == url
-        && !exchange.request.is_empty()
-        && !exchange.request.starts_with(b"HEAD ");
-    if !fresh {
-        let following = exchange.answering && exchange.url == url;
-        let chunk = wire.wire_read(url)?;
-        if following {
-            follow(wire, url, &chunk);
+        match self.write(url, bytes) {
+            Err(err) if !resendable(&self.exchange) => Err(err),
+            Err(err) => {
+                log::debug!("{} write failed ({err}), sending again", short(url));
+                self.resend(url)
+            }
+            Ok(()) => Ok(()),
         }
-        return Ok(chunk);
     }
-    wire.exchange().answering = true;
 
-    let mut retries = 0;
-    loop {
-        let refusal = match read_answer(wire, url)? {
-            Answered::Passed(bytes) => {
-                wire.exchange().heard = !bytes.is_empty();
-                begin_follow(wire, url, &bytes);
-                return Ok(bytes);
+    /// Reads the next chunk of the answer from `url`.
+    ///
+    /// The first read reads its head, and the whole answer when it may be
+    /// throttled, retrying the request within the bounds.
+    pub fn http_read(&mut self, url: &str) -> Result<Vec<u8>, BridgeError> {
+        let exchange = &mut self.exchange;
+        let fresh = !exchange.answering
+            && exchange.url == url
+            && !exchange.request.is_empty()
+            && !exchange.request.starts_with(b"HEAD ");
+        if !fresh {
+            let following = exchange.answering && exchange.url == url;
+            let chunk = self.read(url)?;
+            if following {
+                self.follow(url, &chunk);
             }
-            // NOTE: a read that timed out may be a server still at work on
-            // the request, not an idle connection it closed: sending it
-            // again could apply it twice, or meet its own 412.
-            Answered::Lost(lost)
-                if !resendable(wire.exchange()) || lost.as_ref().is_some_and(timed_out) =>
-            {
-                return match lost {
-                    Some(err) => Err(err),
-                    None => Ok(Vec::new()),
-                };
-            }
-            Answered::Lost(lost) => {
-                let why = lost.map_or_else(|| "end of stream".to_string(), |err| err.message);
+            return Ok(chunk);
+        }
+        self.exchange.answering = true;
+
+        let mut retries = 0;
+        loop {
+            let refusal = match self.read_answer(url)? {
+                Answered::Passed(bytes) => {
+                    self.exchange.heard = !bytes.is_empty();
+                    self.begin_follow(url, &bytes);
+                    return Ok(bytes);
+                }
+                // NOTE: a timed-out read may be a server still at work, not
+                // an idle close: sending again could apply it twice, or meet
+                // its own 412.
+                Answered::Lost(lost)
+                    if !resendable(&self.exchange) || lost.as_ref().is_some_and(timed_out) =>
+                {
+                    return match lost {
+                        Some(err) => Err(err),
+                        None => Ok(Vec::new()),
+                    };
+                }
+                Answered::Lost(lost) => {
+                    let why = lost.map_or_else(|| "end of stream".to_string(), |err| err.message);
+                    log::debug!(
+                        "{} connection lost before its answer ({why}), sending again",
+                        short(url)
+                    );
+                    self.resend(url)?;
+                    continue;
+                }
+                Answered::Throttled(refusal) => refusal,
+            };
+            self.exchange.heard = true;
+
+            // NOTE: a 503 may come from a gateway after the server behind it
+            // did the work: only a request that may be applied twice is sent
+            // again; a 429 or a quota 403 refuses before any work.
+            if refusal.status == 503 && !idempotent(&self.exchange.request) {
                 log::debug!(
-                    "{} connection lost before its answer ({why}), sending again",
+                    "{} unavailable (503), not sent again: not idempotent",
                     short(url)
                 );
-                resend(wire, url)?;
-                continue;
+                self.begin_follow(url, &refusal.bytes);
+                return Ok(refusal.bytes);
             }
-            Answered::Throttled(refusal) => refusal,
-        };
-        wire.exchange().heard = true;
 
-        // NOTE: a 503 may come from a gateway after the server behind it
-        // did the work: only a request that may be applied twice is sent
-        // again; a 429 or a quota 403 refuses before any work.
-        if refusal.status == 503 && !idempotent(&wire.exchange().request) {
+            let (delay, budget) = match (refusal.retry_after, refusal.throttle) {
+                (Some(delay), Throttle::Minute) => (delay, QUOTA_WAIT_BUDGET),
+                (Some(delay), Throttle::Burst) => (delay, WAIT_BUDGET),
+                // NOTE: Gmail's minute quota refills by the second, measured
+                // clearing within 2 s: a few seconds more each retry, never
+                // the next minute, and no quota budget spent for it.
+                (None, Throttle::Minute) if self.gmail_pace.is_some() => {
+                    (minute_pause(retries + 1), WAIT_BUDGET)
+                }
+                (None, Throttle::Minute) => {
+                    let jitter = MINUTE_JITTER.mul_f64(rand::random_range(0.0..=1.0));
+                    (
+                        until_next_minute(self.host.now()) + jitter,
+                        QUOTA_WAIT_BUDGET,
+                    )
+                }
+                (None, Throttle::Burst) => {
+                    (backoff(retries, rand::random_range(0.5..=1.0)), WAIT_BUDGET)
+                }
+            };
+            let left = budget.saturating_sub(self.waited);
+            if retries >= MAX_RETRIES || delay > left {
+                log::warn!(
+                    "{} still throttled ({} {}), giving up after {retries} retries",
+                    short(url),
+                    refusal.status,
+                    refusal.reason
+                );
+                self.begin_follow(url, &refusal.bytes);
+                return Ok(refusal.bytes);
+            }
+
             log::debug!(
-                "{} unavailable (503), not sent again: not idempotent",
-                short(url)
-            );
-            begin_follow(wire, url, &refusal.bytes);
-            return Ok(refusal.bytes);
-        }
-
-        let (delay, budget) = match (refusal.retry_after, refusal.throttle) {
-            (Some(delay), Throttle::Minute) => (delay, QUOTA_WAIT_BUDGET),
-            (Some(delay), Throttle::Burst) => (delay, WAIT_BUDGET),
-            // NOTE: Gmail's minute quota is a bucket refilling by the
-            // second, measured clearing within 2 s: a few seconds more each
-            // retry, never the next minute, and no budget spent for it.
-            (None, Throttle::Minute) if wire.paced().is_some() => {
-                (minute_pause(retries + 1), WAIT_BUDGET)
-            }
-            (None, Throttle::Minute) => {
-                let jitter = MINUTE_JITTER.mul_f64(rand::random_range(0.0..=1.0));
-                (until_next_minute(wire.now()) + jitter, QUOTA_WAIT_BUDGET)
-            }
-            (None, Throttle::Burst) => {
-                (backoff(retries, rand::random_range(0.5..=1.0)), WAIT_BUDGET)
-            }
-        };
-        let left = budget.saturating_sub(*wire.waited());
-        if retries >= MAX_RETRIES || delay > left {
-            log::warn!(
-                "{} still throttled ({} {}), giving up after {retries} retries",
+                "{} throttled ({} {}), {:?} wait, retry {} in {} ms",
                 short(url),
                 refusal.status,
-                refusal.reason
+                refusal.reason,
+                refusal.throttle,
+                retries + 1,
+                delay.as_millis()
             );
-            begin_follow(wire, url, &refusal.bytes);
-            return Ok(refusal.bytes);
+            self.host.sleep(delay);
+            self.waited += delay;
+            retries += 1;
+            self.exchange.heard = false;
+
+            let request = std::mem::take(&mut self.exchange.request);
+            let written = self.write(url, &request);
+            self.exchange.request = request;
+            written?;
         }
+    }
 
-        log::debug!(
-            "{} throttled ({} {}), {:?} wait, retry {} in {} ms",
-            short(url),
-            refusal.status,
-            refusal.reason,
-            refusal.throttle,
-            retries + 1,
-            delay.as_millis()
-        );
-        wire.sleep(delay);
-        *wire.waited() += delay;
-        retries += 1;
-        wire.exchange().heard = false;
-
-        let request = std::mem::take(&mut wire.exchange().request);
-        let written = wire.wire_write(url, &request);
-        wire.exchange().request = request;
-        written?;
+    /// Waits out the pacing of a Gmail request of `units` under `key`.
+    ///
+    /// Its throttled answers then hold that account's pacing; answers the
+    /// wait ([`pace_gmail`]).
+    pub fn pace_gmail(&mut self, key: &str, units: u32) -> Duration {
+        self.gmail_pace = Some(key.to_string());
+        let wait = pace_gmail(key, units, self.urgent);
+        if !wait.is_zero() {
+            self.host.sleep(wait);
+        }
+        wait
     }
 }
 
-/// Whether the request in flight may be sent again on a new connection:
-/// it went out on a reused one, which the server may have closed while it
-/// idled, it was not sent again already, and its method is idempotent
-/// (RFC 9112 section 9.3.1, RFC 9110 section 9.2.2; WebDAV's PROPFIND and
-/// REPORT are safe).
+/// Whether the request in flight may be sent again on a new connection.
+///
+/// It went out on a reused one, was not sent again already, and its method
+/// is idempotent (RFC 9112 section 9.3.1).
 fn resendable(exchange: &Exchange) -> bool {
     exchange.reused && !exchange.resent && idempotent(&exchange.request)
 }
 
-/// Whether a request's method is idempotent (RFC 9110 section 9.2.2;
-/// WebDAV's PROPFIND and REPORT are safe): applying it twice does what
-/// applying it once does.
+/// Whether a request's method is idempotent (RFC 9110 section 9.2.2).
+///
+/// WebDAV's PROPFIND and REPORT are safe, so they count.
 fn idempotent(request: &[u8]) -> bool {
     const IDEMPOTENT: [&[u8]; 8] = [
         b"GET ",
@@ -451,124 +330,122 @@ fn idempotent(request: &[u8]) -> bool {
     IDEMPOTENT.iter().any(|method| request.starts_with(method))
 }
 
-/// Whether a failed read timed out (the Java transport's
-/// `SocketTimeoutException` as the bridge words it), rather than the connection ending.
+/// Whether a failed read timed out rather than the connection ending.
+///
+/// The Java transport's `SocketTimeoutException`, as the bridge words it.
 fn timed_out(err: &BridgeError) -> bool {
     err.message.contains("SocketTimeoutException") || err.message.contains("timed out")
 }
 
-/// Drops the request's connection and writes the whole request again on
-/// a new one.
-fn resend<W: Wire>(wire: &mut W, url: &str) -> Result<(), BridgeError> {
-    wire.wire_reset(url);
-    let exchange = wire.exchange();
-    exchange.resent = true;
-    exchange.reused = false;
-    let request = std::mem::take(&mut exchange.request);
-    let written = wire.wire_write(url, &request);
-    wire.exchange().request = request;
-    written
-}
-
-/// Starts following an answer from its first bytes, settling it at once
-/// when they hold all of it.
-fn begin_follow<W: Wire>(wire: &mut W, url: &str, bytes: &[u8]) {
-    wire.exchange().follow = Follow::of(bytes);
-    follow(wire, url, &[]);
-}
-
-/// Follows more bytes of the answer, settling it once its end is read, and
-/// dropping the connection when bytes come past that end.
-fn follow<W: Wire>(wire: &mut W, url: &str, bytes: &[u8]) {
-    let was = std::mem::take(&mut wire.exchange().follow);
-    match was.feed(bytes) {
-        Follow::Ended => {
-            wire.exchange().follow = Follow::Settled;
-            wire.wire_settle(url);
-        }
-        Follow::Excess => wire.wire_reset(url),
-        next => wire.exchange().follow = next,
-    }
-}
-
-/// Reads one answer's head, and its body when the head says it may
-/// be throttled, deciding whether it is.
-fn read_answer<W: Wire>(wire: &mut W, url: &str) -> Result<Answered, BridgeError> {
-    let mut bytes = Vec::new();
-
-    let head_end = loop {
-        if let Some(end) = head_end(&bytes) {
-            break end;
-        }
-        if bytes.len() > HEAD_CAP {
-            return Ok(Answered::Passed(bytes));
-        }
-        let chunk = match wire.wire_read(url) {
-            Err(err) if bytes.is_empty() => return Ok(Answered::Lost(Some(err))),
-            read => read?,
-        };
-        if chunk.is_empty() && bytes.is_empty() {
-            return Ok(Answered::Lost(None));
-        }
-        if chunk.is_empty() {
-            return Ok(Answered::Passed(bytes));
-        }
-        bytes.extend_from_slice(&chunk);
-    };
-
-    let Some(head) = Head::parse(&bytes[..head_end]) else {
-        return Ok(Answered::Passed(bytes));
-    };
-    if !matches!(head.status, 403 | 429 | 503) || head.close {
-        return Ok(Answered::Passed(bytes));
+/// The steps of a throttled exchange.
+impl<H: Host> Client<H> {
+    /// Writes the whole request again on a new connection.
+    fn resend(&mut self, url: &str) -> Result<(), BridgeError> {
+        self.reset(url);
+        let exchange = &mut self.exchange;
+        exchange.resent = true;
+        exchange.reused = false;
+        let request = std::mem::take(&mut exchange.request);
+        let written = self.write(url, &request);
+        self.exchange.request = request;
+        written
     }
 
-    let body = loop {
-        match head.framing.body(&bytes[head_end..]) {
-            Body::Complete(body) => break body,
-            Body::Unframed => return Ok(Answered::Passed(bytes)),
-            Body::Partial if bytes.len() - head_end > BODY_CAP => {
+    /// Starts following an answer, settling it if its first bytes are all.
+    fn begin_follow(&mut self, url: &str, bytes: &[u8]) {
+        self.exchange.follow = Follow::of(bytes);
+        self.follow(url, &[]);
+    }
+
+    /// Follows more bytes of the answer, settling it at its end.
+    ///
+    /// Bytes past that end drop the connection.
+    fn follow(&mut self, url: &str, bytes: &[u8]) {
+        let was = std::mem::take(&mut self.exchange.follow);
+        match was.feed(bytes) {
+            Follow::Ended => {
+                self.exchange.follow = Follow::Settled;
+                self.host.settle(url);
+            }
+            Follow::Excess => self.reset(url),
+            next => self.exchange.follow = next,
+        }
+    }
+
+    /// Reads an answer's head, and its body when it may be throttled.
+    fn read_answer(&mut self, url: &str) -> Result<Answered, BridgeError> {
+        let mut bytes = Vec::new();
+
+        let head_end = loop {
+            if let Some(end) = head_end(&bytes) {
+                break end;
+            }
+            if bytes.len() > HEAD_CAP {
                 return Ok(Answered::Passed(bytes));
             }
-            Body::Partial => {
-                let chunk = wire.wire_read(url)?;
-                if chunk.is_empty() {
+            let chunk = match self.read(url) {
+                Err(err) if bytes.is_empty() => return Ok(Answered::Lost(Some(err))),
+                read => read?,
+            };
+            if chunk.is_empty() && bytes.is_empty() {
+                return Ok(Answered::Lost(None));
+            }
+            if chunk.is_empty() {
+                return Ok(Answered::Passed(bytes));
+            }
+            bytes.extend_from_slice(&chunk);
+        };
+
+        let Some(head) = Head::parse(&bytes[..head_end]) else {
+            return Ok(Answered::Passed(bytes));
+        };
+        if !matches!(head.status, 403 | 429 | 503) || head.close {
+            return Ok(Answered::Passed(bytes));
+        }
+
+        let body = loop {
+            match head.framing.body(&bytes[head_end..]) {
+                Body::Complete(body) => break body,
+                Body::Unframed => return Ok(Answered::Passed(bytes)),
+                Body::Partial if bytes.len() - head_end > BODY_CAP => {
                     return Ok(Answered::Passed(bytes));
                 }
-                bytes.extend_from_slice(&chunk);
+                Body::Partial => {
+                    let chunk = self.read(url)?;
+                    if chunk.is_empty() {
+                        return Ok(Answered::Passed(bytes));
+                    }
+                    bytes.extend_from_slice(&chunk);
+                }
             }
-        }
-    };
+        };
 
-    let Some(throttle) = throttled(head.status, &body) else {
-        return Ok(Answered::Passed(bytes));
-    };
+        let Some(throttle) = throttled(head.status, &body) else {
+            return Ok(Answered::Passed(bytes));
+        };
 
-    let now = wire.now();
-    let retry_after = head
-        .retry_after
-        .as_deref()
-        .and_then(|value| retry_after(value, now))
-        .or_else(|| retry_after_named(&body, now));
-    Ok(Answered::Throttled(Refusal {
-        status: head.status,
-        reason: reason(head.status, &body),
-        bytes,
-        retry_after,
-        throttle,
-    }))
+        let now = self.host.now();
+        let retry_after = head
+            .retry_after
+            .as_deref()
+            .and_then(|value| retry_after(value, now))
+            .or_else(|| retry_after_named(&body, now));
+        Ok(Answered::Throttled(Refusal {
+            status: head.status,
+            reason: reason(head.status, &body),
+            bytes,
+            retry_after,
+            throttle,
+        }))
+    }
 }
 
-/// Holds one Gmail request of the account `key` names, costing `units`
-/// quota units, until both its slot under [`GMAIL_UNITS_PER_SECOND`] and
-/// room in the last minute's [`GMAIL_UNITS_PER_MINUTE`] come, and
-/// answers how long it waited. An `urgent` request takes no slot behind
-/// the others, though they wait for it, and draws on the fifth of the
-/// minute's quota the background leaves.
+/// Books a Gmail request of `units` under `key`, answering its wait.
 ///
-/// A batch is one request but costs the units of every call it carries,
-/// so it is paced once with their sum.
-pub(crate) fn pace_gmail(key: &str, units: u32, urgent: bool) -> Duration {
+/// It waits for its slot under [`GMAIL_UNITS_PER_SECOND`] and room in the
+/// last minute's [`GMAIL_UNITS_PER_MINUTE`]; an `urgent` one queues behind
+/// none and draws on the fifth left. A batch is paced once, by its sum.
+pub fn pace_gmail(key: &str, units: u32, urgent: bool) -> Duration {
     let wait = {
         let mut paces = GMAIL_PACES.lock().unwrap_or_else(|err| err.into_inner());
         let now = Instant::now();
@@ -585,23 +462,22 @@ pub(crate) fn pace_gmail(key: &str, units: u32, urgent: bool) -> Duration {
             wait.as_millis(),
             if urgent { ", urgent" } else { "" }
         );
-        std::thread::sleep(wait);
     }
     wait
 }
 
-/// The gate an account's metadata batches go through one at a time:
-/// each call of a batch runs side by side on Gmail's side, and two
-/// batches at once draw its per-user concurrency 429s.
-pub(crate) fn gmail_gate(key: &str) -> Arc<Mutex<()>> {
+/// The gate an account's metadata batches go through one at a time.
+///
+/// Gmail runs a batch's calls side by side, so two batches at once draw
+/// its per-user concurrency 429s.
+pub fn gmail_gate(key: &str) -> Arc<Mutex<()>> {
     let mut paces = GMAIL_PACES.lock().unwrap_or_else(|err| err.into_inner());
     let pace = paces.entry(key.to_string()).or_insert_with(GmailPace::new);
     pace.used = Instant::now();
     Arc::clone(&pace.gate)
 }
 
-/// One account's Gmail pacing: the next per-second slot, the minute's
-/// units, background and urgent, and the gate of its batches.
+/// One account's Gmail pacing: per-second slot, minute windows, gate.
 struct GmailPace {
     next: Option<Instant>,
     minute: MinuteBudget,
@@ -643,13 +519,13 @@ impl GmailPace {
     }
 }
 
-/// The quota units spent over the last minute, as a sliding window, so
-/// no sixty seconds ever carry more than the budget, whichever minute
-/// the server counts by.
+/// The quota units spent over the last minute, as a sliding window.
+///
+/// No sixty seconds then carry more than the budget, whichever minute the
+/// server counts by.
 #[derive(Debug)]
 struct MinuteBudget {
-    /// What was spent and when, oldest first, each instant at or after
-    /// the one before it.
+    /// What was spent and when, oldest first, instants never decreasing.
     spent: VecDeque<(Instant, u32)>,
     /// The sum of `spent`'s units.
     total: u32,
@@ -665,12 +541,10 @@ impl MinuteBudget {
         }
     }
 
-    /// Books `units` at the earliest instant from `now` at which the
-    /// last sixty seconds hold room for them under `limit`, and returns
-    /// how long from `now` that is. Spends are booked in order, never
-    /// one before the one booked ahead of it. A spend larger than the
-    /// whole budget counts as the whole budget, waiting for an empty
-    /// minute rather than forever.
+    /// Books `units` once the minute has room under `limit`; answers the wait.
+    ///
+    /// Spends are booked in order. One larger than the whole budget counts
+    /// as the budget, waiting for an empty minute rather than forever.
     fn reserve(&mut self, now: Instant, units: u32, limit: u32) -> Duration {
         let units = units.min(limit);
         let mut at = self.spent.back().map_or(now, |(last, _)| now.max(*last));
@@ -691,11 +565,10 @@ impl MinuteBudget {
     }
 }
 
-/// One step of a paced stream of costs (the generic cell rate algorithm
-/// over quota units): given the next free slot and now, how long a
-/// request of `units` waits and the slot after it, `rate` units a
-/// second. Up to `burst` units more than the request's own go out at
-/// once after a pause.
+/// The wait of a request of `units` and the next free slot after it.
+///
+/// The generic cell rate algorithm over quota units, at `rate` a second:
+/// after a pause, up to `burst` units more than the request's go at once.
 fn pace_slot(
     next: Option<Instant>,
     now: Instant,
@@ -715,8 +588,7 @@ fn pace_slot(
 enum Throttle {
     /// A rate or concurrency limit: a short exponential back-off.
     Burst,
-    /// A per-minute quota the answer names: until the next minute, or on
-    /// Gmail a few seconds more each retry ([`minute_pause`]).
+    /// A per-minute quota: until the next minute ([`minute_pause`] on Gmail).
     Minute,
 }
 
@@ -724,15 +596,13 @@ enum Throttle {
 enum Answered {
     /// Anything but a throttled answer: handed to the coroutine as is.
     Passed(Vec<u8>),
-    /// No byte of an answer: the connection ended, or failed with the
-    /// error, before one came.
+    /// No answer byte: the connection ended, or failed with the error.
     Lost(Option<BridgeError>),
     /// A throttled answer, read to its end.
     Throttled(Refusal),
 }
 
-/// A throttled answer: its bytes, its status and reason for the log,
-/// and the wait it asked for.
+/// A throttled answer, with its status, reason and asked wait.
 struct Refusal {
     status: u16,
     reason: String,
@@ -741,13 +611,11 @@ struct Refusal {
     throttle: Throttle,
 }
 
-/// Whether a complete answer says the request was throttled, and how it
-/// is waited out: a 503, a 429, or one of Google's rate-limit 403s (a
-/// 403 for anything else, and any answer naming a daily quota, is no
-/// reason to wait). Only an answer naming a per-minute quota waits as a
-/// [`Throttle::Minute`]: a bare 429, Gmail's concurrency one
-/// (`Too many concurrent requests for user`) and its per-second one
-/// (`User-rate limit exceeded`) included, is gone within seconds.
+/// How a complete answer is waited out, if it says it was throttled.
+///
+/// A 503, a 429, or a Google rate-limit 403; never a daily quota. Only a
+/// named per-minute quota is a [`Throttle::Minute`]: any other, Gmail's
+/// concurrency and per-second limits included, is gone within seconds.
 fn throttled(status: u16, body: &[u8]) -> Option<Throttle> {
     match status {
         503 => Some(Throttle::Burst),
@@ -764,26 +632,24 @@ fn throttled(status: u16, body: &[u8]) -> Option<Throttle> {
     }
 }
 
-/// Whether a body names one of Google's per-minute quotas, as Gmail's
-/// `Quota exceeded for quota metric 'Total Query Cost' and limit 'Units
-/// per minute per user'` does, in its message or in its `ErrorInfo`
-/// metadata (`…PerMinutePerUser`); the older APIs' hundred seconds
-/// count alike.
-pub(crate) fn names_minute_quota(body: &[u8]) -> bool {
+/// Whether a body names one of Google's per-minute quotas.
+///
+/// In its message (Gmail's `limit 'Units per minute per user'`) or its
+/// `ErrorInfo` metadata (`…PerMinutePerUser`); the older APIs' hundred
+/// seconds count alike.
+pub fn names_minute_quota(body: &[u8]) -> bool {
     contains(body, b"per minute")
         || contains(body, b"PerMinute")
         || contains(body, b"per 100 seconds")
         || contains(body, b"Per100Seconds")
 }
 
-/// Whether a body names a daily quota, which no wait within a sync
-/// brings back.
-pub(crate) fn names_daily_quota(body: &[u8]) -> bool {
+/// Whether a body names a daily quota, which no wait in a sync brings back.
+pub fn names_daily_quota(body: &[u8]) -> bool {
     contains(body, b"dailyLimitExceeded") || contains(body, b"per day") || contains(body, b"PerDay")
 }
 
-/// The reason a throttled answer gives, for the log: Google's reasons
-/// and message, or the start of any other body.
+/// The reason a throttled answer gives, for the log.
 fn reason(status: u16, body: &[u8]) -> String {
     let error = GmailApiError::parse(status, body);
     let mut reason = error.reasons.join(",");
@@ -809,16 +675,13 @@ fn short(url: &str) -> &str {
     url.split('?').next().unwrap_or(url)
 }
 
-/// The wait from `now` to the start of the next minute, at least a
-/// second, so a refusal in a minute's last instant still pauses.
+/// The wait from `now` to the next minute, at least a second.
 fn until_next_minute(now: Timestamp) -> Duration {
     let millis = now.as_millisecond().rem_euclid(60_000) as u64;
     Duration::from_millis(60_000 - millis).max(Duration::from_secs(1))
 }
 
-/// The wait before retry `retries` (0-based) with no `Retry-After`:
-/// exponential from [`BACKOFF_BASE`], capped at [`BACKOFF_MAX`], scaled
-/// by `jitter` in `0.5..=1.0`.
+/// The back-off before retry `retries` (0-based), scaled by `jitter`.
 fn backoff(retries: u32, jitter: f64) -> Duration {
     let full = BACKOFF_BASE
         .saturating_mul(1 << retries.min(16))
@@ -826,8 +689,7 @@ fn backoff(retries: u32, jitter: f64) -> Duration {
     full.mul_f64(jitter)
 }
 
-/// A `Retry-After` value as a wait from `now` (RFC 9110 section 10.2.3):
-/// delay seconds, or an HTTP date, a date already past waiting nothing.
+/// A `Retry-After` value as a wait from `now` (RFC 9110 section 10.2.3).
 fn retry_after(value: &str, now: Timestamp) -> Option<Duration> {
     let value = value.trim();
     if let Ok(seconds) = value.parse::<u64>() {
@@ -839,9 +701,9 @@ fn retry_after(value: &str, now: Timestamp) -> Option<Duration> {
     Some(until(at, now))
 }
 
-/// The wait a Google error message names, as Gmail's per-user rate limit
-/// does (`User-rate limit exceeded.  Retry after 2026-10-10T20:21:41.123Z`):
-/// an RFC 3339 instant after `Retry after`, a past one waiting nothing.
+/// The wait a Google error message names after `Retry after`.
+///
+/// Gmail's per-user rate limit names an RFC 3339 instant there.
 fn retry_after_named(body: &[u8], now: Timestamp) -> Option<Duration> {
     const NEEDLE: &[u8] = b"Retry after ";
     let at = body
@@ -857,7 +719,7 @@ fn retry_after_named(body: &[u8], now: Timestamp) -> Option<Duration> {
     Some(until(instant, now))
 }
 
-/// The wait from `now` to `at`, nothing for an instant already past.
+/// The wait from `now` to `at`, nothing for a past instant.
 fn until(at: Timestamp, now: Timestamp) -> Duration {
     let millis = at.as_millisecond().saturating_sub(now.as_millisecond());
     Duration::from_millis(millis.max(0) as u64)
@@ -935,8 +797,7 @@ enum Framing {
     Length(usize),
     /// Chunked transfer coding, ending at its zero chunk.
     Chunked,
-    /// Neither: the body ends when the server closes, which cannot be
-    /// told apart from a stall without closing too.
+    /// Neither: the body ends at the server's close, which a stall mimics.
     None,
 }
 
@@ -966,9 +827,7 @@ impl Framing {
 /// How far an answer was read, to settle it once its end is.
 #[derive(Default)]
 enum Follow {
-    /// No answer, or one whose end cannot be told (no framing, a head past
-    /// the caps, `Connection: close`, an interim answer): never settled, so
-    /// its connection is dropped before the next request.
+    /// No answer, or no end to tell: its connection is dropped before reuse.
     #[default]
     Unknown,
     /// This many octets of a `Content-Length` body still to come.
@@ -1022,8 +881,7 @@ impl Follow {
     }
 }
 
-/// A chunked body followed as it streams (RFC 9112 section 7.1), nothing
-/// of it kept but the line under way.
+/// A chunked body followed as it streams (RFC 9112 section 7.1).
 #[derive(Default)]
 struct Chunks {
     /// Whether the last chunk was read and its trailers are coming.
@@ -1079,7 +937,7 @@ impl Chunks {
             };
             match size {
                 0 => self.trailer = true,
-                // NOTE: its CRLF included, in range under CHUNK_CAP.
+                // NOTE: in range, the CRLF included, under CHUNK_CAP.
                 size => self.data = size + 2,
             }
         }
@@ -1087,8 +945,7 @@ impl Chunks {
     }
 }
 
-/// Decodes a chunked body (RFC 9112 section 7.1), extensions and
-/// trailers skipped.
+/// Decodes a chunked body (RFC 9112 section 7.1), skipping extensions.
 fn dechunk(bytes: &[u8]) -> Body {
     let mut body = Vec::new();
     let mut at = 0;
@@ -1103,7 +960,7 @@ fn dechunk(bytes: &[u8]) -> Body {
         at += line + 2;
 
         if size == 0 {
-            // NOTE: trailers until the blank line that ends the body.
+            // NOTE: trailers run until the blank line ending the body.
             loop {
                 let Some(line) = line_end(&bytes[at..]) else {
                     return Body::Partial;
@@ -1123,8 +980,9 @@ fn dechunk(bytes: &[u8]) -> Body {
     }
 }
 
-/// The size a chunk-size line names (RFC 9112 section 7.1): hex digits
-/// before any extension, none for anything else or a size past
+/// The size a chunk-size line names (RFC 9112 section 7.1).
+///
+/// None for anything but hex digits before an extension, or past
 /// [`CHUNK_CAP`].
 fn chunk_size(line: &[u8]) -> Option<usize> {
     let size = line.split(|byte| *byte == b';').next()?.trim_ascii();
@@ -1146,7 +1004,7 @@ mod tests {
 
     use jiff::Timestamp;
 
-    use super::*;
+    use crate::client::throttle::*;
 
     fn head(text: &str) -> Head {
         Head::parse(text.as_bytes()).unwrap()
@@ -1185,8 +1043,7 @@ mod tests {
         assert!(matches!(dechunk(b"zz\r\n"), Body::Unframed));
     }
 
-    /// A chunk size a hostile or broken server sends is broken framing,
-    /// never an overflow nor a slice past the bytes read.
+    /// A hostile chunk size is broken framing, never an overflow or panic.
     #[test]
     fn a_chunk_size_out_of_range_or_garbage_is_broken_framing() {
         let sizes: [&[u8]; 8] = [
@@ -1222,28 +1079,27 @@ mod tests {
         assert_eq!(chunks.data, CHUNK_CAP + 2 - 5);
     }
 
-    /// An answer whose chunk size overflows passes through, throttled or
-    /// not, and its connection is never settled for reuse.
+    /// An overflowing chunk size passes through, its connection never reused.
     #[test]
     fn an_answer_with_an_overflowing_chunk_passes_through_unsettled() {
         for status in ["200 OK", "429 Too Many Requests"] {
             let answer = format!(
                 "HTTP/1.1 {status}\r\nTransfer-Encoding: chunked\r\n\r\nFFFFFFFFFFFFFFFF\r\nhi"
             );
-            let mut wire = Scripted::new(&[answer.as_bytes()], "2026-10-11T08:00:00Z");
-            throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
-            let read = throttled_read(&mut wire, GRAPH).unwrap();
+            let mut client =
+                Client::new(Scripted::new(&[answer.as_bytes()], "2026-10-11T08:00:00Z"));
+            client.http_write(GRAPH, GRAPH_GET).unwrap();
+            let read = client.http_read(GRAPH).unwrap();
             assert_eq!(read, answer.as_bytes());
-            assert!(wire.slept.is_empty());
-            assert_eq!(wire.settled, 0);
+            assert!(client.host.slept.is_empty());
+            assert_eq!(client.host.settled, 0);
         }
     }
 
-    /// The answer Gmail gave on 2026-10-07, its project number made up.
+    /// Gmail's per-minute quota refusal, its project number made up.
     const GMAIL_MINUTE_QUOTA: &[u8] = br#"{"error":{"code":403,"message":"Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user' of service 'gmail.googleapis.com' for consumer 'project_number:123'.","errors":[{"message":"Quota exceeded","domain":"usageLimits","reason":"rateLimitExceeded"}],"status":"PERMISSION_DENIED"}}"#;
 
-    /// Gmail's per-user concurrency limit, as it answers a request (or a
-    /// batch's inner call) sent while too many others run.
+    /// Gmail's per-user concurrency limit, on a request or a batch's call.
     const GMAIL_CONCURRENCY: &[u8] = br#"{"error":{"code":429,"message":"Too many concurrent requests for user","errors":[{"message":"Too many concurrent requests for user","domain":"global","reason":"rateLimitExceeded"}],"status":"RESOURCE_EXHAUSTED"}}"#;
 
     /// Gmail's per-user rate limit, naming when to come back.
@@ -1270,8 +1126,7 @@ mod tests {
             throttled(403, br#"{"reason":"rateLimitExceeded"}"#),
             Some(Throttle::Burst)
         );
-        // NOTE: Google's envelope read as reasons: a `RESOURCE_EXHAUSTED`
-        // 403 whose message names no quota at all.
+        // NOTE: a `RESOURCE_EXHAUSTED` 403 naming no quota is a rate limit.
         assert_eq!(
             throttled(
                 403,
@@ -1357,13 +1212,8 @@ mod tests {
     struct Scripted {
         answers: VecDeque<Vec<u8>>,
         writes: Vec<Vec<u8>>,
-        exchange: Exchange,
-        waited: Duration,
         slept: Vec<Duration>,
         now: Timestamp,
-        /// The Gmail account the requests are paced under, none for any
-        /// other server.
-        paced: Option<String>,
         /// Whether a request goes out on a connection that served one.
         reused: bool,
         /// How many reads fail before the script answers again.
@@ -1380,11 +1230,8 @@ mod tests {
             Self {
                 answers: answers.iter().map(|answer| answer.to_vec()).collect(),
                 writes: Vec::new(),
-                exchange: Exchange::default(),
-                waited: Duration::ZERO,
                 slept: Vec::new(),
                 now: now.parse().unwrap(),
-                paced: None,
                 reused: false,
                 failing: 0,
                 failure: "Transport read failed: SocketException: Connection reset",
@@ -1395,8 +1242,8 @@ mod tests {
         }
     }
 
-    impl Wire for Scripted {
-        fn wire_read(&mut self, _url: &str) -> Result<Vec<u8>, BridgeError> {
+    impl Host for Scripted {
+        fn read(&mut self, _url: &str) -> Result<Vec<u8>, BridgeError> {
             if self.failing > 0 {
                 self.failing -= 1;
                 return Err(self.failure.into());
@@ -1404,34 +1251,30 @@ mod tests {
             Ok(self.answers.pop_front().unwrap_or_default())
         }
 
-        fn wire_write(&mut self, _url: &str, bytes: &[u8]) -> Result<(), BridgeError> {
+        fn write(&mut self, _url: &str, bytes: &[u8]) -> Result<(), BridgeError> {
             self.writes.push(bytes.to_vec());
             Ok(())
         }
 
-        fn wire_begin(&mut self, _url: &str) -> bool {
+        fn begin(&mut self, _url: &str) -> bool {
             self.begun += 1;
             self.reused
         }
 
-        fn wire_settle(&mut self, _url: &str) {
+        fn settle(&mut self, _url: &str) {
             self.settled += 1;
         }
 
-        fn wire_reset(&mut self, _url: &str) {
+        fn reset(&mut self, _url: &str) {
             self.resets += 1;
         }
 
-        fn exchange(&mut self) -> &mut Exchange {
-            &mut self.exchange
+        fn starttls(&mut self, _url: &str) -> Result<(), BridgeError> {
+            Err("Unscripted".into())
         }
 
-        fn waited(&mut self) -> &mut Duration {
-            &mut self.waited
-        }
-
-        fn paced(&self) -> Option<String> {
-            self.paced.clone()
+        fn serve(&mut self, _request: &str) -> Result<String, BridgeError> {
+            Err("Unscripted".into())
         }
 
         fn sleep(&mut self, delay: Duration) {
@@ -1454,8 +1297,8 @@ mod tests {
         bytes
     }
 
-    // NOTE: a scripted wire paces no account, so these tests leave the
-    // process-wide pacing alone; a refusal reads the same on any API.
+    // NOTE: a scripted wire paces no account, leaving the process-wide
+    // pacing alone; a refusal reads the same on any API.
     const URL: &str = "https://gmail.googleapis.com/gmail/v1/users/me/messages";
     const REQUEST: &[u8] =
         b"GET /gmail/v1/users/me/messages HTTP/1.1\r\nHost: gmail.googleapis.com\r\n\r\n";
@@ -1464,15 +1307,15 @@ mod tests {
     fn a_minute_quota_refusal_waits_for_the_next_minute_then_succeeds() {
         let refused = answer("403 Forbidden", GMAIL_MINUTE_QUOTA);
         let served = answer("200 OK", b"{}");
-        let mut wire = Scripted::new(&[&refused, &served], "2026-10-07T08:49:20Z");
+        let mut client = Client::new(Scripted::new(&[&refused, &served], "2026-10-07T08:49:20Z"));
 
-        throttled_write(&mut wire, URL, REQUEST).unwrap();
-        let read = throttled_read(&mut wire, URL).unwrap();
+        client.http_write(URL, REQUEST).unwrap();
+        let read = client.http_read(URL).unwrap();
 
         assert_eq!(read, served);
-        assert_eq!(wire.writes, [REQUEST, REQUEST]);
-        assert_eq!(wire.slept.len(), 1);
-        let slept = wire.slept[0];
+        assert_eq!(client.host.writes, [REQUEST, REQUEST]);
+        assert_eq!(client.host.slept.len(), 1);
+        let slept = client.host.slept[0];
         assert!(slept >= Duration::from_secs(40), "{slept:?}");
         assert!(
             slept <= Duration::from_secs(40) + MINUTE_JITTER,
@@ -1484,56 +1327,75 @@ mod tests {
     fn a_gmail_minute_quota_refusal_backs_off_seconds_more_each_time() {
         let refused = answer("403 Forbidden", GMAIL_MINUTE_QUOTA);
         let served = answer("200 OK", b"{}");
-        let mut wire = Scripted::new(&[&refused, &refused, &served], "2026-10-07T08:49:20Z");
-        wire.paced = Some("token".into());
+        let mut client = Client::new(Scripted::new(
+            &[&refused, &refused, &served],
+            "2026-10-07T08:49:20Z",
+        ));
+        client.gmail_pace = Some("token".into());
 
-        throttled_write(&mut wire, URL, REQUEST).unwrap();
-        assert_eq!(throttled_read(&mut wire, URL).unwrap(), served);
+        client.http_write(URL, REQUEST).unwrap();
+        assert_eq!(client.http_read(URL).unwrap(), served);
 
-        // Two, then three seconds: never the forty to the next minute.
-        assert_eq!(wire.slept, [Duration::from_secs(2), Duration::from_secs(3)]);
+        // NOTE: two, then three seconds, never the forty to the minute.
+        assert_eq!(
+            client.host.slept,
+            [Duration::from_secs(2), Duration::from_secs(3)]
+        );
     }
 
     #[test]
     fn a_minute_quota_refusal_past_its_budget_is_the_answer() {
         let refused = answer("403 Forbidden", GMAIL_MINUTE_QUOTA);
-        let mut wire = Scripted::new(&[&refused, &refused, &refused], "2026-10-07T08:49:20Z");
+        let mut client = Client::new(Scripted::new(
+            &[&refused, &refused, &refused],
+            "2026-10-07T08:49:20Z",
+        ));
 
-        throttled_write(&mut wire, URL, REQUEST).unwrap();
-        let read = throttled_read(&mut wire, URL).unwrap();
+        client.http_write(URL, REQUEST).unwrap();
+        let read = client.http_read(URL).unwrap();
 
-        // One wait to the next minute fits the budget, a second whole
-        // minute does not: the refusal reaches the coroutine.
+        // NOTE: one wait to the next minute fits the budget, a second
+        // does not.
         assert_eq!(read, refused);
-        assert_eq!(wire.slept.len(), 1);
-        assert!(wire.waited <= QUOTA_WAIT_BUDGET);
+        assert_eq!(client.host.slept.len(), 1);
+        assert!(client.waited <= QUOTA_WAIT_BUDGET);
     }
 
     #[test]
     fn a_concurrency_refusal_is_retried_within_a_second() {
         let refused = answer("429 Too Many Requests", GMAIL_CONCURRENCY);
         let served = answer("200 OK", b"{}");
-        let mut wire = Scripted::new(&[&refused, &refused, &served], "2026-10-07T08:49:20Z");
+        let mut client = Client::new(Scripted::new(
+            &[&refused, &refused, &served],
+            "2026-10-07T08:49:20Z",
+        ));
 
-        throttled_write(&mut wire, URL, REQUEST).unwrap();
-        assert_eq!(throttled_read(&mut wire, URL).unwrap(), served);
+        client.http_write(URL, REQUEST).unwrap();
+        assert_eq!(client.http_read(URL).unwrap(), served);
 
-        // Two short back-offs, the second at most two seconds: never the
-        // forty seconds to the next minute.
-        assert_eq!(wire.slept.len(), 2);
-        assert!(wire.slept[0] <= Duration::from_secs(1), "{:?}", wire.slept);
-        assert!(wire.slept[1] <= Duration::from_secs(2), "{:?}", wire.slept);
+        // NOTE: two short back-offs, never the forty to the next minute.
+        assert_eq!(client.host.slept.len(), 2);
+        assert!(
+            client.host.slept[0] <= Duration::from_secs(1),
+            "{:?}",
+            client.host.slept
+        );
+        assert!(
+            client.host.slept[1] <= Duration::from_secs(2),
+            "{:?}",
+            client.host.slept
+        );
     }
 
     #[test]
     fn a_user_rate_refusal_waits_until_the_instant_it_names() {
         let refused = answer("429 Too Many Requests", GMAIL_USER_RATE);
         let served = answer("200 OK", b"{}");
-        let mut wire = Scripted::new(&[&refused, &served], "2026-10-10T20:21:40Z");
+        let mut client = Client::new(Scripted::new(&[&refused, &served], "2026-10-10T20:21:40Z"));
 
-        throttled_write(&mut wire, URL, REQUEST).unwrap();
-        assert_eq!(throttled_read(&mut wire, URL).unwrap(), served);
-        assert_eq!(wire.slept, [Duration::from_millis(1500)]);
+        client.http_write(URL, REQUEST).unwrap();
+        assert_eq!(client.http_read(URL).unwrap(), served);
+        assert_eq!(client.host.slept, [Duration::from_millis(1500)]);
     }
 
     #[test]
@@ -1541,11 +1403,11 @@ mod tests {
         let refused =
             b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 3\r\nContent-Length: 2\r\n\r\n{}";
         let served = answer("200 OK", b"{}");
-        let mut wire = Scripted::new(&[refused, &served], "2026-10-07T08:49:20Z");
+        let mut client = Client::new(Scripted::new(&[refused, &served], "2026-10-07T08:49:20Z"));
 
-        throttled_write(&mut wire, URL, REQUEST).unwrap();
-        assert_eq!(throttled_read(&mut wire, URL).unwrap(), served);
-        assert_eq!(wire.slept, [Duration::from_secs(3)]);
+        client.http_write(URL, REQUEST).unwrap();
+        assert_eq!(client.http_read(URL).unwrap(), served);
+        assert_eq!(client.host.slept, [Duration::from_secs(3)]);
     }
 
     #[test]
@@ -1581,8 +1443,7 @@ mod tests {
         assert_eq!(backoff(9, 1.0), Duration::from_secs(16));
         assert_eq!(backoff(2, 0.5), Duration::from_secs(2));
 
-        // The worst case fits the budget, so a server that never names
-        // a wait still gets every retry.
+        // NOTE: a server that never names a wait still gets every retry.
         let worst: Duration = (0..MAX_RETRIES).map(|n| backoff(n, 1.0)).sum();
         assert!(worst <= WAIT_BUDGET);
     }
@@ -1595,9 +1456,6 @@ mod tests {
         let mut next = None;
         let mut booked = Vec::new();
 
-        // Three minutes of batches at the paced rate, a send of a hundred
-        // units every tenth request, the clock moving with each wait as
-        // a worker's would.
         let mut now = start;
         while now < start + Duration::from_secs(180) {
             let units = if booked.len() % 10 == 9 { 100 } else { 125 };
@@ -1609,7 +1467,6 @@ mod tests {
             booked.push((now, units));
         }
 
-        // No sixty seconds ever carry more than the budget.
         for (at, (first, _)) in booked.iter().enumerate() {
             let within: u32 = booked[at..]
                 .iter()
@@ -1619,8 +1476,6 @@ mod tests {
             assert!(within <= limit, "{within} units within a minute");
         }
 
-        // Past a full minute, a send's hundred units waits for room
-        // rather than going out.
         let mut full = MinuteBudget::new();
         for _ in 0..limit / 5 {
             assert_eq!(full.reserve(start, 5, limit), Duration::ZERO);
@@ -1642,9 +1497,8 @@ mod tests {
         let start = Instant::now();
         let mut pace = GmailPace::new();
 
-        // A batch of 10 reads (200 units) goes at once, the next one waits
-        // for its units to be paid at the rate, and two batches never go
-        // out in the same second's worth of units.
+        // NOTE: a batch of 10 reads is 200 units: it goes at once, the
+        // next waits for its units to be paid at the rate.
         assert_eq!(pace.book(start, 200, false), Duration::ZERO);
         let second = pace.book(start, 200, false);
         let per_unit = Duration::from_secs(1) / GMAIL_UNITS_PER_SECOND;
@@ -1652,7 +1506,6 @@ mod tests {
         let third = pace.book(start, 200, false);
         assert_eq!(third, second + per_unit * 200);
 
-        // After a pause, a few small calls go out at once, then the rate.
         let later = start + Duration::from_secs(10);
         let mut free = 0;
         for _ in 0..60 {
@@ -1666,14 +1519,11 @@ mod tests {
         let start = Instant::now();
         let mut pace = GmailPace::new();
 
-        // The background spent its whole minute and queued behind it.
         for _ in 0..GMAIL_UNITS_PER_MINUTE / 125 {
             pace.book(start, 125, false);
         }
         assert!(pace.book(start, 125, false) >= Duration::from_secs(30));
 
-        // A message opened now goes at once, and the background yields
-        // its units to it.
         let before = pace.next.unwrap();
         assert_eq!(pace.book(start, 5, true), Duration::ZERO);
         assert!(pace.next.unwrap() > before);
@@ -1687,110 +1537,112 @@ mod tests {
     const GRAPH_PUT: &[u8] =
         b"PUT /v1.0/me/events/e1 HTTP/1.1\r\nHost: graph.microsoft.com\r\nContent-Length: 2\r\n\r\n{}";
 
-    /// Graph closed the connection while it idled: the read ends before a
-    /// byte of the answer, and the request goes out again on a new one.
+    /// A connection Graph closed while idle is resent on a new one.
     #[test]
     fn a_reused_connection_ended_before_its_answer_sends_the_request_again() {
         let served = answer("200 OK", b"From: a\r\n\r\nbody");
-        let mut wire = Scripted::new(&[b"", &served], "2026-10-11T08:00:00Z");
-        wire.reused = true;
+        let mut client = Client::new(Scripted::new(&[b"", &served], "2026-10-11T08:00:00Z"));
+        client.host.reused = true;
 
-        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
-        assert_eq!(throttled_read(&mut wire, GRAPH).unwrap(), served);
+        client.http_write(GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(client.http_read(GRAPH).unwrap(), served);
 
-        assert_eq!(wire.writes, [GRAPH_GET, GRAPH_GET]);
-        assert_eq!(wire.resets, 1);
-        assert_eq!(wire.settled, 1, "the answer read whole is settled");
+        assert_eq!(client.host.writes, [GRAPH_GET, GRAPH_GET]);
+        assert_eq!(client.host.resets, 1);
+        assert_eq!(client.host.settled, 1, "the answer read whole is settled");
     }
 
     #[test]
     fn a_reused_connection_reset_before_its_answer_sends_the_request_again() {
         let served = answer("200 OK", b"{}");
-        let mut wire = Scripted::new(&[&served], "2026-10-11T08:00:00Z");
-        wire.reused = true;
-        wire.failing = 1;
+        let mut client = Client::new(Scripted::new(&[&served], "2026-10-11T08:00:00Z"));
+        client.host.reused = true;
+        client.host.failing = 1;
 
-        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
-        assert_eq!(throttled_read(&mut wire, GRAPH).unwrap(), served);
-        assert_eq!(wire.writes, [GRAPH_GET, GRAPH_GET]);
+        client.http_write(GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(client.http_read(GRAPH).unwrap(), served);
+        assert_eq!(client.host.writes, [GRAPH_GET, GRAPH_GET]);
     }
 
     #[test]
     fn a_request_is_sent_again_once_only_idempotent_and_reused() {
         // NOTE: a POST may have been served before the connection went.
-        let mut post = Scripted::new(&[b""], "2026-10-11T08:00:00Z");
-        post.reused = true;
-        throttled_write(&mut post, GRAPH, GRAPH_POST).unwrap();
-        assert!(throttled_read(&mut post, GRAPH).unwrap().is_empty());
-        assert_eq!(post.writes.len(), 1);
+        let mut post = Client::new(Scripted::new(&[b""], "2026-10-11T08:00:00Z"));
+        post.host.reused = true;
+        post.http_write(GRAPH, GRAPH_POST).unwrap();
+        assert!(post.http_read(GRAPH).unwrap().is_empty());
+        assert_eq!(post.host.writes.len(), 1);
 
-        // A fresh connection that ends is the server's answer, not an idle
-        // close.
-        let mut fresh = Scripted::new(&[b""], "2026-10-11T08:00:00Z");
-        throttled_write(&mut fresh, GRAPH, GRAPH_GET).unwrap();
-        assert!(throttled_read(&mut fresh, GRAPH).unwrap().is_empty());
-        assert_eq!(fresh.writes.len(), 1);
+        // NOTE: a fresh connection ending is an answer, not an idle close.
+        let mut fresh = Client::new(Scripted::new(&[b""], "2026-10-11T08:00:00Z"));
+        fresh.http_write(GRAPH, GRAPH_GET).unwrap();
+        assert!(fresh.http_read(GRAPH).unwrap().is_empty());
+        assert_eq!(fresh.host.writes.len(), 1);
 
-        let mut failing = Scripted::new(&[], "2026-10-11T08:00:00Z");
-        failing.reused = true;
-        failing.failing = 2;
-        throttled_write(&mut failing, GRAPH, GRAPH_GET).unwrap();
-        assert!(throttled_read(&mut failing, GRAPH).is_err());
-        assert_eq!(failing.writes.len(), 2, "sent again once");
+        let mut failing = Client::new(Scripted::new(&[], "2026-10-11T08:00:00Z"));
+        failing.host.reused = true;
+        failing.host.failing = 2;
+        failing.http_write(GRAPH, GRAPH_GET).unwrap();
+        assert!(failing.http_read(GRAPH).is_err());
+        assert_eq!(failing.host.writes.len(), 2, "sent again once");
     }
 
-    /// A server slow to answer a PUT may still apply it: the timeout is
-    /// the answer, nothing is sent again.
+    /// A PUT that timed out may still apply: nothing is sent again.
     #[test]
     fn a_read_timeout_is_not_a_lost_connection() {
-        let mut wire = Scripted::new(&[], "2026-10-11T08:00:00Z");
-        wire.reused = true;
-        wire.failing = 1;
-        wire.failure = "Transport read failed: java.net.SocketTimeoutException: Read timed out";
+        let mut client = Client::new(Scripted::new(&[], "2026-10-11T08:00:00Z"));
+        client.host.reused = true;
+        client.host.failing = 1;
+        client.host.failure =
+            "Transport read failed: java.net.SocketTimeoutException: Read timed out";
 
-        throttled_write(&mut wire, GRAPH, GRAPH_PUT).unwrap();
-        assert!(throttled_read(&mut wire, GRAPH).is_err());
-        assert_eq!(wire.writes, [GRAPH_PUT]);
+        client.http_write(GRAPH, GRAPH_PUT).unwrap();
+        assert!(client.http_read(GRAPH).is_err());
+        assert_eq!(client.host.writes, [GRAPH_PUT]);
     }
 
-    /// A send whose answer never came may have been carried out; one
-    /// answered, or refused while being written, was not.
+    /// A send left unanswered may have happened; one refused mid-write not.
     #[test]
     fn a_request_without_an_answer_is_unanswered() {
-        let mut lost = Scripted::new(&[b""], "2026-10-11T08:00:00Z");
-        throttled_write(&mut lost, GRAPH, GRAPH_POST).unwrap();
-        assert!(!lost.exchange.unanswered(), "nothing read yet");
-        assert!(throttled_read(&mut lost, GRAPH).unwrap().is_empty());
-        assert!(lost.exchange.unanswered());
+        let mut lost = Client::new(Scripted::new(&[b""], "2026-10-11T08:00:00Z"));
+        lost.http_write(GRAPH, GRAPH_POST).unwrap();
+        assert!(!lost.unanswered(), "nothing read yet");
+        assert!(lost.http_read(GRAPH).unwrap().is_empty());
+        assert!(lost.unanswered());
 
         let served = answer("500 Internal Server Error", b"{}");
-        let mut answered = Scripted::new(&[&served], "2026-10-11T08:00:00Z");
-        throttled_write(&mut answered, GRAPH, GRAPH_POST).unwrap();
-        throttled_read(&mut answered, GRAPH).unwrap();
-        assert!(!answered.exchange.unanswered());
+        let mut answered = Client::new(Scripted::new(&[&served], "2026-10-11T08:00:00Z"));
+        answered.http_write(GRAPH, GRAPH_POST).unwrap();
+        answered.http_read(GRAPH).unwrap();
+        assert!(!answered.unanswered());
 
-        throttled_write(&mut answered, GRAPH, GRAPH_POST).unwrap();
-        assert!(!answered.exchange.unanswered(), "a new request resets it");
+        answered.http_write(GRAPH, GRAPH_POST).unwrap();
+        assert!(!answered.unanswered(), "a new request resets it");
     }
 
-    /// A gateway's 503 may follow the work done behind it: a POST is not
-    /// sent again, a GET is.
+    /// A gateway's 503 may follow the work: a POST is not resent, a GET is.
     #[test]
     fn only_an_idempotent_request_is_sent_again_after_a_503() {
         let unavailable =
             b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 2\r\n\r\n{}";
         let served = answer("200 OK", b"{}");
 
-        let mut post = Scripted::new(&[unavailable, &served], "2026-10-11T08:00:00Z");
-        throttled_write(&mut post, GRAPH, GRAPH_POST).unwrap();
-        assert_eq!(throttled_read(&mut post, GRAPH).unwrap(), unavailable);
-        assert_eq!(post.writes, [GRAPH_POST]);
-        assert!(post.slept.is_empty());
+        let mut post = Client::new(Scripted::new(
+            &[unavailable, &served],
+            "2026-10-11T08:00:00Z",
+        ));
+        post.http_write(GRAPH, GRAPH_POST).unwrap();
+        assert_eq!(post.http_read(GRAPH).unwrap(), unavailable);
+        assert_eq!(post.host.writes, [GRAPH_POST]);
+        assert!(post.host.slept.is_empty());
 
-        let mut get = Scripted::new(&[unavailable, &served], "2026-10-11T08:00:00Z");
-        throttled_write(&mut get, GRAPH, GRAPH_GET).unwrap();
-        assert_eq!(throttled_read(&mut get, GRAPH).unwrap(), served);
-        assert_eq!(get.writes, [GRAPH_GET, GRAPH_GET]);
+        let mut get = Client::new(Scripted::new(
+            &[unavailable, &served],
+            "2026-10-11T08:00:00Z",
+        ));
+        get.http_write(GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(get.http_read(GRAPH).unwrap(), served);
+        assert_eq!(get.host.writes, [GRAPH_GET, GRAPH_GET]);
     }
 
     /// A 429 refuses before any work: a POST waits and goes again.
@@ -1798,34 +1650,33 @@ mod tests {
     fn a_post_refused_by_a_429_is_sent_again() {
         let refused = answer("429 Too Many Requests", b"{}");
         let served = answer("200 OK", b"{}");
-        let mut post = Scripted::new(&[&refused, &served], "2026-10-11T08:00:00Z");
+        let mut post = Client::new(Scripted::new(&[&refused, &served], "2026-10-11T08:00:00Z"));
 
-        throttled_write(&mut post, GRAPH, GRAPH_POST).unwrap();
-        assert_eq!(throttled_read(&mut post, GRAPH).unwrap(), served);
-        assert_eq!(post.writes, [GRAPH_POST, GRAPH_POST]);
+        post.http_write(GRAPH, GRAPH_POST).unwrap();
+        assert_eq!(post.http_read(GRAPH).unwrap(), served);
+        assert_eq!(post.host.writes, [GRAPH_POST, GRAPH_POST]);
     }
 
     #[test]
     fn an_answer_is_settled_once_read_to_its_end() {
         let served = answer("200 OK", b"0123456789");
         let (head, tail) = served.split_at(served.len() - 4);
-        let mut wire = Scripted::new(&[head, tail], "2026-10-11T08:00:00Z");
+        let mut client = Client::new(Scripted::new(&[head, tail], "2026-10-11T08:00:00Z"));
 
-        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
-        assert_eq!(wire.begun, 1, "a new request begins on its origin");
-        throttled_read(&mut wire, GRAPH).unwrap();
-        assert_eq!(wire.settled, 0, "four octets still to come");
-        throttled_read(&mut wire, GRAPH).unwrap();
-        assert_eq!(wire.settled, 1);
+        client.http_write(GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(client.host.begun, 1, "a new request begins on its origin");
+        client.http_read(GRAPH).unwrap();
+        assert_eq!(client.host.settled, 0, "four octets still to come");
+        client.http_read(GRAPH).unwrap();
+        assert_eq!(client.host.settled, 1);
 
-        // The next request begins again.
-        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
-        assert_eq!(wire.begun, 2);
+        client.http_write(GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(client.host.begun, 2);
     }
 
     #[test]
     fn a_chunked_answer_is_settled_at_its_last_chunk() {
-        let mut wire = Scripted::new(
+        let mut client = Client::new(Scripted::new(
             &[
                 b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel",
                 b"lo\r\n6;x=y\r\n world\r",
@@ -1833,14 +1684,14 @@ mod tests {
                 b"\r\n",
             ],
             "2026-10-11T08:00:00Z",
-        );
-        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
+        ));
+        client.http_write(GRAPH, GRAPH_GET).unwrap();
         for _ in 0..3 {
-            throttled_read(&mut wire, GRAPH).unwrap();
-            assert_eq!(wire.settled, 0);
+            client.http_read(GRAPH).unwrap();
+            assert_eq!(client.host.settled, 0);
         }
-        throttled_read(&mut wire, GRAPH).unwrap();
-        assert_eq!(wire.settled, 1);
+        client.http_read(GRAPH).unwrap();
+        assert_eq!(client.host.settled, 1);
     }
 
     #[test]
@@ -1848,31 +1699,31 @@ mod tests {
         let closing = b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}";
         let unframed = b"HTTP/1.1 200 OK\r\n\r\n{}";
         for answer in [&closing[..], &unframed[..]] {
-            let mut wire = Scripted::new(&[answer], "2026-10-11T08:00:00Z");
-            throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
-            throttled_read(&mut wire, GRAPH).unwrap();
-            assert_eq!(wire.settled, 0);
+            let mut client = Client::new(Scripted::new(&[answer], "2026-10-11T08:00:00Z"));
+            client.http_write(GRAPH, GRAPH_GET).unwrap();
+            client.http_read(GRAPH).unwrap();
+            assert_eq!(client.host.settled, 0);
         }
 
-        // Bytes past the end put the connection out of step: it goes.
-        let mut excess = Scripted::new(
+        // NOTE: bytes past the end put the connection out of step.
+        let mut excess = Client::new(Scripted::new(
             &[b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}HTTP/1.1"],
             "2026-10-11T08:00:00Z",
-        );
-        throttled_write(&mut excess, GRAPH, GRAPH_GET).unwrap();
-        throttled_read(&mut excess, GRAPH).unwrap();
-        assert_eq!(excess.settled, 0);
-        assert_eq!(excess.resets, 1);
+        ));
+        excess.http_write(GRAPH, GRAPH_GET).unwrap();
+        excess.http_read(GRAPH).unwrap();
+        assert_eq!(excess.host.settled, 0);
+        assert_eq!(excess.host.resets, 1);
     }
 
     #[test]
     fn a_throttled_answer_given_up_on_is_settled() {
         let refused = answer("503 Service Unavailable", b"");
         let answers: Vec<&[u8]> = vec![&refused; MAX_RETRIES as usize + 1];
-        let mut wire = Scripted::new(&answers, "2026-10-11T08:00:00Z");
-        throttled_write(&mut wire, GRAPH, GRAPH_GET).unwrap();
-        assert_eq!(throttled_read(&mut wire, GRAPH).unwrap(), refused);
-        assert_eq!(wire.settled, 1);
+        let mut client = Client::new(Scripted::new(&answers, "2026-10-11T08:00:00Z"));
+        client.http_write(GRAPH, GRAPH_GET).unwrap();
+        assert_eq!(client.http_read(GRAPH).unwrap(), refused);
+        assert_eq!(client.host.settled, 1);
     }
 
     #[test]

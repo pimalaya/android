@@ -1,16 +1,18 @@
-//! Account base URLs and the backends hiding behind them.
+//! # Accounts
 //!
-//! Four backends share the client's operations: CardDAV (a plain HTTPS
-//! context root), Microsoft Graph, JMAP for Contacts (RFC 9610) and
-//! the Google People API. The three non-CardDAV backends have no
-//! context root to fill the base URL slot, so a sentinel scheme fills
-//! it instead; every base URL is opaque to the Java side, which only
-//! ever threads it back into the bridge. This module owns the
-//! sentinels: building base URLs, telling the backend of one apart,
-//! and extracting the protocol pieces (JMAP session URL, book segment,
-//! Graph folder id) the per-backend operations address.
+//! Account base URLs and the backend each one names: a DAV context root,
+//! or a sentinel scheme for an API with no root (Graph, JMAP, Google).
+//!
+//! Base URLs are opaque to Java, which threads them back into the bridge.
+//! The domains route on [`Backend`] and address collections through the
+//! pieces extracted here; onboarding lives in [`discovery`] and [`oauth`].
+
+mod discovery;
+pub mod oauth;
 
 use url::Url;
+
+use crate::client::Auth;
 
 /// Sentinel scheme of Microsoft Graph accounts: their base URL is
 /// `msgraph://<email>` instead of a CardDAV context root.
@@ -20,16 +22,17 @@ pub const MSGRAPH_PREFIX: &str = "msgraph://";
 /// `google://<email>` instead of a CardDAV context root.
 pub const GOOGLE_PREFIX: &str = "google://";
 
-/// Sentinel scheme of JMAP accounts: their base URL is
-/// `jmap://<host>[/path]` instead of a CardDAV context root. The part
-/// after the sentinel is the HTTPS session URL (a bare host triggers
-/// `/.well-known/jmap` discovery).
+/// Sentinel scheme of JMAP accounts, base URL `jmap://<host>[/path]`.
+///
+/// The part after it is the HTTPS session URL; a bare host triggers
+/// `/.well-known/jmap` discovery.
 pub const JMAP_PREFIX: &str = "jmap://";
 
-/// Sentinel scheme of the built-in local account: its cards live only
-/// in the app's store and never sync to any server, so it has no
-/// transport and never reaches a [`Backend`]; only the account info
-/// tells it apart, to keep the local book out of the sync loop.
+/// Sentinel scheme of the built-in local account, never synced.
+///
+/// Its cards live only in the app's store, so it never reaches a
+/// [`Backend`]; the account info tells it apart to keep the local book out
+/// of the sync loop.
 pub const LOCAL_PREFIX: &str = "local://";
 
 /// Path segment of the default Contacts folder (empty Graph folder id).
@@ -66,19 +69,18 @@ impl Backend {
         }
     }
 
-    /// True when the backend's cards are account-level resources with
-    /// m:n addressbook memberships (JMAP, Google), listed once per
-    /// account; CardDAV and Graph cards live in the one collection
-    /// they were listed from.
+    /// True when cards are account-level with m:n book memberships.
+    ///
+    /// JMAP and Google cards are listed once per account; CardDAV and
+    /// Graph cards live in the one collection they were listed from.
     pub fn account_level(self) -> bool {
         matches!(self, Self::Jmap | Self::Google)
     }
 
-    /// True when a calendar write carries an override of one occurrence
-    /// (RFC 5545 3.8.4.4) to the server: CalDAV's puts the whole object,
-    /// Graph's and Google's write the occurrence through its instance
-    /// after the series, and JMAP's carries it inside the event's
-    /// `recurrenceOverrides`.
+    /// True when a calendar write carries overrides (RFC 5545 3.8.4.4).
+    ///
+    /// CalDAV puts the whole object, Graph and Google write the instance
+    /// after the series, JMAP carries it in `recurrenceOverrides`.
     pub fn writes_overrides(self) -> bool {
         matches!(
             self,
@@ -86,9 +88,10 @@ impl Backend {
         )
     }
 
-    /// True when a calendar write carries an `EXDATE` to the server, the
-    /// occurrence deleted through its instance where it is not the whole
-    /// object, or excluded in the event's `recurrenceOverrides` on JMAP.
+    /// True when a calendar write carries an `EXDATE` to the server.
+    ///
+    /// Where the object is not whole, the occurrence is deleted through its
+    /// instance, or excluded in `recurrenceOverrides` on JMAP.
     pub fn writes_exdates(self) -> bool {
         matches!(
             self,
@@ -96,8 +99,7 @@ impl Backend {
         )
     }
 
-    /// True when a calendar of this backend takes event writes: every one,
-    /// JMAP's through `CalendarEvent/set`.
+    /// True when a calendar of this backend takes event writes (all do).
     pub fn writes_events(self) -> bool {
         matches!(
             self,
@@ -105,10 +107,10 @@ impl Backend {
         )
     }
 
-    /// True when a mail account of this backend submits through the
-    /// session it reads from (RFC 8621 section 7, Graph `sendMail`, Gmail
-    /// `messages.send`), needing no submit endpoint of its own; an IMAP
-    /// account submits over SMTP.
+    /// True when mail submits through the session it reads from.
+    ///
+    /// RFC 8621 section 7, Graph `sendMail`, Gmail `messages.send`; an IMAP
+    /// account submits over SMTP instead.
     pub fn submits_over_session(self) -> bool {
         matches!(self, Self::Jmap | Self::Graph | Self::Google)
     }
@@ -124,9 +126,31 @@ impl Backend {
     }
 }
 
-/// Builds an account base URL of the given kind: `googleCarddav` is
-/// Google's fixed CardDAV principal root for the email, `google` and
-/// `msgraph` wrap the email behind their sentinel, and `jmap` wraps an
+/// One account as an operation addresses it.
+pub struct Account<'a> {
+    /// The base URL, a context root or a backend sentinel.
+    pub base_url: &'a str,
+    /// The backend behind the base URL.
+    pub backend: Backend,
+    /// The account's credential.
+    pub auth: Auth<'a>,
+}
+
+impl<'a> Account<'a> {
+    /// The account as Java hands it over, its backend told from the URL.
+    pub fn new(base_url: &'a str, login: &'a str, password: &'a str) -> Self {
+        Self {
+            base_url,
+            backend: Backend::of(base_url),
+            auth: Auth::new(login, password),
+        }
+    }
+}
+
+/// Builds an account base URL of the given kind.
+///
+/// `googleCarddav` is Google's CardDAV principal root for the email,
+/// `google` and `msgraph` wrap the email behind their sentinel, `jmap` an
 /// HTTPS session URL (or bare host) behind [`JMAP_PREFIX`].
 pub fn base_url(kind: &str, value: &str) -> Result<String, String> {
     match kind {
@@ -146,8 +170,7 @@ pub fn base_url(kind: &str, value: &str) -> Result<String, String> {
     }
 }
 
-/// The HTTPS session URL behind a JMAP account's base URL (the part
-/// after [`JMAP_PREFIX`]).
+/// The HTTPS session URL behind a JMAP base URL ([`JMAP_PREFIX`] off).
 pub fn jmap_session_url(base_url: &str) -> Result<Url, String> {
     let host = base_url
         .strip_prefix(JMAP_PREFIX)
@@ -157,9 +180,9 @@ pub fn jmap_session_url(base_url: &str) -> Result<Url, String> {
     Url::parse(&session_url).map_err(|err| format!("Invalid JMAP session URL: {err}"))
 }
 
-/// The book segment addressed by an addressbook URL: the part after
-/// the account's base URL, or the URL itself when it does not extend
-/// the base.
+/// The book segment of an addressbook URL: the part after the base URL.
+///
+/// A URL not extending the base passes through whole.
 pub fn book_segment<'a>(base_url: &str, addressbook_url: &'a str) -> &'a str {
     let prefix = format!("{base_url}/");
     match addressbook_url.strip_prefix(&prefix) {
@@ -168,16 +191,11 @@ pub fn book_segment<'a>(base_url: &str, addressbook_url: &'a str) -> &'a str {
     }
 }
 
-/// The collection id addressed by a JMAP collection URL: its last path
-/// segment.
+/// The collection id of a JMAP collection URL: its last path segment.
 ///
-/// An AddressBook or Calendar id is unique inside its JMAP account and
-/// nowhere else, so two accounts on one provider routinely name a
-/// collection the same. The URL the app addresses one by therefore
-/// carries both, `<base URL>/<JMAP account id>/<collection id>`, and
-/// only the tail is the id the protocol takes back. A session that
-/// named no account for the capability composed the bare id, which the
-/// same last-segment read returns unchanged.
+/// Collection ids are unique only inside a JMAP account, so the app's URL
+/// is `<base>/<account id>/<collection id>` and only the tail goes back to
+/// the server; a bare id (no account named) reads back unchanged.
 pub fn jmap_collection_id(collection_url: &str) -> &str {
     collection_url.rsplit('/').next().unwrap_or(collection_url)
 }
@@ -193,10 +211,10 @@ pub fn graph_folder<'a>(base_url: &str, addressbook_url: &'a str) -> &'a str {
     }
 }
 
-/// The card's addressing key, reconstructed for pre-uri local rows:
-/// CardDAV resources are named `<id>.vcf` (Graph rides the same
-/// fallback, though its rows always carry a uri), JMAP and Google
-/// address the bare server id.
+/// The card's addressing key, reconstructed for pre-uri local rows.
+///
+/// CardDAV resources are `<id>.vcf` (Graph shares the fallback, though its
+/// rows always carry a uri); JMAP and Google address the bare server id.
 pub fn addressing_key(backend: Backend, id: &str, uri: &str) -> String {
     if !uri.is_empty() {
         return uri.to_string();
@@ -210,7 +228,7 @@ pub fn addressing_key(backend: Backend, id: &str, uri: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::account::*;
 
     /// Each sentinel routes to its backend; anything else is CardDAV.
     #[test]
@@ -232,8 +250,7 @@ mod tests {
         assert!(!Backend::Graph.account_level());
     }
 
-    /// The backends reading mail over an API send over it; an IMAP base
-    /// URL reads as the CardDAV default and needs SMTP.
+    /// API mail backends send over the API; an IMAP base URL needs SMTP.
     #[test]
     fn mail_submits_over_the_session_on_every_api_backend() {
         assert!(Backend::of("jmap://api.fastmail.com").submits_over_session());
@@ -242,8 +259,7 @@ mod tests {
         assert!(!Backend::of("imaps://imap.example.com:993").submits_over_session());
     }
 
-    /// Every base URL kind builds its documented shape; the jmap kind
-    /// strips an HTTP(S) scheme off the session URL.
+    /// Every kind builds its shape; jmap strips an HTTP(S) scheme.
     #[test]
     fn base_url_builds_every_kind() {
         assert_eq!(
@@ -281,8 +297,7 @@ mod tests {
         assert!(jmap_session_url("https://api.fastmail.com").is_err());
     }
 
-    /// A JMAP collection URL carries the JMAP account id in front of
-    /// the collection's own id, and only the tail addresses it.
+    /// Only the tail of a JMAP collection URL addresses the collection.
     #[test]
     fn jmap_collection_id_takes_the_last_segment() {
         assert_eq!(
@@ -290,20 +305,18 @@ mod tests {
             "book1",
         );
 
-        // Two accounts on one provider name the same book; the URLs
-        // they are stored under differ, and both read back as `book1`.
+        // NOTE: two accounts on one provider naming the same book.
         assert_eq!(
             jmap_collection_id("jmap://api.example.com/session/u9f1e2c04/book1"),
             "book1",
         );
 
-        // A session naming no account composed the bare id.
+        // NOTE: a session naming no account composed the bare id.
         assert_eq!(jmap_collection_id("jmap://api.example.com/book1"), "book1");
     }
 
-    /// The book segment is the part after the base URL; a URL outside
-    /// the base passes through, and the Graph default folder maps to
-    /// the empty folder id.
+    /// The book segment follows the base URL, an outside URL passes
+    /// through, and the Graph default folder maps to the empty id.
     #[test]
     fn book_segment_and_graph_folder_extract_the_id() {
         assert_eq!(book_segment("jmap://host", "jmap://host/abc"), "abc");

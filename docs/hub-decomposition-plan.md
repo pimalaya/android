@@ -1,5 +1,7 @@
 # Hub decomposition plan: splitting the oversized files
 
+> Its Rust parts are superseded by the rust-domain-layout change (cairn/log/2026-10-13-rust-domain-layout.md), which regrouped the crate by domain.
+
 A handful of files concentrate too much responsibility: client.rs (3113), project.rs (2493) and ffi.rs (1959) on the Rust side, MainActivity.java (3190), ContactForm.java (1637) and OfflineStore.java (1194) on the Java side. This plan splits each along seams that already exist, one mechanical, behavior-preserving move at a time, every stage compiling both build variants and passing the Rust and JVM suites. Files that are already one cohesive concern are left alone: OfflineEngine, CardStore, ContactsList, and the MainActivity screen-registry and navigation spine.
 
 ## Rust
