@@ -27,7 +27,7 @@ public class ZoneChange extends BroadcastReceiver {
         new Thread(
                         () -> {
                             try {
-                                PimdirDb pimdir = PimdirDb.shared(app);
+                                PimdirDb pimdir = App.of(app).pimdir();
                                 for (String collection : CalendarRows.shown(app)) {
                                     CalendarRows.phonePass(pimdir, collection);
                                 }

@@ -29,6 +29,7 @@
     <!-- NOTE: predictive back stays off: from API 36 it stops calling
          onBackPressed, which MainActivity steps its pages back with. -->
     <application
+        android:name=".App"
         android:allowBackup="false"
         android:enableOnBackInvokedCallback="false"
         android:dataExtractionRules="@xml/data_extraction_rules"

@@ -33,9 +33,6 @@ public class SyncService extends Service {
     private static final Object LOCK = new Object();
     private static Adapter adapter;
 
-    /** When a pass last brought a Contacts-app edit in, for the app to reload. */
-    static volatile long ingested;
-
     @Override
     public void onCreate() {
         synchronized (LOCK) {
@@ -86,8 +83,8 @@ public class SyncService extends Service {
             }
 
             try {
-                PimdirDb pimdir = PimdirDb.shared(context);
-                CardStore store = CardStore.shared(context);
+                PimdirDb pimdir = App.of(context).pimdir();
+                CardStore store = App.of(context).cards();
                 ContactEngine engine =
                         new ContactEngine(store, pimdir, new PimalayaClient(), null, null, context);
                 ContactEngine.Report report = new ContactEngine.Report();
@@ -100,7 +97,7 @@ public class SyncService extends Service {
                 if (!report.localIn.isEmpty()
                         || !report.localOut.isEmpty()
                         || !report.localChanged.isEmpty()) {
-                    ingested = System.currentTimeMillis();
+                    App.of(context).state.contactsIngested = System.currentTimeMillis();
                 }
             } catch (Exception error) {
                 Log.w("pimalaya", "phone sync failed: " + error);

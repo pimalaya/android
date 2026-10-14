@@ -77,6 +77,9 @@ public final class ContactEngine extends PimdirEngine {
     /** The phone spoke's adapter; null on context-less (mutate) drivers. */
     private final PhoneRemote phone;
 
+    /** The store, for the phone queue its writes reach. */
+    private final PimdirDb pimdir;
+
     /**
      * The report the running sync flows tally into (the driver seam
      * feeds it as pushes are accepted and writes land); null outside
@@ -176,6 +179,7 @@ public final class ContactEngine extends PimdirEngine {
             Context context) {
         super(pimdir, client);
         this.base = base;
+        this.pimdir = pimdir;
         this.primary = primary;
         this.account = account;
         this.phone = context == null ? null : new PhoneRemote(context, pimdir);
@@ -393,7 +397,7 @@ public final class ContactEngine extends PimdirEngine {
     @Override
     protected void staged(String collection) {
         if (!CardStore.isPhoneCollection(collection)) {
-            PhoneQueue.written(collection);
+            PhoneQueue.written(pimdir.context(), collection);
         }
     }
 

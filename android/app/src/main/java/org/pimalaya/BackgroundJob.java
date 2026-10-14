@@ -49,15 +49,6 @@ public class BackgroundJob extends JobService {
     /** At most this many notifications per account per run, the newest. */
     private static final int BURST = 5;
 
-    /** When a run last synced, for the app to reload what it wrote. */
-    static volatile long ran;
-
-    /** Whether a run is syncing, for the app's dock. */
-    static volatile boolean running;
-
-    /** Called on the run's thread when it ends; the app's, while it lives. */
-    static volatile Runnable onEnd;
-
     private volatile boolean stopped;
 
     @Override
@@ -84,19 +75,20 @@ public class BackgroundJob extends JobService {
     }
 
     private void run() {
+        AppState state = App.of(this).state;
         // NOTE: the app on screen syncs on the user's word, and its lists
         // would not know what a run wrote under them.
-        if (MainActivity.onScreen || !SyncLock.take()) {
+        if (state.onScreen || !SyncLock.take()) {
             return;
         }
-        running = true;
+        state.backgroundRunning = true;
         try {
             check(this);
-            ran = System.currentTimeMillis();
+            state.backgroundRan = System.currentTimeMillis();
         } finally {
-            running = false;
+            state.backgroundRunning = false;
             SyncLock.release();
-            Runnable ended = onEnd;
+            Runnable ended = state.onBackgroundEnd;
             if (ended != null) {
                 ended.run();
             }
@@ -104,8 +96,8 @@ public class BackgroundJob extends JobService {
     }
 
     private void check(Context context) {
-        PimdirDb pimdir = PimdirDb.shared(context);
-        CardStore base = CardStore.shared(context);
+        PimdirDb pimdir = App.of(context).pimdir();
+        CardStore base = App.of(context).cards();
         SecureStore store = new SecureStore(context);
         MailStore mail = new MailStore(context, pimdir);
         EventStore events = new EventStore(context, pimdir);

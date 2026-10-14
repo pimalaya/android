@@ -31,9 +31,6 @@ public class CalendarSyncService extends Service {
     private static final Object LOCK = new Object();
     private static Adapter adapter;
 
-    /** When a pass last brought a calendar-app edit in, for the app to reload. */
-    static volatile long ingested;
-
     @Override
     public void onCreate() {
         synchronized (LOCK) {
@@ -89,10 +86,10 @@ public class CalendarSyncService extends Service {
             }
 
             try {
-                PimdirDb pimdir = PimdirDb.shared(context);
+                PimdirDb pimdir = App.of(context).pimdir();
                 for (String collection : CalendarRows.rows(context, account).keySet()) {
                     if (CalendarRows.phonePass(pimdir, collection)) {
-                        ingested = System.currentTimeMillis();
+                        App.of(context).state.calendarsIngested = System.currentTimeMillis();
                     }
                 }
             } catch (Exception error) {

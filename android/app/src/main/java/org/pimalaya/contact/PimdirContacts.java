@@ -51,6 +51,7 @@ public final class PimdirContacts {
     /** The source name a server-synced binding carries. */
     private static final String SERVER = PimdirStorage.SERVER;
 
+    private final PimdirDb store;
     private final PimdirItems items;
 
     /**
@@ -61,6 +62,7 @@ public final class PimdirContacts {
     private final ContactEngine stager;
 
     public PimdirContacts(PimdirDb store) {
+        this.store = store;
         this.items = new PimdirItems(store);
         this.stager = new ContactEngine(null, store, new PimalayaClient(), null, null, null);
     }
@@ -340,7 +342,7 @@ public final class PimdirContacts {
         }
         // NOTE: written past the engine, whose staging queues the phone
         // pass of every other write.
-        PhoneQueue.written(target);
+        PhoneQueue.written(store.context(), target);
     }
 
     /**
@@ -371,7 +373,7 @@ public final class PimdirContacts {
         } finally {
             db.endTransaction();
         }
-        PhoneQueue.written(local);
+        PhoneQueue.written(store.context(), local);
     }
 
     // ---- helpers ----------------------------------------------------------

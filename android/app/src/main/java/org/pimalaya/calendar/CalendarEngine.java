@@ -77,6 +77,9 @@ public final class CalendarEngine extends PimdirEngine {
     /** The phone spoke's adapter: the calendar's rows in CalendarContract. */
     private final CalendarRemote phone;
 
+    /** The store, for the phone queue its writes reach. */
+    private final PimdirDb pimdir;
+
     /** Whether a phone pass of this driver wrote anything into the store. */
     private boolean ingested;
 
@@ -89,6 +92,7 @@ public final class CalendarEngine extends PimdirEngine {
             String address) {
         super(pimdir, client);
         this.transport = transport;
+        this.pimdir = pimdir;
         this.account = account;
         this.accountId = accountId;
         this.address = address;
@@ -260,7 +264,7 @@ public final class CalendarEngine extends PimdirEngine {
     @Override
     protected void staged(String collection) {
         if (!PimdirStorage.isPhoneCollection(collection)) {
-            PhoneQueue.calendarWritten(collection);
+            PhoneQueue.calendarWritten(pimdir.context(), collection);
         }
     }
 

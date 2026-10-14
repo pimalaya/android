@@ -87,7 +87,6 @@ import org.pimalaya.mail.MessageCompose;
 import org.pimalaya.mail.MessageView;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
-import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.CacheSweep;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.ItemLinks;
@@ -224,17 +223,14 @@ public class MainActivity extends Activity {
     /** Every connected account (multi-account). */
     public final List<AccountEntry> accounts = new ArrayList<>();
 
-    /** Whether the app is on screen, which a background run leaves alone. */
-    static volatile boolean onScreen;
-
     /** The background run this activity last reloaded after. */
-    private long reloadedRun = BackgroundJob.ran;
+    private long reloadedRun;
 
     /** The Contacts-app edit {@link SyncService} brought in that the list last reloaded after. */
-    private volatile long reloadedIngest = SyncService.ingested;
+    private volatile long reloadedIngest;
 
     /** The calendar-app edit {@link CalendarSyncService} brought in, the agenda reloaded after. */
-    private volatile long reloadedCalendarIngest = CalendarSyncService.ingested;
+    private volatile long reloadedCalendarIngest;
 
     /** Each domain's filter, read once from where it was last left. */
     private final Map<PimDomain, MergedFilter> filters = new java.util.EnumMap<>(PimDomain.class);
@@ -363,14 +359,18 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        AppState state = App.of(this).state;
+        reloadedRun = state.backgroundRan;
+        reloadedIngest = state.contactsIngested;
+        reloadedCalendarIngest = state.calendarsIngested;
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         drawer = findViewById(R.id.drawer);
         applyEdgeToEdge();
 
         store = new SecureStore(this);
-        pimdir = PimdirDb.shared(this);
-        base = CardStore.shared(this);
+        pimdir = App.of(this).pimdir();
+        base = App.of(this).cards();
         contacts = new PimdirContacts(pimdir);
         pool = new ContactPool(base, contacts, accounts);
         contactsList = new ContactsList(this);
@@ -538,11 +538,11 @@ public class MainActivity extends Activity {
         }
         deleteSharedPreferences("pimalaya.background");
         BackgroundCheck.schedule(this);
-        BackgroundJob.onEnd = () -> main.post(this::backgroundEnded);
+        state.onBackgroundEnd = () -> main.post(this::backgroundEnded);
 
         // NOTE: the phone's contacts follow the store by events: a pass after
         // each write (PhoneQueue), Android's upload sync, the app's return.
-        PhoneQueue.start(this);
+        App.of(this).startPhoneQueue();
         reconcilePhone();
 
         goHome();
@@ -774,7 +774,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        BackgroundJob.onEnd = null;
+        App.of(this).state.onBackgroundEnd = null;
         io.shutdownNow();
         interactive.shutdownNow();
         // NOTE: shutdownNow interrupts, but a blocking accept() only
@@ -998,10 +998,10 @@ public class MainActivity extends Activity {
             onboarding.resetConfigContinue();
         }
 
-        onScreen = true;
+        App.of(this).state.onScreen = true;
         afterBackgroundRun();
         phoneReturn();
-        if (BackgroundJob.running && !syncing) {
+        if (App.of(this).state.backgroundRunning && !syncing) {
             showBackgroundDock();
         }
 
@@ -1029,7 +1029,7 @@ public class MainActivity extends Activity {
                 // NOTE: never registered, the resume having failed early.
             }
         }
-        onScreen = false;
+        App.of(this).state.onScreen = false;
         // NOTE: an account connected or removed while the app was open
         // changes whether the background check has anything to do.
         BackgroundCheck.schedule(this);
@@ -1046,7 +1046,7 @@ public class MainActivity extends Activity {
             return;
         }
         getSystemService(android.app.NotificationManager.class).cancelAll();
-        long ran = BackgroundJob.ran;
+        long ran = App.of(this).state.backgroundRan;
         if (ran == reloadedRun || syncing) {
             return;
         }
@@ -1078,7 +1078,7 @@ public class MainActivity extends Activity {
      * the next return does it.
      */
     private void backgroundEnded() {
-        if (!onScreen || isDestroyed()) {
+        if (!App.of(this).state.onScreen || isDestroyed()) {
             return;
         }
         mailList.redrawFooter();
@@ -1868,7 +1868,7 @@ public class MainActivity extends Activity {
      * a step asked for now would do nothing.
      */
     public boolean syncHeld() {
-        return syncing || BackgroundJob.running;
+        return syncing || App.of(this).state.backgroundRunning;
     }
 
     /**
@@ -2078,7 +2078,7 @@ public class MainActivity extends Activity {
         if (domain == null
                 || screen != panel
                 || syncing
-                || BackgroundJob.running
+                || App.of(this).state.backgroundRunning
                 || isFinishing()) {
             return;
         }
@@ -2998,7 +2998,7 @@ public class MainActivity extends Activity {
                     if (failure != null) {
                         Log.w("pimalaya", "phone pass on return failed", failure);
                     }
-                    long ingested = SyncService.ingested;
+                    long ingested = App.of(this).state.contactsIngested;
                     boolean changed =
                             !report.localIn.isEmpty()
                                     || !report.localOut.isEmpty()
@@ -3009,7 +3009,7 @@ public class MainActivity extends Activity {
                     }
 
                     boolean events = runner.syncPhoneCalendars();
-                    long calendarIngested = CalendarSyncService.ingested;
+                    long calendarIngested = App.of(this).state.calendarsIngested;
                     if (events || calendarIngested != reloadedCalendarIngest) {
                         reloadedCalendarIngest = calendarIngested;
                         postAlive(calendarList::reload);
@@ -3063,7 +3063,7 @@ public class MainActivity extends Activity {
 
     /** The dock during a first projection, a null line once it ended. */
     private void phoneDock(String text, int done, int total) {
-        if (syncing || BackgroundJob.running) {
+        if (syncing || App.of(this).state.backgroundRunning) {
             return;
         }
         if (text == null) {
