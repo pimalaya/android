@@ -17,6 +17,8 @@ import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
 import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.sync.PimdirEngine;
+import org.pimalaya.sync.SyncRunner;
 
 import java.io.File;
 import java.io.IOException;
@@ -123,9 +125,9 @@ public class MailEngine extends PimdirEngine {
      * Counts the bodies this driver's bridge calls write, for the dock's
      * bar ({@link MailTally}); null when nothing is counting.
      */
-    MailTally tally;
+    public MailTally tally;
 
-    MailEngine(PimdirDb pimdir, PimalayaClient client, MailSession session, String accountId) {
+    public MailEngine(PimdirDb pimdir, PimalayaClient client, MailSession session, String accountId) {
         super(pimdir, client);
         this.pimdir = pimdir;
         this.session = session;
@@ -140,7 +142,7 @@ public class MailEngine extends PimdirEngine {
      * bodies once linked across its mailboxes are released, once
      * ({@link MailStore#repairLinks}).
      */
-    List<Mailbox> mailboxes() {
+    public List<Mailbox> mailboxes() {
         List<Mailbox> mailboxes = client.listMailboxes(session);
         Account server = session.account();
         boolean accountWide = PimalayaClient.isGoogle(server) || PimalayaClient.isJmap(server);
@@ -189,7 +191,7 @@ public class MailEngine extends PimdirEngine {
      * repair. And no upgrade either: every message a listing carries arrives
      * named.
      */
-    void sync(String collection) {
+    public void sync(String collection) {
         step(Progress.STAGE_SERVER, 0);
         list(collection, scopeOf(collection));
     }
@@ -208,7 +210,7 @@ public class MailEngine extends PimdirEngine {
      * backend: no checkpoint is bound to a scope, a Graph delta link being
      * made with no filter, so it reports what changes in the band too.
      */
-    boolean widen(String collection, int count) {
+    public boolean widen(String collection, int count) {
         String bound = bound(collection);
         MailStore.Coverage coverage = mail().coverage(collection);
         if (coverage.filling || coverage.at == null) {
@@ -315,7 +317,7 @@ public class MailEngine extends PimdirEngine {
      * Only a mailbox's own reads end up here: a push answers the 404 of a
      * message gone itself ({@link #gone}).
      */
-    static boolean refused(Exception failure) {
+    public static boolean refused(Exception failure) {
         return isGone(failure);
     }
 
@@ -378,7 +380,7 @@ public class MailEngine extends PimdirEngine {
      * first dialog waits on the inbox before anything else, and every pass
      * after it lands the inbox first.
      */
-    static List<Mailbox> ordered(List<Mailbox> mailboxes) {
+    public static List<Mailbox> ordered(List<Mailbox> mailboxes) {
         List<Mailbox> ordered = new ArrayList<>(mailboxes);
         ordered.sort(
                 java.util.Comparator.comparingInt((Mailbox mailbox) -> rank(mailbox.role))

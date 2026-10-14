@@ -52,6 +52,16 @@ import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.sync.BackgroundCheck;
+import org.pimalaya.sync.FirstSync;
+import org.pimalaya.sync.MergedFilter;
+import org.pimalaya.sync.PimdirEngine;
+import org.pimalaya.sync.RemotePass;
+import org.pimalaya.sync.SyncLock;
+import org.pimalaya.sync.SyncRunner;
+import org.pimalaya.sync.SyncScope;
+import org.pimalaya.sync.SyncStamps;
+import org.pimalaya.sync.SyncSteps;
 
 /**
  * Single-activity host walking the app's screens through a ViewFlipper.

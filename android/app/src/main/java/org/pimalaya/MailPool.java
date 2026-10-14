@@ -45,7 +45,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * @param <S> the session, a {@link MailSession} in the app; anything
  *     closeable in a test.
  */
-final class MailPool<S extends AutoCloseable> implements AutoCloseable {
+public final class MailPool<S extends AutoCloseable> implements AutoCloseable {
     /** Graph sessions an account runs at once: HTTP requests, nothing held. */
     static final int GRAPH = 4;
 
@@ -75,7 +75,7 @@ final class MailPool<S extends AutoCloseable> implements AutoCloseable {
                     });
 
     /** How many sessions one account of this backend runs at once. */
-    static int sizeOf(Account account) {
+    public static int sizeOf(Account account) {
         if (PimalayaClient.isGraph(account)) {
             return GRAPH;
         }
@@ -89,29 +89,29 @@ final class MailPool<S extends AutoCloseable> implements AutoCloseable {
     }
 
     /** Opens one more session of the account. */
-    interface Opener<S> {
+    public interface Opener<S> {
         S open() throws Exception;
     }
 
     /** The driver a worker runs one mailbox with, on that worker's session. */
-    interface Engines<S> {
+    public interface Engines<S> {
         MailEngine on(S session);
     }
 
     /** What a run does to one mailbox: a pass, a widening by a chunk. */
-    interface Step {
+    public interface Step {
         void run(MailEngine engine, String collection) throws Exception;
     }
 
     /** Told as each mailbox lands, on the worker that ran it. */
-    interface Landed {
+    public interface Landed {
         void landed(int done, int total);
     }
 
     /** One mailbox a run could not take through. */
-    static final class Failure {
-        final String collection;
-        final Exception error;
+    public static final class Failure {
+        public final String collection;
+        public final Exception error;
 
         Failure(String collection, Exception error) {
             this.collection = collection;
@@ -120,9 +120,9 @@ final class MailPool<S extends AutoCloseable> implements AutoCloseable {
     }
 
     /** What one run over an account's mailboxes came to. */
-    static final class Outcome {
+    public static final class Outcome {
         /** The mailboxes that failed, in the order the run took them. */
-        final List<Failure> failures = new ArrayList<>();
+        public final List<Failure> failures = new ArrayList<>();
 
         /** Mailboxes the run was given. */
         int mailboxes;
@@ -137,7 +137,7 @@ final class MailPool<S extends AutoCloseable> implements AutoCloseable {
         long remote;
 
         /** The first failure, or null when every mailbox went through. */
-        Exception failure() {
+        public Exception failure() {
             return failures.isEmpty() ? null : failures.get(0).error;
         }
 
@@ -163,7 +163,7 @@ final class MailPool<S extends AutoCloseable> implements AutoCloseable {
      * {@code first} is given (not closed with the pool), the others opened
      * by {@code opener} as workers need them.
      */
-    MailPool(int size, S first, Opener<S> opener) {
+    public MailPool(int size, S first, Opener<S> opener) {
         this.size = Math.max(1, size);
         this.opener = opener;
         this.borrowed = first != null;
@@ -185,7 +185,7 @@ final class MailPool<S extends AutoCloseable> implements AutoCloseable {
      *
      * <p>One run at a time per pool, so a session never serves two runs.
      */
-    synchronized Outcome run(
+    public synchronized Outcome run(
             String label,
             List<String> collections,
             Engines<S> engines,

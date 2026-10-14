@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import static org.junit.Assert.assertEquals;
 
@@ -11,6 +11,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.AccountCredential;
+import org.pimalaya.AccountEntry;
+import org.pimalaya.FakeAndroidKeyStore;
+import org.pimalaya.PimDomain;
+import org.pimalaya.SecureStore;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 

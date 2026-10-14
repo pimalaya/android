@@ -7,6 +7,7 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.pimalaya.sync.MergedFilter;
 
 /**
  * The contacts screen: the merged list grouped into one card per

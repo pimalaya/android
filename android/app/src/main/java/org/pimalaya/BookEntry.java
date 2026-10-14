@@ -10,12 +10,12 @@ import org.pimalaya.client.Addressbook;
  * Both sync switches require the subscription, so an off book neither
  * talks to the server nor shows in the Contacts app.
  */
-final class BookEntry {
-    final Addressbook book;
-    final String accountEmail;
+public final class BookEntry {
+    public final Addressbook book;
+    public final String accountEmail;
     final boolean subscribed;
-    final boolean remoteSynced;
-    final boolean phoneSynced;
+    public final boolean remoteSynced;
+    public final boolean phoneSynced;
 
     BookEntry(
             Addressbook book,

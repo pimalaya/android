@@ -24,8 +24,8 @@ import org.pimalaya.client.Account;
  * that uses it. Renewing it is one write, and no two domains can end up
  * holding different halves of the same sign-in.
  */
-final class AccountEntry {
-    final String email;
+public final class AccountEntry {
+    public final String email;
 
     private final Map<PimDomain, AccountConnection> connections;
     private final Map<String, AccountCredential> credentials;
@@ -49,7 +49,7 @@ final class AccountEntry {
     }
 
     /** One connected identity covering a single domain. */
-    static AccountEntry of(
+    public static AccountEntry of(
             String email, PimDomain domain, String baseUrl, AccountCredential credential) {
         return empty(email).with(domain, baseUrl, credential);
     }
@@ -60,7 +60,7 @@ final class AccountEntry {
     }
 
     /** What a domain signs in with, or null when it covers none. */
-    AccountCredential credential(PimDomain domain) {
+    public AccountCredential credential(PimDomain domain) {
         AccountConnection connection = connections.get(domain);
         return connection == null ? null : credentials.get(connection.credentialId);
     }
@@ -71,7 +71,7 @@ final class AccountEntry {
     }
 
     /** Whether this account is connected for a domain. */
-    boolean covers(PimDomain domain) {
+    public boolean covers(PimDomain domain) {
         return connections.containsKey(domain);
     }
 
@@ -80,7 +80,7 @@ final class AccountEntry {
      * the account does not cover it: the shorthand for the many callers
      * that want somewhere to send a request.
      */
-    Account server(PimDomain domain) {
+    public Account server(PimDomain domain) {
         AccountConnection connection = connections.get(domain);
         AccountCredential credential = credential(domain);
         if (connection == null || credential == null) {
@@ -181,7 +181,7 @@ final class AccountEntry {
      * renewed with it. That is the property the split exists for: there
      * is no second copy to update, and therefore none to forget.
      */
-    AccountEntry refreshed(PimDomain domain, String accessToken, String refreshToken) {
+    public AccountEntry refreshed(PimDomain domain, String accessToken, String refreshToken) {
         AccountCredential credential = credential(domain);
         if (credential == null) {
             return this;

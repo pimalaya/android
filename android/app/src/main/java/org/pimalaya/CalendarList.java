@@ -16,6 +16,7 @@ import android.widget.TextView;
 
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
+import org.pimalaya.sync.MergedFilter;
 
 import java.time.Instant;
 import java.time.ZoneId;

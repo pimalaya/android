@@ -1,10 +1,11 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import android.content.Context;
 import android.content.SharedPreferences;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.pimalaya.PimDomain;
 
 /**
  * The first sync each domain of a freshly connected account owes, run the
@@ -20,7 +21,7 @@ import java.util.List;
  * <p>Kept beside the account rather than in its record, as its mail bound
  * is: it is app state, not a secret, and only the connection flow sets it.
  */
-final class FirstSync {
+public final class FirstSync {
     private static final String PREFS = "first-sync";
 
     private FirstSync() {}
@@ -34,12 +35,12 @@ final class FirstSync {
     }
 
     /** Records that a freshly connected account owes a domain its first sync. */
-    static void owe(Context context, String email, PimDomain domain) {
+    public static void owe(Context context, String email, PimDomain domain) {
         prefs(context).edit().putBoolean(key(email, domain), true).apply();
     }
 
     /** The accounts owing a domain its first sync, by address. */
-    static List<String> owing(Context context, PimDomain domain) {
+    public static List<String> owing(Context context, PimDomain domain) {
         List<String> owing = new ArrayList<>();
         String prefix = domain.id + "\n";
         for (String key : prefs(context).getAll().keySet()) {
@@ -51,12 +52,12 @@ final class FirstSync {
     }
 
     /** Records that an account's first sync of a domain went through. */
-    static void paid(Context context, String email, PimDomain domain) {
+    public static void paid(Context context, String email, PimDomain domain) {
         prefs(context).edit().remove(key(email, domain)).apply();
     }
 
     /** Forgets whatever an account owed, with the account. */
-    static void forget(Context context, String email) {
+    public static void forget(Context context, String email) {
         SharedPreferences.Editor editor = prefs(context).edit();
         for (PimDomain domain : PimDomain.values()) {
             editor.remove(key(email, domain));

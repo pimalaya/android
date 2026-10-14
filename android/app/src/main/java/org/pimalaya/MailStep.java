@@ -24,7 +24,7 @@ import java.util.List;
  * ({@link MailEngine#download}); a step's messages land through the
  * engine as a listing's do ({@link MailEngine#land}).
  */
-interface MailStep {
+public interface MailStep {
     /** About how many messages a step brings an account. */
     int COUNT = 50;
 
@@ -45,16 +45,16 @@ interface MailStep {
     /** What a step left. */
     final class Outcome {
         /** The frontier it leaves, null where it brought nothing to move it. */
-        final String frontier;
+        public final String frontier;
 
         /**
          * Whether nothing older is left in what it stepped: the account held
          * whole, or the one mailbox it was asked for.
          */
-        final boolean exhausted;
+        public final boolean exhausted;
 
         /** How many messages it brought. */
-        final int brought;
+        public final int brought;
 
         Outcome(String frontier, boolean exhausted, int brought) {
             this.frontier = frontier;

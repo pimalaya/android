@@ -22,9 +22,9 @@ import java.util.concurrent.TimeUnit;
  * done, and what a body run settled: a run counts by chunk ({@link
  * MailBodies#step}), a chunk's files then folded into what it took.
  */
-final class MailTally {
+public final class MailTally {
     /** Hears the count move: {@code landed} of {@code planned}, any thread. */
-    interface Listener {
+    public interface Listener {
         void told(int landed, int planned);
     }
 
@@ -48,7 +48,7 @@ final class MailTally {
 
     private int flight;
 
-    MailTally(Listener listener) {
+    public MailTally(Listener listener) {
         this.listener = listener;
     }
 

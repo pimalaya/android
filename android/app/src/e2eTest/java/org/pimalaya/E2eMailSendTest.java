@@ -7,6 +7,7 @@ import static org.junit.Assert.assertTrue;
 
 import org.json.JSONObject;
 import org.junit.Test;
+import org.pimalaya.sync.RemotePass;
 import org.robolectric.RuntimeEnvironment;
 
 import java.nio.charset.StandardCharsets;

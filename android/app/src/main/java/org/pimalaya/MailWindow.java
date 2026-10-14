@@ -39,7 +39,7 @@ import java.util.Map;
  * a JMAP account the ids its last step reached ({@link #anchors}), where
  * the next one starts.
  */
-final class MailWindow {
+public final class MailWindow {
     private static final String PREFS = "mail-window";
 
     /** Where the own frontiers of mailboxes stepped alone are kept, by collection. */
@@ -138,7 +138,7 @@ final class MailWindow {
      * mail: a step over it alone, which leaves its account's alone. A
      * frontier already older stays where it is.
      */
-    static void moveBackMailbox(Context context, String collection, String date) {
+    public static void moveBackMailbox(Context context, String collection, String date) {
         String held = mailboxes(context).getString(collection, null);
         if (ALL.equals(held) || (held != null && date != null && date.compareTo(held) >= 0)) {
             return;
@@ -153,7 +153,7 @@ final class MailWindow {
      * one mailbox alone that mailbox's own, the account's left as it is, so
      * its other mailboxes show no day they do not hold.
      */
-    static void stepped(
+    public static void stepped(
             Context context, String accountId, String only, MailStep.Outcome outcome) {
         if (only != null) {
             if (outcome.exhausted || outcome.frontier != null) {

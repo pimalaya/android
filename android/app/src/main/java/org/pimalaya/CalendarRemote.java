@@ -42,6 +42,7 @@ import org.pimalaya.client.PimalayaException;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
 import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.sync.PimdirEngine;
 
 /**
  * The CalendarContract half of the calendar mirror: the phone spoke's remote

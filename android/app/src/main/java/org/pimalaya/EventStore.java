@@ -69,7 +69,7 @@ public final class EventStore {
      * because mailboxes do need it, a mailbox name being unique only within
      * its account, and one rule across the three domains beats an exception.
      */
-    void replaceCalendars(String accountEmail, List<Calendar> calendars) {
+    public void replaceCalendars(String accountEmail, List<Calendar> calendars) {
         String account = accounts.idOf(accountEmail);
 
         List<PimdirCollections.Stored> listed = new ArrayList<>(calendars.size());
@@ -93,14 +93,14 @@ public final class EventStore {
     }
 
     /** One stored calendar, with the account it belongs to. */
-    static final class StoredCalendar {
+    public static final class StoredCalendar {
         /** The backend's own address, what a listing round asks for. */
         final String url;
 
-        final String accountEmail;
+        public final String accountEmail;
 
         /** The namespaced collection id, what the store keys items by. */
-        final String id;
+        public final String id;
 
         final String name;
         final String color;
@@ -129,7 +129,7 @@ public final class EventStore {
         }
     }
 
-    List<StoredCalendar> loadCalendars() {
+    public List<StoredCalendar> loadCalendars() {
         List<StoredCalendar> calendars = new ArrayList<>();
         for (PimdirCollections.Stored stored : collections.list(PimdirSummary.CALENDAR)) {
             String account = accounts.idOf(stored.accountEmail);

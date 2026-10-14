@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -9,6 +9,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
+import org.pimalaya.AccountActivation;
+import org.pimalaya.PimDomain;
 
 /**
  * One list's filter: which accounts and which of their collections it
@@ -30,9 +32,9 @@ import java.util.WeakHashMap;
  *
  * <p>It is also the scope of the domain's syncs: what it hides is not synced.
  */
-final class MergedFilter implements SyncScope {
+public final class MergedFilter implements SyncScope {
     /** What an account's checkbox reads. */
-    enum Tick {
+    public enum Tick {
         ON,
         PARTIAL,
         OFF
@@ -79,7 +81,7 @@ final class MergedFilter implements SyncScope {
      * A copy of this filter for the filter page to edit, kept nowhere: the
      * page applies it ({@link #apply}) or drops it.
      */
-    synchronized MergedFilter draft() {
+    public synchronized MergedFilter draft() {
         MergedFilter draft = new MergedFilter(context, accountsKey, collectionsKey, quietKey);
         draft.drafting = true;
         draft.hiddenAccounts.clear();
@@ -92,7 +94,7 @@ final class MergedFilter implements SyncScope {
     }
 
     /** Takes a draft's choices and keeps them. */
-    synchronized void apply(MergedFilter draft) {
+    public synchronized void apply(MergedFilter draft) {
         synchronized (draft) {
             hiddenAccounts.clear();
             hiddenAccounts.addAll(draft.hiddenAccounts);
@@ -103,12 +105,12 @@ final class MergedFilter implements SyncScope {
     }
 
     /** The domain's filter as it was last left. */
-    static MergedFilter of(Context context, PimDomain domain) {
+    public static MergedFilter of(Context context, PimDomain domain) {
         return shared(context, domain.id);
     }
 
     /** The Files tab's filter, which no account connects as a domain. */
-    static MergedFilter files(Context context) {
+    public static MergedFilter files(Context context) {
         return shared(context, "files");
     }
 
@@ -121,12 +123,12 @@ final class MergedFilter implements SyncScope {
     }
 
     /** Whether an item of this account and collection takes part. */
-    synchronized boolean accepts(String account, String collection) {
+    public synchronized boolean accepts(String account, String collection) {
         return showsAccount(account) && !hiddenCollections.contains(collection);
     }
 
     /** Whether the account takes part at all, whatever its collections. */
-    synchronized boolean showsAccount(String account) {
+    public synchronized boolean showsAccount(String account) {
         return AccountActivation.enabled(context, account) && !hiddenAccounts.contains(account);
     }
 
@@ -144,7 +146,7 @@ final class MergedFilter implements SyncScope {
      * Whether anything is hidden beyond what is hidden by default, which the
      * bar icon reflects.
      */
-    synchronized boolean isActive() {
+    public synchronized boolean isActive() {
         return !hiddenAccounts.isEmpty() || !quietCollections.containsAll(hiddenCollections);
     }
 
@@ -154,7 +156,7 @@ final class MergedFilter implements SyncScope {
      * collections are folded away; otherwise ticked when they all show,
      * partly ticked when some or none do.
      */
-    synchronized Tick tick(String account, Collection<String> collections) {
+    public synchronized Tick tick(String account, Collection<String> collections) {
         if (hiddenAccounts.contains(account)) {
             return Tick.OFF;
         }
@@ -167,12 +169,12 @@ final class MergedFilter implements SyncScope {
     }
 
     /** Whether a collection shows: it and its account. */
-    synchronized boolean ticked(String account, String collection) {
+    public synchronized boolean ticked(String account, String collection) {
         return !hiddenAccounts.contains(account) && chosen(collection);
     }
 
     /** Whether a collection's own checkbox reads ticked, whatever its account. */
-    synchronized boolean chosen(String collection) {
+    public synchronized boolean chosen(String collection) {
         return !hiddenCollections.contains(collection);
     }
 
@@ -180,7 +182,7 @@ final class MergedFilter implements SyncScope {
      * Flips an account's checkbox: a shown account is hidden, a hidden one
      * comes back, its collections keeping their own choices either way.
      */
-    synchronized void toggleAccount(String account) {
+    public synchronized void toggleAccount(String account) {
         if (!hiddenAccounts.remove(account)) {
             hiddenAccounts.add(account);
         }
@@ -188,7 +190,7 @@ final class MergedFilter implements SyncScope {
     }
 
     /** Flips one collection's own checkbox. */
-    synchronized void toggleCollection(String collection) {
+    public synchronized void toggleCollection(String collection) {
         if (!hiddenCollections.remove(collection)) {
             hiddenCollections.add(collection);
         }
@@ -200,7 +202,7 @@ final class MergedFilter implements SyncScope {
      * that were never listed before, and only those: one the user showed
      * since stays shown.
      */
-    synchronized void quiet(Collection<String> collections) {
+    public synchronized void quiet(Collection<String> collections) {
         boolean changed = false;
         for (String collection : collections) {
             if (quietCollections.add(collection)) {
@@ -214,7 +216,7 @@ final class MergedFilter implements SyncScope {
     }
 
     /** Shows everything again, but what is hidden by default. */
-    synchronized void reset() {
+    public synchronized void reset() {
         hiddenAccounts.clear();
         hiddenCollections.clear();
         hiddenCollections.addAll(quietCollections);
@@ -222,7 +224,7 @@ final class MergedFilter implements SyncScope {
     }
 
     /** Drops what the filter held of an account that is gone. */
-    synchronized void forget(String account, Collection<String> collections) {
+    public synchronized void forget(String account, Collection<String> collections) {
         hiddenAccounts.remove(account);
         hiddenCollections.removeAll(collections);
         quietCollections.removeAll(collections);

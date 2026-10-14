@@ -31,6 +31,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
+import org.pimalaya.sync.MergedFilter;
+import org.pimalaya.sync.SyncScope;
 
 /**
  * The mail screen: one list merging every mailbox of every account,

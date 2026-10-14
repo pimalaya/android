@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * under the same link id rather than fetching it again. Newest first, the
  * shown mailboxes before the others.
  */
-final class MailBodies {
+public final class MailBodies {
     private MailBodies() {}
 
     /** Bodies one step downloads per account, before checking it may go on. */
@@ -117,7 +117,7 @@ final class MailBodies {
      * its window's for any other but the junk and the trash, whose mail is
      * not worth the bytes.
      */
-    static boolean downloads(String role, boolean whole) {
+    public static boolean downloads(String role, boolean whole) {
         return whole || !("junk".equals(role) || "trash".equals(role));
     }
 

@@ -1,6 +1,8 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import android.content.res.Resources;
+import org.pimalaya.PimDomain;
+import org.pimalaya.R;
 
 /**
  * What the sync dock says and how full its bar is.
@@ -12,7 +14,7 @@ import android.content.res.Resources;
  * download first, then the projection onto the phone for the domains that
  * have one.
  */
-final class SyncSteps {
+public final class SyncSteps {
     private SyncSteps() {}
 
     /**
@@ -22,7 +24,7 @@ final class SyncSteps {
     static final double DOWNLOAD_SHARE = 0.6;
 
     /** The dock's domain for a pass over {@code domain}. */
-    static int lineOf(PimDomain domain) {
+    public static int lineOf(PimDomain domain) {
         switch (domain) {
             case MAIL:
                 return R.string.sync_line_mail;
@@ -86,7 +88,7 @@ final class SyncSteps {
     }
 
     /** The words of a stage, or null when the domain has no such stage. */
-    static String text(Resources resources, PimDomain domain, int stage, int count) {
+    public static String text(Resources resources, PimDomain domain, int stage, int count) {
         int text = textOf(domain, stage);
         if (text == 0) {
             return null;
@@ -100,7 +102,7 @@ final class SyncSteps {
      * The step counting an account's collections as they land: its
      * mailboxes, address books or calendars.
      */
-    static int collectionsOf(PimDomain domain) {
+    public static int collectionsOf(PimDomain domain) {
         switch (domain) {
             case MAIL:
                 return R.string.sync_step_mailboxes;
@@ -115,7 +117,7 @@ final class SyncSteps {
      * How much of its collection a counted step has filled at {@code done}
      * of {@code total}, from 0 to 1.
      */
-    static double shareOf(PimDomain domain, int stage, int done, int total) {
+    public static double shareOf(PimDomain domain, int stage, int done, int total) {
         if (total <= 0) {
             return 0;
         }
@@ -134,7 +136,7 @@ final class SyncSteps {
      * the {@code share} of the one under way, or that share alone when no
      * collection is counted.
      */
-    static int permille(int landed, int of, double share) {
+    public static int permille(int landed, int of, double share) {
         double current = Math.min(Math.max(share, 0), 1);
         if (of <= 0) {
             return (int) (current * 1000);
@@ -148,7 +150,7 @@ final class SyncSteps {
      * of the one under way weighing {@code weight}, out of the {@code
      * planned} whole; the section alone when nothing was planned.
      */
-    static int across(int passed, int weight, int planned, int section) {
+    public static int across(int passed, int weight, int planned, int section) {
         if (planned <= 0) {
             return section;
         }

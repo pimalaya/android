@@ -28,7 +28,7 @@ import java.util.Set;
  * capability for, and once signed in the session's capabilities decide which of
  * the ticked domains the one account syncs ({@link #servedByJmap}).
  */
-enum PimDomain {
+public enum PimDomain {
     MAIL("mail", R.string.domain_mail, R.drawable.ic_domain_mail, "urn:ietf:params:jmap:mail"),
     CONTACTS(
             "contacts",
@@ -45,7 +45,7 @@ enum PimDomain {
     static final String JMAP_SUBMISSION = "urn:ietf:params:jmap:submission";
 
     /** The stored spelling; the enum name is not persisted. */
-    final String id;
+    public final String id;
 
     /** The label a picker shows. */
     final int label;

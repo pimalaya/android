@@ -16,7 +16,7 @@ import org.pimalaya.client.Account;
  * transport-less {@code local} backend, non-account-level, so its cards
  * key per collection like CardDAV.
  */
-final class LocalBook {
+public final class LocalBook {
     /** Base URL and account-email key of the local account (never a real email). */
     static final String ACCOUNT = "local://on-this-device";
 
@@ -29,7 +29,7 @@ final class LocalBook {
     private LocalBook() {}
 
     /** True for the local account's email key or any local URL. */
-    static boolean is(String emailOrUrl) {
+    public static boolean is(String emailOrUrl) {
         return emailOrUrl != null && emailOrUrl.startsWith("local://");
     }
 

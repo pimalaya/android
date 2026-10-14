@@ -25,6 +25,7 @@ import org.pimalaya.client.ServiceConfig;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.sync.BackgroundCheck;
 
 /**
  * The connection wizard behind the auth panel: the email (or server)

@@ -35,7 +35,7 @@ import org.pimalaya.client.Addressbook;
  * its own authority alone, and each kind's reconcile leaves the other's
  * accounts alone.
  */
-final class Accounts {
+public final class Accounts {
     /** Matches android:accountType in res/xml/authenticator.xml. */
     static final String TYPE = "org.pimalaya";
 
@@ -43,7 +43,7 @@ final class Accounts {
      * An address as a release log may name it: its domain alone, which
      * tells the provider without telling the person.
      */
-    static String redacted(String address) {
+    public static String redacted(String address) {
         if (address == null) {
             return "?";
         }

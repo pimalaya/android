@@ -1,6 +1,8 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import android.content.Context;
+import org.pimalaya.AccountActivation;
+import org.pimalaya.PimDomain;
 
 /**
  * What one sync takes: which accounts, and which of their collections.
@@ -10,7 +12,7 @@ import android.content.Context;
  * ({@link #mail}); a domain's pull takes what its filter shows, which is
  * never an account that is off ({@link MergedFilter}).
  */
-interface SyncScope {
+public interface SyncScope {
     /** Whether the sync takes the account at all. */
     boolean account(String email);
 

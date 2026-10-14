@@ -42,7 +42,7 @@ import org.pimalaya.pimdir.PimdirSummary;
  * on the phone stays; {@code SYNC_EVENTS} and {@code VISIBLE} are the user's
  * after the insert.
  */
-final class CalendarRows {
+public final class CalendarRows {
     /** The provider's own default, written explicitly. */
     private static final int MAX_REMINDERS = 5;
 
@@ -56,7 +56,7 @@ final class CalendarRows {
      * only the accounts follow. Blocks; the caller runs it off the main
      * thread.
      */
-    static void reconcile(Context context, PimdirDb pimdir) throws Exception {
+    public static void reconcile(Context context, PimdirDb pimdir) throws Exception {
         List<PimdirCollections.Stored> all =
                 new PimdirCollections(pimdir, context).list(PimdirSummary.CALENDAR);
         Map<String, List<PimdirCollections.Stored>> shown = new LinkedHashMap<>();
@@ -148,12 +148,12 @@ final class CalendarRows {
      * app's return, in the background run, and after a device zone change.
      * Answers whether it brought a calendar-app edit in.
      */
-    static boolean phonePass(PimdirDb pimdir, String collection) {
+    public static boolean phonePass(PimdirDb pimdir, String collection) {
         return CalendarEngine.phonePass(pimdir, collection);
     }
 
     /** Every calendar the phone shows, by collection id, whichever account holds it. */
-    static List<String> shown(Context context) {
+    public static List<String> shown(Context context) {
         List<String> shown = new ArrayList<>();
         for (Account account : Accounts.calendarAccounts(context)) {
             shown.addAll(rows(context, account).keySet());

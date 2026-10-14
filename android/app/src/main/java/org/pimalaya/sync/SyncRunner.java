@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import android.content.Context;
 import android.util.Log;
@@ -8,6 +8,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.pimalaya.AccountCredential;
+import org.pimalaya.AccountEntry;
+import org.pimalaya.Accounts;
+import org.pimalaya.BookEntry;
+import org.pimalaya.CalendarRows;
+import org.pimalaya.CardStore;
+import org.pimalaya.LocalBook;
+import org.pimalaya.OfflineEngine;
+import org.pimalaya.PhoneMirror;
+import org.pimalaya.PimDomain;
+import org.pimalaya.SecureStore;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.PimalayaClient;
@@ -25,12 +36,12 @@ import org.pimalaya.pimdir.PimdirSummary;
  * sync dock and its in-memory account cache (fed by the
  * observer). Everything blocks; callers run it off the main thread.
  */
-final class SyncRunner {
+public final class SyncRunner {
     /**
      * Observes a run for the foreground loader and the account cache;
      * every hook fires on the sync thread.
      */
-    interface Observer extends PimdirEngine.Progress {
+    public interface Observer extends PimdirEngine.Progress {
         /** A pass moved on to one account (the loader's title). */
         void account(String email);
 
@@ -47,13 +58,13 @@ final class SyncRunner {
      * plus the first failure. The phone passes it ran are not reported:
      * the phone is a view of the store, not a sync.
      */
-    static final class Outcome {
+    public static final class Outcome {
         final Set<String> remoteIn = new HashSet<>();
         final Set<String> remoteOut = new HashSet<>();
         final Set<String> remoteChanged = new HashSet<>();
         int conflicts;
 
-        Exception failure;
+        public Exception failure;
 
         /** Folds one book's report in; the sets dedupe across passes. */
         void absorb(OfflineEngine.Report report) {
@@ -73,7 +84,7 @@ final class SyncRunner {
     /** Null when the run is headless (the background worker). */
     private final Observer observer;
 
-    SyncRunner(
+    public SyncRunner(
             Context context,
             CardStore base,
             PimdirDb pimdir,
@@ -98,7 +109,7 @@ final class SyncRunner {
      * server down) never blocks the others, the first failure riding
      * the outcome instead.
      */
-    Outcome syncRemote() {
+    public Outcome syncRemote() {
         return syncRemote(SyncScope.all(context));
     }
 
@@ -106,7 +117,7 @@ final class SyncRunner {
      * The remote run narrowed to a scope: the books of the accounts and
      * collections it takes.
      */
-    Outcome syncRemote(SyncScope scope) {
+    public Outcome syncRemote(SyncScope scope) {
         Outcome outcome = new Outcome();
 
         // NOTE: self-heal an account whose addressbooks a schema rebuild
@@ -197,7 +208,7 @@ final class SyncRunner {
      * failure, or null. A book with no Android account or no contacts
      * permission is skipped.
      */
-    Exception syncPhone(OfflineEngine.Report report) {
+    public Exception syncPhone(OfflineEngine.Report report) {
         try {
             OfflineEngine engine = new OfflineEngine(base, pimdir, client, null, null, context);
             for (BookEntry entry : phoneSyncedBooks()) {
@@ -215,7 +226,7 @@ final class SyncRunner {
      * Answers whether any brought a calendar-app edit in. Nothing without the
      * calendar permission.
      */
-    boolean syncPhoneCalendars() {
+    public boolean syncPhoneCalendars() {
         if (!PhoneMirror.CALENDAR.granted(context)) {
             return false;
         }
@@ -227,7 +238,7 @@ final class SyncRunner {
     }
 
     /** The subscribed books set to mirror into the phone's contacts. */
-    List<BookEntry> phoneSyncedBooks() {
+    public List<BookEntry> phoneSyncedBooks() {
         List<BookEntry> phone = new ArrayList<>();
         for (BookEntry entry : base.loadSubscribedAddressbooks()) {
             if (entry.phoneSynced) {
@@ -419,7 +430,7 @@ final class SyncRunner {
     }
 
     /** True for an HTTP 401 from any backend (expired or revoked token). */
-    static boolean expiredToken(Exception error) {
+    public static boolean expiredToken(Exception error) {
         return error instanceof PimalayaException
                 && Integer.valueOf(401).equals(((PimalayaException) error).status);
     }

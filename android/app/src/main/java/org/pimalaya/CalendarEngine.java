@@ -16,6 +16,7 @@ import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
 import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.sync.PimdirEngine;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,7 +46,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * calendar per sync, which is what the previous whole-collection refresh
  * cost too.
  */
-final class CalendarEngine extends PimdirEngine {
+public final class CalendarEngine extends PimdirEngine {
     /**
      * One lock per calendar, process-wide, as {@link OfflineEngine} holds one
      * per book: the in-app sync, the background run, Android's upload sync
@@ -77,7 +78,7 @@ final class CalendarEngine extends PimdirEngine {
     /** Whether a phone pass of this driver wrote anything into the store. */
     private boolean ingested;
 
-    CalendarEngine(
+    public CalendarEngine(
             PimdirDb pimdir,
             PimalayaClient client,
             Transport transport,
@@ -122,7 +123,7 @@ final class CalendarEngine extends PimdirEngine {
      * entries by their body: without this pass a remote edit would empty
      * the calendar until something else refetched it, which nothing does.
      */
-    void sync(String collection) {
+    public void sync(String collection) {
         ReentrantLock lock = lock(collection);
         lock.lock();
         try {

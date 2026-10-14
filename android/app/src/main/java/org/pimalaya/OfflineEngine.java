@@ -26,6 +26,7 @@ import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.sync.PimdirEngine;
 
 /**
  * One account's offline driver: the Rust bridge runs the engine's
@@ -44,7 +45,7 @@ import org.pimalaya.pimdir.PimdirStorage;
  * conflicts by three-way merge and pushes the resolutions. Everything
  * blocks; callers run it off the main thread.
  */
-final class OfflineEngine extends PimdirEngine {
+public final class OfflineEngine extends PimdirEngine {
     /**
      * One lock per book URL, process-wide: the in-app sync, the
      * background worker and the OS-scheduled sync service can each
@@ -121,14 +122,14 @@ final class OfflineEngine extends PimdirEngine {
      * were deleted, changed = cards whose content changed; plus the
      * conflicts left for the user.
      */
-    static final class Report {
+    public static final class Report {
         final Set<String> localIn = new HashSet<>();
         final Set<String> localOut = new HashSet<>();
         final Set<String> localChanged = new HashSet<>();
-        final Set<String> remoteIn = new HashSet<>();
-        final Set<String> remoteOut = new HashSet<>();
-        final Set<String> remoteChanged = new HashSet<>();
-        int conflicts;
+        public final Set<String> remoteIn = new HashSet<>();
+        public final Set<String> remoteOut = new HashSet<>();
+        public final Set<String> remoteChanged = new HashSet<>();
+        public int conflicts;
 
         /** Tallies one effect on one card, deduped per card and axis. */
         void tally(String collection, String handle, String kind) {
@@ -164,7 +165,7 @@ final class OfflineEngine extends PimdirEngine {
      * yields only (local mutations never touch the remote), a null
      * context disables the phone spoke.
      */
-    OfflineEngine(
+    public OfflineEngine(
             CardStore base,
             PimdirDb pimdir,
             PimalayaClient client,
@@ -187,7 +188,7 @@ final class OfflineEngine extends PimdirEngine {
      * the hub still converges with the Contacts app, nothing touches
      * the server.
      */
-    Report syncBook(String url, boolean remote) throws JSONException {
+    public Report syncBook(String url, boolean remote) throws JSONException {
         ReentrantLock lock = syncLock(url);
         lock.lock();
         try {
@@ -245,7 +246,7 @@ final class OfflineEngine extends PimdirEngine {
      * (no contacts permission, or no Android account: the book is not
      * mirrored).
      */
-    void syncPhone(String url, Report report) throws JSONException {
+    public void syncPhone(String url, Report report) throws JSONException {
         if (phone == null || !phone.available(url)) {
             return;
         }

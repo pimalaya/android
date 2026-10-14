@@ -22,6 +22,7 @@ import org.pimalaya.pimdir.PimdirItems;
 import org.pimalaya.pimdir.PimdirQueue;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.sync.MergedFilter;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -145,7 +146,7 @@ public final class MailStore {
      * and the outbox is a queue collection of no kind, so it is not one of
      * them: the messages waiting in it are rows the replace never looks at.
      */
-    void replaceMailboxes(String accountEmail, List<Mailbox> mailboxes) {
+    public void replaceMailboxes(String accountEmail, List<Mailbox> mailboxes) {
         String account = accounts.idOf(accountEmail);
 
         // NOTE: before the replace, which is the moment an outbox written by
@@ -292,7 +293,7 @@ public final class MailStore {
     }
 
     /** An account's All Mail collection, which it holds only if it keeps one. */
-    static String allMailOf(String accountId) {
+    public static String allMailOf(String accountId) {
         return PimdirAccount.collectionId(accountId, ALL_MAIL);
     }
 
@@ -300,7 +301,7 @@ public final class MailStore {
      * Makes sure a Gmail account keeps its All Mail, for a step that runs
      * before the account's roster was read again since it had none.
      */
-    void ensureAllMail(String accountEmail) {
+    public void ensureAllMail(String accountEmail) {
         String account = accounts.idOf(accountEmail);
         markAllMail(context, account, true);
         collections.ensure(allMailOf(account), accountEmail, PimdirSummary.MAIL, ALL_MAIL);
@@ -418,12 +419,12 @@ public final class MailStore {
     }
 
     /** Where one account's mailbox is stored. */
-    String collectionOf(String accountEmail, String mailbox) {
+    public String collectionOf(String accountEmail, String mailbox) {
         return PimdirAccount.collectionId(accounts.idOf(accountEmail), mailbox);
     }
 
     /** Where one account's outgoing messages wait. */
-    String outboxOf(String accountEmail) {
+    public String outboxOf(String accountEmail) {
         return PimdirAccount.collectionId(accounts.idOf(accountEmail), OUTBOX);
     }
 
@@ -446,7 +447,7 @@ public final class MailStore {
 
     /** One stored envelope, with the account it came from. */
     public static final class StoredMessage {
-        final String accountEmail;
+        public final String accountEmail;
 
         /**
          * The collection it belongs to, which every store read addresses
@@ -683,7 +684,7 @@ public final class MailStore {
      * <p>Parked rows among them: a refused message is still a message the
      * sender wrote, and the row it shows says so rather than disappearing.
      */
-    List<StoredMessage> outgoing() {
+    public List<StoredMessage> outgoing() {
         List<StoredMessage> messages = new ArrayList<>();
         for (PimdirQueue.Action action : submissions()) {
             messages.add(outgoing(action));
@@ -1518,9 +1519,9 @@ public final class MailStore {
     }
 
     /** What a mailbox's last complete listing covered (pimdir STORAGE section 4.3). */
-    static final class Coverage {
+    public static final class Coverage {
         /** The floor on the {@code Date} header, null for all mail. */
-        final String since;
+        public final String since;
 
         /** When the listing closed; null while none ever has. */
         final String at;
@@ -1565,7 +1566,7 @@ public final class MailStore {
      * listing, and whether one is under way. What says "mail since" of an
      * account, or that a search over it is not exhaustive yet.
      */
-    Coverage coverage(String collection) {
+    public Coverage coverage(String collection) {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
         PimdirSql.Bound bound = PimdirSql.bind("LIST_COVERAGE", values);
@@ -1755,7 +1756,7 @@ public final class MailStore {
     }
 
     /** The role every mail collection carries, by collection id. */
-    Map<String, String> roles() {
+    public Map<String, String> roles() {
         Map<String, String> roles = new HashMap<>();
         String sql = PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0];
         try (Cursor cursor = typed(items.readable(), sql, new Object[0])) {
@@ -2025,14 +2026,14 @@ public final class MailStore {
     }
 
     /** One message waiting to be sent: what the drain hands over. */
-    static final class Outgoing {
+    public static final class Outgoing {
         /** The queue row, which is what acknowledging it addresses. */
-        final long id;
+        public final long id;
 
         /** The {@code Message-ID} it was stamped with, bare. */
-        final String messageId;
+        public final String messageId;
 
-        final byte[] source;
+        public final byte[] source;
 
         Outgoing(long id, String messageId, byte[] source) {
             this.id = id;
@@ -2048,7 +2049,7 @@ public final class MailStore {
      * sender wrote them in it, and a server may well hold two messages of
      * one conversation apart by nothing else.
      */
-    List<Outgoing> outgoing(String accountEmail) {
+    public List<Outgoing> outgoing(String accountEmail) {
         String collection = outboxOf(accountEmail);
         migrateOutbox(accountEmail);
 
@@ -2078,7 +2079,7 @@ public final class MailStore {
      * to apply and the row is removed by the process that carried it out
      * (STORAGE section 15.5). It releases the body's pin with it.
      */
-    void acknowledge(long queued) {
+    public void acknowledge(long queued) {
         queue.acknowledge(queued);
     }
 
@@ -2088,7 +2089,7 @@ public final class MailStore {
      * what it sent instead (Gmail), so the sync lands the staged copy on
      * the provider's rather than listing a second.
      */
-    void aliasSentCopy(String messageId, String filed) {
+    public void aliasSentCopy(String messageId, String filed) {
         if (filed.equals(messageId)) {
             return;
         }
@@ -2117,7 +2118,7 @@ public final class MailStore {
     }
 
     /** Records why a submission will not be tried again. */
-    void parkOutgoing(long queued, String reason) {
+    public void parkOutgoing(long queued, String reason) {
         queue.park(queued, reason);
     }
 
@@ -2127,7 +2128,7 @@ public final class MailStore {
      * deliver it twice, but only once the user asks
      * ({@link #resendOutgoing}).
      */
-    void parkUncertain(long queued, String reason) {
+    public void parkUncertain(long queued, String reason) {
         queue.park(queued, UNCERTAIN + reason);
     }
 
@@ -2158,7 +2159,7 @@ public final class MailStore {
     }
 
     /** Counts one failed attempt, leaving the message where it is. */
-    void retryOutgoing(long queued) {
+    public void retryOutgoing(long queued) {
         queue.bumpAttempts(queued);
     }
 
@@ -2175,7 +2176,7 @@ public final class MailStore {
      * for the filter page, the outbox of each mail account in {@code emails}
      * among them under its own collection.
      */
-    List<PimdirCollections.Stored> loadMailboxes(List<String> emails) {
+    public List<PimdirCollections.Stored> loadMailboxes(List<String> emails) {
         List<PimdirCollections.Stored> mailboxes = new ArrayList<>();
         for (String email : emails) {
             mailboxes.add(

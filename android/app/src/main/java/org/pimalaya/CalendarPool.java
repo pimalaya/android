@@ -29,9 +29,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * @param <S> the session, a {@link org.pimalaya.client.Transport} in the
  *     app; anything closeable in a test.
  */
-final class CalendarPool<S extends AutoCloseable> implements AutoCloseable {
+public final class CalendarPool<S extends AutoCloseable> implements AutoCloseable {
     /** Calendars an account syncs at once. */
-    static final int SIZE = 3;
+    public static final int SIZE = 3;
 
     /** The workers every pool runs on; idle ones die after a minute. */
     private static final ExecutorService WORKERS =
@@ -43,7 +43,7 @@ final class CalendarPool<S extends AutoCloseable> implements AutoCloseable {
                     });
 
     /** Opens one more session of the account. */
-    interface Opener<S> {
+    public interface Opener<S> {
         S open() throws Exception;
     }
 
@@ -51,14 +51,14 @@ final class CalendarPool<S extends AutoCloseable> implements AutoCloseable {
      * What a run does to one calendar on a worker's session, adding the
      * nanoseconds its engines spent on the network to {@code remote}.
      */
-    interface Step<S> {
+    public interface Step<S> {
         void run(S session, String collection, AtomicLong remote) throws Exception;
     }
 
     /** One calendar a run could not take through. */
-    static final class Failure {
-        final String collection;
-        final Exception error;
+    public static final class Failure {
+        public final String collection;
+        public final Exception error;
 
         Failure(String collection, Exception error) {
             this.collection = collection;
@@ -67,9 +67,9 @@ final class CalendarPool<S extends AutoCloseable> implements AutoCloseable {
     }
 
     /** What one run over an account's calendars came to. */
-    static final class Outcome {
+    public static final class Outcome {
         /** The calendars that failed, in the order the run took them. */
-        final List<Failure> failures = new ArrayList<>();
+        public final List<Failure> failures = new ArrayList<>();
 
         /** Calendars the run was given. */
         int calendars;
@@ -84,7 +84,7 @@ final class CalendarPool<S extends AutoCloseable> implements AutoCloseable {
         long remote;
 
         /** The first failure, or null when every calendar went through. */
-        Exception failure() {
+        public Exception failure() {
             return failures.isEmpty() ? null : failures.get(0).error;
         }
 
@@ -110,7 +110,7 @@ final class CalendarPool<S extends AutoCloseable> implements AutoCloseable {
      * {@code first} is given (not closed with the pool), the others opened
      * by {@code opener} as workers need them.
      */
-    CalendarPool(int size, S first, Opener<S> opener) {
+    public CalendarPool(int size, S first, Opener<S> opener) {
         this.size = Math.max(1, size);
         this.opener = opener;
         this.borrowed = first != null;
@@ -127,7 +127,7 @@ final class CalendarPool<S extends AutoCloseable> implements AutoCloseable {
      *
      * <p>One run at a time per pool, so a session never serves two runs.
      */
-    synchronized Outcome run(String label, List<String> collections, Step<S> step) {
+    public synchronized Outcome run(String label, List<String> collections, Step<S> step) {
         Outcome outcome = new Outcome();
         outcome.calendars = collections.size();
         int workers = Math.min(size, collections.size());

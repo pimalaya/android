@@ -21,6 +21,7 @@ import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.sync.PimdirEngine;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 

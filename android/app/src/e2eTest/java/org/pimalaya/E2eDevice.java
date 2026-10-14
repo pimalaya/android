@@ -17,6 +17,9 @@ import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.sync.RemotePass;
+import org.pimalaya.sync.SyncRunner;
+import org.pimalaya.sync.SyncScope;
 import org.robolectric.shadows.ShadowNetworkInfo;
 
 import java.io.File;

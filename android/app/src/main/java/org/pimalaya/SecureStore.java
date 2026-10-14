@@ -136,7 +136,7 @@ public class SecureStore {
      * the account as stored rather than on a caller's copy, then persists;
      * returns the renewed account, or null when the address is gone.
      */
-    AccountEntry renew(String email, PimDomain domain, String accessToken, String refreshToken) {
+    public AccountEntry renew(String email, PimDomain domain, String accessToken, String refreshToken) {
         synchronized (LOCK) {
             List<AccountEntry> entries = loadAll();
             for (int at = 0; at < entries.size(); at++) {

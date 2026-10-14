@@ -10,8 +10,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.MailEngine;
 import org.pimalaya.MailStore;
-import org.pimalaya.PimdirEngine;
 import org.pimalaya.client.PimdirSql;
+import org.pimalaya.sync.PimdirEngine;
 
 import java.util.ArrayList;
 import java.util.Comparator;

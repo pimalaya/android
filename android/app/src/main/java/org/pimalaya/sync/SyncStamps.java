@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -11,7 +11,7 @@ import android.content.SharedPreferences;
  * phone and the server agreed. A failed pass leaves the stamp where it
  * was, so the card keeps telling how stale the account has grown.
  */
-final class SyncStamps {
+public final class SyncStamps {
     private SyncStamps() {}
 
     private static SharedPreferences prefs(Context context) {
@@ -24,7 +24,7 @@ final class SyncStamps {
     }
 
     /** When the account last synced, 0 when it never has. */
-    static long at(Context context, String email) {
+    public static long at(Context context, String email) {
         return prefs(context).getLong(email, 0);
     }
 }

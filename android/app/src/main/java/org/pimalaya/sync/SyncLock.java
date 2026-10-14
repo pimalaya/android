@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import java.util.concurrent.Semaphore;
 
@@ -7,18 +7,18 @@ import java.util.concurrent.Semaphore;
  * background job ({@link BackgroundJob}) write the same store, and two
  * passes over one mailbox would only race each other.
  */
-final class SyncLock {
+public final class SyncLock {
     private static final Semaphore HELD = new Semaphore(1);
 
     private SyncLock() {}
 
     /** Takes the lock if nobody holds it. */
-    static boolean take() {
+    public static boolean take() {
         return HELD.tryAcquire();
     }
 
     /** Gives the lock back. */
-    static void release() {
+    public static void release() {
         HELD.release();
     }
 }

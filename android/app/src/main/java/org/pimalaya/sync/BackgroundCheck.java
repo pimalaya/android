@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import android.Manifest;
 import android.app.job.JobInfo;
@@ -11,6 +11,10 @@ import android.os.Build;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Predicate;
+import org.pimalaya.AccountEntry;
+import org.pimalaya.BackgroundJob;
+import org.pimalaya.LocalBook;
+import org.pimalaya.SecureStore;
 
 /**
  * How often each account syncs in the background and whether its new mail
@@ -22,11 +26,11 @@ import java.util.function.Predicate;
  * synced, by any sync, so an account just pulled in the app waits its full
  * interval again.
  */
-final class BackgroundCheck {
+public final class BackgroundCheck {
     private static final String PREFS = "background-check";
 
     /** The intervals offered, in minutes, 0 for off; the default is 15. */
-    static final int[] INTERVALS = {0, 15, 30, 60, 120};
+    public static final int[] INTERVALS = {0, 15, 30, 60, 120};
 
     private static final int DEFAULT = 15;
 
@@ -40,7 +44,7 @@ final class BackgroundCheck {
     /** The accounts whose new mail notifies. */
     private static final String NOTIFY = "notify";
 
-    static final int JOB = 1;
+    public static final int JOB = 1;
 
     /** The period asked for; Android allows no less. */
     private static final long PERIOD = 15 * 60 * 1000L;
@@ -52,29 +56,29 @@ final class BackgroundCheck {
     }
 
     /** The account's background interval in minutes, 0 when off. */
-    static int interval(Context context, String email) {
+    public static int interval(Context context, String email) {
         return prefs(context).getInt("interval:" + email, DEFAULT);
     }
 
-    static void setInterval(Context context, String email, int minutes) {
+    public static void setInterval(Context context, String email, int minutes) {
         prefs(context).edit().putInt("interval:" + email, minutes).apply();
         schedule(context);
     }
 
     /** Whether the account syncs in the background at all. */
-    static boolean syncs(Context context, String email) {
+    public static boolean syncs(Context context, String email) {
         return interval(context, email) > 0;
     }
 
     /** Whether the account's interval has passed since it last synced. */
-    static boolean due(Context context, String email) {
+    public static boolean due(Context context, String email) {
         int minutes = interval(context, email);
         long elapsed = System.currentTimeMillis() - SyncStamps.at(context, email);
         return minutes > 0 && elapsed >= minutes * 60 * 1000L - SLACK;
     }
 
     /** Whether the account's new mail notifies; off until turned on. */
-    static boolean notifies(Context context, String email) {
+    public static boolean notifies(Context context, String email) {
         return prefs(context).getStringSet(NOTIFY, Set.of()).contains(email);
     }
 
@@ -83,7 +87,7 @@ final class BackgroundCheck {
      * syncs in the background too, at the default interval when it was off:
      * the background run is what notifies.
      */
-    static void setNotifies(Context context, String email, boolean on) {
+    public static void setNotifies(Context context, String email, boolean on) {
         put(context, NOTIFY, email, on);
         if (on && !syncs(context, email)) {
             setInterval(context, email, DEFAULT);
@@ -94,13 +98,13 @@ final class BackgroundCheck {
      * The permissions notifying takes on the given SDK, those {@code has}
      * holds left out: posting one is a runtime permission from Android 13.
      */
-    static String[] missing(int sdk, Predicate<String> has) {
+    public static String[] missing(int sdk, Predicate<String> has) {
         String permission = Manifest.permission.POST_NOTIFICATIONS;
         return sdk >= 33 && !has.test(permission) ? new String[] {permission} : new String[0];
     }
 
     /** Whether the app may notify. */
-    static boolean permitted(Context context) {
+    public static boolean permitted(Context context) {
         Predicate<String> has =
                 permission ->
                         context.checkSelfPermission(permission)
@@ -109,7 +113,7 @@ final class BackgroundCheck {
     }
 
     /** Drops a removed account's switches. */
-    static void forget(Context context, String email) {
+    public static void forget(Context context, String email) {
         prefs(context).edit().remove("interval:" + email).apply();
         put(context, NOTIFY, email, false);
         schedule(context);
@@ -129,7 +133,7 @@ final class BackgroundCheck {
      * Schedules the job while an account takes part, cancels it otherwise.
      * Scheduling again keeps the job's place, its period unchanged.
      */
-    static void schedule(Context context) {
+    public static void schedule(Context context) {
         JobScheduler jobs = context.getSystemService(JobScheduler.class);
         boolean wanted = false;
         for (AccountEntry account : new SecureStore(context).loadAll()) {

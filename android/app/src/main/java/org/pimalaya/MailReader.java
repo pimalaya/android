@@ -5,6 +5,7 @@ import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.sync.PimdirEngine;
 
 import java.io.File;
 import java.util.List;

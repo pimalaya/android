@@ -1,10 +1,11 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.PimDomain;
 import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
@@ -34,7 +35,7 @@ import java.util.List;
  */
 public abstract class PimdirEngine implements OfflineDriver {
     /** The pimdir store's engine seam (placements, writes, conflicts). */
-    protected final PimdirStorage offline;
+    public final PimdirStorage offline;
 
     protected final PimalayaClient client;
 
@@ -47,7 +48,7 @@ public abstract class PimdirEngine implements OfflineDriver {
      * to overlap: one SQLite writer, a page's write landing whole before the
      * next one starts, as when the mailboxes ran one after another.
      */
-    static final Object STORE = new Object();
+    public static final Object STORE = new Object();
 
     /**
      * Observes a pass's coarse steps for a progress display; steps fire on
@@ -58,7 +59,7 @@ public abstract class PimdirEngine implements OfflineDriver {
      * carries the domain of the engine that took it, which the dock names
      * and weighs its counts by ({@link SyncSteps}).
      */
-    interface Progress {
+    public interface Progress {
         /** Exchanging the spine with the server. */
         int STAGE_SERVER = 0;
         /** Downloading `count` bodies from the server. */
@@ -82,7 +83,7 @@ public abstract class PimdirEngine implements OfflineDriver {
     }
 
     /** The foreground pass's progress observer; null when headless. */
-    Progress progress;
+    public Progress progress;
 
     protected void step(int stage, int count) {
         if (progress != null) {
@@ -152,7 +153,7 @@ public abstract class PimdirEngine implements OfflineDriver {
      * Where a pass's time goes: the debug log's numbers, page by page, and
      * what a test reads to tell the bridge's share from the store's.
      */
-    static final class Clock {
+    public static final class Clock {
         /** Nanoseconds in the remote's own call: the network and the connector. */
         long remote;
 
@@ -166,7 +167,7 @@ public abstract class PimdirEngine implements OfflineDriver {
         long store;
 
         /** Members the pages listed. */
-        int listed;
+        public int listed;
 
         /** Pages listed. */
         int pages;
@@ -189,7 +190,7 @@ public abstract class PimdirEngine implements OfflineDriver {
     }
 
     /** The pass's clock, every page landed so far folded in. */
-    final Clock clock = new Clock();
+    public final Clock clock = new Clock();
 
     /** The page under way, logged and folded into {@link #clock} at its write. */
     private Clock page = new Clock();
@@ -206,7 +207,7 @@ public abstract class PimdirEngine implements OfflineDriver {
     }
 
     /** Nanoseconds this driver has spent on the network so far, the page under way included. */
-    long remoteSoFar() {
+    public long remoteSoFar() {
         return clock.remote + page.remote;
     }
 
@@ -482,7 +483,7 @@ public abstract class PimdirEngine implements OfflineDriver {
      * Stages a flag set on one placement; the next sync pushes the
      * difference between it and the set the source last agreed on.
      */
-    void mutateFlags(String collection, String handle, JSONArray flags) throws JSONException {
+    public void mutateFlags(String collection, String handle, JSONArray flags) throws JSONException {
         JSONObject mutation = new JSONObject();
         mutation.put("op", "setFlags");
         mutation.put("handle", handle);
@@ -494,7 +495,7 @@ public abstract class PimdirEngine implements OfflineDriver {
      * Stages a removal: the placement becomes a tombstone the next sync
      * pushes, and a create that was never pushed is withdrawn instead.
      */
-    void mutateRemove(String collection, String handle) throws JSONException {
+    public void mutateRemove(String collection, String handle) throws JSONException {
         JSONObject mutation = new JSONObject();
         mutation.put("op", "remove");
         mutation.put("handle", handle);
@@ -506,7 +507,7 @@ public abstract class PimdirEngine implements OfflineDriver {
      * tombstone here, both visible at once (SYNC §3). The next sync of
      * either collection carries it out as a server move.
      */
-    void mutateMove(String collection, String handle, String target) throws JSONException {
+    public void mutateMove(String collection, String handle, String target) throws JSONException {
         JSONObject mutation = new JSONObject();
         mutation.put("op", "move");
         mutation.put("handle", handle);
@@ -519,7 +520,7 @@ public abstract class PimdirEngine implements OfflineDriver {
      * Stages a copy into {@code target}, the placement kept: a pending
      * create there the next sync pushes as a server-side copy.
      */
-    void mutateCopy(String collection, String handle, String target) throws JSONException {
+    public void mutateCopy(String collection, String handle, String target) throws JSONException {
         JSONObject mutation = new JSONObject();
         mutation.put("op", "copy");
         mutation.put("handle", handle);
@@ -532,7 +533,7 @@ public abstract class PimdirEngine implements OfflineDriver {
      * Stages a content edit on one placement; editing a conflicted
      * placement resolves it.
      */
-    void mutateEdit(String collection, String handle, String body, JSONObject summary,
+    public void mutateEdit(String collection, String handle, String body, JSONObject summary,
             String sortKey) throws JSONException {
         JSONObject mutation = new JSONObject();
         mutation.put("op", "edit");
@@ -551,7 +552,7 @@ public abstract class PimdirEngine implements OfflineDriver {
      * Stages a locally authored item the remote has never seen; the next
      * sync pushes it as an append.
      */
-    void mutateAdd(String collection, String linkId, String body, JSONArray flags,
+    public void mutateAdd(String collection, String linkId, String body, JSONArray flags,
             JSONObject summary, String sortKey) throws JSONException {
         JSONObject mutation = new JSONObject();
         mutation.put("op", "add");
@@ -596,7 +597,7 @@ public abstract class PimdirEngine implements OfflineDriver {
     // ---- the wire shapes --------------------------------------------------
 
     /** One push result on the engine wire. */
-    protected static JSONObject result(
+    public static JSONObject result(
             String handle, boolean accepted, String assigned, String revision)
             throws JSONException {
         JSONObject result = new JSONObject();

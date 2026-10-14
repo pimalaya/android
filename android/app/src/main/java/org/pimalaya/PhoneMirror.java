@@ -15,7 +15,7 @@ import java.util.function.Predicate;
  * <p>Asked as a mirror's switch is turned on ({@link MainActivity#askMirrors}),
  * its pair in one prompt.
  */
-enum PhoneMirror {
+public enum PhoneMirror {
     CONTACTS(
             PimDomain.CONTACTS,
             Manifest.permission.READ_CONTACTS,
@@ -46,7 +46,7 @@ enum PhoneMirror {
     }
 
     /** Whether every permission the mirror takes is granted. */
-    boolean granted(Context context) {
+    public boolean granted(Context context) {
         return granted(
                 permission ->
                         context.checkSelfPermission(permission)

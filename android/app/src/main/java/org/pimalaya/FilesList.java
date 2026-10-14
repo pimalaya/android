@@ -21,6 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.sync.MergedFilter;
 
 /**
  * The Files screen: one card per file collection the filter shows, the

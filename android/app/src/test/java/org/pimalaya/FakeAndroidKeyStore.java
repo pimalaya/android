@@ -39,7 +39,7 @@ public final class FakeAndroidKeyStore extends Provider {
      * Registers the provider, replacing one a previous Robolectric sandbox
      * registered: JCA is JVM-wide, but each sandbox loads its own classes.
      */
-    static synchronized void install() {
+    public static synchronized void install() {
         Security.removeProvider("AndroidKeyStore");
         Security.addProvider(new FakeAndroidKeyStore());
     }

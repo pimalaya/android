@@ -1,10 +1,26 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import android.content.Context;
 import android.util.Log;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.pimalaya.AccountCredential;
+import org.pimalaya.AccountEntry;
+import org.pimalaya.Accounts;
+import org.pimalaya.CalendarEngine;
+import org.pimalaya.CalendarPool;
+import org.pimalaya.CalendarRows;
+import org.pimalaya.EventStore;
+import org.pimalaya.MailBodies;
+import org.pimalaya.MailEngine;
+import org.pimalaya.MailPool;
+import org.pimalaya.MailStep;
+import org.pimalaya.MailStore;
+import org.pimalaya.MailTally;
+import org.pimalaya.MailWindow;
+import org.pimalaya.PimDomain;
+import org.pimalaya.SecureStore;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
@@ -23,9 +39,9 @@ import org.pimalaya.pimdir.PimdirDb;
  * the other's screen. Everything blocks; callers run it off the main
  * thread.
  */
-final class RemotePass {
+public final class RemotePass {
     /** What a pass reports as it goes, for the sync dock. */
-    interface Progress extends PimdirEngine.Progress {
+    public interface Progress extends PimdirEngine.Progress {
         /** The pass moved on to one account, null between accounts. */
         void account(String email);
 
@@ -34,7 +50,7 @@ final class RemotePass {
     }
 
     /** A pass nobody watches, the background check's. */
-    static final Progress HEADLESS =
+    public static final Progress HEADLESS =
             new Progress() {
                 @Override
                 public void account(String email) {}
@@ -55,7 +71,7 @@ final class RemotePass {
     private final SyncRunner runner;
     private final Progress progress;
 
-    RemotePass(
+    public RemotePass(
             Context context,
             PimdirDb pimdir,
             PimalayaClient client,
@@ -75,9 +91,9 @@ final class RemotePass {
     }
 
     /** What one mail pass over every account came to. */
-    static final class MailPass {
-        Exception failure;
-        int sent;
+    public static final class MailPass {
+        public Exception failure;
+        public int sent;
     }
 
     /**
@@ -86,7 +102,7 @@ final class RemotePass {
      * pass lists nothing on a metered network, where the outbox goes out
      * all the same.
      */
-    MailPass mailPass(SyncScope scope, boolean listing) {
+    public MailPass mailPass(SyncScope scope, boolean listing) {
         progress.account(null);
         MailPass pass = new MailPass();
         List<String> queued = new ArrayList<>();
@@ -191,7 +207,7 @@ final class RemotePass {
      * connection that cannot be opened, and one already open outlives the
      * token that opened it.
      */
-    MailSession openMail(AccountEntry account) {
+    public MailSession openMail(AccountEntry account) {
         try {
             return PimalayaClient.openMail(account.server(PimDomain.MAIL));
         } catch (Exception refused) {
@@ -207,7 +223,7 @@ final class RemotePass {
     }
 
     /** The stored accounts connected for one domain. */
-    List<AccountEntry> accountsFor(PimDomain domain) {
+    public List<AccountEntry> accountsFor(PimDomain domain) {
         List<AccountEntry> matching = new ArrayList<>();
         for (AccountEntry entry : store.loadAll()) {
             if (entry.covers(domain)) {
@@ -221,7 +237,7 @@ final class RemotePass {
      * Every calendar account synced, on the calling thread: those the
      * scope takes. Answers the first failure.
      */
-    Exception calendarPass(SyncScope scope) {
+    public Exception calendarPass(SyncScope scope) {
         progress.account(null);
         Exception failure = null;
         // NOTE: the calendar accounts, rather than the contacts accounts that
@@ -335,7 +351,7 @@ final class RemotePass {
      * frontier, so the body step downloads their bodies and *Load more*
      * steps it from there. Answers what went wrong, or null.
      */
-    Exception firstOf(AccountEntry account, MailSession session, String collection) {
+    public Exception firstOf(AccountEntry account, MailSession session, String collection) {
         progress.account(account.email);
         try {
             progress.step(PimDomain.MAIL, PimdirEngine.Progress.STAGE_SERVER, 0);
@@ -359,7 +375,7 @@ final class RemotePass {
      * of headers ({@link MailEngine#widen}), its bodies left to opening.
      * Answers what went wrong, or null.
      */
-    Exception loadMore(AccountEntry account, MailSession session, String only) {
+    public Exception loadMore(AccountEntry account, MailSession session, String only) {
         if (only == null
                 || MailBodies.downloads(mail.roles().get(only), false)
                 || PimalayaClient.isGoogle(account.server(PimDomain.MAIL))) {
@@ -389,7 +405,7 @@ final class RemotePass {
      * mailbox's own when it stepped that alone. Answers what went wrong, or
      * null.
      */
-    Exception stepMail(AccountEntry account, MailSession session, String only, boolean first) {
+    public Exception stepMail(AccountEntry account, MailSession session, String only, boolean first) {
         progress.account(account.email);
         String accountId = accountIdOf(account.email);
         try {
@@ -467,7 +483,7 @@ final class RemotePass {
      * thread. Answers what went wrong, or null; a calendar whose pass
      * fails leaves the ones beside it alone.
      */
-    Exception fetchCalendars(AccountEntry account, SyncScope scope) {
+    public Exception fetchCalendars(AccountEntry account, SyncScope scope) {
         progress.account(account.email);
         // NOTE: one session for the whole account, so the listing and every
         // event round after it share the token a refresh may have replaced
@@ -584,7 +600,7 @@ final class RemotePass {
     }
 
     /** The store id one account's collections are namespaced under. */
-    String accountIdOf(String email) {
+    public String accountIdOf(String email) {
         if (accountIds == null) {
             accountIds = new PimdirAccount(context);
         }

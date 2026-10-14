@@ -23,35 +23,35 @@ import java.util.UUID;
  * for all of its APIs, so a Google account holds one: a domain added
  * later asks for the union and its grant replaces the earlier one.
  */
-final class AccountCredential {
+public final class AccountCredential {
     /**
      * What names this credential inside its account. Opaque and minted
      * per grant: two sign-ins are two credentials even against one
      * provider, since the second cannot renew the first.
      */
-    final String id;
+    public final String id;
 
     /** The login presented with the secret; empty for a bearer token. */
     final String login;
 
     /** The password, API token or OAuth access token itself. */
-    final String secret;
+    public final String secret;
 
     /** Refresh token of an OAuth credential; null for a password one. */
-    final String refreshToken;
+    public final String refreshToken;
 
     /** Token endpoint the refresh runs against; null without a refresh token. */
-    final String tokenEndpoint;
+    public final String tokenEndpoint;
 
     /** OAuth client the tokens were issued to; null without a refresh token. */
-    final String clientId;
+    public final String clientId;
 
     /**
      * Secret of the OAuth client, when its registration issued one (Google
      * desktop-type clients require it in every exchange); null for
      * secret-less clients and password credentials.
      */
-    final String clientSecret;
+    public final String clientSecret;
 
     /**
      * The space-separated scopes the grant holds, as the token response
@@ -85,7 +85,7 @@ final class AccountCredential {
     }
 
     /** A credential a browser grant produced, renewable on its own. */
-    static AccountCredential oauth(
+    public static AccountCredential oauth(
             String accessToken,
             String refreshToken,
             String tokenEndpoint,
@@ -117,7 +117,7 @@ final class AccountCredential {
     }
 
     /** Whether this credential can be renewed without asking the user. */
-    boolean renewable() {
+    public boolean renewable() {
         return refreshToken != null;
     }
 
