@@ -64,7 +64,7 @@ public class FiltersTest {
         return new FilterPage.Account(email, email, collections);
     }
 
-    /** A filter accepting exactly the listed {@code account/collection} pairs. */
+    /** A filter accepting exactly these {@code account/collection} pairs. */
     private static BiPredicate<String, String> accepting(String... pairs) {
         Set<String> accepted = Set.of(pairs);
         return (account, collection) -> accepted.contains(account + "/" + collection);

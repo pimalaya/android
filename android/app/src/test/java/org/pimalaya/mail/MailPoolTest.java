@@ -38,14 +38,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * An account's mailboxes run side by side on a pool of sessions: a pass of N
- * mailboxes takes about N / size of the time one after another did, the
- * inbox is taken first, no session serves two workers at once, and the
- * store's writes never overlap.
+ * An account's mailboxes run side by side on a pool of sessions.
  *
- * <p>The server answers every request after a fixed latency, which is what a
- * pass waits on; everything from the engine down to the store is the real
- * thing.
+ * <p>N mailboxes take about N / size of the serial time, the inbox first, no
+ * session serving two workers, no store writes overlapping. The server answers
+ * after a fixed latency, which is what a pass waits on.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailPoolTest {
@@ -55,7 +52,7 @@ public class MailPoolTest {
     /** What one request to the fake server takes. */
     private static final long LATENCY_MS = 120;
 
-    /** Messages in each mailbox, fewer than a chunk: a first pass lists them all. */
+    /** Messages per mailbox, under a chunk: a first pass lists them all. */
     private static final int SIZE = 20;
 
     private Context context;
@@ -75,10 +72,10 @@ public class MailPoolTest {
     private final List<String> started = Collections.synchronizedList(new ArrayList<>());
 
     /**
-     * When set, the listing of {@code first} holds its worker until the one of
-     * {@code last} has begun, and every other listing waits for the one of
-     * {@code first}: what a listing begins after is then the order the pool
-     * took the mailboxes in, never which worker won the store's lock first.
+     * When set, orders the listings by the pool's take, not the store's lock.
+     *
+     * <p>The listing of {@code first} holds its worker until the one of {@code
+     * last} has begun, every other waiting for {@code first}'s.
      */
     private volatile String first;
     private volatile String last;
@@ -117,8 +114,10 @@ public class MailPoolTest {
     }
 
     /**
-     * Waits for a gate, bounded: a pool taking the mailboxes out of order
-     * then fails the order it is checked on rather than hanging.
+     * Waits for a gate, bounded.
+     *
+     * <p>A pool taking the mailboxes out of order fails the order check rather
+     * than hanging.
      */
     private static void await(CountDownLatch gate) {
         try {
@@ -138,7 +137,9 @@ public class MailPoolTest {
         private final Session session;
         private final String failing;
 
-        /** The engine one worker runs a mailbox with, over this server's session. */
+        /**
+         * The engine one worker runs a mailbox with, on this server's session.
+         */
         final MailEngine engine;
 
         Server(Session session, String failing) {
@@ -206,8 +207,9 @@ public class MailPoolTest {
     }
 
     /**
-     * Watches the store's writes as the list does ({@link MailState#onWrite}):
-     * told inside each write a pass lands.
+     * Watches the store's writes as the list does ({@link MailState#onWrite}).
+     *
+     * <p>Told inside each write a pass lands.
      */
     private void watchWrites() {
         MailState.of(context).onWrite =
@@ -239,7 +241,7 @@ public class MailPoolTest {
                 .put("sortKey", PimdirSummary.mailSortKey(date));
     }
 
-    /** The account's mailboxes, as a server lists them: not in a pass's order. */
+    /** The account's mailboxes as a server lists them, not in pass order. */
     private List<Mailbox> roster(int others) {
         List<Mailbox> mailboxes = new ArrayList<>();
         mailboxes.add(new Mailbox("Junk", "junk"));
@@ -272,7 +274,7 @@ public class MailPoolTest {
         return all;
     }
 
-    /** One pass over the collections on a pool of {@code size}, the failing one refused. */
+    /** One pass over the collections on a pool of {@code size}, one refused. */
     private WorkerPool.Outcome pass(
             List<String> collections, int size, List<Session> opened, String failing) {
         try (WorkerPool<Session> pool =

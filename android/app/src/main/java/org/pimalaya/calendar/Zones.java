@@ -27,23 +27,19 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Where a calendar time is: the instant an {@link EventTime} names, and
- * the {@code VTIMEZONE} a time in a zone owes the object it is written
- * in.
+ * Where a calendar time is: its instant, and its zone's {@code VTIMEZONE}.
  *
- * <p>The platform's time-zone database answers both, through java.time:
- * Android ships the IANA database and keeps it current, so the native
- * library carries none (docs/pimalaya-android-plan.md). What the
- * database cannot name, the object's own {@code VTIMEZONE} answers on
- * the native side, which hands its offset over with the time.
+ * <p>Answered by java.time: Android ships the IANA database and keeps it
+ * current, so the native library carries none. A zone it cannot name, the
+ * object's own {@code VTIMEZONE} places natively.
  */
 public final class Zones {
     /**
-     * Windows zone names, as Exchange and Outlook write them in a
-     * {@code TZID}, and the IANA zone each stands for: the default
-     * ({@code territory="001"}) mapping of CLDR's {@code windowsZones.xml}
-     * (CLDR otherVersion 7e11800, typeVersion 2021a), the table io-msgraph
-     * reads Graph's zones with.
+     * Windows zone names as Outlook writes a {@code TZID}, mapped to IANA.
+     *
+     * <p>CLDR {@code windowsZones.xml}'s default ({@code territory="001"})
+     * mapping (otherVersion 7e11800, typeVersion 2021a), as io-msgraph reads
+     * Graph's zones.
      */
     private static final String[][] WINDOWS = {
         {"AUS Central Standard Time", "Australia/Darwin"},
@@ -196,24 +192,18 @@ public final class Zones {
         }
     }
 
-    /** Every IANA name the platform knows, keyed in lower case; built on first use. */
+    /** The platform's IANA names keyed in lower case, built on first use. */
     private static Map<String, String> ianaNames;
 
     /** RFC 5545's weekday names, Monday first as {@link DayOfWeek} is. */
     private static final String[] WEEKDAYS = {"MO", "TU", "WE", "TH", "FR", "SA", "SU"};
 
     /**
-     * The zone a {@code TZID} names, or null when the platform knows no
-     * zone by it.
+     * The zone a {@code TZID} names, or null if the platform knows none.
      *
-     * <p>An IANA name as it is, trimmed and in any case (Outlook writes a
-     * trailing space); a Windows one through the CLDR table; and an IANA
-     * name behind a path, the way libical
-     * ({@code /freeassociation.sourceforge.net/Tzfile/Europe/Vienna}) and
-     * old Mozilla clients ({@code /mozilla.org/20050126_1/Europe/Paris})
-     * spell theirs. A name the platform's database does not know, such
-     * as a zone newer than the device, answers null like any other, and
-     * the object's own definition places it.
+     * <p>An IANA name trimmed, in any case (Outlook adds a space); a Windows
+     * one via CLDR; an IANA name behind a path (libical, old Mozilla). An
+     * unknown one is null: the object's definition places it.
      */
     static ZoneId zoneOf(String tzid) {
         if (tzid == null || tzid.trim().isEmpty()) {
@@ -262,16 +252,11 @@ public final class Zones {
     }
 
     /**
-     * The zone to name a series by where a zone has to be named, as the
-     * phone's calendar provider expands a rule in one: the zone its
-     * {@code TZID} is, else the IANA zone whose rules give every time of
-     * it the offset the object's own definition gave, else the device's.
+     * The zone to name a series by, as the provider expands a rule in one.
      *
-     * <p>Never UTC for a zoned series: a provider expanding a Friday
-     * 23:00 series in UTC would move it to Saturdays. A fixed-offset
-     * {@code Etc} zone is passed over for the same reason, since it would
-     * match one season of a zone that changes its clocks. The device's
-     * zone wins a tie, then the first name in order.
+     * <p>Its {@code TZID}'s, else the IANA zone matching every defined offset,
+     * else the device's (wins ties). Never UTC or a fixed {@code Etc} zone: a
+     * Friday 23:00 series expanded in UTC moves to Saturdays.
      */
     static ZoneId zoneFor(List<EventTime> span, ZoneId device) {
         EventTime first = span.isEmpty() ? null : span.get(0);
@@ -320,22 +305,17 @@ public final class Zones {
         return any;
     }
 
-    /** The instant a time names, read where the device is when it says nothing else. */
+    /** The instant a time names, in the device's zone when it names none. */
     static long instant(EventTime time) {
         return instant(time, ZoneId.systemDefault());
     }
 
     /**
-     * The instant a time names, in milliseconds: a date at its midnight
-     * and a floating time on the reader's clock, a UTC one as it is, and
-     * a zoned one in its zone.
+     * The instant a time names, in milliseconds.
      *
-     * <p>A zoned time the clock skips takes the offset before the gap,
-     * and one it repeats the earlier of its two, as RFC 5545 3.3.5 reads
-     * a DATE-TIME; java.time resolves both that way. A zone the platform
-     * cannot name is read at the offset the object's own definition puts
-     * in force, and one nobody defined is read where the device is,
-     * which is all a reader can do with it.
+     * <p>Dates at midnight and floating times on the reader's clock. A skipped
+     * time takes the offset before the gap, a repeated one the earlier (RFC
+     * 5545 3.3.5); an unnamed zone its defined offset, else the reader's.
      */
     static long instant(EventTime time, ZoneId reader) {
         if (time.isDate()) {
@@ -357,8 +337,9 @@ public final class Zones {
     }
 
     /**
-     * An instant as a time relative to what another one is: the same
-     * {@code TZID}, the same kind, so writing it back keeps its zone.
+     * An instant as a time shaped like {@code like}.
+     *
+     * <p>The same {@code TZID} and kind, so writing it back keeps its zone.
      */
     static EventTime at(long instant, EventTime like, ZoneId reader) {
         Instant moment = Instant.ofEpochMilli(instant);
@@ -390,7 +371,11 @@ public final class Zones {
         return stamp(moment, false) + "Z";
     }
 
-    /** A civil {@code YYYYMMDD} or {@code YYYYMMDDTHHMMSS} stamp, a date at midnight. */
+    /**
+     * A civil {@code YYYYMMDD} or {@code YYYYMMDDTHHMMSS} stamp.
+     *
+     * <p>A date reads as its midnight.
+     */
     static LocalDateTime civil(String time) {
         LocalDateTime day =
                 LocalDate.of(
@@ -428,18 +413,11 @@ public final class Zones {
     }
 
     /**
-     * The {@code VTIMEZONE} of a zone, written from the platform's rules
-     * (RFC 5545 3.6.5), for an object that writes a time in it from
-     * {@code since} on.
+     * A zone's {@code VTIMEZONE} from the platform's rules (RFC 5545 3.6.5).
      *
-     * <p>What the zone does from the year before that: every change the
-     * database lists, grouped into one observance per pair of offsets
-     * with the later ones as {@code RDATE}s, then the rules it keeps
-     * yearly, each an {@code RRULE}. A zone that changes nothing in that
-     * span is the offset it keeps. Its history before is left out, since
-     * no date written from {@code since} on reads it, and a zone such as
-     * Morocco's, whose changes are all listed decades ahead, still comes
-     * out whole.
+     * <p>From the year before {@code since}: changes as one observance per
+     * offset pair, later ones {@code RDATE}s, then yearly {@code RRULE}s, so
+     * Morocco's decades of listed changes come whole.
      */
     static String vtimezone(ZoneId zone, long since) {
         ZoneRules rules = zone.getRules();
@@ -520,7 +498,7 @@ public final class Zones {
         out.append("END:").append(kind).append("\r\n");
     }
 
-    /** An offset as RFC 5545 3.3.14 spells it: {@code +HHMM}, seconds when it has some. */
+    /** An offset as RFC 5545 3.3.14 spells it, {@code +HHMM[SS]}. */
     private static String offset(ZoneOffset offset) {
         int seconds = offset.getTotalSeconds();
         int magnitude = Math.abs(seconds);
@@ -537,11 +515,9 @@ public final class Zones {
     /**
      * The yearly {@code RRULE} a transition rule recurs on.
      *
-     * <p>The rule names a day of the month, or the first weekday on or
-     * after it, or the last on or before it. Its wall time can fall a day
-     * off that (a rule kept in UTC or standard time, a change at 24:00),
-     * which {@code onset} says: the day it actually falls on in
-     * {@code year}, the weekday and the day moving with it.
+     * <p>A month day, the first weekday on or after it, or the last before it.
+     * Its wall time may fall a day off (UTC or standard-time rules, a 24:00
+     * change): {@code onset} is its actual day in {@code year}.
      */
     private static String rule(ZoneOffsetTransitionRule rule, LocalDate onset, int year) {
         int indicator = rule.getDayOfMonthIndicator();

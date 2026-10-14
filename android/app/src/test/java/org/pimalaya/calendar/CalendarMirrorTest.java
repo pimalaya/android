@@ -45,12 +45,11 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * The calendar mirror end to end over a provider that behaves as the phone's
- * does where the mirror relies on it ({@link FakeCalendarProvider}), the
- * store and the engine real: the store's events reach the calendar's rows,
- * a calendar app's edit, creation, deletion and override come back as
- * patches of the object, a quiet pass writes nothing, a read-only calendar
- * is put back, and an edit both sides made stays conflicted for the triage.
+ * The calendar mirror end to end over {@link FakeCalendarProvider}.
+ *
+ * <p>Store and engine real: events reach the rows; an app's edit, create,
+ * delete and override return as patches; a quiet pass writes nothing; a
+ * read-only calendar is put back; a two-sided edit stays conflicted.
  */
 @RunWith(RobolectricTestRunner.class)
 public class CalendarMirrorTest {
@@ -88,7 +87,7 @@ public class CalendarMirrorTest {
     private Server server;
     private long calendar;
 
-    /** The server: a map of handle to (revision, body), taking what is pushed. */
+    /** The server: handle to (revision, body), taking what is pushed. */
     private static final class Server extends PimdirEngine {
         final Map<String, String[]> members = new LinkedHashMap<>();
         private int revision;
@@ -240,7 +239,7 @@ public class CalendarMirrorTest {
         return rows(Events.CONTENT_URI, null);
     }
 
-    /** A calendar app's write: no sync-adapter flag, so the row comes out dirty. */
+    /** A calendar app's write: no sync-adapter flag, so the row turns dirty. */
     private void edit(long id, String column, Object value) {
         ContentValues values = new ContentValues();
         if (value instanceof Long) {

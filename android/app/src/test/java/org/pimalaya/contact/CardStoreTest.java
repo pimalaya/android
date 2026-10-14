@@ -21,13 +21,10 @@ import org.robolectric.RuntimeEnvironment;
 import java.util.List;
 
 /**
- * The app's own state about its address books, now that the books themselves
- * are collections in the pimdir store.
+ * Pins the seam between the store's book collections and this database.
  *
- * <p>What is worth pinning here is the seam: a book is listed because the store
- * holds the collection, and it is displayed the way it is because this database
- * holds the switches, so the two have to meet correctly even when one of them
- * has never heard of the other.
+ * <p>A book lists because the store holds it and displays per the switches held
+ * here: the two meet even when one never heard of the other.
  */
 @RunWith(RobolectricTestRunner.class)
 public class CardStoreTest {
@@ -64,14 +61,12 @@ public class CardStoreTest {
     public void aBookIsTheCollectionPlusTheSwitchesHeldForIt() {
         BookEntry entry = only();
 
-        // Display fields come from the store, so there is one copy of them.
+        // NOTE: display fields come from the store: one copy of them.
         assertEquals("Book One", entry.book.name());
         assertEquals(BOOK, entry.book.url());
         assertEquals("b1", entry.book.id());
         assertEquals(EMAIL, entry.accountEmail);
 
-        // Switches come from here, and a new book is subscribed and
-        // remote-synced with the phone spoke off.
         assertTrue(entry.subscribed);
         assertTrue(entry.remoteSynced);
         assertFalse(entry.phoneSynced);
@@ -81,7 +76,7 @@ public class CardStoreTest {
     public void aRefreshKeepsTheSwitchesTheUserSet() {
         store.setBookState(BOOK, true, false, true);
 
-        // A re-listing must never silently turn a spoke the user chose back on.
+        // NOTE: a re-listing never silently turns a spoke back on.
         roster(new Addressbook("b1", "Book One renamed", BOOK, null, null));
 
         BookEntry entry = only();
@@ -93,10 +88,8 @@ public class CardStoreTest {
 
     @Test
     public void aBookWhoseUrlWasRecomposedKeepsItsSwitches() {
-        // JMAP collection URLs gained the JMAP account id, so the same book
-        // comes back under a new URL exactly once. Matching on the id within
-        // the account is what stops that reshaping from silently
-        // re-subscribing every book and dropping the phone spoke.
+        // NOTE: JMAP book URLs gained the JMAP account id; matching on the id
+        // within the account keeps that from resetting every book's switches.
         store.setBookState(BOOK, true, false, true);
 
         roster(new Addressbook("b1", "Book One", BOOK + "?recomposed", null, null));
@@ -109,8 +102,8 @@ public class CardStoreTest {
 
     @Test
     public void unsubscribingForcesBothSpokesOff() {
-        // Neither spoke means anything without the subscription, so leaving one
-        // on would schedule syncs for a book that is not displayed.
+        // NOTE: a spoke left on without the subscription would schedule syncs
+        // for a book not displayed.
         store.setBookState(BOOK, false, true, true);
 
         BookEntry entry = only();
@@ -123,8 +116,8 @@ public class CardStoreTest {
 
     @Test
     public void aCollectionWithNoSwitchRowTakesTheDefaults() {
-        // The store learned about a book this database has not seen: hiding it
-        // would lose a whole address book to a bookkeeping gap.
+        // NOTE: hiding a book this database has not seen would lose it to a
+        // bookkeeping gap.
         new PimdirCollections(pimdir, context)
                 .ensure("https://dav.example.com/books/b2/", EMAIL, PimdirSummary.CONTACT, "Book Two");
 
@@ -161,8 +154,8 @@ public class CardStoreTest {
 
         store.onUpgrade(db, 2, 3);
 
-        // The cards and their memberships are the pimdir store's now, and the
-        // next sync refills it; the switches are what no sync can re-derive.
+        // NOTE: the next sync refills the cards; the switches are what no sync
+        // can re-derive.
         assertFalse(table(db, "card"));
         assertFalse(table(db, "membership"));
         assertFalse("the carry scaffolding is gone", table(db, "addressbook_carry"));
@@ -180,7 +173,7 @@ public class CardStoreTest {
         }
     }
 
-    /** The version 2 shape, enough of it for the carry to have something to do. */
+    /** The version 2 shape, enough of it for the carry to do something. */
     private void legacySchema(SQLiteDatabase db) {
         db.execSQL("DROP TABLE IF EXISTS addressbook");
         db.execSQL(

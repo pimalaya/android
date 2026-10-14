@@ -24,11 +24,11 @@ import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
 /**
- * A CardDAV or CalDAV home prepared over WebDAV itself: a scratch
- * collection is an address book made by extended MKCOL (RFC 5689) or a
- * calendar by MKCALENDAR (RFC 4791), its path segment and display name the
- * scratch name, and an item is a resource PUT into it. Only collections
- * carrying the prefix are ever written or deleted.
+ * A CardDAV or CalDAV home prepared over WebDAV itself.
+ *
+ * <p>A scratch book is made by extended MKCOL (RFC 5689), a calendar by
+ * MKCALENDAR (RFC 4791), named by the scratch name; an item is a PUT resource.
+ * Only collections carrying the prefix are ever written or deleted.
  */
 final class E2eDavFixture implements E2eItemFixture {
     private static final DateTimeFormatter UTC =
@@ -157,7 +157,9 @@ final class E2eDavFixture implements E2eItemFixture {
         }
     }
 
-    /** A collection's members, its own entry left out: href and display name. */
+    /**
+     * A collection's members, its own entry left out: href and display name.
+     */
     private List<String[]> members(String url) throws Exception {
         String answer =
                 send(
@@ -213,10 +215,11 @@ final class E2eDavFixture implements E2eItemFixture {
     }
 
     /**
-     * One WebDAV request over HTTP/1.1 on a TLS socket of its own, closed
-     * after the answer: the platform's HttpURLConnection refuses the WebDAV
-     * methods. A type for a body other than XML, a depth for a PROPFIND. A
-     * failure names the method, the URL and the answer, never a header.
+     * One WebDAV request over HTTP/1.1 on a TLS socket of its own.
+     *
+     * <p>HttpURLConnection refuses the WebDAV methods. {@code type} for a
+     * non-XML body. A failure names the method, the URL and the answer, never a
+     * header.
      */
     private String send(String method, String url, String body, String type) throws Exception {
         URI uri = URI.create(url);

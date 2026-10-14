@@ -6,11 +6,12 @@ import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.Stager;
 
-/** The calendar driver that only stages: event writes, and the phone queue they reach. */
+/** The calendar driver that only stages: event writes, then the phone queue. */
 public final class CalendarStager extends Stager {
     /** The store, for the phone queue its writes reach. */
     private final PimdirDb pimdir;
 
+    /** A driver that only stages, over the store and the bridge. */
     public CalendarStager(PimdirDb pimdir, Clients clients) {
         super(pimdir, clients);
         this.pimdir = pimdir;
@@ -22,8 +23,9 @@ public final class CalendarStager extends Stager {
     }
 
     /**
-     * A write to a calendar reaches the phone's calendar within a second
-     * ({@link PhoneQueue}); a write to the phone collection is a phone
+     * A write to a calendar reaches the phone's calendar within a second.
+     *
+     * <p>Through {@link PhoneQueue}; a write to the phone collection is a phone
      * pass's own, pushed by that pass.
      */
     static void staged(PimdirDb pimdir, String collection) {

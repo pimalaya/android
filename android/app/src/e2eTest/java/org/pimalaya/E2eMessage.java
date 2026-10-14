@@ -8,9 +8,10 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * One message a fixture seeds into a scratch mailbox, as RFC 5322 bytes: from
- * the account to itself, its subject carrying the run's tag, its
- * `Message-ID` under a domain nobody delivers to.
+ * One message a fixture seeds into a scratch mailbox, as RFC 5322 bytes.
+ *
+ * <p>From the account to itself, its subject carrying the tag, its `Message-ID`
+ * under a domain nobody delivers to.
  */
 final class E2eMessage {
     static final DateTimeFormatter RFC_5322 =

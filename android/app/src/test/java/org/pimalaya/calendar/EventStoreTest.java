@@ -24,10 +24,9 @@ import java.util.List;
 /**
  * The calendar mirror, on the shared store.
  *
- * <p>An event is stored as the iCalendar text the server sent, because what it
- * renders as depends on the window being shown; these check that the text
- * survives the round trip through the blob directory and that a re-listing
- * leaves nothing behind.
+ * <p>Events are stored as the server's iCalendar text, since rendering depends
+ * on the window shown: the text must survive the blob round trip, and a
+ * re-listing leave nothing behind.
  */
 @RunWith(RobolectricTestRunner.class)
 public class EventStoreTest {
@@ -82,11 +81,9 @@ public class EventStoreTest {
 
     @Test
     public void twoAccountsSharingACalendarIdDoNotCollide() {
-        // The JMAP address carries its account id now, so two accounts on one
-        // provider no longer hand identical URLs down. This pins the store's
-        // own guard against it anyway: a backend that did would be one
-        // collection that each sync round re-points at the other account,
-        // merging two people's agendas.
+        // NOTE: pins the store's own guard: a backend handing two accounts one
+        // URL would make one collection each round re-points at the other
+        // account, merging two people's agendas.
         String jmapUrl = "jmap://api.example.com/c1";
         store.replaceCalendars(
                 EMAIL, List.of(new Calendar("c1", "Mine", jmapUrl, null, null, "", true)));
@@ -97,7 +94,6 @@ public class EventStoreTest {
         assertEquals(2, calendars.size());
         assertNotEquals(calendars.get(0).id, calendars.get(1).id);
 
-        // And the address the listing round asks for is the un-namespaced one.
         for (EventStore.StoredCalendar calendar : calendars) {
             assertEquals(jmapUrl, calendar.url);
         }
@@ -131,10 +127,9 @@ public class EventStoreTest {
 
     @Test
     public void anEntryTheServerHasNeverSeenCarriesItsProvisionalHandle() {
-        // A staged create has no binding, so nothing has named it yet: the
-        // engine addresses it by the handle its identity derives (SYNC §2),
-        // and a page opened on it has to hand back that same handle or the
-        // edit would name a resource nobody knows.
+        // NOTE: a staged create has no binding: the engine addresses it by the
+        // handle its identity derives (SYNC §2), and a page opened on it must
+        // hand that handle back or the edit names a resource nobody knows.
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {

@@ -198,8 +198,9 @@ public class E2eCalendarTest extends E2eCase {
     }
 
     /**
-     * A scratch calendar, or for Google's CalDAV, whose home lists the
-     * primary calendar alone, that one, where only tagged events are written.
+     * A scratch calendar, or Google's primary (its CalDAV home lists no other).
+     *
+     * <p>Only tagged events are written to the primary.
      */
     private String scratchCalendar() throws Exception {
         return target.id.equals("google-caldav") ? E2eGoogleCalendarFixture.PRIMARY : scratch();

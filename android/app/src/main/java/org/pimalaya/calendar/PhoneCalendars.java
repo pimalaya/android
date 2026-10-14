@@ -8,14 +8,11 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Which calendars show in the phone's calendar apps, the setups' switch per
- * account and the settings' per calendar.
+ * Which calendars the phone's calendar apps show, per account and calendar.
  *
- * <p>Kept as the accounts shown and, among their calendars, those kept off,
- * as the filter keeps its hidden sets: the setup chooses before the account's
- * first sync lists its calendars, and a calendar the server lists later joins
- * the phone like its siblings. Keyed by collection id, the app's own state
- * about collections pimdir has no column for, like the books' switches.
+ * <p>Kept as the accounts shown and the calendars kept off, since the setup
+ * chooses before the first sync lists them: a calendar listed later joins like
+ * its siblings. Keyed by collection id, app state pimdir has no column for.
  */
 public final class PhoneCalendars {
     private static final String PREFS = "phone-calendars";
@@ -42,8 +39,10 @@ public final class PhoneCalendars {
     }
 
     /**
-     * The setup's choice for the account: on, its calendars show on the
-     * phone, those kept off before staying off.
+     * The setup's choice for the account.
+     *
+     * <p>On, its calendars show on the phone, those kept off before staying
+     * off.
      */
     public static void setAccount(Context context, String account, boolean on) {
         Set<String> accounts = read(context, ACCOUNTS);
@@ -56,9 +55,10 @@ public final class PhoneCalendars {
     }
 
     /**
-     * One calendar's switch. Turned on in an account the phone does not
-     * show, the account comes with that calendar alone, its {@code siblings}
-     * kept off.
+     * One calendar's switch.
+     *
+     * <p>Turned on in an account the phone does not show, the account comes
+     * with that calendar alone, its {@code siblings} kept off.
      */
     public static void set(
             Context context,

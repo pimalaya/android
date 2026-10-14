@@ -14,15 +14,15 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 
 /**
- * Google calendars prepared through the Calendar API (v3): a scratch
- * collection is a secondary calendar of the user's, deleted with its events
- * (Google completes such a delete asynchronously, minutes later), and an
- * event is imported under an `iCalUID` of its own.
+ * Google calendars prepared through the Calendar API (v3).
+ *
+ * <p>A scratch collection is a secondary calendar, deleted with its events
+ * (asynchronously, minutes later); an event is imported under its own
+ * `iCalUID`.
  */
 final class E2eGoogleCalendarFixture implements E2eItemFixture {
     /**
-     * The user's primary calendar, the one Google's CalDAV serves (no home
-     * lists the others), where only tagged events are written.
+     * The primary calendar, the one Google's CalDAV serves; tagged events only.
      */
     static final String PRIMARY = "primary";
 

@@ -19,19 +19,16 @@ import org.pimalaya.client.ContactOrganization;
 import org.pimalaya.client.ContactPhone;
 
 /**
- * Pins the neutral-field-model to ContactsContract wire mapping
- * (docs/contacts-mapping.md): mimetypes, column names and type
- * constants are asserted literally, so any drift in the mapping breaks
- * loudly here instead of silently on phones.
+ * Pins the field model to ContactsContract mapping (docs/contacts-mapping.md).
+ *
+ * <p>Mimetypes, columns and type constants are literal, so drift breaks here
+ * rather than silently on phones.
  */
 public class MappingTest {
     @Test
     public void displayNameNeverProjectsOnlyComponentsDo() throws Exception {
-        // Regression: FN is hub-only. Projected alone it was re-split
-        // into the wrong parts by the provider's guesswork; written
-        // alongside the parts the provider rewrote it as their join,
-        // which then read back as a phone edit clearing FN. The phone
-        // gets the structured parts, nothing else.
+        // NOTE: FN is hub-only: the provider re-splits or rewrites it, which
+        // read back as a phone edit clearing FN. The phone gets the parts.
         ContactFields.Builder model = new ContactFields.Builder();
         model.displayName = "Jane Doe Yo";
         model.name = new ContactName("Doe", "Jane", "Q.", "", "Jr.");
@@ -163,8 +160,6 @@ public class MappingTest {
         }
     }
 
-    // ---- Inverse direction (rows to model) -------------------------------------
-
     @Test
     public void richModelRoundTripsThroughRows() throws Exception {
         // NOTE: the display name stays empty: FN is hub-only, never
@@ -210,7 +205,7 @@ public class MappingTest {
 
     @Test
     public void displayNameOnlyRowReadsAsBareDisplayName() throws Exception {
-        // The shape phone apps author when only a full name is typed.
+        // NOTE: the shape phone apps author when only a full name is typed.
         Map<String, Object> row = new HashMap<>();
         row.put("mimetype", "vnd.android.cursor.item/name");
         row.put("data1", "Jane Doe");
@@ -246,8 +241,6 @@ public class MappingTest {
         assertEquals("home", adr.types().get(0));
     }
 
-    // ---- Field-space merge ------------------------------------------------------
-
     @Test
     public void mergeTakesOnlyThePhoneEditedFields() throws Exception {
         ContactFields base = divergentBase();
@@ -257,10 +250,9 @@ public class MappingTest {
 
         ContactFields merged = Mapping.merge(base, phone.build());
         assertEquals("+332222", merged.phones().get(0).number());
-        // FN never reaches the phone rows, so an untouched phone must
-        // not read as a name clear.
+        // NOTE: FN never reaches the phone rows, so an untouched phone must not
+        // read as a name clear.
         assertEquals("Doe", merged.name().family());
-        // Fields outside the phone mapping ride along from the base.
         assertEquals("friends", merged.categories().get(0));
     }
 
@@ -269,8 +261,8 @@ public class MappingTest {
         ContactFields base = divergentBase();
         ContactFields phone = Mapping.model(Mapping.rows(base));
 
-        // No field taken means no phone edit: the caller keeps the base
-        // card's exact bytes instead of re-encoding a no-op.
+        // NOTE: no field taken means no phone edit: the caller keeps the base's
+        // exact bytes.
         assertNull(Mapping.merge(base, phone));
     }
 
@@ -283,8 +275,6 @@ public class MappingTest {
         base.categories.add("friends");
         return base.build();
     }
-
-    // ---- Helpers --------------------------------------------------------------
 
     private static Map<String, Object> firstOfType(ContactFields model, String mimetype) {
         List<Map<String, Object>> rows = Mapping.rows(model);

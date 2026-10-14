@@ -17,10 +17,10 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * Pins the merged view's grouping end to end: replicas indexed by the
- * bridge, the link and detached rows read from the card store, the pool
- * grouped by the bridge, and each group holding the very entries it was
- * given, in pool order.
+ * Pins the merged view's grouping end to end.
+ *
+ * <p>Bridge-indexed replicas, link and detached rows from the card store, the
+ * groups holding the very entries given, in pool order.
  */
 @RunWith(RobolectricTestRunner.class)
 public class ContactPoolTest {
@@ -76,7 +76,7 @@ public class ContactPoolTest {
         assertEquals(List.of(), pool.group(List.of(), List.of()));
     }
 
-    /** The group holds exactly the given entries, the same objects, in order. */
+    /** The group holds exactly the given entries, same objects, in order. */
     private static void assertMembers(Group group, List<Entry> entries, int... indexes) {
         assertEquals(indexes.length, group.replicas.size());
         for (int at = 0; at < indexes.length; at++) {

@@ -30,16 +30,9 @@ import java.util.List;
 /**
  * The mail side of the store, on the shared pimdir store.
  *
- * <p>Three things are worth pinning: that a mailbox is namespaced by its
- * account, because two accounts with an INBOX is the ordinary case and a
- * collision would silently merge two people's mail; that the merged list is
- * ordered by the key written at sync time rather than by anything parsed at
- * render time; and that the outbox survives a roster replace, since it holds
- * the one thing in the store no server could hand back.
- *
- * <p>The items are written here the way the engine writes them, through
- * {@link PimdirItems}. What the engine does on top of that (the reconcile, the
- * staged writes it derives) is the engine's to pin.
+ * <p>Pins mailboxes namespaced by account (two INBOXes never merge), the merged
+ * list ordered by the key written at sync, and the outbox surviving a roster
+ * replace. Items are written as the engine does ({@link PimdirItems}).
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailStoreTest {
@@ -117,8 +110,9 @@ public class MailStoreTest {
         envelope(ONE, "INBOX", "1", "Hers", "Mon, 5 Jan 2026 09:00:00 +0000");
         envelope(TWO, "INBOX", "1", "His", "Mon, 5 Jan 2026 10:00:00 +0000");
 
-        // Same mailbox name, same UID, different accounts: the id is namespaced
-        // so these are two collections rather than one overwritten row.
+        // NOTE: same mailbox name, same UID, different accounts: the id is
+        // namespaced so these are two collections rather than one overwritten
+        // row.
         assertEquals(2, scalar("SELECT count(*) FROM items"));
 
         List<MailStore.StoredMessage> merged = store.loadMerged(10);
@@ -142,17 +136,16 @@ public class MailStoreTest {
         assertEquals("an unreadable date sinks rather than fails", "Undated", merged.get(2).subject);
         assertEquals(0, merged.get(2).stamp);
 
-        // The label has to come from the same key the row was ordered by, or a
-        // list can show dates that disagree with its own order.
+        // NOTE: the label comes from the key the row was ordered by, or a list
+        // can show dates that disagree with its own order.
         assertTrue(merged.get(0).stamp > merged.get(1).stamp);
     }
 
     @Test
     public void bothBackendsSpellingsOfADateOrderTogether() {
-        // IMAP hands over an RFC 5322 envelope date and JMAP an RFC 3339
-        // receivedAt. The merged list orders one column across both, so a
-        // spelling only one of them could read would sink every message of
-        // the other under every message of its neighbour.
+        // NOTE: IMAP hands over an RFC 5322 envelope date and JMAP an RFC 3339
+        // receivedAt; one column orders both, so a spelling only one could read
+        // would sink every message of the other.
         mailboxes(ONE, "INBOX");
         mailboxes(TWO, "INBOX");
         envelope(ONE, "INBOX", "1", "Imap", "Mon, 5 Jan 2026 09:00:00 +0000");
@@ -172,10 +165,8 @@ public class MailStoreTest {
                 ONE, "INBOX", "7", "Read", DATE, Flags.Marker.SEEN.wire(),
                 Flags.Marker.ANSWERED.wire(), Flags.Marker.FLAGGED.wire());
 
-        // Three of the four are what the row's trailing icons read, and they
-        // travel by two different routes: answered and flagged are IMAP flags
-        // in the item's own flag set, the attachment is a summary field,
-        // because no protocol treats it as a flag.
+        // NOTE: answered and flagged are IMAP flags in the item's flag set, the
+        // attachment a summary field, since no protocol treats it as a flag.
         MailStore.StoredMessage stored = store.loadMerged(10).get(0);
         assertTrue(stored.seen());
         assertTrue(stored.answered());
@@ -187,8 +178,8 @@ public class MailStoreTest {
     @Test
     public void aMarkerSetIsReadBackWhole() {
         mailboxes(ONE, "INBOX");
-        // A keyword this app does not model, which a toggle has to leave alone:
-        // it is read back so the staged set can carry it through unchanged.
+        // NOTE: a keyword this app does not model, which a toggle leaves alone:
+        // read back so the staged set carries it through unchanged.
         envelope(ONE, "INBOX", "7", "Read", DATE, Flags.Marker.SEEN.wire(), "$junk");
 
         Flags flags = store.flagsOf(store.collectionOf(ONE, "INBOX"), "7");
@@ -238,8 +229,8 @@ public class MailStoreTest {
             db.endTransaction();
         }
 
-        // The row shows the name and the avatar beside it is keyed by the
-        // address, so losing either half would cost one of the two.
+        // NOTE: the row shows the name and the avatar is keyed by the address,
+        // so losing either half costs one of the two.
         MailStore.StoredMessage nameless = store.loadMerged(10).get(0);
         MailStore.StoredMessage named = store.loadMerged(10).get(1);
 
@@ -283,10 +274,9 @@ public class MailStoreTest {
                 Submission.of(ONE, "queued@example.org", "Waiting", DATE),
                 SOURCE.getBytes(StandardCharsets.UTF_8));
 
-        // A roster replace drops every mail collection the account no longer
-        // lists, and no server lists an outbox: taking its silence for a
-        // removal would lose a message nothing could hand back. The queue
-        // rows are the ones a replace never looks at.
+        // NOTE: a roster replace drops every mail collection the account no
+        // longer lists, and no server lists an outbox: its silence is no
+        // removal, the message nothing could hand back.
         store.replaceMailboxes(
                 ONE, List.of(new Mailbox("INBOX", ""), new Mailbox("Bin", Mailbox.TRASH)));
 
@@ -296,8 +286,8 @@ public class MailStoreTest {
 
         assertEquals("read back with no network to ask", "Bin", store.policy().trashOf(ONE));
 
-        // And it reads as pending, which is the one state where the store
-        // holds a message no server has.
+        // NOTE: pending is the one state where the store holds a message no
+        // server has.
         MailStore.StoredMessage row = store.loadMerged(10).get(0);
         assertTrue(row.pending());
         assertFalse(row.failed);
@@ -322,8 +312,8 @@ public class MailStoreTest {
 
         assertTrue("nothing offers it to the server again", store.outbox().outgoing(ONE).isEmpty());
 
-        // Still a message the sender wrote, so it is still shown, saying
-        // that it was refused rather than disappearing.
+        // NOTE: still a message the sender wrote, so it is shown, saying it was
+        // refused rather than disappearing.
         MailStore.StoredMessage row = store.loadMerged(10).get(0);
         assertTrue(row.failed);
         assertTrue(row.pending());
@@ -340,7 +330,8 @@ public class MailStoreTest {
         long queued = store.outbox().outgoing(ONE).get(0).id;
         store.outbox().parkUncertain(queued, "Reached unexpected EOF on SMTP stream");
 
-        // Never handed over again on its own, which could deliver it twice.
+        // NOTE: never handed over again on its own, which could deliver it
+        // twice.
         assertTrue(store.outbox().outgoing(ONE).isEmpty());
         MailStore.StoredMessage row = store.loadMerged(10).get(0);
         assertTrue(row.uncertain);
@@ -366,9 +357,9 @@ public class MailStoreTest {
                 SOURCE.getBytes(StandardCharsets.UTF_8));
         queueForeign(store.outbox().outboxOf(ONE));
 
-        // Skipped rather than parked or applied: an owner that does not
-        // recognise a kind leaves the row exactly as it found it and never
-        // blocks the ones behind it (STORAGE section 15.2).
+        // NOTE: skipped rather than parked or applied: an owner that does not
+        // recognise a kind leaves the row as it found it and never blocks the
+        // ones behind it (STORAGE section 15.2).
         assertEquals(1, store.outbox().outgoing(ONE).size());
         assertEquals(
                 "the foreign row is untouched",
@@ -390,9 +381,9 @@ public class MailStoreTest {
         mailboxes(ONE, "INBOX");
         String outbox = store.outbox().outboxOf(ONE);
 
-        // The shape the version before this one wrote: an item in a mail
-        // collection of its own, which nothing drains any more and which
-        // the next roster replace would cascade away.
+        // NOTE: the shape the version before wrote: an item in a mail
+        // collection of its own, which nothing drains and the next roster
+        // replace would cascade away.
         new PimdirCollections(pimdir, RuntimeEnvironment.getApplication())
                 .ensure(outbox, ONE, PimdirSummary.MAIL, "Outbox");
 
@@ -426,7 +417,6 @@ public class MailStoreTest {
         assertTrue(row.pending());
         assertEquals("Waiting", row.subject);
 
-        // Twice is the same as once: nothing is left to move.
         assertEquals(1, store.outbox().outgoing(ONE).size());
     }
 
@@ -483,8 +473,6 @@ public class MailStoreTest {
     @Test
     public void theListIsSizedPlacedAndPagedByTheStore() throws Exception {
         mailboxes(ONE, "INBOX");
-        // 120 messages over 60 days, every third one unread, every fourth
-        // one carrying an attachment.
         for (int index = 0; index < 120; index++) {
             String date =
                     java.time.LocalDate.of(2026, 1, 1).plusDays(index / 2)
@@ -503,8 +491,6 @@ public class MailStoreTest {
         }
         assertEquals("the day headers place every row", 120, placed);
 
-        // A page read after the one before it (a scroll) and one read from
-        // its offset (a fling) are the same rows.
         List<MailStore.StoredMessage> first = store.page(query, null, 0, 50);
         List<MailStore.StoredMessage> scrolled = store.page(query, first.get(49), 0, 50);
         List<MailStore.StoredMessage> flung = store.page(query, null, 50, 50);
@@ -515,7 +501,7 @@ public class MailStoreTest {
         assertTrue("newest first", first.get(0).stamp >= first.get(49).stamp);
         assertEquals(20, store.page(query, null, 100, 50).size());
 
-        // The chips and the badge are conditions of the query, over every
+        // NOTE: the chips and the badge are conditions of the query, over every
         // stored message rather than over what a page holds.
         assertEquals(40, store.count(all(true, false, "")));
         assertEquals(40, store.count(query.unread()));
@@ -523,8 +509,8 @@ public class MailStoreTest {
         assertEquals(40, store.unread(query));
         assertEquals(10, store.count(all(true, true, "")));
 
-        // A floor is the statements' own: the count, the days, the pages and
-        // the badge stop at it. February on holds rows 62 to 119.
+        // NOTE: a floor is the statements' own: the count, the days, the pages
+        // and the badge stop at it. February on holds rows 62 to 119.
         MailStore.Query floored = query.since("2026-02-01T00:00:00Z");
         assertEquals(58, store.count(floored));
         long days = 0;
@@ -536,7 +522,6 @@ public class MailStoreTest {
         assertEquals("unread below the floor is not counted", 19, store.unread(floored));
         assertEquals(19, store.count(floored.unread()));
 
-        // What a range weighs, sizes the store does not know told apart.
         sized(ONE, "s1", "Sized", "2026-03-02T09:00:00Z", 1_000, false);
         sized(ONE, "s2", "Sized", "2026-03-02T10:00:00Z", 2_000, false);
         MailStore.Sum known = store.sum(query, "2026-03-02T00:00:00Z", null, null);
@@ -571,7 +556,6 @@ public class MailStoreTest {
         assertEquals(1, store.count(found));
         assertEquals("old", store.page(found, null, 0, 50).get(0).id);
         assertEquals(1, store.countByDay(found, "+0 minutes").size());
-        // A literal wildcard is searched for, not matched by.
         assertEquals(0, store.count(all(false, false, "100%")));
         assertEquals("%100\\%%", PimdirDb.likePattern("100%"));
     }
@@ -587,7 +571,7 @@ public class MailStoreTest {
         String accountId = store.accountIdOf(ONE);
         MailWindow.set(context, accountId, "2019-06-01T00:00:00Z");
 
-        // A flag change staged and not pushed yet owes the server something,
+        // NOTE: a flag change staged and not pushed owes the server something,
         // so a collection leaves it.
         MailStager engine = new MailStager(pimdir, Clients.real());
         String collection = store.collectionOf(ONE, "INBOX");

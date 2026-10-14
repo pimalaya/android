@@ -51,12 +51,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * A Gmail step from the engine down to the store: the messages the bridge
- * read whole land in every mailbox their labels name, the first step
- * opening every mailbox (the trash included) as a round closed on the
- * history id, a later one adding to them as a delta; each body is filed
- * from its file once and linked into the other mailboxes. And the footer's
- * line under "Load more".
+ * A Gmail step from the engine down to the store.
+ *
+ * <p>Messages land in every mailbox their labels name: a first step opens all
+ * (trash included) as a round closed on the history id, a later one adds a
+ * delta; a body is filed once and linked elsewhere. And "Load more"'s footer.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailStepTest {
@@ -88,7 +87,7 @@ public class MailStepTest {
         trash = store.collectionOf(EMAIL, "TRASH");
     }
 
-    /** One message the fake account serves: its id, date, reception and mailboxes. */
+    /** One message the fake account serves: id, date, reception, mailboxes. */
     private static final class Mail {
         final String id;
         final String date;
@@ -168,7 +167,7 @@ public class MailStepTest {
             }
         }
 
-        /** Which of a listed page the store holds, asked as the bridge asks it. */
+        /** Which of a listed page the store holds, asked as the bridge asks. */
         private Set<String> held(OfflineDriver store, List<String> listing) {
             try {
                 String asked =

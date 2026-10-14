@@ -4,9 +4,9 @@ import java.util.List;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.client.MailSession;
 
-/** What the mail screens ask of the app's foreground sync (the coordinator in sync answers). */
+/** What the mail screens ask of the app's foreground sync. */
 public interface MailSync {
-    /** The mail list's pull, under a role chip ({@code role}, null for none). */
+    /** The mail list's pull, under a role chip (null for none). */
     void syncMail(String role);
 
     /** Whether the sync is held: a step asked for now would do nothing. */
@@ -24,6 +24,6 @@ public interface MailSync {
     /** Opens one account's mail connection. */
     MailSession openMail(AccountEntry account);
 
-    /** Moves the windows of some accounts later, {@code done} run on the main thread. */
+    /** Moves some accounts' windows later, {@code done} on the main thread. */
     void releaseWindow(List<String> emails, String date, Runnable done);
 }

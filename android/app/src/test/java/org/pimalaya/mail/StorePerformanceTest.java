@@ -48,12 +48,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * What keeps the store's cost proportional to what a read asks for rather
- * than to what the store holds (cairn/changes/store-performance): a scoped
- * load of a listing's page reads that page, a write is never read through a
- * cursor, a deep page or a fling reads from where it lands, a count skips
- * the summary it does not filter on, and a step asks which of a page the
- * store holds rather than carrying every handle it binds.
+ * A store read costs what it asks for, not what the store holds.
+ *
+ * <p>Scoped loads read their page, writes never go through a cursor, a deep
+ * page or fling reads from where it lands, counts skip unfiltered summaries,
+ * steps ask which of a page is held (cairn/changes/store-performance).
  */
 @RunWith(RobolectricTestRunner.class)
 public class StorePerformanceTest {
@@ -100,7 +99,7 @@ public class StorePerformanceTest {
         return new JSONObject().put("op", "upsert").put("placement", placement);
     }
 
-    /** Lists {@code count} messages into a mailbox, one a minute down from {@code newest}. */
+    /** Lists {@code count} messages, one a minute down from {@code newest}. */
     private void list(String collection, String prefix, int count, String newest)
             throws Exception {
         java.time.Instant top = java.time.Instant.parse(newest);
@@ -118,7 +117,6 @@ public class StorePerformanceTest {
         }
     }
 
-    // ---- 1: a scoped load reads the rows it names --------------------------
 
     @Test
     public void aScopeLongerThanAStatementBindsStillNarrowsTheLoad() throws Exception {
@@ -130,8 +128,9 @@ public class StorePerformanceTest {
             links.put("h" + (index + 300));
         }
 
-        // A listing's page is 500 to 1000 members: a scope that long used to
-        // widen back to the whole mailbox, every page then reading all of it.
+        // NOTE: a listing's page is 500 to 1000 members: a scope that long used
+        // to widen back to the whole mailbox, every page then reading all of
+        // it.
         JSONObject byHandle = new JSONObject().put("kind", "handles").put("handles", handles);
         JSONArray loaded = storage.loadCollection(inbox, byHandle).getJSONArray("placements");
         assertEquals(1000, loaded.length());
@@ -143,8 +142,6 @@ public class StorePerformanceTest {
     @Test
     public void aHandleScopeReachesAStagedCreateByItsName() throws Exception {
         list(inbox, "h", 3, "2026-10-01T12:00:00Z");
-        // A create staged and not pushed: an item no source binds yet,
-        // placed under the provisional handle of its link id.
         JSONObject staged =
                 new JSONObject()
                         .put("collection", inbox)
@@ -180,12 +177,8 @@ public class StorePerformanceTest {
         assertEquals(List.of(PimdirStorage.provisionalOf("draft"), "h1"), got);
     }
 
-    // ---- 3: a write is never read through a cursor -------------------------
 
-    /**
-     * Seeds {@code count} listed messages straight into the tables, fast,
-     * numbered from {@code from}.
-     */
+    /** Seeds {@code count} listed messages straight into the tables. */
     private void seed(String collection, int from, int count, String date, String object) {
         String rows =
                 "WITH RECURSIVE n(i) AS (SELECT " + (from + 1) + " UNION ALL SELECT i + 1 FROM n"
@@ -210,7 +203,7 @@ public class StorePerformanceTest {
                 new Object[] {collection, date});
     }
 
-    /** More rows than one 2 MB cursor window holds of a returned seq (87,150). */
+    /** More rows than one 2 MB cursor window holds of a seq (87,150). */
     private static final int PAST_A_WINDOW = 250_000;
 
     @Test(timeout = 120_000)
@@ -218,9 +211,9 @@ public class StorePerformanceTest {
         seed(inbox, 0, PAST_A_WINDOW, "2001-01-01T00:00:00Z", null);
         seed(inbox, PAST_A_WINDOW, PAST_A_WINDOW, "2003-01-01T00:00:00Z", null);
 
-        // A delete read through a cursor runs again for every row past its
-        // first window, each run reading the mailbox: tens of thousands of
-        // runs over the rows it keeps, a collection that never ends.
+        // NOTE: a delete read through a cursor runs again for every row past
+        // its first window, each run reading the mailbox: a collection that
+        // never ends.
         assertEquals(PAST_A_WINDOW, store.collectBefore(EMAIL, "2002-01-01T00:00:00Z"));
         assertEquals(PAST_A_WINDOW, scalar("SELECT count(*) FROM items"));
         assertEquals(PAST_A_WINDOW, scalar("SELECT count(*) FROM bindings"));
@@ -264,7 +257,6 @@ public class StorePerformanceTest {
         assertEquals(0, scalar("SELECT count(*) FROM items"));
     }
 
-    // ---- 4 and 7: a deep page reads from where it lands ---------------------
 
     /** EXPLAIN QUERY PLAN of a bound read, its steps joined. */
     private String plan(PimdirSql.Bound bound) {
@@ -295,7 +287,6 @@ public class StorePerformanceTest {
 
     @Test
     public void keysetPagesFlingsAndTheBodyPlanWalkTheListAsOneRead() throws Exception {
-        // Two mailboxes, ties on the minute across them, and two undated.
         list(inbox, "i", 130, "2026-03-02T00:30:00Z");
         list(archive, "a", 70, "2026-03-02T00:30:00Z");
         storage.applyWrites(
@@ -326,8 +317,8 @@ public class StorePerformanceTest {
         }
         assertEquals(ids(whole), planned);
 
-        // A fling lands on a row with no page above it read: from the start
-        // of its day on the wall clock the days were counted on.
+        // NOTE: a fling lands on a row with no page above it read: from the
+        // start of its day on the wall clock the days were counted on.
         for (int minutes : new int[] {0, 120, -300}) {
             String shift = String.format(java.util.Locale.ROOT, "%+d minutes", minutes);
             List<MailStore.Day> days = store.countByDay(query, shift);
@@ -351,11 +342,10 @@ public class StorePerformanceTest {
         return ids;
     }
 
-    // ---- 6: a count skips the summary it does not filter on -----------------
 
     @Test
     public void theCountsReadTheSummaryForTheAttachmentChipAlone() {
-        // The counts stand an empty summary in for the real one when the
+        // NOTE: the counts stand an empty summary in for the real one when the
         // chip is off, which holds only while they read nothing else of it.
         Pattern column = Pattern.compile("\\bs\\.([a-z_]+)");
         for (String name : new String[] {"COUNT_MAIL", "COUNT_MAIL_BY_DAY", "COUNT_UNREAD"}) {
@@ -384,7 +374,6 @@ public class StorePerformanceTest {
         assertFalse(plan, plan.contains("mail_summary_1"));
     }
 
-    // ---- 8: a step asks which of a page the store holds ---------------------
 
     @Test
     public void aStepAsksTheStoreWhichOfAPageItHolds() throws Exception {
@@ -400,7 +389,6 @@ public class StorePerformanceTest {
                 storage.heldOf(List.of(inbox, archive), List.of("i1", "a4", "new", "i9")));
         assertEquals("none outside a step", Set.of(), engine.held(List.of("i1")));
 
-        // The bridge asks through the driver's serve, a page at a time.
         JSONObject[] answered = new JSONObject[1];
         MailClient bridge =
                 new MailClient() {
@@ -447,7 +435,6 @@ public class StorePerformanceTest {
         assertEquals("i2", held.getString(0));
     }
 
-    // ---- 9: an opened message crosses as a file ----------------------------
 
     @Test
     public void anOpenedMessageIsStreamedIntoTheStoreAndReadFromIt() throws Exception {
@@ -508,7 +495,6 @@ public class StorePerformanceTest {
                 1,
                 scalar("SELECT attachment FROM mail_summary WHERE link_id = '42'"));
 
-        // Opened again: from the store, no fetch.
         MailReader.Read again = reader.read(store.message(inbox, "42"), () -> null);
         assertFalse(again.fetched);
         assertEquals(1, dirs.size());

@@ -22,9 +22,10 @@ import org.pimalaya.sync.FirstSync;
 import org.pimalaya.sync.SyncPasses;
 
 /**
- * An account's deletion across every domain: its credentials, its contacts
- * moved to the on-device book, its mail and events, and the app state kept
- * per account (filters, defaults, switches).
+ * An account's deletion across every domain.
+ *
+ * <p>Its credentials, its contacts moved to the on-device book, its mail and
+ * events, and the app state kept per account (filters, defaults, switches).
  */
 final class AccountRemoval {
     private final Context context;
@@ -48,8 +49,10 @@ final class AccountRemoval {
     }
 
     /**
-     * Removes an account's data and app state, on the calling thread (the
-     * main one); answers its book URLs for the phone purge.
+     * Removes an account's data and app state; answers its book URLs.
+     *
+     * <p>Runs on the calling thread (the main one); the URLs feed the phone
+     * purge.
      */
     List<String> remove(String email) {
         // NOTE: remember the books' URLs to remove the phone accounts
@@ -93,8 +96,9 @@ final class AccountRemoval {
     }
 
     /**
-     * Drops what the filters, the defaults and the account switch held of an
-     * account being deleted, before its collections go.
+     * Drops what the filters, defaults and account switch held of an account.
+     *
+     * <p>Before its collections go.
      */
     private void forgetViews(String email) {
         for (PimDomain domain : PimDomain.values()) {

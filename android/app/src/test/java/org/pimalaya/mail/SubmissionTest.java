@@ -21,10 +21,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The submission payload the queue persists: written byte for byte as the
- * version before the typed {@link Submission} wrote it (Android's org.json,
- * insertion order, as on a device), and a payload written by that version
- * read back to the same values. The literals were captured on that version.
+ * The submission payload the queue persists, byte for byte as before.
+ *
+ * <p>Written as the version before the typed {@link Submission} wrote it
+ * (Android's org.json, insertion order), and that version's payloads read back
+ * to the same values; literals captured on that version.
  */
 @RunWith(RobolectricTestRunner.class)
 public class SubmissionTest {
@@ -33,7 +34,7 @@ public class SubmissionTest {
     private static final byte[] SOURCE =
             "From: a@example.org\r\n\r\nthe body\r\n".getBytes(StandardCharsets.UTF_8);
 
-    /** A payload as the version before wrote it, with a key this one does not know. */
+    /** A payload as the version before wrote it, with an unknown key. */
     private static final String OLD =
             "{\"v\":1,\"from\":\"jane@example.com\",\"messageId\":\"old\\/x@example.org\","
                     + "\"subject\":\"Old \\u00e9\",\"sortKey\":\"2026-01-05T09:00:00Z\","

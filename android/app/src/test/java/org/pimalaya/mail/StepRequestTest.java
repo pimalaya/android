@@ -31,17 +31,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * What a step asks the bridge on each backend, and what a step item lands
- * as: the requests of a Gmail and a JMAP account (GmailStep), a Graph one
- * (GraphStep) and the request an IMAP account would build, through six
- * frontier, anchor, bound and kept-whole states, each over the account and
- * over one mailbox. The expected requests were captured on the code that
- * built them as JSON; {@code BOUND} stands for the account's three-month
- * bound, which moves with the date.
+ * What a step asks the bridge on each backend, and what a step item lands as.
+ *
+ * <p>Gmail, JMAP, Graph and IMAP requests over six frontier, anchor, bound and
+ * kept-whole states, account-wide and per mailbox, captured as JSON on the old
+ * code; {@code BOUND} stands for the moving three-month bound.
  */
 @RunWith(RobolectricTestRunner.class)
 public class StepRequestTest {
-    /** Each step asked: its label, the mailbox handed beside it, the request. */
+    /** Each step asked: its label, the mailbox beside it, the request. */
     private static final List<String> ASKED =
             List.of(
                     "gmail s0 only=- | null | {\"count\":50,\"frontier\":null,\"bound\":null,\"anchors\":[],\"mailboxes\":[\"INBOX\",\"Sent\",\"Clients\",\"TRASH\"]}",
@@ -216,14 +214,12 @@ public class StepRequestTest {
                                 + "\"size\":0}]}");
         NamedStepItem full = step.items().get(0);
         JSONObject named = MailEngine.wireItem(full);
-        // handle, flags, linkId, summary, sortKey: the file and labels left out.
         MailWire.assertSameJson(
                 "{\"handle\":\"m1\",\"flags\":[\"\\\\Seen\",\"$label\"],"
                         + "\"linkId\":\"m1\",\"summary\":{\"subject\":\"Lunch\"},"
                         + "\"sortKey\":\"2026-01-06T08:30:00Z\"}",
                 named);
         JSONObject bare = MailEngine.wireItem(step.items().get(1));
-        // A summary and a sort key the bridge left out stay out.
         MailWire.assertSameJson("{\"handle\":\"m2\",\"flags\":[],\"linkId\":\"m2\"}", bare);
     }
 }

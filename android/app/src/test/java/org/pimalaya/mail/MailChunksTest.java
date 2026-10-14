@@ -35,14 +35,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A mailbox listed a chunk of messages at a time: a first pass lists the
- * newest {@link MailEngine#FIRST_CHUNK}, the floor it leaves is the oldest
- * {@code Date} among them, a widening lists the next chunk below it, and the
- * merged list reaches down to the most recent floor of the mailboxes it shows.
+ * A mailbox listed a chunk of messages at a time.
  *
- * <p>The server is a list of dated messages answering the engine's listings
- * and the chunk floors the bridge would ask it for, so everything from the
- * engine down to the store is the real thing.
+ * <p>A first pass lists the newest {@link MailEngine#FIRST_CHUNK}, leaving the
+ * oldest {@code Date} as floor; a widening lists the next chunk below it; the
+ * merged list reaches the most recent floor of the mailboxes it shows.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailChunksTest {
@@ -73,8 +70,9 @@ public class MailChunksTest {
     }
 
     /**
-     * A server mailbox of {@code size} messages, UIDs 1 to {@code size}, the
-     * newest at the top and each {@code spacing} hours older than the one
+     * A server mailbox of {@code size} dated messages, newest on top.
+     *
+     * <p>UIDs 1 to {@code size}, each {@code spacing} hours older than the one
      * above it.
      */
     private final class Server extends MailClient {
@@ -268,10 +266,11 @@ public class MailChunksTest {
                         store.edges()));
     }
     /**
-     * A step from the store widens the mailbox holding the most recent
-     * floor until a step's worth lies between it and the frontier, then
-     * moves the frontier to the {@link MailStep#COUNT}th newest below the
-     * old one; the step that lists the last of the mailbox says so.
+     * A step from the store widens the mailbox holding the most recent floor.
+     *
+     * <p>Until a step's worth lies above the frontier, which moves to the
+     * {@link MailStep#COUNT}th newest below the old one; the step listing the
+     * last of the mailbox says so.
      */
     @Test
     public void aStepFromTheStoreWidensUntilFiftyLieBelowTheFrontier() throws Exception {
@@ -302,9 +301,10 @@ public class MailChunksTest {
     }
 
     /**
-     * The store's load carries a message's date for the engine to scope a
-     * round by, and nothing of it is ever written back: a marker staged on a
-     * listed message keeps the summary its listing stored.
+     * The store's load carries a message's date, never written back.
+     *
+     * <p>The engine scopes a round by it; a marker staged on a listed message
+     * keeps the summary its listing stored.
      */
     @Test
     public void aDatedLoadNeverWritesItsDateBackAsTheSummary() throws Exception {

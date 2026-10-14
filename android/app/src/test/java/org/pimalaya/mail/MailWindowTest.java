@@ -21,10 +21,10 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * An account's frontier: the one a step leaves (imports and wrong clocks
- * aside), the one first chunks leave, how it moves (back only, raised by a
- * narrowed bound, never older than the bound), and whether a step may bring
- * more.
+ * An account's frontier: where steps and first chunks leave it, how it moves.
+ *
+ * <p>Back only (imports and wrong clocks aside), raised by a narrowed bound,
+ * never older than the bound; and whether a step may bring more.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailWindowTest {
@@ -113,10 +113,10 @@ public class MailWindowTest {
     }
 
     /**
-     * Off Gmail, where mailboxes step one by one after the account's first
-     * step, a mailbox with a frontier of its own reads that one alone, even
-     * newer than its account's: one ticked later starts where its own first
-     * chunk reached.
+     * Off Gmail, a mailbox with a frontier of its own reads that one alone.
+     *
+     * <p>Even newer than its account's: mailboxes step one by one after the
+     * first step, and one ticked later starts where its own first chunk ended.
      */
     @Test
     public void offGmailAMailboxReadsItsOwnFrontier() {
@@ -157,14 +157,12 @@ public class MailWindowTest {
         MailWindow.stepped(context, ACCOUNT, null, new MailStep.Outcome("2026-08-01T00:00:00Z", false, 50));
         assertEquals("2026-08-01T00:00:00Z", MailWindow.since(context, ACCOUNT, clients));
 
-        // A mailbox stepped alone to its end has no more, its account still has.
         MailWindow.stepped(context, ACCOUNT, clients, new MailStep.Outcome(null, true, 3));
         assertNull(MailWindow.since(context, ACCOUNT, clients));
         assertFalse(MailWindow.more(context, ACCOUNT, clients));
         assertTrue(MailWindow.more(context, ACCOUNT));
         assertTrue(MailWindow.more(context, ACCOUNT, inbox));
 
-        // Moving the account's later drops a mailbox's own older one.
         MailWindow.set(context, ACCOUNT, "2026-09-15T00:00:00Z");
         MailWindow.dropMailboxes(context, ACCOUNT, "2026-09-15T00:00:00Z");
         assertEquals("2026-09-15T00:00:00Z", MailWindow.since(context, ACCOUNT, clients));

@@ -22,9 +22,10 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * The custom-client loopback listener: a local app connecting first, silent
- * or sending a stray request, neither hangs the wait nor gets the grant's
- * redirect taken for its own.
+ * The custom-client loopback listener against a local app connecting first.
+ *
+ * <p>Silent or sending a stray request, it neither hangs the wait nor gets the
+ * grant's redirect taken for its own.
  */
 @RunWith(RobolectricTestRunner.class)
 public class LoopbackRedirectTest {
@@ -73,7 +74,6 @@ public class LoopbackRedirectTest {
     public void strayConnectionsAreTurnedAwayAndTheRedirectServed() throws Exception {
         Future<String> redirect = await();
 
-        // A silent connection is dropped after its read timeout.
         try (Socket silent =
                 new Socket(InetAddress.getByName("127.0.0.1"), server.getLocalPort())) {
             silent.setSoTimeout(5_000);
@@ -90,7 +90,7 @@ public class LoopbackRedirectTest {
             String answer = send("x".repeat(LoopbackRedirect.MAX_REQUEST_LINE * 4));
             assertTrue(answer.isEmpty() || answer.startsWith("HTTP/1.1 400"));
         } catch (java.io.IOException reset) {
-            // refused by a reset
+            // NOTE: a reset is a refusal too.
         }
 
         String answer = send("GET /cb?code=c0de&state=" + STATE + " HTTP/1.1\r\nHost: x\r\n\r\n");

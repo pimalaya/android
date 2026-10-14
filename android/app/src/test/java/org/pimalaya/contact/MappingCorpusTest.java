@@ -20,12 +20,10 @@ import org.pimalaya.client.ContactFields;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Pins the phone mapping and the field-model patch on a corpus, against
- * outcomes captured from the JSON model the records replaced
- * (mapping-corpus.txt): every vCard's phone rows, every merge decision over
- * every phone row set (null for no edit, the fields taken, the patched
- * vCard), every patch of a projection or an edit-form model onto every
- * vCard, and the three-way merges of a conflicted push. Outputs are kept as
+ * Pins the phone mapping and the field-model patch on a corpus.
+ *
+ * <p>Outcomes captured from the replaced JSON model (mapping-corpus.txt): phone
+ * rows, merge decisions, patches, conflicted three-way merges. Outputs kept as
  * SHA-256 prefixes, errors by message.
  */
 @RunWith(RobolectricTestRunner.class)

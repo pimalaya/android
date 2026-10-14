@@ -40,15 +40,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The body step: the bodies a frontier and a mailbox kept whole plan, the
- * Wi-Fi it waits for, an arrival taken whatever its date, and the upgrade
- * it lands them through, each body read into a file and filed as the
- * object it is, from the engine down to the store.
+ * The body step, from the engine down to the store.
  *
- * <p>The server is one mailbox of four messages: three from the last days
- * (one of 40 KB, one of 3 MB, one of unknown size carrying an attachment)
- * and one from three years back, answering the engine's listing and the
- * source each body is read from.
+ * <p>The bodies a frontier and a mailbox kept whole plan, the Wi-Fi it waits
+ * for, an arrival taken whatever its date, and the upgrade landing them, each
+ * read into a file and filed as the object it is.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailBodiesTest {
@@ -85,13 +81,13 @@ public class MailBodiesTest {
         final List<String> read = new ArrayList<>();
         final List<String> pushed = new ArrayList<>();
 
-        /** How many more reads of a handle the server fails, -1 for all of them. */
+        /** How many more reads of a handle fail, -1 for all of them. */
         final java.util.Map<String, Integer> refusing = new java.util.HashMap<>();
 
-        /** The handles the server answers gone (deleted since they were listed). */
+        /** The handles the server answers gone (deleted since listed). */
         final java.util.Set<String> vanished = new java.util.HashSet<>();
 
-        /** The account's driver, on this server, the changes it pushes recorded. */
+        /** The account's driver on this server, its pushes recorded. */
         final MailEngine engine =
                 new MailEngine(
                         pimdir,
@@ -158,7 +154,7 @@ public class MailBodiesTest {
         }
     }
 
-    /** The bridge, recording the changes each push it asks of the driver carries. */
+    /** The bridge, recording the changes each push asks of the driver. */
     private static final class Pushes extends OfflineClient {
         private final List<String> pushed;
 
@@ -208,7 +204,9 @@ public class MailBodiesTest {
                 .put("sortKey", PimdirSummary.mailSortKey(date));
     }
 
-    /** The bodies the inbox plans from {@code since} on (null for all), newest first. */
+    /**
+     * The bodies the inbox plans from {@code since} (null: all), newest first.
+     */
     private List<MailBodies.Row> planned(String since) {
         return MailBodies.wanted(store.bodyRows(List.of(inbox), since));
     }

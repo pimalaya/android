@@ -38,14 +38,11 @@ import java.util.List;
 import java.util.function.Consumer;
 
 /**
- * Deleted items: every item the store keeps after its deletion, across
- * mail, contacts and calendars, newest deletion first ({@link DeletedItems}).
+ * Deleted items of every domain, newest first ({@link DeletedItems}).
  *
- * <p>Tapping a row whose body is stored restores it into a collection of its
- * kind the user picks, its last one preselected. A row held as summary only
- * says it is not stored on this device, and one a source still binds says it
- * waits for the server; neither offers anything. Above the list, what the
- * retained items hold and the button that frees it, confirmed first.
+ * <p>A row with its body stored restores into a picked collection of its kind,
+ * its last one preselected; a summary-only row, or one a source still binds,
+ * offers nothing. Above, what they hold and a confirmed button freeing it.
  */
 public final class DeletedItemsPage {
     /** Rows shown at first and added by each "Show more". */
@@ -69,6 +66,7 @@ public final class DeletedItemsPage {
     /** The screen the page was raised over, restored on the way out. */
     private int cameFrom = Panels.MAIL;
 
+    /** Builds the deleted items page. */
     public DeletedItemsPage(
             Host host,
             SyncPasses.Parts parts,
@@ -82,6 +80,7 @@ public final class DeletedItemsPage {
         this.reload = reload;
     }
 
+    /** Wires the page's buttons and list. */
     public void setUp() {
         host.findViewById(R.id.deleted_back).setOnClickListener(view -> leave());
         host.findViewById(R.id.deleted_free).setOnClickListener(view -> confirmFree());
@@ -175,12 +174,11 @@ public final class DeletedItemsPage {
         adapter.notifyDataSetChanged();
     }
 
-    // ---- restore ----------------------------------------------------------
-
     /**
-     * Asks where to put the row back, among its account's writable
-     * collections of its kind, the last one preselected (else the account's
-     * default), and stages it there.
+     * Asks where to put the row back and stages it there.
+     *
+     * <p>Among its account's writable collections of its kind, the last one
+     * preselected, else the account's default.
      */
     private void restore(DeletedItems.Row row) {
         if (row.waiting()) {
@@ -250,9 +248,10 @@ public final class DeletedItemsPage {
     }
 
     /**
-     * Whether the account's mail sync uploads a create with no origin: an
-     * append is IMAP's, the providers filing their own copies (Graph, Gmail)
-     * and JMAP pushing none yet.
+     * Whether the account's mail sync uploads a create with no origin.
+     *
+     * <p>An append is IMAP's: Graph and Gmail file their own copies, JMAP
+     * pushes none yet.
      */
     private boolean appends(String email) {
         for (AccountEntry account : accounts) {
@@ -325,8 +324,6 @@ public final class DeletedItemsPage {
         }
     }
 
-    // ---- free space -------------------------------------------------------
-
     private void confirmFree() {
         Object tag = host.findViewById(R.id.deleted_free).getTag();
         long bytes = tag instanceof Long ? (Long) tag : 0;
@@ -340,7 +337,7 @@ public final class DeletedItemsPage {
                 .show();
     }
 
-    /** Purges every item retained until now, then collects what nothing references. */
+    /** Purges every retained item, then collects what nothing references. */
     private void free(long bytes) {
         host.findViewById(R.id.deleted_progress).setVisibility(View.VISIBLE);
         String cutoff = DeletedItems.stamp(new Date());
@@ -370,8 +367,6 @@ public final class DeletedItemsPage {
                             });
                 });
     }
-
-    // ---- rows -------------------------------------------------------------
 
     private String accountLabel(DeletedItems.Row row) {
         return LocalBook.is(row.collection.accountEmail)

@@ -39,8 +39,10 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * Deleting an account: its credentials, mail and events go, its contacts stay
- * on the device, and every per-account choice the app kept is dropped.
+ * Deleting an account: credentials, mail and events go, contacts stay.
+ *
+ * <p>The contacts stay on the device; every per-account choice the app kept is
+ * dropped.
  */
 @RunWith(RobolectricTestRunner.class)
 public class AccountRemovalTest {

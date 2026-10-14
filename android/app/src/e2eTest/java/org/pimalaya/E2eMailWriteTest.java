@@ -13,7 +13,9 @@ import org.pimalaya.mail.MailStore;
 
 import java.util.List;
 
-/** Markers and deletes staged on the phone, pushed, and read back by another device. */
+/**
+ * Markers and deletes staged on the phone, pushed, read back by another device.
+ */
 public class E2eMailWriteTest extends E2eCase {
     public E2eMailWriteTest(String target) {
         super(target);

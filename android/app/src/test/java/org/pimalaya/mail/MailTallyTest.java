@@ -14,9 +14,10 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * A mail step or a body run counts its bodies as their files land: out of
- * what it planned, a step closing its plan on what it brought, a run
- * settling chunk by chunk and adding a replan to what it landed.
+ * A step or body run counts its bodies as their files land, out of its plan.
+ *
+ * <p>A step closes its plan on what it brought; a run settles chunk by chunk,
+ * adding a replan to what it landed.
  */
 public class MailTallyTest {
     @Rule public TemporaryFolder folder = new TemporaryFolder();

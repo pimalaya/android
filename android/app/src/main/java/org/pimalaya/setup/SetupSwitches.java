@@ -5,11 +5,10 @@ import java.util.Set;
 import org.pimalaya.phone.PhoneMirror;
 
 /**
- * The setups' opt-in switches: the books in the phone's contacts, the
- * calendars in its calendar, and new-mail notifications.
+ * The setups' opt-in switches: phone contacts, phone calendars, notifications.
  *
- * <p>Each starts off and turns on only once its permission prompt, asked as
- * it is switched on, came back granted: a refusal leaves it off.
+ * <p>Each starts off and turns on only once its permission prompt, asked as it
+ * is switched on, came back granted: a refusal leaves it off.
  */
 final class SetupSwitches {
     /** The phone apps the account's collections show in. */
@@ -25,8 +24,7 @@ final class SetupSwitches {
     }
 
     /**
-     * A mirror's switch moved: on only when its prompt granted it. Answers
-     * whether it is on.
+     * A mirror's switch moved, on only when granted; answers whether it is on.
      */
     boolean mirror(PhoneMirror mirror, boolean on, Set<PhoneMirror> granted) {
         if (on && granted.contains(mirror)) {
@@ -37,7 +35,9 @@ final class SetupSwitches {
         return false;
     }
 
-    /** The notifications' switch moved: on only when granted. Answers whether it is on. */
+    /**
+     * The notifications switch moved, on only when granted; answers its state.
+     */
     boolean notify(boolean on, boolean granted) {
         notifies = on && granted;
         return notifies;

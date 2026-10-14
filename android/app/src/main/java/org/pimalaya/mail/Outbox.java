@@ -17,25 +17,21 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The outbox, which is not a mailbox at all but each account's pending
- * submissions on the store's action queue ({@link PimdirQueue}): what is
- * queued, what the drain hands over, and what was parked.
+ * The outbox: each account's pending submissions on the store's queue.
+ *
+ * <p>Not a mailbox ({@link PimdirQueue}): what is queued, what the drain hands
+ * over, and what was parked.
  */
 public final class Outbox {
     /**
      * The collection the outbox's queue rows are filed against.
      *
-     * <p>A control character, which no server hands out and no user types, so
-     * it cannot collide with a mailbox the account really holds. It holds no
-     * items: an action addresses a collection, and this is the one a submission
-     * addresses.
+     * <p>A control character no server hands out and no user types, so it never
+     * collides with a real mailbox. It holds no items.
      */
     private static final String OUTBOX = "\u0001outbox";
 
-    /**
-     * What a parked submission's reason starts with when the message may
-     * have gone ({@link #parkUncertain}), rather than been refused.
-     */
+    /** A parked reason's prefix when the message may have gone, not refused. */
     static final String UNCERTAIN = "uncertain: ";
 
 
@@ -52,8 +48,9 @@ public final class Outbox {
     }
 
     /**
-     * Whether a submission of the message is still waiting, or was refused
-     * and parked: the sent copy staged for it is not to be filed yet.
+     * Whether a submission of the message is still waiting or parked.
+     *
+     * <p>The sent copy staged for it is then not to be filed yet.
      */
     boolean submitting(String messageId) {
         for (PimdirQueue.Action action : submissions()) {
@@ -109,7 +106,7 @@ public final class Outbox {
         return messages;
     }
 
-    /** One queued submission as a row, read off the payload it was written with. */
+    /** One queued submission as a row, read off its payload. */
     private StoredMessage outgoing(PimdirQueue.Action action) {
         Submission submission = Submission.from(action);
         String from = submission.from();
@@ -137,12 +134,9 @@ public final class Outbox {
     /**
      * Moves an outbox written as items onto the queue, once.
      *
-     * <p>The version before this one held outgoing messages as items in a
-     * mail collection of their own. Nothing syncs those rows and nothing
-     * drains them any more, and the first roster replace after the upgrade
-     * would delete the collection and cascade them away, so they are
-     * enqueued as the submissions they always were and the rows are
-     * dropped. A store with none of them pays one indexed read.
+     * <p>Older versions kept outgoing mail as items nothing syncs, which the
+     * first roster replace would cascade away: they are enqueued and dropped. A
+     * store with none pays one indexed read.
      */
     void migrateOutbox(String accountEmail) {
         String collection = outboxOf(accountEmail);
@@ -215,6 +209,7 @@ public final class Outbox {
         /** The {@code Message-ID} it was stamped with, bare. */
         public final String messageId;
 
+        /** The message itself, as handed over. */
         public final byte[] source;
 
         Outgoing(long id, String messageId, byte[] source) {
@@ -255,10 +250,8 @@ public final class Outbox {
     /**
      * Acknowledges one submission, which is what finishes it.
      *
-     * <p>Cancelling rather than applying: what the action asked for
-     * happened at a server and not in the store, so there is nothing here
-     * to apply and the row is removed by the process that carried it out
-     * (STORAGE section 15.5). It releases the body's pin with it.
+     * <p>Cancelled rather than applied: it happened at a server, not in the
+     * store (STORAGE section 15.5). It releases the body's pin with it.
      */
     public void acknowledge(long queued) {
         queue.acknowledge(queued);
@@ -270,20 +263,20 @@ public final class Outbox {
     }
 
     /**
-     * Parks a submission that may have gone: the whole message was handed
-     * over and no verdict came back. Not sent again on its own, which could
-     * deliver it twice, but only once the user asks
-     * ({@link #resendOutgoing}).
+     * Parks a submission that may have gone: handed over, no verdict back.
+     *
+     * <p>Never sent again on its own, which could deliver it twice, only once
+     * the user asks ({@link #resendOutgoing}).
      */
     public void parkUncertain(long queued, String reason) {
         queue.park(queued, UNCERTAIN + reason);
     }
 
     /**
-     * Queues a parked submission again as a new row, at the end of the
-     * queue, and drops the parked one: the user checked the message did not
-     * go and asked for it to be sent. The new row is appended before the old
-     * one goes, so its body stays pinned throughout.
+     * Queues a parked submission again at the end, dropping the parked row.
+     *
+     * <p>The user checked it did not go. The new row is appended first, so its
+     * body stays pinned throughout.
      */
     void resendOutgoing(long queued) {
         for (PimdirQueue.Action action : queue.parked()) {
@@ -312,8 +305,7 @@ public final class Outbox {
     }
 
     /**
-     * The name the outbox goes by in the list and the filter: a mailbox like
-     * any other to the reader, though no server holds it.
+     * The outbox's name in the list and the filter, though no server holds it.
      */
     String outboxName() {
         return context.getString(R.string.mail_outbox);

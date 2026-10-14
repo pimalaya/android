@@ -16,8 +16,9 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * The mail surface against what a hostile message hands it: links in a
- * message, and bodies that kill the app.
+ * The mail surface against what a hostile message hands it.
+ *
+ * <p>Links in a message, and bodies that kill the app.
  */
 @RunWith(RobolectricTestRunner.class)
 public class HardeningTest {
@@ -46,7 +47,6 @@ public class HardeningTest {
     public void aLinkNotTappedInTheMessageItselfOpensNothing() {
         Uri tracker = Uri.parse("https://tracker.example/?id=victim");
 
-        // A meta refresh, then an iframe.
         assertNull(MessageView.linkIntent(tracker, false, true));
         assertNull(MessageView.linkIntent(tracker, true, false));
         assertNull(MessageView.linkIntent(Uri.parse("someapp://action?x=1"), true, true));

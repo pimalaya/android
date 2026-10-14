@@ -35,15 +35,11 @@ import org.pimalaya.client.FormDate;
 import org.pimalaya.client.FormGender;
 
 /**
- * The per-property edit dialogs behind the contact form: one label-free
- * mini-form per field kind (display name, name parts, organization,
- * phone, email, address, gender, dates, the plain string lists), plus
- * the shared dialog scaffolding (the vertical content column, the OK
- * or Remove alert, the placeholder-hinted fields, the type spinner,
- * radios and the choices completer). Each dialog edits the working
- * field model in place then re-renders, reached through its
- * {@link ContactForm} host: the host owns the model, the view support
- * and the conflict alternatives, and re-gates its save on every render.
+ * The contact form's per-field edit dialogs, plus their shared scaffolding.
+ *
+ * <p>One label-free mini-form per field kind. Each edits the working model in
+ * place then re-renders through its {@link ContactForm}, which owns the model,
+ * view support and conflict alternatives, and re-gates its save.
  */
 final class ContactFieldDialogs {
     private final ContactForm host;
@@ -52,8 +48,7 @@ final class ContactFieldDialogs {
         this.host = host;
     }
 
-    /** The display name has its own row: one field, view-composed
-     * otherwise (the bridge never mints an FN). */
+    /** The display name's own row; view-composed (the bridge mints no FN). */
     void displayNameDialog() {
         LinearLayout content = dialogContent();
         EditText display =
@@ -73,8 +68,7 @@ final class ContactFieldDialogs {
                 });
     }
 
-    /** Edits one structured-name component in place, leaving the others
-     *  (kept under the model's {@code name} object) untouched. */
+    /** Edits one name component in place, the model's others untouched. */
     void namePartDialog(String part, int hint) {
         LinearLayout content = dialogContent();
         EditText field =
@@ -101,8 +95,7 @@ final class ContactFieldDialogs {
                 });
     }
 
-    /** Edits one organization component in place, leaving the other
-     *  (kept under the model's {@code organization} object) untouched. */
+    /** Edits one organization component in place, the other untouched. */
     void organizationPartDialog(String part, int hint) {
         LinearLayout content = dialogContent();
         EditText field =
@@ -277,8 +270,7 @@ final class ContactFieldDialogs {
     }
 
     /**
-     * One plain string list: the model list it is, the dialog's title, its
-     * field's hint (0 = none) and input type.
+     * One plain string list: model list, title, hint (0 = none), input type.
      */
     record StringList(String list, int title, int hint, int inputType) {}
 
@@ -370,11 +362,10 @@ final class ContactFieldDialogs {
     }
 
     /**
-     * The GENDER field: one free-text line with the standard genders as
-     * a dropdown of choices, since any identity is allowed. A listed
-     * value stores its RFC 6350 sex code, anything else the free-text
-     * identity. The dropdown opens with the dialog when adding, stays
-     * closed when editing an existing value.
+     * The GENDER field: free text with the standard genders as choices.
+     *
+     * <p>A listed value stores its RFC 6350 sex code, anything else the free
+     * identity. The dropdown opens when adding, stays closed when editing.
      */
     void genderDialog() {
         String[] labels = host.activity.getResources().getStringArray(R.array.gender_types);
@@ -409,8 +400,7 @@ final class ContactFieldDialogs {
                 });
     }
 
-    /** The gender field's current display value: the free identity when
-     *  set, otherwise the label of its sex code, else empty. */
+    /** The gender's display value: free identity, else its sex code's label. */
     private String genderPrefill(String[] labels) {
         FormGender genderView = host.view.gender();
         if (genderView == null) {
@@ -484,10 +474,7 @@ final class ContactFieldDialogs {
         return content;
     }
 
-    /**
-     * Shows an edit dialog: OK runs the write-back and re-renders the
-     * page, Remove (when given) drops the entry.
-     */
+    /** Shows an edit dialog: OK writes back and re-renders, Remove drops. */
     private void showDialog(
             CharSequence title, LinearLayout content, Runnable onOk, Runnable onRemove) {
         ScrollView wrap = new ScrollView(host.activity);
@@ -551,9 +538,9 @@ final class ContactFieldDialogs {
     }
 
     /**
-     * A dialog field, label-free: the field name rides as the
-     * placeholder hint. A conflicted path renders one tappable chip
-     * per candidate value below it.
+     * A label-free dialog field, its name as the placeholder hint.
+     *
+     * <p>A conflicted path renders one chip per candidate value below it.
      */
     private EditText dialogField(
             LinearLayout content, String path, int label, String prefill, int inputType) {
@@ -594,10 +581,10 @@ final class ContactFieldDialogs {
     }
 
     /**
-     * A free-text field backed by a dropdown of choices: the value is
-     * editable to anything, the choices only suggest. When {@code
-     * open} the dropdown pops as the dialog opens (a fresh field), else
-     * it waits for a tap (editing an existing value).
+     * A free-text field with suggested choices in a dropdown.
+     *
+     * <p>When {@code open} the dropdown pops with the dialog (a fresh field),
+     * else it waits for a tap.
      */
     private AutoCompleteTextView autoCompleteField(
             LinearLayout content, int hint, String prefill, String[] choices, boolean open) {
@@ -633,10 +620,7 @@ final class ContactFieldDialogs {
         return spinner;
     }
 
-    /**
-     * A typed value line: the type spinner sized to its content, then
-     * the value field filling the rest of the line.
-     */
+    /** A typed value line: content-sized type spinner, then the value field. */
     private EditText typedValueLine(
             LinearLayout content, Spinner type, int hint, String prefill, int inputType) {
         LinearLayout line = new LinearLayout(host.activity);

@@ -3,5 +3,5 @@ package org.pimalaya.calendar;
 import org.pimalaya.client.Clients;
 import org.pimalaya.pimdir.PimdirDb;
 
-/** What the calendar screens work over: the store, the bridge and its calendar side. */
+/** The calendar screens' ground: the store, the bridge, the event store. */
 public record CalendarParts(PimdirDb pimdir, Clients clients, EventStore events) {}

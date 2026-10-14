@@ -5,13 +5,11 @@ import android.content.SharedPreferences;
 import org.pimalaya.pimdir.PimdirAccount;
 
 /**
- * Which mailboxes are kept whole ("Download this mailbox"): listed past
- * their account's bound and every body downloaded, whatever the account's
- * window ({@link MailWindow}).
+ * Which mailboxes are kept whole ("Download this mailbox").
  *
- * <p>Kept beside the account rather than inside its encrypted record, as
- * its bound is ({@link MailScope}): it is no secret, and what reads it
- * knows a mailbox by its collection id.
+ * <p>Listed past the account's bound with every body, whatever its window
+ * ({@link MailWindow}). Kept in prefs like the bound ({@link MailScope}): no
+ * secret, and read by collection id.
  */
 public final class MailOffline {
     private static final String PREFS = "mail-offline";
@@ -27,6 +25,7 @@ public final class MailOffline {
         return prefs(context).getBoolean("whole:" + collection, false);
     }
 
+    /** Keeps a mailbox whole, or stops keeping it. */
     public static void setWhole(Context context, String collection, boolean whole) {
         SharedPreferences.Editor editor = prefs(context).edit();
         if (whole) {
@@ -38,9 +37,9 @@ public final class MailOffline {
     }
 
     /**
-     * Whether an account downloaded its bodies ahead under the offline
-     * policy windows replaced (in the background, or whole): what its
-     * window starts from ({@link MailWindow#migrate}).
+     * Whether an account downloaded bodies ahead under the old offline policy.
+     *
+     * <p>What its window starts from ({@link MailWindow#migrate}).
      */
     static boolean downloadedAhead(Context context, String accountId) {
         return prefs(context).getInt("policy:" + accountId, 0) != 0;

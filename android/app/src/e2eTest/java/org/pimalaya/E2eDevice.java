@@ -48,16 +48,11 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * One simulated phone: a store of its own (an isolated files directory, so its
- * own `pimdir.db` and blobs, and its own preferences), an in-memory account
- * roster, and a headless {@link SyncPasses} wired as {@link BackgroundJob}
- * wires one. Two devices in one test share nothing but the server and the
- * network the host JVM sees ({@link #network}).
+ * One simulated phone: own store and roster, headless passes, Wi-Fi gated.
  *
- * <p>It drives the remote pass as the open app does: the first sync is one
- * step ({@link MailStep}), a sync is a pass listing only on Wi-Fi, Load more
- * is a step, every one gated on {@link SyncCoordinator#wifi(Context)}, never
- * bypassed: a test puts the device on Wi-Fi rather than skipping the gate.
+ * <p>Own files and preferences, {@link SyncPasses} wired as the job wires them;
+ * devices share only server and network ({@link #network}). Steps and passes
+ * gate on {@link SyncCoordinator#wifi(Context)}: tests go on Wi-Fi.
  */
 final class E2eDevice {
     /** The network a device sees, injected into Robolectric's connectivity. */
@@ -77,7 +72,7 @@ final class E2eDevice {
     final Accounts accounts;
     final SyncPasses passes;
 
-    /** The test's tag, whose scratch collections alone a pass takes among the suite's. */
+    /** The test's tag: a pass takes only its scratch collections. */
     String tag;
 
     E2eDevice(Context app, String name) {
@@ -96,8 +91,10 @@ final class E2eDevice {
     }
 
     /**
-     * Puts every device of the run on a network: Robolectric's connectivity
-     * is the application's, which the devices' contexts share.
+     * Puts every device of the run on a network.
+     *
+     * <p>Robolectric's connectivity is the application's, which the devices'
+     * contexts share.
      */
     static void network(Context app, Network network) {
         ConnectivityManager connectivity = app.getSystemService(ConnectivityManager.class);
@@ -127,9 +124,10 @@ final class E2eDevice {
     }
 
     /**
-     * Connects a mail account as the connection flow hands it over, then runs
-     * its first sync as the mail tab does (`SyncCoordinator.firstMail`): one
-     * step on the account's session, on Wi-Fi only.
+     * Connects a mail account and first-syncs it as the mail tab does.
+     *
+     * <p>As {@code SyncCoordinator.firstMail}: one step on the account's
+     * session, on Wi-Fi only.
      */
     Exception connect(AccountEntry account) {
         accounts.add(account);
@@ -150,8 +148,10 @@ final class E2eDevice {
     }
 
     /**
-     * One Load more over an account (`SyncCoordinator.loadMore`): the next step
-     * of the one mailbox {@code only} names, or of the account for null.
+     * One Load more over an account ({@link SyncCoordinator#loadMore}).
+     *
+     * <p>The next step of the one mailbox {@code only} names, or of the account
+     * for null.
      */
     Exception loadMore(String email, String only) {
         if (!wifi()) {
@@ -166,10 +166,11 @@ final class E2eDevice {
     }
 
     /**
-     * One mail pass over the account as a sync asks for it (`syncMail`),
-     * scoped to some of its collections as the filter scopes one: the roster
-     * is listed whole, and only these are reconciled, on Wi-Fi; on a metered
-     * network the outbox among them is drained and nothing listed.
+     * One mail pass over the account as {@code syncMail} asks for it.
+     *
+     * <p>Scoped as the filter scopes one: the roster listed whole, these
+     * reconciled, on Wi-Fi; on a metered network only the outbox among them is
+     * drained.
      */
     SyncPasses.MailPass sync(String email, Collection<String> collections) {
         Set<String> scoped = new HashSet<>(collections);
@@ -189,18 +190,20 @@ final class E2eDevice {
     }
 
     /**
-     * One contacts pass over the account, as the contacts tab's pull runs
-     * it: its books listed on first sight, subscribed ones reconciled.
+     * One contacts pass, as the contacts tab's pull runs it.
+     *
+     * <p>Books listed on first sight, subscribed ones reconciled.
      */
     Exception syncContacts(String email) {
         return passes.syncRemote(only(email)).failure;
     }
 
     /**
-     * One calendar pass over the account, as the agenda's pull runs it,
-     * hiding the scratch calendars of other tests as the filter would hide a
-     * calendar: Google deletes a calendar minutes after it says so, and one
-     * still listed meanwhile answers 404.
+     * One calendar pass, as the agenda's pull runs it.
+     *
+     * <p>Other tests' scratch calendars hidden as the filter would: Google
+     * deletes a calendar minutes after saying so, and one still listed answers
+     * 404.
      */
     Exception syncCalendars(String email) {
         Map<String, String> names = new java.util.HashMap<>();
@@ -327,7 +330,7 @@ final class E2eDevice {
         return mail.outbox().outboxOf(email);
     }
 
-    /** What the store lists in one collection whose subject carries the text. */
+    /** What the store lists in a collection whose subject carries the text. */
     List<MailStore.StoredMessage> messages(String collection, String subject) {
         MailStore.Query query =
                 mail.query((email, candidate) -> candidate.equals(collection), false, false, subject);
@@ -340,7 +343,7 @@ final class E2eDevice {
         return found;
     }
 
-    /** The one message of a collection with this subject, null when there is none. */
+    /** The one message of a collection with this subject, or null. */
     MailStore.StoredMessage message(String collection, String subject) {
         List<MailStore.StoredMessage> found = messages(collection, subject);
         if (found.size() > 1) {
@@ -350,9 +353,10 @@ final class E2eDevice {
     }
 
     /**
-     * Whether an item owes its server a push, read off the store: no base
-     * agreed yet (a create, a move's target), markers past the agreed ones,
-     * or, outside mail, a body past the agreed one.
+     * Whether an item owes its server a push, read off the store.
+     *
+     * <p>No agreed base yet (a create, a move's target), markers past the
+     * agreed ones, or, outside mail, a body past the agreed one.
      */
     boolean owes(String collection, String linkId) {
         try (Cursor cursor =
@@ -425,8 +429,9 @@ final class E2eDevice {
     }
 
     /**
-     * A context whose files, preferences and list filters are this device's
-     * alone; the mail state is the process's, which the devices share.
+     * A context whose files, preferences and filters are this device's alone.
+     *
+     * <p>The mail state is the process's, which the devices share.
      */
     private static final class Isolated extends ContextWrapper
             implements MergedFilter.Owner, MailState.Owner {
@@ -507,8 +512,10 @@ final class E2eDevice {
     }
 
     /**
-     * The roster in memory: the Android keystore that encrypts the real one
-     * is a device's, and a test's accounts live as long as the test.
+     * The roster in memory.
+     *
+     * <p>The keystore encrypting the real one is a device's, and a test's
+     * accounts live as long as the test.
      */
     static final class Accounts extends SecureStore {
         private final List<AccountEntry> entries = new ArrayList<>();

@@ -23,9 +23,10 @@ import org.robolectric.RuntimeEnvironment;
 import java.util.List;
 
 /**
- * The mail settings kept in shared preferences, read and written under the
- * file names and keys an installed version wrote them with: a value written
- * before an upgrade is read after it.
+ * The mail settings in shared preferences, under the installed file names.
+ *
+ * <p>Read and written under the names and keys an installed version used: a
+ * value written before an upgrade is read after it.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailPolicyTest {

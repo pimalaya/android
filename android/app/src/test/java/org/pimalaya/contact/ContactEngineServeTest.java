@@ -20,10 +20,10 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * Drives ContactEngine.serve with hand-built yield envelopes, exactly
- * as the Rust engine upcalls it: the storage ops run against the real
- * store and the real bridge, so these tests pin the driver's wire
- * contract without a network.
+ * Drives ContactStager.serve with hand-built yield envelopes, as Rust does.
+ *
+ * <p>Storage ops run against the real store and bridge: the driver's wire
+ * contract, pinned without a network.
  */
 @RunWith(RobolectricTestRunner.class)
 public class ContactEngineServeTest {
@@ -44,8 +44,6 @@ public class ContactEngineServeTest {
         new PimdirCollections(pimdir, context).replace(
                 EMAIL, PimdirSummary.CONTACT, PimdirCollections.of(EMAIL, books));
 
-        // No account (storage yields only) and no context (no phone
-        // spoke): the shape the mutate driver runs with.
         engine = new ContactStager(pimdir, Clients.real());
     }
 
@@ -74,11 +72,10 @@ public class ContactEngineServeTest {
                                                 new JSONObject()
                                                         .put("collection", BOOK)
                                                         .put("handle", "c1.vcf")
-                                                        // A body is fetched with
-                                                        // its identity: a
-                                                        // placement carrying one
-                                                        // and no link id is a
-                                                        // probe, not an item.
+                                                        // NOTE: a fetched body
+                                                        // carries its identity:
+                                                        // without a link id
+                                                        // it is a probe.
                                                         .put("linkId", "uid-c1")
                                                         .put("object", hash)
                                                         .put("level", "full")
@@ -114,9 +111,8 @@ public class ContactEngineServeTest {
 
     @Test
     public void serveWrapsDriverFailuresAsErrorReplies() throws Exception {
-        // A malformed envelope must come back as an error reply, never
-        // as a raised exception: the Rust engine aborts its run on the
-        // error field.
+        // NOTE: the Rust engine aborts its run on the error field, so a
+        // malformed envelope answers an error reply, never an exception.
         JSONObject reply = new JSONObject(engine.serve("{\"op\": \"load\"}"));
         assertTrue(reply.getString("error").length() > 0);
     }

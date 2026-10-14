@@ -44,25 +44,22 @@ import org.pimalaya.ui.Host;
 import org.pimalaya.ui.PillField;
 
 /**
- * The connection wizard behind the auth panel: the email (or server)
- * step with its parallel discovery, the domain step proposing one
- * option per protocol and authentication variant, the sign-in page
- * with a card per server, and the addressbook selection whose commit
- * persists the account and runs the first sync. The OAuth grants live
- * in {@link OauthFlow}, which lands its redeemed tokens back here
- * through {@link #connect}; the host keeps the step navigation (the
- * flipper, the bar) and calls in through {@link #open} and
- * {@link #refreshStep}. Nothing persists before the selection
- * confirms, so backing out of the flow leaves everything untouched.
+ * The connection wizard behind the auth panel, address to first sync.
+ *
+ * <p>Discovery, domains, sign-in cards, then the book selection persisting the
+ * account; {@link OauthFlow} lands tokens in {@link #connect}. Nothing persists
+ * before that, so backing out leaves everything untouched.
  */
 public final class OnboardingFlow {
     /** The auth flow's steps, inside its own flipper under one bar. */
     public static final int STEP_EMAIL = 0;
 
-    /** What to connect this address for, once discovery has said what it can. */
+    /** What to connect this address for, once discovery has answered. */
     public static final int STEP_DOMAIN = 1;
 
+    /** The configuration page (panel_config). */
     public static final int STEP_CONFIG = 2;
+    /** The address book selection, whose commit persists the account. */
     public static final int STEP_BOOKS = 3;
 
     /** The standard setup's outcome when some servers refused the password. */
@@ -94,11 +91,10 @@ public final class OnboardingFlow {
             new java.util.EnumMap<>(PimDomain.class);
 
     /**
-     * The domains one in-flight browser grant is signing in for, with the
-     * endpoint each of them will use; empty outside a grant.
+     * The domains one in-flight browser grant signs in for, with endpoints.
      *
-     * <p>Several, because one authorization server covers every domain that
-     * chose it, and the tokens it returns belong to all of them.
+     * <p>Empty outside a grant. Several, as one authorization server covers
+     * every domain that chose it, its tokens belonging to all of them.
      */
     private final java.util.Map<PimDomain, String> oauthGroup =
             new java.util.EnumMap<>(PimDomain.class);
@@ -122,21 +118,19 @@ public final class OnboardingFlow {
     private boolean signInPage;
 
     /**
-     * The fixed provider rule the address matched ({@code provider:google},
-     * {@code provider:microsoft}), or null.
+     * The fixed provider rule the address matched ({@code provider:google}...).
      *
-     * <p>Kept beside the discovered configs rather than replacing them: a
-     * provider match tells us how to sign in for contacts, and says nothing
-     * about whether the same address also serves mail or calendars, which only
-     * the protocol sweep can answer.
+     * <p>Null when none. Kept beside the discovered configs: a provider match
+     * says how to sign in for contacts, not whether the address also serves
+     * mail or calendars, which only the protocol sweep answers.
      */
     private String matchedProvider;
 
     /**
-     * Whether the advanced setup is running: a section of configurations
-     * per domain and a prompt per sign-in. Off by default, the standard
-     * setup being the path; the links on the address and domain steps
-     * turn it on.
+     * Whether the advanced setup runs: configurations per domain.
+     *
+     * <p>Off by default, the standard setup being the path; the links on the
+     * address and domain steps turn it on.
      */
     private boolean advanced;
 
@@ -152,21 +146,20 @@ public final class OnboardingFlow {
     /** Whether the one password is being tried against the servers. */
     private boolean verifying;
 
-    /**
-     * The options under mail, the contacts and the calendars in both setups:
-     * notifications and the phone apps, off until turned on and permitted.
-     */
+    /** Both setups' notification and phone-app options, off until permitted. */
     private final SetupSwitches switches = new SetupSwitches();
 
     /**
-     * Whether another app already fills the phone's Contacts app with this
-     * address ({@link Accounts#elsewhere}), which keeps the books off it.
+     * Whether another app fills the phone's Contacts app with this address.
+     *
+     * <p>{@link Accounts#elsewhere}; it keeps the books off it.
      */
     private boolean elsewhere;
 
-    /** The same for the phone's calendars ({@link Accounts#calendarsElsewhere}). */
+    /** The same for the calendars ({@link Accounts#calendarsElsewhere}). */
     private boolean calendarsElsewhere;
 
+    /** Builds the wizard; {@link #bind} wires its views once laid out. */
     public OnboardingFlow(
             Host host,
             SyncPasses.Parts parts,
@@ -281,9 +274,9 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Scrolls the domain step to its end, so the password field and its
-     * note sit above the keyboard. Delayed past the keyboard's resize of
-     * the window, which would otherwise clip the scroll it answers.
+     * Scrolls the domain step to its end, the password above the keyboard.
+     *
+     * <p>Delayed past the keyboard's resize, which would clip the scroll.
      */
     private void revealPassword() {
         android.widget.ScrollView scroll = host.findViewById(R.id.domain_scroll);
@@ -292,10 +285,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Scrolls the step's page so {@code view}, a domain just ticked or the
-     * card whose configuration was just picked, sits at its top with what it
-     * opened below it. Posted past the layout the tick changes, as the
-     * password's reveal is.
+     * Scrolls the page so {@code view} sits at its top, what it opened below.
+     *
+     * <p>{@code view} is a domain just ticked or a card whose configuration was
+     * just picked. Posted past the layout the tick changes, as the password's
+     * reveal is.
      */
     private void reveal(View view) {
         view.post(
@@ -357,14 +351,9 @@ public final class OnboardingFlow {
     /**
      * The email step's continue: discovery, always.
      *
-     * <p>One field, one kind of answer. Asking for "an email, a server or a
-     * URI" made the user do the app's job, and the app can do it: discovery
-     * knows how to turn an address into servers, and when it turns up nothing
-     * the manual server entry is offered from the next step, where it reads as
-     * a fallback rather than as a thing to have known in advance.
-     *
-     * <p>No question about how much to ask comes first: the standard setup is
-     * the path, and the advanced one is a link beside it.
+     * <p>Asking for "an email, a server or a URI" made the user do the app's
+     * job. Nothing found offers manual entry on the next step, as a fallback;
+     * the advanced setup is a link beside it.
      */
     private void submitEmail() {
         host.hideKeyboard();
@@ -380,16 +369,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Searches the email's (or bare domain's) CardDAV and JMAP service
-     * configs, then proposes them. The MX provider probe runs first and
-     * is decisive: a domain whose mail exchanges live at Google or
-     * Microsoft is hosted there, suite and contacts included, so the
-     * dedicated provider variants show right away and the protocol
-     * sweep (PACC, CardDAV and JMAP resolves), which would only produce
-     * origin-fallback noise there, is skipped. No match runs the sweep
-     * in parallel. A failing search surfaces as an error dialog and
-     * stays on the email panel, and a domain nothing was discovered for
-     * falls back to the manual server rows.
+     * Searches the address's service configs, then proposes them.
+     *
+     * <p>The MX probe decides first: mail at Google or Microsoft skips the
+     * protocol sweep (PACC, CardDAV, JMAP), noise there. A failure stays on the
+     * email panel; nothing found falls back to manual rows.
      */
     private void search() {
         host.setAuthLoading(R.id.email_continue, R.id.email_progress, true);
@@ -508,20 +492,17 @@ public final class OnboardingFlow {
          */
         AccountCredential credential;
 
-        /** Whether this domain is switched on and has something to connect to. */
+        /** Whether this domain is on and has something to connect to. */
         boolean ready() {
             return enabled && selected != null;
         }
     }
 
     /**
-     * One sign-in the selection owes: a card on the sign-in page, or a
-     * browser hop.
+     * One sign-in the selection owes: a sign-in card, or a browser hop.
      *
-     * <p>Several domains when one sign-in covers them all, which is the whole
-     * reason the sequence is planned rather than run per domain: domains
-     * behind one authorization server are one browser hop, and domains on one
-     * server under one login are one password.
+     * <p>Planned, not run per domain: domains behind one authorization server
+     * are one hop, domains on one server under one login one password.
      */
     private static final class AuthStep {
         final List<PimDomain> domains = new ArrayList<>();
@@ -573,19 +554,9 @@ public final class OnboardingFlow {
     /**
      * Fills the setup screen with every domain this address offers.
      *
-     * <p>The standard setup shows one card, a row per domain it can connect,
-     * each ticked: it answers the configuration question itself, with the best
-     * sign-in of the best configuration found ({@link SetupPlan#standardOption}), so
-     * what is left is what the user actually decides, which of the three to
-     * keep on this phone. A domain it cannot connect is not shown. Under the
-     * card, the one password every password domain shares, or a word on the
-     * browser hop.
-     *
-     * <p>The advanced setup shows a switch per domain and its configurations
-     * under it: each domain takes one or none, the radio deselects, so an
-     * address that offers calendars is not obliged to connect them. Reached
-     * from the standard screen, it keeps the domains that were ticked and the
-     * configuration the standard setup picked for each.
+     * <p>Standard: ticked rows of what it can connect, each its best option
+     * ({@link SetupPlan#standardOption}). Advanced: a switch per domain over
+     * its configurations, one or none, keeping the standard screen's picks.
      */
     private void showSetup() {
         ((TextView) host.findViewById(R.id.domain_email)).setText(pendingEmail);
@@ -661,9 +632,9 @@ public final class OnboardingFlow {
                             new SubmitOption(
                                     host.getString(R.string.domain_manual), null, null, true));
                     if (setup.submitSelected == null || setup.submitSelected.through != null) {
-                        // The row for none, so the group opens on an answer
-                        // rather than on nothing: not sending is a choice,
-                        // and it is the only one this address offers.
+                        // NOTE: the row for none, so the group opens on an
+                        // answer: not sending is a choice, and the only one
+                        // this address offers.
                         setup.submitSelected = none;
                     }
                 }
@@ -715,10 +686,7 @@ public final class OnboardingFlow {
         showSetup();
     }
 
-    /**
-     * The standard setup's card: a row per domain it can connect, its glyph
-     * on a tile, its name, and a tick.
-     */
+    /** The standard setup's card: a row per domain, glyph, name and tick. */
     private View domainCard(AccountEntry existing) {
         LinearLayout card = CardRows.card(host);
 
@@ -765,9 +733,10 @@ public final class OnboardingFlow {
     }
 
     /**
-     * The tick putting the books in the phone's contacts, or the calendars
-     * in its calendar. Turned on, it asks the mirror's permissions, and a
-     * refusal turns it back off.
+     * The tick mirroring the books or calendars on the phone.
+     *
+     * <p>Turned on, it asks the mirror's permissions, and a refusal turns it
+     * back off.
      */
     private View phoneRow(PhoneMirror mirror) {
         CheckBox toggle = new CheckBox(host);
@@ -791,8 +760,10 @@ public final class OnboardingFlow {
     }
 
     /**
-     * The tick notifying the account's new mail. Turned on, it asks the
-     * notifications permission, and a refusal turns it back off.
+     * The tick notifying the account's new mail.
+     *
+     * <p>Turned on, it asks the notifications permission; a refusal turns it
+     * back off.
      */
     private View notifyRow() {
         CheckBox toggle = new CheckBox(host);
@@ -810,10 +781,7 @@ public final class OnboardingFlow {
                 host, R.string.background_notify, R.string.notify_mail_note, toggle);
     }
 
-    /**
-     * One domain's row inside a card: its glyph on a tile, its name over an
-     * optional status line, and a trailing view.
-     */
+    /** One domain's row: glyph, name over a status line, trailing view. */
     private LinearLayout domainRow(PimDomain domain, String status, boolean error, View trailing) {
         return domainRow(domain, status, error, trailing, false);
     }
@@ -833,10 +801,9 @@ public final class OnboardingFlow {
     /**
      * Sends a standard setup that has nothing to offer to the advanced one.
      *
-     * <p>An address whose every service wants a browser grant or a token
-     * leaves the standard screen with three switches that cannot be turned on,
-     * which reads as an app that cannot connect this provider rather than as a
-     * setup that asked the wrong way in.
+     * <p>Every service wanting a browser grant or a token leaves three switches
+     * that cannot turn on, which reads as an app that cannot connect this
+     * provider.
      */
     private void offerAdvanced() {
         new AlertDialog.Builder(host)
@@ -856,13 +823,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * One domain's card in the advanced setup: a header with its glyph, its
-     * name and a switch, and under it, while it is on, a radio row per
-     * configuration, manual entry last, then mail's sending rows.
+     * One domain's card in the advanced setup: header with switch, options.
      *
-     * <p>Switched off to begin with, unless the standard screen it came from
-     * had it ticked: an address that offers three domains is not a request
-     * for three.
+     * <p>While on, a radio row per configuration, manual entry last, then
+     * sending rows. Off unless the standard screen ticked it: three domains
+     * offered is not a request for three.
      */
     private View sectionOf(DomainSetup setup, boolean alreadyConnected) {
         LinearLayout card = CardRows.card(host);
@@ -941,11 +906,10 @@ public final class OnboardingFlow {
     }
 
     /**
-     * One radio row inside a card, under a hairline: the radio, then the
-     * protocol over its server and sign-in. Not a RadioGroup, so a group can
-     * start with nothing picked; the row as a whole picks.
+     * One radio row: radio, then protocol over server and sign-in.
      *
-     * @return the row's radio, which the caller checks
+     * <p>Not a RadioGroup, so a group can start with nothing picked. Answers
+     * the radio, which the caller checks.
      */
     private android.widget.RadioButton optionRow(
             LinearLayout into, String primary, String secondary, Runnable onPick) {
@@ -1000,14 +964,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Draws where mail is sent from, in the advanced setup: a sending heading
-     * over SMTP by name, what was discovered, a row for not sending at all
-     * and manual entry, whose server the sign-in page asks for.
+     * Draws where mail is sent from, in the advanced setup.
      *
-     * <p>The standard setup draws nothing: it connects the best endpoint
-     * found with mail ({@link SetupPlan#firstOffered}), and an address that publishes
-     * none is saved without one, a sender being addable from the account's
-     * settings.
+     * <p>SMTP, what was discovered, not sending, manual entry. The standard
+     * setup draws nothing: it takes the best endpoint
+     * ({@link SetupPlan#firstOffered}) or none, settings adding one later.
      */
     private void addSubmission(LinearLayout body, DomainSetup setup) {
         TextView heading = new TextView(host, null, 0, R.style.SectionHeader);
@@ -1082,27 +1043,20 @@ public final class OnboardingFlow {
     /**
      * Whether this section has a submission question to ask at all.
      *
-     * <p>Only once mail is read over IMAP or Graph, since the rows follow
-     * that choice and there is nothing to follow before it. A switched-off
-     * domain has none, and neither has one reading over JMAP: RFC 8621
-     * submits through the session it reads from, so a server offered under
-     * it would be a second account to sign in to for something the first
-     * one already does.
+     * <p>Only once mail is read over IMAP or Graph, the rows following that
+     * choice. Not when off, nor over JMAP: RFC 8621 submits through the session
+     * it reads from, so another server would be a second account.
      */
     private static boolean sends(DomainSetup setup) {
         return setup.enabled && setup.selected != null && setup.selected.asksSubmission();
     }
 
     /**
-     * Brings the domain step's buttons in line with the plan: Continue
-     * available once at least one domain is on and every domain that is on
-     * knows what to connect to, and, in the standard setup, the shared
-     * password typed when one is asked for.
+     * Brings the domain step's buttons in line with the plan.
      *
-     * <p>Nothing is signed in to yet. What the screen collects is the plan,
-     * and the interactions it needs are worked out from the whole plan at
-     * once, which is the only way to know that two domains behind one
-     * authorization server cost one browser hop rather than two.
+     * <p>Continue once a domain is on, each knows what to connect to, and any
+     * shared password is typed. Nothing signs in yet: only the whole plan shows
+     * two domains behind one server cost one hop.
      */
     private void resetSetupContinue() {
         host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, false);
@@ -1193,11 +1147,10 @@ public final class OnboardingFlow {
     }
 
     /**
-     * The ticked domains the standard setup's one password signs in to:
-     * every one whose chosen sign-in is a password under a known login.
+     * The ticked domains the standard setup's one password signs in to.
      *
-     * <p>A password option with no login, as when a bare domain was typed
-     * rather than an address, keeps its own prompt in the sign-in sequence.
+     * <p>Each whose sign-in is a password under a known login. One with no
+     * login (a bare domain typed) keeps its own prompt in the sequence.
      */
     private List<DomainSetup> sharedPassword() {
         List<DomainSetup> shared = new ArrayList<>();
@@ -1216,7 +1169,7 @@ public final class OnboardingFlow {
         return shared;
     }
 
-    /** Shows the wrong-password line in place of the field's note, or restores it. */
+    /** Shows the wrong-password line in place of the field's note, or not. */
     private void showPasswordError(boolean wrong) {
         TextView note = host.findViewById(R.id.domain_password_note);
         note.setText(wrong ? R.string.password_wrong : R.string.password_shared);
@@ -1226,10 +1179,10 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Everything this domain was discovered to be connectable with: one option
-     * per configuration and authentication method. Manual entry is not among
-     * them, being an answer the discovery did not give: the advanced setup adds
-     * it, so an empty list here is the address offering this domain nothing.
+     * Everything discovery found for this domain, per config and method.
+     *
+     * <p>Manual entry is not among them: the advanced setup adds it, so an
+     * empty list means the address offers this domain nothing.
      */
     private List<SetupOption> optionsFor(PimDomain domain) {
         List<SetupOption> options =
@@ -1265,10 +1218,9 @@ public final class OnboardingFlow {
     /**
      * The matched provider's contacts sign-ins, as options.
      *
-     * <p>They are hand-written rather than discovered because neither Google
-     * nor Microsoft publishes a CardDAV SRV record or well-known: the sign-in
-     * itself is the only way to find out, so the endpoints and scopes are the
-     * app's own knowledge of those two.
+     * <p>Hand-written: neither Google nor Microsoft publishes a CardDAV SRV
+     * record or well-known, so the endpoints and scopes are the app's own
+     * knowledge.
      */
     private void addProviderOptions(List<SetupOption> options) {
         if ("provider:google".equals(matchedProvider)) {
@@ -1330,8 +1282,9 @@ public final class OnboardingFlow {
                 host.getString(label),
                 SetupPlan.hostOf(baseUrl),
                 baseUrl,
-                // NOTE: Google and Microsoft authorize by scope, not by RFC 8707
-                // resource, and sending one earns an invalid_target from them.
+                // NOTE: Google and Microsoft authorize by scope, not by RFC
+                // 8707 resource, and sending one earns an invalid_target from
+                // them.
                 null,
                 method,
                 emailLogin());
@@ -1382,14 +1335,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Works out the sign-ins the whole selection needs, in order, one card
-     * each.
+     * Works out the sign-ins the selection needs, in order, one card each.
      *
-     * <p>Browser grants pool by authorization server and audience
-     * ({@link SetupPlan#audienceOf}), so the domains one consent covers cost one hop.
-     * A password or a token pools by server and login: mail, contacts and
-     * calendars on one JMAP session are one password, not three. Manual entry
-     * names a server of its own and is never pooled.
+     * <p>Grants pool by authorization server and audience
+     * ({@link SetupPlan#audienceOf}), passwords and tokens by server and login
+     * (one JMAP session, one password). Manual entry is never pooled.
      */
     private List<AuthStep> planAuthSteps() {
         Map<PimDomain, SetupOption> picked = new java.util.EnumMap<>(PimDomain.class);
@@ -1414,10 +1364,9 @@ public final class OnboardingFlow {
     /**
      * Abandons the sign-ins and returns to the selection.
      *
-     * <p>Everything already signed in to this run is dropped with it. Half a
-     * sequence is not half an account: leaving the completed steps behind
-     * would persist an account covering fewer domains than the screen still
-     * shows selected.
+     * <p>What this run signed in is dropped too: half a sequence is not half an
+     * account, and keeping it would persist fewer domains than the screen
+     * shows.
      */
     public void abortAuthSteps() {
         authSteps = null;
@@ -1434,8 +1383,9 @@ public final class OnboardingFlow {
     }
 
     /**
-     * A grant that failed or was refused: the chain stops where it is, what
-     * signed in keeps its credential, and the step's button comes back.
+     * A grant failed or was refused: the chain stops where it is.
+     *
+     * <p>What signed in keeps its credential, and the step's button comes back.
      */
     public void grantAborted() {
         connecting = false;
@@ -1443,9 +1393,10 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Back from the OAuth client page or the addressbooks: to the sign-in
-     * page with nothing lost, or, for a standard setup that never showed
-     * one, to the domains.
+     * Back from the OAuth client page or the books, to the sign-in page.
+     *
+     * <p>Nothing lost; a standard setup that never showed one returns to the
+     * domains.
      */
     public void backToSignIn() {
         if (!signInPage) {
@@ -1458,9 +1409,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Plans the sign-ins the domains still owe and runs them: on the sign-in
-     * page when one asks for something to type, or whenever the advanced setup
-     * runs; straight to the browser otherwise, one grant after the other.
+     * Plans the sign-ins the domains still owe and runs them.
+     *
+     * <p>On the sign-in page when one asks for something to type, or in the
+     * advanced setup; straight to the browser otherwise, one grant after the
+     * other.
      */
     private void runSignIns() {
         authSteps = planAuthSteps();
@@ -1476,8 +1429,7 @@ public final class OnboardingFlow {
     }
 
     /**
-     * The sign-in page: a card per planned sign-in, its domains and server
-     * on top, then what its method asks for.
+     * The sign-in page: a card per planned sign-in, domains and server on top.
      */
     private void showSignIn() {
         signInPage = true;
@@ -1636,11 +1588,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Where a card's password or token goes, shown before it does: each
-     * endpoint's scheme and host, flagged when it sits outside the address's
-     * domain, which is what a forged configuration would point at. Null for a
-     * browser card, whose secret the app never holds, and for a server entered
-     * by hand, which the user just named.
+     * Where a card's password or token goes, shown before it does.
+     *
+     * <p>Each endpoint's scheme and host, flagged outside the address's domain,
+     * where a forged configuration would point. Null for a browser card, whose
+     * secret the app never holds, and a server typed by hand.
      */
     private View sentTo(AuthStep step) {
         if (step.oauth() || step.option.isManual()) {
@@ -1698,8 +1650,7 @@ public final class OnboardingFlow {
     }
 
     /**
-     * A card's second line: the protocol and its server, or that it was
-     * entered by hand, and where mail sends through when it does.
+     * A card's second line: protocol and server (or by hand), and the sender.
      */
     private String signInDetail(AuthStep step) {
         SetupOption option = step.option;
@@ -1720,9 +1671,10 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Brings the cards in line with their state, and Connect with what they
-     * hold: available once every card left to sign in has what it asks for. A
-     * browser card does not hold it back, Connect running its grant.
+     * Brings the cards in line with their state, and Connect with them.
+     *
+     * <p>Connect is available once every card left has what it asks for; a
+     * browser card, whose grant Connect runs, does not hold it back.
      */
     private void refreshSignIn() {
         if (authSteps == null) {
@@ -1774,7 +1726,7 @@ public final class OnboardingFlow {
         step.status.setVisibility(View.VISIBLE);
     }
 
-    /** One server's check: a domain of a card, signed in the way it will sync. */
+    /** One server's check: a card's domain, signed in the way it will sync. */
     private static final class Probe {
         final AuthStep step;
         final PimDomain domain;
@@ -1793,9 +1745,9 @@ public final class OnboardingFlow {
     }
 
     /**
-     * A server typed on a card that cannot be signed in to encrypted (plain
-     * {@code imap://} or {@code http://}, say): said on the card, and nothing
-     * is sent.
+     * A card's server that cannot be signed in to encrypted: said, not sent.
+     *
+     * <p>Plain {@code imap://} or {@code http://}, say.
      */
     private void insecure(AuthStep step) {
         status(step, host.getString(R.string.server_insecure), true);
@@ -1803,9 +1755,10 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Connect on the sign-in page: tries every card still to sign in, side
-     * by side, reporting each on its card; once every one has, runs the
-     * browser cards left, then commits.
+     * Connect on the sign-in page: tries every card left, side by side.
+     *
+     * <p>Each reports on its card; once all have, the browser cards left run,
+     * then the commit.
      */
     private void connectAll() {
         host.hideKeyboard();
@@ -1871,7 +1824,8 @@ public final class OnboardingFlow {
                         }
                     }
                     // NOTE: not postAlive: the step it leads to may persist the
-                    // account (finishOnboarding), which a destroyed activity must not drop.
+                    // account (finishOnboarding), which a destroyed activity
+                    // must not drop.
                     host.main.post(() -> signedIn(probes, failures));
                     pool.shutdown();
                 });
@@ -1941,9 +1895,9 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Runs the next browser card not signed in yet, or commits once none is
-     * left. A grant comes back through {@link #connect}, which calls this
-     * again while the chain runs.
+     * Runs the next browser card not signed in, or commits once none is left.
+     *
+     * <p>A grant comes back through {@link #connect}, which calls this again.
      */
     private void nextGrant() {
         connecting = true;
@@ -1958,10 +1912,10 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Runs one browser grant for every domain of the card, with their scopes
-     * merged: through the app's own registration at Google and Microsoft,
-     * through dynamic registration at an issuer, or with the user's own
-     * client from the OAuth client page.
+     * Runs one browser grant for every domain of the card, scopes merged.
+     *
+     * <p>Through the app's registration at Google and Microsoft, dynamic
+     * registration at an issuer, or the user's own client.
      */
     private void startGrant(AuthStep step, boolean own) {
         SetupOption option = step.option;
@@ -2047,22 +2001,17 @@ public final class OnboardingFlow {
         return String.join(" ", ids);
     }
 
-    /**
-     * The entered email as a login prefill; empty when the connection
-     * field carried a bare domain or a URL instead.
-     */
+    /** The entered email as a login prefill; empty for a bare domain or URL. */
     private String emailLogin() {
         return pendingEmail != null && pendingEmail.contains("@") ? pendingEmail : "";
     }
 
     /**
-     * Lands a redeemed browser grant on every domain of its card, then runs
-     * the next grant while the chain does, or comes back to the sign-in page
-     * for a card signed in on its own. Nothing persists yet: the account and
-     * its books only store once everything is in, so backing out of the flow
-     * leaves everything untouched. The tokens and the grant carry the refresh
-     * material and the scopes granted, so expired access tokens can be
-     * refreshed on later syncs and a later grant can ask for the union.
+     * Lands a redeemed browser grant on every domain of its card.
+     *
+     * <p>Then the next grant, or back to the sign-in page; nothing persists
+     * before all is in. Refresh material and granted scopes are kept, for later
+     * refreshes and union grants.
      */
     public void connect(String email, OauthTokens tokens, OauthGrant grant) {
         connectedEmail = email;
@@ -2151,8 +2100,9 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Continue from the setup screen: everything signed in to becomes one
-     * account, and the contacts domain adds its address book selection.
+     * Continue from the setup screen: what signed in becomes one account.
+     *
+     * <p>The contacts domain adds its address book selection.
      */
     private void confirmSetup() {
         host.hideKeyboard();
@@ -2169,14 +2119,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Tries the standard setup's one password against every domain it covers,
-     * side by side, and reports per domain.
+     * Tries the standard setup's one password on every domain, side by side.
      *
-     * <p>Every server accepting moves on to whatever else the plan owes (a
-     * browser grant for a domain that signs in that way). Every server
-     * refusing it says so on the field and saves nothing. Some refusing is
-     * the result step's to settle: continue without them, or set them up in
-     * the advanced setup.
+     * <p>All accepting moves on to what else the plan owes (a browser grant);
+     * all refusing says so on the field and saves nothing; a mix goes to the
+     * result step.
      */
     private void verifyPassword(List<DomainSetup> shared) {
         String password =
@@ -2212,7 +2159,8 @@ public final class OnboardingFlow {
                         }
                     }
                     // NOTE: not postAlive: the step it leads to may persist the
-                    // account (finishOnboarding), which a destroyed activity must not drop.
+                    // account (finishOnboarding), which a destroyed activity
+                    // must not drop.
                     host.main.post(() -> verified(shared, password, refused));
                     pool.shutdown();
                 });
@@ -2254,13 +2202,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Signs in to one domain the way its first sync will, and reports what
-     * went wrong, null when nothing did: the mail session opens and
-     * authenticates, the address books and calendars list.
+     * Signs in to one domain as its first sync will; answers the error or null.
      *
-     * <p>Over JMAP, the session is read first: a domain it serves no account
-     * for is {@link NotServed}, on its own, whatever the other domains of the
-     * same sign-in answer.
+     * <p>The mail session opens and authenticates, books and calendars list.
+     * Over JMAP the session is read first: a domain it serves no account for is
+     * {@link NotServed}, whatever the other domains answer.
      */
     private Exception probe(PimDomain domain, Account account) {
         try {
@@ -2296,7 +2242,7 @@ public final class OnboardingFlow {
         }
     }
 
-    /** A domain the JMAP session serves no account for, said in the user's words. */
+    /** A domain the JMAP session serves no account for, in the user's words. */
     private static final class NotServed extends Exception {
         NotServed(String message) {
             super(message);
@@ -2322,9 +2268,9 @@ public final class OnboardingFlow {
     }
 
     /**
-     * The result step: the one password reached some domains and not
-     * others. A row per domain it was tried on, connected or not, and the
-     * two ways on.
+     * The result step: the one password reached some domains, not others.
+     *
+     * <p>A row per domain tried, connected or not, and the two ways on.
      */
     private void showResult(List<DomainSetup> shared, Map<PimDomain, Exception> refused) {
         ((TextView) host.findViewById(R.id.result_email)).setText(pendingEmail);
@@ -2387,12 +2333,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * The result once every domain signed in, when another app already fills
-     * the phone's Contacts or Calendar app with the address: a row per domain
-     * connected, the contacts or the calendars saying they stay off the
-     * phone, and Continue, which goes on unmirrored. The standard setup's,
-     * and the advanced one's for the calendars, which have no page of their
-     * own to say it on.
+     * The result once signed in, when another app has the address.
+     *
+     * <p>Another app fills the phone's Contacts or Calendar: a row per domain,
+     * those staying off the phone said, Continue unmirrored. Also the advanced
+     * calendars', which have no page.
      */
     private void showElsewhere(String email) {
         ((TextView) host.findViewById(R.id.result_email)).setText(pendingEmail);
@@ -2427,10 +2372,10 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Onward once the setup's sign-ins are connected and what the phone
-     * already shows is said: the books page in the advanced setup, every
-     * book in the standard one, and straight to the first sync without
-     * contacts.
+     * Onward once signed in and what the phone already shows is said.
+     *
+     * <p>The books page in the advanced setup, every book in the standard one,
+     * straight to the first sync without contacts.
      */
     private void connected(String email) {
         if (pendingBooks == null) {
@@ -2467,8 +2412,10 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Turns everything the sequence signed in to into one account, and adds
-     * the contacts domain's address book selection when it is among them.
+     * Turns what the sequence signed in to into one account.
+     *
+     * <p>Adds the contacts domain's address book selection when it is among
+     * them.
      */
     private void commitConnections() {
         authSteps = null;
@@ -2522,8 +2469,9 @@ public final class OnboardingFlow {
                         boolean calendarsFound =
                                 calendars && Accounts.calendarsElsewhere(host, email);
                         List<Addressbook> books = fetched;
-                        // NOTE: not postAlive: the step it leads to may persist the
-                        // account (finishOnboarding), which a destroyed activity must not drop.
+                        // NOTE: not postAlive: the step it leads to may persist
+                        // the account (finishOnboarding), which a destroyed
+                        // activity must not drop.
                         host.main.post(
                                 () -> {
                                     resetConfigContinue();
@@ -2550,11 +2498,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * The addressbooks step: one card with a row per book, its name and a
-     * checkbox, every one ticked to begin with. The phone's switch, on the
-     * page before, applies to every book ticked; the account's settings
-     * change it per book later. A note says when another app already fills
-     * the phone's Contacts app with the address, the books staying off it.
+     * The addressbooks step: one card, a ticked checkbox row per book.
+     *
+     * <p>The phone switch of the page before applies to every book ticked;
+     * settings change it per book later. A note says when another app fills the
+     * phone's Contacts app, the books staying off it.
      */
     private void openBooksSelection(String email, List<Addressbook> books) {
         connectedEmail = email;
@@ -2624,8 +2572,7 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Finish is enabled while at least one addressbook is on, or when the
-     * account has none to pick.
+     * Finish is enabled while an addressbook is on, or the account has none.
      */
     private void updateBooksContinue() {
         host.setFabEnabled(R.id.books_continue, bookChoices.isEmpty() || booksAnyChecked());
@@ -2651,10 +2598,7 @@ public final class OnboardingFlow {
         commitBooks(subscribed);
     }
 
-    /**
-     * The standard setup's commit, selection-free: every addressbook
-     * subscribed, then the first sync straight to the contacts list.
-     */
+    /** The standard setup's commit: every addressbook, then the first sync. */
     private void confirmAllBooks(String email) {
         connectedEmail = email;
         java.util.Set<String> subscribed = new java.util.HashSet<>();
@@ -2665,12 +2609,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * The flow's real commit, shared by the books step's Continue and
-     * the standard setup: persists the connected account and its
-     * addressbooks, subscribes the given ones, in the phone's Contacts app
-     * when the switch says so and no other app fills it with the address
-     * already, creates their Android accounts, then runs the account's
-     * first sync, which projects them.
+     * The flow's real commit, for the books step and the standard setup.
+     *
+     * <p>Persists the account and its books, subscribes the given ones (on the
+     * phone when switched and no other app has the address), creates their
+     * Android accounts, then runs the first sync, which projects them.
      */
     private void commitBooks(java.util.Set<String> subscribed) {
         boolean phone = switches.mirrors.contains(PhoneMirror.CONTACTS) && !elsewhere;
@@ -2684,13 +2627,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Persists everything the run connected, as one account, and hands it to
-     * the first sync, which fills every domain it covers before the app shows
-     * any of them.
+     * Persists what the run connected as one account, then first-syncs it.
      *
-     * <p>One save at the end rather than one per domain: the account is the
-     * unit, and a run that connected mail and contacts should leave one entry
-     * behind holding both, not two entries racing to replace each other.
+     * <p>The sync fills every domain before the app shows any. One save, not
+     * one per domain: the account is the unit, and two entries would race to
+     * replace each other.
      */
     private void finishOnboarding() {
         if (connectedAccount == null) {
@@ -2724,13 +2665,11 @@ public final class OnboardingFlow {
     }
 
     /**
-     * Everywhere this address submits mail, from the same discovery run
-     * that found where it reads it, best first.
+     * Everywhere this address submits mail, from that discovery, best first.
      *
-     * <p>Implicit TLS behind {@code smtps://} first, then STARTTLS behind
-     * {@code smtp://}, which the session upgrades before it authenticates.
-     * A plain endpoint is logged and not offered: nothing is ever submitted
-     * in the clear.
+     * <p>Implicit TLS ({@code smtps://}), then STARTTLS ({@code smtp://}),
+     * upgraded before authenticating. A plain endpoint is logged, not offered:
+     * nothing is submitted in the clear.
      */
     private List<SubmitOption> submissionOptions() {
         List<SubmitOption> implicit = new ArrayList<>();

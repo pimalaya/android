@@ -18,15 +18,11 @@ import java.util.List;
 import org.pimalaya.R;
 
 /**
- * A composer address field: one removable chip per recipient, wrapping
- * over as many lines as they need, then the input the next one is typed
- * in.
+ * A composer address field: one removable chip per recipient, then the input.
  *
- * <p>An address becomes a chip when a separator is typed (comma,
- * semicolon, space), on the keyboard's next action, and when the field
- * loses focus, so a pasted list splits by itself and nobody has to know
- * that a comma is what separates two. Backspace on an empty input takes
- * the last chip back into it, the way a mistyped address is corrected.
+ * <p>A typed separator (comma, semicolon, space), the keyboard's action and
+ * focus loss all make a chip, so a pasted list splits by itself. Backspace on
+ * an empty input takes the last chip back for correction.
  */
 public final class RecipientField extends ViewGroup {
     private static final String ANDROID = "http://schemas.android.com/apk/res/android";
@@ -39,6 +35,7 @@ public final class RecipientField extends ViewGroup {
     private final EditText input;
     private final List<String> addresses = new ArrayList<>();
 
+    /** Inflated from a layout. */
     public RecipientField(Context context, AttributeSet attrs) {
         super(context, attrs);
 
@@ -98,7 +95,9 @@ public final class RecipientField extends ViewGroup {
         setOnClickListener(view -> input.requestFocus());
     }
 
-    /** The recipients, comma separated as the bridge reads them, the pending input included. */
+    /**
+     * The recipients comma separated, as the bridge reads them, input included.
+     */
     String value() {
         List<String> all = new ArrayList<>(addresses);
         String pending = input.getText().toString().trim();

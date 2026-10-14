@@ -33,17 +33,11 @@ import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.ui.Avatar;
 
 /**
- * The phone's calendars: one Android account per address whose calendars it
- * shows ({@link Accounts#reconcileCalendars}), and in it one {@code Calendars}
- * row per calendar shown ({@link PhoneCalendars}), its columns as
- * docs/calendar-mapping.md's calendar level sets them.
+ * The phone's calendars: an Android account per address, a row per calendar.
  *
- * <p>Every write goes as the sync adapter, the account on the URI, so no
- * calendar app sees it as an edit. A name or a colour is written only when
- * the collection's own changed since it was last projected (kept in
- * {@code CAL_SYNC1} and {@code CAL_SYNC2}), so a rename or a recolouring made
- * on the phone stays; {@code SYNC_EVENTS} and {@code VISIBLE} are the user's
- * after the insert.
+ * <p>Written as the sync adapter, so no app sees an edit. Name and colour
+ * change only with the collection's since last projected ({@code CAL_SYNC1},
+ * {@code CAL_SYNC2}); {@code SYNC_EVENTS} and {@code VISIBLE} are the user's.
  */
 public final class CalendarRows {
     /** The provider's own default, written explicitly. */
@@ -52,12 +46,11 @@ public final class CalendarRows {
     private CalendarRows() {}
 
     /**
-     * Brings the phone's calendar accounts and rows in line with the
-     * calendars it shows: missing ones created, changed ones updated, the
-     * rest removed, each after its phone pass, since the provider deletes a
-     * calendar with every phone edit in it. Without the calendar permission
-     * only the accounts follow. Blocks; the caller runs it off the main
-     * thread.
+     * Aligns the phone's calendar accounts and rows with what it shows.
+     *
+     * <p>Blocks: run it off the main thread. A row leaves after its phone pass,
+     * since the provider deletes a calendar with its phone edits. Without the
+     * calendar permission only the accounts follow.
      */
     public static void reconcile(Context context, PimdirDb pimdir) throws Exception {
         List<PimdirCollections.Stored> all =
@@ -144,18 +137,17 @@ public final class CalendarRows {
     }
 
     /**
-     * The phone pass of one shown calendar, offline: its calendar-app edits
-     * brought into the store and the store's projected onto it
-     * ({@link CalendarPhonePass}). Run before its rows leave the
-     * phone, on Android's upload syncs ({@link CalendarSyncService}), on the
-     * app's return, in the background run, and after a device zone change.
-     * Answers whether it brought a calendar-app edit in.
+     * One shown calendar's phone pass, offline ({@link CalendarPhonePass}).
+     *
+     * <p>Runs before its rows leave, on Android's upload syncs ({@code
+     * CalendarSyncService}), on the app's return, in the background run and
+     * after a zone change. Answers whether it brought a calendar-app edit in.
      */
     public static boolean phonePass(PimdirDb pimdir, String collection) {
         return CalendarPhonePass.pass(pimdir, collection);
     }
 
-    /** Every calendar the phone shows, by collection id, whichever account holds it. */
+    /** Every calendar the phone shows by collection id, of any account. */
     public static List<String> shown(Context context) {
         List<String> shown = new ArrayList<>();
         for (Account account : Accounts.calendarAccounts(context)) {
@@ -165,9 +157,10 @@ public final class CalendarRows {
     }
 
     /**
-     * A calendar leaving the phone: its last phone pass, then the store
-     * forgets what the phone held of it, since the provider deletes its
-     * events with its row. Shown again, it is projected whole.
+     * A calendar leaving the phone: a last phone pass, then forgotten.
+     *
+     * <p>The store forgets what the phone held of it, since the provider
+     * deletes its events with its row. Shown again, it is projected whole.
      */
     private static void leave(PimdirDb pimdir, String collection) throws Exception {
         phonePass(pimdir, collection);
@@ -195,7 +188,7 @@ public final class CalendarRows {
         return current;
     }
 
-    /** Whether a row already holds every value of an update, compared as text. */
+    /** Whether a row already holds an update's values, compared as text. */
     static boolean unchanged(ContentValues values, Map<String, String> current) {
         for (String column : values.keySet()) {
             if (!current.containsKey(column)
@@ -223,7 +216,7 @@ public final class CalendarRows {
         }
     }
 
-    /** The account's {@code Calendars} rows, by collection id ({@code _SYNC_ID}). */
+    /** The account's {@code Calendars} rows, keyed by {@code _SYNC_ID}. */
     public static Map<String, Row> rows(Context context, Account account) {
         Map<String, Row> rows = new LinkedHashMap<>();
         try (Cursor cursor =
@@ -268,9 +261,10 @@ public final class CalendarRows {
     }
 
     /**
-     * A shown calendar's update, against the name and colour it last
-     * projected ({@code last}): either is written only when the
-     * collection's own changed.
+     * A shown calendar's update against its last projected name and colour.
+     *
+     * <p>{@code last} holds them; either is written only when the collection's
+     * own changed.
      */
     static ContentValues update(
             PimdirCollections.Stored calendar, boolean primary, String zone, Row last) {
@@ -333,14 +327,15 @@ public final class CalendarRows {
         values.put(Calendars.CAL_SYNC2, String.valueOf(color));
     }
 
-    /** The collection's colour, else its account's avatar hue, as the agenda draws it. */
+    /** Its colour, else its account's avatar hue, as the agenda draws it. */
     private static int color(PimdirCollections.Stored calendar) {
         return Avatar.colorOf(calendar.color, calendar.accountEmail);
     }
 
     /**
-     * Seeds the account's event colours, before any event names one: the
-     * provider refuses an {@code EVENT_COLOR_KEY} absent from them, and
+     * Seeds the account's event colours before any event names one.
+     *
+     * <p>The provider refuses an {@code EVENT_COLOR_KEY} absent from them, and
      * calendar apps offer only those.
      */
     private static void seedColors(Context context, Account account) throws Exception {
@@ -379,7 +374,7 @@ public final class CalendarRows {
         }
     }
 
-    /** The account's event colours missing from {@code present}, by CSS name. */
+    /** The account's event colours not in {@code present}, by CSS name. */
     static List<ContentValues> colors(Account account, Set<String> present) {
         List<ContentValues> rows = new ArrayList<>();
         for (Map.Entry<String, Integer> named : CssColors.NAMED.entrySet()) {
@@ -398,8 +393,9 @@ public final class CalendarRows {
     }
 
     /**
-     * The URI as the account's sync adapter writes it: the provider refuses
-     * a sync-adapter write without the account.
+     * The URI as the account's sync adapter writes it.
+     *
+     * <p>The provider refuses a sync-adapter write without the account.
      */
     static Uri asSyncAdapter(Uri uri, Account account) {
         return uri.buildUpon()

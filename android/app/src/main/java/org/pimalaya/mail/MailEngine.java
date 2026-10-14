@@ -44,53 +44,25 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * The mail half of the engine: one driver per session, servicing the
- * remote yields of the mailboxes run on it.
+ * The mail driver: one per session, serving its mailboxes' remote yields.
  *
- * <p>What shapes it is that mail authenticates once per session. IMAP is a
- * session and JMAP is one session resource, so both backends list many
- * mailboxes inside one login, where a WebDAV collection is one request
- * each. The engine, on the other hand, reconciles one collection at a time.
- * The two meet in the session: a pass runs an account's mailboxes on a few
- * sessions side by side ({@code WorkerPool}), each answering the listings of
- * the mailboxes its worker takes in turn, so a sync costs a handful of
- * connections per account rather than one per mailbox, and waits on the
- * network for a few mailboxes at once rather than one after another.
- *
- * <p>The session it walks and writes on is the caller's, opened for the
- * pass and closed with it, so the three markers a reader moved go out on
- * the connection the walk already had rather than on three of their own.
- *
- * <p>A listing names every message it carries (pimdir SYNC section 4): a
- * message's handle <em>is</em> its link id, and its summary comes off the
- * header fields the listing read, so a new message lands listed in the page
- * that found it, with no probe and no upgrade after it. Only the body needs
- * the network, which is why opening a message is the one read that still
- * reaches for one, beside the body step an account's window runs
- * ({@link MailBodies}).
- *
- * <p>A mailbox is listed whole, within the account's bound ({@link
- * MailScope}), newest first and a page at a time: each page lands in its own
- * write, so the top of the list shows while the rest fills in, and a pass
- * cut off resumes where its last page landed.
+ * <p>Mail logs in per session, the engine reconciles per collection: a pass
+ * runs a few caller-opened sessions side by side ({@code WorkerPool}). Pages
+ * land newest first in their own writes, named (pimdir SYNC section 4).
  */
 public final class MailEngine extends PimdirEngine {
     /**
      * The markers this app writes, and the only ones a push ever touches.
      *
-     * <p>The set is closed on purpose. A server marks messages with
-     * keywords nobody here models ({@code $junk}, a label, a rule's own
-     * tag), and a push that reasoned about anything outside this list
-     * would have to decide what to do with them; diffing inside it means
-     * it never sees them.
+     * <p>Closed on purpose: servers carry keywords nobody here models
+     * ({@code $junk}, labels), and diffing inside this set never sees them.
      */
     private static final Flags.Marker[] WRITABLE = {
         Flags.Marker.SEEN, Flags.Marker.ANSWERED, Flags.Marker.FLAGGED, Flags.Marker.DELETED
     };
 
     /**
-     * Messages a mailbox's first pass lists, the chunk an account's window
-     * starts from: a number of messages, never a span of time.
+     * Messages a mailbox's first pass lists: a count, never a time span.
      */
     static final int FIRST_CHUNK = 50;
 
@@ -107,19 +79,18 @@ public final class MailEngine extends PimdirEngine {
     static final int IMAP = 3;
 
     /**
-     * Gmail sessions an account runs at once: the account is one listing,
-     * read once per run, and its metadata batches spread over the sessions
-     * under one pacing bucket.
+     * Gmail sessions an account runs at once.
+     *
+     * <p>The account is one listing, read once per run, its metadata batches
+     * spread over the sessions under one pacing bucket.
      */
     static final int GMAIL = 2;
 
     /**
      * How many sessions one account of this backend runs at once.
      *
-     * <p>The size is the backend's: four for Graph and JMAP, which are HTTP
-     * requests and nothing else; three for IMAP, each worker its own connection
-     * and login; two for Gmail, whose reads are paced across the whole process
-     * anyway, so more workers would only queue on the same bucket.
+     * <p>Four for Graph and JMAP (plain HTTP), three for IMAP (a login each),
+     * two for Gmail, paced process-wide so more would queue on one bucket.
      */
     public static int sessionsOf(Account account) {
         if (AccountClient.isGraph(account)) {
@@ -134,8 +105,7 @@ public final class MailEngine extends PimdirEngine {
         return IMAP;
     }
 
-    /** The account's live connection; null on a driver that only stages,
-     *  whose mutations reach no server. */
+    /** The live connection; null on a stage-only driver, reaching no server. */
     private final MailSession session;
 
     /** What the account's collection ids are namespaced under. */
@@ -145,17 +115,16 @@ public final class MailEngine extends PimdirEngine {
     private final PimdirDb pimdir;
 
     /**
-     * The members the last listed page named, by handle: what a meta fetch
-     * reads back, since a listing already read everything one would.
+     * The members the last listed page named, by handle.
+     *
+     * <p>What a meta fetch reads back: the listing read all it would.
      */
     private final Map<String, JSONObject> listed = new HashMap<>();
 
-    /**
-     * Counts the bodies this driver's bridge calls write, for the dock's
-     * bar ({@link MailTally}); null when nothing is counting.
-     */
+    /** Counts the bodies bridge calls write ({@link MailTally}), or null. */
     public MailTally tally;
 
+    /** A driver on {@code session}, null to stage only, for one account. */
     public MailEngine(PimdirDb pimdir, Clients clients, MailSession session, String accountId) {
         super(pimdir, clients);
         this.pimdir = pimdir;
@@ -164,12 +133,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The account's mailboxes and the role each carries, in one round; a
-     * Gmail or JMAP account's are remembered as listed account-wide, a
-     * Gmail one's as keeping an All Mail ({@link PimdirCollections#ALL_MAIL}), and
-     * whether the server erases one message alone. Any other account's
-     * bodies once linked across its mailboxes are released, once
-     * ({@link MailStore#repairLinks}).
+     * The account's mailboxes and their roles, in one round.
+     *
+     * <p>Records account-wide listing (Gmail, JMAP), All Mail (Gmail) and
+     * single-message erase; other accounts' cross-linked bodies are released
+     * once ({@link MailStore#repairLinks}).
      */
     public List<Mailbox> mailboxes() {
         List<Mailbox> mailboxes = clients.mail().listMailboxes(session);
@@ -191,12 +159,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The bodies the store holds under some link ids, within this account:
-     * a link id names one message across its mailboxes only where they are
-     * listed account-wide (Gmail, JMAP), each a projection of one listing.
-     * Elsewhere it is a handle of one mailbox (an IMAP UID names another
-     * message in the next mailbox, a Graph id is its folder's copy alone),
-     * so nothing is linked and every body is fetched.
+     * The bodies the store holds under some link ids, within this account.
+     *
+     * <p>A link id spans mailboxes only on account-wide listings (Gmail, JMAP);
+     * elsewhere a handle is one mailbox's (an IMAP UID, a Graph id), so nothing
+     * links and every body is fetched.
      */
     @Override
     protected JSONObject lookup(JSONArray links) throws JSONException {
@@ -206,19 +173,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Reconciles one mailbox with its server: list, then push what is
-     * staged.
+     * Reconciles one mailbox with its server: list, then push what is staged.
      *
-     * <p>Within the account's bound: the scope's floor on the {@code Date}
-     * header, or none. No backend's checkpoint is bound to a scope (an IMAP
-     * modseq, a Gmail history id, a JMAP state, a Graph delta link made with
-     * no filter), so a widened bound lists only the band it lacks.
-     *
-     * <p>No hydrate after it, unlike a calendar: a mailbox is a list of
-     * summaries and a message rises off it by being opened, so a placement
-     * below full is the ordinary state of one rather than something to
-     * repair. And no upgrade either: every message a listing carries arrives
-     * named.
+     * <p>Within the bound on {@code Date}; no checkpoint is bound to a scope,
+     * so a widened bound lists only the band it lacks. No hydrate or upgrade
+     * after: a summary is a message's ordinary state, and listings name all.
      */
     public void sync(String collection) {
         step(Progress.STAGE_SERVER, 0);
@@ -226,18 +185,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Widens one mailbox by its next chunk: the {@code count} newest messages
-     * dated below its floor, the oldest {@code Date} among them its new
-     * floor, within the account's bound. A chunk is a number of messages,
-     * never a span of time. Answers whether there was anything to widen: a
-     * mailbox listed whole within the bound has nothing.
+     * Widens one mailbox by its next chunk; answers whether it could.
      *
-     * <p>A mailbox never listed lists its first chunk instead, and a round
-     * under way resumes rather than opening another.
-     *
-     * <p>The wider scope lists only the band below the old floor, on every
-     * backend: no checkpoint is bound to a scope, a Graph delta link being
-     * made with no filter, so it reports what changes in the band too.
+     * <p>The {@code count} newest below its floor (a count, never a span), the
+     * oldest becoming the floor, within the bound. Never listed: its first
+     * chunk; a round under way resumes. Only the band lists, every backend.
      */
     public boolean widen(String collection, int count) {
         String bound = bound(collection);
@@ -262,10 +214,10 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Lists one mailbox from {@code since} (null for all of it), within the
-     * account's bound: the round an IMAP first step opens each mailbox with
-     * ({@link ImapStep}). A mailbox already listed, or under way, syncs as
-     * {@link #sync} does.
+     * Lists one mailbox from {@code since} (null for all), within the bound.
+     *
+     * <p>The round an IMAP first step opens each mailbox with; one listed or
+     * under way syncs as {@link #sync} does.
      */
     void syncSince(String collection, String since) {
         MailStore.Coverage coverage = mail().coverage(collection);
@@ -278,10 +230,10 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Lists a mailbox down to {@code since} (null for all mail), within the
-     * account's bound, unless what it covers reaches there already: the
-     * band a step's frontier lacks, or the whole mailbox for one never
-     * listed. Answers whether it listed.
+     * Lists a mailbox down to {@code since} unless covered; answers whether.
+     *
+     * <p>Null for all mail, within the bound: a step's missing band, or the
+     * whole of a mailbox never listed.
      */
     boolean reach(String collection, String since) {
         String floor = MailScope.clamp(since, bound(collection));
@@ -295,12 +247,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The floor one pass lists a mailbox from, within the account's bound:
-     * where its round under way lists from, else what its last closed round
-     * covered, so a pass after the first is a delta; and for a mailbox never
-     * listed, its first chunk, the {@link #FIRST_CHUNK} newest messages, or
-     * on an account stepped through account-wide (Gmail) its bound, whose
-     * round names what the store holds ({@link #nameUnnamed}).
+     * The floor one pass lists a mailbox from, within the account's bound.
+     *
+     * <p>A round's under way, else the last coverage (a delta), else the
+     * {@link #FIRST_CHUNK} newest; account-wide (Gmail) its bound, whose round
+     * names what the store holds ({@link #nameUnnamed}).
      */
     private String scopeOf(String collection) {
         String bound = bound(collection);
@@ -319,32 +270,24 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The {@code Date}s of a mailbox's {@code count} newest messages, newest
-     * first, as {@link #timedFloor} reads them: fewer when the mailbox holds
-     * fewer.
+     * A mailbox's {@code count} newest {@code Date}s, newest first, or fewer.
      */
     List<String> newest(String collection, int count) {
         return clients.mail().floor(session, mailboxOf(collection), null, count).dates();
     }
 
     /**
-     * Whether a failure is the server refusing one mailbox, the connection
-     * standing: a 404, which the bridge answers for an IMAP mailbox the
-     * server would not open ({@code NO} to {@code EXAMINE} or
-     * {@code SELECT}: deleted since the roster was read, or not yet seen by
-     * a new session) as for a Graph folder or a Gmail label gone. A step and
-     * a pass skip such a mailbox, the next roster dropping it if it is gone.
-     * Only a mailbox's own reads end up here: a push answers the 404 of a
-     * message gone itself ({@link #gone}).
+     * Whether a failure is the server refusing one mailbox, connection intact.
+     *
+     * <p>A 404: an IMAP mailbox refused {@code EXAMINE}/{@code SELECT}, a Graph
+     * folder or Gmail label gone. Steps and passes skip it. Only a mailbox's
+     * reads land here; a push's 404 is a message gone ({@link #gone}).
      */
     public static boolean refused(Exception failure) {
         return isGone(failure);
     }
 
-    /**
-     * Skips one mailbox a step or a pass found refused ({@link #refused}),
-     * logged; any other failure is thrown on.
-     */
+    /** Skips and logs a {@link #refused} mailbox; other failures throw on. */
     static void skip(String collection, RuntimeException failure) {
         if (!refused(failure)) {
             throw failure;
@@ -353,10 +296,10 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The floor of a mailbox's next chunk: the oldest {@code Date} among its
-     * {@code count} newest messages dated before {@code before} (null for no
-     * ceiling), null when fewer lie below it and the mailbox is whole there.
-     * Its time is counted as the network's toward the first page.
+     * The floor of a mailbox's next chunk, null when it is whole there.
+     *
+     * <p>The oldest {@code Date} of its {@code count} newest before
+     * {@code before} (null for none), timed as network toward the first page.
      */
     private String timedFloor(String collection, String before, int count) {
         long started = System.nanoTime();
@@ -368,9 +311,9 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Runs the engine's round or delta over a mailbox from {@code since}. No
-     * backend's checkpoint is bound to the scope it was made under, so a
-     * widening is a band round.
+     * Runs the engine's round or delta over a mailbox from {@code since}.
+     *
+     * <p>No checkpoint is bound to its scope, so a widening is a band round.
      */
     private void list(String collection, String since) {
         Log.d(
@@ -381,10 +324,7 @@ public final class MailEngine extends PimdirEngine {
         MailState.of(pimdir.context()).relisted(collection);
     }
 
-    /**
-     * The floor of a mailbox's bound today, null for all of its mail: its
-     * account's, or none for a mailbox kept whole.
-     */
+    /** A mailbox's bound floor today: its account's, null when kept whole. */
     private String bound(String collection) {
         return MailScope.sinceOf(pimdir.context(), accountId, collection);
     }
@@ -400,10 +340,10 @@ public final class MailEngine extends PimdirEngine {
     private MailStore mail;
 
     /**
-     * The order a pass takes an account's mailboxes in: the inbox, the sent
-     * mail, the drafts, every other by name, the junk and the trash last. The
-     * first dialog waits on the inbox before anything else, and every pass
-     * after it lands the inbox first.
+     * The order a pass takes an account's mailboxes in.
+     *
+     * <p>Inbox, sent, drafts, others by name, junk and trash last: the first
+     * dialog waits on the inbox, and every pass lands it first.
      */
     public static List<Mailbox> ordered(List<Mailbox> mailboxes) {
         List<Mailbox> ordered = new ArrayList<>(mailboxes);
@@ -465,16 +405,15 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The mailboxes the step under way holds the account's messages in
-     * ({@link #stepRead}), what {@link #held} answers over; none outside
-     * a step.
+     * The mailboxes the step under way holds messages in; none outside one.
      */
     private List<String> holding = List.of();
 
     /**
-     * Which of some server handles the store binds in the mailboxes the step
-     * under way holds: what the bridge asks of each page a step lists
-     * ({@code held}), so no step reads the account's every handle.
+     * Which handles the store binds in the step's {@link #holding} mailboxes.
+     *
+     * <p>Asked by the bridge of each page a step lists, so no step reads the
+     * account's every handle.
      */
     Set<String> held(List<String> handles) {
         synchronized (locks.store) {
@@ -493,8 +432,9 @@ public final class MailEngine extends PimdirEngine {
     public static final String SCRATCH = "mail-sources";
 
     /**
-     * A directory of its own under the app's cache, for one read of whole
-     * messages into files ({@link #sources}); the caller deletes it.
+     * A fresh cache directory for one read of whole messages into files.
+     *
+     * <p>Filled by {@link #sources}; the caller deletes it.
      */
     static File scratch(Context context) {
         File dir =
@@ -516,10 +456,7 @@ public final class MailEngine extends PimdirEngine {
         dir.delete();
     }
 
-    /**
-     * The page a step lands ({@link #land}), answered in place of a listing
-     * by the next enumerate; null while none is.
-     */
+    /** The page a step lands, answered by the next enumerate, else null. */
     private Landing landing;
 
     /** What a step's next enumerate answers: its members of one mailbox. */
@@ -536,13 +473,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Lands a step's members of one mailbox ({@link MailStep}) through the
-     * engine, as it lands a listing: each item named as a listed one is.
-     * Where the mailbox holds nothing yet and the engine opens a round, the
-     * items are that round, whole, closed with {@code checkpoint} (the
-     * account's history id taken before the step), so the next pass is a
-     * delta from it; anywhere else they are a delta adding them, which
-     * leaves the checkpoint and finds nothing absent.
+     * Lands a step's members of one mailbox, named as listed ones are.
+     *
+     * <p>On an empty mailbox opening a round, they are that round, closed with
+     * {@code checkpoint} (the history id before the step), so the next pass is
+     * a delta; elsewhere a delta adding them, finding nothing absent.
      */
     void land(String collection, JSONArray items, String checkpoint) {
         boolean empty;
@@ -565,9 +500,9 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * One page of a mailbox's listing, straight from the backend: the
-     * engine's request in, its reply out, every member named by the header
-     * fields the listing read.
+     * One page of a mailbox's listing, straight from the backend.
+     *
+     * <p>Every member named by the header fields the listing read.
      */
     @Override
     protected PimDomain domain() {
@@ -599,10 +534,7 @@ public final class MailEngine extends PimdirEngine {
         return listed(collection, page, true);
     }
 
-    /**
-     * The page a step lands, as {@link #land} says: a round's only page
-     * over a mailbox holding nothing, else a delta.
-     */
+    /** A step's page ({@link #land}): an empty box's round, else a delta. */
     private JSONObject landed(String collection, JSONObject listing) throws JSONException {
         Landing step = landing;
         landing = null;
@@ -620,10 +552,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Keeps what a page named for a meta fetch to read back, counts it, and
-     * with {@code arrivals} owes the bodies of a delta's members new to the
-     * store, which download whatever their date ({@link MailOwed}): a
-     * listing's, not a step's, whose bodies download with it.
+     * Keeps a page's names for meta fetches, counts it, owes arrivals.
+     *
+     * <p>With {@code arrivals}, a delta's members new to the store are owed
+     * their body whatever the date ({@link MailOwed}); a step's download
+     * anyway.
      */
     private JSONObject listed(String collection, JSONObject page, boolean arrivals)
             throws JSONException {
@@ -657,11 +590,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Whether the store's coverage of a mailbox already holds a scope: a
-     * round over it then lists what changed, where a first chunk lists its
-     * band. Graph tells the two apart by it: its first chunk lands by
-     * {@code /messages} without waiting on a delta link, and the round a
-     * later pass opens over the covered scope makes that link.
+     * Whether the store's coverage of a mailbox already holds a scope.
+     *
+     * <p>A round then lists changes, a first chunk its band. Graph lands a
+     * first chunk by {@code /messages} with no delta link; a later round over
+     * the covered scope makes that link.
      */
     boolean covered(String collection, JSONObject scope) {
         MailStore.Coverage coverage = mail().coverage(collection);
@@ -676,19 +609,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Names the members a page listed by id and markers alone, so nothing
-     * reaches the store unnamed (pimdir SYNC section 4): one the store binds
-     * keeps the summary it holds, every other one is read with its summary
-     * ({@link MailClient#nameMessages}), and one gone since it was listed is
-     * left out.
+     * Names members a page listed by id and markers alone (pimdir SYNC 4).
      *
-     * <p>A Graph delta lists them so. So does a round over a mailbox of an
-     * account stepped through account-wide (Gmail), which lists the
-     * mailbox's ids alone: there, of the members the mailbox does not
-     * hold, only those the account holds in another mailbox (newly filed
-     * here) and those listed before the first message the account holds
-     * (arrived since its history expired) are read; the rest are older mail
-     * no step brought, left out, as a band round leaves all of them.
+     * <p>Bound ones keep their summary, others are read
+     * ({@link MailClient#nameMessages}), gone ones dropped. On Gmail rounds
+     * only refiled or new arrivals are read ({@link #steppedIn}).
      */
     void nameUnnamed(String collection, JSONObject listing, JSONObject page)
             throws JSONException {
@@ -744,11 +669,10 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Which members of a Gmail round's page the mailbox does not hold are
-     * named ({@link #nameUnnamed}): those the account holds elsewhere, and
-     * those listed ahead of every message it holds, unless the round lists a
-     * band. Listed newest received first, so what comes ahead of every
-     * message held arrived after them.
+     * Which unheld members of a Gmail round's page are named.
+     *
+     * <p>Those held elsewhere, and those ahead of every held message, unless a
+     * band round: listed newest received first, they arrived after.
      */
     private List<String> steppedIn(
             JSONObject listing, List<String> unnamed, Map<String, String[]> bound) {
@@ -775,8 +699,7 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Whether the round under way met a message the account holds: past
-     * it, a member nobody holds is older mail, never an arrival.
+     * Whether the round met a held message: past it, unheld means older mail.
      */
     private boolean sawHeld;
 
@@ -798,11 +721,10 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Names an arrival by the pending create staged for it, matched on the
-     * {@code Message-ID} both carry, so the engine lands the create on it
-     * (pimdir SYNC §6) rather than pushing a second copy: the sent copy a
-     * provider filed itself. A member this source binds already is left
-     * named as it is.
+     * Names an arrival by the pending create sharing its {@code Message-ID}.
+     *
+     * <p>So the engine lands the create on it (pimdir SYNC §6), not a second
+     * copy: a provider-filed sent copy. Already bound members stay as named.
      */
     void nameByMessageId(String collection, JSONObject page) throws JSONException {
         JSONArray items = page.optJSONArray("items");
@@ -856,13 +778,10 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The named members of the last page at the meta tier, the bodies
-     * {@link #download} asked for at the full one.
+     * The last page's members at meta, or {@link #download}'s bodies at full.
      *
-     * <p>A sync never asks: a listing names everything it carries. A meta
-     * upgrade revisiting a claim reads back what the last page named. A
-     * full one is the body step's alone ({@link MailBodies}), the reader
-     * fetching what someone opens itself ({@link MailStore#saveSource}).
+     * <p>A sync never asks; a meta upgrade reads back the last page. Full is
+     * the body step's alone, the reader fetching itself.
      */
     @Override
     protected JSONObject fetch(JSONObject yielded) throws JSONException {
@@ -882,10 +801,10 @@ public final class MailEngine extends PimdirEngine {
         return reply;
     }
 
-    /** The rows {@link #download} asked for, by handle, while its upgrade runs. */
+    /** The rows {@link #download} asked for, by handle, during its upgrade. */
     private final Map<String, MailBodies.Row> downloading = new HashMap<>();
 
-    /** The bodies {@link #stored} pinned ({@link PimdirItems#pin}), while the upgrade runs. */
+    /** The bodies {@link #stored} pinned, while the upgrade runs. */
     private final List<String> pinned = new ArrayList<>();
 
     /** The handles the upgrade asked the server for, while it runs. */
@@ -894,22 +813,19 @@ public final class MailEngine extends PimdirEngine {
     /** The handles whose body was handed over and filed, while it runs. */
     private final Set<String> answered = new HashSet<>();
 
-    /**
-     * The files of messages already read whole, by handle, a fetch takes
-     * rather than reading them again: a step's ({@link #fetched}).
-     */
+    /** Files of messages a step read whole, by handle, a fetch reuses. */
     private final Map<String, File> fetched = new HashMap<>();
 
-    /** The summary each fetched body gives, by link id, restated once it lands. */
+    /** Each fetched body's summary, by link id, restated once it lands. */
     private final Map<String, JSONObject> summaries = new HashMap<>();
 
-    /** The attachments each fetched body carries, by link id, recorded once it lands. */
+    /** Each fetched body's attachments, by link id, recorded once it lands. */
     private final Map<String, List<MessageBody.Attachment>> attachments = new HashMap<>();
 
     /**
-     * Hands over the files of messages a step read whole, by handle, for
-     * the downloads after it to store rather than read again; an empty map
-     * once they are done.
+     * Hands over a step's whole-message files for downloads to store.
+     *
+     * <p>An empty map once they are done.
      */
     void fetched(Map<String, File> files) {
         fetched.clear();
@@ -917,25 +833,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Downloads the bodies of some messages of one mailbox through the
-     * engine's upgrade to {@code Full}: a body the store holds under the
-     * same link id is linked rather than fetched, every other one is
-     * fetched, and each lands with its base moved to it. A message still
-     * pending (a move's target, a sent copy) is left: it has no handle the
-     * server knows; so is one the frontier no longer takes, read again
-     * rather than trusted from the plan, unless it downloads whatever its
-     * date ({@link MailBodies.Row#always}).
+     * Downloads some bodies of one mailbox through the upgrade to {@code Full}.
      *
-     * <p>The sort key stays the listing's; the summary is restated from
-     * the body (its attachment mark, size and invitation,
-     * {@link MailStore#restateFromBody}), and the parts recorded as files
-     * ({@link FileStore#recordAttachments}), as opening it does.
-     *
-     * <p>Answers the rows whose body did not land: asked of the server and
-     * not handed over, or not stored. A landed one is owed no more
-     * ({@link MailOwed}); nor is one the server answered gone, which is not
-     * a failure: it is marked so ({@link MailState#gone}) and left for the
-     * next listing of its mailbox to take away.
+     * <p>A held body links; pending ones and those off the frontier (unless
+     * {@link MailBodies.Row#always}) are skipped. Summary and parts restated.
+     * Answers rows not landed; a gone one is marked {@link MailState#gone}.
      */
     public List<MailBodies.Row> download(String collection, List<MailBodies.Row> rows) {
         downloading.clear();
@@ -1036,15 +938,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The bodies of some messages, as the reply to a full fetch: each one
-     * read whole into a file ({@link #sources}), unless a step read it
-     * already ({@link #fetched}), filed in the object store under its hash
-     * and answered by that hash and its size, with the link id and sort key
-     * the store holds, so no body crosses the boundary twice. One the
-     * server no longer has ({@link #gone}), or fails to hand over, is left
-     * out and stays below {@code Full}, which {@link #download} answers as
-     * gone or as not landed; an expired token fails the fetch, for the
-     * caller to renew.
+     * Some bodies as a full fetch's reply, filed and answered by hash and size.
+     *
+     * <p>Read into files ({@link #sources}) unless a step did; none crosses the
+     * boundary. Gone or unhanded ones are left out, below {@code Full}; an
+     * expired token fails the fetch for the caller to renew.
      */
     private JSONObject fetchBodies(String collection, JSONArray wanted) throws JSONException {
         List<String> missing = new ArrayList<>();
@@ -1100,14 +998,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * One message's file filed in the object store and answered as a full
-     * fetch's item, its summary and parts kept for {@link #download} to
-     * restate; null when it cannot be read.
+     * Files one message's file as a full fetch's item, or null when unreadable.
      *
-     * <p>The bridge reads the file once for its hash, its summary and its
-     * parts ({@link MailClient#describeMessage}), and the file is moved
-     * into the blob store, never copied: no body is read on this side or
-     * crosses the boundary.
+     * <p>The bridge reads it once ({@link MailClient#describeMessage}) and it
+     * is moved, never copied, into the blob store; summary and parts are kept
+     * for {@link #download}. No body crosses the boundary.
      */
     private JSONObject stored(String collection, String handle, File file) throws JSONException {
         MailBodies.Row row = downloading.get(handle);
@@ -1163,16 +1058,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * What a step over {@code only} (the collection a view filtered to it
-     * steps alone, null for the account) asks the bridge ({@link
-     * #stepRead}), each backend reading what it needs: about {@link
-     * MailStep#COUNT} messages the store does not hold (each listed page
-     * asked of {@link #held}), below the {@code frontier} (the mailbox's
-     * own over it alone, else the account's; null for all mail or until
-     * the account holds one), within the account's {@code bound}, after
-     * the {@code anchors} the last JMAP step left ({@link
-     * MailWindow#anchors}), over the {@code mailboxes} named (null for
-     * none).
+     * What a step over {@code only} (null for the account) asks the bridge.
+     *
+     * <p>About {@link MailStep#COUNT} unheld messages below the frontier,
+     * within the bound, after the JMAP {@link MailWindow#anchors}, over
+     * {@code mailboxes} (null for none); see {@link #stepRead}.
      */
     StepRequest stepRequest(String only, List<String> mailboxes) {
         Context context = pimdir.context();
@@ -1195,11 +1085,10 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * One step of a Gmail or JMAP account read by the bridge ({@link
-     * MailStep}), as {@code request} asks ({@link #stepRequest}), of its
-     * mailbox or of the account for none, each message read into a file of
-     * {@code dir}, as {@link #counted} reads it. The bridge asks this driver
-     * which of each page it lists the store holds ({@link #held}).
+     * One Gmail or JMAP step read by the bridge, as {@code request} asks.
+     *
+     * <p>Each message read into a file of {@code dir}, {@link #counted}; the
+     * bridge asks which of each page the store holds ({@link #held}).
      */
     NamedStep stepRead(List<String> holding, StepRequest request, File dir) {
         return counted(
@@ -1216,10 +1105,10 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * {@code step}, its bodies counted as their files land ({@link
-     * #tally}): the step's count planned before it reads, closed on what
-     * it brought once it answers. {@code holding} the mailboxes whose
-     * messages the step leaves out ({@link #held}).
+     * Runs {@code step} with its bodies counted as files land ({@link #tally}).
+     *
+     * <p>Its count planned before, closed on what it brought; {@code holding}
+     * names the mailboxes whose messages it leaves out ({@link #held}).
      */
     private <T> T counted(
             List<String> holding, StepRequest request, File dir, Supplier<T> step) {
@@ -1239,10 +1128,7 @@ public final class MailEngine extends PimdirEngine {
         }
     }
 
-    /**
-     * A Gmail or JMAP step's item as a listing names it (the engine's
-     * wire), its file and labels left out.
-     */
+    /** A step's item on the engine's wire, its file and labels left out. */
     static JSONObject wireItem(NamedStepItem item) throws JSONException {
         JSONObject named = new JSONObject();
         named.put("handle", item.handle());
@@ -1257,16 +1143,14 @@ public final class MailEngine extends PimdirEngine {
         return named;
     }
 
-    /**
-     * The handles {@link #sources} found gone (deleted since they were
-     * listed), apart from those not handed over, while a download runs.
-     */
+    /** The handles {@link #sources} found gone while a download runs. */
     private final Set<String> gone = new HashSet<>();
 
     /**
-     * Some messages' sources as the server holds them, each read into a
-     * file of {@code dir}, by handle; one gone left out and added to
-     * {@link #gone}, one not handed over left out.
+     * Some messages' sources, each read into a file of {@code dir}, by handle.
+     *
+     * <p>A gone one is left out and added to {@link #gone}; one not handed over
+     * is left out.
      */
     private Map<String, File> sources(String mailbox, List<String> handles, File dir) {
         MessageSources reply = clients.mail().fetchSources(session, mailbox, handles, dir);
@@ -1276,9 +1160,10 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The files a read of whole messages wrote, by handle: this driver's
-     * ({@link #sources}) and the reader's, on a session of its own opened
-     * for the one message it fetches ({@link MailReader#fetch}).
+     * The files a read of whole messages wrote, by handle.
+     *
+     * <p>This driver's ({@link #sources}) and the reader's
+     * ({@link MailReader#fetch}).
      */
     static Map<String, File> files(MessageSources reply) {
         Map<String, File> files = new HashMap<>();
@@ -1330,13 +1215,10 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * A removal as staged (pimdir SYNC §4): one naming a destination is a
-     * server move, a plain one a delete for good.
+     * A staged removal (pimdir SYNC §4): a move to a destination, or a delete.
      *
-     * <p>A move's pending create is withdrawn once the move is delivered:
-     * the message arrives with the destination's next listing under the
-     * handle the server gave it there, which is the identity a message is
-     * filed under.
+     * <p>A move's pending create is withdrawn once delivered: the message comes
+     * back with the destination's listing under its new handle.
      */
     private JSONObject pushRemove(String mailbox, String handle, JSONObject change)
             throws JSONException {
@@ -1371,17 +1253,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * A create as staged (pimdir SYNC §4): one with an origin is a
-     * server-side copy, one without an append. Accepted with no handle
-     * assigned, the copy arriving with the mailbox's next listing under the
-     * handle the server gave it.
+     * A staged create (pimdir SYNC §4): with an origin a copy, else an append.
      *
-     * <p>Three wait, rejected and so kept pending. A move's target is
-     * delivered by its source's removal, which relocates it. A sent copy
-     * waits for its submission, a copy filed for a message that was not
-     * sent being a lie the sender reads as a sent one. And on an account
-     * submitting over its session a create with no origin is a sent copy
-     * the provider files itself, which its listing lands.
+     * <p>Arrives with the next listing. Kept pending: a move's target, a sent
+     * copy before its submission went, and a provider-filed sent copy (no
+     * origin, account submitting over its session).
      */
     private JSONObject pushAdd(String collection, String mailbox, String handle, JSONObject change)
             throws JSONException {
@@ -1435,11 +1311,8 @@ public final class MailEngine extends PimdirEngine {
     /**
      * Writes the markers that moved, one verb per marker.
      *
-     * <p>The difference and not the set: both backends' write verbs add or
-     * remove one marker, so what has to be worked out is which of the four
-     * this app models changed since the source last agreed. A placement
-     * with no agreed set is one the walk has just brought in, and the only
-     * honest reading of the staged set there is that all four are stated.
+     * <p>The difference since last agreed, not the set: verbs add or remove
+     * one. With no agreed set (just walked in), all four are stated.
      */
     private JSONObject pushFlags(
             String collection, String mailbox, String handle, JSONObject change)
@@ -1463,15 +1336,11 @@ public final class MailEngine extends PimdirEngine {
     }
 
     /**
-     * Takes a write on one message failing with a 404 as the message gone
-     * from the server since it was listed (deleted for good, purged from
-     * the trash or the spam, a draft saved under a new id): nothing left
-     * to remove, move or mark, so the change converged, and a copy of it
-     * is refused. Any other failure is thrown on.
+     * Takes a write's 404 as the message gone since listed: converged.
      *
-     * <p>Answered here so a push never fails a pass with a 404, which
-     * {@link #refused} reads as the server refusing the mailbox: a
-     * mailbox gone fails its listing, before anything is pushed.
+     * <p>Nothing left to remove, move or mark; a copy is refused. Answered so a
+     * push never fails a pass on a 404 {@link #refused} would misread. Other
+     * failures throw on.
      */
     private static void gone(String mailbox, String handle, RuntimeException failure) {
         if (!isGone(failure)) {

@@ -29,11 +29,7 @@ import org.pimalaya.pimdir.PimdirSummary;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
-/**
- * A Graph book's bodies: what the complete round's listing holds is taken
- * from it, and everything else is read in one batched call, never one
- * request a contact.
- */
+/** A Graph book's bodies: from the complete listing, else one batched call. */
 @RunWith(RobolectricTestRunner.class)
 public class ContactEngineGraphFetchTest {
     private static final String EMAIL = "jane@example.com";

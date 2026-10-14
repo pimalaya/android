@@ -27,19 +27,11 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * The file side of the pimdir store (STORAGE section 14.3): a message's
- * attachments as files holding no body, each referenced by its message, and
- * the folders a file is saved or imported into with a body of its own.
+ * The file side of the pimdir store (STORAGE section 14.3).
  *
- * <p>Both live in collections of the file kind that no source syncs, written
- * here directly with the canonical statements. An account's stand-ins sit in
- * one collection whose id is the account's namespace and a control character,
- * as the outbox's is: no server names a mailbox that way, so it never
- * collides, and it is found again from the account id alone, with no app
- * state to lose or keep in step. It carries the role {@code attachments}
- * (section 14), which is what tells it from a folder ({@link #isAttachments}).
- * A folder belongs to the device ({@link LocalBook#ACCOUNT}) under a random
- * id, so renaming it moves a label.
+ * <p>Attachments are body-less stand-ins their message references; folders hold
+ * bodies. An account's stand-ins share one {@code attachments} collection, id
+ * the account namespace plus a control character: no mailbox collides.
  */
 public final class FileStore {
     /** The prefix of a folder's collection name, before its random part. */
@@ -56,6 +48,7 @@ public final class FileStore {
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
 
+    /** The file store over the shared pimdir store. */
     public FileStore(Context context, PimdirDb store) {
         this.context = context;
         this.store = store;
@@ -64,15 +57,15 @@ public final class FileStore {
         this.accounts = new PimdirAccount(context);
     }
 
-    /** One placement of a file: a stand-in, or a folder's copy with its body. */
+    /** A file's placement: a stand-in, or a folder's copy with its body. */
     public static final class StoredFile {
         /** The collection holding this placement. */
         final String collection;
 
-        /** The file's key, {@code part:} for an attachment, {@code file:} for an import. */
+        /** Its key: {@code part:} attachment, {@code file:} import. */
         public final String linkId;
 
-        /** The file's public id, shared by its stand-in and its saved copies. */
+        /** Its public id, shared by its stand-in and its saved copies. */
         public final long seq;
 
         /** The file name, empty when none is known. */
@@ -84,7 +77,7 @@ public final class FileStore {
         /** The size in octets, null when unknown. */
         public final Long size;
 
-        /** An attachment's IMAP section in its message, null for any other file. */
+        /** An attachment's IMAP section; null for any other file. */
         public final String part;
 
         /** The body a placement of the file holds, null while none does. */
@@ -104,6 +97,7 @@ public final class FileStore {
         }
     }
 
+    /** The links endpoint of a file. */
     public static ItemLinks.Endpoint endpointOf(StoredFile file) {
         return ItemLinks.of(PimdirSummary.FILE, file.linkId);
     }
@@ -113,6 +107,7 @@ public final class FileStore {
         /** The message's mailbox, a live placement of it. */
         public final String collection;
 
+        /** The message's link id. */
         public final String linkId;
 
         /** The sender's address, empty when unknown. */
@@ -134,15 +129,16 @@ public final class FileStore {
         return PimdirAccount.collectionId(accountId, PimdirCollections.ATTACHMENTS);
     }
 
-    /** Whether a file collection holds an account's attachments rather than being a folder. */
+    /** Whether a file collection is an account's attachments, not a folder. */
     static boolean isAttachments(PimdirCollections.Stored collection) {
         return PimdirCollections.ATTACHMENTS_ROLE.equals(collection.role);
     }
 
     /**
-     * The key of one part of a message (Annex A.7): every writer names it
-     * alike. Null for a message under a writer-derived key, which names no
-     * identity a part could be keyed on (section 9.1).
+     * A message part's key (Annex A.7), named alike by every writer.
+     *
+     * <p>Null for a message under a writer-derived key, which names no identity
+     * a part could be keyed on (section 9.1).
      */
     public static String partKey(String messageLinkId, String section) {
         return ItemLinks.derived(messageLinkId) ? null : "part:" + messageLinkId + "#" + section;
@@ -156,12 +152,11 @@ public final class FileStore {
     }
 
     /**
-     * Records the attachments of a message whose body was just stored: per
-     * part the collection does not hold yet, a stand-in at {@code Meta} with
-     * its summary and the {@code attachment} reference from the message, all
-     * in one transaction, so no stand-in is ever left unreferenced. A part
-     * already recorded keeps its stand-in and gets its reference back if a
-     * person removed it.
+     * Records the attachments of a message whose body was just stored.
+     *
+     * <p>Per new part, a stand-in at {@code Meta} and the message's
+     * {@code attachment} reference, in one transaction: no stand-in is left
+     * unreferenced. A removed reference of a known part comes back.
      */
     public void recordAttachments(
             String accountId, String messageLinkId, List<MessageBody.Attachment> attachments) {
@@ -204,7 +199,7 @@ public final class FileStore {
         }
     }
 
-    /** The files a message attaches, in document order, read from its references. */
+    /** A message's attached files, in document order, from its references. */
     public List<StoredFile> attachments(String accountId, String messageLinkId) {
         Map<String, Object> values = new HashMap<>();
         values.put("account", accountId);
@@ -240,9 +235,9 @@ public final class FileStore {
     }
 
     /**
-     * Every attachment of one attachments collection with its message,
-     * newest message first ({@code list_attachments_by_account}), read a page
-     * at a time.
+     * An attachments collection's files with their message, newest first.
+     *
+     * <p>{@code list_attachments_by_account}, read a page at a time.
      */
     List<Attached> attachmentsIn(String collection) {
         SQLiteDatabase db = items.readable();
@@ -331,9 +326,10 @@ public final class FileStore {
     }
 
     /**
-     * The message a file came from: the first that references it as an
-     * attachment and still has a live placement, with its sender. Null for a
-     * file no message references (an import).
+     * The message a file came from, with its sender; null for an import.
+     *
+     * <p>The first referencing it as an attachment that still has a live
+     * placement.
      */
     Origin origin(String fileLinkId) {
         SQLiteDatabase db = items.readable();
@@ -359,7 +355,7 @@ public final class FileStore {
         return null;
     }
 
-    /** A live mail placement of one message, with its sender; null when none is left. */
+    /** A live mail placement of a message, with its sender; else null. */
     private static Origin placement(SQLiteDatabase db, String messageLinkId) {
         Map<String, Object> values = new HashMap<>();
         values.put("link_id", messageLinkId);
@@ -388,7 +384,11 @@ public final class FileStore {
         return null;
     }
 
-    /** The file a placement's body is stored in, null when it holds none or its blob is gone. */
+    /**
+     * The file a placement's body is stored in.
+     *
+     * <p>Null when it holds none or its blob is gone.
+     */
     public java.io.File saved(StoredFile file) {
         return items.blobFile(file.objectHash);
     }
@@ -427,8 +427,10 @@ public final class FileStore {
     }
 
     /**
-     * Creates a folder on the device, answering its collection id; null when
-     * a folder already goes by the name, one card standing for each name.
+     * Creates a device folder, answering its collection id.
+     *
+     * <p>Null when a folder already goes by the name: one card stands for each
+     * name.
      */
     String createFolder(String name) {
         if (taken(name, null)) {
@@ -447,10 +449,7 @@ public final class FileStore {
         return id;
     }
 
-    /**
-     * Renames a folder, which moves its label and nothing else; false when
-     * another folder already goes by the name.
-     */
+    /** Renames a folder, moving its label only; false if the name is taken. */
     boolean renameFolder(String folder, String name) {
         if (taken(name, folder)) {
             return false;
@@ -463,27 +462,27 @@ public final class FileStore {
         return true;
     }
 
-    /**
-     * Deletes a folder with every file in it; a body no other file holds
-     * goes with it.
-     */
+    /** Deletes a folder and its files; a body no other file holds goes too. */
     void deleteFolder(String folder) {
         dropCollection(folder);
     }
 
     /**
-     * Saves a file into a folder: its bytes, read from {@code source}, become
-     * a blob shared with every other file holding the same ones, and the
-     * folder places the same key with that body, a stand-in staying (section
-     * 14.3). False when the folder holds it already, which is left as it is.
+     * Saves a file into a folder; false when the folder holds it already.
+     *
+     * <p>Its bytes, read from {@code source}, become a blob shared with every
+     * file holding the same ones; the folder places the same key with that
+     * body, a stand-in staying (section 14.3).
      */
     boolean save(String folder, StoredFile file, java.io.File source) throws IOException {
         return place(folder, file.linkId, file.name, file.mediaType, source);
     }
 
     /**
-     * Imports a file from outside the store into a folder, as a file of its
-     * own keyed {@code file:} and 128 random bits (Annex A.7).
+     * Imports a file from outside the store into a folder.
+     *
+     * <p>A file of its own, keyed {@code file:} and 128 random bits (Annex
+     * A.7).
      */
     void importFile(String folder, String name, String mediaType, java.io.File source)
             throws IOException {
@@ -491,9 +490,10 @@ public final class FileStore {
     }
 
     /**
-     * Deletes a folder's copy of a file ({@code delete_unbound_item}),
-     * releasing its body. A stand-in is not deleted by hand: it goes with the
-     * last message referencing it.
+     * Deletes a folder's copy of a file, releasing its body.
+     *
+     * <p>By {@code delete_unbound_item}. A stand-in is never deleted by hand:
+     * it goes with the last message referencing it.
      */
     void delete(StoredFile file) {
         if (file.objectHash == null) {
@@ -528,8 +528,9 @@ public final class FileStore {
     }
 
     /**
-     * Drops an account's stand-ins with their collection. Its messages' own
-     * removal already took them one by one; this takes the collection.
+     * Drops an account's stand-ins collection.
+     *
+     * <p>Its messages' removal already took the stand-ins one by one.
      */
     public void forget(String accountId) {
         dropCollection(attachmentsOf(accountId));
@@ -537,8 +538,9 @@ public final class FileStore {
     }
 
     /**
-     * Places a key with a body in a folder, unless the folder holds it
-     * already; the blob is hashed and copied from the file a buffer at a time.
+     * Places a key with a body in a folder, unless the folder holds it.
+     *
+     * <p>The blob is hashed and copied from the file a buffer at a time.
      */
     private boolean place(
             String folder, String linkId, String name, String mediaType, java.io.File source)
@@ -562,7 +564,7 @@ public final class FileStore {
         }
     }
 
-    /** Deletes a collection with everything under it, settling the bodies it held. */
+    /** Deletes a collection and everything under it, settling its bodies. */
     private void dropCollection(String collection) {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
@@ -599,7 +601,7 @@ public final class FileStore {
         return hex.toString();
     }
 
-    /** A collection's declared kind, null when the store holds no such collection. */
+    /** A collection's declared kind; null when the store lacks it. */
     private static String kindOf(SQLiteDatabase db, String collection) {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
@@ -621,8 +623,9 @@ public final class FileStore {
     }
 
     /**
-     * Places a file in a collection, sharing the public id its key already
-     * has elsewhere; sorted on its name, A to Z (Annex A.7).
+     * Places a file in a collection, sorted by name A to Z (Annex A.7).
+     *
+     * <p>It shares the public id its key already has elsewhere.
      */
     private void insert(
             SQLiteDatabase db, String collection, String linkId, String name, String hash,
@@ -640,7 +643,7 @@ public final class FileStore {
         exec(db, "INSERT_ITEM", values);
     }
 
-    /** Records the {@code attachment} reference from a message to one of its files. */
+    /** Records a message's {@code attachment} reference to one of its files. */
     private static void reference(SQLiteDatabase db, String messageLinkId, String fileLinkId) {
         Map<String, Object> values = new HashMap<>();
         values.put("from_kind", PimdirSummary.MAIL);
@@ -658,9 +661,10 @@ public final class FileStore {
     }
 
     /**
-     * The {@code file_summary} row of one placement, as {@link
-     * PimdirSummary#write} takes it: a null value is left out, which binds
-     * NULL.
+     * One placement's {@code file_summary} row.
+     *
+     * <p>As {@link PimdirSummary#write} takes it: a null value is left out,
+     * which binds NULL.
      */
     private static JSONObject summary(String name, String mediaType, long size, String part) {
         try {

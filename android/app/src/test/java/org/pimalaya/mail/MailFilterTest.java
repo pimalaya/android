@@ -24,9 +24,10 @@ import java.util.List;
 import java.util.function.BiPredicate;
 
 /**
- * The mail list under its filter and its role chips: collections by id, so
- * two accounts' mailboxes of one name are two rows, and a role chip merging
- * that role's mailbox of every shown account.
+ * The mail list under its filter and its role chips.
+ *
+ * <p>Collections by id, so two accounts' mailboxes of one name are two rows,
+ * and a role chip merging that role's mailbox of every shown account.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailFilterTest {
@@ -86,9 +87,10 @@ public class MailFilterTest {
     }
 
     /**
-     * Each account shows its inbox alone to begin with; ticking one account's
-     * Archive leaves the other's hidden, and the Archive chip, a view of its
-     * own, shows both.
+     * Each account shows its inbox alone to begin with.
+     *
+     * <p>Ticking one account's Archive leaves the other's hidden, and the
+     * Archive chip, a view of its own, shows both.
      */
     @Test
     public void twoAccountsArchivesAreTwoCollections() {
@@ -122,7 +124,7 @@ public class MailFilterTest {
         assertEquals(1, count(MailList.narrowed(filter, "trash", store.roles())::collection));
     }
 
-    /** The outbox is a collection of each account of its own, never a role's. */
+    /** The outbox is a collection of each account, never a role's. */
     @Test
     public void eachOutboxIsItsAccounts() {
         List<PimdirCollections.Stored> listed = store.loadMailboxes(List.of(JANE, JOHN));

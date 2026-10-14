@@ -12,9 +12,10 @@ import org.pimalaya.client.AuthMethod;
 import org.pimalaya.client.ServiceConfig;
 
 /**
- * The connection wizard's decisions over discovered options: which one the
- * standard setup picks, which sending rows go with a reading choice, and
- * which picks share one sign-in. No views and no network.
+ * The connection wizard's decisions over discovered options.
+ *
+ * <p>Which one the standard setup picks, which sending rows go with a reading
+ * choice, and which picks share one sign-in. No views and no network.
  */
 final class SetupPlan {
     private SetupPlan() {}
@@ -29,11 +30,11 @@ final class SetupPlan {
     record Discovery(List<ServiceConfig> searched, String email, String emailLogin) {}
 
     /**
-     * The discovered half of one domain's options: one per configuration
-     * serving it and authentication method, the configurations ranked for
-     * the domain and the methods by {@link #authRank}. A configuration this
-     * app cannot drive is left out. {@code protocolName} is the user-facing
-     * name of a service kind.
+     * One domain's discovered options, by configuration and auth method.
+     *
+     * <p>Configurations ranked for the domain, methods by {@link #authRank};
+     * one this app cannot drive is left out. {@code protocolName} names a
+     * service kind for the user.
      */
     static List<SetupOption> discoveredOptions(
             PimDomain domain, Discovery discovery, Function<String, String> protocolName) {
@@ -79,10 +80,9 @@ final class SetupPlan {
     /**
      * The standard setup's way into one domain, or null when it offers none.
      *
-     * <p>Google's and Microsoft's own APIs first, which sign in through the
-     * app's registration at either; elsewhere the configuration ranked best
-     * for the domain ({@link PimDomain#rank}), then OAuth over an API token
-     * over a password. The user picks the domains and the setup picks the rest.
+     * <p>Google's and Microsoft's own APIs first (the app's registration); else
+     * the configuration ranked best ({@link PimDomain#rank}), then OAuth over
+     * API token over password.
      */
     static SetupOption standardOption(PimDomain domain, List<SetupOption> options, String email) {
         SetupOption best = null;
@@ -98,16 +98,17 @@ final class SetupPlan {
         return best;
     }
 
-    /** The standard setup's order: the service for the domain first, then the sign-in. */
+    /** The standard setup's order: the domain's service first, then sign-in. */
     static int standardRank(PimDomain domain, SetupOption option, String email) {
         int service = proprietary(option, email) ? 0 : 1 + domain.rank(option.service);
         return service * 10 + authRank(option.method.type());
     }
 
     /**
-     * Whether an option reads Google's or Microsoft's own API: a discovered
-     * Gmail, Google Calendar or Graph service, or a provider sign-in to the
-     * People API or Graph.
+     * Whether an option reads Google's or Microsoft's own API.
+     *
+     * <p>A discovered Gmail, Google Calendar or Graph service, or a provider
+     * sign-in to the People API or Graph.
      */
     static boolean proprietary(SetupOption option, String email) {
         if (option.service == null) {
@@ -127,8 +128,9 @@ final class SetupPlan {
     }
 
     /**
-     * Auth precedence: OAuth 2.0 over API token over password, the device grant
-     * last among the OAuth ones since a phone has a browser.
+     * Auth precedence: OAuth 2.0 over API token over password.
+     *
+     * <p>The device grant last among the OAuth ones, a phone having a browser.
      */
     static int authRank(AuthMethod.Type type) {
         switch (type) {
@@ -146,11 +148,9 @@ final class SetupPlan {
     /**
      * Whether a sending row goes with what mail is read through.
      *
-     * <p>Reading over a provider API sends through that API, and SMTP goes
-     * with anything else: Microsoft's SMTP signs in with Outlook's token
-     * and Graph with Graph's, so pairing one with the other would be a
-     * second credential to store and renew for the same mailbox. Gmail's
-     * one token would cover both, and is kept to the same shape.
+     * <p>A provider API sends through itself, SMTP goes with the rest:
+     * Microsoft's SMTP takes Outlook's token, Graph Graph's, two credentials
+     * for one mailbox. Gmail's token covers both, kept to the same shape.
      */
     static boolean offers(SetupOption selected, SubmitOption option) {
         if (option.none()) {
@@ -197,10 +197,11 @@ final class SetupPlan {
     }
 
     /**
-     * The sign-ins a selection needs, in order, one group of domains each:
-     * the picked options in the map's order (domain order for an
-     * {@link java.util.EnumMap}), pooled by {@link #sameSignIn} against the
-     * first option of each group.
+     * The sign-ins a selection needs, in order, one group of domains each.
+     *
+     * <p>Picked options in the map's order (domain order for an {@link
+     * java.util.EnumMap}), pooled by {@link #sameSignIn} against each group's
+     * first.
      */
     static List<List<PimDomain>> signIns(Map<PimDomain, SetupOption> picked) {
         List<List<PimDomain>> groups = new ArrayList<>();
@@ -274,24 +275,11 @@ final class SetupPlan {
     }
 
     /**
-     * The RFC 8707 resource an OAuth grant asks for, or null when there is
-     * none to ask for.
+     * The RFC 8707 resource an OAuth grant asks for, null for provider rules.
      *
-     * <p>An HTTP service names itself: the URL it was discovered at is the URI
-     * the server protects. A text one does not, and IMAP is the case that
-     * matters, because nothing in PACC, autoconfig or SRV carries a resource
-     * for it and a server that requires one (Fastmail answers
-     * {@code invalid_target} without) leaves no other way in.
-     *
-     * <p>So a text service falls back to the origin of its authorization
-     * endpoint, on the reasoning that a provider issuing tokens at
-     * {@code https://api.example.com/oauth/authorize} protects its resources
-     * under the same origin. That is a derivation, not a discovery: a provider
-     * that separates the two will need its resource from RFC 9728 protected
-     * resource metadata, which nothing fetches yet.
-     *
-     * <p>A provider rule's config asks for none: Google and Microsoft
-     * authorize by scope, and answer a resource with {@code invalid_target}.
+     * <p>An HTTP service's discovery URL. A text one (IMAP: Fastmail answers
+     * {@code invalid_target} without) takes its authorization endpoint's
+     * origin, pending RFC 9728. Google and Microsoft reject one.
      */
     static String resourceOf(ServiceConfig config, AuthMethod method) {
         if (fromProvider(config)) {

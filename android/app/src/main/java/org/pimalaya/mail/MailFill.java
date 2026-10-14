@@ -9,27 +9,18 @@ import java.util.function.ToIntFunction;
 /**
  * Which mailboxes the background fill widens next, a chunk at a time.
  *
- * <p>The merged list reaches down to the most recent floor among the
- * mailboxes it shows: below it, one mailbox's older mail would be listed
- * while another's of the same days is not stored yet. So the fill takes
- * the mailbox whose floor is that limiting one first, the way a k-way merge
- * draws from the input whose head is next.
- *
- * <p>A chunk is a number of messages, never a span of time: a step of the
- * fill widens by {@link MailEngine#FILL_CHUNK}. An account stepped through
- * account-wide (Gmail) is not filled ({@link MailStep}).
+ * <p>The list reaches the most recent floor, so that mailbox fills first, as a
+ * k-way merge draws. A chunk is {@link MailEngine#FILL_CHUNK} messages, never a
+ * time span; account-wide steps (Gmail) are not filled.
  */
 public final class MailFill {
     private MailFill() {}
 
     /**
-     * The mailbox the background fill widens next, null once every one is
-     * listed whole within its account's bound.
+     * The mailbox the fill widens next, null once all are whole within bound.
      *
-     * <p>The inbox and the sent mail first, a mailbox never listed before
-     * one that only lacks older mail, then the most recent floor among them
-     * (the one limiting the list); every other mailbox after both are whole,
-     * on the same terms.
+     * <p>Inbox and sent first, a never-listed mailbox before one lacking older
+     * mail, then the most recent floor; the others after on the same terms.
      */
     static MailStore.Edge next(List<MailStore.Edge> edges) {
         MailStore.Edge first = pick(edges, true);
@@ -64,9 +55,10 @@ public final class MailFill {
     }
 
     /**
-     * The mailboxes one step of the fill widens side by side: the next ones
-     * in the fill's order ({@link #next}), as many of an account as it runs
-     * sessions at once ({@code room}). Empty once every mailbox is whole.
+     * The mailboxes one fill step widens side by side, empty once all whole.
+     *
+     * <p>The next in {@link #next}'s order, as many of an account as it runs
+     * sessions at once ({@code room}).
      */
     static List<MailStore.Edge> batch(
             List<MailStore.Edge> edges, ToIntFunction<String> room) {
@@ -87,7 +79,7 @@ public final class MailFill {
 
     /** What a fill step reaches for, so the step itself can be tested. */
     public interface Host {
-        /** Whether the fill may go on: foreground, unmetered, nothing else syncing. */
+        /** Whether the fill may go on: foreground, unmetered, no other sync. */
         boolean allowed();
 
         /** Every mailbox and how far its chunks have reached, read afresh. */
@@ -102,9 +94,9 @@ public final class MailFill {
         }
 
         /**
-         * Widens a step's mailboxes by one fill chunk each, blocking until
-         * all of them are done: every one is tried, and the first failure is
-         * thrown once they are.
+         * Widens each mailbox by one fill chunk, blocking until all are done.
+         *
+         * <p>Every one is tried; the first failure is thrown after.
          */
         default void widen(List<MailStore.Edge> edges) throws Exception {
             Exception failure = null;
@@ -126,9 +118,13 @@ public final class MailFill {
 
     /** Why a fill step stopped, or that another should follow. */
     public enum Step {
-        /** One chunk of each mailbox the step took landed; another step follows while allowed. */
+        /**
+         * A chunk of each mailbox landed; another step follows while allowed.
+         */
         AGAIN,
-        /** Not allowed now (background, metered, another sync): resumed later. */
+        /**
+         * Not allowed now (background, metered, another sync): resumed later.
+         */
         PAUSED,
         /** Every mailbox is whole within its bound. */
         DONE,
@@ -137,10 +133,10 @@ public final class MailFill {
     }
 
     /**
-     * One step of the background fill: the next mailboxes widened by one
-     * chunk each, side by side ({@link #batch}), when the fill is still
-     * allowed. Nothing is held between steps but what the store covers, so a
-     * fill stopped anywhere resumes from the floors it reached.
+     * One fill step: the next mailboxes widened a chunk each ({@link #batch}).
+     *
+     * <p>Only while allowed. Nothing is held between steps but store coverage,
+     * so a stopped fill resumes from the floors reached.
      */
     public static Step step(Host host) {
         if (!host.allowed()) {

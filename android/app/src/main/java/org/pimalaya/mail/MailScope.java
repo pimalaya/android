@@ -9,17 +9,9 @@ import java.time.ZoneId;
 /**
  * An account's mail bound: all of its mail, or the last N months of it.
  *
- * <p>The bound is a scope on the {@code Date} header (pimdir SYNC section
- * 5): a round lists the messages dated from its floor on, a message with no
- * usable date included, and nothing outside it is ever deleted by a sync.
- * Narrowing it is what frees the space, through the owner's collection
- * ({@link MailStore#collectBefore}); widening it has the next sync list the
- * band it now lacks.
- *
- * <p>Kept beside the account rather than inside its encrypted record, as the
- * trash is: it is no secret, and the engine reads it by the account id a
- * collection is namespaced under, which is all a driver knows of its
- * account.
+ * <p>A scope on {@code Date} (pimdir SYNC section 5): rounds list from its
+ * floor, undated mail included, a sync deletes nothing outside it, narrowing
+ * frees space ({@link MailStore#collectBefore}). In prefs by account id.
  */
 public final class MailScope {
     /** The choices the settings offer, in months; 0 is all mail. */
@@ -53,19 +45,15 @@ public final class MailScope {
         return since(months(context, accountId));
     }
 
-    /**
-     * The floor of one mailbox's scope today: its account's, or none for a
-     * mailbox kept whole ("Download this mailbox").
-     */
+    /** One mailbox's floor today: its account's, none for one kept whole. */
     static String sinceOf(Context context, String accountId, String collection) {
         return MailOffline.whole(context, collection) ? null : sinceOf(context, accountId);
     }
 
     /**
-     * What a pass lists a mailbox from: the later of its floor (where its
-     * chunks have reached) and the account's bound, null when neither is
-     * set. Both are RFC 3339 instants in UTC written alike, so they compare
-     * as text.
+     * What a pass lists a mailbox from: the later of floor and bound, or null.
+     *
+     * <p>Both are RFC 3339 UTC instants written alike, so they compare as text.
      */
     static String clamp(String floor, String bound) {
         if (floor == null) {
@@ -78,25 +66,20 @@ public final class MailScope {
     }
 
     /**
-     * Whether a mailbox's floor still has mail below it that the account
-     * keeps: a floor above the bound, or any floor under no bound. A
-     * mailbox listed whole within its bound limits nothing.
+     * Whether a mailbox's floor still has kept mail below it.
+     *
+     * <p>A floor above the bound, or any floor under no bound.
      */
     static boolean limits(String floor, String bound) {
         return floor != null && (bound == null || floor.compareTo(bound) > 0);
     }
 
     /**
-     * The floor of an {@code months} bound on {@code today}, as the RFC 3339
-     * instant Annex A writes a date in: the first day of the month that many
-     * months back, at midnight in {@code zone}, or null for no bound.
+     * An {@code months} bound's floor on {@code today}, null for no bound.
      *
-     * <p>A month boundary rather than today's date: the scope then holds
-     * still for a month, so a round cut off one day resumes the next under
-     * the same scope instead of restarting over one a day narrower, and the
-     * coverage is restated once a month rather than once a pass. Midnight on
-     * the device's clock, as a window's dates are ({@link MailWindow}), so a
-     * window and the bound compare by the same days.
+     * <p>Midnight in {@code zone}, first of the month that many months back, an
+     * RFC 3339 Annex A instant. A month boundary holds the scope still, so a
+     * cut-off round resumes rather than restarts.
      */
     static String since(int months, LocalDate today, ZoneId zone) {
         if (months <= 0) {

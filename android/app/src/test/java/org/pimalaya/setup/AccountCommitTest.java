@@ -29,8 +29,9 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * The wizard's commit: the sign-ins add up to one account, saved onto what
- * the address already had, and the ticked address books subscribed.
+ * The wizard's commit: one account from the sign-ins, books subscribed.
+ *
+ * <p>Saved onto what the address already had.
  */
 @RunWith(RobolectricTestRunner.class)
 public class AccountCommitTest {

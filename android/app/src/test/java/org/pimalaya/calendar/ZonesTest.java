@@ -28,11 +28,9 @@ import java.util.regex.Pattern;
 /**
  * Where a calendar time is, on the platform's database.
  *
- * <p>Worth pinning because a time read in the wrong zone shows hours
- * off with nothing on the screen to say so, and a {@code VTIMEZONE}
- * written wrong moves an entry for every other client reading it.
- * Under Robolectric for the one reason that the native library loads into
- * one class loader per process: a zone's entry is expanded by the bridge.
+ * <p>A time read in the wrong zone shows hours off with nothing to say so; a
+ * wrong {@code VTIMEZONE} moves an entry for every other client. Robolectric
+ * because the bridge expands entries and loads once per class loader.
  */
 @RunWith(RobolectricTestRunner.class)
 public class ZonesTest {
@@ -48,8 +46,6 @@ public class ZonesTest {
 
     @Test
     public void aUtcTimeIsReadAsUtcAndShownAtTheReadersHour() {
-        // The delta's scenario: a Graph event at 08:00 UTC, the device in
-        // Paris in summer, shows at 10:00.
         EventTime graph = new EventTime("20260706T080000", EventTimeKind.UTC, "", null);
         long instant = Zones.instant(graph, PARIS);
 
@@ -61,7 +57,6 @@ public class ZonesTest {
 
     @Test
     public void aZonedTimeIsReadInItsZoneWhereverTheReaderIs() {
-        // A meeting at 09:00 New York, read in Paris.
         assertEquals(
                 at("2026-07-06T13:00:00Z"),
                 Zones.instant(zoned("20260706T090000", "America/New_York"), PARIS));
@@ -83,7 +78,7 @@ public class ZonesTest {
     @Test
     public void anIanaNameIsReadInAnyCaseTrimmedAndBehindAPath() {
         assertEquals(PARIS, Zones.zoneOf("europe/paris"));
-        // Outlook writes a trailing space.
+        // NOTE: Outlook writes a trailing space.
         assertEquals(PARIS, Zones.zoneOf("Europe/Paris "));
         assertEquals(
                 ZoneId.of("Europe/Vienna"),
@@ -115,9 +110,9 @@ public class ZonesTest {
 
     @Test
     public void aTimeTheClockSkipsOrRepeatsIsReadTheWayRfc5545Says() {
-        // RFC 5545 3.3.5: 02:30 on the night Paris springs forward never
-        // happens and is read at the offset before the gap; on the night
-        // it falls back it happens twice and is the first.
+        // NOTE: RFC 5545 3.3.5: 02:30 on the night Paris springs forward never
+        // happens and is read at the offset before the gap; on the night it
+        // falls back it happens twice and is the first.
         assertEquals(
                 at("2026-03-29T01:30:00Z"),
                 Zones.instant(zoned("20260329T023000", "Europe/Paris"), ZoneOffset.UTC));
@@ -128,8 +123,6 @@ public class ZonesTest {
 
     @Test
     public void aPickedMomentIsWrittenInTheZoneItsPropertyWasIn() {
-        // A reader in Paris moves a New York meeting to 16:00 their time:
-        // it stays a New York one, at 10:00 there.
         EventTime york = zoned("20260706T090000", "America/New_York");
         EventTime moved = Zones.at(at("2026-07-06T14:00:00Z"), york, PARIS);
 
@@ -175,11 +168,9 @@ public class ZonesTest {
 
     @Test
     public void everyZoneWrittenIsReadBackAtTheOffsetsThePlatformGives() {
-        // The definition is read by ical-rs on the native side, with no
-        // database of its own: for every zone the platform has, times in
-        // it an hour and a day either side of each of its changes over two
-        // years, and at noon each month, are placed at the offset java.time
-        // gives, so a rule landing a day or an hour off shows.
+        // NOTE: ical-rs reads the definition natively, with no database of its
+        // own: times an hour and a day either side of every change over two
+        // years, and at noon each month, must land at java.time's offset.
         Instant since = Instant.parse("2026-01-01T00:00:00Z");
         Instant until = Instant.parse("2028-01-01T00:00:00Z");
 
@@ -237,7 +228,6 @@ public class ZonesTest {
 
     @Test
     public void aZoneOnlyItsObjectDefinesIsNamedByTheZoneItsOffsetsMatch() {
-        // Summer and winter in Paris, under a name no database knows.
         List<EventTime> span =
                 List.of(
                         new EventTime("20260706T090000", EventTimeKind.ZONED, "Romance", 7200),
@@ -253,14 +243,12 @@ public class ZonesTest {
         assertEquals(7200, rules.getOffset(summer).getTotalSeconds());
         assertEquals(3600, rules.getOffset(winter).getTotalSeconds());
 
-        // Offsets no zone gives fall back on the device's, never UTC.
         List<EventTime> odd =
                 List.of(
                         new EventTime(
                                 "20260706T090000", EventTimeKind.ZONED, "Odd", 7 * 3600 + 17 * 60));
         assertEquals(tokyo, Zones.zoneFor(odd, tokyo));
 
-        // A name the database knows is that zone, and UTC is UTC.
         assertEquals(
                 ZoneId.of("America/New_York"),
                 Zones.zoneFor(List.of(zoned("20260706T090000", "America/New_York")), tokyo));

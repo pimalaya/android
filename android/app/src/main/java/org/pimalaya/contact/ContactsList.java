@@ -25,15 +25,11 @@ import org.pimalaya.ui.SectionsAdapter;
 import org.pimalaya.ui.Ui;
 
 /**
- * The contacts screen: the merged list grouped into one card per
- * letter, its recycling adapter, the header search and the multi-select
- * mode. It owns the display state
- * (the replica pool, the grouped rows, the sorted-and-filtered rows,
- * the selection and search flags) and rebuilds it off the main thread
- * through {@link ContactPool}; the host keeps the chrome bar it shares
- * with the other screens (re-running {@link #updateSelectionUi} on
- * every return) and the flows that leave the screen (opening a contact,
- * merging, importing, syncing).
+ * The contacts screen: the merged list by letter, search and multi-select.
+ *
+ * <p>It owns the display state and rebuilds it off the main thread through
+ * {@link ContactPool}; the host keeps the shared chrome bar (re-running
+ * {@link #updateSelectionUi} on every return) and the flows leaving it.
  */
 public final class ContactsList {
     private final Host host;
@@ -52,8 +48,7 @@ public final class ContactsList {
     /** The merged rows as the bridge grouped them, unfiltered. */
     private List<Group> groupedContacts = new ArrayList<>();
 
-    /** The merged rows, filtered by the search query and sorted; backs
-     *  the adapter. */
+    /** The merged rows, search-filtered and sorted; backs the adapter. */
     private List<Group> sortedContacts = new ArrayList<>();
 
     private final CardSections<Group> sections = new CardSections<>();
@@ -68,9 +63,12 @@ public final class ContactsList {
     /** Lower-cased raw-vCard filter; empty shows all. */
     private String searchQuery = "";
 
-    /** Whether the Default chip narrows the list to the shown accounts' default books. */
+    /**
+     * Whether the Default chip narrows to the shown accounts' default books.
+     */
     private boolean defaultOnly;
 
+    /** The contacts screen; {@code pull} runs the pull-to-refresh sync. */
     public ContactsList(Host host, ContactParts parts, ContactEditor editor, Runnable pull) {
         this.host = host;
         this.parts = parts;
@@ -82,7 +80,7 @@ public final class ContactsList {
 
     /** Wires the list, its bar buttons, the header search and the pull-down. */
     public void setUp() {
-        // Pull-to-refresh runs the same syncAll as the drawer; its own
+        // NOTE: pull-to-refresh runs the same syncAll as the drawer; its own
         // spinner retracts right away, the sync dock carries the wait.
         androidx.swiperefreshlayout.widget.SwipeRefreshLayout refresh =
                 host.findViewById(R.id.contacts_refresh);
@@ -126,9 +124,6 @@ public final class ContactsList {
                 });
         list.setAdapter(adapter);
 
-        // A letter's header selects its whole section, the only unit the
-        // list has beside one contact; a row opens or, during a
-        // selection, toggles.
         list.setOnItemClickListener(
                 (parent, view, position, id) -> {
                     int row = header.rowAt(position);
@@ -155,22 +150,22 @@ public final class ContactsList {
                 });
     }
 
+    /** The list's large header. */
     public ListHeader header() {
         return header;
     }
 
-    /** The vCard file import and export, which the host's document pickers answer. */
+    /** The vCard file import and export, answered by the host's pickers. */
     public VcfTransfer transfer() {
         return transfer;
     }
 
     /**
-     * Rebuilds the contacts list from the base (staged edits included):
-     * the full table scan and the bridge grouping run on the io
-     * executor, and the render lands back on the main thread; the io
-     * executor is single-threaded, so overlapping reloads apply in
-     * order. The account snapshot keeps the grouping off the live
-     * main-thread cache.
+     * Rebuilds the list from the store, staged edits included.
+     *
+     * <p>Scan and grouping run on the single-threaded io executor, so
+     * overlapping reloads apply in order; the account snapshot keeps the
+     * grouping off the live main-thread cache.
      */
     public void reload() {
         List<AccountEntry> snapshot = new ArrayList<>(parts.accounts());
@@ -187,13 +182,16 @@ public final class ContactsList {
                 });
     }
 
-    /** The rows currently on screen (search-filtered), for export and
-     *  the birthday peek. */
+    /**
+     * The rows on screen (search-filtered), for export and the birthday peek.
+     */
     List<Group> visibleGroups() {
         return sortedContacts;
     }
 
-    /** The merged row holding a card of this key, filter or no filter; null for none. */
+    /**
+     * The merged row holding a card of this key, filter or not; null for none.
+     */
     public Group groupOf(String linkId) {
         for (Group group : groupedContacts) {
             for (Entry entry : group.replicas) {
@@ -205,10 +203,12 @@ public final class ContactsList {
         return null;
     }
 
+    /** Whether a multi-selection is running. */
     public boolean isSelectionMode() {
         return selectionMode;
     }
 
+    /** Whether a search query filters the list. */
     public boolean isSearchOpen() {
         return !searchQuery.isEmpty();
     }
@@ -219,9 +219,9 @@ public final class ContactsList {
     }
 
     /**
-     * Filters the grouped rows by the search query and refreshes the
-     * list; a group matches when any of its replicas does. Conflicts
-     * float to the top so they cannot be missed.
+     * Filters the grouped rows by the search query and refreshes the list.
+     *
+     * <p>A group matches when any replica does; conflicts float to the top.
      */
     private void render() {
         updateSelectionUi();
@@ -238,10 +238,8 @@ public final class ContactsList {
                                                 new PimdirCollections(parts.pimdir(), host)))
                         : null;
         for (Group group : groupedContacts) {
-            // A merged row survives when any replica of it passes both
-            // the filter axes and the query: hiding an account thins a
-            // row's replicas, and only empties the row when that account
-            // held all of them.
+            // NOTE: hiding an account thins a row's replicas, and only empties
+            // the row when that account held all of them.
             boolean matches = false;
             for (Entry entry : group.replicas) {
                 if (!filter.accepts(entry.accountEmail, entry.book.url())
@@ -274,8 +272,6 @@ public final class ContactsList {
                                 sortedContacts.size(),
                                 sortedContacts.size()));
 
-        // One empty state for every cause: a search miss, an empty
-        // addressbook, or no account.
         host.findViewById(R.id.contacts_empty)
                 .setVisibility(sortedContacts.isEmpty() ? View.VISIBLE : View.GONE);
     }
@@ -319,8 +315,6 @@ public final class ContactsList {
 
             ((TextView) row.findViewById(R.id.contact_name)).setText(name);
 
-            // One supporting line: the phone, else the email, else the
-            // card's fallback info.
             String subtitle = entry.phone;
             if (subtitle == null || subtitle.isEmpty()) {
                 subtitle = entry.email;
@@ -330,8 +324,6 @@ public final class ContactsList {
             }
             bindLine(row.findViewById(R.id.contact_subtitle), subtitle);
 
-            // The link glyph and card count, only for a contact backed
-            // by several physical cards.
             int cards = parts.pool().distinctRefs(group.replicas).size();
             row.findViewById(R.id.contact_link_icon)
                     .setVisibility(cards > 1 ? View.VISIBLE : View.GONE);
@@ -341,8 +333,6 @@ public final class ContactsList {
 
             ((TextView) row.findViewById(R.id.contact_origin)).setText(originOf(group));
 
-            // The warning flag for a conflict or divergence, ending the
-            // name's line.
             android.widget.ImageView danger = row.findViewById(R.id.contact_diverged);
             danger.setImageTintList(
                     android.content.res.ColorStateList.valueOf(
@@ -350,8 +340,8 @@ public final class ContactsList {
             danger.setVisibility(
                     group.conflicted() || diverged(group) ? View.VISIBLE : View.GONE);
 
-            // A contact living only in the hidden local book (attached to
-            // no addressbook) shows muted.
+            // NOTE: a contact only in the hidden local book (attached to no
+            // addressbook) shows muted.
             row.setAlpha(attachedToNoBook(group) ? 0.5f : 1f);
 
             return row;
@@ -359,10 +349,10 @@ public final class ContactsList {
     }
 
     /**
-     * Where a contact lives: its addressbook, then its account, the way
-     * a mail row names its mailbox and account. A contact on several
-     * cards names the first one held by an account, the on-device book
-     * being where cards wait rather than where they belong.
+     * Where a contact lives: its addressbook, then its account.
+     *
+     * <p>Several cards name the first one an account holds: the on-device book
+     * is where cards wait, not where they belong.
      */
     private String originOf(Group group) {
         for (Entry entry : group.replicas) {
@@ -397,8 +387,7 @@ public final class ContactsList {
     }
 
     /**
-     * Merges the selected rows into one single card through the merge
-     * form (the host owns the survivor choice and the fan-out).
+     * Merges the selected rows through the merge form (survivor and fan-out).
      */
     private void mergeSelected() {
         editor.mergeReplicas(selectedReplicas());
@@ -417,6 +406,7 @@ public final class ContactsList {
         }
     }
 
+    /** Leaves the multi-selection, clearing it. */
     public void exitSelection() {
         selectionMode = false;
         selectedKeys.clear();
@@ -451,13 +441,10 @@ public final class ContactsList {
     }
 
     /**
-     * Selects every contact under a letter, or clears them when they are
-     * all already selected: a letter header's tap.
+     * Selects every contact under a letter, or clears them when all are.
      *
-     * <p>Outside a selection it starts one, so the button does something
-     * wherever it is pressed. A long press on a row starts a selection
-     * from one contact; this starts one from a whole section, which is
-     * the only other unit the list has.
+     * <p>Outside a selection it starts one: a whole section is the list's only
+     * unit beside one contact.
      */
     private void toggleLetter(String letter) {
         List<String> keys = new ArrayList<>();
@@ -495,11 +482,7 @@ public final class ContactsList {
         header.clearSearch();
     }
 
-    /**
-     * Raises or hides the contacts' own bar buttons: birthdays,
-     * duplicates and import/export. The filter is every list's and
-     * follows its own rule.
-     */
+    /** Raises or hides the contacts' own bar buttons (not the filter). */
     private void showActions(boolean shown) {
         int visibility = shown ? View.VISIBLE : View.GONE;
         for (int id :
@@ -513,19 +496,18 @@ public final class ContactsList {
     }
 
     /**
-     * The contacts screen's chrome, per selection and search state (the
-     * bar is shared across screens, so this only runs while the
-     * contacts screen shows; the host's chrome re-runs it on every
-     * return).
+     * The contacts screen's chrome, per selection and search state.
+     *
+     * <p>The bar is shared, so this runs only while the contacts screen shows;
+     * the host re-runs it on every return.
      */
     public void updateSelectionUi() {
         if (host.screen != Panels.CONTACTS) {
             return;
         }
 
-        // A selection takes the domain name's place with its count,
-        // shown whatever the scroll, since navigating away mid-selection
-        // is not what the bar is for.
+        // NOTE: a selection's count shows whatever the scroll, since
+        // navigating away mid-selection is not what the bar is for.
         TextView title = host.findViewById(R.id.bar_title);
         boolean navigating = !selectionMode;
         if (navigating) {
@@ -540,7 +522,7 @@ public final class ContactsList {
                 .setVisibility(selectionMode ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.selection_close)
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-        // Merging needs at least two physical cards.
+        // NOTE: merging needs at least two physical cards.
         host.findViewById(R.id.contacts_merge)
                 .setVisibility(
                         selectionMode && parts.pool().distinctRefs(selectedReplicas()).size() > 1
@@ -548,7 +530,6 @@ public final class ContactsList {
                                 : View.GONE);
         host.findViewById(R.id.contacts_delete)
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
-        // The select-all box, checked when every contact is selected.
         host.findViewById(R.id.selection_all_slot)
                 .setVisibility(selectionMode ? View.VISIBLE : View.GONE);
         ((CheckBox) host.findViewById(R.id.selection_all))
@@ -567,7 +548,7 @@ public final class ContactsList {
     }
 
     private void deleteSelected() {
-        // Deleting a merged row deletes every replica behind it, each
+        // NOTE: deleting a merged row deletes every replica behind it, each
         // against its own account.
         for (Group group : sortedContacts) {
             if (selectedKeys.contains(group.key)) {

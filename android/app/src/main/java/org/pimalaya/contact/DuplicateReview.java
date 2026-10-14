@@ -21,14 +21,11 @@ import org.pimalaya.client.RefCard;
 import org.pimalaya.ui.Host;
 
 /**
- * The semi-automatic duplicate remover behind its app-bar icon: the
- * bridge scans every replica for exact normalized matches (emails,
- * phones, full names), and the first unhandled group surfaces as a
- * one-shot review dialog of tappable card rows with three verbs:
- * Merge runs the host's normal merge flow, Ignore remembers the
- * dismissal in the store, and Link (offered only when every card
- * lives in its own addressbook) makes the cards one contact by
- * staging a shared UID. Tap the icon again for the next group.
+ * The duplicate remover behind its app-bar icon, one group per tap.
+ *
+ * <p>The bridge finds exact normalized matches (emails, phones, full names).
+ * Merge runs the normal merge flow, Ignore remembers the dismissal, Link (each
+ * card in its own book) stages a shared UID.
  */
 final class DuplicateReview {
     private final Host host;
@@ -44,9 +41,7 @@ final class DuplicateReview {
     }
 
     /**
-     * Scans the replicas for likely duplicates (computed by the
-     * bridge, off the main thread) and reviews the first group that
-     * is neither handled nor dismissed.
+     * Scans for duplicates off the main thread, reviewing the first open group.
      */
     void find(List<Entry> replicas) {
         Map<String, Entry> byRef = new HashMap<>();
@@ -101,10 +96,10 @@ final class DuplicateReview {
     }
 
     /**
-     * Reviews the first duplicate group found, one shot: after any
-     * verb, tapping the bar icon again surfaces the next group (a
-     * handled group no longer matches, an ignored one is remembered).
-     * Each card is a tappable row leaving the review for its editor.
+     * Reviews one duplicate group; the next tap surfaces the next one.
+     *
+     * <p>A handled group no longer matches, an ignored one is remembered. Each
+     * card row leaves the review for its editor.
      */
     private void review(List<Entry> members) {
         DuplicateGroup dup = group(members);
@@ -185,8 +180,7 @@ final class DuplicateReview {
     }
 
     /**
-     * The group's duplicate-review facts from the bridge: its
-     * dismissal key and whether Link may be offered.
+     * The group's review facts from the bridge: dismissal key, Link offered.
      */
     private DuplicateGroup group(List<Entry> members) {
         List<DuplicateMember> refs = new ArrayList<>();
@@ -196,10 +190,7 @@ final class DuplicateReview {
         return ContactClient.duplicateGroup(refs);
     }
 
-    /**
-     * Links the cards into one contact by staging the same UID on all
-     * of them; transparent UID grouping does the rest.
-     */
+    /** Links the cards into one contact by staging the same UID on all. */
     private void link(List<Entry> members) {
         String uid = "";
         for (Entry entry : members) {

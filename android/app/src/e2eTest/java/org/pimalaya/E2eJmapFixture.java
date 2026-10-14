@@ -12,8 +12,9 @@ import java.util.Iterator;
 import java.util.List;
 
 /**
- * A JMAP target prepared over its own session resource (RFC 8620, RFC 8621):
- * a scratch mailbox is a `Mailbox`, destroyed with its mail, and a message is
+ * A JMAP target prepared over its own session (RFC 8620, RFC 8621).
+ *
+ * <p>A scratch mailbox is a `Mailbox`, destroyed with its mail; a message is
  * seeded by uploading its bytes and importing the blob.
  */
 final class E2eJmapFixture implements E2eFixture {
@@ -208,7 +209,7 @@ final class E2eJmapFixture implements E2eFixture {
         return null;
     }
 
-    /** One method call, answering its arguments; a method-level error fails it. */
+    /** One method call, answering its arguments; a method error fails it. */
     private JSONObject call(String method, JSONObject arguments) throws Exception {
         arguments.put("accountId", account);
         JSONObject request =

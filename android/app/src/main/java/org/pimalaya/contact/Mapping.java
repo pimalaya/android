@@ -27,21 +27,20 @@ import org.pimalaya.client.ContactOrganization;
 import org.pimalaya.client.ContactPhone;
 
 /**
- * The pure half of the phone spoke, both directions: neutral field
- * model to ContactsContract data rows and back, as plain maps keyed by
- * the wire column names (docs/contacts-mapping.md is the contract,
- * MappingTest pins it). Only compile-time Android constants are
- * referenced, so the whole mapping runs and is tested on the JVM;
- * PhoneRemote wraps the maps into ContentValues and owns everything
- * that needs a device.
+ * The phone spoke's pure half: field model to ContactsContract rows and back.
+ *
+ * <p>Plain maps keyed by wire column (docs/contacts-mapping.md is the contract,
+ * MappingTest pins it); only compile-time Android constants, so it runs on the
+ * JVM. {@link PhoneRemote} owns what needs a device.
  */
 final class Mapping {
     private Mapping() {}
 
     /**
-     * The model fields the phone rows represent: what {@link #model}
-     * returns and what a fetched phone contact overwrites in the base
-     * card's model (everything else is Pimalaya-only and rides along).
+     * The model fields the phone rows represent.
+     *
+     * <p>What {@link #model} returns and a fetched phone contact overwrites;
+     * everything else is Pimalaya-only and rides along.
      */
     enum Field {
         DISPLAY_NAME("displayName", ContactFields::displayName, (into, from) ->
@@ -199,10 +198,10 @@ final class Mapping {
     }
 
     /**
-     * Maps ContactsContract data rows back onto the neutral field
-     * model, the inverse of {@link #rows}. Every field of
-     * {@link Field} is present in the result, empty when the rows
-     * carry nothing, so a phone-side clear reads as a clear.
+     * Maps data rows back onto the field model, the inverse of {@link #rows}.
+     *
+     * <p>Every {@link Field} is present, empty when the rows carry nothing, so
+     * a phone-side clear reads as a clear.
      */
     static ContactFields model(List<Map<String, Object>> rows) {
         ContactFields.Builder model = new ContactFields.Builder();
@@ -316,15 +315,11 @@ final class Mapping {
     }
 
     /**
-     * Overlays the phone's field model onto the base card's model: a
-     * field is taken from the phone only when it differs from what the
-     * base itself projects onto the phone, so mapping lossiness never
-     * reads as a phone edit, and every field outside {@link Field}
-     * rides along from the base untouched. Returns null when no field
-     * is taken: the phone carries no edit, and the caller must keep
-     * the base card's exact bytes rather than re-encode them (the
-     * engine diffs content by hash, so a re-encoded no-op would read
-     * as a phone edit and cascade to the server).
+     * Overlays the phone's model on the base's; null when nothing is taken.
+     *
+     * <p>A field is taken only when it differs from the base's own projection,
+     * so lossiness is no edit. On null keep the base's exact bytes: the engine
+     * diffs by hash, and a re-encoded no-op would cascade to the server.
      */
     static ContactFields merge(ContactFields base, ContactFields phone) {
         ContactFields baseView = model(rows(base));
@@ -344,7 +339,7 @@ final class Mapping {
         return edited ? merged.build() : null;
     }
 
-    /** vCard TYPE set to the Android phone type, per docs/contacts-mapping.md. */
+    /** vCard TYPE set to Android phone type (docs/contacts-mapping.md). */
     static int phoneType(Set<String> types) {
         if (types.contains("fax")) {
             return types.contains("work")
@@ -373,9 +368,9 @@ final class Mapping {
     }
 
     /**
-     * Android phone type back to the vCard TYPE set, the inverse of
-     * {@link #phoneType}; exotic types map to the empty set (a bare
-     * TEL), per docs/contacts-mapping.md.
+     * Android phone type to vCard TYPE set, inverse of {@link #phoneType}.
+     *
+     * <p>Exotic types map to the empty set, a bare TEL.
      */
     static List<String> phoneTypes(int type) {
         switch (type) {

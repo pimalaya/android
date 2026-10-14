@@ -11,16 +11,13 @@ import java.util.function.Function;
 import org.pimalaya.account.LocalBook;
 
 /**
- * The merge flow's and the addressbooks dialog's decisions over a
- * contact's replicas, apart from the dialogs and the store
- * ({@link ContactEditor} runs them).
+ * The merge and addressbooks dialog decisions, apart from dialogs and store.
  */
 final class ContactMerge {
     private ContactMerge() {}
 
-    /** The candidate survivors: the first replica of each addressbook, in order. */
+    /** The candidate survivors: each addressbook's first replica, in order. */
     static List<Entry> candidates(List<Entry> replicas) {
-        // The first replica of each addressbook is its candidate survivor.
         Map<String, Entry> byBook = new LinkedHashMap<>();
         for (Entry entry : replicas) {
             byBook.putIfAbsent(entry.book.url(), entry);
@@ -38,8 +35,7 @@ final class ContactMerge {
     }
 
     /**
-     * The cards a merge into the survivor removes, in order: every
-     * physical card but the survivor's, each once.
+     * The cards a merge removes, in order: every card but the survivor's, once.
      */
     static List<Entry> doomed(List<Entry> replicas, Entry survivor, Function<Entry, String> ref) {
         String survivorRef = ref.apply(survivor);
@@ -56,8 +52,9 @@ final class ContactMerge {
     }
 
     /**
-     * The distinct documents behind the group, one per normalized
-     * hash: one means a plain edit, several go through the union merge.
+     * The distinct documents behind the group, one per normalized hash.
+     *
+     * <p>One means a plain edit; several go through the union merge.
      */
     static List<String> documents(List<Entry> replicas) {
         List<String> docs = new ArrayList<>();
@@ -71,8 +68,7 @@ final class ContactMerge {
     }
 
     /**
-     * The addressbooks dialog's ticks: the state picked earlier in this
-     * session when there is one, else whether the contact lives there.
+     * The addressbooks dialog's ticks: this session's picks, else placement.
      */
     static boolean[] checked(
             List<BookEntry> books, List<Entry> replicas, Map<String, Boolean> pending) {
@@ -98,8 +94,7 @@ final class ContactMerge {
             pending.put(books.get(index).book.url(), checked[index]);
             anyChecked |= checked[index];
         }
-        // Nothing checked leaves the contact unattached,
-        // kept only in the hidden local book.
+        // NOTE: nothing checked leaves the contact in the hidden local book.
         pending.put(LocalBook.URL, !anyChecked);
         return pending;
     }

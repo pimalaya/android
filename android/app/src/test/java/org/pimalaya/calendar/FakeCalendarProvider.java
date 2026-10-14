@@ -17,13 +17,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * The calendar provider as far as the mirror relies on it, over an in-memory
- * SQLite: rows a calendar app writes come out dirty, rows the sync adapter
- * writes come out as written, an app deleting a master the adapter stamped
- * soft-deletes it and drops its unstamped exception rows, the adapter's own
- * deletes remove the row they name alone, and a batch is one transaction.
- * Columns are created as they are first named, so the tables hold whatever
- * the code under test writes.
+ * The calendar provider, as far as the mirror relies on it, in memory.
+ *
+ * <p>App writes come out dirty, adapter writes as written. An app deleting a
+ * stamped master soft-deletes it, dropping unstamped exceptions; an adapter
+ * delete removes one row. Batches are transactions.
  */
 public class FakeCalendarProvider extends ContentProvider {
     private static final String[] TABLES = {
@@ -79,8 +77,8 @@ public class FakeCalendarProvider extends ContentProvider {
         }
         for (String name : names) {
             if (name.matches("[A-Za-z_][A-Za-z0-9_]*") && held.add(name.toLowerCase())) {
-                // NOTE: numeric affinity, so a number bound as text still matches,
-                // as on the provider's typed columns.
+                // NOTE: numeric affinity, so a number bound as text still
+                // matches, as on the provider's typed columns.
                 db.execSQL("ALTER TABLE " + table + " ADD COLUMN " + name + " NUMERIC");
             }
         }

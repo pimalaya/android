@@ -19,10 +19,8 @@ import java.util.UUID;
 /**
  * Puts one composed message in its account's outbox.
  *
- * <p>Nothing is handed over here, and that is the point: composing reaches
- * for nothing, so a message can be written and sent with the radio off, and
- * the sync that follows is what carries it out. What the composer waits for
- * is a disk write.
+ * <p>Nothing is handed over here: the next sync carries it out, so a message is
+ * sent with the radio off and the composer waits for a disk write only.
  */
 public final class MailSubmit {
     /** The pattern an RFC 5322 date is written in (section 3.3). */
@@ -34,6 +32,7 @@ public final class MailSubmit {
     /** The sender's driver, staging the sent copy. */
     private final MailStager engine;
 
+    /** Queues into {@code mail}, staging sent copies on {@code engine}. */
     public MailSubmit(MailClient client, MailStore mail, MailStager engine) {
         this.client = client;
         this.mail = mail;
@@ -41,9 +40,9 @@ public final class MailSubmit {
     }
 
     /**
-     * What the composer's fields say, read on the main thread: the sender,
-     * the three address fields comma separated, the subject, the body and
-     * the reply's headers (empty outside a reply).
+     * What the composer's fields say, read on the main thread.
+     *
+     * <p>Address fields comma separated; the reply's headers empty outside one.
      */
     public record Draft(
             String from,
@@ -57,14 +56,10 @@ public final class MailSubmit {
             String references) {}
 
     /**
-     * Queues a draft ({@link #queue(ComposeDraft)}), stamped now and under a
-     * fresh `Message-ID`.
+     * Queues a draft stamped now under a fresh `Message-ID`.
      *
-     * <p>The two stamps are minted here rather than in the bridge, which
-     * keeps the composition a pure function of what it is handed: the
-     * date is this device's clock and the identifier is a fresh one under
-     * the sender's own domain, which is what RFC 5322 section 3.6.4 asks
-     * of whoever mints it.
+     * <p>Minted here so composition stays a pure function: the device's clock,
+     * an id under the sender's domain (RFC 5322 section 3.6.4).
      */
     public void queue(Draft draft) throws JSONException {
         queue(
@@ -83,14 +78,10 @@ public final class MailSubmit {
     }
 
     /**
-     * Composes the draft (the bridge's shape: {@code from}, {@code to},
-     * {@code cc}, {@code bcc}, {@code subject}, {@code body}, {@code date},
-     * {@code messageId} and the reply's headers), queues its submission and
-     * stages its sent copy.
+     * Composes the draft, queues its submission and stages its sent copy.
      *
-     * <p>The `Message-ID` is the identity, which is what the payload names it
-     * by: it is minted before and stamped on the message, so the copy the
-     * sync files in the sent mailbox comes back under the same name.
+     * <p>The `Message-ID` is the identity the payload names it by, stamped on
+     * the message, so the sent copy the sync files comes back under it.
      */
     public void queue(ComposeDraft draft) throws JSONException {
         String sender = draft.from();
@@ -111,13 +102,11 @@ public final class MailSubmit {
     }
 
     /**
-     * Stages the copy the sender keeps in the account's sent mailbox beside
-     * the submission, so it shows there at once. The sync carries it out:
-     * the provider filing sent mail itself (Gmail, Graph, JMAP), its listing
-     * lands the copy by the `Message-ID`; elsewhere the copy is appended
-     * once the submission went (pimdir SYNC §5).
+     * Stages the sender's copy in the sent mailbox, shown at once.
      *
-     * <p>None for an account marking no sent mailbox.
+     * <p>Gmail, Graph and JMAP file sent mail: their listing lands it by
+     * `Message-ID`; elsewhere it is appended once sent (pimdir SYNC §5). None
+     * for an account marking no sent mailbox.
      */
     private void stageSentCopy(
             String sender, String messageId, String subject, String to, String date, byte[] source)
@@ -162,10 +151,7 @@ public final class MailSubmit {
         return format.format(new Date());
     }
 
-    /**
-     * A fresh `Message-ID` under the sender's own domain, which is the one
-     * RFC 5322 section 3.6.4 says whoever mints it should use.
-     */
+    /** A fresh `Message-ID` under the sender's domain (RFC 5322 3.6.4). */
     public static String messageId(String email) {
         int at = email.lastIndexOf('@');
         String domain = at < 0 ? "pimalaya.android" : email.substring(at + 1);

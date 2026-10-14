@@ -4,14 +4,11 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 /**
- * The bodies whose reading killed the app: a native crash (a stack
- * overflow, an abort) cannot be caught, so a body that brings one down
- * would be downloaded and read again on every run, the app dying each
- * time. Each read is marked before it starts and cleared once it ends,
- * written at once; a mark left over is a read the process did not
- * survive. After {@link MailBodies#ATTEMPTS} of them the body is poisoned:
- * never downloaded or read again, its row saying *Download failed* and its
- * reader that it could not be read. By {@link MailOwed#key}.
+ * The bodies whose reading killed the app, by {@link MailOwed#key}.
+ *
+ * <p>A native crash cannot be caught: each read is marked before it starts and
+ * cleared after, so a leftover mark is a read the process did not survive.
+ * After {@link MailBodies#ATTEMPTS} the body is never read again.
  */
 final class MailPoison {
     private static final String PREFS = "mail-poison";
@@ -22,10 +19,7 @@ final class MailPoison {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    /**
-     * Marks a read about to start, false without marking when the body is
-     * poisoned and must not be read.
-     */
+    /** Marks a read about to start; false, unmarked, for a poisoned body. */
     static boolean begin(Context context, String key) {
         synchronized (MailPoison.class) {
             int died = prefs(context).getInt(key, 0);

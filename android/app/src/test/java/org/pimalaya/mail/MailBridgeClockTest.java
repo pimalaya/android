@@ -27,13 +27,11 @@ import org.robolectric.RuntimeEnvironment;
 import java.util.List;
 
 /**
- * Where a first round's time goes once the network is out of it: the
- * bridge's JSON on both sides, the engine, and the store, page by page.
+ * Where a first round's time goes once the network is out of it.
  *
- * <p>The pages are what a connector answers, read from the string the
- * native call returns, so the clock covers everything but the network.
- * The numbers are printed for the record; what is asserted is only that
- * every member landed.
+ * <p>The bridge's JSON both ways, the engine and the store, page by page, on
+ * the pages a connector answers. The numbers are printed for the record; only
+ * that every member landed is asserted.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailBridgeClockTest {

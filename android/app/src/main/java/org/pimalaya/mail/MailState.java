@@ -5,10 +5,7 @@ import android.content.Context;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * What the process keeps of mail between screens and runs: the bodies a
- * run gave up on and the list listening to the engine's writes.
- */
+/** What the process keeps of mail: failed bodies and the listening list. */
 public final class MailState {
     /** The process holding the state, which the app is. */
     public interface Owner {
@@ -17,27 +14,25 @@ public final class MailState {
     }
 
     /**
-     * The messages whose body failed every attempt of a run, by
-     * {@link MailOwed#key}: their row says so rather than dimming silently,
-     * and no run plans them again until their mailbox is listed anew
-     * ({@link #relisted}), so a run never starts for them alone. Kept for
-     * the process, so the next app start tries them again.
+     * Messages whose body failed every attempt of a run, by owed key.
+     *
+     * <p>Their row says so, and no run plans them until their mailbox is listed
+     * anew ({@link #relisted}). Kept for the process: the next start retries.
      */
     final Set<String> failed = ConcurrentHashMap.newKeySet();
 
     /**
-     * The messages the server answered gone when their body was asked for
-     * (deleted since they were listed), by {@link MailOwed#key}: owed no
-     * more, and planned by no run until their mailbox is listed anew
-     * ({@link #relisted}), whose delta takes them away. Kept for the
-     * process.
+     * Messages the server answered gone for their body, by owed key.
+     *
+     * <p>Owed no more, planned by no run until their mailbox is listed anew
+     * ({@link #relisted}), whose delta removes them. Kept for the process.
      */
     final Set<String> gone = ConcurrentHashMap.newKeySet();
 
     /**
-     * Told after every write a mail driver's pass lands, so a list showing
-     * the store redraws as the pages of a first pass land; null when
-     * nothing is listening. Called on the sync thread.
+     * Told after every write a mail pass lands, null when nothing listens.
+     *
+     * <p>Called on the sync thread.
      */
     volatile Runnable onWrite;
 
@@ -46,11 +41,7 @@ public final class MailState {
         return ((Owner) context.getApplicationContext()).mailState();
     }
 
-    /**
-     * Forgets what {@link #failed} and {@link #gone} hold of one mailbox,
-     * just listed: what is still there and still without its body is
-     * planned again.
-     */
+    /** Forgets a just-listed mailbox's {@link #failed} and {@link #gone}. */
     void relisted(String collection) {
         String prefix = MailOwed.key(collection, "");
         failed.removeIf(key -> key.startsWith(prefix));

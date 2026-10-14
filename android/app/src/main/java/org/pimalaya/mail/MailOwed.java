@@ -10,14 +10,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * The bodies owed whatever their date ({@link MailBodies}): a message a
- * delta listed new to the store (pimdir SYNC section 5), a delayed one or
- * one filed from older mail, and one a step brought whose body did not land.
- * By collection and link id.
+ * The bodies owed whatever their date ({@link MailBodies}), by link id.
  *
- * <p>App state kept beside the accounts, as their frontiers are, so what is
- * owed survives a restart: an arrival dated below its frontier left over a
- * restart would otherwise stay a summary until opened.
+ * <p>Delta arrivals (pimdir SYNC section 5), delayed or filed messages, step
+ * bodies that did not land. Kept beside the accounts to survive a restart, else
+ * an arrival below its frontier stays a summary.
  */
 final class MailOwed {
     private static final String PREFS = "mail-owed";

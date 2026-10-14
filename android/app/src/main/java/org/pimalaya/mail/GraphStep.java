@@ -12,21 +12,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A Microsoft Graph account's step ({@link MailStep}): the account's
- * messages newest {@code Date} first below its frontier, read by the
- * bridge in one listing ({@code /me/messages}) and a keyset under it,
- * about {@link #COUNT} of them with every one sharing the last one's
- * {@code Date}, those held at the frontier left out, and their bodies in
- * {@code $batch} calls one after another.
+ * A Microsoft Graph account's step ({@link MailStep}).
  *
- * <p>The headers come through the band rounds a widening lists: every
- * stepped mailbox is listed down to the oldest {@code Date} the step
- * brought, those holding its messages first, so their coverage floors
- * keep pace with the frontier and the merged list reaches it. The bodies
- * the step read are then stored from its files, never read again.
- *
- * <p>Junk, trash and mailboxes kept whole take no part; a view filtered to
- * one mailbox steps that mailbox.
+ * <p>About {@link #COUNT} messages by newest {@code Date} under the frontier,
+ * ties kept, bodies by {@code $batch}; band rounds list each stepped mailbox
+ * down to the oldest date brought. Junk, trash and whole mailboxes stay out.
  */
 final class GraphStep implements MailStep {
     @Override
@@ -127,9 +117,10 @@ final class GraphStep implements MailStep {
     }
 
     /**
-     * The bodies a mailbox's stepped members download, whatever their
-     * date: under the link id their band round landed them with, one it
-     * did not land (dated below the band) left out.
+     * The bodies a mailbox's stepped members download, whatever their date.
+     *
+     * <p>Under the link id their band round landed them with; one it did not
+     * land (dated below the band) is left out.
      */
     private static List<MailBodies.Row> rows(
             MailEngine engine, String collection, List<GraphStepItem> members) {

@@ -33,36 +33,11 @@ import java.util.Map;
 import java.util.function.BiPredicate;
 
 /**
- * The mail side of the pimdir store: mailboxes as collections of kind
- * {@code message/rfc822}, envelopes as items.
+ * The mail side of the pimdir store: mailboxes of kind {@code message/rfc822}.
  *
- * <p>A sync stores spines: a message arrives as an item with a summary and no
- * object, which is exactly what pimdir's detail ladder calls the {@code meta}
- * level. Opening one hydrates it, the message filed as that same row's object
- * so the row reaches {@code full} and the next open reads it from here. The
- * ladder is the whole bookkeeping: no second table, and nothing to invalidate,
- * a message being immutable once sent.
- *
- * <p>A mailbox id is namespaced by the account ({@link PimdirAccount}), because
- * two accounts both having an INBOX is the normal case and their messages must
- * not collide. A calendar or an address book uses its URL instead, which is
- * already unique; a mailbox name is not.
- *
- * <p>The merged list is one descending scan of {@code sort_key} across the
- * mail collections a filter lets through, read a page at a time around the
- * scroll position and sized by a count ({@link Query}): io-pimdir's canonical
- * readers ({@code count_mail}, {@code count_mail_by_day}, {@code count_unread},
- * {@code list_mail_page_filtered}, {@code search_mail}) run here over
- * the bundled SQLite, the statements crossing the bridge rather than being
- * transcribed. The ordering is written once, at sync time, so a listing never
- * parses a date.
- *
- * <p>The items themselves are written by {@link MailEngine} and never here: a
- * mailbox is reconciled rather than replaced, which is what lets a staged
- * marker or a staged delete survive a refresh. What is left here is the roster,
- * the reads a list and a reader do, and the outbox, which is not a mailbox at
- * all but this account's pending submissions on the store's action queue
- * ({@link PimdirQueue}).
+ * <p>A sync stores {@code meta} items, an open raises one to {@code full}.
+ * Mailbox ids are namespaced by account ({@link PimdirAccount}). Only
+ * {@link MailEngine} writes items, so staged changes survive a refresh.
  */
 public final class MailStore {
     /** The mail roles pimdir's schema takes (STORAGE section 14). */
@@ -80,6 +55,7 @@ public final class MailStore {
     private final MailPolicy policy;
     private final Context context;
 
+    /** The mail side of {@code store}. */
     public MailStore(Context context, PimdirDb store) {
         this.items = new PimdirItems(store);
         this.store = store;
@@ -102,13 +78,10 @@ public final class MailStore {
     }
 
     /**
-     * Replaces an account's mailbox roster with what the walk just listed,
-     * and remembers where the trash is.
+     * Replaces an account's mailbox roster with the walk's, noting the trash.
      *
-     * <p>Nothing has to be held back from the replace any more. A roster
-     * replace drops every collection of the kind the account no longer lists,
-     * and the outbox is a queue collection of no kind, so it is not one of
-     * them: the messages waiting in it are rows the replace never looks at.
+     * <p>The outbox is a queue collection of no kind, so the replace, which
+     * drops collections of the kind no longer listed, never touches it.
      */
     public void replaceMailboxes(String accountEmail, List<Mailbox> mailboxes) {
         String account = accounts.idOf(accountEmail);
@@ -179,11 +152,7 @@ public final class MailStore {
         policy.markTrash(accountEmail, trash);
     }
 
-    /**
-     * Drops everything one account's mail left in the store: its mailboxes,
-     * their messages, their attachments, and whatever was still waiting to
-     * go out.
-     */
+    /** Drops all of one account's mail, its outbox included. */
     public void forget(String accountEmail) {
         String outbox = this.outbox.outboxOf(accountEmail);
         List<PimdirQueue.Action> waiting = new ArrayList<>(queue.pending(outbox));
@@ -208,14 +177,13 @@ public final class MailStore {
         MailPolicy.markExpungesOne(context, accounts.idOf(accountEmail), true);
     }
 
-    /** An account's All Mail collection, which it holds only if it keeps one. */
+    /** An account's All Mail collection, held only if it keeps one. */
     public static String allMailOf(String accountId) {
         return PimdirAccount.collectionId(accountId, PimdirCollections.ALL_MAIL);
     }
 
     /**
-     * Makes sure a Gmail account keeps its All Mail, for a step that runs
-     * before the account's roster was read again since it had none.
+     * Makes sure a Gmail account keeps its All Mail, before a roster re-read.
      */
     public void ensureAllMail(String accountEmail) {
         String account = accounts.idOf(accountEmail);
@@ -223,10 +191,7 @@ public final class MailStore {
         collections.ensure(allMailOf(account), accountEmail, PimdirSummary.MAIL, PimdirCollections.ALL_MAIL);
     }
 
-    /**
-     * The collection one account files sent mail in, null when it marks
-     * none (RFC 6154 {@code \Sent}, JMAP's {@code sent} role).
-     */
+    /** An account's sent collection (RFC 6154 {@code \Sent}), or null. */
     String sentOf(String accountEmail) {
         String prefix = PimdirAccount.collectionId(accounts.idOf(accountEmail), "");
         for (Map.Entry<String, String> role : roles().entrySet()) {
@@ -248,9 +213,10 @@ public final class MailStore {
     }
 
     /**
-     * Whether deleting one message removes it for good: in its account's
-     * trash, where the server erases one message alone (the rule
-     * {@code MailEngine.stageDelete} stages by).
+     * Whether deleting one message removes it for good.
+     *
+     * <p>In its trash, on a server erasing one message alone: the rule
+     * {@link MailStager#stageDelete} stages by.
      */
     boolean erases(StoredMessage message) {
         String trash = policy.trashOf(message.accountEmail);
@@ -272,25 +238,25 @@ public final class MailStore {
 
     /** One stored envelope, with the account it came from. */
     public static final class StoredMessage {
+        /** The account it came from. */
         public final String accountEmail;
 
         /**
-         * The collection it belongs to, which every store read addresses
-         * it by.
+         * The collection it belongs to, which every store read addresses.
          *
-         * <p>Carried rather than derived from the mailbox name beside it,
-         * which a message waiting to go out does not have: its collection
-         * is the one its queue row is filed against, and no mailbox name
-         * would lead back to it.
+         * <p>Carried, not derived from the mailbox name: a waiting message has
+         * none, its collection being the one its queue row is filed against.
          */
         public final String collection;
 
         final String mailbox;
 
-        /** The mailbox as the reader is shown it ({@link MailStore#mailboxLabel}). */
+        /** The mailbox as the reader is shown it. */
         final String mailboxLabel;
 
+        /** Its link id in the collection. */
         public final String id;
+        /** Its subject. */
         public final String subject;
 
         /** The sender's display name, empty when they sent none. */
@@ -299,20 +265,23 @@ public final class MailStore {
         /** The sender's address, what the row's avatar is derived from. */
         public final String fromAddress;
 
+        /** Its date, in epoch milliseconds. */
         public final long stamp;
 
         /**
-         * The row's place in the merged order, {@code (sortKey, seq)} with
-         * the collection: what the next page is read after. Empty and 0 on a
-         * message waiting to go out, which is no item.
+         * The row's merged-order place with {@code seq}: what pages follow.
+         *
+         * <p>Empty and 0 on a waiting message, which is no item.
          */
         public final String sortKey;
 
+        /** The row's sequence, the second part of its place. */
         public final long seq;
 
         /** The markers it carries, what the marks a row shows are read off. */
         final Flags flags;
 
+        /** Whether it carries an attachment. */
         public final boolean hasAttachment;
 
         /** The attachment mark: 1 with, 0 without, null never examined. */
@@ -321,17 +290,14 @@ public final class MailStore {
         /** Its size in bytes, null where the store does not know it. */
         public final Long size;
 
-        /** Whether the store holds its body: what a row not on the phone is dimmed by. */
+        /** Whether the store holds its body: rows without are dimmed. */
         public final boolean bodied;
 
         /**
-         * The queue row this message is, or null when it is a message the
-         * store synced rather than one waiting to go out.
+         * The queue row this message is, null for a synced message.
          *
-         * <p>A waiting message is not an item: it is an action on the
-         * store's queue carrying the bytes to hand over, so this is the
-         * only handle there is to it, and every read and discard of one
-         * addresses it by this rather than by a collection and a link id.
+         * <p>A waiting message is a queue action carrying its bytes, not an
+         * item: every read and discard of one addresses it by this.
          */
         final Queued queued;
 
@@ -354,15 +320,14 @@ public final class MailStore {
         final boolean failed;
 
         /**
-         * Whether its row was parked because the message may have gone: the
-         * whole of it was handed over and no verdict came back. Sent again
-         * only when somebody says so ({@link Outbox#resendOutgoing}).
+         * Whether its row was parked as possibly gone: no verdict came back.
+         *
+         * <p>Sent again only when asked ({@link Outbox#resendOutgoing}).
          */
         final boolean uncertain;
 
         /**
-         * What every stored message carries: the account, the collection and
-         * the mailbox it is in, its key there, and what a row draws of it.
+         * What every stored message carries: account, collection, key, row.
          */
         public record MessageHeader(
                 String accountEmail,
@@ -376,14 +341,9 @@ public final class MailStore {
         /**
          * What a synced message's list row carries beside its header.
          *
-         * @param mailboxLabel the mailbox as the reader is shown it
          * @param sortKey the row's sort key, null read as empty
-         * @param seq the row's sequence, the second part of its place
-         * @param flags the markers it carries
-         * @param attachment the attachment mark: 1 with, 0 without, null
-         *     never examined
+         * @param attachment 1 with, 0 without, null never examined
          * @param size its size in bytes, null where the store does not know it
-         * @param bodied whether the store holds its body
          */
         public record Listing(
                 String mailboxLabel,
@@ -397,11 +357,9 @@ public final class MailStore {
         /**
          * The queue row a message waiting to go out is.
          *
-         * @param id the queue row
          * @param objectHash the body that row pins
          * @param failed whether the server refused it, which parked its row
-         * @param uncertain whether its row was parked because the message
-         *     may have gone
+         * @param uncertain whether it was parked as possibly gone
          */
         record Queued(long id, String objectHash, boolean failed, boolean uncertain) {}
 
@@ -464,6 +422,7 @@ public final class MailStore {
             this.uncertain = false;
         }
 
+        /** Whether it carries {@code \Seen}. */
         public boolean seen() {
             return flags.has(Flags.Marker.SEEN);
         }
@@ -472,22 +431,20 @@ public final class MailStore {
             return flags.has(Flags.Marker.ANSWERED);
         }
 
+        /** Whether it carries {@code \Flagged}. */
         public boolean flagged() {
             return flags.has(Flags.Marker.FLAGGED);
         }
 
         /**
-         * Whether the message is waiting to go out, which is what a row
-         * says of itself rather than something a caller works out: it is the
-         * one state where the store holds a message no server has.
+         * Whether the message is waiting to go out, held by no server.
          */
         public boolean pending() {
             return queued != null;
         }
 
         /**
-         * Whether it carries {@code \Deleted}: deleted where the server
-         * expunges no single message (no UIDPLUS), and so still listed.
+         * Whether it carries {@code \Deleted}, still listed (no UIDPLUS).
          */
         public boolean deleted() {
             return flags.has(Flags.Marker.DELETED);
@@ -499,15 +456,15 @@ public final class MailStore {
         }
     }
 
-    /** A message's endpoint; null for one still in an outbox, which is no item. */
+    /** A message's endpoint; null for one in an outbox, no item. */
     public static ItemLinks.Endpoint endpointOf(StoredMessage message) {
         return message.pending() ? null : ItemLinks.of(PimdirSummary.MAIL, message.id);
     }
 
     /**
-     * Messages whose words hold {@code words}, at most {@code limit}, as the
-     * link search lists them ahead of the other kinds
-     * ({@link ItemLinks#search}): through the mail search, each message once.
+     * Messages holding {@code words}, at most {@code limit}, each once.
+     *
+     * <p>Through the mail search, listed first by {@link ItemLinks#search}.
      */
     public List<ItemLinks.Placement> linkPlacements(String words, int limit) {
         Map<String, ItemLinks.Placement> found = new LinkedHashMap<>();
@@ -536,12 +493,8 @@ public final class MailStore {
     /**
      * Every account's messages, newest first: the merged list itself.
      *
-     * <p>Two reads, because a message waiting to go out is not an item: the
-     * descending scan of the sort key answers for everything the store synced,
-     * and the queue answers for what has not left yet (STORAGE section 15.4,
-     * a reader overlaying the pending actions on what it shows). They go on
-     * top rather than in date order, which is where a sender looks for a
-     * message they have just written and where a refusal has to be seen.
+     * <p>Waiting messages come from the queue (STORAGE section 15.4) and go on
+     * top, where a sender looks and a refusal is seen; the rest by sort key.
      */
     List<StoredMessage> loadMerged(int limit) {
         List<StoredMessage> messages = new ArrayList<>(outbox.outgoing());
@@ -550,14 +503,10 @@ public final class MailStore {
     }
 
     /**
-     * The `References` a reply to one message carries, oldest first and
-     * ending with that message's own `Message-ID`, each in angle brackets;
-     * empty when the store holds no identifier for it.
+     * A reply's `References`, oldest first, ending with the parent's id.
      *
-     * <p>The parent's `In-Reply-To` stands in for its own `References`,
-     * which the summary does not keep: RFC 5322 section 3.6.4 allows it
-     * where the parent names a single parent of its own, and a reply
-     * threads under its parent either way.
+     * <p>Angle-bracketed, empty with no id. The parent's `In-Reply-To` stands
+     * in for its `References`, unkept (RFC 5322 3.6.4 allows it).
      */
     List<String> threadOf(String collection, String linkId) {
         List<String> thread = new ArrayList<>();
@@ -583,14 +532,11 @@ public final class MailStore {
         return thread;
     }
 
-    // ---- the merged list's reads -----------------------------------------
-
     /**
-     * What the merged list shows: the mail collections a filter lets
-     * through, the two chips, and the words searched for in the sender and
-     * the subject. Every read below answers under it, so the count that
-     * sizes the list, the per-day counts that place its headers and the
-     * pages it loads agree.
+     * What the merged list shows: collections, the two chips, searched words.
+     *
+     * <p>Every read below answers under it, so the count, per-day counts and
+     * pages agree.
      */
     public static final class Query {
         /** The collection ids, as the JSON array the readers bind. */
@@ -609,16 +555,18 @@ public final class MailStore {
         final String pattern;
 
         /**
-         * How far down the list reaches, on the sort key (the {@code Date}),
-         * null for all of it: the list's floor ({@link #floorOf}), or a
-         * window. The canonical statements apply it themselves.
+         * How far down the list reaches on the sort key, null for all.
+         *
+         * <p>Its floor ({@link #floorOf}) or a window; canonical statements
+         * apply it themselves.
          */
         final String since;
 
         /**
-         * The rows it leaves out as {@code [collection, link_id]} pairs, a
-         * JSON array, null for none: the sent copies staged beside a
-         * submission still in an outbox, whose outbox row stands for them.
+         * Rows left out, a JSON array of {@code [collection, link_id]}.
+         *
+         * <p>Null for none. Sent copies staged beside a waiting submission,
+         * whose outbox row stands for them.
          */
         final String hidden;
 
@@ -627,6 +575,7 @@ public final class MailStore {
 
         private final java.util.Set<String> held;
 
+        /** A query over {@code collections}, chips null when off. */
         public Query(List<String> collections, Integer seen, Integer attachment, String pattern,
                 List<String[]> hidden) {
             this.collections = new JSONArray(collections).toString();
@@ -649,7 +598,7 @@ public final class MailStore {
             return new Query(this, 0, since);
         }
 
-        /** The same query reaching down to {@code since} alone, null for all of it. */
+        /** The same query down to {@code since} alone, null for all. */
         public Query since(String since) {
             return new Query(this, seen, since);
         }
@@ -671,7 +620,7 @@ public final class MailStore {
             return held.contains(collection);
         }
 
-        /** The same query over the collections {@code keep} lets through alone. */
+        /** The same query over the collections {@code keep} lets through. */
         Query only(java.util.function.Predicate<String> keep) {
             List<String> kept = new ArrayList<>();
             for (String collection : held) {
@@ -699,9 +648,9 @@ public final class MailStore {
     }
 
     /**
-     * The query a list asks for: the mail collections {@code accepts} lets
-     * through by account and collection id, the chips, and the words
-     * searched for (empty for none).
+     * The query a list asks for: collections {@code accepts}, chips, words.
+     *
+     * <p>By account and collection id; empty words for no search.
      */
     public Query query(
             BiPredicate<String, String> accepts,
@@ -756,7 +705,7 @@ public final class MailStore {
 
     /** One day of the merged list and how many messages fall on it. */
     static final class Day {
-        /** The day, {@code YYYY-MM-DD} on the reader's wall clock; null for undated mail. */
+        /** The day, {@code YYYY-MM-DD} on the wall clock; null if undated. */
         final String day;
 
         final long count;
@@ -768,14 +717,11 @@ public final class MailStore {
     }
 
     /**
-     * How many messages of the query fall on each day, newest day first and
-     * undated mail last: what places the list's day headers without loading
-     * a row.
+     * The query's messages per day, newest day first, undated last.
      *
-     * <p>{@code shift} is the SQLite modifier moving a UTC instant to the
-     * reader's wall clock ({@code '+120 minutes'}). A search is grouped over
-     * {@code search_mail} read as a subquery, by the same day expression
-     * {@code count_mail_by_day} groups by.
+     * <p>{@code shift} is the SQLite modifier to the wall clock
+     * ({@code '+120 minutes'}). A search groups {@code search_mail} as a
+     * subquery by {@code count_mail_by_day}'s day expression.
      */
     List<Day> countByDay(Query query, String shift) {
         List<Day> days = new ArrayList<>();
@@ -807,8 +753,9 @@ public final class MailStore {
     }
 
     /**
-     * The unread mail of the query's collections down to its floor, chips
-     * and search aside: what the badge counts, one window at a time.
+     * The badge: unread mail of the query's collections down to its floor.
+     *
+     * <p>Chips and search aside, one window at a time.
      */
     long unread(Query query) {
         if (query.size == 0) {
@@ -828,14 +775,14 @@ public final class MailStore {
         return unread;
     }
 
-    /** What a range of the list weighs: its messages, their known bytes, how many weigh unknown. */
+    /** A range's weight: messages, known bytes, how many weigh unknown. */
     static final class Sum {
         final long count;
 
         /** The bytes of the messages whose size is known. */
         final long size;
 
-        /** How many have no known size (Graph before it reads one, a server without it). */
+        /** How many have no known size (Graph before reading, some servers). */
         final long unknown;
 
         Sum(long count, long size, long unknown) {
@@ -846,11 +793,10 @@ public final class MailStore {
     }
 
     /**
-     * What the query's messages dated in {@code [since, until)} weigh, under
-     * its chips, either bound null for open ({@code sum_mail}), each message
-     * once: with {@code held} 0 those the phone holds no body of, what a
-     * window moved back to {@code since} downloads; 1 those it holds, what a
-     * window moved later to {@code until} frees; null either.
+     * The weight of the query's messages in {@code [since, until)}, each once.
+     *
+     * <p>Null bounds are open ({@code sum_mail}). {@code held} 0: no body held,
+     * what moving back downloads; 1: held, what moving later frees; null both.
      */
     Sum sum(Query query, String since, String until, Integer held) {
         if (query.size == 0) {
@@ -869,11 +815,10 @@ public final class MailStore {
     }
 
     /**
-     * The sort keys of the query's {@code count} newest messages dated below
-     * {@code floor}, under its chips, newest first, an undated one left out:
-     * {@code list_mail_page_filtered} read after a cursor sorting before
-     * every row dated at the floor. What a step from the store moves a
-     * frontier by ({@link WidenStep}).
+     * Sort keys of the query's {@code count} newest dated below {@code floor}.
+     *
+     * <p>Newest first, undated out, under its chips: what {@link WidenStep}
+     * moves a frontier by.
      */
     List<String> datesBelow(Query query, String floor, int count) {
         List<String> dates = new ArrayList<>();
@@ -897,15 +842,11 @@ public final class MailStore {
     }
 
     /**
-     * One page of the query, newest first: after {@code after} when given
-     * (the keyset, what a scroll reads next), else from {@code offset} rows
-     * in.
+     * One page newest first: after {@code after}, else at {@code offset}.
      *
-     * <p>The keyset is {@code list_mail_page_filtered}'s and
-     * {@code search_mail}'s own, bounded on the sort key ({@link #below}) so
-     * a page deep in the list costs its own rows. An offset reads the same
-     * statement as a subquery, which costs the rows it skips: a fling reads
-     * from the day it lands on instead ({@link #pageBelow}).
+     * <p>The keyset is bounded on the sort key ({@link #below}), so a deep page
+     * costs its own rows; an offset costs those it skips, so a fling reads from
+     * its day ({@link #pageBelow}).
      */
     public List<StoredMessage> page(Query query, StoredMessage after, long offset, int limit) {
         if (query.size == 0 || limit <= 0) {
@@ -926,10 +867,10 @@ public final class MailStore {
     }
 
     /**
-     * One page of the query, newest first, {@code skip} rows into those
-     * sorting below {@code key} (a sort key, null for the top): what a fling
-     * lands on, from the start of the day it reaches ({@link MailList}),
-     * costing the rows of that day it skips rather than every row above it.
+     * One page, {@code skip} rows into those below {@code key} (null for top).
+     *
+     * <p>What a fling lands on from its day's start, costing that day's skipped
+     * rows rather than every row above.
      */
     List<StoredMessage> pageBelow(Query query, String key, long skip, int limit) {
         if (query.size == 0 || limit <= 0) {
@@ -946,7 +887,7 @@ public final class MailStore {
         return rows(below(skipping(read, skip, limit), key), limit);
     }
 
-    /** A read narrowed to {@code limit} of its rows past the first {@code skip}. */
+    /** A read narrowed to {@code limit} rows past the first {@code skip}. */
     private static PimdirSql.Bound skipping(PimdirSql.Bound inner, long skip, int limit) {
         Object[] args = new Object[inner.args.length + 2];
         System.arraycopy(inner.args, 0, args, 0, inner.args.length);
@@ -971,15 +912,11 @@ public final class MailStore {
     }
 
     /**
-     * A newest-first keyset read with the bound its cursor implies stated on
-     * the sort key, so the index serves it: {@code sort_key <= key} on
-     * {@code items}, read through a common table expression of that name
-     * which the canonical statement then reads in its place, and which
-     * SQLite flattens into it. Without it the cursor's row comparison
-     * stays out of {@code items_by_sort_global}, and every page walks from
-     * the newest row down to its own (pimdir's statements are to state the
-     * bound themselves; see cairn/changes/store-performance). A null key
-     * reads the statement as it is.
+     * A keyset read with its bound stated on the sort key, so the index serves.
+     *
+     * <p>{@code sort_key <= key} through a CTE named {@code items}, flattened;
+     * else each page walks {@code items_by_sort_global} from the top
+     * (cairn/changes/store-performance). A null key reads it as it is.
      */
     static PimdirSql.Bound below(PimdirSql.Bound inner, String key) {
         if (key == null) {
@@ -994,12 +931,10 @@ public final class MailStore {
     }
 
     /**
-     * A count read without the summary join it does not need: with the
-     * attachment chip off, {@code count_mail}, {@code count_mail_by_day} and
-     * {@code count_unread} read {@code mail_summary} for that chip alone, so
-     * an empty relation of that name stands in for it and every row skips
-     * the probe (MailStoreTest pins that they read nothing else of it).
-     * With the chip on, the statement as it is.
+     * A count read without the summary join, chip off.
+     *
+     * <p>The counts read {@code mail_summary} for the attachment chip alone, so
+     * an empty relation of that name stands in (MailStoreTest pins this).
      */
     static PimdirSql.Bound unjoined(PimdirSql.Bound inner, Integer attachment) {
         if (attachment != null) {
@@ -1012,9 +947,9 @@ public final class MailStore {
     }
 
     /**
-     * One stored message by its mailbox and key, as a list row carries it
-     * ({@code get_mail_row}), null when the mailbox holds it no more: what a
-     * file's origin and a link open.
+     * One stored message as a list row ({@code get_mail_row}), or null if gone.
+     *
+     * <p>What a file's origin and a link open.
      */
     public StoredMessage message(String collection, String linkId) {
         Map<String, Object> key = new HashMap<>();
@@ -1026,7 +961,7 @@ public final class MailStore {
         }
     }
 
-    /** One row of a mail page as a list shows it, null when its mailbox is unknown. */
+    /** One mail page row as listed, null when its mailbox is unknown. */
     private StoredMessage row(Cursor cursor, Map<String, PimdirCollections.Stored> mailboxes) {
         PimdirCollections.Stored mailbox = mailboxes.get(cursor.getString(0));
         if (mailbox == null) {
@@ -1052,11 +987,10 @@ public final class MailStore {
     }
 
     /**
-     * Every stored message of some mailboxes dated from {@code since} on
-     * (null for all of them), newest first, with whether the store holds its
-     * body and what it weighs: what the body step plans from
-     * ({@link MailBodies}). Read a page of 500 at a time on
-     * {@code list_mail_page_filtered}'s keyset.
+     * Some mailboxes' messages from {@code since} (null all), newest first.
+     *
+     * <p>With body held and weight, what {@link MailBodies} plans from; read
+     * 500 at a time on {@code list_mail_page_filtered}'s keyset.
      */
     List<MailBodies.Row> bodyRows(List<String> ids, String since) {
         List<MailBodies.Row> rows = new ArrayList<>();
@@ -1116,10 +1050,9 @@ public final class MailStore {
     }
 
     /**
-     * The name a mailbox is shown under: its role's in the reader's
-     * language where the source states one, since servers name those in
-     * their own words (IMAP's INBOX, Gmail's SENT or SPAM labels), its own
-     * name otherwise.
+     * The name a mailbox is shown under: its role's, localised, else its own.
+     *
+     * <p>Servers name roles their own way (INBOX, Gmail's SENT or SPAM).
      */
     public String mailboxLabel(PimdirCollections.Stored mailbox) {
         int label = MailList.roleLabel(mailbox.role);
@@ -1136,8 +1069,7 @@ public final class MailStore {
     }
 
     /**
-     * Every row a query lets through, newest first, as one statement: the
-     * page or search statement read whole, down to the query's floor.
+     * Every row a query lets through, newest first, down to its floor.
      */
     private static PimdirSql.Bound listed(Query query) {
         String statement = query.pattern == null ? "LIST_MAIL_PAGE_FILTERED" : "SEARCH_MAIL";
@@ -1145,10 +1077,10 @@ public final class MailStore {
     }
 
     /**
-     * A newest-first read with the query's hidden rows cut out, at most
-     * {@code limit} of what is left ({@code -1} for all); the read itself
-     * when it hides none. The order is restated, a subquery's own being no
-     * promise.
+     * A read with the query's hidden rows cut, at most {@code limit} (-1 all).
+     *
+     * <p>The read itself when none hidden; the order restated, a subquery's own
+     * being no promise.
      */
     private static PimdirSql.Bound hiding(PimdirSql.Bound inner, Query query, long limit) {
         if (query.hidden == null) {
@@ -1172,8 +1104,9 @@ public final class MailStore {
     }
 
     /**
-     * A canonical statement read whole, between a prefix and a suffix: no
-     * cursor, no limit ({@code -1}), its values bound in place.
+     * A canonical statement read whole between a prefix and suffix.
+     *
+     * <p>No cursor, no limit ({@code -1}), its values bound in place.
      */
     private static PimdirSql.Bound wrapped(
             String prefix, String statement, String suffix, Query query) {
@@ -1182,12 +1115,11 @@ public final class MailStore {
     }
 
     /**
-     * Restates one message's summary from its body once the body is in
-     * (pimdir STORAGE Annex A.1): the attachment mark and the size the
-     * listing read without it are replaced by the body's own, and the
-     * invitation it names is recorded, then tied to its calendar item
-     * ({@code link_invitations_of}). {@code summary} is what
-     * {@code PimdirSql.derive} gives of the body; null changes nothing.
+     * Restates a message's summary from its body (pimdir STORAGE Annex A.1).
+     *
+     * <p>The body's attachment mark and size replace the listing's, its
+     * invitation tied to its calendar item ({@code link_invitations_of}).
+     * {@code summary} is {@code PimdirSql.derive}'s; null changes nothing.
      */
     public void restateFromBody(String collection, String linkId, JSONObject summary) {
         if (summary == null) {
@@ -1204,7 +1136,7 @@ public final class MailStore {
         }
     }
 
-    /** What a mailbox's last complete listing covered (pimdir STORAGE section 4.3). */
+    /** A mailbox's last complete listing's coverage (STORAGE section 4.3). */
     public static final class Coverage {
         /** The floor on the {@code Date} header, null for all mail. */
         public final String since;
@@ -1216,8 +1148,9 @@ public final class MailStore {
         public final boolean filling;
 
         /**
-         * The floor the listing under way lists from, null for all mail or
-         * none under way: a widening's band, or a first pass's chunk.
+         * The floor a listing under way lists from, else null.
+         *
+         * <p>Also null for all mail: a widening's band, or a first chunk.
          */
         final String roundSince;
 
@@ -1229,10 +1162,10 @@ public final class MailStore {
         }
 
         /**
-         * How far down the list may show this mailbox, null where nothing
-         * limits it: the floor of what it covers when that floor is above
-         * the account's bound, the floor of its first pass while that pass
-         * is still filling in, nothing for a mailbox never listed.
+         * How far down the list may show this mailbox, null where unlimited.
+         *
+         * <p>Its coverage floor above the bound, or its first pass's while it
+         * fills; nothing for one never listed.
          */
         String limit(String bound) {
             String floor;
@@ -1248,9 +1181,9 @@ public final class MailStore {
     }
 
     /**
-     * What one mailbox's server source covers: the scope of its last complete
-     * listing, and whether one is under way. What says "mail since" of an
-     * account, or that a search over it is not exhaustive yet.
+     * A mailbox's coverage: last complete scope, and any round under way.
+     *
+     * <p>What says "mail since", or that a search is not exhaustive yet.
      */
     public Coverage coverage(String collection) {
         Map<String, Object> values = new HashMap<>();
@@ -1272,15 +1205,11 @@ public final class MailStore {
     }
 
     /**
-     * How far down the merged list may show the collections of a query, null
-     * when nothing limits it: the most recent of their floors, every older
-     * message of one mailbox waiting on the others' chunks to reach it, and
-     * of the windows of the accounts they belong to, so the list stays
-     * continuous by date across accounts, a mailbox stepped alone reaching
-     * down to its own ({@link #mailboxWindow}). A mailbox kept whole brings
-     * no window; a mailbox of an account stepped through account-wide
-     * (Gmail) no floor, its steps alone deciding what it holds. Over
-     * {@code edges}, as {@link #edges} reads them.
+     * How far down the merged list may show a query's collections, or null.
+     *
+     * <p>The most recent of their floors and account windows (a mailbox's own,
+     * {@link #mailboxWindow}), so the list stays continuous by date. Whole
+     * mailboxes bring no window, account-wide (Gmail) ones no floor.
      */
     String floorOf(Query query, List<Edge> edges) {
         List<String> floors = new ArrayList<>();
@@ -1298,23 +1227,22 @@ public final class MailStore {
         return MailWindow.latest(floors);
     }
 
-    /** An account's window today, null for all mail ({@link MailWindow#since}). */
+    /** An account's window today, null for all mail. */
     public String windowOf(String accountEmail) {
         return MailWindow.since(context, accounts.idOf(accountEmail));
     }
 
     /**
-     * A mailbox's window today, null for all mail: the older of its own, a
-     * step over it alone left, and its account's.
+     * A mailbox's window today, the older of its own and its account's.
      */
     String mailboxWindow(String collection) {
         return MailWindow.since(context, PimdirAccount.accountIdOf(collection), collection);
     }
 
     /**
-     * The window an account's first mail sync leaves ({@link
-     * MailWindow#initial}): its inbox's floor, else (an account listed
-     * account-wide, or one with no inbox) the most recent of its mailboxes'.
+     * The window an account's first sync leaves ({@link MailWindow#initial}).
+     *
+     * <p>Its inbox's floor, else (account-wide, no inbox) the most recent one.
      */
     String firstWindow(String accountEmail) {
         String account = accounts.idOf(accountEmail);
@@ -1339,10 +1267,10 @@ public final class MailStore {
     }
 
     /**
-     * The window of an account set up before windows existed: the date of
-     * its inbox's {@link MailEngine#FIRST_CHUNK}th newest stored message,
-     * what its first chunk reached, or {@link #firstWindow} where the inbox
-     * holds fewer.
+     * The window of an account set up before windows existed.
+     *
+     * <p>Its inbox's {@link MailEngine#FIRST_CHUNK}th newest stored date, else
+     * {@link #firstWindow} where the inbox holds fewer.
      */
     String storedWindow(String accountEmail) {
         List<String> inbox = new ArrayList<>();
@@ -1366,8 +1294,10 @@ public final class MailStore {
 
     /** One mailbox, and how far down its chunks have reached. */
     public static final class Edge {
+        /** The account the mailbox belongs to. */
         public final String accountEmail;
         final String mailbox;
+        /** Its collection id. */
         public final String collection;
 
         /** What the source says the mailbox is for (pimdir's role), or null. */
@@ -1379,7 +1309,7 @@ public final class MailStore {
         /** The floor the list stops at for it, null where it limits nothing. */
         final String limit;
 
-        /** Whether its account is listed account-wide ({@link MailPolicy#markAccountWide}). */
+        /** Whether its account is listed account-wide. */
         public final boolean accountWide;
 
         Edge(
@@ -1461,14 +1391,11 @@ public final class MailStore {
     }
 
     /**
-     * Bounds an account's mail to its last {@code months} months, 0 for all
-     * of it, answering how many stored messages the change collected.
+     * Bounds an account's mail to {@code months} (0 all); answers how many.
      *
-     * <p>A wider bound collects nothing: the next sync lists the band it now
-     * lacks. A narrower one collects what falls below its floor, since no
-     * sync deletes what lies outside its scope (pimdir SYNC section 5): the
-     * messages stay on the server, and a later widening lists them again. It
-     * raises a window left below its floor ({@link MailWindow#raise}).
+     * <p>Wider collects nothing. Narrower collects below its floor, since no
+     * sync deletes outside its scope (pimdir SYNC section 5), and raises the
+     * window ({@link MailWindow#raise}); the server keeps them.
      */
     public int bound(String accountEmail, int months) {
         String account = accounts.idOf(accountEmail);
@@ -1485,12 +1412,10 @@ public final class MailStore {
     }
 
     /**
-     * The owner's collection of one account's mail below a date (pimdir
-     * STORAGE section 11.3): every message dated before {@code before} that
-     * owes nothing to any server, removed with its bindings, summary and
-     * body, its mailboxes keeping it on the server. What a narrowed bound
-     * frees; a later widening relists and refetches them. Answers how many
-     * went.
+     * Collects an account's mail dated before {@code before} (STORAGE 11.3).
+     *
+     * <p>Messages owing nothing to a server go with bindings, summary and body,
+     * kept on the server; a widening refetches. Answers how many went.
      */
     int collectBefore(String accountEmail, String before) {
         int collected = 0;
@@ -1521,14 +1446,10 @@ public final class MailStore {
     }
 
     /**
-     * Frees the bodies of one account's mail dated before {@code until}
-     * (pimdir STORAGE section 11.4), its headers, flags and bindings kept,
-     * so a search still finds them: what a window moved later lets go. A
-     * mailbox kept whole keeps all of it, and so does a message the store
-     * still needs the body of (a conflict, a pending create, a local edit,
-     * one a source does not bind yet). The bases first, the items, the
-     * counts, then the collector, in one transaction. Answers how many were
-     * freed.
+     * Frees bodies of an account's mail before {@code until} (STORAGE 11.4).
+     *
+     * <p>Headers kept for search; whole mailboxes and needed bodies (conflict,
+     * pending, local edit, unbound) stay. One transaction; answers how many.
      */
     public int release(String accountEmail, String until) {
         List<String> ids = new ArrayList<>();
@@ -1562,14 +1483,10 @@ public final class MailStore {
     }
 
     /**
-     * Frees the bodies of one account's mail that another collection holds
-     * under the same link id, each item back to its summary for the body
-     * step to read again: what the store-wide lookup linked across IMAP
-     * mailboxes while it read a UID as an identity, another mailbox's
-     * message of the same UID standing in for the one listed. Both sides
-     * of a link go, which one is right being unknown without the bytes; a
-     * message the store still needs the body of stays, on {@code
-     * release_before}'s terms (pimdir STORAGE section 11.4). Answers how
+     * Frees an account's bodies linked across IMAP mailboxes by UID.
+     *
+     * <p>A UID was once read as an identity; both sides go back to summaries,
+     * needed bodies staying ({@code release_before}, STORAGE 11.4). Answers how
      * many were freed.
      */
     int releaseCrossLinked(String accountId) {
@@ -1629,9 +1546,9 @@ public final class MailStore {
     }
 
     /**
-     * {@link #releaseCrossLinked} once per account, for an account whose
-     * link ids name a message in its own mailbox alone; answers how many
-     * were freed, 0 once done.
+     * {@link #releaseCrossLinked} once per account whose link ids are local.
+     *
+     * <p>Answers how many were freed, 0 once done.
      */
     int repairLinks(String accountId) {
         if (policy.linksRepaired(accountId)) {
@@ -1643,12 +1560,10 @@ public final class MailStore {
     }
 
     /**
-     * The markers one stored envelope carries, as the set a staged change
-     * is derived from.
+     * The markers one stored envelope carries, the base of a staged change.
      *
-     * <p>Read back rather than reasoned about from the row a list handed
-     * over: the row carries the three the app renders, and the set carries
-     * whatever else the server marked. A toggle has to leave those alone.
+     * <p>Read back, not taken from the row, which carries only the three the
+     * app renders: a toggle leaves the others alone.
      */
     Flags flagsOf(String collection, String id) {
         try (Cursor cursor =
@@ -1662,22 +1577,17 @@ public final class MailStore {
             try {
                 return Flags.parse(cursor.getString(0));
             } catch (JSONException error) {
-                // An unreadable marker set says nothing, so there is nothing
-                // in it to keep: the staged set replaces it whole.
+                // NOTE: an unreadable set has nothing to keep: the staged
+                // set replaces it whole.
                 return Flags.none();
             }
         }
     }
 
     /**
-     * The message itself, as the server sent it, or null when the store
-     * holds its envelope and not the message.
+     * The message as the server sent it, or null with only the envelope.
      *
-     * <p>Which is the ordinary state of a mailbox: a sync stores the spine,
-     * and a message gains its body the first time someone opens it. A
-     * message that has not gone out yet is the other way round: it is
-     * nothing <em>but</em> a body, the one its queue row carries, so that
-     * is where it is read from.
+     * <p>A waiting message is nothing but a body, read from its queue row.
      */
     public byte[] source(StoredMessage message) {
         if (message.pending()) {
@@ -1687,9 +1597,7 @@ public final class MailStore {
     }
 
     /**
-     * The file one message's body is stored in, null when the store holds
-     * none: what an attachment is read out of, the body never loaded whole on
-     * this side.
+     * The file one message's body is in, or null; never loaded whole here.
      */
     java.io.File sourceFile(StoredMessage message) {
         return message.pending() ? null : items.objectFile(message.collection, message.id);
@@ -1701,18 +1609,18 @@ public final class MailStore {
     }
 
     /**
-     * Files the message a reader just fetched into {@code file}, hashed by the
-     * bridge as {@code hash}, against its envelope: moved into the blob store,
-     * never read on this side.
+     * Files a fetched message's {@code file}, hashed {@code hash}.
+     *
+     * <p>Moved into the blob store, never read on this side.
      */
     void saveSource(String collection, String id, String hash, java.io.File file) {
         items.putObject(collection, id, hash, file);
     }
 
     /**
-     * Every account's mailboxes as the store holds them, each with its role,
-     * for the filter page, the outbox of each mail account in {@code emails}
-     * among them under its own collection.
+     * Every account's mailboxes with their roles, for the filter page.
+     *
+     * <p>The outbox of each mail account in {@code emails} among them.
      */
     public List<PimdirCollections.Stored> loadMailboxes(List<String> emails) {
         List<PimdirCollections.Stored> mailboxes = new ArrayList<>();
@@ -1730,9 +1638,8 @@ public final class MailStore {
         try {
             return Flags.parse(flags);
         } catch (JSONException error) {
-            // An unreadable flag set is an unknown one, and unknown reads as
-            // unset: an unread message shows rather than hides, and no icon
-            // claims a state the store cannot back up.
+            // NOTE: an unreadable flag set reads as unset: an unread message
+            // shows, and no icon claims a state the store cannot back.
             return Flags.none();
         }
     }

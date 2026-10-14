@@ -28,11 +28,11 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * A mirrored calendar's {@code Calendars} row, as docs/calendar-mapping.md's
- * calendar level sets it: every column on insert, the user's own columns
- * left alone after it, a name or a colour rewritten only when the
- * collection's own changed since it was last projected; and the account's
- * event colours, the CSS named ones.
+ * A mirrored calendar's {@code Calendars} row (docs/calendar-mapping.md).
+ *
+ * <p>Every column on insert, the user's columns left alone after; a name or
+ * colour rewritten only when the collection's changed since last projected. And
+ * the account's event colours, the CSS named ones.
  */
 @RunWith(RobolectricTestRunner.class)
 public class CalendarRowsTest {

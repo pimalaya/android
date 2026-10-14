@@ -11,9 +11,10 @@ import org.pimalaya.ui.Dates;
 import org.pimalaya.ui.Host;
 
 /**
- * The next-birthday peek behind the app bar's cake icon: one sentence
- * telling who celebrates the next birthday and when, computed off the
- * main thread from the merged rows' projected BDAY (full dates only).
+ * The next-birthday peek behind the app bar's cake icon: who, and when.
+ *
+ * <p>Computed off the main thread from the merged rows' projected BDAY, full
+ * dates only.
  */
 final class Birthdays {
     private final Host host;

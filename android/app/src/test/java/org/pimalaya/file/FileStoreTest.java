@@ -31,12 +31,11 @@ import java.nio.file.Files;
 import java.util.List;
 
 /**
- * Attachments as files (pimdir STORAGE section 14.3): a stored message's parts
- * recorded as body-less stand-ins it references, read back in document order,
- * and saved into a folder as a body shared by every copy of the same bytes.
+ * Attachments as files (pimdir STORAGE section 14.3).
  *
- * <p>The parts come from the real bridge, so the sections the stand-ins are
- * keyed by are the ones {@link MailClient#messagePart} reads back.
+ * <p>Parts recorded as body-less stand-ins the message references, read back in
+ * document order, saved as one body per bytes. From the real bridge, keyed by
+ * the sections {@link MailClient#messagePart} reads back.
  */
 @RunWith(RobolectricTestRunner.class)
 public class FileStoreTest {
@@ -81,7 +80,7 @@ public class FileStoreTest {
         inbox = mail.collectionOf(ONE, "INBOX");
     }
 
-    /** Files one message with its body, and records its parts as a store of it does. */
+    /** Files one message and its body, recording its parts as a store does. */
     private byte[] stored(String linkId) {
         byte[] source = SOURCE.getBytes(StandardCharsets.UTF_8);
         SQLiteDatabase db = items.writable();
@@ -119,7 +118,7 @@ public class FileStoreTest {
         return Files.readAllBytes(file.toPath());
     }
 
-    /** One part of a message, written out by the bridge as the reader has it. */
+    /** One part of a message, as the bridge writes it out for the reader. */
     private byte[] part(byte[] source, String section) throws IOException {
         File out =
                 File.createTempFile(

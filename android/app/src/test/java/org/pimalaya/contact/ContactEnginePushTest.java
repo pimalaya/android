@@ -37,12 +37,11 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * What a push hands the contact client on each backend's path, and what the
- * engine answers the bridge from the client's replies: the batch of a JMAP
- * or Graph round, the Google round's batch verbs and membership patches, and
- * the one-change verbs. The real engine and store over a fake server; the
- * expected calls and results were captured on the code that built the push
- * batch as JSON.
+ * What a push hands the contact client per backend, and answers the bridge.
+ *
+ * <p>JMAP and Graph batches, Google batch verbs and membership patches, the
+ * one-change verbs; real engine and store over a fake server, expectations
+ * captured on the code that built the push batch as JSON.
  */
 @RunWith(RobolectricTestRunner.class)
 public class ContactEnginePushTest {
@@ -119,8 +118,7 @@ public class ContactEnginePushTest {
         }
 
         /**
-         * Accepts every change but a destroy, which it refuses, and leaves
-         * {@code n2} unanswered.
+         * Accepts every change but a destroy, refused; {@code n2} unanswered.
          */
         @Override
         public List<PushOutcome> pushCards(
@@ -218,9 +216,9 @@ public class ContactEnginePushTest {
     }
 
     /**
-     * An account of one book (and another it could copy from), synced once:
-     * the server's five cards held. Then two cards created, {@code b} edited
-     * and {@code c} deleted on this side.
+     * An account of one book (and one to copy from), synced once: five cards.
+     *
+     * <p>Then two cards created, {@code b} edited, {@code c} deleted here.
      */
     private void account(String base, String book, String bookId) throws Exception {
         Context context = RuntimeEnvironment.getApplication();

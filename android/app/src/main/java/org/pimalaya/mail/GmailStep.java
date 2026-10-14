@@ -15,24 +15,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A Gmail account's step ({@link MailStep}): the ids of the account's
- * listing (spam and trash left out), or of the one label a view shows,
- * that its store does not hold, newest received first, read whole in
- * batches by the bridge; each message lands in every mailbox its labels
- * name, its body read once and linked into the others.
+ * A Gmail (or JMAP) account's step ({@link MailStep}): the ids it lacks.
  *
- * <p>A set difference rather than a date: an imported message dated
- * years before it arrived, a gap a failure left, a message stored from a
- * search, none of them throws the step off. The frontier it leaves skips
- * a message dated a day or more before its reception ({@link
- * MailWindow#frontier}), and the oldest reception it brought is where a
- * round over a label lists from once the history has expired ({@link
- * MailWindow#reach}).
- *
- * <p>A JMAP account steps through here too, one {@code Email/query} over the
- * account whose {@code mailboxIds} place each message; its query starts after
- * the anchors the last step left ({@link MailWindow#anchors}), kept once
- * the step landed.
+ * <p>Newest received first (spam and trash out), read whole in batches, each
+ * in every labelled mailbox: a set difference, so misdated imports do not
+ * throw it off. JMAP queries after the {@link MailWindow#anchors}.
  */
 final class GmailStep implements MailStep {
     @Override
@@ -139,8 +126,9 @@ final class GmailStep implements MailStep {
     }
 
     /**
-     * The bodies a mailbox's members download, whatever their date: under
-     * the link id they landed with, a sent copy's being its create's.
+     * The bodies a mailbox's members download, whatever their date.
+     *
+     * <p>Under the link id they landed with, a sent copy's being its create's.
      */
     private static List<MailBodies.Row> rows(
             String collection, JSONArray members, Map<String, Long> sizes)

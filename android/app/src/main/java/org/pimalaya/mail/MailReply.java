@@ -8,10 +8,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * A reply's and a forward's text decisions, apart from the reader that
- * opens the composer on them ({@link MessageView}).
- */
+/** A reply's and a forward's text decisions, apart from {@link MessageView}. */
 final class MailReply {
     private MailReply() {}
 
@@ -19,11 +16,11 @@ final class MailReply {
     record People(String to, String cc) {}
 
     /**
-     * A reply to everyone on the message: the sender, and every other
-     * address it went to, the account's own left out. A message the
-     * account sent itself answers its recipients instead, which is who a
-     * follow-up goes to. The two headers are null before the body loads,
-     * and the reply then goes to the sender alone.
+     * A reply to everyone on the message, the account's own address left out.
+     *
+     * <p>A message the account sent answers its recipients instead. The two
+     * headers are null before the body loads; the reply then goes to the sender
+     * alone.
      */
     static People replyAll(
             String accountEmail, String fromAddress, String toHeader, String ccHeader) {
@@ -81,7 +78,7 @@ final class MailReply {
         return thread.get(thread.size() - 1);
     }
 
-    /** The `References` of a reply in a thread: every `Message-ID`, space separated. */
+    /** A threaded reply's `References`: every `Message-ID`, space separated. */
     static String references(List<String> thread) {
         return String.join(" ", thread);
     }

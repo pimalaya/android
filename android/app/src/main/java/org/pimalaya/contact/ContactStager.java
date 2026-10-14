@@ -8,29 +8,28 @@ import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.Stager;
 
-/** The contacts driver that only stages: card writes, and the phone queue they reach. */
+/** The contacts driver that only stages: card writes, and the phone queue. */
 public final class ContactStager extends Stager {
     /** The store, for the phone queue its writes reach. */
     private final PimdirDb pimdir;
 
+    /** A stager over the store and the bridge. */
     public ContactStager(PimdirDb pimdir, Clients clients) {
         super(pimdir, clients);
         this.pimdir = pimdir;
     }
 
     /**
-     * Stages a content edit on one card through the engine (the next sync
-     * pushes it); editing a conflicted placement resolves it.
+     * Stages a content edit on one card; a conflicted placement resolves.
      *
-     * <p>The summary and the key come off the document itself, so a
-     * rename moves the card in the list rather than leaving it where the
-     * old name put it.
+     * <p>The summary and key come off the document, so a rename moves the card
+     * in the list.
      */
     public void edit(String url, String handle, String vcard) throws JSONException {
         edit(this, url, handle, vcard);
     }
 
-    /** {@link #edit} on any driver: a pass stages its own conflict resolutions. */
+    /** {@link #edit} on any driver: a pass stages its own resolutions. */
     static void edit(Stager on, String url, String handle, String vcard) throws JSONException {
         CardIndex index = ContactClient.indexCard(vcard);
         on.mutateEdit(
@@ -47,9 +46,9 @@ public final class ContactStager extends Stager {
     }
 
     /**
-     * A write to a book reaches the phone's contacts within a second
-     * ({@link PhoneQueue}); a write to the phone collection is a phone
-     * pass's own conflict resolution, pushed by that pass.
+     * Wakes the phone pass ({@link PhoneQueue}) after a write to a book.
+     *
+     * <p>A write to the phone collection is a phone pass's own, pushed by it.
      */
     static void staged(PimdirDb pimdir, String collection) {
         if (!CardStore.isPhoneCollection(collection)) {

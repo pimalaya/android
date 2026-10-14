@@ -14,7 +14,9 @@ import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
-/** An address book listed, and a contact created, edited and deleted on the phone. */
+/**
+ * An address book listed, a contact created, edited and deleted on the phone.
+ */
 public class E2eContactsTest extends E2eCase {
     public E2eContactsTest(String target) {
         super(target);
@@ -174,8 +176,9 @@ public class E2eContactsTest extends E2eCase {
     }
 
     /**
-     * The book a test works in: the scratch one, or for Google, whose
-     * contacts are one fixed list, whichever the account lists first.
+     * The book a test works in: the scratch one, or Google's first listed.
+     *
+     * <p>Google's contacts are one fixed list.
      */
     private String bookName(String scratch) {
         return target.id.equals("google-carddav") ? null : scratch;

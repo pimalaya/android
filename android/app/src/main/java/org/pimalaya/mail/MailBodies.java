@@ -12,16 +12,11 @@ import java.util.Set;
 import org.pimalaya.account.AccountEntry;
 
 /**
- * Which bodies download without being opened, and the step that downloads
- * them: what each account holds from its frontier ({@link MailWindow}) on,
- * its mailboxes kept whole ({@link MailOffline}), and what is owed whatever
- * its date ({@link MailOwed}), carried out after each pass, step and fill
- * step while the app is open on Wi-Fi, never as periodic work.
+ * Which bodies download without being opened, and the step downloading them.
  *
- * <p>A body is raised to {@code Full} through the engine's upgrade
- * ({@link MailEngine#download}), which links a body the store already holds
- * under the same link id rather than fetching it again. Newest first, the
- * shown mailboxes before the others.
+ * <p>From the frontier ({@link MailWindow}), whole mailboxes, owed ones; after
+ * each pass, step and fill step, open on Wi-Fi, never periodic. Raised through
+ * {@link MailEngine#download}, which links a held body, newest first.
  */
 public final class MailBodies {
     private MailBodies() {}
@@ -34,6 +29,7 @@ public final class MailBodies {
 
     /** One stored message, as the plan reads it. */
     public static final class Row {
+        /** The collection it is stored in. */
         public final String collection;
         final String linkId;
 
@@ -49,10 +45,7 @@ public final class MailBodies {
         /** Its attachment mark: 1 with, 0 without, null never examined. */
         final Integer attachment;
 
-        /**
-         * Whether it downloads whatever its date: one a step brought, one
-         * owed ({@link MailOwed}).
-         */
+        /** Whether it downloads whatever its date: stepped, or owed. */
         final boolean always;
 
         Row(
@@ -84,18 +77,19 @@ public final class MailBodies {
     }
 
     /**
-     * Whether a mailbox's bodies download: all of them for one kept whole,
-     * its window's for any other but the junk and the trash, whose mail is
-     * not worth the bytes.
+     * Whether a mailbox's bodies download: all when whole, else its window's.
+     *
+     * <p>Never junk or trash, whose mail is not worth the bytes.
      */
     public static boolean downloads(String role, boolean whole) {
         return whole || !("junk".equals(role) || "trash".equals(role));
     }
 
     /**
-     * Whether the body step takes one message: dated on or after its
-     * account's window ({@code window}, null for all mail; an undated one
-     * only then) in a mailbox it downloads, or in a mailbox kept whole.
+     * Whether the body step takes one message.
+     *
+     * <p>Dated from {@code window} (null for all mail, the only one taking
+     * undated) in a downloading mailbox, or any in one kept whole.
      */
     static boolean takes(String sortKey, String window, String role, boolean whole) {
         return whole
@@ -132,17 +126,14 @@ public final class MailBodies {
 
     /** What a step reaches for, so the step itself can be tested. */
     public interface Host {
-        /**
-         * Whether an account's bodies may download now: the app in the
-         * foreground, no sync running, the account on, and Wi-Fi.
-         */
+        /** Whether bodies may download now: foreground, no sync, on, Wi-Fi. */
         boolean allowed(String accountEmail);
 
         /**
-         * Downloads some of an account's bodies, blocking until they are in,
-         * and answers the rows whose body did not land, a message gone not
-         * among them ({@link MailState#gone}); throws when the download failed as a
-         * whole (no session, an expired token).
+         * Downloads some bodies, blocking; answers the rows that did not land.
+         *
+         * <p>Gone ones not among them ({@link MailState#gone}); throws when the
+         * whole download failed (no session, an expired token).
          */
         List<Row> download(String accountEmail, List<Row> rows) throws Exception;
 
@@ -152,25 +143,24 @@ public final class MailBodies {
 
     /** What is left to download, by account: one run's plan. */
     public static final class Run {
-        /** The process's failed and gone bodies, which a run reads and marks. */
+        /** The process's failed and gone bodies, read and marked by a run. */
         final MailState state;
 
         final Map<String, Deque<Row>> left = new LinkedHashMap<>();
 
-        /** How many times each row was tried this run, by {@link MailOwed#key}. */
+        /** Tries per row this run, by {@link MailOwed#key}. */
         final Map<String, Integer> attempts = new HashMap<>();
 
         /** How many downloads in a row of each account failed as a whole. */
         final Map<String, Integer> broken = new HashMap<>();
 
+        /** A run over the process's failed and gone bodies. */
         public Run(MailState state) {
             this.state = state;
         }
 
         /**
-         * Plans an account's bodies: the rows wanted, in the order given,
-         * but those failed or gone ({@link MailState#failed}, {@link MailState#gone}).
-         * Answers how many it planned.
+         * Plans the wanted rows in order, but failed or gone; answers how many.
          */
         public int plan(String accountEmail, List<Row> wanted) {
             Deque<Row> rows = new ArrayDeque<>(wanted.size());
@@ -196,7 +186,9 @@ public final class MailBodies {
     public enum Step {
         /** Some bodies landed or were tried; another step follows. */
         AGAIN,
-        /** Nothing may download now (background, a sync, no Wi-Fi): resumed later. */
+        /**
+         * Nothing may download now (background, sync, no Wi-Fi): resumed later.
+         */
         PAUSED,
         /** Nothing is left of the plan. */
         DONE
@@ -204,13 +196,10 @@ public final class MailBodies {
 
     /**
      * One step: up to {@link #CHUNK} bodies of every account allowed now.
-     * A body that did not land goes back to the end of its account's plan,
-     * tried again later in the run on the sessions the host reopens, at most
-     * {@link #ATTEMPTS} times, then marked failed ({@link MailState#failed}); one
-     * the server answers gone is not tried again ({@link MailState#gone}). A
-     * download failing as a whole puts its rows back the same way, so an
-     * expired token is renewed and the run goes on; an account failing so
-     * twice in a row leaves the run, the next one planning it again.
+     *
+     * <p>Unlanded rows (or a whole failed download) requeue, {@link #ATTEMPTS}
+     * times, then are failed; gone ones are dropped. An account failing whole
+     * twice in a row leaves the run, so an expired token renews meanwhile.
      */
     public static Step step(Run run, Host host) {
         if (run.drained()) {

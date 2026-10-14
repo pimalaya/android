@@ -31,10 +31,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * A body filed while a sync runs is never lost to it (body-loss-races): a
- * write merged from placements loaded before the body was filed keeps it,
- * and a body moved into the blob store ahead of the write naming it keeps
- * its file until that write has landed.
+ * A body filed while a sync runs is never lost to it (body-loss-races).
+ *
+ * <p>A write merged from placements loaded before the body was filed keeps it,
+ * and a body moved into the blob store ahead of its write keeps its file until
+ * that write has landed.
  */
 @RunWith(RobolectricTestRunner.class)
 public class BodyLossRacesTest {
@@ -101,21 +102,16 @@ public class BodyLossRacesTest {
         return text("SELECT refcount FROM objects WHERE hash = ?", hash);
     }
 
-    // ---- a stale write keeps the body ---------------------------------------
 
     @Test
     public void aWriteLoadedBeforeTheReaderFiledTheBodyKeepsIt() throws Exception {
         JSONArray unread = new JSONArray();
         storage.applyWrites(new JSONArray().put(listed("m1", unread, flagsBase(unread))));
 
-        // The pass loads m1 at meta, then the reader opens it while the
-        // pass is on the network.
         store.saveSource(inbox, "m1", SOURCE);
         String hash = item("object_hash", "m1");
         assertEquals("2", item("level", "m1"));
 
-        // The pass writes what it merged from the placement it loaded:
-        // no body, at meta, its new markers.
         JSONArray seen = new JSONArray().put(Flags.Marker.SEEN.wire());
         storage.applyWrites(new JSONArray().put(listed("m1", seen, flagsBase(seen))));
 
@@ -131,7 +127,6 @@ public class BodyLossRacesTest {
         JSONArray none = new JSONArray();
         storage.applyWrites(new JSONArray().put(listed("m1", none, flagsBase(none))));
 
-        // A fill chunk lands the body, its base moved to it.
         String hash = PimdirHash.of(SOURCE);
         JSONObject full = listed("m1", none, flagsBase(none).put("object", hash));
         full.getJSONObject("placement").put("object", hash).put("level", "full");
@@ -145,7 +140,6 @@ public class BodyLossRacesTest {
                         .put(full));
         assertEquals("item and base", "2", refcount(hash));
 
-        // A pass that loaded m1 before the fill writes it back at meta.
         JSONArray flagged = new JSONArray().put("\\Flagged");
         storage.applyWrites(new JSONArray().put(listed("m1", flagged, flagsBase(flagged))));
 
@@ -158,7 +152,6 @@ public class BodyLossRacesTest {
         assertTrue(blobs.has(hash));
     }
 
-    // ---- a body filed ahead of its write keeps its file ----------------------
 
     private static void writeFile(File file, byte[] bytes) throws Exception {
         try (FileOutputStream out = new FileOutputStream(file)) {
@@ -188,26 +181,20 @@ public class BodyLossRacesTest {
                 new JSONArray()
                         .put(listed("m1", none, flagsBase(none)))
                         .put(listed("m2", none, flagsBase(none))));
-        // m1 holds the body m2 is about to download: the same bytes.
         store.saveSource(inbox, "m1", SOURCE);
         String hash = item("object_hash", "m1");
 
-        // The download moves its copy in: the file is there already, so
-        // the copy goes.
         PimdirItems.pin(pimdir, hash);
         File fetched = File.createTempFile("fetched", ".eml");
         writeFile(fetched, SOURCE);
         blobs.adopt(hash, fetched);
 
-        // Meanwhile m1's body is replaced, its last reference to the hash
-        // dropped and the object collected.
         store.saveSource(inbox, "m1", "Subject: Other\r\n\r\nother\r\n".getBytes(
                 StandardCharsets.UTF_8));
         assertNull("collected", refcount(hash));
         new PimdirItems(pimdir).unlinkCollected();
         assertTrue("pinned, the file stays", blobs.has(hash));
 
-        // The download's write lands, then releases the pin.
         JSONObject full = listed("m2", none, flagsBase(none).put("object", hash));
         full.getJSONObject("placement").put("object", hash).put("level", "full");
         storage.applyWrites(
@@ -248,7 +235,6 @@ public class BodyLossRacesTest {
                             .put(full));
             fail("a row without its file was written");
         } catch (RuntimeException refused) {
-            // The batch rolled back.
         }
 
         assertEquals("still meta", "1", item("level", "m1"));

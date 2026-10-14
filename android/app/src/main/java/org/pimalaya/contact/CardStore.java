@@ -19,28 +19,11 @@ import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
 
 /**
- * The app's own state about the contacts it stores, beside the store itself.
+ * The app's own state about the contacts, beside the pimdir store.
  *
- * <p>The contacts live in the pimdir store ({@link PimdirContacts}); what is
- * here is everything pimdir deliberately has no column for, because it is this
- * app's policy rather than a property of the data:
- *
- * <ul>
- *   <li>an address book's three switches: {@code subscribed} drives what is
- *       displayed, {@code remote_synced} and {@code phone_synced} the two sync
- *       spokes. Plus the account it belongs to and its id on that backend,
- *       which the store has no room for either (its {@code account} column is a
- *       stable id, not an address).
- *   <li>the merged view's link exceptions (docs/merged-view.md): a replica
- *       detached from automatic grouping, and group keys joined into a cluster.
- *       Nothing on any server and nothing in a sync depends on them.
- *   <li>the duplicate groups the user chose to leave alone.
- * </ul>
- *
- * <p>The display fields of a book (name, description, colour) are <em>not</em>
- * here: they are the collection's, they live in the store, and holding a second
- * copy would mean two places to disagree. {@link #loadAllAddressbooks} joins the
- * two in memory instead, over the handful of rows a device has.
+ * <p>App policy pimdir has no column for: each book's three switches, account
+ * and backend id, the merged view's link exceptions, the ignored duplicates.
+ * Display fields stay the store's ({@link #loadAllAddressbooks} joins them).
  */
 public class CardStore extends SQLiteOpenHelper {
     private static final String DATABASE = "cards.db";
@@ -52,16 +35,17 @@ public class CardStore extends SQLiteOpenHelper {
 
     private final PimdirCollections collections;
 
+    /** Opens the app's contact state database beside the pimdir store. */
     public CardStore(Context context, PimdirDb pimdir) {
         super(context, DATABASE, null, VERSION);
         this.collections = new PimdirCollections(pimdir, context);
     }
 
     /**
-     * The storage key of a card that lives in one collection (CardDAV,
-     * Graph): resource ids are only unique per collection there, so the
-     * collection is part of the identity. Account-level backends (JMAP,
-     * Google) use the bare server id, unique across the account.
+     * The storage key of a card: collection-scoped on CardDAV and Graph.
+     *
+     * <p>Resource ids are unique per collection there; JMAP and Google use the
+     * bare server id, unique across the account.
      */
     public static String key(String addressbookUrl, String id) {
         return addressbookUrl + "\u0000" + id;
@@ -208,15 +192,11 @@ public class CardStore extends SQLiteOpenHelper {
     }
 
     /**
-     * Links the given group keys into one cluster (merging any cluster
-     * a key already belongs to), so their rows collapse into one
-     * merged contact.
+     * Links group keys into one cluster, their rows becoming one contact.
      *
-     * <p>NOTE: unwired today (linking goes through a shared UID);
-     * kept, with {@link #unlinkGroup}, for the match-suggestion flows
-     * docs/merged-view.md reserves the link and detached tables for.
-     * When they come back, the cluster computation belongs in the
-     * bridge next to groupContacts.
+     * <p>NOTE: unwired (linking goes through a shared UID); kept with
+     * {@link #unlinkGroup} for docs/merged-view.md's match suggestions, whose
+     * cluster computation then belongs in the bridge.
      */
     public void linkGroups(List<String> groupKeys) {
         if (groupKeys.size() < 2) {
@@ -243,11 +223,7 @@ public class CardStore extends SQLiteOpenHelper {
         }
     }
 
-    /**
-     * Splits a merged contact apart: drops the cluster's link rows and
-     * detaches every replica, so each becomes its own row until it is
-     * explicitly linked again.
-     */
+    /** Splits a merged contact: drops its links and detaches every replica. */
     public void unlinkGroup(String clusterKey, List<String> members, List<String> replicaRefs) {
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
@@ -272,21 +248,11 @@ public class CardStore extends SQLiteOpenHelper {
     }
 
     /**
-     * Replaces one account's address books with the fetched set, keeping the
-     * switches of any book already known; new ones default to subscribed with
-     * remote sync on.
+     * Replaces one account's books' switches; new ones subscribed, remote on.
      *
-     * <p>Only the switches: the books themselves are collections in the store
-     * and {@link PimdirCollections} is what writes them, so a book that
-     * vanished server-side loses its contents there rather than here.
-     *
-     * <p>A book is recognised by its URL, and failing that by its id within the
-     * account. The fallback is what carries the switches across a change in how
-     * a backend's URLs are composed: the JMAP ones gained their JMAP account id
-     * so two accounts on one provider stop colliding, and without this a user
-     * would find every JMAP book back to the defaults, re-subscribed and
-     * un-mirrored from the phone. An id that two books of one account share is
-     * left out of the fallback rather than guessed at.
+     * <p>{@link PimdirCollections} writes the books. A book matches by URL,
+     * else by id within the account (an ambiguous id is skipped): that keeps
+     * the switches across a URL scheme change, like JMAP's added account id.
      */
     public void replaceAddressbooks(String accountEmail, List<Addressbook> books) {
         SQLiteDatabase db = getWritableDatabase();
@@ -342,9 +308,7 @@ public class CardStore extends SQLiteOpenHelper {
     }
 
     /**
-     * Sets one addressbook's three switches. Both sync switches require
-     * the subscription, so they are forced off whenever the book is not
-     * subscribed.
+     * Sets one book's three switches; both sync switches need the subscription.
      */
     public void setBookState(
             String url, boolean subscribed, boolean remoteSynced, boolean phoneSynced) {
@@ -372,9 +336,7 @@ public class CardStore extends SQLiteOpenHelper {
     }
 
     /**
-     * Seeds the built-in local addressbook, so a fresh install or a
-     * schema rebuild always finds it present and subscribed. Ignored
-     * when the row already exists, keeping any cards and subscription.
+     * Seeds the built-in local book, present and subscribed; kept if it exists.
      */
     public void ensureLocalAddressbook(String url, String accountEmail, String id) {
         ContentValues values = new ContentValues();
@@ -386,7 +348,7 @@ public class CardStore extends SQLiteOpenHelper {
                 .insertWithOnConflict("addressbook", null, values, SQLiteDatabase.CONFLICT_IGNORE);
     }
 
-    /** Every subscribed addressbook, ordered by account then name (drives the home listing). */
+    /** Every subscribed book, by account then name (the home listing). */
     public List<BookEntry> loadSubscribedAddressbooks() {
         List<BookEntry> subscribed = new ArrayList<>();
         for (BookEntry entry : loadAllAddressbooks()) {
@@ -398,8 +360,7 @@ public class CardStore extends SQLiteOpenHelper {
     }
 
     /**
-     * The subscribed address books as the store holds them, every account's,
-     * the on-device one among them.
+     * The subscribed books as the store holds them, the on-device one included.
      */
     public List<PimdirCollections.Stored> subscribedBooks(PimdirCollections collections) {
         java.util.Set<String> subscribed = new java.util.HashSet<>();
@@ -416,13 +377,9 @@ public class CardStore extends SQLiteOpenHelper {
     }
 
     /**
-     * Every known addressbook, subscribed or not (drives the subscription
-     * editor): the store's contact collections, each carrying the switches this
-     * database holds for it.
+     * Every known book with its switches, for the subscription editor.
      *
-     * <p>A collection with no switch row is one the store learned about before
-     * this database did, so it takes the same defaults a new book does rather
-     * than being hidden.
+     * <p>A collection with no switch row takes a new book's defaults.
      */
     public List<BookEntry> loadAllAddressbooks() {
         Map<String, int[]> switches = new HashMap<>();
@@ -494,8 +451,7 @@ public class CardStore extends SQLiteOpenHelper {
     }
 
     /**
-     * The name a create offers the server: CardDAV names the resource
-     * {@code id.vcf}, the other backends address the bare id.
+     * The name a create offers: {@code id.vcf} on CardDAV, else the bare id.
      */
     static String resourceName(String url, String id) {
         return isCarddavUrl(url) ? id + ".vcf" : id;

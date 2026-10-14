@@ -22,30 +22,9 @@ import java.util.List;
 /**
  * The contacts store, on the pimdir tables.
  *
- * <p>What the bespoke schema spelled out in columns, pimdir expresses in its
- * own model, and the translation is the whole of this class:
- *
- * <ul>
- *   <li>a replica is an {@code items} row keyed {@code (collection, link_id)},
- *       its vCard a content-addressed object rather than a TEXT column
- *   <li><strong>membership is placement</strong>: a card in three address books
- *       is three rows sharing one {@code link_id} and therefore one {@code seq},
- *       which is what the old {@code membership} table encoded by hand
- *   <li><strong>dirty is derived, not stored</strong>: an item whose
- *       {@code object_hash} has moved past the {@code base_object} its server
- *       binding agreed on <em>is</em> a pending push, so a staged edit cannot
- *       drift out of sync with the flag that announces it
- *   <li>a staged create is an item no base of the server binding agreed on,
- *       and a staged delete is {@code deleted = 1} on an item whose binding is
- *       still there; creates, edits and deletes are pimdir mutations, staged
- *       through the engine and never by direct row edits (SYNC §7)
- *   <li>the summary is the standard's typed row ({@link PimdirSummary}) and the
- *       ordering it never had becomes {@code sort_key}
- * </ul>
- *
- * <p>Nothing here talks to a server. Every method stages, and the next engine
- * pass ({@link ContactEngine}) derives what to push from the state it finds,
- * which is why none of these take an ETag or a revision.
+ * <p>A replica is an item keyed (collection, link_id); membership is placement
+ * (rows sharing a link_id); dirty is derived (object_hash past the binding's
+ * base). Every method stages (SYNC §7): {@link ContactEngine} pushes.
  */
 public final class PimdirContacts {
     /** The source name a server-synced binding carries. */
@@ -55,12 +34,11 @@ public final class PimdirContacts {
     private final PimdirItems items;
 
     /**
-     * A contacts driver that only stages: what a create, an edit and a
-     * delete go through, as pimdir mutations (SYNC §7), never as direct row
-     * edits.
+     * A contacts driver that only stages: mutations, never row edits (SYNC §7).
      */
     private final ContactStager stager;
 
+    /** The contacts of a store. */
     public PimdirContacts(PimdirDb store) {
         this.store = store;
         this.items = new PimdirItems(store);
@@ -69,6 +47,7 @@ public final class PimdirContacts {
 
     /** One displayable replica: the card plus its summary. */
     public static final class Indexed {
+        /** The card. */
         public final Card card;
 
         /** Display name (FN), empty when the card has none. */
@@ -89,8 +68,9 @@ public final class PimdirContacts {
         /** Normalized content hash, the divergence marker. */
         final String hash;
 
-        /** True when both sides edited and a captured remote body is on hand,
-         *  so the divergence is the user's to settle. */
+        /**
+         * Both sides edited and a remote body is captured: the user settles.
+         */
         final boolean conflicted;
 
         Indexed(Card card, CardIndex index, boolean conflicted) {
@@ -106,20 +86,11 @@ public final class PimdirContacts {
     }
 
     /**
-     * One address book's live cards with what a row renders, in the store's
-     * order.
+     * One address book's live cards with what a row renders, in store order.
      *
-     * <p>The row is derived from the body rather than read off the stored
-     * summary. Annex A fixes what a summary carries and three of the fields a
-     * row needs are not in it: the first phone number, the fallback info line
-     * and the normalised content hash the merged view compares replicas by.
-     * The list loads every body anyway, since a card opens from it, so
-     * deriving costs one parse per row and never a second copy of derived data
-     * to keep true.
-     *
-     * <p>Bodiless items are skipped: a spine the sync has enumerated but not yet
-     * hydrated has nothing to show, and showing it as a nameless row would read
-     * as a broken contact rather than as one still arriving.
+     * <p>Rows derive from the body: Annex A's summary lacks the first phone,
+     * the info line and the content hash. Bodiless items (enumerated, not yet
+     * hydrated) are skipped rather than shown as a broken nameless row.
      */
     public List<Indexed> list(String collection) {
         SQLiteDatabase db = items.readable();
@@ -150,15 +121,11 @@ public final class PimdirContacts {
     }
 
     /**
-     * Stages a local create or edit, a pimdir mutation; the next sync pushes
-     * it.
+     * Stages a local create or edit as a pimdir mutation; the next sync pushes.
      *
-     * <p>A card the collection holds is an edit, which leaves the base alone:
-     * what the server last confirmed does not change because the user typed
-     * something. On a conflicted card saving <em>is</em> the resolution, the
-     * base adopting the remote state observed at conflict time, so the
-     * resolving push is conditioned on what it was merged against. Any other
-     * card is a create.
+     * <p>An edit leaves the base alone. On a conflicted card saving is the
+     * resolution: the base adopts the remote state observed at conflict time,
+     * so the push is conditioned on what it was merged against.
      */
     public void save(String collection, Card card) {
         CardIndex index = indexOf(card.vcard());
@@ -185,9 +152,9 @@ public final class PimdirContacts {
     }
 
     /**
-     * Stages a local delete, a pimdir mutation; the next sync pushes it. A
-     * create no push carried out yet is withdrawn instead by the engine,
-     * there being nothing to tell the server about.
+     * Stages a local delete as a pimdir mutation; the next sync pushes it.
+     *
+     * <p>A create never pushed is withdrawn by the engine instead.
      */
     public void stageDelete(String collection, String linkId) {
         if (!held(collection, linkId)) {
@@ -212,7 +179,9 @@ public final class PimdirContacts {
         }
     }
 
-    /** Drops the replica outright (a pushed delete, or a never-pushed create). */
+    /**
+     * Drops the replica outright (a pushed delete, or a never-pushed create).
+     */
     void remove(String collection, String linkId) {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
@@ -226,21 +195,11 @@ public final class PimdirContacts {
     }
 
     /**
-     * Writes the summaries of contacts that hold none, returning how many were
-     * repaired.
+     * Writes the summaries of contacts holding none; answers how many.
      *
-     * <p>A summary is written, never derived (SPEC.md §9.3), so a store filled
-     * before its kind had a summary table keeps no summary until something
-     * rewrites it, and a sync will not: the bodies have not changed, so nothing
-     * re-fetches them. Every row would then be invisible to any other reader of
-     * the store, and unsorted here. io-pimdir anticipates exactly this with
-     * {@code set_sort_key}, "for a store written before its kind had a
-     * convention".
-     *
-     * <p>Cheap when there is nothing to do: it reads the summary rows, not the
-     * bodies, and only loads a body for a row it is about to write. A card with
-     * no {@code FN} is summarised as nameless and not revisited: what is
-     * repaired is the missing row, not the empty name.
+     * <p>A summary is written, never derived (SPEC.md §9.3): a store filled
+     * before its kind had one keeps none, and a sync re-fetches nothing. Reads
+     * summary rows, loads only bodies it writes for (io-pimdir set_sort_key).
      */
     public int repairSummaries() {
         SQLiteDatabase db = items.writable();
@@ -288,11 +247,7 @@ public final class PimdirContacts {
         return stale.size();
     }
 
-    /**
-     * The collections the card is placed in, staged removals excluded and
-     * staged additions included: what "which address books is this contact in"
-     * means while changes are pending.
-     */
+    /** The card's collections, staged removals out and staged additions in. */
     List<String> collectionsOf(String linkId) {
         SQLiteDatabase db = items.readable();
         try (Cursor cursor =
@@ -309,15 +264,11 @@ public final class PimdirContacts {
     }
 
     /**
-     * Stages a membership change on an account-level backend, where one card
-     * belongs to several address books at once.
+     * Stages a membership change on an account-level backend.
      *
-     * <p>Placing it into another collection is an ordinary item row carrying the
-     * same link id, so it shares the {@code seq} and the object the card already
-     * has: no body is copied and no second identity is minted. Removing it is
-     * the same staged delete as anywhere else, which is why a round trip cancels
-     * out rather than pushing twice: adding back a staged removal simply clears
-     * the flag, and removing a staged addition drops a row nothing has bound.
+     * <p>Placing is an item row sharing the link id, so its seq and object: no
+     * copy, no new identity. Removing is the usual staged delete, so a round
+     * trip cancels out rather than pushing twice.
      */
     void stageMembership(String from, String target, String linkId, boolean added) {
         if (!added) {
@@ -346,15 +297,10 @@ public final class PimdirContacts {
     }
 
     /**
-     * Moves an account's cards into the on-device book, keeping the contacts and
-     * losing every sync marker: the account is going, its contacts are not.
+     * Moves an account's cards into the on-device book, dropping sync markers.
      *
-     * <p>A card placed in several of the account's books collapses to one local
-     * row, since the books it was in are about to stop existing. Bindings are
-     * left behind rather than carried, which is the point: the local book has no
-     * server, so a carried base would claim an agreement with a remote that no
-     * longer syncs it. A staged delete is not carried either, since the user
-     * already asked for that card to go.
+     * <p>Several placements collapse to one local row. Bindings stay behind (no
+     * server, so no agreement to claim) and staged deletes are not carried.
      */
     public void detachToLocal(List<String> collections, String local) {
         SQLiteDatabase db = items.writable();
@@ -375,8 +321,6 @@ public final class PimdirContacts {
         }
         PhoneQueue.written(store.context(), local);
     }
-
-    // ---- helpers ----------------------------------------------------------
 
     /**
      * Places an existing item into another collection, body and summary alike.

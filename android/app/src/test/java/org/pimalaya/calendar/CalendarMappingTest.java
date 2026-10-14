@@ -27,13 +27,11 @@ import org.pimalaya.client.CalendarClient;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Pins the calendar object to CalendarContract mapping
- * (docs/calendar-mapping.md): the columns an object's view projects, the
- * provider's cell and duration formats, and the field-space merge that takes
- * a field from the phone only when its rows differ from what the base itself
- * projects. Objects go through the real native projection and patch, so a
- * round trip here is the one a phone makes. Under Robolectric for the one
- * reason that the native library loads into one class loader per process.
+ * Pins the object to CalendarContract mapping (docs/calendar-mapping.md).
+ *
+ * <p>Projected columns, cell and duration formats, and the merge taking a phone
+ * field only when its rows differ from the base's projection. Real native code,
+ * on Robolectric: the library loads once per class loader.
  */
 @RunWith(RobolectricTestRunner.class)
 public class CalendarMappingTest {
@@ -525,7 +523,7 @@ public class CalendarMappingTest {
                 "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:Jane@Example.com\r\n"));
     }
 
-    /** An exception row as a calendar app inserts one: the master's row copied. */
+    /** An exception row as a calendar app inserts one, copying the master's. */
     private static Row exception(String ical, long instance) throws Exception {
         Row master = phone(ical).get(0);
         Row row = new Row();

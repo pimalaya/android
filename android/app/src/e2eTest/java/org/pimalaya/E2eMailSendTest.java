@@ -16,7 +16,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
 
-/** A message sent to the account itself, through the outbox, as the composer sends it. */
+/**
+ * A message to the account itself, through the outbox, as the composer sends.
+ */
 public class E2eMailSendTest extends E2eCase {
     public E2eMailSendTest(String target) {
         super(target);

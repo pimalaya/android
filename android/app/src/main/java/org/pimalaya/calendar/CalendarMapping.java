@@ -29,47 +29,46 @@ import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.pimdir.PimdirHash;
 
 /**
- * The pure half of the calendar mirror, both directions: the phone's view of
- * a calendar object (what the native projection hands over) to
- * CalendarContract rows and back, as plain maps keyed by the provider's
- * column names, and the field-space merge of what the phone changed.
- * docs/calendar-mapping.md is the contract, CalendarMappingTest pins it.
- * Only compile-time Android constants are referenced, so all of it runs on
- * the JVM; {@link CalendarRemote} reads and writes the provider.
+ * The pure half of the calendar mirror: object views to rows and back.
+ *
+ * <p>Plain maps keyed by provider column, and the field-space merge of the
+ * phone's changes, per docs/calendar-mapping.md. Runs on the JVM;
+ * {@link CalendarRemote} does the I/O.
  */
 final class CalendarMapping {
     private CalendarMapping() {}
 
-    /** The extended property calendar apps edit an event's URL in, ical4android's. */
+    /** The extended property apps edit an event's URL in (ical4android's). */
     static final String URL = "vnd.android.cursor.item/vnd.ical4android.url";
 
     /**
-     * Joins an item's handle and an override's recurrence id into the
-     * {@code _SYNC_ID} of the row standing for it, in an object without a
-     * master: the unit separator, which no handle carries.
+     * The separator of a masterless override's {@code _SYNC_ID}.
+     *
+     * <p>Joins the item's handle and the override's recurrence id: the unit
+     * separator, which no handle carries.
      */
     static final char STANDALONE = '\u001f';
 
     private static final long DAY = 86_400_000L;
 
     /**
-     * The most reminders one event carries into the provider, as Google
-     * Calendar allows: a calendar the server lets anyone write to cannot
-     * set off a burst of alarms.
+     * Most reminders per event in the provider, as Google Calendar allows.
+     *
+     * <p>A calendar anyone may write to cannot set off a burst of alarms.
      */
     static final int MAX_REMINDERS = 5;
 
     /**
-     * The most characters a title or a location carries into the provider,
-     * and a description: the store keeps the whole text, but a phone pass
-     * writes its rows in one binder transaction, which a megabyte
-     * description would fail on every pass.
+     * Characters kept of a title, location or description in the provider.
+     *
+     * <p>The store keeps the whole text, but a phone pass writes in one binder
+     * transaction, which a megabyte description would fail every pass.
      */
     static final int SHORT_TEXT = 1024;
 
     static final int LONG_TEXT = 16 * 1024;
 
-    /** Where one object's rows land: its handle, its calendar's address, the device's zone. */
+    /** Where one object's rows land: handle, calendar address, device zone. */
     static final class Phone {
         final String handle;
 
@@ -86,9 +85,10 @@ final class CalendarMapping {
     }
 
     /**
-     * One {@code Events} row with its {@code Reminders}, {@code Attendees}
-     * and the URL property, as read or as written; a row read carries its
-     * ids ({@code _id} in each sub-row).
+     * An {@code Events} row with its reminders, attendees and URL property.
+     *
+     * <p>As read or written; a read row carries its ids ({@code _id} in each
+     * sub-row).
      */
     static final class Row {
         final Map<String, Object> values = new LinkedHashMap<>();
@@ -109,12 +109,11 @@ final class CalendarMapping {
         boolean deleted;
     }
 
-    // ---- view to rows -------------------------------------------------------
-
     /**
-     * The rows an object's view projects: the master and an exception row per
-     * override, or a standalone row per override of an object holding no
-     * master. None for an object holding no event.
+     * The rows a view projects; none for an object holding no event.
+     *
+     * <p>The master and an exception row per override, or a standalone row per
+     * override when no master.
      */
     static List<Row> rows(JSONObject event, Phone phone) throws JSONException {
         List<Row> rows = new ArrayList<>();
@@ -160,7 +159,7 @@ final class CalendarMapping {
         return rows;
     }
 
-    /** A text cut to at most {@code longest} characters, never inside a pair. */
+    /** {@code text} cut to {@code longest} characters, never inside a pair. */
     static String clip(String text, int longest) {
         if (text.length() <= longest) {
             return text;
@@ -169,7 +168,7 @@ final class CalendarMapping {
         return text.substring(0, end);
     }
 
-    /** One component's row, its organizer and series read off {@code master}. */
+    /** A component's row, organizer and series read off {@code master}. */
     private static Row row(
             JSONObject component, JSONObject master, String uid, Phone phone, boolean listed)
             throws JSONException {
@@ -311,19 +310,21 @@ final class CalendarMapping {
     }
 
     /**
-     * The instant an override's row names its instance by
-     * ({@code ORIGINAL_INSTANCE_TIME}): its recurrence id aligned to the
-     * series' start, in whole seconds, which is what the provider pairs
-     * an override with its instance at.
+     * The instant an override's row names its instance by.
+     *
+     * <p>Its {@code ORIGINAL_INSTANCE_TIME}: the recurrence id aligned to the
+     * series' start, in whole seconds, which is how the provider pairs an
+     * override with its instance.
      */
     static long instanceOf(EventTime recurrenceId, EventTime start, ZoneId device) {
         return Math.floorDiv(aligned(recurrenceId, start, device), 1000L) * 1000L;
     }
 
     /**
-     * The instant a date of a series names, aligned to its start's type: a
-     * UTC midnight on an all-day series, a date at the start's time of day
-     * on a timed one (the provider removes nothing with a date there).
+     * The instant a series date names, aligned to its start's type.
+     *
+     * <p>UTC midnight on an all-day series, the start's time of day on a timed
+     * one (the provider removes nothing with a date there).
      */
     static long aligned(EventTime value, EventTime start, ZoneId device) {
         if (start.isDate()) {
@@ -348,8 +349,10 @@ final class CalendarMapping {
     }
 
     /**
-     * A provider {@code RDATE} or {@code EXDATE} cell: every instant in UTC,
-     * which the provider reads whatever else the row says; null for none.
+     * A provider {@code RDATE} or {@code EXDATE} cell; null for none.
+     *
+     * <p>Every instant in UTC, which the provider reads whatever else the row
+     * says.
      */
     static String cell(List<Long> instants) {
         if (instants.isEmpty()) {
@@ -363,8 +366,10 @@ final class CalendarMapping {
     }
 
     /**
-     * The instants a provider cell names: lines of {@code [TZID;]v1,v2}, a
-     * bare value read as UTC, a date as its UTC midnight.
+     * The instants a provider cell names.
+     *
+     * <p>Lines of {@code [TZID;]v1,v2}, a bare value read as UTC, a date as its
+     * UTC midnight.
      */
     static List<Long> instants(String cell) {
         List<Long> instants = new ArrayList<>();
@@ -411,9 +416,10 @@ final class CalendarMapping {
     }
 
     /**
-     * A length as a provider {@code DURATION}: RFC 5545 form, always
-     * {@code P<n>D} on an all-day row, which the provider's all-day fix-up
-     * reads without crashing.
+     * A length as a provider {@code DURATION}, RFC 5545 form.
+     *
+     * <p>Always {@code P<n>D} on an all-day row, which the provider's all-day
+     * fix-up reads without crashing.
      */
     static String duration(long seconds, boolean allDay) {
         if (allDay) {
@@ -444,7 +450,11 @@ final class CalendarMapping {
         return out.toString();
     }
 
-    /** The seconds a provider {@code DURATION} spans: RFC 5545 form, or Etar's {@code P<n>S}. */
+    /**
+     * The seconds a provider {@code DURATION} spans.
+     *
+     * <p>RFC 5545 form, or Etar's {@code P<n>S}.
+     */
     static long seconds(String duration) {
         if (duration == null || duration.isEmpty()) {
             return 0;
@@ -491,7 +501,7 @@ final class CalendarMapping {
         return sign * total;
     }
 
-    /** {@code STATUS}: never null, a missing one confirmed, an unknown one tentative. */
+    /** {@code STATUS}: a missing one confirmed, an unknown one tentative. */
     static int status(String status) {
         switch (status.toUpperCase(Locale.ROOT)) {
             case "":
@@ -504,7 +514,11 @@ final class CalendarMapping {
         }
     }
 
-    /** {@code CLASS} as {@code ACCESS_LEVEL}, an unknown one private (RFC 5545 3.8.1.3). */
+    /**
+     * {@code CLASS} as {@code ACCESS_LEVEL}, an unknown one private.
+     *
+     * <p>RFC 5545 3.8.1.3.
+     */
     static int access(String access) {
         switch (access.toUpperCase(Locale.ROOT)) {
             case "":
@@ -518,7 +532,7 @@ final class CalendarMapping {
         }
     }
 
-    /** The phone's colour key for a {@code COLOR}: the CSS name, by exact name, else none. */
+    /** A {@code COLOR}'s phone colour key: its exact CSS name, else none. */
     static String colorKey(String color) {
         String name = color.trim().toLowerCase(Locale.ROOT);
         return CssColors.NAMED.containsKey(name) ? name : null;
@@ -540,7 +554,11 @@ final class CalendarMapping {
         }
     }
 
-    /** {@code PARTSTAT} as {@code ATTENDEE_STATUS}, a missing one awaiting an answer. */
+    /**
+     * {@code PARTSTAT} as {@code ATTENDEE_STATUS}.
+     *
+     * <p>A missing one awaits an answer.
+     */
     static int attendeeStatus(String partstat) {
         switch (partstat.toUpperCase(Locale.ROOT)) {
             case "ACCEPTED":
@@ -557,7 +575,7 @@ final class CalendarMapping {
         }
     }
 
-    /** An alarm as minutes before a start at {@code start}, after it when negative. */
+    /** An alarm as minutes before {@code start}, negative for after. */
     private static long minutes(JSONObject alarm, long start) {
         if (alarm.has("minutes")) {
             return alarm.optLong("minutes");
@@ -581,29 +599,22 @@ final class CalendarMapping {
         return tzid.isEmpty() ? wire : tzid + ":" + wire;
     }
 
-    /** The item a row's {@code _SYNC_ID} belongs to, a standalone override's suffix dropped. */
+    /**
+     * The item a row's {@code _SYNC_ID} belongs to.
+     *
+     * <p>A standalone override's suffix dropped.
+     */
     static String itemOf(String syncId) {
         int at = syncId.indexOf(STANDALONE);
         return at < 0 ? syncId : syncId.substring(0, at);
     }
 
-    // ---- rows back to a view: the merge -------------------------------------
-
     /**
-     * The phone's edit of an object, in field space: each field is taken from
-     * the phone's rows only when it differs from what the base view itself
-     * projects, so mapping lossiness never reads as an edit. Both sides go
-     * through the same mapping to rows, a time compared civil in its row's
-     * zone (an instant in a zone only the object defines), a duration as a
-     * length, rules, dates, reminders and attendees as sets.
+     * The phone's edit of an object, in field space.
      *
-     * <p>Returns the view to patch onto the base: the base's components with
-     * the taken fields replaced, a new override carrying its taken fields
-     * alone, a removed one left out. Null when nothing is taken: the caller
-     * keeps the base's exact bytes.
-     *
-     * <p>A master listed instance by instance keeps its dates and rules
-     * whatever the phone did to them: those are reverted, not taken.
+     * <p>A field is taken only where the rows differ from the base's own
+     * projection: mapping loss is no edit. Answers the view to patch on, or
+     * null to keep the base bytes; a listed master's dates and rules revert.
      */
     static JSONObject merge(JSONObject base, List<Row> phone, Phone context)
             throws JSONException {
@@ -706,9 +717,10 @@ final class CalendarMapping {
     }
 
     /**
-     * Whether the phone moved the dates or the recurrence of a master listed
-     * instance by instance, which the merge does not take: its rows are put
-     * back as the base projects them.
+     * Whether the phone moved a listed master's dates or recurrence.
+     *
+     * <p>The merge does not take those: its rows are put back as the base
+     * projects them.
      */
     static boolean reverts(JSONObject base, List<Row> phone, Phone context)
             throws JSONException {
@@ -729,12 +741,11 @@ final class CalendarMapping {
     }
 
     /**
-     * Takes into {@code into} each field the phone's row changes against the
-     * held one (none: a created event, every field taken), and answers whether
-     * any was. {@code like} is the base component the times are relative to;
-     * {@code master} brings the series fields in, {@code listed} keeps them and
-     * the dates out, {@code fresh} reads the row as a new override, whose
-     * status the provider defaulted.
+     * Takes the row's changed fields into {@code into}; answers whether any.
+     *
+     * <p>Against the held row (none: a create). {@code like} anchors the times,
+     * {@code master} brings series fields in, {@code listed} keeps them and
+     * dates out, {@code fresh} is a new override (status defaulted).
      */
     private static boolean component(
             JSONObject into,
@@ -913,7 +924,7 @@ final class CalendarMapping {
         return edited;
     }
 
-    /** The phone's alarms, each the base's own where the base held one at that offset. */
+    /** The phone's alarms, reusing the base's at the same offset. */
     private static JSONArray alarms(JSONObject like, Row base, Row phone) throws JSONException {
         JSONArray held = like == null ? null : like.optJSONArray("alarms");
         List<Long> heldMinutes = new ArrayList<>();
@@ -941,7 +952,7 @@ final class CalendarMapping {
         return alarms;
     }
 
-    /** The phone's attendees, each the base's own where the base held it the same. */
+    /** The phone's attendees, reusing the base's where unchanged. */
     private static JSONArray attendees(JSONObject like, Row base, List<Map<String, Object>> guests)
             throws JSONException {
         JSONArray held = like == null ? null : like.optJSONArray("attendees");
@@ -979,9 +990,10 @@ final class CalendarMapping {
     }
 
     /**
-     * A row's attendees as the object takes them: the organizer's own row
-     * alone, which Etar adds beside the attendees it invites, adds nothing
-     * to an object that does not list them.
+     * A row's attendees as the object takes them.
+     *
+     * <p>The organizer's own row alone, which Etar adds beside those it
+     * invites, adds nothing to an object not listing them.
      */
     private static List<Map<String, Object>> guests(Row row, Row base) {
         if (row.attendees.size() != 1) {
@@ -1010,7 +1022,7 @@ final class CalendarMapping {
         return keys;
     }
 
-    /** An attendee compared: the address in any case, the name, the type, the answer. */
+    /** An attendee's key: address in any case, name, type and answer. */
     private static String guestKey(Map<String, Object> guest) {
         int status = number(guest, Attendees.ATTENDEE_STATUS, Attendees.ATTENDEE_STATUS_NONE);
         // NOTE: none is Etar's default for an attendee it adds, and reads
@@ -1025,9 +1037,10 @@ final class CalendarMapping {
     }
 
     /**
-     * A row's reminders the object takes, sorted: the alert ones and those
-     * left to the default, which is an alert; an email reminder stays the
-     * phone's.
+     * A row's reminders the object takes, sorted.
+     *
+     * <p>The alert ones and those left to the default, an alert; an email
+     * reminder stays the phone's.
      */
     private static List<Long> minutes(Row row) {
         List<Long> minutes = new ArrayList<>();
@@ -1055,8 +1068,10 @@ final class CalendarMapping {
     }
 
     /**
-     * Whether a row repeats: a master with a rule or a date list. An override
-     * row's recurrence columns are ignored, Etar copying the master's there.
+     * Whether a row repeats: a master with a rule or a date list.
+     *
+     * <p>An override row's recurrence columns are ignored: Etar copies the
+     * master's there.
      */
     private static boolean isSeries(Row row) {
         return row.values.get(Events.ORIGINAL_INSTANCE_TIME) == null
@@ -1064,10 +1079,11 @@ final class CalendarMapping {
     }
 
     /**
-     * Where a row starts, as compared: the day of an all-day row, the civil
-     * time in its zone with the zone, the civil time alone for a floating
-     * base (the device's zone being the phone's business), the instant for a
-     * zone only the object defines.
+     * Where a row starts, as compared.
+     *
+     * <p>The day of an all-day row; civil time with zone; civil time alone for
+     * a floating base (the device's zone is the phone's business); the instant
+     * for a zone only the object defines.
      */
     private static String startKey(Row row, JSONObject like) {
         return momentKey(
@@ -1077,7 +1093,11 @@ final class CalendarMapping {
                 like);
     }
 
-    /** Where a row ends, as compared: a length on a repeating row, as its start otherwise. */
+    /**
+     * Where a row ends, as compared.
+     *
+     * <p>A length on a repeating row, else as its start is.
+     */
     private static String endKey(Row row, JSONObject like) {
         boolean allDay = number(row, Events.ALL_DAY, 0) == 1;
         if (isSeries(row)) {
@@ -1105,10 +1125,11 @@ final class CalendarMapping {
     }
 
     /**
-     * Where a row ends: its {@code DTEND}, or its start plus its
-     * {@code DURATION} on a repeating row (the provider writes 0 into a
-     * recurring row's {@code DTEND} after a tzdata update), an all-day end
-     * not after its start one day on.
+     * Where a row ends.
+     *
+     * <p>Its {@code DTEND}, or start plus {@code DURATION} on a repeating row
+     * (the provider zeroes a recurring {@code DTEND} after a tzdata update); an
+     * all-day end not after its start one day on.
      */
     private static long endOf(Row row) {
         long start = millis(row, Events.DTSTART);
@@ -1126,10 +1147,11 @@ final class CalendarMapping {
     }
 
     /**
-     * A time read off a row as the object writes it: in the zone the object
-     * had for it when the phone kept the row's zone, its IANA name when the
-     * phone changed it; a time in a zone only the object defines rides with
-     * its instant, which the native side places.
+     * A time read off a row as the object writes it.
+     *
+     * <p>In the object's zone when the phone kept the row's zone, its IANA name
+     * when the phone changed it; a zone only the object defines rides with its
+     * instant, placed natively.
      */
     static JSONObject timeOf(
             long millis, String tz, boolean allDay, JSONObject like, String likeZone,
@@ -1179,9 +1201,10 @@ final class CalendarMapping {
     }
 
     /**
-     * The master carried to one of its instances, for a new override's row to
-     * be compared against: the master's fields, the instance's dates, and the
-     * recurrence id naming it in the master's zone.
+     * The master carried to an instance, to compare a new override against.
+     *
+     * <p>The master's fields, the instance's dates, and the recurrence id
+     * naming it in the master's zone.
      */
     static JSONObject instance(JSONObject master, long instant, ZoneId device)
             throws JSONException {
@@ -1216,7 +1239,7 @@ final class CalendarMapping {
         return view;
     }
 
-    /** A provider rule cell compared: each rule's parts as a set, its end coerced. */
+    /** A rule cell as compared: each rule's parts a set, its end coerced. */
     private static Set<String> rules(String cell, JSONObject start, boolean allDay, ZoneId device) {
         Set<String> rules = new TreeSet<>();
         for (String rule : lines(cell)) {
@@ -1245,9 +1268,10 @@ final class CalendarMapping {
     }
 
     /**
-     * A rule with its {@code UNTIL} coerced to the start's value type, in UTC
-     * when the start is zoned (RFC 5545 3.3.10): Etar writes a date-time one
-     * on all-day series.
+     * A rule with its {@code UNTIL} coerced to the start's value type.
+     *
+     * <p>In UTC when the start is zoned (RFC 5545 3.3.10): Etar writes a
+     * date-time one on all-day series.
      */
     static String coerced(String rule, JSONObject start, boolean allDay, ZoneId device) {
         StringBuilder out = new StringBuilder();
@@ -1317,7 +1341,7 @@ final class CalendarMapping {
         return null;
     }
 
-    /** Whether a row is a master: no original instance, no link to one (the contract's test). */
+    /** Whether a row is a master: no original instance, no link to one. */
     static boolean isMaster(Map<String, Object> values) {
         return values.get(Events.ORIGINAL_ID) == null
                 && values.get(Events.ORIGINAL_SYNC_ID) == null
@@ -1326,9 +1350,11 @@ final class CalendarMapping {
                         || String.valueOf(values.get(Events._SYNC_ID)).indexOf(STANDALONE) < 0);
     }
 
-    // ---- writes -------------------------------------------------------------
-
-    /** One write a push makes, as plain values: {@link CalendarRemote} builds the operation. */
+    /**
+     * One write a push makes, as plain values.
+     *
+     * <p>{@link CalendarRemote} builds the operation.
+     */
     static final class Write {
         static final String EVENTS = "events";
         static final String REMINDERS = "reminders";
@@ -1343,7 +1369,7 @@ final class CalendarMapping {
         /** The row an update or a delete addresses, -1 for an insert. */
         final long id;
 
-        /** A sub-row's event: the write inserting it, or -1 for an existing one. */
+        /** A sub-row's event: its inserting write, or -1 if it exists. */
         final int parent;
 
         /** A sub-row's existing event, -1 when {@link #parent} inserts it. */
@@ -1363,14 +1389,11 @@ final class CalendarMapping {
     }
 
     /**
-     * The writes bringing an object's rows from {@code existing} to
-     * {@code desired}, in place: event rows matched (the master, each
-     * override by its instance, each standalone row by its id) and updated,
-     * the missing inserted and the extra deleted; reminders matched by
-     * offset, attendees by address and the URL property updated, inserted or
-     * deleted one by one, so what apps keep beside them survives. An email
-     * reminder is the phone's and never deleted, and a property this mirror
-     * did not write is never touched.
+     * The writes taking an object's rows to {@code desired}, in place.
+     *
+     * <p>Event rows matched (master, override by instance, standalone by id),
+     * sub-rows one by one (reminders by offset, attendees by address): what
+     * apps keep beside survives, email reminders included.
      */
     static List<Write> plan(List<Row> existing, List<Row> desired) {
         List<Write> writes = new ArrayList<>();
@@ -1431,8 +1454,10 @@ final class CalendarMapping {
     }
 
     /**
-     * One table of sub-rows brought in line: matched by a key, an unchanged
-     * match left alone, a changed one updated, the rest inserted or deleted.
+     * One table of sub-rows brought in line, matched by a key.
+     *
+     * <p>An unchanged match left alone, a changed one updated, the rest
+     * inserted or deleted.
      */
     private static void subRows(
             List<Write> writes,
@@ -1489,7 +1514,7 @@ final class CalendarMapping {
         return true;
     }
 
-    /** How an event row is matched: the master, an override by its instance, a standalone by id. */
+    /** An event row's key: master, override's instance, standalone's id. */
     private static String key(Row row) {
         Object instance = row.values.get(Events.ORIGINAL_INSTANCE_TIME);
         if (instance != null) {
@@ -1500,9 +1525,9 @@ final class CalendarMapping {
     }
 
     /**
-     * A digest of what an object's rows carry, for the revision an edited
-     * object is listed at: two reads of the same rows agree, any change of
-     * theirs moves it.
+     * A digest of an object's rows: an edited object's listed revision.
+     *
+     * <p>Two reads of the same rows agree; any change of theirs moves it.
      */
     static String fingerprint(List<Row> rows) {
         List<String> parts = new ArrayList<>();
@@ -1522,8 +1547,6 @@ final class CalendarMapping {
         Collections.sort(parts);
         return PimdirHash.of(String.join("\n", parts));
     }
-
-    // ---- helpers ------------------------------------------------------------
 
     /** A view's time as an {@link EventTime}, null for none. */
     static EventTime time(JSONObject time) {
@@ -1557,7 +1580,7 @@ final class CalendarMapping {
         return Zones.civil(time.substring(0, 8)).toInstant(ZoneOffset.UTC).toEpochMilli();
     }
 
-    /** An instant down to its UTC day on an all-day series, to the second otherwise. */
+    /** An instant cut to its UTC day if all-day, else to the second. */
     private static long day(long instant, boolean allDay) {
         long unit = allDay ? DAY : 1000L;
         return Math.floorDiv(instant, unit) * unit;
@@ -1596,7 +1619,7 @@ final class CalendarMapping {
         return LocalDateTime.ofInstant(Instant.ofEpochMilli(millis), zone);
     }
 
-    /** The zone a provider names, the fallback for one this device does not know. */
+    /** The zone a provider names, else {@code fallback} if unknown here. */
     private static ZoneId zoneNamed(String tz, ZoneId fallback) {
         if ("UTC".equalsIgnoreCase(tz) || "Etc/UTC".equalsIgnoreCase(tz)
                 || "GMT".equalsIgnoreCase(tz)) {

@@ -11,9 +11,10 @@ import java.util.EnumSet;
 import java.util.Set;
 
 /**
- * The setups' options start off, every run, and turn on only once their
- * permission is granted: a refusal leaves the switch off, and one mirror's
- * grant never turns the other on.
+ * The setups' options start off and turn on only once granted.
+ *
+ * <p>A refusal leaves the switch off, and one mirror's grant never turns the
+ * other on.
  */
 public class SetupSwitchesTest {
     private static final Set<PhoneMirror> NONE = EnumSet.noneOf(PhoneMirror.class);

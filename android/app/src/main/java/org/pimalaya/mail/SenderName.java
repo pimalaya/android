@@ -4,8 +4,9 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 /**
- * The name each account's mail goes out under, as its settings say: the
- * display part of the {@code From} header, empty to send the bare
+ * The name each account's mail goes out under, as its settings say.
+ *
+ * <p>The display part of the {@code From} header, empty to send the bare
  * address.
  */
 public final class SenderName {

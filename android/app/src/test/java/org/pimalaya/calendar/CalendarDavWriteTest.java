@@ -34,9 +34,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * An entry created and edited on the phone, then deleted, over a CalDAV
- * server answering its PUTs with no ETag, as Google's does: the real
- * calendar driver, engine and store over a fake server.
+ * An entry created, edited and deleted over CalDAV answering PUTs without ETag.
+ *
+ * <p>As Google's does: the real calendar driver, engine and store over a fake
+ * server.
  */
 @RunWith(RobolectricTestRunner.class)
 public class CalendarDavWriteTest {
@@ -50,7 +51,7 @@ public class CalendarDavWriteTest {
     private String calendar;
     private final Dav dav = new Dav();
 
-    /** A CalDAV calendar listed whole on every round, answering no ETag to a PUT. */
+    /** A CalDAV calendar listed whole each round; a PUT gets no ETag. */
     private static final class Dav extends CalendarClient {
         /** The entries by resource name, as (ETag, body). */
         final Map<String, String[]> entries = new LinkedHashMap<>();

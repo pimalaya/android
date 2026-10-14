@@ -5,18 +5,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A step taken from the store ({@link MailStep}), for a backend that does
- * not step itself yet (Graph, JMAP) and for IMAP's later steps
- * ({@link ImapStep}): while fewer than
- * {@link #COUNT} stored messages lie between the account's frontier and
- * the most recent floor among its mailboxes, the mailbox holding that
- * floor widens by {@link #COUNT}; the frontier then moves to the
- * {@code Date} of the {@link #COUNT}th newest stored message below it, ties
- * included. Their bodies download behind it ({@link MailBodies}).
+ * A step taken from the store ({@link MailStep}): Graph, JMAP, later IMAP.
  *
- * <p>The first sync lists each mailbox's first chunk, one after another on
- * the account's session, and leaves the frontier those chunks reach
- * ({@link MailStore#firstWindow}).
+ * <p>The most recent floor's mailbox widens by {@link #COUNT} until that many
+ * stored messages lie below the frontier, which moves to the {@link #COUNT}th
+ * one's date. A first sync lists {@link MailStore#firstWindow} instead.
  */
 final class WidenStep implements MailStep {
     /** The most mailboxes one step widens, so short chunks cannot hold it. */
@@ -99,9 +92,10 @@ final class WidenStep implements MailStep {
     }
 
     /**
-     * The mailbox a step widens next, null once every one is listed whole
-     * within its bound: one never listed first, else the one holding the
-     * most recent floor, below which the list cannot show the others.
+     * The mailbox a step widens next, null once all are whole within bound.
+     *
+     * <p>One never listed first, else the one holding the most recent floor,
+     * below which the list cannot show the others.
      */
     static MailStore.Edge limiting(List<MailStore.Edge> edges, List<String> stepped) {
         MailStore.Edge best = null;
@@ -120,9 +114,9 @@ final class WidenStep implements MailStep {
     }
 
     /**
-     * How many of some sort keys, newest first, lie at or above
-     * {@code floor} (all of them for none): the messages the list shows
-     * once the frontier reaches them.
+     * How many sort keys, newest first, lie at or above {@code floor}.
+     *
+     * <p>All of them for none: the messages the list shows once reached.
      */
     static int within(List<String> newestFirst, String floor) {
         int count = 0;

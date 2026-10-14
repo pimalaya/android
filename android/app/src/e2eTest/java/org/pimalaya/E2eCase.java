@@ -28,10 +28,11 @@ import java.util.concurrent.Callable;
 import java.util.function.BooleanSupplier;
 
 /**
- * What every end-to-end test stands on, once per target: the account built as
- * the connection flow builds it, a phone device and an observer device with a
- * store each, a tag of its own, the scratch mailboxes it creates and the
- * cleanup that removes them and every tagged message however the test ends.
+ * What every end-to-end test stands on, once per target.
+ *
+ * <p>The account built as the connection flow builds it, a phone and an
+ * observer device with a store each, a tag, scratch mailboxes, and a cleanup
+ * removing them and every tagged message however the test ends.
  */
 @RunWith(ParameterizedRobolectricTestRunner.class)
 public abstract class E2eCase {
@@ -67,8 +68,7 @@ public abstract class E2eCase {
     }
 
     /**
-     * The mail targets; a contacts or calendar test class shadows this with
-     * its domain's.
+     * The mail targets; a contacts or calendar test shadows this with its own.
      */
     @ParameterizedRobolectricTestRunner.Parameters(name = "{0}")
     public static Collection<Object[]> targets() {
@@ -182,8 +182,9 @@ public abstract class E2eCase {
     }
 
     /**
-     * Creates a scratch mailbox, calendar or address book the cleanup
-     * deletes, answering its name.
+     * Creates a scratch mailbox, calendar or book the cleanup deletes.
+     *
+     * <p>Answers its name.
      */
     protected String scratch() throws Exception {
         String name = tag + "-" + (scratch.size() + 1);
@@ -196,7 +197,7 @@ public abstract class E2eCase {
         return name;
     }
 
-    /** A message from the account to itself, its subject the tag and a label. */
+    /** A message from the account to itself, subject the tag and a label. */
     protected E2eMessage message(String label) {
         return new E2eMessage(
                 address, tag + " " + label, "<" + label + "." + tag + "@pimalaya-e2e.invalid>");
@@ -217,8 +218,9 @@ public abstract class E2eCase {
     }
 
     /**
-     * A second device on the same account, connected now: what reached the
-     * server, read back through the app's own sync.
+     * A second device on the account, connected now, reading the server back.
+     *
+     * <p>What reached the server, read through the app's own sync.
      */
     protected E2eDevice observer() throws Exception {
         if (observer == null) {
@@ -241,7 +243,7 @@ public abstract class E2eCase {
         }
     }
 
-    /** One pass over some collections of a device's account, which must not fail. */
+    /** One pass over some collections of a device's account; must not fail. */
     protected void pass(E2eDevice device, String... collections) {
         SyncPasses.MailPass pass = device.sync(address, List.of(collections));
         if (pass.failure != null) {
@@ -249,7 +251,7 @@ public abstract class E2eCase {
         }
     }
 
-    /** The collection of a device's account holding a role, which must exist. */
+    /** The collection of a device's account holding a role; it must exist. */
     protected String role(E2eDevice device, String role) {
         String collection = device.role(address, role);
         assumeTrue("not supported: the account marks no " + role + " mailbox", collection != null);
@@ -262,16 +264,18 @@ public abstract class E2eCase {
     }
 
     /**
-     * Holds once the check does, asked again with a growing pause until the
-     * patience (`e2e.patience`, seconds) runs out: providers settle late.
+     * Holds once the check does, retried with a growing pause.
+     *
+     * <p>Until `e2e.patience` seconds run out: providers settle late.
      */
     protected static void eventually(String what, BooleanSupplier check) throws Exception {
         settles(what, () -> check.getAsBoolean() ? null : "");
     }
 
     /**
-     * Holds once {@code state} answers null; else what it answers, the state
-     * seen last, ends the failure.
+     * Holds once {@code state} answers null.
+     *
+     * <p>Else its last answer ends the failure.
      */
     protected static void settles(String what, Callable<String> state) throws Exception {
         long patience = Long.getLong("e2e.patience", 120) * 1000;

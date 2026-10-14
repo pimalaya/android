@@ -15,9 +15,10 @@ import java.util.Map;
 import java.util.StringJoiner;
 
 /**
- * The few HTTP requests the suite makes itself, minting tokens and preparing
- * servers: JSON in, JSON out. A failure names the method, the URL and what
- * the server answered, never a header, so no credential reaches a report.
+ * The suite's own HTTP requests, minting tokens and preparing servers.
+ *
+ * <p>JSON in, JSON out. A failure names the method, the URL and the answer,
+ * never a header, so no credential reaches a report.
  */
 final class E2eHttp {
     private E2eHttp() {}
@@ -90,7 +91,9 @@ final class E2eHttp {
         return bytes.toString(StandardCharsets.UTF_8.name());
     }
 
-    /** The URL without its query, which never carries a secret here but may grow long. */
+    /**
+     * The URL without its query, which never holds a secret but may be long.
+     */
     private static String strip(String url) {
         int query = url.indexOf('?');
         return query < 0 ? url : url.substring(0, query);

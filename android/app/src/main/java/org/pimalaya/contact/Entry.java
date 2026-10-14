@@ -4,20 +4,25 @@ import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Card;
 
 /**
- * One replica in the contacts pool: a card, the addressbook it lives
- * in, and its write-time index columns (docs/merged-view.md), so
- * rendering never parses a vCard.
+ * One replica of the pool: a card, its book and index columns.
+ *
+ * <p>The write-time index (docs/merged-view.md) keeps rendering parse-free.
  */
 public final class Entry {
+    /** The addressbook the replica lives in. */
     public final Addressbook book;
+    /** The email of the book's account. */
     public final String accountEmail;
+    /** The card itself. */
     public final Card card;
     final String name;
     final String email;
     final String phone;
     final String info;
     final String uid;
+    /** The normalized content hash replicas compare by. */
     public final String hash;
+    /** Whether the replica is a sync conflict awaiting the user. */
     public final boolean conflicted;
 
     /** The replica's display name from its index, id fallback. */

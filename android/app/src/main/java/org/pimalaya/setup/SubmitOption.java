@@ -5,10 +5,9 @@ import org.pimalaya.client.AuthMethod;
 /**
  * One offered way to send: a server, or nowhere.
  *
- * <p>Its own type rather than another {@link SetupOption}, because it
- * is not a way to connect a domain. Nobody picks between reading mail
- * and sending it: the two ride together, the reading one decides how
- * the account signs in, and this one only says where the messages go.
+ * <p>Not a {@link SetupOption}: reading and sending ride together, the reading
+ * option decides how the account signs in, and this one only says where
+ * messages go.
  */
 final class SubmitOption {
     final String label;
@@ -17,8 +16,7 @@ final class SubmitOption {
     final String detail;
 
     /**
-     * Where mail is submitted, null until manual entry answers and
-     * for the row that says not to send at all.
+     * Where mail is submitted, null until manual entry answers or not sending.
      */
     String url;
 
@@ -26,23 +24,25 @@ final class SubmitOption {
     final boolean manual;
 
     /**
-     * What the mail grant asks for on its behalf, null when nothing: it
-     * signs in with the mail connection's credential, so a browser
-     * grant for mail has to cover sending too.
+     * What the mail grant asks for on its behalf, null when nothing.
+     *
+     * <p>It signs in with the mail connection's credential, so a browser grant
+     * for mail has to cover sending too.
      */
     final String scope;
 
     /**
-     * The provider API it submits through (`msgraph`, `gmail`), null for
-     * SMTP and the rows around it. Only an account reading over that API
-     * can: its token is the API's, where SMTP takes the mail server's.
+     * The provider API it submits through (`msgraph`, `gmail`), null for SMTP.
+     *
+     * <p>Only an account reading over that API can: its token is the API's.
      */
     final String through;
 
     /**
-     * How an SMTP row signs in, null for the rows that name no method.
-     * It signs in with the mail connection's credential, so only a row
-     * of the same kind as the mail sign-in can use it.
+     * How an SMTP row signs in, null for rows naming no method.
+     *
+     * <p>It uses the mail connection's credential, so only a row of the mail
+     * sign-in's kind can.
      */
     final AuthMethod.Type auth;
 

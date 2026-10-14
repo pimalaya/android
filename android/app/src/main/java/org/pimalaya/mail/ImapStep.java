@@ -7,24 +7,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * An IMAP account's step ({@link MailStep}): its mailboxes widened from
- * the store, then the bodies the step brought read in streamed batches,
- * one mailbox after another on the account's session.
+ * An IMAP account's step ({@link MailStep}): widened from the store, streamed.
  *
- * <p>The first step takes the account's floor, the {@code Date} of the
- * {@link #COUNT}th newest message by {@code Date} across the mailboxes it
- * brings bodies to (an order statistic of each one's newest, which the
- * bridge reads with {@code UID SORT} where the server has it and from a
- * sample of the newest UIDs elsewhere, so no imported message drags it
- * back), so it brings about {@link #COUNT} bodies; it lists every mailbox
- * from that floor, for the checkpoint each next pass is a delta from, and
- * leaves it as the frontier. A later step widens as {@link WidenStep}
- * does: the mailbox holding the most recent coverage floor by
- * {@link #COUNT} until about that many stored messages lie below the
- * frontier, the new frontier the {@code Date} of the {@link #COUNT}th of
- * them. Either way, the bodies between the new frontier and the old one
- * are read whole after it ({@link MailEngine#download}), the junk and the
- * trash left out.
+ * <p>The first lists every mailbox from the {@link #COUNT}th newest date
+ * (UID SORT or samples, so imports do not drag it); later ones widen as
+ * {@link WidenStep}; {@link MailEngine#download} reads the bodies between.
  */
 final class ImapStep implements MailStep {
     @Override
@@ -53,12 +40,11 @@ final class ImapStep implements MailStep {
     }
 
     /**
-     * The first step's listing: every mailbox from the account's floor,
-     * the {@code Date} of the {@link #COUNT}th newest message across the
-     * mailboxes it brings bodies to, each one's {@link #COUNT} newest read
-     * ({@link MailEngine#newest}); its frontier that floor, all mail when
-     * they hold no more than a step in all. A mailbox the server refuses
-     * to open is left out ({@link MailEngine#skip}), unless every one is.
+     * The first step's listing: every mailbox from the account's floor.
+     *
+     * <p>Each one's {@link #COUNT} newest read ({@link MailEngine#newest}); the
+     * frontier is the floor, all mail when they hold one step in all. A refused
+     * mailbox is left out ({@link MailEngine#skip}) unless every one is.
      */
     private static Outcome opening(MailEngine engine, List<String> collections) {
         List<String> dates = new ArrayList<>();
@@ -102,9 +88,9 @@ final class ImapStep implements MailStep {
     }
 
     /**
-     * The mailboxes a step brings bodies to: {@code only} alone when given,
-     * none of the junk, the trash, or one kept whole (its bodies are the
-     * body step's).
+     * The mailboxes a step brings bodies to: {@code only} alone when given.
+     *
+     * <p>Never junk, trash, or one kept whole (the body step's).
      */
     private static List<String> stepped(
             MailEngine engine, List<String> collections, String only) {
@@ -121,11 +107,11 @@ final class ImapStep implements MailStep {
     }
 
     /**
-     * Downloads the bodies the store lacks of the messages of
-     * {@code stepped} dated from {@code since} (null for all) to below
-     * {@code until} (null for no ceiling), whatever the frontier says yet,
-     * one mailbox after another, planned on the engine's tally first
-     * ({@link MailEngine#tally}); answers how many messages lie there.
+     * Downloads the lacking bodies of {@code stepped} from {@code since}.
+     *
+     * <p>Up to below {@code until} (nulls unbounded), one mailbox after
+     * another, planned on the tally first ({@link MailEngine#tally}); answers
+     * how many messages lie there.
      */
     private static int download(
             MailEngine engine, List<String> stepped, String since, String until) {

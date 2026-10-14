@@ -28,8 +28,9 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * The body step's plan over a real store and the kept choices: what an
- * account downloads under its frontier, the filter and the mailboxes
+ * The body step's plan over a real store and the kept choices.
+ *
+ * <p>What an account downloads under its frontier, the filter and the mailboxes
  * kept whole, and what it owes.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -151,7 +152,8 @@ public class BodyPlanTest {
         message("Trash", "2", NEW, null);
         MailOwed.owe(context, collection("Junk"), List.of("1"));
         MailOwed.owe(context, collection("Trash"), List.of("2"));
-        // NOTE: the filter quiets both once listed; ticked, they still plan nothing.
+        // NOTE: the filter quiets both once listed; ticked, they still plan
+        // nothing.
         shown("Junk", true);
         shown("Trash", true);
 

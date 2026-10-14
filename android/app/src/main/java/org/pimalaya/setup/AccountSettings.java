@@ -51,12 +51,11 @@ import org.pimalaya.ui.Sections;
 import org.pimalaya.ui.SyncPill;
 
 /**
- * The full-screen account settings controller behind the drawer: one
- * account's page, opened over the drawer, as {@link Sections} cards under
- * the account's identity. Every change applies when it is made, so the
- * page always says what the account does. It reaches the base, store and
- * io executor through the host, which keeps the overlay navigation and
- * calls in through {@link #open} and {@link #leave}.
+ * The full-screen account settings page, opened over the drawer.
+ *
+ * <p>One account's {@link Sections} cards under its identity. Every change
+ * applies when made, so the page says what the account does. The activity
+ * keeps the navigation and calls {@link #open} and {@link #leave}.
  */
 public final class AccountSettings {
     private final Host host;
@@ -77,23 +76,25 @@ public final class AccountSettings {
     private String settingsEmail;
 
     /**
-     * The list screen the drawer was raised over, restored on the way
-     * out. The overlay covers the drawer, which covers a list, and that
-     * list is still there underneath: landing the chrome on a different
-     * one would leave the bar describing a screen nobody navigated to.
+     * The list screen the drawer was raised over, restored on the way out.
+     *
+     * <p>That list is still under the overlay and the drawer: landing the
+     * chrome on another would leave the bar describing a screen nobody
+     * navigated to.
      */
     private int cameFrom = Panels.MAIL;
 
     /**
-     * Whether another app already fills the phone's Contacts app with the
-     * open account's address ({@link Accounts#elsewhere}), looked for as the
-     * page opens.
+     * Whether another app fills the phone's Contacts app with this address.
+     *
+     * <p>{@link Accounts#elsewhere}, looked for as the page opens.
      */
     private boolean elsewhere;
 
-    /** The same for the phone's calendars ({@link Accounts#calendarsElsewhere}). */
+    /** The same for the calendars ({@link Accounts#calendarsElsewhere}). */
     private boolean calendarsElsewhere;
 
+    /** Builds the page; {@link #bind} wires it once laid out. */
     public AccountSettings(
             Host host,
             SyncPasses.Parts parts,
@@ -224,8 +225,9 @@ public final class AccountSettings {
     }
 
     /**
-     * The account switch: off, the account syncs nothing and the lists and
-     * their filters leave it out ({@link AccountActivation}).
+     * The account switch: off, the account syncs nothing.
+     *
+     * <p>The lists and their filters leave it out ({@link AccountActivation}).
      */
     private void addActivation(Sections sections, String email) {
         Switch toggle = new Switch(host);
@@ -251,9 +253,10 @@ public final class AccountSettings {
     }
 
     /**
-     * The mail card: the name mail goes out under, how far back it syncs,
-     * since when its mail is on the phone ({@link MailWindow}), and where
-     * it sends through.
+     * The mail card: sender name, sync bound, window and submission server.
+     *
+     * <p>The window is since when its mail is on the phone ({@link
+     * org.pimalaya.mail.MailWindow}).
      */
     private void addMail(Sections sections, AccountEntry account) {
         String email = account.email;
@@ -337,9 +340,10 @@ public final class AccountSettings {
     }
 
     /**
-     * Bounds the account's mail: a narrower bound frees what falls below it
-     * at once, the messages staying on the server; a wider one is listed by
-     * the next sync.
+     * Bounds the account's mail.
+     *
+     * <p>A narrower bound frees what falls below it at once, the messages
+     * staying on the server; a wider one is listed by the next sync.
      */
     private void bound(String email, int months) {
         host.io.execute(
@@ -372,9 +376,10 @@ public final class AccountSettings {
     }
 
     /**
-     * The background card ({@link BackgroundCheck}): how often the account
-     * syncs while the app is closed, and whether its new mail notifies,
-     * which needs the first.
+     * The background card ({@link BackgroundCheck}).
+     *
+     * <p>How often the account syncs while the app is closed, and whether its
+     * new mail notifies, which needs the first.
      */
     private void addBackground(Sections sections, AccountEntry account) {
         String email = account.email;
@@ -436,12 +441,11 @@ public final class AccountSettings {
     }
 
     /**
-     * The addressbooks card: a switch per book, and under a book that is on
-     * whether it syncs with the server and shows in the phone's contacts,
-     * led by a line when another app already fills the phone's Contacts app
-     * with the address. A book reads as off the phone while the contacts
-     * permission is missing. Turning a book on brings it to the phone when
-     * the account's other books are there, without asking anything.
+     * The addressbooks card: a switch per book, then its sync and phone rows.
+     *
+     * <p>Led by a line when another app fills the phone's Contacts app. A book
+     * reads as off the phone while the contacts permission is missing; one
+     * turned on joins the phone when the account's other books are there.
      */
     private void addBooks(Sections sections, String email) {
         List<View> rows = new ArrayList<>();
@@ -522,10 +526,9 @@ public final class AccountSettings {
 
     /**
      * Writes a book's switches; the contacts root and the phone follow them.
-     * Turned on for the phone while the contacts permission is missing, it
-     * is asked first, and refused leaves the book off it; the projection
-     * follows on the dock. Turned off, the phone's copy goes after one
-     * last pass.
+     *
+     * <p>On for the phone, the contacts permission is asked first and a refusal
+     * leaves the book off it. Off, the phone's copy goes after one last pass.
      */
     private void setBook(BookEntry entry, boolean enabled, boolean remote, boolean local) {
         String url = entry.book.url();
@@ -557,11 +560,11 @@ public final class AccountSettings {
     }
 
     /**
-     * The calendars card: a row per calendar, its filter state under its
-     * name and whether it shows in the phone's calendar under that, led by a
-     * line when another app already fills the phone's calendar with the
-     * address. The switch still shows it there then, and reads as off while
-     * the calendar permission is missing.
+     * The calendars card: a row per calendar, its filter and phone switches.
+     *
+     * <p>Led by a line when another app fills the phone's calendar with the
+     * address; the switch still shows it there then, and reads as off while the
+     * calendar permission is missing.
      */
     private void addCalendars(Sections sections, String email) {
         List<View> rows = new ArrayList<>();
@@ -603,9 +606,10 @@ public final class AccountSettings {
     }
 
     /**
-     * A calendar's phone switch. Turned on, the calendar permission is asked
-     * first, and refused leaves the calendar off the phone; turned off, its
-     * row goes after one last pass. The phone's calendars follow either way.
+     * A calendar's phone switch; the phone's calendars follow either way.
+     *
+     * <p>On, the calendar permission is asked first and a refusal leaves it off
+     * the phone. Off, its row goes after one last pass.
      */
     private void setCalendar(String email, String calendar, boolean on, List<String> siblings) {
         if (!on) {
@@ -635,8 +639,9 @@ public final class AccountSettings {
     }
 
     /**
-     * The servers card, read only: one row per host, naming the domains it
-     * serves, over which protocols and how it signs in.
+     * The servers card, read only: one row per host.
+     *
+     * <p>Each names the domains it serves, the protocols and how it signs in.
      */
     private void addServers(Sections sections, AccountEntry account) {
         Map<String, Server> servers = new LinkedHashMap<>();
@@ -756,8 +761,9 @@ public final class AccountSettings {
     }
 
     /**
-     * A single-choice dialog: its title, a line of context and the choices
-     * as radio rows. A tap applies and closes; Cancel leaves it as it was.
+     * A single-choice dialog of radio rows under a title and a context line.
+     *
+     * <p>A tap applies and closes; Cancel leaves it as it was.
      */
     private void choose(int title, int message, int choices, int current, IntConsumer picked) {
         LinearLayout content = new LinearLayout(host);
@@ -827,12 +833,10 @@ public final class AccountSettings {
     }
 
     /**
-     * Asks for the server this account sends through, emptied to send
-     * through none.
+     * Asks for the server this account sends through, emptied for none.
      *
-     * <p>A host and a port, port 465 when none is typed, implicit TLS
-     * either way: the same endpoint the advanced setup takes, for the
-     * same reason, which is that this client has no STARTTLS step.
+     * <p>A host and a port, 465 when none is typed, implicit TLS either way:
+     * the advanced setup's endpoint, since this client has no STARTTLS step.
      */
     private void promptSubmission(String current) {
         String email = settingsEmail;
@@ -897,8 +901,9 @@ public final class AccountSettings {
     }
 
     /**
-     * Confirms, then removes the account and everything under it,
-     * leaving its settings screen for the drawer underneath.
+     * Confirms, then removes the account and everything under it.
+     *
+     * <p>Leaves its settings screen for the drawer underneath.
      */
     private void confirmDeleteAccount(String email) {
         // NOTE: a running pass would write the account back as it goes.

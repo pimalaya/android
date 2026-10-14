@@ -21,20 +21,11 @@ import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
 
 /**
- * A list's filter page: each account with a checkbox, its collections
- * indented below with theirs, over the domain's {@link MergedFilter}.
+ * The filter page over a domain's {@link MergedFilter}, a box per collection.
  *
- * <p>Checkboxes rather than switches, to stay apart from an account's on and
- * off in its settings, which decides what syncs at all: an account that is off
- * is not listed here. Unticking an account folds its collections away, each
- * keeping its own box for when the account is ticked again. The ticks are a
- * draft until Apply, which keeps them and syncs what they newly take
- * ({@link Filters#apply}); closing the page drops them.
- *
- * <p>On calendars and address books, the account's default collection says
- * so, and a writable one of an account whose source names no default offers
- * "Set as default" ({@link DefaultCollection}). A mailbox offers "Download"
- * instead, which keeps it whole offline ({@link MailOffline}).
+ * <p>Checkboxes, not switches: an account's switch in its settings decides what
+ * syncs at all. Ticks are a draft until Apply keeps them and syncs what they
+ * newly take ({@link Filters#apply}); closing the page drops them.
  */
 public final class FilterPage {
     /** One account and its collections, as the page lists them. */
@@ -63,7 +54,7 @@ public final class FilterPage {
     /** The rosters the page lists and what Apply runs. */
     private final Filters filters;
 
-    /** Runs once a filter changed: the lists and the bar's filter icon follow. */
+    /** Run on a filter change: the lists and the bar's filter icon follow. */
     private final Runnable filterChanged;
 
     /** The domain on the page, null while it is closed. */
@@ -78,12 +69,14 @@ public final class FilterPage {
     /** The list screen the page was raised over, restored on the way out. */
     private int cameFrom = Panels.MAIL;
 
+    /** The filter page; {@code filterChanged} runs once a filter changed. */
     public FilterPage(Host host, Filters filters, Runnable filterChanged) {
         this.host = host;
         this.filters = filters;
         this.filterChanged = filterChanged;
     }
 
+    /** Wires the page's buttons and list. */
     public void setUp() {
         host.findViewById(R.id.filter_back).setOnClickListener(view -> leave());
         host.findViewById(R.id.filter_reset)
@@ -127,10 +120,7 @@ public final class FilterPage {
         return draft;
     }
 
-    /**
-     * Keeps the page's ticks and closes it: the lists follow, and what the
-     * ticks newly take syncs ({@link Filters#apply}).
-     */
+    /** Keeps the ticks and closes the page, syncing what they newly take. */
     private void apply() {
         MergedFilter kept = files ? MergedFilter.files(host) : MergedFilter.of(host, domain);
         PimDomain applied = files ? null : domain;
@@ -232,10 +222,11 @@ public final class FilterPage {
     }
 
     /**
-     * "Download this mailbox": keeps one mailbox whole, listed past its
-     * account's bound and every body downloaded by the body step
-     * ({@link MailBodies}), once confirmed. Stopping keeps what is stored
-     * until the bound is narrowed again.
+     * "Download this mailbox": keeps one mailbox whole, once confirmed.
+     *
+     * <p>Listed past its account's bound, every body downloaded by the body
+     * step ({@link org.pimalaya.mail.MailBodies}). Stopping keeps what is
+     * stored until the bound narrows again.
      */
     private void download(PimdirCollections.Stored collection, boolean whole) {
         if (!whole) {
@@ -261,10 +252,11 @@ public final class FilterPage {
     }
 
     /**
-     * One row: the checkbox at the start, the name beside it with an
-     * optional line under it, indented by {@code indent} for a collection;
-     * {@code action}, when given, is offered at the end under {@code actionLabel}:
-     * "Set as default", or a mailbox's "Download" and "Stop".
+     * One row: a checkbox, the name and an optional line under it.
+     *
+     * <p>Indented by {@code indent} for a collection; {@code action}, when
+     * given, sits at the end under {@code actionLabel}: "Set as default", or a
+     * mailbox's "Download" and "Stop".
      */
     private View row(
             String label,

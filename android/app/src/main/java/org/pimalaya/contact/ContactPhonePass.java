@@ -12,24 +12,20 @@ import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
 
 /**
- * The phone collection's engine pass, same shape as the server
- * one: reconcile the hub with the book's raw contacts, hydrate the
- * bodies the phone round brought, resolve divergences by the same
- * three-way merge. Skipped silently when the spoke is unavailable
- * (no contacts permission, or no Android account: the book is not
- * mirrored).
+ * The phone collection's engine pass, shaped like the server one.
+ *
+ * <p>Reconciles the hub with the book's raw contacts, hydrates, resolves by
+ * three-way merge. Skipped when the spoke is unavailable (no permission, or the
+ * book is not mirrored).
  */
 public final class ContactPhonePass extends PhonePass {
-    /** The phone spoke's adapter, whose rows are also a conflict's remote side. */
+    /** The phone spoke's adapter; its rows are a conflict's remote side. */
     private final PhoneRemote phone;
 
-    /**
-     * The report the running sync flows tally into (the driver seam
-     * feeds it as pushes are accepted and writes land); null outside
-     * syncs.
-     */
+    /** The report the running sync tallies into; null outside syncs. */
     private ContactEngine.Report tally;
 
+    /** A phone pass over the store and the bridge. */
     public ContactPhonePass(PimdirDb pimdir, Clients clients) {
         this(pimdir, clients, new PhoneRemote(pimdir.context(), pimdir));
     }
@@ -40,8 +36,7 @@ public final class ContactPhonePass extends PhonePass {
     }
 
     /**
-     * The book's phone pass ({@link #sync(String)}), tallying into
-     * {@code report}; answers whether it wrote into the store.
+     * The book's phone pass, tallying into {@code report}; true if it wrote.
      */
     public boolean sync(String url, ContactEngine.Report report) throws JSONException {
         tally = report;
@@ -63,14 +58,10 @@ public final class ContactPhonePass extends PhonePass {
     }
 
     /**
-     * Resolves one phone-conflicted row the same way, and always: the
-     * phone side carries no field the user could be asked about that the
-     * merge cannot settle, so the three-way result stands.
+     * Resolves one phone-conflicted row, always: the three-way result stands.
      *
-     * <p>The revision is refreshed from the raw contact rather than from
-     * the stored one, so the resolving push is conditioned on the state
-     * the merge reconciled with rather than the one the conflict was
-     * first noticed at.
+     * <p>The phone has no field the merge cannot settle. The revision comes
+     * from the raw contact, so the push is conditioned on the merged state.
      */
     private void resolvePhoneConflict(String collection, JSONObject conflict)
             throws JSONException {

@@ -28,33 +28,30 @@ import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.Picker;
 
 /**
- * The contact editor's flows over one working {@link EditSession}:
- * opening a merged row, a conflict or a new card into the form, merging
- * replicas, the addressbooks dialog and saving ({@link ContactWriter}).
- * The host keeps the
- * screen table and the chrome, which read the session through
- * {@link #edit} when they render.
+ * The contact editor's flows over one working {@link EditSession}.
+ *
+ * <p>Opening a merged row, a conflict or a new card, merging, the addressbooks
+ * dialog and saving ({@link ContactWriter}). The host keeps the screens and
+ * chrome, reading the session through {@link #edit}.
  */
 public final class ContactEditor {
     private final Host host;
     private final ContactParts parts;
     private final ContactForm form;
 
-    /** Rebuilds the contacts list from the base (staged edits included). */
+    /** Rebuilds the contacts list from the store (staged edits included). */
     private final Runnable reloadList;
 
     /** The contact save fan-out over the working edit session. */
     private final ContactWriter writer;
 
-    /**
-     * The contacts screen, whose selection a merge leaves; it binds itself
-     * here when built, the two referencing each other.
-     */
+    /** The contacts screen a merge leaves; it binds itself here when built. */
     ContactsList list;
 
     /** The editor's working state, replaced blank when it leaves. */
     private EditSession edit = new EditSession();
 
+    /** An editor over the shared parts, drawing into {@code form}. */
     public ContactEditor(Host host, ContactParts parts, ContactForm form, Runnable reloadList) {
         this.host = host;
         this.parts = parts;
@@ -74,10 +71,10 @@ public final class ContactEditor {
     }
 
     /**
-     * Opens a merged row in the editor: one form for the whole contact
-     * (docs/merged-view.md), the union of the replicas' documents with
-     * per-field alternative chips when they diverge. Saving fans the
-     * form out onto every replica.
+     * Opens a merged row: one form for the whole contact (docs/merged-view.md).
+     *
+     * <p>The union of the replicas' documents, with chips where they diverge;
+     * saving fans the form out onto every replica.
      */
     public void openGroup(Group group) {
         if (group.conflicted()) {
@@ -88,12 +85,10 @@ public final class ContactEditor {
     }
 
     /**
-     * Opens the resolution form on a both-sides-edited conflict: the
-     * bridge three-way merges the stored base, the local edit and the
-     * captured remote (the newer side by REV pre-filled, both offered as
-     * chips), and the editor loads it in conflict mode. A conflict with
-     * nothing genuinely colliding (only list edits, which merge cleanly)
-     * resolves straight away without a prompt.
+     * Opens the resolution form on a both-sides-edited conflict.
+     *
+     * <p>The bridge three-way merges base, local and captured remote (newer by
+     * REV pre-filled, both as chips). Nothing colliding resolves at once.
      */
     private void openConflict(Group group) {
         Entry replica = null;
@@ -131,9 +126,8 @@ public final class ContactEditor {
         }
 
         if (resolution.resolved()) {
-            // Nothing needs the user: stage the clean merge and clear the
-            // conflict. The toast is the tap's only visible outcome, so
-            // without it the vanishing flag reads as a bug.
+            // NOTE: the toast is the tap's only visible outcome; without it
+            // the vanishing conflict flag reads as a bug.
             try {
                 new ContactStager(parts.pimdir(), parts.clients())
                         .edit(replica.book.url(), handle, resolution.vcard());
@@ -160,10 +154,10 @@ public final class ContactEditor {
     }
 
     /**
-     * Starts a new contact in the default address book of the account in
-     * view, asking only when there is none ({@link DefaultCollection}). With
-     * no account the contact is created unattached (the hidden local book);
-     * the local book is never offered as an explicit target.
+     * Starts a new contact in the default book of the account in view.
+     *
+     * <p>Asks only when there is none ({@link DefaultCollection}). With no
+     * account it goes in the hidden local book, never offered as a target.
      */
     public void addContact(MergedFilter shown) {
         Map<String, BookEntry> byUrl = new HashMap<>();
@@ -176,8 +170,6 @@ public final class ContactEditor {
             }
         }
 
-        // With no real account the contact is born unattached, in the
-        // hidden local book.
         if (byUrl.isEmpty()) {
             if (local != null) {
                 openNewContact(local.book, local.accountEmail);
@@ -253,9 +245,7 @@ public final class ContactEditor {
     }
 
     /**
-     * Merges into the survivor: a straight absorb when every card
-     * already carries the same content (the cards of one merged
-     * contact, nothing to reconcile), the merge form otherwise.
+     * Merges into the survivor: absorbed when all cards agree, else the form.
      */
     private void performMerge(List<Entry> replicas, Entry survivor) {
         if (ContactMerge.identical(replicas)) {
@@ -298,10 +288,10 @@ public final class ContactEditor {
     }
 
     /**
-     * Opens the edit form on a merged contact: the single document when
-     * the replicas agree, their union with per-field alternative chips
-     * when they diverge. Saving stages the form onto every replica.
-     * Returns false when the documents could not be read.
+     * Opens the edit form on a merged contact; false when unreadable.
+     *
+     * <p>The single document when replicas agree, their union with chips when
+     * they diverge. Saving stages the form onto every replica.
      */
     boolean openMerged(List<Entry> replicas) {
         Entry primary = replicas.get(0);
@@ -342,9 +332,9 @@ public final class ContactEditor {
     }
 
     /**
-     * Leaves the editor without saving. The list still reloads: the
-     * addressbooks dialog stages copies and removals it must reflect.
-     * An unsaved Merge is abandoned.
+     * Leaves the editor without saving; an unsaved merge is abandoned.
+     *
+     * <p>The list still reloads: the addressbooks dialog stages changes.
      */
     public void close() {
         edit = new EditSession();
@@ -353,16 +343,11 @@ public final class ContactEditor {
     }
 
     /**
-     * The addressbooks dialog of the open contact, the one placement
-     * gesture: checked means the contact exists there, through any of
-     * its cards. Only real addressbooks are listed; unchecking every one
-     * is allowed and leaves the contact unattached, living in the hidden
-     * local book (it shows muted in the list, Delete is still the way to
-     * remove it). The dialog only records the desired state (reopening
-     * shows it); everything applies on SAVE: a staged membership when the
-     * contact already has a card on that account-level backend, a copied
-     * card sharing the vCard UID anywhere else, a membership removal or
-     * the card's staged delete on uncheck.
+     * The open contact's addressbooks dialog: checked means placed there.
+     *
+     * <p>Unchecking all leaves it in the hidden local book. The desired state
+     * applies on SAVE: memberships on account-level backends, UID-sharing
+     * copies elsewhere, removals or deletes on uncheck.
      */
     public void manageBooks() {
         if (edit.replicas.isEmpty()) {
@@ -394,10 +379,9 @@ public final class ContactEditor {
     }
 
     /**
-     * Stages the edited contact in the base and returns to the list
-     * (delegated to {@link ContactWriter}). The form model applies to
-     * every replica's own document (docs/merged-view.md), fanning out
-     * onto every replica, conflict and merge branches included.
+     * Stages the edited contact ({@link ContactWriter}), back to the list.
+     *
+     * <p>The form applies to every replica's document (docs/merged-view.md).
      */
     public void save() {
         writer.save();
@@ -408,9 +392,9 @@ public final class ContactEditor {
     }
 
     /**
-     * The bridge's index of a vCard for one-off lookups (name, uid);
-     * the hot paths read the same index from the store's columns
-     * instead. Empty on a parse failure.
+     * The bridge's index of a vCard for one-off lookups; empty if unparsable.
+     *
+     * <p>Hot paths read the same index from the store's columns.
      */
     CardIndex cardIndex(String vcard) {
         try {

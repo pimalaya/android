@@ -25,9 +25,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Where a new event or contact goes: the collection its source names default
- * (stored as pimdir's {@code default} role), else the account's only writable
- * one, else the user's choice; a read-only collection is never offered.
+ * Where a new event or contact goes.
+ *
+ * <p>The collection its source names default (pimdir's {@code default} role),
+ * else the account's only writable one, else the user's choice; a read-only
+ * collection is never offered.
  */
 @RunWith(RobolectricTestRunner.class)
 public class DefaultCollectionTest {
@@ -97,7 +99,7 @@ public class DefaultCollectionTest {
         assertTrue(events.loadCalendars().get(1).isDefault);
     }
 
-    /** A source naming none falls back to the account's only writable calendar. */
+    /** A source naming none falls back to the only writable calendar. */
     @Test
     public void theOnlyWritableCalendarIsTheDefault() {
         events.replaceCalendars(
@@ -106,7 +108,9 @@ public class DefaultCollectionTest {
         assertEquals("mine", choice().direct.name);
     }
 
-    /** Several writable and none named: the user is asked, then their choice holds. */
+    /**
+     * Several writable, none named: the user is asked, and the choice holds.
+     */
     @Test
     public void theUsersChoiceIsTheLastFallback() {
         events.replaceCalendars(
@@ -169,7 +173,11 @@ public class DefaultCollectionTest {
         assertEquals("john", choice.direct.name);
     }
 
-    /** The Default chip keeps one collection per account listed, none for an account without. */
+    /**
+     * The Default chip lists one collection per account.
+     *
+     * <p>None for an account without one.
+     */
     @Test
     public void theDefaultChipKeepsOneDefaultPerAccount() {
         events.replaceCalendars(

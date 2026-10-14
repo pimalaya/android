@@ -24,9 +24,10 @@ import org.robolectric.RuntimeEnvironment;
 import java.util.List;
 
 /**
- * A calendar pass's triage of its conflicted entries, on the real bridge and
- * store: what the merge settles is staged on the binding that conflicted, on
- * either source, and what it cannot stays marked for the entry page.
+ * A calendar pass's triage of conflicted entries, on the real bridge and store.
+ *
+ * <p>What the merge settles is staged on the binding that conflicted, on either
+ * source; what it cannot stays marked for the entry page.
  */
 @RunWith(RobolectricTestRunner.class)
 public class CalendarTriageTest {
@@ -78,7 +79,7 @@ public class CalendarTriageTest {
                 .put("body", body);
     }
 
-    /** A placement of the entry on one source, its base agreed at {@link #BASE}. */
+    /** The entry placed on one source, its base agreed at {@link #BASE}. */
     private static JSONObject placement(String collection, String handle, String body)
             throws Exception {
         return new JSONObject()
@@ -98,8 +99,9 @@ public class CalendarTriageTest {
     }
 
     /**
-     * The entry edited here into {@code local}, and conflicted on the source
-     * {@code collection} names, which holds {@code remote}.
+     * The entry edited here into {@code local}, conflicted on a source.
+     *
+     * <p>The source {@code collection} names, which holds {@code remote}.
      */
     private void conflict(String collection, String handle, String local, String remote)
             throws Exception {
@@ -194,9 +196,9 @@ public class CalendarTriageTest {
 
         engine.mutateRemove(calendar, "e.ics");
 
-        // The decision on the conflict: the delete is staged against the
-        // revision recorded when the edit there was seen, never the stale
-        // base, so a later edit there still refuses it.
+        // NOTE: the delete is staged against the revision recorded when the
+        // edit there was seen, never the stale base, so a later edit there
+        // still refuses it.
         JSONObject row = storage.loadRow(calendar, "e.ics");
         assertTrue(row.getBoolean("deleted"));
         assertEquals("etag-remote", row.getString("etag"));

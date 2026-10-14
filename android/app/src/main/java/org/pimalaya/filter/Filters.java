@@ -20,8 +20,9 @@ import org.pimalaya.sync.SyncCoordinator;
 import org.pimalaya.sync.SyncPasses;
 
 /**
- * What the filter page lists and what Apply does past the ticks: the
- * rosters of accounts and collections, and the syncs a newly ticked
+ * What the filter page lists, and what Apply does past keeping the ticks.
+ *
+ * <p>The rosters of accounts and collections, and the syncs a newly ticked
  * collection takes.
  */
 public final class Filters {
@@ -40,6 +41,7 @@ public final class Filters {
     /** Every connected account: the activity's live list. */
     private final List<AccountEntry> accounts;
 
+    /** The rosters and syncs over the activity's live account list. */
     public Filters(
             Context context,
             SyncPasses passes,
@@ -56,8 +58,10 @@ public final class Filters {
     }
 
     /**
-     * What the filter page lists for Files: the device's folders under the
-     * device, and each account that is on with its attachments collection.
+     * What the filter page lists for Files.
+     *
+     * <p>The device's folders under the device, and each account that is on
+     * with its attachments collection.
      */
     List<FilterPage.Account> filesRoster() {
         List<FilterPage.Account> roster = new ArrayList<>();
@@ -79,12 +83,11 @@ public final class Filters {
     }
 
     /**
-     * Keeps the filter page's ticks ({@code ticks}) in {@code kept}, the
-     * filter of {@code domain} (null for the Files tab), and syncs what they
-     * newly take: the first step of each mailbox never listed, a later pull
-     * catching up one listed before; a pass over the books or the
-     * calendars when one is newly ticked. What they untick is hidden and
-     * synced no more, its stored items kept.
+     * Keeps {@code ticks} in {@code kept} and syncs what they newly take.
+     *
+     * <p>{@code domain} is null for Files. A mailbox never listed takes its
+     * first step, one listed before a pull, a newly ticked book or calendar a
+     * pass. What they untick is hidden and no longer synced, its items kept.
      */
     void apply(PimDomain domain, MergedFilter kept, MergedFilter ticks, Runnable changed) {
         Map<String, List<String>> taken =
@@ -111,8 +114,9 @@ public final class Filters {
     }
 
     /**
-     * The collections {@code ticks} takes that {@code kept} did not, by
-     * account in the roster's order.
+     * The collections {@code ticks} newly takes over {@code kept}.
+     *
+     * <p>By account, in the roster's order.
      */
     static Map<String, List<String>> taken(
             List<FilterPage.Account> roster,
@@ -132,10 +136,11 @@ public final class Filters {
     }
 
     /**
-     * What the filter page lists for a domain: every account that is on and
-     * covers it, each with its collections, the outbox among a mail
-     * account's and the on-device book as an account of its own. An account
-     * holding none is left out, having nothing to tick.
+     * What the filter page lists for a domain, account by account.
+     *
+     * <p>Every account that is on and covers it, with its collections: a mail
+     * account's outbox among them, the on-device book as an account of its own.
+     * An account holding none is left out.
      */
     List<FilterPage.Account> roster(PimDomain domain) {
         List<String> emails = new ArrayList<>();

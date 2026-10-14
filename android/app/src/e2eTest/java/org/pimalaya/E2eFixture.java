@@ -5,11 +5,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
- * Prepares and cleans one target's server through the provider's own API,
- * never through the app: the scratch mailboxes a test works in, the messages
- * it seeds, and the sweep that removes whatever carries its tag. Every write
- * names a scratch mailbox or a tagged message, so nothing else on the account
- * is ever touched.
+ * Prepares and cleans one target's server through the provider's API.
+ *
+ * <p>Never through the app: scratch mailboxes, seeded messages, and the sweep
+ * of whatever carries the tag. Every write names a scratch mailbox or a tagged
+ * message, so nothing else on the account is touched.
  */
 interface E2eFixture extends AutoCloseable {
     /** What every scratch mailbox name and message tag starts with. */
@@ -35,24 +35,26 @@ interface E2eFixture extends AutoCloseable {
         throw new UnsupportedOperationException("no keywords on this target");
     }
 
-    /** Takes a message out of a mailbox elsewhere, keeping it: a Gmail archive. */
+    /** Takes a message out of a mailbox, keeping it: a Gmail archive. */
     default void unfile(String mailbox, String subject) throws Exception {
         throw new UnsupportedOperationException("no labels on this target");
     }
 
     /**
-     * Where the server files the messages with this subject, read through
-     * the provider's own API: mailbox names, Gmail label names (a system
-     * label named by its id, `TRASH`).
+     * Where the server files the messages with this subject, by provider API.
+     *
+     * <p>Mailbox names, or Gmail labels (a system label by its id, `TRASH`).
      */
     List<String> where(String subject) throws Exception;
 
-    /** Deletes for good every message whose subject carries the tag, account-wide. */
+    /** Deletes for good every tagged message, account-wide. */
     void sweep(String tag) throws Exception;
 
     /**
-     * Deletes what a run older than {@code before} left behind: its scratch
-     * mailboxes, named by their tag's timestamp, and its tagged messages.
+     * Deletes what a run older than {@code before} left behind.
+     *
+     * <p>Its scratch mailboxes, named by their tag's timestamp, and its tagged
+     * messages.
      */
     void sweepStale(LocalDateTime before) throws Exception;
 

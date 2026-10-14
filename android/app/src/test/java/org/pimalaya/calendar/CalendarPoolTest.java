@@ -43,14 +43,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * An account's calendars run side by side, and a calendar's entries are read
- * in as few requests as the backend allows: a first sync of 120 events over
- * three Graph calendars, once read one request an event and one calendar
- * after another, takes a fraction of the time.
+ * An account's calendars run side by side, read in as few requests as possible.
  *
- * <p>The server answers every request after a fixed latency, which is what a
- * pass waits on; the calendar driver's reads, the engine and the store are
- * the real thing.
+ * <p>A first sync of 120 events over three Graph calendars takes a fraction of
+ * the time one request per event, calendar after calendar, took. The server
+ * answers after a fixed latency; driver, engine and store are real.
  */
 @RunWith(RobolectricTestRunner.class)
 public class CalendarPoolTest {
@@ -89,7 +86,7 @@ public class CalendarPoolTest {
         use(EMAIL);
     }
 
-    /** Runs the next passes as another account's, over collections of its own. */
+    /** Runs the next passes as another account's, over its own collections. */
     private void use(String address) {
         email = address;
         accountId = new PimdirAccount(context).idOf(address);
@@ -179,8 +176,10 @@ public class CalendarPoolTest {
     }
 
     /**
-     * The calendar driver, its storage writes watched: the real
-     * {@link CalendarEngine}'s listing and reads behind the shared engine.
+     * The calendar driver, its storage writes watched.
+     *
+     * <p>The real {@link CalendarEngine}'s listing and reads behind the shared
+     * engine.
      */
     private final class Watched extends PimdirEngine {
         final CalendarEngine inner;
@@ -237,7 +236,11 @@ public class CalendarPoolTest {
         }
     }
 
-    /** Three calendars of {@link #SIZE} events on a server, stored as an account's. */
+    /**
+     * Three calendars of {@link #SIZE} events on a server.
+     *
+     * <p>Stored as an account's.
+     */
     private List<String> threeCalendars(Server server) {
         List<Calendar> listed = new ArrayList<>();
         for (String name : new String[] {"work", "home", "birthdays"}) {

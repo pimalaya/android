@@ -11,9 +11,10 @@ import org.pimalaya.client.Flags;
 import java.util.Map;
 
 /**
- * What the entry page's save and delete stage, on the io executor: the
- * staging branches behind {@link EventView}'s decision, which stay the
- * page's (they read its state).
+ * What the entry page's save and delete stage, on the io executor.
+ *
+ * <p>The staging branches behind {@link EventView}'s decision, which stays the
+ * page's since it reads the page's state.
  */
 final class EventWrites {
     private final CalendarStager engine;
@@ -23,10 +24,11 @@ final class EventWrites {
     }
 
     /**
-     * One save, as the page captured it on the main thread: the scope, the
-     * scoped edit, the new series' UID, the entry and its calendar, whether
-     * it is a create, whether anything beyond the stamp was edited, and the
-     * conflict it settles with the sides picked.
+     * One save, as the page captured it on the main thread.
+     *
+     * <p>The scope, the scoped edit, the new series' UID, the entry and its
+     * calendar, whether it creates, whether anything beyond the stamp was
+     * edited, and the conflict it settles with the sides picked.
      */
     record Save(
             EventScope scope,
@@ -40,11 +42,11 @@ final class EventWrites {
             Map<Integer, EventSide> picks) {}
 
     /**
-     * Stages a save: the series or the lone entry, one occurrence through
-     * its override, or this and following by splitting the series, the new
-     * series' create staged before the shortened series' edit. In conflict
-     * mode the resolution is staged on the binding that conflicted, as it
-     * is when nothing was edited beside it.
+     * Stages a save: the series or lone entry, one occurrence, or a split.
+     *
+     * <p>One occurrence goes through its override; this and following stages
+     * the new series' create before the shortened series' edit. A conflict's
+     * resolution lands on the binding that conflicted, edited or not.
      */
     void save(Save save) throws Exception {
         EventScope scope = save.scope();
@@ -105,9 +107,10 @@ final class EventWrites {
     }
 
     /**
-     * One delete, as the page captured it on the main thread: the scope, the
-     * scoped edit naming what goes, the entry and its calendar, and the
-     * conflict it settles with the sides picked.
+     * One delete, as the page captured it on the main thread.
+     *
+     * <p>The scope, the scoped edit naming what goes, the entry and its
+     * calendar, and the conflict it settles with the sides picked.
      */
     record Delete(
             EventScope scope,
@@ -118,9 +121,10 @@ final class EventWrites {
             Map<Integer, EventSide> picks) {}
 
     /**
-     * Stages a delete: all occurrences remove the entry, one or this and
-     * following edit what is left of the series, unless nothing is. In
-     * conflict mode both are staged on the binding that conflicted.
+     * Stages a delete: all occurrences remove the entry, others trim a series.
+     *
+     * <p>One or this and following edit what is left of the series, unless
+     * nothing is. In conflict mode both land on the binding that conflicted.
      */
     void delete(Delete delete) throws Exception {
         EventScope scope = delete.scope();

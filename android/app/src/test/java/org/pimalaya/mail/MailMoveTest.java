@@ -43,11 +43,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Every mail action is a pimdir mutation shown at once, and the sync
- * carries it out as staged (local-first-actions): a move as a server move,
- * a removal as a delete for good, a create as a copy or an append, never
- * one turned into the other. Run through the real bridge, engine and store,
- * the server's verbs recorded rather than sent.
+ * Every mail action is a pimdir mutation shown at once, synced as staged.
+ *
+ * <p>A move as a server move, a removal as a delete for good, a create as a
+ * copy or an append, never one as the other (local-first-actions). The real
+ * bridge, engine and store, the server's verbs recorded rather than sent.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailMoveTest {
@@ -61,12 +61,12 @@ public class MailMoveTest {
     private String trash;
     private String sent;
 
-    /** A mail driver whose server verbs are recorded, listing what it is told. */
+    /** A mail driver recording its server verbs, listing what it is told. */
     private final class Server extends MailClient {
         final List<String> calls = new ArrayList<>();
         JSONArray listed = new JSONArray();
 
-        /** The handles the server no longer holds: a write on one answers 404. */
+        /** The handles the server no longer holds: a write on one is a 404. */
         final Set<String> gone = new HashSet<>();
 
         /** The account's driver, on this server. */
@@ -140,7 +140,6 @@ public class MailMoveTest {
         trash = store.collectionOf(EMAIL, "Trash");
         sent = store.collectionOf(EMAIL, "Sent");
 
-        // One message the sync has reconciled: bound and agreed.
         file(inbox, named("42", "Hello"));
     }
 
@@ -293,8 +292,8 @@ public class MailMoveTest {
 
         assertEquals(MailStager.Deletion.MARKED, stager().stageDelete(rowIn("Trash")));
 
-        // No UIDPLUS: an EXPUNGE would take every marked message, so the row
-        // stays, saying so, rather than leaving and coming back.
+        // NOTE: no UIDPLUS: an EXPUNGE would take every marked message, so the
+        // row stays, saying so, rather than leaving and coming back.
         MailStore.StoredMessage row = rowIn("Trash");
         assertTrue(row.deleted());
         assertEquals("not a tombstone", "0",
@@ -364,8 +363,6 @@ public class MailMoveTest {
         file(trash, named("7", "Old"));
         stager().mutateRemove(trash, "7");
 
-        // Purged from the trash by another client between the listing and
-        // the push.
         Server server = new Server();
         server.gone.add("7");
         server.listed = new JSONArray().put(named("7", "Old")).put(named("8", "New"));
@@ -418,7 +415,6 @@ public class MailMoveTest {
                         date, body.length(), false),
                 PimdirSummary.mailSortKey(date));
 
-        // The provider filed it itself under its own handle.
         JSONObject arrival =
                 new JSONObject()
                         .put("handle", "900")

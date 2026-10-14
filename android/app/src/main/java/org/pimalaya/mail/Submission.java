@@ -8,20 +8,12 @@ import org.pimalaya.pimdir.PimdirQueue;
 /**
  * The payload of a submission: what this app queues.
  *
- * <p>It carries what a listing draws as well as what the drain needs,
- * because a waiting message is not an item and there is no summary row
- * beside it to read a subject and a date off. The bytes would say all
- * of this, and parsing a message to draw a list is the one thing the
- * sort key exists to avoid.
- *
- * <p>The queue keeps the payload as the text it was written as: this reads
- * it and writes it, and a row sent again is queued with its text as it is.
+ * <p>It carries what a listing draws, since a waiting message has no summary
+ * row and parsing it is what the sort key avoids. The queue keeps the payload
+ * as written text: a row sent again is queued with its text as it is.
  *
  * @param v the payload version it was written with
- * @param from the account it goes out from
  * @param messageId the {@code Message-ID} it was stamped with, bare
- * @param subject its subject
- * @param sortKey the sort key of its date
  */
 record Submission(int v, String from, String messageId, String subject, String sortKey) {
     /** The payload version this app writes and reads. */
@@ -33,8 +25,9 @@ record Submission(int v, String from, String messageId, String subject, String s
     }
 
     /**
-     * The submission one queued action carries, read off the payload it
-     * was written with; every part empty when it cannot be read back.
+     * The submission one queued action carries, read off its payload.
+     *
+     * <p>Every part empty when it cannot be read back.
      */
     static Submission from(PimdirQueue.Action action) {
         JSONObject payload = payload(action.payload());

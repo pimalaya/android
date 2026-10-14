@@ -33,10 +33,10 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * A card created on the phone and pushed to a CardDAV server that does not
- * keep it as sent, the real engine and store over a fake server: Google
- * files it under a name of its own and rewrites its UID to that name, and
- * a server altering what it stores answers the PUT with no ETag.
+ * A phone-created card pushed to a CardDAV server that alters what it keeps.
+ *
+ * <p>Real engine and store over a fake server: Google files it under its own
+ * name and rewrites its UID; an altering server answers the PUT with no ETag.
  */
 @RunWith(RobolectricTestRunner.class)
 public class ContactEngineDavCreateTest {
@@ -187,10 +187,10 @@ public class ContactEngineDavCreateTest {
     }
 
     /**
-     * Google rewrote the card's UID when it took the create, so its body
-     * names another identity once it moves: the card stays the one the
-     * phone created, and the edit staged on it meanwhile is merged and
-     * pushed rather than dropped with an item read as replaced.
+     * Google rewrote the created card's UID: it stays the phone's card.
+     *
+     * <p>The edit staged on it meanwhile is merged and pushed, not dropped with
+     * an item read as replaced.
      */
     @Test
     public void anEditOfACardGoogleRewroteIsKeptWhenItMovesElsewhere() throws Exception {
@@ -215,9 +215,10 @@ public class ContactEngineDavCreateTest {
     }
 
     /**
-     * A server answering the create with no ETag: the binding takes the one
-     * the card is stored at, so the listing after it reads nothing changed
-     * and the removal staged meanwhile is pushed, not undone.
+     * A create answered with no ETag: the binding takes the stored one.
+     *
+     * <p>The next listing reads nothing changed, so the removal staged
+     * meanwhile is pushed, not undone.
      */
     @Test
     public void aCardCreatedThenDeletedIsDeletedOnAServerAnsweringNoEtag() throws Exception {

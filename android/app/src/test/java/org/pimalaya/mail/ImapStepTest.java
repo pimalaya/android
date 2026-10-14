@@ -49,15 +49,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * An IMAP step from the engine down to the store: the first one takes the
- * inbox's floor, lists every mailbox from it and reads the bodies above
- * it, the junk's left out; a later one widens from the store and reads the
- * bodies between the new frontier and the old.
+ * An IMAP step from the engine down to the store.
  *
- * <p>The server is a few mailboxes of dated messages answering the
- * engine's listings, the chunk floors the bridge would ask for and the
- * files it would write, so everything from the step down to the store is
- * the real thing.
+ * <p>The first takes the inbox's floor, lists every mailbox from it and reads
+ * the bodies above it, the junk's left out; a later one widens from the store
+ * and reads the bodies between the new frontier and the old.
  */
 @RunWith(RobolectricTestRunner.class)
 public class ImapStepTest {
@@ -90,10 +86,11 @@ public class ImapStepTest {
     }
 
     /**
-     * An account whose mailboxes each hold {@code size} messages, UIDs 1 to
-     * {@code size}, the newest at the top and each {@code spacing} hours
-     * older than the one above it, each mailbox 20 minutes below the one
-     * declared before it, so no two messages share a date.
+     * An account whose mailboxes each hold {@code size} dated messages.
+     *
+     * <p>UIDs 1 to {@code size}, newest on top, each {@code spacing} hours
+     * older than the one above; each mailbox 20 minutes below the one declared
+     * before it, so no two messages share a date.
      */
     private final class Server extends MailClient {
         final Map<String, int[]> shapes = new HashMap<>();
@@ -118,9 +115,10 @@ public class ImapStepTest {
         }
 
         /**
-         * The EXAMINE a read opens a mailbox with: refused with a 404 as the
-         * bridge answers Gmail's {@code NO Unknown Mailbox}, or failing as a
-         * dropped connection does, with no status.
+         * The EXAMINE a read opens a mailbox with.
+         *
+         * <p>Refused with a 404 as the bridge answers Gmail's {@code NO Unknown
+         * Mailbox}, or failing with no status as a dropped connection does.
          */
         void open(String collection) {
             if (refused.containsKey(collection)) {

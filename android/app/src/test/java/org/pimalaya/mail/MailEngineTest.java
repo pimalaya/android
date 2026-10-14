@@ -37,14 +37,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The staged writes every mail action is, run through the real bridge
- * and the real store.
+ * The staged writes every mail action is, through the real bridge and store.
  *
- * <p>What they pin is the half of offline-first that is easy to get
- * wrong: a staged change moves the item and leaves the base alone. The
- * base is what the source last agreed on, so it is what the next sync
- * diffs the push out of; moving it with the edit would push nothing and
- * silently drop the change.
+ * <p>They pin what offline-first easily gets wrong: a staged change moves the
+ * item, never the base. The base is what the source last agreed on, which the
+ * next sync diffs the push out of: moving it would silently drop the change.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailEngineTest {
@@ -65,12 +62,8 @@ public class MailEngineTest {
         collection = store.collectionOf(EMAIL, "INBOX");
         accountId = new PimdirAccount(context).idOf(EMAIL);
 
-        // No account: the shape a driver that only stages runs with, which
-        // is every action in the reader and the composer.
         engine = new MailStager(pimdir, Clients.real());
 
-        // One message the sync has already reconciled: bound, and agreed at
-        // a flag set the server also holds.
         JSONObject write = new JSONObject();
         write.put("op", "write");
         write.put(
@@ -116,18 +109,18 @@ public class MailEngineTest {
         assertTrue("the marker the reader moved", held.has(Flags.Marker.SEEN));
         assertTrue("and the keyword this app never models", held.markers().contains("$junk"));
 
-        // The base is what the source last agreed on. If the stage moved it
-        // too, the next sync would diff nothing out and the marker would
-        // never reach the server.
+        // NOTE: if the stage moved the base too, the next sync would diff
+        // nothing out and the marker would never reach the server.
         Flags base = engine.offline.baseFlags(collection, "42");
         assertFalse(base.has(Flags.Marker.SEEN));
         assertTrue(base.markers().contains("$junk"));
     }
 
     /**
-     * The staged marker has to come back to the engine as a pending push,
-     * or the sync finds nothing to send: what the merge acts on is the
-     * placement's status, and the store derives it rather than storing it.
+     * A staged marker comes back to the engine as a pending push.
+     *
+     * <p>Or the sync finds nothing to send: the merge acts on the placement's
+     * status, which the store derives rather than stores.
      */
     @Test
     public void aStagedMarkerIsProjectedAsAPendingPush() throws Exception {
@@ -147,10 +140,10 @@ public class MailEngineTest {
     }
 
     /**
-     * And a message the reader opened is not one: a message is immutable,
-     * so the bytes stored by opening it owe no upload, and reading them as
-     * one would derive an update per opened message that no mail backend
-     * would take.
+     * A message the reader opened owes no upload.
+     *
+     * <p>A message is immutable: reading its stored bytes as an edit would
+     * derive an update per opened message that no mail backend would take.
      */
     @Test
     public void aStoredBodyIsNotAPendingPush() throws Exception {
@@ -166,9 +159,10 @@ public class MailEngineTest {
     }
 
     /**
-     * An opened message holds a body its base does not, which the engine
-     * reads as a content edit; the mail sync pushes no content, so a marker
-     * staged on it still goes out as a marker rather than as an update.
+     * A marker staged on an opened message goes out as a marker.
+     *
+     * <p>Its body, absent from the base, reads as a content edit to the engine;
+     * the mail sync pushes no content.
      */
     @Test
     public void aMarkerOnAnOpenedMessageIsPushedAsAMarker() throws Exception {
@@ -250,8 +244,8 @@ public class MailEngineTest {
     public void aStagedDeleteIsATombstoneUntilItIsPushed() throws Exception {
         engine.mutateRemove(collection, "42");
 
-        // Marked rather than dropped: the row has to survive until a sync
-        // has told the server, or the delete would happen only here.
+        // NOTE: marked rather than dropped: the row survives until a sync has
+        // told the server, or the delete would happen only here.
         assertEquals("1", scalar("SELECT deleted FROM items WHERE link_id = ?", "42"));
         assertTrue("and it leaves the list at once", store.loadMerged(10).isEmpty());
     }
@@ -265,9 +259,9 @@ public class MailEngineTest {
                 Submission.of(EMAIL, "queued@example.com", "Hi", date),
                 source.getBytes(StandardCharsets.UTF_8));
 
-        // No item: a message on its way out is an action the engine never
-        // sees, which is why nothing it stages has to be kept out of a
-        // reconcile or held back from a roster replace.
+        // NOTE: a message on its way out is an action the engine never sees, so
+        // nothing it stages is kept out of a reconcile or held back from a
+        // roster replace.
         assertEquals(
                 "0",
                 scalar("SELECT count(*) FROM items WHERE collection = ?", store.outbox().outboxOf(EMAIL)));
@@ -297,9 +291,10 @@ public class MailEngineTest {
     }
 
     /**
-     * A mailbox listed in pages lands each page as it comes, and a pass cut
-     * off between two pages resumes from the cursor the last landed page
-     * left rather than from the top (pimdir SYNC section 5).
+     * A mailbox listed in pages lands each page as it comes.
+     *
+     * <p>A pass cut off between two pages resumes from the cursor the last
+     * landed page left, not from the top (pimdir SYNC section 5).
      */
     @Test
     public void aRoundLandsPageByPageAndResumesWhereItStopped() throws Exception {

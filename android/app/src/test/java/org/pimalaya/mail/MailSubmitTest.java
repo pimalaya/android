@@ -23,9 +23,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * The composer's queue, through the real bridge and the real store: a
- * draft lands in the outbox composed, and the rule that decides whether
- * its parent is marked answered.
+ * The composer's queue, through the real bridge and store.
+ *
+ * <p>A draft lands in the outbox composed, and the rule deciding whether its
+ * parent is marked answered.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailSubmitTest {

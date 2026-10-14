@@ -15,10 +15,10 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 /**
- * A Google target prepared through the Gmail API, whichever protocol the
- * target reads over: a scratch mailbox is a user label, which IMAP shows as
- * a mailbox too, and a sweep deletes the tagged messages for good, since a
- * removed label leaves its mail in All Mail.
+ * A Google target prepared through the Gmail API, whatever it reads over.
+ *
+ * <p>A scratch mailbox is a user label, a mailbox to IMAP too; a sweep deletes
+ * tagged messages for good, a removed label leaving its mail in All Mail.
  */
 final class E2eGmailFixture implements E2eFixture {
     private static final String API = "https://gmail.googleapis.com/gmail/v1/users/me/";

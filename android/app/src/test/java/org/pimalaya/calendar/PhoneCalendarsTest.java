@@ -14,9 +14,11 @@ import org.robolectric.RuntimeEnvironment;
 import java.util.List;
 
 /**
- * Which calendars the phone shows: an account's, once its setup's switch was
- * on, including those listed after, less those its settings keep off; a
- * calendar turned on in an account the phone does not show brings it alone.
+ * Which calendars the phone shows, per account and per calendar.
+ *
+ * <p>An account's once its setup's switch was on, those listed later included,
+ * less those its settings keep off; a calendar turned on in a hidden account
+ * brings it alone.
  */
 @RunWith(RobolectricTestRunner.class)
 public class PhoneCalendarsTest {

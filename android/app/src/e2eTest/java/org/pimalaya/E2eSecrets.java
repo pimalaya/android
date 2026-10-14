@@ -16,9 +16,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * The credentials of the test accounts, read from the environment at run
- * time and the tokens minted from them. Nothing here is ever printed: a
- * missing variable is named, a value never is.
+ * The test accounts' credentials, from the environment, and tokens minted.
+ *
+ * <p>Nothing here is ever printed: a missing variable is named, a value never.
  */
 final class E2eSecrets {
     /** A token with less than this left is minted again. */
@@ -68,9 +68,10 @@ final class E2eSecrets {
     }
 
     /**
-     * An access token for the Google Workspace test user, minted by the
-     * service account through its domain-wide delegation: an RFC 7523 JWT
-     * bearer grant whose `sub` is the user.
+     * An access token for the Google Workspace test user.
+     *
+     * <p>Minted by the service account's domain-wide delegation: an RFC 7523
+     * JWT bearer grant whose `sub` is the user.
      */
     static synchronized String googleToken(String subject, String scope) throws Exception {
         String key = "google " + subject + " " + scope;
@@ -123,8 +124,9 @@ final class E2eSecrets {
     }
 
     /**
-     * An app-only access token of the Microsoft test tenant's live-tests
-     * app: an RFC 6749 client credentials grant, for a resource's
+     * An app-only access token of the Microsoft test tenant's live-tests app.
+     *
+     * <p>An RFC 6749 client credentials grant, for a resource's
      * {@code .default} scope.
      */
     static synchronized String microsoftToken(String scope) throws Exception {

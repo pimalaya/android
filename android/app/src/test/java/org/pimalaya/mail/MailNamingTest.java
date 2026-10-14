@@ -32,11 +32,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A Graph delta lists a message by id and markers alone: one the store binds
- * keeps the summary it holds, every other one is read with its summary, one
- * gone since is left out; a Gmail round names only what the account holds
- * elsewhere and what arrived ahead of it; and a round over a scope the
- * store covers is told apart from a first chunk, which lists its band.
+ * How a round names its messages to the store.
+ *
+ * <p>A Graph delta's bound message keeps its summary, others are read, gone
+ * ones left out; a Gmail round names what is held elsewhere or arrived ahead; a
+ * round over a covered scope is told apart from a first chunk's band.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailNamingTest {
@@ -56,7 +56,9 @@ public class MailNamingTest {
         inbox = store.collectionOf(EMAIL, "Inbox");
     }
 
-    /** A mailbox holding one message, {@code 1} unless named, that reads ids from a list. */
+    /**
+     * A mailbox of one message ({@code 1} unless named), ids read from a list.
+     */
     private final class Server extends MailClient {
         final List<List<String>> reads = new ArrayList<>();
         final String listed;

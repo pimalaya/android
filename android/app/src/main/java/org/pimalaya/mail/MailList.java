@@ -43,30 +43,11 @@ import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
 
 /**
- * The mail screen: one list merging every mailbox of every account,
- * newest first, grouped into one card per day.
+ * The mail screen: every mailbox of every account in one list, by day cards.
  *
- * <p>This is the view the plan is really about. Plain IMAP cannot give
- * it: a client selects one mailbox at a time, so a cross-mailbox,
- * cross-account list has to be assembled locally. Here the store holds
- * every account's mailboxes whole, and the list is one descending scan
- * over them, with the account and mailbox shown per row and filterable on
- * both axes.
- *
- * <p>It shows what the steps brought ({@link MailStep}): down to its floor,
- * the most recent of the shown accounts' frontiers and of the shown
- * mailboxes' coverage, so what it shows is on the phone, and it ends on a
- * footer loading more. It loads lazily. Its size is a count of what
- * the filter, the chips, the search and the floor let through, its day
- * headers are placed from one count per day, and its rows are read a page
- * at a time around the scroll position, far pages evicted, a placeholder
- * standing in for a row whose page is still on its way. Search, the chips,
- * the floor and the unread badge are conditions of the store's query,
- * search covering every stored message and the badge each account's
- * window; none of them changes what syncs, which the filter alone decides. The
- * messages waiting to go out stay on top, outside the paged query. A long
- * press starts a selection the bar then acts on, keyed by store id, and
- * selecting all is a query rather than a walk over rows in memory.
+ * <p>One scan of the store, IMAP selecting a mailbox at a time, down to the
+ * shown frontiers' floor ({@link MailStep}), then a footer loading more. Paged
+ * lazily; search, chips and badge narrow the query, never what syncs.
  */
 public final class MailList {
     /** How many rows one page read brings in. */
@@ -75,12 +56,13 @@ public final class MailList {
     /** How many pages are kept around the scroll position. */
     private static final int CACHED_PAGES = 24;
 
-    /** How long a burst of sync writes is let settle before the list redraws. */
+    /** How long a burst of sync writes settles before the list redraws. */
     private static final long SETTLE_MILLIS = 400;
 
     /**
-     * The roles the chips give direct access to, pimdir's mail roles (STORAGE
-     * section 14), each every shown account's mailbox of that role.
+     * The roles the chips open, pimdir's mail roles (STORAGE section 14).
+     *
+     * <p>Each chip is every shown account's mailbox of that role.
      */
     private static final String[] ROLES = {"inbox", "sent", "drafts", "trash", "junk", "archive"};
 
@@ -113,10 +95,10 @@ public final class MailList {
     };
 
     /**
-     * What a list shows and a pull syncs under a role chip: every mailbox
-     * holding {@code role} ({@code roles} by collection id) of the accounts
-     * {@code filter} shows, ticked or not, a chip being a view of its own;
-     * what the filter lets through with no chip on. The outbox holds no
+     * What a list shows and a pull syncs under a role chip.
+     *
+     * <p>Every mailbox of {@code role} of the accounts {@code filter} shows,
+     * ticked or not; the filter's own scope with no chip. The outbox holds no
      * role, so a chip leaves it out.
      */
     public static SyncScope narrowed(MergedFilter filter, String role, Map<String, String> roles) {
@@ -185,8 +167,7 @@ public final class MailList {
     private final Map<String, MailStore.StoredMessage> selected = new LinkedHashMap<>();
 
     /**
-     * Whether everything the query lets through is selected, the rows in
-     * {@link #excluded} aside: a query rather than a set of rows.
+     * Whether all the query lets through is selected, {@link #excluded} aside.
      */
     private boolean allSelected;
 
@@ -195,6 +176,7 @@ public final class MailList {
     /** A reload asked for by a sync write, held until the burst settles. */
     private final Runnable settled = this::reload;
 
+    /** The list over the store, syncing through {@code sync}. */
     public MailList(Host host, MailStore store, MailSync sync, MessageView messageView) {
         this.host = host;
         this.store = store;
@@ -203,6 +185,7 @@ public final class MailList {
         messageView.mailList = this;
     }
 
+    /** Wires the list, header, chips and footer to their views. */
     public void setUp() {
         ListView list = host.findViewById(R.id.mail_list);
         header = new ListHeader(host, list, Panels.MAIL);
@@ -289,22 +272,21 @@ public final class MailList {
                                 });
     }
 
-    /** The list's one reader, for a read that has to stay off the sync's thread. */
+    /** The list's one reader, for reads kept off the sync's thread. */
     public java.util.concurrent.Executor reads() {
         return reads;
     }
 
+    /** The list's header: title, search and chips. */
     public ListHeader header() {
         return header;
     }
 
-    // ---- the layout -------------------------------------------------------
-
     /**
-     * Reads the list's shape from the store again: the counts that size
-     * it, the per-day counts that place its headers, the badge, and the
-     * pages around where the list stands, then swaps it in whole, so what
-     * is on screen never flashes through placeholders.
+     * Reads the list's shape from the store again and swaps it in whole.
+     *
+     * <p>Counts, per-day counts, the badge and the pages around the scroll, so
+     * the screen never flashes through placeholders.
      */
     public void reload() {
         int asked = ++generation;
@@ -397,7 +379,9 @@ public final class MailList {
                 });
     }
 
-    /** Draws the current layout: the rows, the line under the title, the empty state. */
+    /**
+     * Draws the layout: the rows, the line under the title, the empty state.
+     */
     private void render() {
         adapter.notifyDataSetChanged();
         updateSelectionUi();
@@ -415,10 +399,9 @@ public final class MailList {
                 .setVisibility(rows == 0 && layout.footer == null ? View.VISIBLE : View.GONE);
     }
 
-    // ---- the footer -------------------------------------------------------
-
-    /** One step the footer's button takes: an account's, or one mailbox's alone. */
+    /** One step the footer takes: an account's, or one mailbox's alone. */
     public static final class Step {
+        /** The account stepped. */
         public final String email;
 
         /** The mailbox stepped alone, null for the account's step. */
@@ -431,9 +414,9 @@ public final class MailList {
     }
 
     /**
-     * What the list's footer offers, read with the layout: the steps a tap
-     * takes ({@link MailStep}), and whether any steps one mailbox of an
-     * account stepped mailbox by mailbox, which the line under it says.
+     * What the footer offers: the steps a tap takes ({@link MailStep}).
+     *
+     * <p>Also whether any steps one mailbox alone, which its line says.
      */
     private static final class Footer {
         final List<Step> steps;
@@ -446,15 +429,11 @@ public final class MailList {
     }
 
     /**
-     * The footer under {@code wanted}, null for none, over the shown
-     * accounts that are on, a mailbox kept whole taking no part. A Gmail
-     * account, listed whole through All Mail, takes one step while it has
-     * more to load ({@link MailWindow#more}), of the one label it shows
-     * alone if it does. Any other account takes one step of each mailbox it
-     * shows that has more ({@link MailWindow#more(android.content.Context,
-     * String, String)}). The junk or the trash, which no step of its account
-     * brings, loads more only when its account shows it alone, by itself
-     * ({@link #moreAlone}).
+     * The footer under {@code wanted}, null for none, over shown accounts on.
+     *
+     * <p>Gmail takes one step while {@link MailWindow#more}; others one per
+     * shown mailbox with more; junk or trash only when shown alone
+     * ({@link #moreAlone}). Whole mailboxes take no part.
      */
     private Footer footerOf(
             MailStore.Query wanted, List<MailStore.Edge> edges, Map<String, String> roles) {
@@ -520,9 +499,9 @@ public final class MailList {
     }
 
     /**
-     * Whether the junk or the trash shown alone has more to load: on Gmail,
-     * where it is stepped by its label, while its own frontier is not all
-     * mail; elsewhere, where it is widened chunk by chunk, until it is
+     * Whether junk or trash shown alone has more to load.
+     *
+     * <p>On Gmail while its own frontier is not all mail; elsewhere until it is
      * listed down to its account's bound.
      */
     private boolean moreAlone(MailStore.Edge edge) {
@@ -534,8 +513,9 @@ public final class MailList {
     }
 
     /**
-     * The badge: the unread mail of each account within its window, every
-     * mailbox the filter shows, chips and search aside.
+     * The badge: unread mail within each account's window.
+     *
+     * <p>Every mailbox the filter shows, chips and search aside.
      */
     private long badge(MergedFilter filter, Map<String, String> windows) {
         long badge = 0;
@@ -554,10 +534,10 @@ public final class MailList {
     }
 
     /**
-     * The line under the footer's button: about how many messages a step
-     * brings each account, or each mailbox where one is stepped mailbox by
-     * mailbox ({@code perMailbox}), and that it waits for Wi-Fi when there
-     * is none.
+     * The line under the footer's button: about how many a step brings.
+     *
+     * <p>Per account, or per mailbox ({@code perMailbox}), and that it waits
+     * for Wi-Fi when there is none.
      */
     static String info(android.content.Context context, boolean wifi, boolean perMailbox) {
         String line =
@@ -575,16 +555,16 @@ public final class MailList {
     enum FooterState {
         /** Load more: a tap takes the next step. */
         LOAD,
-        /** A step or another pass holds the sync: disabled, saying it is loading. */
+        /** A step or another pass holds the sync: disabled, loading. */
         LOADING,
         /** No Wi-Fi: disabled, its line saying it waits for it. */
         WIFI
     }
 
     /**
-     * The footer's state: waiting off Wi-Fi, where no step runs; loading
-     * while the sync is held ({@code busy}), so a second tap queues
-     * nothing; else ready to load.
+     * The footer's state: waiting off Wi-Fi, loading while busy, else ready.
+     *
+     * <p>Loading while the sync is held, so a second tap queues nothing.
      */
     static FooterState footerState(boolean wifi, boolean busy) {
         if (!wifi) {
@@ -621,8 +601,9 @@ public final class MailList {
     }
 
     /**
-     * The SQLite modifier moving a UTC instant onto the device's wall clock
-     * today, so a day header falls where the reader's midnight does.
+     * The SQLite modifier moving a UTC instant onto the wall clock today.
+     *
+     * <p>So a day header falls where the reader's midnight does.
      */
     private static String shift(int minutes) {
         return String.format(Locale.ROOT, "%+d minutes", minutes);
@@ -645,11 +626,11 @@ public final class MailList {
     }
 
     /**
-     * Where the list's synced row {@code row} is read from, by the per-day
-     * counts it was laid out from ({@code days}, newest first, undated last,
-     * counted {@code minutes} off UTC): below the first instant of the day
-     * after its own, past the rows of its day ahead of it. An undated row
-     * reads below {@link #UNDATED}. Null past the counted rows.
+     * Where synced row {@code row} is read from, by the per-day counts.
+     *
+     * <p>{@code days} newest first, undated last, {@code minutes} off UTC:
+     * below the next day's first instant, past its day's earlier rows; undated
+     * below {@link #UNDATED}. Null past the counted rows.
      */
     static Seek seek(List<MailStore.Day> days, int minutes, long row) {
         long before = 0;
@@ -664,8 +645,9 @@ public final class MailList {
     }
 
     /**
-     * The sort key of the first instant of the day after {@code day} on a
-     * wall clock {@code minutes} off UTC, in the shape the store writes keys.
+     * The sort key of the first instant of the day after {@code day}.
+     *
+     * <p>On a wall clock {@code minutes} off UTC, shaped as the store writes.
      */
     private static String keyAfter(String day, int minutes) {
         return LocalDate.parse(day)
@@ -687,8 +669,9 @@ public final class MailList {
     }
 
     /**
-     * The list's shape: the waiting messages on top, then one section per
-     * day label, each sized by its count, and where each header falls.
+     * The list's shape: waiting messages on top, then one section per day.
+     *
+     * <p>Each sized by its count, with where each header falls.
      */
     private static final class Layout {
         final List<MailStore.StoredMessage> outbox;
@@ -712,7 +695,7 @@ public final class MailList {
         /** The footer the list ends on, null for none. */
         Footer footer;
 
-        /** Each mailbox's frontier, null for all mail: what a row not on the phone says. */
+        /** Each mailbox's frontier, null for all mail, for rows not held. */
         Map<String, String> windows = Map.of();
 
         /** Each mailbox's role, by collection id. */
@@ -720,13 +703,13 @@ public final class MailList {
 
         int size;
 
-        /** The per-day counts it was laid out from, newest day first, undated last. */
+        /** The per-day counts laid out, newest first, undated last. */
         List<MailStore.Day> days = List.of();
 
-        /** The wall clock's offset from UTC the days were counted on, in minutes. */
+        /** The wall clock's offset from UTC the days were counted on. */
         int minutes;
 
-        /** Where the synced row {@code row} is read from ({@link MailList#seek}). */
+        /** Where synced row {@code row} is read from. */
         Seek seek(long row) {
             return MailList.seek(days, minutes, row);
         }
@@ -742,8 +725,9 @@ public final class MailList {
         }
 
         /**
-         * Lays the counts out: the outbox under its own name, then the days,
-         * consecutive days sharing a label (two weeks ago) sharing a card.
+         * Lays the counts out: the outbox, then days by label.
+         *
+         * <p>Consecutive days sharing a label (two weeks ago) share a card.
          */
         static Layout of(
                 Host host,
@@ -821,7 +805,7 @@ public final class MailList {
             return headerAt.length > 0 && headerAt[sectionAt(position)] == position;
         }
 
-        /** The row a position draws, counted from the first waiting one; -1 at a header. */
+        /** A position's row, from the first waiting one; -1 at a header. */
         long rowAt(int position) {
             if (position < 0 || position >= size || headerAt.length == 0) {
                 return -1;
@@ -865,11 +849,10 @@ public final class MailList {
         }
     }
 
-    // ---- the rows ---------------------------------------------------------
-
     /**
-     * The message a position draws, or null at a header or while its page
-     * is on its way, in which case the page is asked for.
+     * The message a position draws, null at a header or while paging.
+     *
+     * <p>A missing page is asked for.
      */
     private MailStore.StoredMessage messageAt(int position) {
         long row = layout.rowAt(position);
@@ -896,9 +879,9 @@ public final class MailList {
     }
 
     /**
-     * Reads one page: after the page before it when that one is read (a
-     * keyset, what a scroll costs), from the start of the day it lands on
-     * otherwise (what a fling costs: the rows of that day before it).
+     * Reads one page: by keyset after the page before when read.
+     *
+     * <p>Else from the start of its day: what a fling costs.
      */
     private void load(int page) {
         if (pages.containsKey(page) || currentQuery == null || !loading.add(page)) {
@@ -927,9 +910,10 @@ public final class MailList {
     }
 
     /**
-     * One page of the list: after {@code after} when the page before it is
-     * read, else from the start of the day its first row falls on, which the
-     * layout's day counts place ({@link Layout#seek}).
+     * One page: after {@code after}, else from its first row's day start.
+     *
+     * <p>The day start comes from the layout's day counts
+     * ({@link Layout#seek}).
      */
     private List<MailStore.StoredMessage> read(
             MailStore.Query listed, Layout shown, MailStore.StoredMessage after, int page) {
@@ -944,9 +928,9 @@ public final class MailList {
     }
 
     /**
-     * When a row says it arrived: the time inside a card of today or
-     * yesterday, where the header already names the day, and the date
-     * past that, where the header only says how long ago.
+     * When a row says it arrived: a time today or yesterday, else a date.
+     *
+     * <p>Older headers only say how long ago, so the row names the date.
      */
     private String timeOf(MailStore.StoredMessage message) {
         if (message.stamp <= 0) {
@@ -1037,7 +1021,7 @@ public final class MailList {
         }
     }
 
-    /** A row whose page is still on its way: its card, and nothing in it yet. */
+    /** A row whose page is on its way: its card, empty. */
     private void placeholder(View view) {
         ((TextView) view.findViewById(R.id.message_subject)).setText("");
         ((TextView) view.findViewById(R.id.message_from)).setText("");
@@ -1064,11 +1048,10 @@ public final class MailList {
     }
 
     /**
-     * What a row whose body the phone does not hold says, 0 for nothing: a
-     * message whose body failed every attempt of a run says so; one from its
-     * mailbox's frontier on (outside the junk and the trash), or one owed
-     * ({@link MailOwed}), is on its way; any other is not downloaded, one
-     * the server answered gone ({@link MailState#gone}) included.
+     * What a row whose body is not held says, 0 for nothing.
+     *
+     * <p>Failed every attempt; on its way from the frontier (not junk or trash)
+     * or owed ({@link MailOwed}); else not downloaded, gone included.
      */
     private int notOnPhone(MailStore.StoredMessage message) {
         if (message.bodied) {
@@ -1106,11 +1089,8 @@ public final class MailList {
                         ? host.getString(R.string.message_no_sender)
                         : message.sender());
         date.setText(timeOf(message));
-        // A message waiting to go out says so where a message that has
-        // been somewhere says which mailbox: naming the outbox would
-        // answer where it is, and what the reader is asking is whether
-        // it has gone. One the server refused says that instead, which
-        // is the same question answered for good.
+        // NOTE: a waiting message says it is waiting, not that it is in the
+        // outbox: the reader asks whether it went. A refused one says so.
         int missing = notOnPhone(message);
         ((TextView) view.findViewById(R.id.message_origin))
                 .setText(
@@ -1120,9 +1100,8 @@ public final class MailList {
                                 + (missing == 0 ? "" : " · " + host.getString(missing)));
         dim(view, !message.bodied);
 
-        // The disc stands for the sender rather than the message, so
-        // it is keyed by the address alone: a sender who changes how
-        // their name is spelled keeps the colour the eye learned.
+        // NOTE: keyed by address alone, so a sender respelling their name
+        // keeps the colour the eye learned.
         TextView avatar = view.findViewById(R.id.message_avatar);
         avatar.setText(Avatar.letter(message.fromAddress));
         avatar.setBackground(Avatar.circle(host, message.fromAddress));
@@ -1136,8 +1115,6 @@ public final class MailList {
                     android.content.res.ColorStateList.valueOf(host.accentContrast()));
         }
 
-        // Unread is carried by the dot, the weight of the sender and
-        // the subject, and the time taking the accent.
         boolean unread = !message.seen() && !message.pending();
         view.findViewById(R.id.message_dot).setVisibility(unread ? View.VISIBLE : View.GONE);
         from.setTypeface(null, unread ? Typeface.BOLD : Typeface.NORMAL);
@@ -1168,9 +1145,7 @@ public final class MailList {
     }
 
     /**
-     * The marks: the star of an important message, the paperclip of one
-     * carrying an attachment and the replied mark. Shown only when they
-     * hold, so a line ends in as few glyphs as it can.
+     * The marks: star, paperclip and replied, each only when it holds.
      */
     private void bindMarks(View view, MailStore.StoredMessage message) {
         view.findViewById(R.id.message_star)
@@ -1181,8 +1156,7 @@ public final class MailList {
                 .setVisibility(message.answered() ? View.VISIBLE : View.GONE);
     }
 
-    // ---- the selection ----------------------------------------------------
-
+    /** Whether a selection is under way. */
     public boolean isSelectionMode() {
         return allSelected || !selected.isEmpty();
     }
@@ -1223,6 +1197,7 @@ public final class MailList {
         updateSelectionUi();
     }
 
+    /** Ends the selection and restores the bar. */
     public void exitSelection() {
         selected.clear();
         excluded.clear();
@@ -1232,9 +1207,9 @@ public final class MailList {
     }
 
     /**
-     * Selects everything the query lets through, or clears the selection
-     * when it already is: a flag over the query, read whole only when the
-     * bar acts on it.
+     * Selects all the query lets through, or clears when it already is.
+     *
+     * <p>A flag over the query, read whole only when the bar acts on it.
      */
     public void toggleSelectAll() {
         boolean all = allSelected && excluded.isEmpty();
@@ -1246,9 +1221,10 @@ public final class MailList {
     }
 
     /**
-     * Hands the selected messages over once they are read: the rows picked
-     * one by one as they are, everything the query lets through read from
-     * the store, off the main thread, when all of it is selected.
+     * Hands the selected messages over once read.
+     *
+     * <p>Picked rows as they are; a select-all read from the store off the main
+     * thread.
      */
     private void withSelection(Consumer<List<MailStore.StoredMessage>> act) {
         if (!allSelected) {
@@ -1270,9 +1246,9 @@ public final class MailList {
     }
 
     /**
-     * The bar during a selection: the count where the title was, then
-     * read, star and delete over the whole of it, and select-all. Each
-     * toggle goes the way that changes something: read while any is
+     * The bar during a selection: the count, read, star, delete, select-all.
+     *
+     * <p>Each toggle goes the way that changes something: read while any is
      * unread, star while any is not starred.
      */
     void updateSelectionUi() {

@@ -46,18 +46,9 @@ import java.util.Set;
 /**
  * The reader for one message: the header card, then the message itself.
  *
- * <p>The card is drawn from the list row the reader tapped, so the
- * screen is never blank: the subject, the sender and the date are
- * already in the store, and only the body and the recipients have to be
- * read. They are read from the store too wherever it holds the message,
- * which it does from the first time the message was opened; a message it
- * does not hold is fetched once and filed as it renders.
- *
- * <p>An HTML body renders in a web view with scripting off, network
- * loads blocked and images not loaded at all. That is the whole point
- * of showing HTML rather than the text alternative: a remote image is a
- * read receipt the sender did not ask permission for, and a script in a
- * message has no business running.
+ * <p>The card comes from the tapped row, so it is never blank; the body from
+ * the store, else fetched once and filed. HTML renders with scripts, loads and
+ * images off: a remote image is a read receipt nobody agreed to.
  */
 public final class MessageView implements FilesList.Origins {
     /** How wide a badge row may run: the reader's own inner width. */
@@ -79,7 +70,7 @@ public final class MessageView implements FilesList.Origins {
     /** The list read again after a write; set by the list once built. */
     MailList mailList;
 
-    /** The composer a reply and a forward open; set by the composer once built. */
+    /** The composer replies and forwards open; set by it once built. */
     MessageCompose compose;
 
     /** The row the reader opened, and what the header is drawn from. */
@@ -88,19 +79,18 @@ public final class MessageView implements FilesList.Origins {
     /**
      * What the open message's two toggles stand at.
      *
-     * <p>Held beside the row rather than read back off it: the row is the
-     * store's answer as of the listing, and the reader moves both of them
-     * while it is open (opening marks read, the toggles are toggles). The
-     * store is written in the same pass, so the two agree; this is what
-     * the buttons draw from without a re-read per tap.
+     * <p>Held beside the row, which is the listing's answer while the reader
+     * moves both; the store is written in the same pass, so they agree with no
+     * re-read per tap.
      */
     private boolean seen;
 
     private boolean flagged;
 
-    /** The open message as read, what a reply and a forward quote; null until it loads. */
+    /** The open message as read, quoted by replies; null until it loads. */
     private MessageBody loaded;
 
+    /** The reader, drawn in {@code host}. */
     public MessageView(
             Host host,
             MailParts parts,
@@ -170,14 +160,10 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * Renders the message, from the store when it holds it and from the
-     * server otherwise, filing what it fetched on the way through.
+     * Renders the message, from the store, else the server, filing a fetch.
      *
-     * <p>The store first, always. A message is immutable once sent, so the
-     * copy filed by the last open is the message, and asking the server for
-     * it again would be a round trip whose only possible answer is what is
-     * already on disk. It is also what makes the reader work with no network
-     * at all.
+     * <p>The store first, always: a sent message is immutable, so the filed
+     * copy is the message, and the reader works offline.
      */
     private void load(MailStore.StoredMessage message) {
         AccountEntry account = accountOf(message.accountEmail);
@@ -252,12 +238,10 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * The reader of one message's account ({@link MailReader}), on a mail
-     * driver that only stages: no account, so it services the storage yields
-     * a mutation makes and can reach no server.
+     * The reader of the message's account, on a stage-only mail driver.
      *
-     * <p>Which is what every action in the reader and the composer needs.
-     * Staging is a disk write, and the push it derives is the next sync's.
+     * <p>No account, so it serves a mutation's storage yields and reaches no
+     * server: all the reader and composer need, a sync pushing what it stages.
      */
     private MailReader reader() {
         return new MailReader(
@@ -268,9 +252,10 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * A session on the message's account for the reader to fetch it on, when
-     * there is a network: else it is not on the phone, and within its window
-     * the body step brings it once back online, else an open does.
+     * A session to fetch the message on, when there is a network.
+     *
+     * <p>Else the body step brings it back online within its window, or an
+     * open.
      */
     private MailSession openOnline(MailStore.StoredMessage message, AccountEntry account) {
         if (!sync.online()) {
@@ -290,8 +275,9 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * The badge opening the message's Linked card, saying how many links it
-     * has; hidden for a message that cannot be linked ({@code count} -1).
+     * The badge opening the message's Linked card, counting its links.
+     *
+     * <p>Hidden for a message that cannot be linked ({@code count} -1).
      */
     private void linked(MailStore.StoredMessage message, int count) {
         android.widget.TextView badge = host.findViewById(R.id.message_view_linked);
@@ -324,7 +310,7 @@ public final class MessageView implements FilesList.Origins {
                                                 })));
     }
 
-    /** What a tap on an attachment offers: open it, share it, or save it to a folder. */
+    /** What a tap on an attachment offers: open, share, or save to a folder. */
     private void choose(MailStore.StoredMessage message, FileStore.StoredFile attachment) {
         FileActions.Source bytes = () -> fileOf(message, attachment);
         CharSequence[] actions = {
@@ -349,14 +335,11 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * The file one attachment is read from: a saved copy's blob when one was
-     * saved, else the part the bridge writes out of the message's blob, the
-     * message fetched first when the store does not hold it.
+     * The file one attachment is read from.
      *
-     * <p>NOTE: fetching the part alone (IMAP {@code BODY.PEEK[<section>]},
-     * Gmail {@code attachments.get}, Graph {@code /attachments/{id}}, a JMAP
-     * blob) would spare the rest of the message; the whole message is what
-     * every backend reads today.
+     * <p>A saved copy's blob, else the part the bridge writes out of the
+     * message's blob, fetched first when not held. Every backend reads the
+     * whole message, though a part fetch would spare the rest.
      */
     public java.io.File fileOf(MailStore.StoredMessage message, FileStore.StoredFile attachment) {
         java.io.File saved = parts.files().saved(attachment);
@@ -386,9 +369,7 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * The file a stand-in is read from: the part its message holds written
-     * out ({@link #fileOf(MailStore.StoredMessage, FileStore.StoredFile)}),
-     * refused when its message is gone.
+     * A stand-in's file: its message's part, refused when the message is gone.
      */
     @Override
     public java.io.File fileOf(FileStore.Origin origin, FileStore.StoredFile file) {
@@ -420,10 +401,7 @@ public final class MessageView implements FilesList.Origins {
                 });
     }
 
-    /**
-     * The action row: the two toggles drawn at what the message stands
-     * at, and the delete button.
-     */
+    /** The action row: the two toggles as the message stands, and delete. */
     private void actions() {
         // NOTE: a message still in the outbox has no markers to move. It
         // has never been anywhere that keeps any, and offering the toggles
@@ -446,8 +424,8 @@ public final class MessageView implements FilesList.Origins {
 
         host.findViewById(R.id.message_view_delete).setOnClickListener(view -> confirmDelete());
 
-        // A message still waiting to go out has nothing to answer yet; one
-        // that may have gone is sent again only when the user says so.
+        // NOTE: a waiting message has nothing to answer yet; one that may
+        // have gone is sent again only when the user says so.
         boolean uncertain = current != null && current.uncertain;
         host.findViewById(R.id.message_view_replies)
                 .setVisibility(pending && !uncertain ? View.GONE : View.VISIBLE);
@@ -470,8 +448,7 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * Queues a message that may have gone to be sent again, the user having
-     * found it did not, then leaves the reader.
+     * Queues a message that did not go to be sent again, leaving the reader.
      */
     private void sendAgain(MailStore.StoredMessage message) {
         host.io.execute(
@@ -500,11 +477,10 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * A reply to everyone on the message: the sender, and every other
-     * address it went to, the account's own left out. A message the
-     * account sent itself answers its recipients instead, which is who a
-     * follow-up goes to. The quote and the people beyond the sender wait
-     * for the body; before it loads, the reply goes to the sender alone.
+     * A reply to everyone on the message, the account's own address left out.
+     *
+     * <p>A message the account sent answers its recipients. The quote and the
+     * people beyond the sender wait for the body; before it, the sender alone.
      */
     private MessageCompose.Prefill reply(MailStore.StoredMessage message, MessageBody body) {
         MailReply.People people =
@@ -537,9 +513,9 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * A forward: nobody to send to yet, the subject marked, and the
-     * message's headers over its text. The attachments stay behind, the
-     * composer writing plain text only.
+     * A forward: no recipient, the subject marked, headers over the text.
+     *
+     * <p>Attachments stay behind: the composer writes plain text only.
      */
     private MessageCompose.Prefill forward(MailStore.StoredMessage message, MessageBody body) {
         MessageCompose.Prefill prefill = new MessageCompose.Prefill();
@@ -598,13 +574,10 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * Stages one marker on a message, then runs {@code done} on the main
-     * thread; the reader's toggles and the list's star both write here.
+     * Stages one marker, then runs {@code done} on the main thread.
      *
-     * <p>The store and nothing else. The next sync pushes the difference
-     * between what is staged and what the server last agreed on, so a
-     * marker written with the radio off is a marker written, and the only
-     * thing either waits for is a disk write.
+     * <p>The reader's toggles and the list's star write here, to the store
+     * only: the next sync pushes the difference, so it works offline.
      */
     void stageFlag(
             MailStore.StoredMessage message, Flags.Marker flag, boolean add, Runnable done) {
@@ -644,7 +617,7 @@ public final class MessageView implements FilesList.Origins {
                 });
     }
 
-    /** Draws a star toggle: filled in the star's yellow when on, outlined when off. */
+    /** Draws a star toggle: filled yellow when on, outlined when off. */
     static void starOf(Host host, ImageView star, boolean on) {
         star.setImageResource(on ? R.drawable.ic_star_filled : R.drawable.ic_star);
         star.setColorFilter(
@@ -666,13 +639,10 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * Asks before deleting {@code messages}, then stages it and runs
-     * {@code done}; the reader's delete and the list's selection both come
-     * here.
+     * Asks before deleting {@code messages}, then stages and runs {@code done}.
      *
-     * <p>The question counts the messages a delete removes for good while
-     * the phone holds no body of them, which no restore can bring back:
-     * Deleted items keeps what was stored, and a header is not a message.
+     * <p>It counts the messages lost for good: deleted with no body held, which
+     * no restore brings back, since a header is not a message.
      */
     void confirmDelete(List<MailStore.StoredMessage> messages, Runnable done) {
         host.io.execute(
@@ -717,20 +687,11 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * Stages the messages' deletion, then reloads the list and runs
-     * {@code done}; the reader's delete and the list's selection both
-     * come here.
+     * Stages the messages' deletion, reloads the list, runs {@code done}.
      *
-     * <p>A delete is a pimdir mutation like any other action, so the list
-     * shows its outcome at once and the sync carries it out as staged:
-     * what is staged ({@link MailStager#stageDelete}) is what the toast
-     * says.
-     *
-     * <p>Unless the account records no trash and is a JMAP one, which RFC
-     * 8621 gives no keyword to mark a message with (section 4.1.1 names
-     * three and this is not one of them). Refused here rather than staged,
-     * because a change nothing could ever carry out would sit in the store
-     * failing once per sync.
+     * <p>The toast says what {@link MailStager#stageDelete} staged. A JMAP
+     * account with no trash is refused: RFC 8621 4.1.1 has no deleted keyword,
+     * so the change would fail once per sync forever.
      */
     void stageDelete(List<MailStore.StoredMessage> messages, Runnable done) {
         List<MailStore.StoredMessage> staged = new ArrayList<>();
@@ -878,9 +839,9 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * Empties the body frame, destroying a web view rather than only
-     * dropping it: a detached WebView keeps its own renderer, and one
-     * per message opened would accumulate for the life of the process.
+     * Empties the body frame, destroying a web view rather than dropping it.
+     *
+     * <p>A detached WebView keeps its renderer, piling up one per message.
      */
     private FrameLayout clearBody() {
         FrameLayout frame = host.findViewById(R.id.message_view_body);
@@ -911,8 +872,8 @@ public final class MessageView implements FilesList.Origins {
     private View html(String body) {
         WebView view = new WebView(host);
 
-        // Mail is written for a white page; letting the platform invert
-        // it turns some messages fully black.
+        // NOTE: mail is written for a white page; a platform inversion turns
+        // some messages fully black.
         view.setBackgroundColor(Color.WHITE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             view.getSettings().setAlgorithmicDarkeningAllowed(false);
@@ -926,9 +887,9 @@ public final class MessageView implements FilesList.Origins {
         view.getSettings().setUseWideViewPort(true);
         view.getSettings().setLoadWithOverviewMode(true);
 
-        // A link opens where links open, which is not inside a message;
-        // only one the reader tapped, in the message itself
-        // (linkIntent), never a refresh or a frame loading on its own.
+        // NOTE: a link opens outside the message, and only one the reader
+        // tapped in the message itself (linkIntent), never a refresh or a
+        // frame loading on its own.
         view.setWebViewClient(
                 new WebViewClient() {
                     @Override
@@ -954,11 +915,10 @@ public final class MessageView implements FilesList.Origins {
     private static final Set<String> LINK_SCHEMES = Set.of("http", "https", "mailto");
 
     /**
-     * The intent a link in a message opens, null when it opens nothing:
-     * one the reader did not tap (a meta refresh opens a tracker on its
-     * own), one in a frame, or one of a scheme other than the web's and
-     * mail's (another app's deep link). Browsable only, as a browser
-     * would open it, so it never reaches an activity no browser could.
+     * The intent a link in a message opens, null when it opens nothing.
+     *
+     * <p>Nothing untapped (a meta refresh opens a tracker), in a frame, or off
+     * the web's and mail's schemes; browsable only, as a browser would open it.
      */
     static Intent linkIntent(Uri url, boolean gesture, boolean mainFrame) {
         String scheme = url == null ? null : url.getScheme();
@@ -975,9 +935,11 @@ public final class MessageView implements FilesList.Origins {
         return intent;
     }
 
-    /** Hands a link to whatever handles it, and says nothing when
-     *  nothing does: a message must not crash the reader. The link itself
-     *  stays out of the log, a sign-in or reset link carrying its token. */
+    /**
+     * Hands a link to whatever handles it, silent when nothing does.
+     *
+     * <p>The link stays out of the log: a sign-in link carries its token.
+     */
     private void open(Intent intent) {
         try {
             host.startActivity(intent);
@@ -987,9 +949,9 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /**
-     * Wraps a message's HTML so it fits a phone: nothing may exceed the
-     * viewport, so a mail laid out for a desktop reflows instead of
-     * forcing the reader to scroll sideways through it.
+     * Wraps a message's HTML so nothing exceeds the viewport.
+     *
+     * <p>Desktop layouts then reflow instead of scrolling sideways.
      */
     private static String fitToWidth(String body) {
         return "<!DOCTYPE html><html><head>"

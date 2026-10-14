@@ -61,37 +61,11 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * The page one agenda row opens onto: what the entry is, and the form
- * that edits it, which are the same page.
+ * The page an agenda row opens onto: the entry, and the form editing it.
  *
- * <p>The same page as a contact's, and in the same way: one scroll of
- * sections, each row tappable into a dialog, a bar button that adds a
- * property the entry does not have yet, and the FAB to save. A contact
- * has no separate reading screen either, and a calendar entry gains
- * nothing from one: everything worth reading is worth correcting where
- * it is read.
- *
- * <p>Which sections and which properties follow the component, which is
- * the honest difference between the three: an event runs between two
- * moments, a to-do is due and partly done, a journal entry is written on
- * a day and has neither. Offering a to-do an end would be offering to
- * write a property RFC 5545 does not give it.
- *
- * <p>Opened on an occurrence of a series, it shows and edits that
- * occurrence, and asks on save and on delete whether the change is for
- * this occurrence, this and following, or all of them: an override and
- * an {@code EXDATE}, a split series, or the series itself. Its dates
- * show at the reader's time and are written back in the zone they were
- * in.
- *
- * <p>An entry both sides edited opens in conflict mode, as a contact does:
- * the same page over the merged object, each colliding field wearing the
- * diverged glyph until reviewed and offering both sides' values as chips,
- * the newer side pre-filled. A collision is a field of the occurrence it
- * is on, drawn in place on that occurrence's page; every other one (another
- * occurrence, one occurrence whole, a property the page does not edit) is
- * a row of its own section, so no side is ever dropped unseen. Saving
- * stages the resolution on the binding that conflicted.
+ * <p>Sections follow the component (RFC 5545). On a series occurrence, save and
+ * delete ask the scope: override and {@code EXDATE}, split, or series. In
+ * conflict mode both sides show as chips or rows, none dropped unseen.
  */
 public final class EventView {
     /** What an event's STATUS may be (RFC 5545 3.8.1.11). */
@@ -105,11 +79,7 @@ public final class EventView {
     /** What a journal entry's STATUS may be. */
     private static final String[] JOURNAL_STATUS = {"", "DRAFT", "FINAL", "CANCELLED"};
 
-    /**
-     * One editable property: the key the bridge's edit object uses, the
-     * section it belongs to, its label, how it is edited, and which
-     * components have it at all.
-     */
+    /** An editable property: edit key, section, label, editor, components. */
     private static final class Field {
         final String key;
         final EventEdit.Field text;
@@ -159,10 +129,10 @@ public final class EventView {
     private static final String[] DATES = {"start", "end", "due", "completed"};
 
     /**
-     * Every property the page can edit, in the order its sections draw
-     * them. The placing date and the all-day switch are not here: they
-     * are what a component <em>is</em>, so they always show rather than
-     * waiting to be added.
+     * Every property the page can edit, in section order.
+     *
+     * <p>The placing date and all-day switch are not here: they are what a
+     * component is, so they always show.
      */
     private static final Field[] CATALOG = {
         new Field("end", R.string.event_section_when, R.string.event_field_end, Kind.DATE, EVENT),
@@ -241,10 +211,7 @@ public final class EventView {
     /** The Linked card the page shows its entry's references in. */
     private final Linked<ItemLinks.Endpoint> linked;
 
-    /**
-     * The agenda a save or a delete reloads; it binds itself here when
-     * built, the two referencing each other.
-     */
+    /** The agenda a save or delete reloads; it binds itself here when built. */
     CalendarList list;
 
     private final Sections sections;
@@ -277,9 +244,10 @@ public final class EventView {
     private final Map<String, EventTime> times = new HashMap<>();
 
     /**
-     * The values and dates as the page opened, so a save sends only what
-     * changed: a date it does not touch keeps its line byte for byte, and
-     * an edit of a whole series moves only the dates that moved.
+     * Values and dates as opened, so a save sends only what changed.
+     *
+     * <p>An untouched date keeps its line byte for byte; a series edit moves
+     * only the dates that moved.
      */
     private final Map<EventEdit.Field, String> opened = new EnumMap<>(EventEdit.Field.class);
 
@@ -294,12 +262,13 @@ public final class EventView {
     /** Its merge: the object the page opened on, and what is left to ask. */
     private EventMerge merge;
 
-    /** The side each conflict was given, by its id; absent, the pre-filled one. */
+    /** Each conflict's given side, by id; absent means the pre-filled one. */
     private final Map<Integer, EventSide> picks = new HashMap<>();
 
     /** The conflicts the user has reviewed, by id, which clears their glyph. */
     private final Set<Integer> reviewed = new HashSet<>();
 
+    /** The entry page; {@code linked} draws its Linked card. */
     public EventView(Host host, CalendarParts parts, Linked<ItemLinks.Endpoint> linked) {
         this.host = host;
         this.parts = parts;
@@ -319,20 +288,9 @@ public final class EventView {
     /**
      * Opens the page on a new entry, in the given calendar.
      *
-     * <p>The object is built before the page opens rather than at save
-     * time, so what is edited is an object like any other and the page
-     * has one shape: the entry exists locally the moment it is started,
-     * and it is the save that decides whether the server has it yet.
-     *
-     * <p>It is placed at the next whole hour, which is the guess that
-     * needs the least correcting: an entry started now is rarely for
-     * now, and every other default (midnight, this exact minute) is
-     * further from what the user then types.
-     *
-     * <p>In the device's zone, by its IANA name and with the definition
-     * RFC 5545 3.2.19 wants beside it: a floating start would follow
-     * whichever zone each reader is in, which no server or other client
-     * takes as meant.
+     * <p>Built up front, so the page has one shape. At the next whole hour, in
+     * the device's zone named with its definition (RFC 5545 3.2.19): a floating
+     * start would follow each reader.
      */
     public void compose(EventStore.StoredCalendar calendar) {
         String uid = UUID.randomUUID().toString();
@@ -368,9 +326,10 @@ public final class EventView {
     }
 
     /**
-     * Starts a new calendar entry in the default calendar of the account
-     * in view, asking only when there is none, exactly as a new contact
-     * picks its address book. A read-only calendar is never offered.
+     * Starts an entry in the default calendar of the account in view.
+     *
+     * <p>Asks only when there is none, as a new contact picks its book; a
+     * read-only calendar is never offered.
      */
     public void composeNew() {
         Map<String, EventStore.StoredCalendar> byId = new HashMap<>();
@@ -404,7 +363,7 @@ public final class EventView {
                 calendar -> compose(byId.get(calendar.id)));
     }
 
-    /** Opens the page on one agenda row, in conflict mode when it is conflicted. */
+    /** Opens the page on an agenda row, in conflict mode if conflicted. */
     public void open(
             Occurrence occurrence,
             EventStore.StoredEvent event,
@@ -418,9 +377,10 @@ public final class EventView {
     }
 
     /**
-     * Opens one calendar resource on its page, as its series rather than an
-     * occurrence, read off the store on the io executor; {@code gone} runs
-     * when the store holds it no more.
+     * Opens one calendar resource on its page, as its series.
+     *
+     * <p>Read off the store on the io executor; {@code gone} runs when the
+     * store holds it no more.
      */
     public void openStored(String collection, String linkId, Runnable gone) {
         host.io.execute(
@@ -454,13 +414,11 @@ public final class EventView {
     }
 
     /**
-     * Opens the page on an entry both sides edited, merged from the store
-     * alone: the newer side of each collision pre-filled, both offered.
+     * Opens the page on an entry both sides edited, merged from the store.
      *
-     * <p>A merge with nothing left to ask, which the sync has not staged
-     * yet, is staged on the spot, the toast its only outcome, as a
-     * contact's is. One that cannot be merged does not open: a save from
-     * the page would settle it with the side here alone.
+     * <p>Each collision's newer side pre-filled, both offered. A merge with
+     * nothing to ask is staged on the spot, a toast its outcome; one that
+     * cannot merge does not open: a save would settle it one-sided.
      */
     private void openConflict(
             Occurrence occurrence,
@@ -575,10 +533,10 @@ public final class EventView {
     }
 
     /**
-     * The dates of the occurrence that was opened rather than its
-     * series': the start where it falls, and the end or due date it runs
-     * to. A to-do placed by its due date alone has no start to move, so
-     * its due date is where it falls.
+     * The opened occurrence's dates rather than its series'.
+     *
+     * <p>The start where it falls, and the end or due date it runs to; a to-do
+     * placed by its due date alone falls at its due date.
      */
     private void occurrenceDates() {
         if (detail.start() == null && detail.due() != null) {
@@ -599,13 +557,17 @@ public final class EventView {
         return occurrence != null && occurrence.recurrenceId() != null;
     }
 
-    /** Whether the object could be read at all: nothing is editable
-     *  otherwise, and saving would clear what could not be shown. */
+    /**
+     * Whether the object could be read at all.
+     *
+     * <p>Nothing is editable otherwise: saving would clear what could not be
+     * shown.
+     */
     boolean readable() {
         return detail != null;
     }
 
-    /** Whether the page may write its entry back: read, on a calendar taking writes. */
+    /** Whether the page may write back: read, on a writable calendar. */
     public boolean editable() {
         return readable() && writes();
     }
@@ -619,8 +581,6 @@ public final class EventView {
     private String component() {
         return detail == null ? EVENT : detail.component();
     }
-
-    // ---- the page ---------------------------------------------------------
 
     private void render() {
         sections.clear();
@@ -654,10 +614,7 @@ public final class EventView {
         }
     }
 
-    /**
-     * Gates the save: live outside conflict mode, and in it once every
-     * conflict has been reviewed.
-     */
+    /** Gates the save: in conflict mode, until every conflict is reviewed. */
     public void gate() {
         host.gateSave(settled(), R.drawable.ic_save, R.string.event_save);
     }
@@ -668,8 +625,9 @@ public final class EventView {
     }
 
     /**
-     * The conflicts the page cannot draw in place, each a row of its own:
-     * another occurrence's, one occurrence or the entry whole, a property
+     * The conflicts the page cannot draw in place, each a row of its own.
+     *
+     * <p>Another occurrence's, one occurrence or the entry whole, a property
      * the page does not edit.
      */
     private void conflicts() {
@@ -699,10 +657,10 @@ public final class EventView {
     }
 
     /**
-     * When the entry is placed, which is the one section every component
-     * has: the all-day switch, the placing date, and whatever the
-     * component bounds itself with. The occurrence's own moment closes
-     * it, read-only, since it is computed rather than stored.
+     * When the entry is placed, the one section every component has.
+     *
+     * <p>The all-day switch, the placing date and the component's bounds,
+     * closed by the occurrence's own moment, read-only since it is computed.
      */
     private void when() {
         List<View> rows = new ArrayList<>();
@@ -728,8 +686,8 @@ public final class EventView {
         } else if (!detail.recurrence().isEmpty()) {
             rows.add(sections.value(detail.recurrence(), R.string.event_field_repeats));
         }
-        // An occurrence an override moved says where its series had it,
-        // which is the instance an edit of it alone is written against.
+        // NOTE: an occurrence an override moved says where its series had
+        // it, the instance an edit of it alone is written against.
         if (series()
                 && Zones.instant(occurrence.recurrenceId()) != Zones.instant(occurrence.start())) {
             rows.add(
@@ -762,8 +720,7 @@ public final class EventView {
         sections.section(title, icon, rows, addIcon(title), false);
     }
 
-    /** The rows of one section: every field of this component that is
-     *  set, plus the ones added this session. */
+    /** The rows of one section: set fields, plus those added this session. */
     private List<View> rowsOf(int section) {
         List<View> rows = new ArrayList<>();
         for (Field field : CATALOG) {
@@ -774,7 +731,7 @@ public final class EventView {
         return rows;
     }
 
-    /** Whether a field's row is drawn: set, added this session, or conflicted. */
+    /** Whether a field's row shows: set, added this session, or conflicted. */
     private boolean shown(Field field) {
         boolean set =
                 field.kind == Kind.DATE
@@ -783,8 +740,12 @@ public final class EventView {
         return set || revealed.contains(field.key) || conflictOn(field.key) != null;
     }
 
-    /** Who is on it, read-only: an attendee list is a negotiation
-     *  (invitations, replies), not a text field. */
+    /**
+     * Who is on it, read-only.
+     *
+     * <p>An attendee list is a negotiation (invitations, replies), not a text
+     * field.
+     */
     private void people() {
         List<View> rows = new ArrayList<>();
         if (!detail.organizer().isEmpty()) {
@@ -841,8 +802,6 @@ public final class EventView {
                 : R.string.event_field_start;
     }
 
-    // ---- adding a field ---------------------------------------------------
-
     /** A section header's add action, filtered to that section. */
     private View addIcon(int section) {
         ImageView icon = new ImageView(host);
@@ -894,8 +853,6 @@ public final class EventView {
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
-
-    // ---- the rows ---------------------------------------------------------
 
     private View row(Field field) {
         CharSequence shown =
@@ -950,7 +907,7 @@ public final class EventView {
         }
     }
 
-    /** A date as the page shows it, at the reader's time, or empty when unset. */
+    /** A date as shown, at the reader's time; empty when unset. */
     private String moment(EventTime time) {
         if (time == null) {
             return "";
@@ -958,8 +915,6 @@ public final class EventView {
         long stamp = Zones.instant(time);
         return time.isDate() ? Dates.date(host, stamp) : Dates.full(host, stamp);
     }
-
-    // ---- the dialogs ------------------------------------------------------
 
     private void editText(Field field) {
         boolean longText = field.kind == Kind.LONG_TEXT;
@@ -990,10 +945,10 @@ public final class EventView {
     }
 
     /**
-     * The dialog of a typed field: its input, and on a conflicted one a
-     * chip per side under it, a chip filling the input in. A value that is
-     * one side's on OK picks that side; any other is an edit of its own,
-     * written over whichever side is held.
+     * A typed field's dialog: its input, and a chip per side if conflicted.
+     *
+     * <p>A chip fills the input in. A value that is one side's on OK picks that
+     * side; any other is an edit of its own, over whichever side is held.
      */
     private void typed(Field field, EditText input) {
         EventMerge.Conflict conflicted = conflictOn(field.key);
@@ -1050,12 +1005,7 @@ public final class EventView {
         return JOURNAL.equals(component) ? JOURNAL_STATUS : EVENT_STATUS;
     }
 
-    /**
-     * A date, then a time unless the entry is all-day: the two pickers
-     * chain, which is what the platform offers, and an all-day entry
-     * stops after the first since a date it has no time for is the
-     * whole point.
-     */
+    /** A date, then a time unless all-day: the platform's pickers chained. */
     private void editDate(String key) {
         EventTime current = times.get(key);
         Calendar moment = Calendar.getInstance();
@@ -1069,8 +1019,9 @@ public final class EventView {
                             moment.set(Calendar.YEAR, year);
                             moment.set(Calendar.MONTH, month);
                             moment.set(Calendar.DAY_OF_MONTH, day);
-                            // NOTE: a completion is a UTC moment whatever the
-                            // entry is (RFC 5545 3.8.2.1), so it keeps its time.
+                            // NOTE: a completion is a UTC moment whatever
+                            // the entry is (RFC 5545 3.8.2.1), so it keeps
+                            // its time.
                             if (allDay() && !"completed".equals(key)) {
                                 times.put(key, at(moment.getTimeInMillis(), key, true));
                                 render();
@@ -1101,10 +1052,11 @@ public final class EventView {
     }
 
     /**
-     * A moment the reader picked, as the date a property writes: a day,
-     * or a time in the zone the property was in, so an event at 09:00
-     * New York moved by a reader in Paris stays in New York. A date that
-     * had none takes the start's zone, else the device's.
+     * A moment the reader picked, as the date a property writes.
+     *
+     * <p>A day, or a time in the property's zone, so 09:00 New York moved from
+     * Paris stays in New York. A date that had none takes the start's zone,
+     * else the device's.
      */
     private EventTime at(long instant, String key, boolean date) {
         ZoneId reader = ZoneId.systemDefault();
@@ -1126,10 +1078,11 @@ public final class EventView {
     }
 
     /**
-     * Flips all-day: a time becomes the day it falls on for the reader,
-     * a day the midnight opening it in the device's zone. An all-day end
-     * is the day after the last one (RFC 5545 3.6.1), so one landing on
-     * its start's day moves a day on.
+     * Flips all-day, converting the dates both ways.
+     *
+     * <p>A time becomes the reader's day it falls on, a day the midnight
+     * opening it in the device's zone. An all-day end is the day after the last
+     * (RFC 5545 3.6.1), so one on its start's day moves a day on.
      */
     private void toggleAllDay() {
         boolean allDay = !allDay();
@@ -1169,9 +1122,7 @@ public final class EventView {
                 .show();
     }
 
-    // ---- conflicts --------------------------------------------------------
-
-    /** The conflict drawn in place on one of the page's rows, by its key; null when none. */
+    /** The conflict drawn in place on a row, by its key; null when none. */
     private EventMerge.Conflict conflictOn(String key) {
         if (merge == null) {
             return null;
@@ -1185,9 +1136,10 @@ public final class EventView {
     }
 
     /**
-     * Whether a conflict is drawn on one of the page's rows: a field the
-     * page edits, of the component the page shows. The series' rule is the
-     * series' row, so it is in place only on a page showing the series.
+     * Whether a conflict draws on a row: a page field of this component.
+     *
+     * <p>The series' rule is the series' row: in place only on a page showing
+     * the series.
      */
     private boolean inPlace(EventMerge.Conflict one) {
         if (!sameOccurrence(one.recurrenceId(), detail.recurrenceId())) {
@@ -1209,7 +1161,7 @@ public final class EventView {
         return false;
     }
 
-    /** Whether two occurrence identities name one occurrence, or neither names one. */
+    /** Whether two occurrence identities name the same one, or none. */
     static boolean sameOccurrence(EventTime left, EventTime right) {
         if (left == null || right == null) {
             return left == right;
@@ -1252,9 +1204,10 @@ public final class EventView {
     }
 
     /**
-     * Asks which side a conflict takes: the side held, then a chip per
-     * side, OK settling it. {@code other}, when given, is the free edit a
-     * date or a status leads to, which reviews the conflict too.
+     * Asks which side a conflict takes, OK settling it.
+     *
+     * <p>The held side, then a chip per side. {@code other}, when given, is the
+     * free edit a date or status leads to, which reviews the conflict too.
      */
     private void choose(EventMerge.Conflict one, Runnable other) {
         EventMerge.Choice[] chosen = {picked(one)};
@@ -1298,9 +1251,9 @@ public final class EventView {
     }
 
     /**
-     * Gives a conflict one side: the value its row shows, and the baseline
-     * the save tells an edit from, so the side travels as the pick it is
-     * and not as an edit written over it.
+     * Gives a conflict one side: its row's value and the save's baseline.
+     *
+     * <p>So the side travels as the pick it is, not as an edit written over it.
      */
     private void pick(EventMerge.Conflict one, EventMerge.Choice choice) {
         picks.put(one.id(), choice.side());
@@ -1334,7 +1287,7 @@ public final class EventView {
         }
     }
 
-    /** The side a conflict holds now: the one picked, else the pre-filled one. */
+    /** A conflict's current side: the picked one, else the pre-filled one. */
     private EventMerge.Choice picked(EventMerge.Conflict one) {
         EventSide side = picks.get(one.id());
         for (EventMerge.Choice choice : one.choices()) {
@@ -1346,8 +1299,10 @@ public final class EventView {
     }
 
     /**
-     * What a side of a conflict reads as: its value, its moment for a date,
-     * and for an occurrence or the entry whole, what keeping it means.
+     * What a side of a conflict reads as.
+     *
+     * <p>Its value, its moment for a date, and for an occurrence or the entry
+     * whole, what keeping it means.
      */
     private String choiceLabel(EventMerge.Conflict one, EventMerge.Choice choice) {
         if (EventConflictKind.RECURRENCE.equals(one.kind())) {
@@ -1374,7 +1329,7 @@ public final class EventView {
         return choice.value().isEmpty() ? host.getString(R.string.value_not_set) : choice.value();
     }
 
-    /** What a conflict is called: its row's label, else the property's own name. */
+    /** What a conflict is called: its row's label, else the property's name. */
     private String fieldLabel(EventMerge.Conflict one) {
         switch (one.field()) {
             case "start":
@@ -1397,8 +1352,6 @@ public final class EventView {
         }
     }
 
-    // ---- the model --------------------------------------------------------
-
     private void put(EventEdit.Field key, String value) {
         model.put(key, value);
     }
@@ -1411,7 +1364,7 @@ public final class EventView {
         return allDay;
     }
 
-    /** The text field the bridge's edit object keys {@code key}, null for any other key. */
+    /** The edit object's text field keyed {@code key}; null for others. */
     private static EventEdit.Field textOf(String key) {
         for (EventEdit.Field text : EventEdit.Field.values()) {
             if (text.wire().equals(key)) {
@@ -1422,10 +1375,10 @@ public final class EventView {
     }
 
     /**
-     * The stored object's properties, or null when it cannot be read:
-     * the agenda placed the row from the same object, so a page saying
-     * only what the row said beats a page that fails. Opened on an
-     * occurrence an override replaces, the override's.
+     * The stored object's properties, or null when it cannot be read.
+     *
+     * <p>The agenda placed the row from it, so saying only what the row said
+     * beats failing. On an occurrence an override replaces, the override's.
      */
     private EventDetail detailOf(EventStore.StoredEvent event) {
         try {
@@ -1438,13 +1391,11 @@ public final class EventView {
     }
 
     /**
-     * What the page changed, as the bridge's edit object: the fields that
-     * differ from how the page opened, and nothing else.
+     * What the page changed, as an edit object: the differing fields alone.
      *
-     * <p>A date carries the zone it is in only when that is not the zone
-     * its property already had, so a date edited where it was keeps its
-     * line's {@code TZID} and {@code VALUE}; one in a zone the object may
-     * not define brings that zone's {@code VTIMEZONE}.
+     * <p>A date carries its zone only when not its property's, so a date edited
+     * in place keeps its line's {@code TZID} and {@code VALUE}; one in a zone
+     * the object may not define brings its {@code VTIMEZONE}.
      */
     private EventEdit edited() {
         Map<EventEdit.Field, String> texts = new EnumMap<>(EventEdit.Field.class);
@@ -1480,8 +1431,9 @@ public final class EventView {
     }
 
     /**
-     * Whether an edit changes anything beyond the stamp every save
-     * carries: a field, or a date with the zone it may bring.
+     * Whether an edit changes anything beyond the stamp every save carries.
+     *
+     * <p>A field, or a date with the zone it may bring.
      */
     private static boolean beyondStamp(EventEdit edit) {
         return edit.summary() != null
@@ -1515,20 +1467,12 @@ public final class EventView {
         return Zones.utc(System.currentTimeMillis());
     }
 
-    // ---- saving -----------------------------------------------------------
-
     /**
      * Patches the object and stages it; the next sync pushes it.
      *
-     * <p>The store and nothing else, so an entry can be written and saved
-     * with the radio off. A create is staged as one, guarded by
-     * {@code If-None-Match} when it goes out, and an edit is staged
-     * against the ETag the entry was read at, so the push that follows is
-     * conditioned on the state the edit was made against rather than on
-     * whatever arrived since.
-     *
-     * <p>On an occurrence of a series it first asks which occurrences
-     * the edit is for.
+     * <p>The store alone, so it works offline. A create goes out guarded by
+     * {@code If-None-Match}, an edit by the ETag it was read at, not whatever
+     * arrived since. On a series occurrence it first asks the scope.
      */
     public void save() {
         if (detail == null) {
@@ -1588,16 +1532,11 @@ public final class EventView {
     }
 
     /**
-     * Saves for one scope: the series or the lone entry, one occurrence
-     * through its override, or this and following by splitting the
-     * series, which stages two writes: the new series' create, then the
-     * shortened series' edit, in that order so a failure between them
-     * leaves an occurrence twice rather than none.
+     * Saves for one scope: series or lone entry, one occurrence, or a split.
      *
-     * <p>In conflict mode the edit applies to the resolution, the merge
-     * with every pick taken, and is staged on the binding that conflicted,
-     * which is what settles it; a resolution with nothing edited beside it
-     * is staged as it is.
+     * <p>A split stages the new series' create, then the shortened one's edit:
+     * a failure between leaves an occurrence twice, never none. In conflict
+     * mode it applies to the resolution, on the conflicted binding.
      */
     private void save(EventScope scope) {
         EventEdit edits = edited();
@@ -1649,9 +1588,10 @@ public final class EventView {
     }
 
     /**
-     * An edit made on the occurrence the page is on, for one scope: which
-     * instance it is, the instant a split ends the series before, and the
-     * new series' UID.
+     * An edit on the opened occurrence, for one scope.
+     *
+     * <p>Which instance it is, the instant a split ends the series before, and
+     * the new series' UID.
      */
     private EventEdit scoped(EventEdit edit, EventScope scope) {
         String recurrenceId = null;
@@ -1668,8 +1608,9 @@ public final class EventView {
     }
 
     /**
-     * Asks before deleting: an entry is one tap from being gone. On an
-     * occurrence of a series, the question is which occurrences.
+     * Asks before deleting: an entry is one tap from being gone.
+     *
+     * <p>On a series occurrence, the question is which occurrences.
      */
     public void confirmDelete() {
         if (!writes()) {
@@ -1693,10 +1634,11 @@ public final class EventView {
     }
 
     /**
-     * Asks before deleting the entry whole. A conflicted one says that the
-     * version changed elsewhere goes with it: the page has shown it, so
-     * the delete is the user's decision on the conflict, and it is pushed
-     * against what the source was seen to hold.
+     * Asks before deleting the entry whole.
+     *
+     * <p>A conflicted one says the other side's version goes too: the page
+     * showed it, so deleting decides the conflict, pushed against what the
+     * source was seen to hold.
      */
     private void confirmWhole() {
         new AlertDialog.Builder(host)
@@ -1710,21 +1652,11 @@ public final class EventView {
     }
 
     /**
-     * Stages the removal and leaves the page; the next sync tells the
-     * server, guarded by the ETag the entry was read at.
+     * Stages the removal and leaves; the next sync sends it, ETag-guarded.
      *
-     * <p>All occurrences remove the entry. One becomes an {@code EXDATE}
-     * on its series and this and following ends the series before it,
-     * both edits of the entry, unless nothing of the series is left.
-     *
-     * <p>An entry that was never saved is only ever on this screen, so its
-     * delete is the page closing: there is nothing staged to withdraw and
-     * nothing anywhere to tell about it.
-     *
-     * <p>In conflict mode an occurrence is removed from the resolution, so
-     * every conflict is reviewed first, and staged on the binding that
-     * conflicted, as a save is; the whole entry is removed there too,
-     * which the engine gates on the revision the conflict recorded.
+     * <p>One occurrence becomes an {@code EXDATE}, this and following ends the
+     * series, unless nothing is left; an unsaved entry just closes. A conflict
+     * stages on the conflicted binding, gated on its recorded revision.
      */
     private void delete(EventScope scope) {
         if (creating) {

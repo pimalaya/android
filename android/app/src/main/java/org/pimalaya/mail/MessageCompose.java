@@ -21,21 +21,9 @@ import java.util.List;
 /**
  * The composer: who it is from, who it goes to, and what it says.
  *
- * <p>Plain text, one recipient field per kind, and the copies hidden
- * until they are asked for. What it is not is a draft editor: nothing is
- * stored until the message is sent, so leaving the screen loses what was
- * typed and the screen says so before it does.
- *
- * <p>Sending stores rather than submits. The message is composed here,
- * which needs nothing but the fields, and lands in the account's outbox;
- * the sync that follows hands it over. So a message can be written and
- * sent with the radio off, and what the composer reports is that it is
- * queued, not that it arrived.
- *
- * <p>The account is the one the composer opened on, and it is fixed for
- * the message: the sender is what a server checks a submission against,
- * so choosing it after the fact would mean re-authenticating somewhere
- * else. With more than one mail account, the picker comes first.
+ * <p>Plain text, no draft: leaving loses what was typed, and says so. Sending
+ * queues for the next sync, offline too. The account is fixed once opened (a
+ * server checks the sender), so with several the picker comes first.
  */
 public final class MessageCompose {
     /** The three address fields. */
@@ -60,8 +48,7 @@ public final class MessageCompose {
     private Prefill opened;
 
     /**
-     * What the composer opens filled with: blank for a new message, the
-     * parent's people, subject and quote for a reply or a forward.
+     * What the composer opens with: blank, or a parent's reply or forward.
      */
     static final class Prefill {
         /** The account to send from, when the message has one; null to ask. */
@@ -75,13 +62,14 @@ public final class MessageCompose {
         /** The parent's `Message-ID`, in brackets; empty outside a reply. */
         String inReplyTo = "";
 
-        /** The thread the reply continues, space separated; empty outside a reply. */
+        /** The thread a reply continues, space separated; else empty. */
         String references = "";
 
         /** The message replied to, marked answered once the reply is queued. */
         MailStore.StoredMessage parent;
     }
 
+    /** The composer of {@code messageView}, reloading {@code mailList}. */
     public MessageCompose(Host host, MailParts parts, MessageView messageView, MailList mailList) {
         this.host = host;
         this.parts = parts;
@@ -96,9 +84,9 @@ public final class MessageCompose {
     }
 
     /**
-     * Opens the composer filled in, on the account the prefill names when
-     * it can send, and otherwise asking which account to send from when
-     * there is more than one and taking it silently when there is one.
+     * Opens the composer filled, on the prefill's account when it can send.
+     *
+     * <p>Otherwise asks which account sends when several, taking the only one.
      */
     void open(Prefill prefill) {
         List<AccountEntry> accounts = new ArrayList<>();
@@ -213,10 +201,7 @@ public final class MessageCompose {
         return String.join(", ", all);
     }
 
-    /**
-     * Composes what is on screen and puts it in the outbox ({@link
-     * MailSubmit}).
-     */
+    /** Composes what is on screen into the outbox ({@link MailSubmit}). */
     public void send() {
         if (account == null) {
             return;
@@ -272,9 +257,9 @@ public final class MessageCompose {
                                 }
                                 host.toast(host.getString(R.string.compose_queued));
                                 host.showBack(Panels.MAIL);
-                                // The parent is answered once the reply is
-                                // queued, the way the reply counts as sent:
-                                // both go out on the next sync.
+                                // NOTE: the parent is answered once the
+                                // reply is queued: both go out on the
+                                // next sync.
                                 if (parent != null && !parent.pending()) {
                                     messageView.stageFlag(
                                             parent,

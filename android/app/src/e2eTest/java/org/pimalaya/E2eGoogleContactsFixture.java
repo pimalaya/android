@@ -10,10 +10,10 @@ import java.util.List;
 import java.util.concurrent.Callable;
 
 /**
- * Google's contacts prepared through the People API: the user's one contact
- * list, which CardDAV serves as its default address book, so no scratch
- * collection is made and every contact the suite writes carries its tag in
- * its name.
+ * Google's contacts prepared through the People API.
+ *
+ * <p>The one contact list, CardDAV's default book: no scratch collection, every
+ * contact written carrying the tag in its name.
  */
 final class E2eGoogleContactsFixture implements E2eItemFixture {
     private static final String API = "https://people.googleapis.com/v1/";

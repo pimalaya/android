@@ -6,10 +6,7 @@ import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirDb;
 
-/**
- * What the mail screens work over: the store, the bridge, the mail, file
- * and link sides of the store, and the accounts kept on the device.
- */
+/** What the mail screens work over: the store sides, bridge and accounts. */
 public record MailParts(
         PimdirDb pimdir,
         Clients clients,

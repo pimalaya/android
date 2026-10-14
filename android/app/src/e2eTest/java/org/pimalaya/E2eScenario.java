@@ -6,9 +6,9 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * The spec scenarios an end-to-end test covers, each as
- * `capability: Requirement / Scenario` with the names cairn/spec/ gives them,
- * which is how the run's report maps a test onto the spec.
+ * The spec scenarios an end-to-end test covers, mapping it onto the spec.
+ *
+ * <p>Each as `capability: Requirement / Scenario`, with cairn/spec/'s names.
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.METHOD)

@@ -10,11 +10,14 @@ import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.Stager;
 
-/** The mail driver that only stages: markers and deletions, each write told to the list. */
+/**
+ * The mail driver that only stages: markers and deletions, told to the list.
+ */
 public final class MailStager extends Stager {
-    /** The store, for the messages a staging reads and the list a write is told to. */
+    /** The store, read by stagings and told of each write. */
     private final PimdirDb pimdir;
 
+    /** A stage-only mail driver over the store. */
     public MailStager(PimdirDb pimdir, Clients clients) {
         super(pimdir, clients);
         this.pimdir = pimdir;
@@ -47,10 +50,7 @@ public final class MailStager extends Stager {
         }
     }
 
-    /**
-     * Stages one marker on one stored message, added or removed, the others
-     * it carries kept; the next sync pushes the difference.
-     */
+    /** Stages one marker added or removed; the next sync pushes the change. */
     public void stageFlag(MailStore.StoredMessage message, Flags.Marker flag, boolean add)
             throws JSONException {
         mutateFlags(
@@ -74,13 +74,9 @@ public final class MailStager extends Stager {
     /**
      * Stages one message's deletion, as its account allows.
      *
-     * <p>A message waiting to go out was never sent, so withdrawing its
-     * submission is the delete, the sent copy staged beside it going too.
-     * Outside the trash it moves there; in the trash it is removed, which
-     * the sync pushes as a delete for good. Where the account records no
-     * trash, or its server erases no single message (no UIDPLUS, whose
-     * plain EXPUNGE takes every marked message), it is marked
-     * {@code \Deleted} and stays.
+     * <p>Outgoing: its submission and sent copy are withdrawn. Outside the
+     * trash it moves there, inside it goes for good; with no trash or no
+     * UIDPLUS it is marked {@code \Deleted}.
      */
     public Deletion stageDelete(MailStore.StoredMessage message) throws JSONException {
         if (message.pending()) {

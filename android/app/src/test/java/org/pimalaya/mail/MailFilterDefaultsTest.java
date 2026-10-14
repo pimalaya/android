@@ -21,9 +21,10 @@ import org.robolectric.RuntimeEnvironment;
 import java.util.List;
 
 /**
- * What the mail filter ticks to begin with, and its page's draft: a Gmail
- * account every label but its trash and spam, any other its inbox alone, an
- * account listed before keeping its ticks; the page's ticks kept only once
+ * What the mail filter ticks to begin with, and its page's draft.
+ *
+ * <p>A Gmail account every label but trash and spam, another its inbox alone,
+ * an account listed before keeping its ticks; the page's ticks kept only once
  * applied.
  */
 @RunWith(RobolectricTestRunner.class)

@@ -23,15 +23,11 @@ import org.pimalaya.ui.Host;
 import org.pimalaya.ui.PillField;
 
 /**
- * The connection flow's OAuth 2.0 grants: the shipped Google and
- * Microsoft clients, custom clients over a loopback or the app-scheme
- * redirect, and the zero-registration issuer path (RFC 8414 metadata
- * plus RFC 7591 dynamic registration). Every grant ends in the browser;
- * the OS-routed redirects come back through the host's onNewIntent into
- * {@link #handleRedirect}, and the redeemed tokens land back in the
- * connection flow through {@link #onConnected}. The in-flight grant
- * persists, sealed under the account key, because the browser hop
- * routinely outlives the process.
+ * The connection flow's OAuth 2.0 grants, every one ending in the browser.
+ *
+ * <p>Shipped clients, custom clients, RFC 8414 + 7591 issuers. Redirects reach
+ * {@link #handleRedirect}, tokens {@link #onConnected}; the grant in flight
+ * persists, sealed, as the browser outlives the process.
  */
 public final class OauthFlow {
     /** Lands a redeemed grant back in the connection flow. */
@@ -67,8 +63,7 @@ public final class OauthFlow {
     /** The in-flight grant as persisted, sealed across the browser hop. */
     private final PendingGrantStore grants;
 
-    /** Wired by the host after construction (the two flows reference
-     *  each other, so one side binds late). */
+    /** Wired after construction: the two flows reference each other. */
     public Connector onConnected;
 
     /** Resets the config screen's continue when a grant aborts. */
@@ -77,8 +72,7 @@ public final class OauthFlow {
     /** Puts the running step's button on its loader while a grant starts. */
     public Runnable onBusy;
 
-    /** The in-flight grant: the PKCE session and the account material
-     *  the redeem needs (all null or empty when no grant runs). */
+    /** The in-flight grant's PKCE session, null when no grant runs. */
     private OauthSession pendingOauth;
 
     private String pendingTokenEndpoint;
@@ -88,8 +82,10 @@ public final class OauthFlow {
     private String pendingClientSecret;
 
     /**
-     * The issuer an issuer-flow grant started at, which its redirect must not
-     * contradict (RFC 9207); null for the shipped and custom clients.
+     * The issuer an issuer-flow grant started at.
+     *
+     * <p>Its redirect must not contradict it (RFC 9207); null for the shipped
+     * and custom clients.
      */
     private String pendingIssuer;
 
@@ -108,6 +104,7 @@ public final class OauthFlow {
     /** The loopback redirect listener, closed with the activity. */
     private java.net.ServerSocket loopbackServer;
 
+    /** Builds the grants; {@link #onConnected} is wired after. */
     public OauthFlow(Host host, AccountClient client, SetupShell shell) {
         this.host = host;
         this.client = client;
@@ -116,11 +113,10 @@ public final class OauthFlow {
     }
 
     /**
-     * Starts a Google OAuth grant with the app's own client, for whatever
-     * the scope covers (mail, calendars, CardDAV or the People API):
-     * prepares the PKCE session, then opens the authorization URL in the
-     * browser. The redirect comes back on the reversed-client-id custom
-     * scheme.
+     * Starts a Google grant with the app's client, for what the scope covers.
+     *
+     * <p>Mail, calendars, CardDAV or the People API; the redirect comes back on
+     * the reversed-client-id scheme.
      */
     void startGoogleOauth(String email, String scope, String baseUrl) {
         pendingOauth =
@@ -157,10 +153,11 @@ public final class OauthFlow {
     }
 
     /**
-     * Starts a Microsoft OAuth grant with the app's own client, mirroring
-     * the Google one: PKCE session, browser, redirect on the pimalaya
-     * custom scheme. The scope addresses one API, Outlook's for mail or
-     * Graph's for contacts and calendars, Entra issuing a token for one.
+     * Starts a Microsoft grant with the app's own client, as Google's.
+     *
+     * <p>The redirect comes back on the pimalaya scheme. The scope addresses
+     * one API, Outlook's for mail or Graph's for contacts and calendars: Entra
+     * issues a token for one.
      */
     void startMicrosoftOauth(String email, String scope, String baseUrl) {
         pendingOauth =
@@ -192,8 +189,10 @@ public final class OauthFlow {
     }
 
     /**
-     * Whether an intent's URL is the pending grant's redirect: the redirect
-     * URI exactly, up to its query, and the grant's state in that query.
+     * Whether an intent's URL is the pending grant's redirect.
+     *
+     * <p>The redirect URI exactly, up to its query, and the grant's state in
+     * that query.
      */
     static boolean isRedirectOf(String url, String redirectUri, String state) {
         if (redirectUri == null || redirectUri.isEmpty() || state == null || state.isEmpty()) {
@@ -219,7 +218,7 @@ public final class OauthFlow {
         }
     }
 
-    /** A redirect URI with the lone `/` path of a `scheme://authority/` form dropped. */
+    /** A redirect URI without the lone `/` path of a `scheme://authority/`. */
     private static String withoutRootSlash(String uri) {
         int authority = uri.indexOf("://");
         if (authority >= 0 && uri.endsWith("/") && uri.indexOf('/', authority + 3) == uri.length() - 1) {
@@ -228,15 +227,16 @@ public final class OauthFlow {
         return uri;
     }
 
-    /** Whether a grant started at {@code since} was abandoned by {@code now}. */
+    /** Whether a grant started at {@code since} is abandoned at {@code now}. */
     static boolean expired(long since, long now) {
         return now - since > GRANT_TTL_MS || now < since;
     }
 
     /**
-     * The scopes a redeemed grant holds: those the token response names
-     * (RFC 6749 section 5.1), else those the request asked for, else null
-     * when neither is known (a grant restored after the process died).
+     * The scopes a redeemed grant holds, or null when unknown.
+     *
+     * <p>Those the token response names (RFC 6749 section 5.1), else those
+     * asked for; neither is known for a grant restored after the process died.
      */
     private static String grantedScope(OauthTokens tokens, OauthSession session) {
         if (tokens.scope() != null && !tokens.scope().isEmpty()) {
@@ -247,11 +247,11 @@ public final class OauthFlow {
     }
 
     /**
-     * Redeems the OAuth redirect for tokens and connects with them, the
-     * access token standing in for the password (empty login, Bearer
-     * auth). No-op unless a grant is in flight for this redirect,
-     * restoring a persisted one when the process died while the user
-     * was in the browser.
+     * Redeems the OAuth redirect and connects with the access token.
+     *
+     * <p>The token stands in for the password (empty login, Bearer auth). No-op
+     * unless a grant is in flight for this redirect, restoring a persisted one
+     * when the process died meanwhile.
      */
     public void handleRedirect(Intent intent) {
         Uri data = intent == null ? null : intent.getData();
@@ -294,8 +294,9 @@ public final class OauthFlow {
                 () -> {
                     try {
                         OauthTokens tokens = session.redeem(tokenEndpoint, redirectUrl, issuer);
-                        // NOTE: not postAlive: the redeemed grant persists the account
-                        // (finishOnboarding), which a destroyed activity must not drop.
+                        // NOTE: not postAlive: the redeemed grant persists the
+                        // account (finishOnboarding), which a destroyed
+                        // activity must not drop.
                         host.main.post(
                                 () ->
                                         onConnected.connect(
@@ -318,13 +319,11 @@ public final class OauthFlow {
     }
 
     /**
-     * Opens the OAuth client page: the client ID and its optional secret
-     * empty, the endpoints, the scope and the redirect prefilled with the
-     * best-known values. Continue runs the custom grant against the given
-     * redirect URI: an http loopback URL serves the redirect on a local
-     * listener, and the app's own org.pimalaya:/oauth2redirect scheme rides
-     * the OS intent route instead (for servers that reject loopback
-     * redirects). Back returns to the sign-in page with nothing lost.
+     * Opens the OAuth client page, endpoints, scope and redirect prefilled.
+     *
+     * <p>Continue runs the custom grant: an http loopback redirect is served on
+     * a local listener, the app's org.pimalaya:/oauth2redirect scheme rides the
+     * OS route (servers rejecting loopback). Back returns to the sign-in page.
      */
     void promptOauthClient(Target target, AuthServer authServer, String scope, Prompt prompt) {
         String authEndpoint = authServer.authEndpoint();
@@ -412,16 +411,11 @@ public final class OauthFlow {
     }
 
     /**
-     * Runs the zero-configuration OAuth path from a bare issuer: fetch
-     * its RFC 8414 metadata, register a public client dynamically
-     * (RFC 7591) when the server allows it, then drive the ordinary
-     * code grant with the freshly issued client id over the OS-routed
-     * custom-scheme redirect (the servers that support registration,
-     * fastmail and Stalwart, reject a loopback http redirect but accept
-     * the private-use scheme, RFC 8252 §7.1). When the server publishes
-     * no registration endpoint, or the user asked for their own client
-     * ({@code own}), opens the OAuth client page with the endpoints
-     * prefilled, so a self-registered client id can be pasted instead.
+     * Runs the zero-configuration OAuth path from a bare issuer.
+     *
+     * <p>RFC 8414 metadata, RFC 7591 registration, a code grant on the app
+     * scheme (Fastmail and Stalwart refuse loopback, RFC 8252 §7.1). With no
+     * registration endpoint, or {@code own}, opens the client page prefilled.
      */
     void startIssuerOauth(Target target, String issuer, String domains, Prompt prompt) {
         boolean own = prompt.own();
@@ -442,8 +436,6 @@ public final class OauthFlow {
                         }
 
                         if (own || !metadata.supportsDynamicRegistration()) {
-                            // No dynamic registration, or the user's own
-                            // client: endpoints prefilled.
                             host.postAlive(
                                     () -> {
                                         onAborted.run();
@@ -521,13 +513,11 @@ public final class OauthFlow {
     }
 
     /**
-     * Opens the browser for a grant riding the app's own
-     * org.pimalaya:/oauth2redirect scheme: PKCE session over
-     * the OS-routed redirect, persisted so it survives the process,
-     * redeemed in {@link #handleRedirect}. Used by the
-     * zero-registration issuer flow (no secret) and by custom clients
-     * whose redirect is the app scheme (for servers that reject a
-     * loopback redirect).
+     * Opens the browser for a grant over the app's own redirect scheme.
+     *
+     * <p>Persisted to survive the process, redeemed in {@link #handleRedirect}:
+     * the issuer flow (no secret) and custom clients on
+     * org.pimalaya:/oauth2redirect.
      */
     void launchSchemeGrant(
             Target target, AuthServer authServer, OauthRequest request, String issuer) {
@@ -572,16 +562,11 @@ public final class OauthFlow {
     }
 
     /**
-     * Runs a custom-client grant against an http loopback redirect URI:
-     * binds its port, opens the browser, and serves the redirect the
-     * browser lands on (its path and state, see {@link LoopbackRedirect}),
-     * reconstructing its URL to redeem for tokens. The redirect host is the
-     * 127.0.0.1 literal (RFC 8252 section 8.3): a typed localhost may
-     * resolve to ::1 first, where another app could listen. The listener
-     * runs on a thread of its own, never the io executor, until the
-     * redirect arrives or the wait times out; it dies with the process (a
-     * custom grant is not persisted, having no OS-routed redirect to resume
-     * through).
+     * Runs a custom-client grant against an http loopback redirect URI.
+     *
+     * <p>Serves it ({@link LoopbackRedirect}) on 127.0.0.1 (RFC 8252 section
+     * 8.3: localhost may be ::1, another app's), on its own thread, never io.
+     * Dies with the process: a custom grant is not persisted.
      */
     private void startLoopbackOauth(Target target, AuthServer authServer, OauthRequest request) {
         String email = target.email();
@@ -663,8 +648,9 @@ public final class OauthFlow {
                                                 LOOPBACK_READ_TIMEOUT_MS,
                                                 done);
                                 OauthTokens tokens = session.redeem(tokenEndpoint, redirectUrl);
-                                // NOTE: not postAlive: the redeemed grant persists the account
-                                // (finishOnboarding), which a destroyed activity must not drop.
+                                // NOTE: not postAlive: the redeemed grant
+                                // persists the account (finishOnboarding),
+                                // which a destroyed activity must not drop.
                                 host.main.post(
                                         () ->
                                                 onConnected.connect(
@@ -692,9 +678,10 @@ public final class OauthFlow {
     }
 
     /**
-     * Persists the in-flight grant: the browser hop routinely outlives
-     * the process (the system reclaims backgrounded apps), and without
-     * the state and PKCE verifier the redirect could not be redeemed.
+     * Persists the in-flight grant, since the browser hop outlives the process.
+     *
+     * <p>Without the state and PKCE verifier the redirect could not be
+     * redeemed.
      */
     private void persistPendingOauth(String clientId, String redirectUri) throws Exception {
         pendingRedirectUri = redirectUri;
@@ -747,8 +734,9 @@ public final class OauthFlow {
     }
 
     /**
-     * The user left the grant behind (closed or stepped back out of the
-     * connection flow): forget it, so a late redirect redeems nothing.
+     * The user left the grant behind: forget it.
+     *
+     * <p>So a late redirect redeems nothing.
      */
     public void cancel() {
         pendingOauth = null;
@@ -764,10 +752,11 @@ public final class OauthFlow {
     }
 
     /**
-     * Opens an authorization URL in the browser, https only: a plain one
-     * would carry the request in clear, and any other scheme is another
-     * app's to handle, which hostile metadata could aim anywhere. Plain http
-     * is left to a loopback host, a custom client's own test server.
+     * Opens an authorization URL in the browser, https only.
+     *
+     * <p>Plain http would carry the request in clear, and another scheme is
+     * another app's, which hostile metadata could aim anywhere. A loopback host
+     * may be http (a custom client's test server).
      */
     private void browse(String url) {
         Uri uri = Uri.parse(url);

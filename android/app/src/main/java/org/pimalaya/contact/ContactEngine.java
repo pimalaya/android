@@ -47,22 +47,11 @@ import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.PimdirEngine;
 
 /**
- * One account's offline driver: the Rust bridge runs the engine's
- * coroutines and this class services their yields, storage against the
- * pimdir store ({@link PimdirStorage}) and remote against the backend
- * clients; a book's phone collection is its phone pass's
- * ({@link ContactPhonePass}), against its raw contacts. Every server
- * backend enumerates incrementally from its stored cursor (CardDAV
- * sync-collection, Graph
- * delta, JMAP /changes, People sync tokens), falling back to a
- * complete round when the cursor expired; the account-wide deltas of
- * JMAP and Google are projected onto each book's enumerate.
- * {@link #syncBook} is the orchestration: a phone pass pulling the
- * contacts app's edits into the hub, the server exchange, then a
- * second phone pass projecting what the server round brought; each
- * pass reconciles, hydrates the missing bodies, auto-resolves
- * conflicts by three-way merge and pushes the resolutions. Everything
- * blocks; callers run it off the main thread.
+ * One account's contact driver: serves the Rust engine's yields.
+ *
+ * <p>Storage against {@link PimdirStorage}, remote against the backend
+ * clients, incrementally from each cursor; JMAP and Google's account-wide
+ * deltas project onto each book. Blocking: run it off the main thread.
  */
 public final class ContactEngine extends PimdirEngine {
     private final CardStore base;
@@ -70,13 +59,10 @@ public final class ContactEngine extends PimdirEngine {
     private final Account account;
 
     /**
-     * The pass's primary connection, for its sequential verbs; null on a
-     * driver that only stages, which reaches no server.
+     * The pass's primary connection for sequential verbs; null when staging.
      *
-     * <p>A concurrent push does not use it. A transport serves one caller
-     * at a time, so each worker of a fan-out opens its own and closes it
-     * with itself, which is also what bounds a round at four connections
-     * rather than one per card.
+     * <p>A transport serves one caller at a time, so each worker of a
+     * concurrent push opens its own: that bounds a round at four connections.
      */
     private final Transport primary;
 
@@ -86,31 +72,26 @@ public final class ContactEngine extends PimdirEngine {
     /** The store, for the phone queue its writes reach. */
     private final PimdirDb pimdir;
 
-    /**
-     * The report the running sync flows tally into (the driver seam
-     * feeds it as pushes are accepted and writes land); null outside
-     * syncs, so app-side mutations count nothing.
-     */
+    /** The report the running sync tallies into; null outside syncs. */
     private Report tally;
 
     /** Book ids by collection URL (account-level membership mapping). */
     private Map<String, String> idByUrl;
 
     /**
-     * The bodies the last delta rounds carried (JMAP and Google list
-     * changed cards in full), by handle: the fetch tier reads them
-     * back without another round-trip; any push invalidates them.
+     * The bodies the last delta rounds carried (JMAP, Google), by handle.
+     *
+     * <p>The fetch tier reads them back without a round-trip; any push
+     * invalidates them.
      */
     private final Map<String, Card> deltaCards = new HashMap<>();
 
     /**
-     * The account-wide deltas this pass read (JMAP, Google), by the cursor
-     * each was read from (null for a complete round): the account has one
-     * delta for every book, so a book whose checkpoint matches one already
-     * read projects it rather than listing the account again. Books
-     * synced together share a checkpoint, so a quiet pass over three
-     * Google groups reads People once rather than three times. Any push
-     * invalidates them, as it does {@link #deltaCards}.
+     * The account-wide deltas this pass read (JMAP, Google), by cursor.
+     *
+     * <p>Null keys a complete round. A book whose checkpoint matches one read
+     * projects it rather than listing the account again (three Google groups,
+     * one People read). Any push invalidates them, as {@link #deltaCards}.
      */
     private final Map<String, CardDelta> accountDeltas = new HashMap<>();
 
@@ -118,28 +99,33 @@ public final class ContactEngine extends PimdirEngine {
     private final Map<String, Map<String, Card>> graphCards = new HashMap<>();
 
     /**
-     * The ETags observed by each collection's last enumerate, plus
-     * whether that enumerate was complete: what the CardDAV If-Match
-     * quirk retry checks the staged base against.
+     * Each collection's last enumerate ETags, plus whether it was complete.
+     *
+     * <p>What the CardDAV If-Match quirk retry checks the staged base against.
      */
     private final Map<String, Map<String, String>> listedEtags = new HashMap<>();
     private final Map<String, Boolean> listedComplete = new HashMap<>();
 
     /**
-     * What a sync did to the cards, for the outcome report: distinct
-     * affected cards per axis (the phone and the server tallied
-     * apart), regardless of direction. A card counts once however many
-     * passes touched it: in = cards that appeared, out = cards that
-     * were deleted, changed = cards whose content changed; plus the
-     * conflicts left for the user.
+     * What a sync did to the cards: distinct cards per axis, phone and server.
+     *
+     * <p>A card counts once however many passes touched it: in appeared, out
+     * deleted, changed content changed; plus the conflicts left for the user.
      */
     public static final class Report {
+        /** Cards that appeared on the phone axis. */
         public final Set<String> localIn = new HashSet<>();
+        /** Cards deleted on the phone axis. */
         public final Set<String> localOut = new HashSet<>();
+        /** Cards whose content changed on the phone axis. */
         public final Set<String> localChanged = new HashSet<>();
+        /** Cards that appeared on the server axis. */
         public final Set<String> remoteIn = new HashSet<>();
+        /** Cards deleted on the server axis. */
         public final Set<String> remoteOut = new HashSet<>();
+        /** Cards whose content changed on the server axis. */
         public final Set<String> remoteChanged = new HashSet<>();
+        /** Conflicts left for the user. */
         public int conflicts;
 
         /** Tallies one effect on one card, deduped per card and axis. */
@@ -170,7 +156,7 @@ public final class ContactEngine extends PimdirEngine {
             }
         }
 
-        /** Tallies a batch of write effects into the report, when a sync runs one. */
+        /** Tallies a batch of write effects into the report, if a sync runs. */
         static void tallyEffects(Report tally, JSONArray effects) throws JSONException {
             for (int index = 0; tally != null && index < effects.length(); index++) {
                 JSONObject effect = effects.getJSONObject(index);
@@ -181,10 +167,7 @@ public final class ContactEngine extends PimdirEngine {
             }
         }
 
-        /**
-         * Tallies the accepted pushes into the sync report: an accepted
-         * add is a card in, a remove a card out, an update a card changed.
-         */
+        /** Tallies accepted pushes: add is in, remove out, update changed. */
         static void tallyPushes(Report tally, String url, JSONArray changes, JSONArray results)
                 throws JSONException {
             if (tally == null) {
@@ -215,10 +198,7 @@ public final class ContactEngine extends PimdirEngine {
         }
     }
 
-    /**
-     * Builds a driver for one account; a null account services storage
-     * yields only (local mutations never touch the remote).
-     */
+    /** A driver for one account; a null account serves storage yields only. */
     public ContactEngine(
             CardStore base,
             PimdirDb pimdir,
@@ -234,13 +214,11 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * One book's full hub sync, three engine passes: phone (pull the
-     * contacts app's edits into the hub), server (exchange with the
-     * remote; the phone-won hub divergences push along), phone again
-     * (project what the server round brought; local-only, cheap). A
-     * book whose remote switch is off keeps only the first phone pass:
-     * the hub still converges with the Contacts app, nothing touches
-     * the server.
+     * One book's hub sync: phone pass, server pass, phone pass again.
+     *
+     * <p>The first pulls the Contacts app's edits, the last projects what the
+     * server round brought. With the remote switch off only the first runs: the
+     * hub converges with the Contacts app, nothing touches the server.
      */
     public Report syncBook(String url, boolean remote) throws JSONException {
         ReentrantLock lock = syncLock(url);
@@ -259,14 +237,11 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * The server collection's engine pass: reconcile with the remote,
-     * fetch the bodies the spine still misses, then triage every
-     * both-sides-edited row right here: a divergence whose three-way
-     * merge needs no user choice resolves on the spot and pushes in a
-     * second reconcile, and only genuine same-field collisions stay
-     * conflicted (remote body captured) for the in-app resolution
-     * form. So a conflict the user sees is always one the form has
-     * something to ask about; the rest self-heals during the sync.
+     * The server pass: reconcile, fetch missing bodies, triage conflicts.
+     *
+     * <p>A divergence whose three-way merge needs no user choice resolves and
+     * pushes in a second reconcile; only same-field collisions stay conflicted
+     * (remote body captured), so the form always has something to ask.
      */
     private void syncServer(String url, Report report) throws JSONException {
         tally = report;
@@ -306,19 +281,11 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * Resolves one conflicted row on the spot when the three-way merge
-     * needs no user choice: lists merge as sets and one-sided scalar
-     * changes flow in, so only a field both sides edited, differently,
-     * is the user's to settle. A clean merge stages as the resolution
-     * (the caller's second reconcile pushes it) and reports true; a
-     * genuine collision leaves the row conflicted for the resolution
-     * form.
+     * Resolves one conflicted row when the three-way merge needs no choice.
      *
-     * <p>The three documents all come from the store: the engine records
-     * the diverging remote body beside the revision it names, and the
-     * hydrate pass before this one is what fetched it. So a conflict is
-     * settled with no credentials, no backend and no network, here and
-     * in the form.
+     * <p>A clean merge stages as the resolution (pushed by the caller's second
+     * reconcile) and answers true; a field both sides edited differently stays
+     * conflicted. All three documents come from the store: no network needed.
      */
     private boolean resolveCleanConflict(String url, JSONObject conflict) throws JSONException {
         // NOTE: on a create collision (no captured base) the local body is
@@ -347,13 +314,11 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * Services an enumerate yield: the collection's member spine
-     * (handle plus content revision), incrementally from the cursor on
-     * every backend (RFC 6578 sync-collection, Graph delta, JMAP
-     * /changes, People sync tokens). An initial round (no cursor)
-     * lists the complete member set and still yields the cursor to
-     * delta from next time; a cursor the server no longer accepts
-     * falls back to an initial round.
+     * Serves an enumerate yield: the member spine (handle plus revision).
+     *
+     * <p>Incremental from the cursor on every backend (RFC 6578, Graph delta,
+     * JMAP /changes, People sync tokens); no cursor lists the complete set and
+     * yields one, a cursor the server refuses falls back to that.
      */
     @Override
     protected PimDomain domain() {
@@ -405,10 +370,9 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * Projects an account-wide delta (JMAP, Google) onto one book's
-     * enumerate through the bridge: cards member of the book are its
-     * items, and on an incremental round a changed card that left the
-     * book (still held locally but no longer listing it) rides as
+     * Projects an account-wide delta (JMAP, Google) onto one book's enumerate.
+     *
+     * <p>On an incremental round, a changed card that left the book rides as
      * vanished.
      */
     private JSONObject accountSnapshot(String url, CardDelta delta) throws JSONException {
@@ -465,10 +429,10 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * Services a fetch yield: the full bodies of the given handles, each
-     * with its link id (the vCard UID, or the identity a bound handle is
-     * already filed under: {@link #keepBoundNames}), the summary STORAGE
-     * Annex A derives from it, and its content hash.
+     * Serves a fetch yield: full bodies with link id, summary and hash.
+     *
+     * <p>The link id is the vCard UID, or the identity a bound handle is filed
+     * under ({@link #keepBoundNames}); the summary is STORAGE Annex A's.
      */
     @Override
     protected JSONObject fetch(JSONObject yielded) throws JSONException {
@@ -512,13 +476,10 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * The Google bodies of a fetch: what the pass's People round carried
-     * first (it lists every changed contact whole), then everything it
-     * does not hold in one batched read, 200 contacts to a {@code
-     * people:batchGet}, where it used to be one {@code people.get} a
-     * contact (a fetch after a push, which drops the round's bodies). A
-     * contact gone since the round is left out of the reply, as a
-     * multiget leaves out a resource it no longer finds.
+     * The Google bodies of a fetch: the People round's, then a batched read.
+     *
+     * <p>200 contacts per {@code people:batchGet}. A contact gone since the
+     * round is left out of the reply, as a multiget leaves out a missing one.
      */
     private void fetchGoogle(String url, JSONArray handles, JSONArray items)
             throws JSONException {
@@ -552,12 +513,10 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * The Graph bodies of a fetch: the complete round's listing first,
-     * then everything it does not hold in one batched read, 20 contacts
-     * to a {@code $batch}, where it used to be one request a contact (a
-     * bulk change elsewhere, an import or a merge, names hundreds at
-     * once). A contact gone since the delta is left out of the reply, as
-     * a multiget leaves out a resource it no longer finds.
+     * The Graph bodies of a fetch: the round's listing, then a batched read.
+     *
+     * <p>20 contacts per {@code $batch}. A contact gone since the delta is left
+     * out of the reply, as a multiget leaves out a missing one.
      */
     private void fetchGraph(String url, JSONArray handles, JSONArray items)
             throws JSONException {
@@ -604,17 +563,11 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * One fetched card on the engine wire. The recorded revision must
-     * be the flavour the next enumerate compares against: posteo's
-     * SabreDAV serves multiget ETags that differ from its listing
-     * ETags for some cards (Google's people.get ETag likewise differs
-     * from its listing's), and recording the fetch flavour ping-pongs
-     * those cards through a refresh-and-refetch on every sync forever.
-     * The ETag the pass's own enumerate listed wins; the fetched one
-     * only stands in when the pass never listed the handle. Content
-     * moving between the listing and the fetch records the older
-     * listing ETag against the newer body, which reads as one more
-     * refresh next sync and then converges.
+     * One fetched card on the engine wire, at the listing's revision.
+     *
+     * <p>Some servers (SabreDAV, Google) fetch other ETags than they list:
+     * recording the fetched one refetches those cards every sync forever. The
+     * pass's listed ETag wins; the fetched one stands in when never listed.
      */
     private JSONObject fetchedItem(String url, String handle, Card card) throws JSONException {
         CardIndex index = ContactClient.indexCard(card.vcard());
@@ -642,14 +595,11 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * Services a push yield: creates, content updates, deletes and
-     * membership patches, one result per change. An optimistic
-     * concurrency failure (HTTP 412) retries unguarded when the last
-     * enumerate proves the remote unchanged (some servers, posteo's
-     * SabreDAV among them, serve listing ETags their If-Match never
-     * matches), and reports the change rejected otherwise so the next
-     * sync reconciles it; any other failure aborts the pass (offline
-     * fallback).
+     * Serves a push yield: creates, updates, deletes, membership patches.
+     *
+     * <p>One result per change. A 412 retries unguarded when the last enumerate
+     * proves the remote unchanged (SabreDAV's If-Match quirk), else reports the
+     * change rejected; any other failure aborts the pass.
      */
     @Override
     protected JSONObject push(JSONObject yielded) throws JSONException {
@@ -697,15 +647,11 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * One round's changes, concurrently over a small pool (CardDAV).
-     * Results keep the change order; the first hard failure aborts the
-     * round like its sequential counterpart, dropping the still-flying
-     * requests with it (the next sync reconciles whatever landed).
+     * One CardDAV round's changes, concurrently over a small pool.
      *
-     * <p>One worker per connection rather than one task per connection: a
-     * transport serves one caller at a time, so the workers drain a
-     * shared queue on their own, and a round of forty cards costs four
-     * connections rather than forty.
+     * <p>Results keep the change order; the first hard failure aborts the
+     * round. Workers drain a shared queue, one per connection (a transport
+     * serves one caller), so forty cards cost four connections.
      */
     private JSONArray pushAll(String url, JSONArray changes) throws JSONException {
         // NOTE: prime the book map single-threaded; the workers only read.
@@ -763,12 +709,11 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * One Google round: the genuine creates and deletes group into the
-     * People batch verbs (200 and 500 a call, one write-quota unit per
-     * call instead of one per card, which throttled large rounds);
-     * membership patches and guarded updates stay per-card. Results
-     * keep the change order, and a failed batch aborts the round like
-     * a failed per-card call would.
+     * One Google round: creates and deletes grouped into People batch verbs.
+     *
+     * <p>200 and 500 a call (one write-quota unit per call); membership patches
+     * and guarded updates stay per card. Results keep the change order; a
+     * failed batch aborts the round.
      */
     private JSONArray pushGoogle(String url, JSONArray changes) throws JSONException {
         JSONObject[] results = new JSONObject[changes.length()];
@@ -867,12 +812,10 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * One JMAP or Graph round through the bridge's batch seam: JMAP
-     * folds the whole round (creates, content updates, membership
-     * patches, destroys) into ContactCard/set calls, Graph into $batch
-     * calls of twenty, both answering one outcome per change, so a
-     * rejected card no longer aborts its round. Results keep the
-     * change order.
+     * One JMAP or Graph round through the bridge's batch seam.
+     *
+     * <p>JMAP ContactCard/set, Graph $batch of twenty: one outcome per change,
+     * so a rejected card does not abort the round. Results keep the order.
      */
     private JSONArray pushRound(String url, JSONArray changes) throws JSONException {
         JSONObject[] results = new JSONObject[changes.length()];
@@ -1028,10 +971,10 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * Pushes a pending create as the bridge plans it: a membership
-     * patch when the body already lives on the account (add with an
-     * origin), a genuine create otherwise, with any post-create
-     * membership patch the backend needs riding along.
+     * Pushes a pending create as the bridge plans it.
+     *
+     * <p>A membership patch when the body already lives on the account (add
+     * with an origin), else a create plus any membership patch it needs.
      */
     private JSONObject pushAdd(Transport transport, String url, JSONObject change)
             throws JSONException {
@@ -1048,10 +991,9 @@ public final class ContactEngine extends PimdirEngine {
                     account,
                     new BooksUpdate(
                             row.getString("id"), List.of(bookId(url)), List.of()));
-            // The body is already on the account, so the member this book now
-            // holds is the one the origin names: assigning the provisional
-            // handle instead would bind the book to a name the server never
-            // heard of, and the next enumerate would read it as vanished.
+            // NOTE: the book now holds the member the origin names; the
+            // provisional handle would bind it to a name the server never
+            // heard of, read as vanished by the next enumerate.
             JSONObject origin = change.optJSONObject("origin");
             String assigned = origin == null ? row.getString("id") : origin.getString("handle");
             return result(handle, true, assigned, null);
@@ -1136,8 +1078,9 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * Pushes a staged removal as the bridge plans it: a membership
-     * patch when the card is not deleted on an account-level backend,
+     * Pushes a staged removal as the bridge plans it.
+     *
+     * <p>A membership patch when the card survives on an account-level backend,
      * the card's deletion otherwise.
      */
     private JSONObject pushRemove(Transport transport, String url, JSONObject change)
@@ -1188,16 +1131,11 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /**
-     * The revision a CardDAV write landed at: the ETag the server answered,
-     * else the one it holds the card at now, read back. The other backends
-     * answer theirs.
+     * The revision a CardDAV write landed at: answered, else read back.
      *
-     * <p>A server storing something other than what it was sent answers no
-     * ETag, as CalDAV's RFC 4791 section 5.3.4 has it, and a base kept with
-     * no revision reads the next listing's as a change made elsewhere, which
-     * undoes a removal staged before it: the card is pulled back rather than
-     * deleted. A read that fails leaves the revision unknown, as before,
-     * rather than failing a write that landed.
+     * <p>A server storing other than it was sent answers no ETag (RFC 4791
+     * 5.3.4), and a base with no revision reads the next listing as a remote
+     * edit, undoing a staged removal. A failed read leaves it unknown.
      */
     private String landed(Transport transport, String url, String uri, String answered) {
         if (answered != null || !CardStore.isCarddavUrl(url)) {
@@ -1241,11 +1179,7 @@ public final class ContactEngine extends PimdirEngine {
         return OfflineClient.pushPlan(new PushPlanFacts(op, url, bookId(url), origin, deleted));
     }
 
-    /**
-     * Whether the last enumerate proves the handle unchanged at the
-     * staged base revision, decided by the bridge over the recorded
-     * listing.
-     */
+    /** Whether the last enumerate proves the handle unchanged at the base. */
     private boolean listingUnchanged(String url, String handle, String ifMatch) {
         return OfflineClient.retryUnguarded(
                 new RetryFacts(

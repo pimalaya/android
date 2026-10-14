@@ -13,13 +13,10 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Reads one message for the reader, from the store when it holds it and from
- * the server otherwise, filing what it fetched on the way through.
+ * Reads one message for the reader: from the store, else from the server.
  *
- * <p>The store first, always. A message is immutable once sent, so the copy
- * filed by the last open is the message, and asking the server for it again
- * would be a round trip whose only possible answer is what is already on
- * disk. It is also what makes the reader work with no network at all.
+ * <p>The store first, always: a sent message is immutable, so the filed copy is
+ * the message, and the reader works offline. What it fetches is filed.
  */
 public final class MailReader {
     /** What one read came to. */
@@ -38,6 +35,7 @@ public final class MailReader {
     /** A driver that only stages: what names a pending move. */
     private final MailStager stager;
 
+    /** A reader filing what it fetches through {@code stager}. */
     public MailReader(MailStore mail, FileStore files, MailClient client, MailStager stager) {
         this.mail = mail;
         this.files = files;
@@ -46,10 +44,11 @@ public final class MailReader {
     }
 
     /**
-     * The message as the reader draws it, its body null for one waiting to go
-     * out whose body is gone. {@code open} opens a session on the message's
-     * account, for the one read that needs the network; it throws when there
-     * is none.
+     * The message as the reader draws it.
+     *
+     * <p>Its body null for an outgoing one whose body is gone. {@code open}
+     * opens a session for the one read needing the network; it throws when
+     * there is none.
      */
     public Read read(MailStore.StoredMessage message, Supplier<MailSession> open) {
         Read read = new Read();
@@ -91,14 +90,10 @@ public final class MailReader {
     }
 
     /**
-     * Fetches one message the store does not hold, files it and restates its
-     * summary, answering the file it is stored in.
+     * Fetches one message the store lacks, files it, restates its summary.
      *
-     * <p>Read as a body step reads one ({@link MailClient#fetchSources}):
-     * streamed by the bridge into a file of its own, described there ({@link
-     * MailClient#describeMessage}) and moved into the blob store, so a
-     * message of any size opens with no copy of it on the Java heap and none
-     * across the boundary.
+     * <p>Answers its file: streamed to disk ({@link MailClient#fetchSources}),
+     * described, moved to the blob store, never on the heap.
      */
     File fetch(MailStore.StoredMessage message, Supplier<MailSession> open) {
         String[] address = addressOf(message);
@@ -140,9 +135,9 @@ public final class MailReader {
     }
 
     /**
-     * Where the server holds a message, as {@code [mailbox, id]}: where it is
-     * listed, or for the target of a move not carried out yet, the mailbox it
-     * is moving from.
+     * Where the server holds a message, as {@code [mailbox, id]}.
+     *
+     * <p>For the target of a pending move, the mailbox it is moving from.
      */
     private String[] addressOf(MailStore.StoredMessage message) {
         String[] source = null;

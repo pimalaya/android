@@ -35,17 +35,11 @@ import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
 
 /**
- * The ContactsContract half of the io-offline driver: the phone spoke's
- * remote adapter, serving the engine's enumerate, fetch and push yields
- * against an addressbook's raw contacts (one per card, the card id in
- * SOURCE_ID, an opaque token in SYNC1 as the sync revision). Every write
- * carries CALLER_IS_SYNCADAPTER so nothing loops back as a local edit;
- * the DIRTY flag (set only by a user edit, never by our writes or the
- * provider's own churn) is what marks a contacts-app change, and pushes
- * are guarded on that revision so an edit racing the sync stays for the
- * next round. The rows-to-model
- * mapping itself lives in Mapping, pure and JVM-tested; this class owns
- * everything that needs a device.
+ * The phone spoke's remote adapter for io-pimdir, over ContactsContract.
+ *
+ * <p>Serves the yields against a book's raw contacts (card id in SOURCE_ID, a
+ * revision token in SYNC1). Writes carry CALLER_IS_SYNCADAPTER, so DIRTY alone
+ * marks a Contacts-app edit. The pure field mapping lives in {@link Mapping}.
  */
 final class PhoneRemote implements PhoneSpoke {
     private final Context context;
@@ -62,10 +56,10 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * Whether the spoke can serve this addressbook: the contacts
-     * permission is granted and the book's Android account exists (the
-     * book is mirrored, {@link Accounts#reconcile}). Callers skip the
-     * phone passes otherwise; the server spoke never depends on it.
+     * Whether the spoke can serve this book: permission and Android account.
+     *
+     * <p>The account exists when the book is mirrored
+     * ({@link Accounts#reconcile}); callers skip the phone passes otherwise.
      */
     @Override
     public boolean available(String spoke) {
@@ -74,10 +68,10 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * Whether the account's raw contacts carry anything for the hub to
-     * ingest: a user edit (DIRTY), a contacts-app creation (no
-     * SOURCE_ID yet) or a deletion (DELETED). One indexed provider
-     * count, half of the phone pass's quiet-path guard.
+     * Whether the raw contacts carry anything for the hub to ingest.
+     *
+     * <p>A user edit (DIRTY), a creation (no SOURCE_ID) or a deletion
+     * (DELETED): one indexed count, half of the phone pass's quiet-path guard.
      */
     @Override
     public boolean changed(String spoke) {
@@ -120,15 +114,11 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * Services an enumerate yield: the account's raw contacts, each as
-     * (handle = SOURCE_ID, revision = the SYNC1 token). A delta round,
-     * never complete: only rows the contacts app explicitly deleted
-     * (DELETED) vanish, so an emptied or torn-down account never reads
-     * as a mass deletion (the hub re-projects a card the phone lacks).
-     * Rows it created (no SOURCE_ID) are stamped a fresh handle first,
-     * so a crash never ingests them twice; rows whose card the store no
-     * longer holds are stale projections and are purged too (heals
-     * interrupted deletes and pre-phone-spoke projections in one rule).
+     * Serves an enumerate yield: raw contacts as (SOURCE_ID, SYNC1 token).
+     *
+     * <p>Always a delta: only DELETED rows vanish, so a torn-down account never
+     * reads as a mass deletion. New rows get a handle first (no double ingest
+     * after a crash); rows whose card the store lost are purged.
      */
     @Override
     public JSONObject enumerate(String collection) throws JSONException {
@@ -209,15 +199,11 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * Services a fetch yield: each handle's raw contact read back as a
-     * vCard. The phone only represents the Mapping fields, so the body
-     * is never a bare reverse-mapped vCard: the phone's field model is
-     * merged over the last converged vCard's own model (field-space
-     * diff, Mapping.merge) and applied onto it as a patch, so unknown
-     * properties and mapping lossiness survive every round-trip. A
-     * phone untouched at field level rides back byte for byte, and
-     * every read stamps the row converged, so a fetch is content-quiet
-     * on both sides.
+     * Serves a fetch yield: each raw contact read back as a vCard.
+     *
+     * <p>The phone's field model merges over the last converged vCard's
+     * (Mapping.merge) and patches it, so unknown properties survive; an
+     * untouched contact rides back byte for byte and every read stamps it.
      */
     @Override
     public JSONObject fetch(String collection, JSONArray handles) throws JSONException {
@@ -315,13 +301,11 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * Services a push yield: creates project the card's data rows onto
-     * a fresh raw contact, updates rewrite them in place, removes purge
-     * the raw contact; updates and removes are guarded on the recorded
-     * VERSION and report rejected on a mismatch, so a contacts-app edit
-     * racing the sync is reconciled by the next round instead of being
-     * overwritten. {@code pushed} is told how many changes are through
-     * after each one.
+     * Serves a push yield: creates, in-place updates and purges.
+     *
+     * <p>Updates and removes are guarded on the recorded VERSION and reported
+     * rejected on a mismatch, so a racing Contacts-app edit survives to the
+     * next round. {@code pushed} is told the count after each change.
      */
     @Override
     public JSONObject push(String collection, JSONArray changes, IntConsumer pushed)
@@ -359,9 +343,9 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * Pushes a pending create: the card's model projected onto a new
-     * raw contact stamped with its handle; a raw contact already
-     * carrying the handle (a crash between insert and convergence) is
+     * Pushes a pending create onto a new raw contact stamped with its handle.
+     *
+     * <p>One already carrying the handle (a crash before convergence) is
      * rewritten in place instead of duplicated.
      */
     private JSONObject pushAdd(String collection, JSONObject change) throws Exception {
@@ -377,10 +361,9 @@ final class PhoneRemote implements PhoneSpoke {
         String vcard = row.getString("vcard");
         ContactFields model = ContactClient.projectCard(vcard);
 
-        // The phone's handle namespace is this app's own: it writes the
-        // sourceid. So a staged create lands under the name behind its
-        // provisional handle (SYNC §2) rather than under the handle itself,
-        // which would file a raw contact under a control character.
+        // NOTE: this app owns the phone's handle namespace, so a staged create
+        // lands under the name behind its provisional handle (SYNC §2), not
+        // under the handle, which holds a control character.
         String name = PimdirStorage.nameOf(handle);
         Long existing = rawId(resolver, account, name);
         long rawId;
@@ -550,9 +533,9 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * The vCard the phone last converged with, the patch base of every
-     * read-back; a phone-created contact starts from a fresh skeleton
-     * carrying its handle as UID.
+     * The vCard the phone last converged with, every read-back's patch base.
+     *
+     * <p>A phone-created contact starts from a skeleton with its handle as UID.
      */
     private String phoneBase(String collection, String handle) throws JSONException {
         JSONObject row = offline.loadRow(PimdirStorage.phoneCollection(
@@ -597,17 +580,11 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * The raw contact's sync revision, read from the contacts-app sync
-     * signals rather than a content read. Neither RawContacts.VERSION nor
-     * a hash of the data rows is stable: the provider bumps VERSION and
-     * rewrites rows (aggregation, name display and phonetic fields, phone
-     * normalization) asynchronously after a write, which would read back
-     * as a phantom contacts-app edit and let the stale phone side win.
-     * DIRTY is the real signal: it is set only by a non-sync-adapter
-     * (user) edit, never by our own writes or provider churn. So the
-     * revision is the opaque token we last stamped in SYNC1 while the row
-     * is clean, and a version-tagged sentinel while it is dirty (a user
-     * edit the sync has not yet ingested).
+     * The raw contact's sync revision, from the sync signals, not the content.
+     *
+     * <p>The provider bumps VERSION and rewrites rows after writes, a phantom
+     * edit; DIRTY is set only by a user edit. So: the SYNC1 token while clean,
+     * a version-tagged sentinel while dirty.
      */
     private static String phoneRevision(
             ContentResolver resolver, Account account, long rawId) {
@@ -637,9 +614,9 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * Stamps the raw contact converged at the given token, guarded on
-     * the VERSION observed before the data rows were read: an edit
-     * racing the ingestion bumps VERSION, the guarded update matches
+     * Stamps the raw contact converged, guarded on the VERSION read before.
+     *
+     * <p>An edit racing the ingestion bumps VERSION, the update matches
      * nothing, and the row stays dirty for the next round.
      */
     private static boolean stampIfUnchanged(
@@ -657,10 +634,10 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * Stamps the raw contact as converged: SYNC1 holds the opaque token
-     * the next enumerate reports while clean (the vCard hash, stable
-     * across provider churn), and DIRTY is cleared so a push we just
-     * applied is not read back as a user edit.
+     * Stamps the raw contact converged: SYNC1 gets the token, DIRTY clears.
+     *
+     * <p>The token (the vCard hash) is stable across provider churn; clearing
+     * DIRTY keeps a push just applied from reading back as a user edit.
      */
     private static String stampRevision(
             ContentResolver resolver, Account account, long rawId, String vcard) {
@@ -685,8 +662,7 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * Contacts in accounts without groups are hidden by default; unhide
-     * ours.
+     * Unhides our contacts: those of accounts without groups hide by default.
      */
     private static void ensureUngroupedVisible(ContentResolver resolver, Account account) {
         ContentValues values = new ContentValues();
@@ -697,11 +673,10 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /**
-     * Drops every group of the account. Pimalaya does not touch the
-     * contacts app's labels section (user decision): the account shows
-     * up under the accounts section via the syncable flag instead, and
-     * vCard CATEGORIES stay vCard-side. Also heals phones that got
-     * groups from earlier builds.
+     * Drops every group of the account.
+     *
+     * <p>User decision: the Contacts app's labels stay untouched, CATEGORIES
+     * stay vCard-side. Also heals phones with groups from earlier builds.
      */
     private static void removeGroups(ContentResolver resolver, Account account) {
         resolver.delete(asSyncAdapter(Groups.CONTENT_URI, account), null, null);

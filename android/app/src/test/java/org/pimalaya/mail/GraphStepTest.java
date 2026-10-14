@@ -45,11 +45,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * A Microsoft Graph step from the engine down to the store: the bridge's
- * account listing names the step's messages and reads their bodies, every
- * stepped folder is listed by band down to the oldest of them, and the
- * bodies are stored from the step's files; the junk and the trash take no
- * part.
+ * A Microsoft Graph step from the engine down to the store.
+ *
+ * <p>The account listing names the step's messages and reads their bodies,
+ * every stepped folder is listed by band down to the oldest, bodies are stored
+ * from the step's files; the junk and the trash take no part.
  */
 @RunWith(RobolectricTestRunner.class)
 public class GraphStepTest {
@@ -104,7 +104,7 @@ public class GraphStepTest {
         }
     }
 
-    /** A Graph account holding {@code mail}, whose next step brings {@code next}. */
+    /** A Graph account of {@code mail}, its next step bringing {@code next}. */
     private final class Server extends MailClient {
         final List<Mail> mail = new ArrayList<>();
         List<Mail> next = List.of();
@@ -159,7 +159,7 @@ public class GraphStepTest {
             }
         }
 
-        /** Which of a listed page the store holds, asked as the bridge asks it. */
+        /** Which of a listed page the store holds, asked as the bridge asks. */
         private Set<String> held(OfflineDriver store, List<String> listing) {
             try {
                 String asked =

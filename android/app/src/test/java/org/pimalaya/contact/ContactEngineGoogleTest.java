@@ -30,9 +30,9 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * A Google account's books: People is read once per pass and projected
- * onto each contact group, and the bodies the round did not carry are
- * read in one batched call, never one request a contact.
+ * A Google account's books: People read once per pass, projected per group.
+ *
+ * <p>Bodies the round did not carry are read in one batched call.
  */
 @RunWith(RobolectricTestRunner.class)
 public class ContactEngineGoogleTest {

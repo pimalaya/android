@@ -7,20 +7,11 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * How many bodies a mail step or a body run has landed out of what it
- * planned, for the dock's bar.
+ * How many bodies a mail step or body run has landed of its plan, for the dock.
  *
- * <p>A body counts once its file is written: every backend writes one file
- * per message into the directory a bridge call is given ({@link
- * MailEngine#stepRead}, {@link MailEngine#sources}), Gmail a batch at a
- * time, Graph a {@code $batch} at a time, IMAP as each streamed body
- * starts, JMAP one blob at a time. A {@link Watch} counts them while the
- * call runs, so the bar moves with the reads rather than once the call
- * answers.
- *
- * <p>The counts are the files in flight, those of the calls under way or
- * done, and what a body run settled: a run counts by chunk ({@link
- * MailBodies#step}), a chunk's files then folded into what it took.
+ * <p>A body counts once its file is in the call's directory; a {@link Watch}
+ * counts them while the call runs ({@link MailEngine#stepRead}), so the bar
+ * moves with the reads. A run counts by chunk ({@link MailBodies#step}).
  */
 public final class MailTally {
     /** Hears the count move: {@code landed} of {@code planned}, any thread. */
@@ -48,6 +39,7 @@ public final class MailTally {
 
     private int flight;
 
+    /** A tally telling {@code listener} as counts move. */
     public MailTally(Listener listener) {
         this.listener = listener;
     }
@@ -62,9 +54,10 @@ public final class MailTally {
     }
 
     /**
-     * Plans {@code more} bodies beyond what has landed: a step's count, a
-     * run's plan, or 0 once a call answered, which closes the plan on what
-     * it brought.
+     * Plans {@code more} bodies beyond what has landed.
+     *
+     * <p>A step's count, a run's plan, or 0 once a call answered, which closes
+     * the plan on what it brought.
      */
     public void expect(int more) {
         synchronized (this) {
@@ -84,10 +77,7 @@ public final class MailTally {
         tell();
     }
 
-    /**
-     * Folds what is in flight into {@code done}, the bodies a chunk of a
-     * run took, its files counted already or linked without one.
-     */
+    /** Folds what is in flight into {@code done}, the bodies a chunk took. */
     public void settle(int done) {
         synchronized (this) {
             settled += Math.max(0, done);
@@ -114,8 +104,7 @@ public final class MailTally {
     }
 
     /**
-     * Starts counting the files written into {@code dir} while a bridge
-     * call runs; closing it counts them one last time and stops.
+     * Counts files written into {@code dir} until closed, which counts last.
      */
     Watch watch(File dir) {
         return new Watch(this, dir);

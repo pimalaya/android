@@ -22,12 +22,11 @@ import org.pimalaya.client.ServiceConfig;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * The wizard's decisions over discovered options: which picks share one
- * sign-in, which sending rows go with a reading choice, and which option the
- * standard setup picks, and the options and grant resources discovered
- * configs give. Robolectric only because the provider
- * check reads {@link AccountClient#googleBase}, a bridge call, and the
- * bridge library loads into the sandbox's class loader.
+ * The wizard's decisions over discovered options.
+ *
+ * <p>Shared sign-ins, sending rows, the standard pick, options and resources.
+ * Robolectric because the provider check reads
+ * {@link AccountClient#googleBase}, a bridge call.
  */
 @RunWith(RobolectricTestRunner.class)
 public class SetupPlanTest {
@@ -234,7 +233,7 @@ public class SetupPlanTest {
         return described;
     }
 
-    /** A discovered config: an https one when {@code url} is given, else TCP. */
+    /** A discovered config: https when {@code url} is given, else TCP. */
     private static ServiceConfig config(
             String service, String url, String security, String source, AuthMethod... auth) {
         return url != null

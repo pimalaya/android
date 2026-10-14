@@ -33,14 +33,14 @@ import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.SectionsAdapter;
 
 /**
- * The Files screen: one card per file collection the filter shows, the
- * device's folders first, then each mail account's attachments.
+ * The Files screen: device folders, then each mail account's attachments.
  *
- * <p>Read off the store on the io executor: an account's attachments in one
- * statement with their messages, newest first, a folder's files A to Z.
+ * <p>One card per collection the filter shows, read off the store on the io
+ * executor: an account's attachments in one statement with their messages,
+ * newest first, a folder's files A to Z.
  */
 public final class FilesList {
-    /** The prefix of the copy an import stages in the cache ({@link CacheSweep}). */
+    /** The cache prefix of an import's staged copy ({@code CacheSweep}). */
     public static final String STAGED = "import";
 
     /** The request code of the import document picker ({@link #imported}). */
@@ -94,6 +94,7 @@ public final class FilesList {
     /** The folder an import waits on the document picker for. */
     private PimdirCollections.Stored importing;
 
+    /** Builds the Files screen. */
     public FilesList(
             Host host,
             FileStore files,
@@ -116,11 +117,11 @@ public final class FilesList {
         java.io.File fileOf(FileStore.Origin origin, FileStore.StoredFile file);
     }
 
-    /** One row: a file in its collection, or the placeholder of an empty folder. */
+    /** One row: a file in its collection, or an empty folder's placeholder. */
     private static final class Row {
         final PimdirCollections.Stored collection;
 
-        /** The card it sits in: the folder's name, or an account's attachments. */
+        /** Its card: the folder's name, or an account's attachments. */
         final String section;
 
         /** Null for an empty folder's placeholder. */
@@ -145,6 +146,7 @@ public final class FilesList {
         }
     }
 
+    /** Wires the list and its header. */
     public void setUp() {
         ListView list = host.findViewById(R.id.files_list);
         header = new ListHeader(host, list, Panels.FILES);
@@ -199,11 +201,12 @@ public final class FilesList {
                 });
     }
 
+    /** The list's header. */
     public ListHeader header() {
         return header;
     }
 
-    /** Reads every shown collection's files off the store, then renders them. */
+    /** Reads the shown collections' files off the store, then renders them. */
     public void reload() {
         MergedFilter filter = MergedFilter.files(host);
         host.io.execute(
@@ -313,9 +316,9 @@ public final class FilesList {
     }
 
     /**
-     * Creates a folder under a name the user gives, unless a folder already
-     * goes by it: one card per name, so two folders of one name would read as
-     * one.
+     * Creates a folder under a name the user gives, unless one goes by it.
+     *
+     * <p>One card per name, so two folders of one name would read as one.
      */
     public void newFolder() {
         fileActions.askName(
@@ -339,8 +342,7 @@ public final class FilesList {
     }
 
     /**
-     * Opens a file's sheet from elsewhere (a link), read off the store with
-     * the message it came from.
+     * Opens a file's sheet from a link, read off the store with its message.
      */
     public void openFile(String collection, String linkId) {
         host.io.execute(
@@ -383,7 +385,9 @@ public final class FilesList {
         return null;
     }
 
-    /** What a file offers: open, share, save, export, its message, its links, delete. */
+    /**
+     * What a file offers: open, share, save, export, message, links, delete.
+     */
     private void fileMenu(Row row) {
         FileStore.StoredFile file = row.file;
         FileActions.Source bytes = () -> fileOf(row);
@@ -417,8 +421,9 @@ public final class FilesList {
     }
 
     /**
-     * The file a row is read from: its own body's blob, or for a stand-in
-     * the part its message holds written out, the message fetched when the
+     * The file a row is read from: its body's blob, or its message's part.
+     *
+     * <p>A stand-in's part is written out of its message, fetched when the
      * phone does not hold it.
      */
     private java.io.File fileOf(Row row) {
@@ -522,6 +527,7 @@ public final class FilesList {
         }
     }
 
+    /** Restores a waiting import after the activity's recreation. */
     public void restore(android.os.Bundle state) {
         String id = state.getString(IMPORT_FOLDER);
         if (id != null) {
@@ -542,8 +548,10 @@ public final class FilesList {
     }
 
     /**
-     * Imports the document picked into the folder that asked for it, copied
-     * into the cache a buffer at a time, then hashed and filed from there.
+     * Imports the picked document into the folder that asked for it.
+     *
+     * <p>Copied into the cache a buffer at a time, then hashed and filed from
+     * there.
      */
     public void imported(Uri source) {
         PimdirCollections.Stored folder = importing;

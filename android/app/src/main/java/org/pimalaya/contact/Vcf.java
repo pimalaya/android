@@ -6,10 +6,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * The vCard file (.vcf) codec behind import and export: pure text
- * splitting and joining, so the round-trip is JVM-testable without a
- * device. Documents are never parsed here; the store indexes them
- * through the bridge at write time.
+ * The vCard file (.vcf) codec behind import and export: pure text.
+ *
+ * <p>Never parses documents (the store indexes them through the bridge), so the
+ * round-trip tests on the JVM.
  */
 final class Vcf {
     /** One raw vCard document, BEGIN through END, any case. */
@@ -18,8 +18,7 @@ final class Vcf {
 
     private Vcf() {}
 
-    /** Every vCard document in the text, in order; junk between
-     *  documents is skipped. */
+    /** Every vCard document in the text, in order; junk between is skipped. */
     static List<String> split(String text) {
         List<String> vcards = new ArrayList<>();
         Matcher matcher = CARD.matcher(text);
@@ -29,8 +28,11 @@ final class Vcf {
         return vcards;
     }
 
-    /** One file: each document appended verbatim (trimmed, one CRLF
-     *  after each), so the file round-trips through {@link #split}. */
+    /**
+     * One file: each document verbatim, trimmed, CRLF after each.
+     *
+     * <p>Round-trips through {@link #split}.
+     */
     static String join(List<String> vcards) {
         StringBuilder vcf = new StringBuilder();
         for (String vcard : vcards) {

@@ -7,14 +7,14 @@ import org.json.JSONObject;
 import org.pimalaya.account.SecureStore;
 
 /**
- * Keeps the in-flight OAuth grant across the browser hop, which routinely
- * outlives the process: its client, redirect, CSRF state, PKCE verifier and
- * where the tokens go. The grant is sealed under the account key, the same
- * AES-GCM scheme as {@link SecureStore}, and never sits on disk in clear. A
- * grant older than {@link OauthFlow#GRANT_TTL_MS} is abandoned and dropped.
+ * Keeps the in-flight OAuth grant across the browser hop.
+ *
+ * <p>Client, redirect, CSRF state, PKCE verifier and token target, sealed under
+ * the account key ({@link SecureStore}'s AES-GCM scheme), never in clear. A
+ * grant older than {@link OauthFlow#GRANT_TTL_MS} is dropped.
  */
 final class PendingGrantStore {
-    /** The grant's field holding when it started, in wall-clock milliseconds. */
+    /** The grant's field holding its start, in wall-clock milliseconds. */
     static final String SAVED_AT = "savedAt";
 
     private static final String PREFS = "pimalaya.oauth";
@@ -24,8 +24,10 @@ final class PendingGrantStore {
     private final SharedPreferences prefs;
 
     /**
-     * Opens the store, wiping a grant an older version left in clear and
-     * one abandoned in the browser.
+     * Opens the store.
+     *
+     * <p>Wipes a grant an older version left in clear and one abandoned in the
+     * browser.
      */
     PendingGrantStore(Context context) {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -52,9 +54,10 @@ final class PendingGrantStore {
     }
 
     /**
-     * The persisted grant, or null when there is none, it no longer opens (a
-     * lost key, a tampered blob) or it was abandoned, in which case it is
-     * dropped.
+     * The persisted grant, or null.
+     *
+     * <p>Null when there is none, it no longer opens (lost key, tampered blob)
+     * or it was abandoned, in which case it is dropped.
      */
     JSONObject load() {
         String payload = prefs.getString(KEY_PAYLOAD, null);

@@ -6,9 +6,10 @@ import org.pimalaya.client.Clients;
 import org.pimalaya.pimdir.PimdirDb;
 
 /**
- * What the contact screens work over: the store, its contacts and books,
- * the merged pool, the bridge, and the activity's live account list
- * (mutated on the main thread, as the pool reads it).
+ * What the contact screens work over: store, contacts, books, pool, bridge.
+ *
+ * <p>The account list is the activity's live one, mutated on the main thread as
+ * the pool reads it.
  */
 public record ContactParts(
         PimdirDb pimdir,

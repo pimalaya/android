@@ -5,8 +5,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * The CSS named colours, the vocabulary an event's {@code COLOR} names
- * (RFC 7986 section 5.9) and the keys of the phone's event colours.
+ * The CSS named colours, which an event's {@code COLOR} names.
+ *
+ * <p>RFC 7986 section 5.9; also the keys of the phone's event colours.
  */
 final class CssColors {
     // NOTE: CSS Color Module Level 4, section 6.1 (Named Colors): the 147 of

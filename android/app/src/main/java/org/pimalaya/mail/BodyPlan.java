@@ -13,27 +13,23 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.pimdir.PimdirCollections;
 
 /**
- * The body step's plan: which bodies each account downloads this run, out
- * of the store, the mail filter and the offline choices (the coordinator
- * in sync runs it, then counts what it planned).
+ * The body step's plan: which bodies each account downloads this run.
+ *
+ * <p>From the store, the mail filter and the offline choices; the sync
+ * coordinator runs it, then counts what it planned.
  */
 public final class BodyPlan {
     private BodyPlan() {}
 
-    /**
-     * What a plan answers: the run, the bodies each planned account has
-     * left (zero for one planning none), and their sum.
-     */
+    /** The run, each planned account's bodies left (zero for none), the sum. */
     public record Plan(MailBodies.Run run, Map<String, Integer> left, int planned) {}
 
     /**
-     * What the body step downloads this run, by account: every account that
-     * is on, its mailboxes' messages dated from their frontier on but in the
-     * junk and the trash, every message of a mailbox kept whole, and what is
-     * owed below its frontier ({@link MailOwed}); the mailboxes the mail
-     * list shows first, each part newest first, the owed ones last; none
-     * failed or gone since its mailbox was last listed
-     * ({@link MailBodies.Run#plan}). Walked on the io thread.
+     * What the body step downloads this run, by account, on the io thread.
+     *
+     * <p>Messages from the frontier (junk and trash out), whole mailboxes, and
+     * owed ones ({@link MailOwed}) last; shown mailboxes first, newest first;
+     * none failed or gone since last listed ({@link MailBodies.Run#plan}).
      */
     public static Plan of(
             Context context, MailStore mail, List<AccountEntry> accounts, MailState state) {
@@ -90,8 +86,9 @@ public final class BodyPlan {
     }
 
     /**
-     * The bodies some mailboxes want from their frontier on, newest first:
-     * a mailbox stepped alone keeps a frontier older than its account's
+     * The bodies some mailboxes want from their frontier on, newest first.
+     *
+     * <p>A mailbox stepped alone keeps a frontier older than its account's
      * ({@link MailWindow#since(android.content.Context, String, String)}).
      */
     private static List<MailBodies.Row> windowedRows(MailStore mail, List<String> collections) {
@@ -111,11 +108,10 @@ public final class BodyPlan {
     }
 
     /**
-     * The owed bodies of some mailboxes dated below their frontier, which
-     * download all the same: one dated at or after it is in the plan
-     * already. What is owed in a mailbox that downloads nothing
-     * ({@code skipped}: the junk, the trash), or by a message gone or
-     * downloaded since, is owed no more.
+     * The owed bodies dated below their frontier, which download all the same.
+     *
+     * <p>What is owed in a mailbox downloading nothing ({@code skipped}: junk,
+     * trash), or by a message gone or downloaded since, is owed no more.
      */
     private static List<MailBodies.Row> owed(
             Context context, MailStore mail, List<String> windowed, List<String> skipped) {

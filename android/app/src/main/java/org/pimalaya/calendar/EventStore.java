@@ -22,30 +22,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * The calendar side of the pimdir store: calendars as collections of kind
- * {@code text/calendar}, their objects as items.
+ * The calendar side of the pimdir store: {@code text/calendar} collections.
  *
- * <p>It had its own database until the contacts moved: the argument then was
- * that read-only events had no use for the contacts schema's merge model, which
- * was true and is now moot, because pimdir's model is not the contacts one. A
- * calendar is a collection like any other and an event is an item like any
- * other, bindings, staged edits and conflicts included.
- *
- * <p>Events are stored as the iCalendar text the server sent, unparsed: what an
- * event renders as depends on the window being shown, so the expansion happens
- * at render time through the bridge. No summary is written beside it: what an
- * agenda row shows needs that same expansion, so the row carries the body and
- * the validator its next write is guarded by, and nothing else.
- *
- * <p>The objects themselves are written by {@link CalendarEngine} and never
- * here: a calendar is reconciled rather than replaced, which is what lets a
- * staged create, edit or delete survive a refresh. What is left here is the
- * calendar roster and the two reads the agenda does.
- *
- * <p>There is no subscription switch. The old schema carried one, defaulted to
- * true and never written by anything, so it decided nothing; when a calendar
- * picker exists it belongs beside the address books' switches, in the app's own
- * state rather than in the store.
+ * <p>Objects are the server's iCalendar text, no summary: what renders depends
+ * on the window, so the bridge expands at render time. {@link CalendarEngine}
+ * writes them (staged edits survive a refresh); here, the roster and reads.
  */
 public final class EventStore {
     private final PimdirItems items;
@@ -53,6 +34,7 @@ public final class EventStore {
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
 
+    /** The calendar store over the shared pimdir store. */
     public EventStore(Context context, PimdirDb store) {
         this.items = new PimdirItems(store);
         this.storage = new PimdirStorage(store);
@@ -63,12 +45,9 @@ public final class EventStore {
     /**
      * Replaces an account's calendars with what the server just listed.
      *
-     * <p>The collection id is the calendar's address namespaced by the account
-     * ({@link PimdirAccount}), the way a mailbox id is. Neither backend needs
-     * it today: a CalDAV URL is unique on its own, and a JMAP calendar URL
-     * carries its JMAP account id since the address itself was fixed. It stays
-     * because mailboxes do need it, a mailbox name being unique only within
-     * its account, and one rule across the three domains beats an exception.
+     * <p>Ids are addresses namespaced by the account ({@link PimdirAccount}),
+     * as mailbox ids are: no calendar backend needs it, but a mailbox name is
+     * unique only in its account, and one rule beats an exception.
      */
     public void replaceCalendars(String accountEmail, List<Calendar> calendars) {
         String account = accounts.idOf(accountEmail);
@@ -98,11 +77,13 @@ public final class EventStore {
         /** The backend's own address, what a listing round asks for. */
         public final String url;
 
+        /** The address of the account holding it. */
         public final String accountEmail;
 
         /** The namespaced collection id, what the store keys items by. */
         public final String id;
 
+        /** Its display name. */
         public final String name;
         final String color;
 
@@ -130,6 +111,7 @@ public final class EventStore {
         }
     }
 
+    /** Every stored calendar, with its account. */
     public List<StoredCalendar> loadCalendars() {
         List<StoredCalendar> calendars = new ArrayList<>();
         for (PimdirCollections.Stored stored : collections.list(PimdirSummary.CALENDAR)) {
@@ -152,15 +134,18 @@ public final class EventStore {
         /** The collection id of the calendar holding it. */
         public final String collectionId;
 
+        /** Its link id. */
         public final String id;
 
         /**
-         * How the engine addresses the entry: the resource name the server
-         * bound it under, or the provisional handle a create waits under
-         * until a push assigns one (SYNC §2).
+         * How the engine addresses the entry (SYNC §2).
+         *
+         * <p>The resource name the server bound it under, or the provisional
+         * handle a create waits under until a push assigns one.
          */
         public final String handle;
 
+        /** The iCalendar text, as the source sent it. */
         public final String ical;
 
         /** The server's validator, empty when it sent none. */
@@ -189,10 +174,12 @@ public final class EventStore {
         }
     }
 
+    /** The links endpoint of an agenda row's object. */
     public static ItemLinks.Endpoint endpointOf(StoredEvent event) {
         return ItemLinks.of(PimdirSummary.CALENDAR, event.id);
     }
 
+    /** Every stored object, conflicted ones marked. */
     public List<StoredEvent> loadEvents() {
         List<StoredEvent> events = new ArrayList<>();
         Set<String> conflicted = conflicted();
@@ -224,14 +211,15 @@ public final class EventStore {
         return events;
     }
 
-    /** How many entries a source holds changed differently, left for their page. */
+    /** How many entries conflict on a source, left for their page. */
     int conflictCount() {
         return conflicted().size();
     }
 
     /**
-     * The entries conflicted on any source of any calendar, as their
-     * collection and link id, which the agenda marks.
+     * The entries conflicted on any source of any calendar.
+     *
+     * <p>As their collection and link id, which the agenda marks.
      */
     private Set<String> conflicted() {
         Set<String> conflicted = new HashSet<>();
@@ -246,15 +234,17 @@ public final class EventStore {
     }
 
     /**
-     * One entry conflicted on one source of its calendar: both sides
-     * edited it since the base they agreed on, and the three bodies its
-     * merge reads, from the store alone (spec/conflicts.md).
+     * One entry conflicted on one source of its calendar (spec/conflicts.md).
+     *
+     * <p>Both sides edited it since the base they agreed on; holds the three
+     * bodies its merge reads, from the store alone.
      */
     static final class StoredConflict {
         /**
-         * The engine collection the conflicted binding is on: the
-         * calendar's own id for its server, its phone source's otherwise.
-         * A resolution is staged there.
+         * The engine collection the conflicted binding is on.
+         *
+         * <p>The calendar's own id for its server, its phone source's
+         * otherwise. A resolution is staged there.
          */
         final String collection;
 
@@ -263,7 +253,7 @@ public final class EventStore {
 
         final String linkId;
 
-        /** The body both sides last agreed on, empty when they agreed on none. */
+        /** The body both sides last agreed on; empty for none. */
         final String base;
 
         /** The body staged here. */
@@ -289,17 +279,16 @@ public final class EventStore {
     }
 
     /**
-     * The engine collections one calendar is reconciled under: its server,
-     * then its phone source, whose binding conflicts the same way.
+     * The engine collections one calendar is reconciled under.
+     *
+     * <p>Its server, then its phone source, whose binding conflicts the same
+     * way.
      */
     static List<String> sourcesOf(String collectionId) {
         return List.of(collectionId, PimdirStorage.phoneCollection(collectionId));
     }
 
-    /**
-     * The conflict an agenda row stands for, on the first of its sources
-     * holding one; null when none does.
-     */
+    /** An agenda row's conflict, on its first source holding one; else null. */
     StoredConflict conflictOf(StoredEvent event) {
         for (String source : sourcesOf(event.collectionId)) {
             for (StoredConflict conflict : conflictsOf(storage, source)) {
@@ -312,8 +301,9 @@ public final class EventStore {
     }
 
     /**
-     * One source's conflicted entries whose diverging body has landed, the
-     * only ones a merge can read ({@link PimdirStorage#loadConflicts}).
+     * One source's conflicted entries whose diverging body landed.
+     *
+     * <p>The only ones a merge can read ({@link PimdirStorage#loadConflicts}).
      */
     static List<StoredConflict> conflictsOf(PimdirStorage storage, String engineCollection) {
         List<StoredConflict> conflicts = new ArrayList<>();

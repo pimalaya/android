@@ -35,26 +35,11 @@ import org.pimalaya.ui.Sections;
 import org.pimalaya.ui.Ui;
 
 /**
- * The contact edit form, settings-style like the system apps: one
- * scrolling page of sections (accent sentence-case headers) holding
- * tappable items, each opening a dialog mini-form. The vCard fields
- * group by theme: Identity (FN, N, BDAY, ANNIVERSARY, GENDER), Work
- * (ORG, TITLE, ROLE), then one section per list (NICKNAME, RELATED,
- * TEL, EMAIL, IMPP, ADR, URL, LANG, NOTE); everything the form does
- * not cover stays in the document untouched.
+ * The contact edit form: themed sections whose items open dialog mini-forms.
  *
- * <p>The page renders from a working field model that the dialogs
- * edit in place, so {@link #collect()} just hands the model back;
- * everything beyond the model is preserved by the vCard patch in the
- * Rust bridge, and the bridge also computes the page's view support
- * (summaries, type spinner positions, picker dates): the type tables
- * and their vCard semantics live there, this class only localizes the
- * labels the positions address. A diverged contact loads in conflict
- * mode, the exact same page as a plain edit (every field shows, fields
- * can be added): the difference is that each disagreeing row wears the
- * diverged glyph until reviewed, the dialogs of conflicted single
- * fields carry one tappable chip per candidate value, and the host
- * blocks saving until every glyph cleared.
+ * <p>Dialogs edit a working field model that {@link #collect()} hands back;
+ * the Rust bridge patches the vCard and computes the view support, this class
+ * only localizes labels. Conflict mode glyphs diverged rows until reviewed.
  */
 public final class ContactForm {
     static final int TEXT_NAME =
@@ -63,7 +48,7 @@ public final class ContactForm {
     private static final int URI_INPUT =
             InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI;
 
-    /** The plain string lists, as {@link ContactFieldDialogs#stringDialog} edits them. */
+    /** String lists, as {@link ContactFieldDialogs#stringDialog} edits them. */
     private static final ContactFieldDialogs.StringList NICKNAMES =
             new ContactFieldDialogs.StringList("nicknames", R.string.item_nickname, 0, TEXT_NAME);
 
@@ -83,11 +68,10 @@ public final class ContactForm {
                     InputType.TYPE_CLASS_TEXT);
 
     /**
-     * One addable field in the catalog: the model key, the section
-     * (category) it belongs to (a section-title resource, its identity),
-     * its chooser label and icon, whether it is a repeatable list (always
-     * offerable, one entry per pick) or a single field (offerable only
-     * while absent), and the action that opens its edit dialog.
+     * One addable field of the catalog: key, section, label, icon and dialog.
+     *
+     * <p>A list is always offerable (one entry per pick), a single field only
+     * while absent.
      */
     private final class Field {
         final String key;
@@ -128,19 +112,20 @@ public final class ContactForm {
     /** Changed list sections of a conflict; null outside conflict mode. */
     private Set<String> changedLists;
 
-    /** Field kinds the user revealed this session through the add-field
-     *  dialog, so their empty section keeps showing. Cleared on load. */
+    /** Field kinds revealed this session, so their empty section shows. */
     final Set<String> revealed = new HashSet<>();
 
-    /** Conflict rows the user has reviewed (opened, then confirmed with
-     *  OK), so their divergence warning clears. Cleared on load. */
+    /** Conflict rows reviewed (opened, then OK), so their warning clears. */
     private final Set<String> resolved = new HashSet<>();
 
     /** Conflict rows still awaiting review, rebuilt on every render. */
     private final Set<String> pending = new HashSet<>();
 
-    /** Items each changed list held at load time: rows past that count
-     *  were added this session and never wear the diverged glyph. */
+    /**
+     * Items each changed list held at load time.
+     *
+     * <p>Rows past that count were added this session and never wear the glyph.
+     */
     private final Map<String, Integer> loadedCounts = new HashMap<>();
 
     /** The row a just-opened dialog resolves on OK; null when none. */
@@ -154,6 +139,7 @@ public final class ContactForm {
     /** The per-property edit dialogs the tappable rows open. */
     private final ContactFieldDialogs dialogs;
 
+    /** An empty form drawing into the activity. */
     public ContactForm(Activity activity) {
         this.activity = activity;
         this.ui = new Ui(activity);
@@ -165,11 +151,10 @@ public final class ContactForm {
     }
 
     /**
-     * Loads the field model (null for a new contact) and renders the
-     * page. A non-null `changed` turns on conflict mode: the same full
-     * page, with the diverged glyph on every disagreeing row and
-     * `alternatives` feeding the value chips of the conflicted
-     * single-field dialogs.
+     * Loads the field model (null for a new contact) and renders the page.
+     *
+     * <p>A non-null {@code changed} turns on conflict mode: the diverged glyph
+     * on disagreeing rows, {@code alternatives} feeding the value chips.
      */
     public void load(
             ContactFields model, Map<String, List<String>> alternatives, List<String> changed) {
@@ -212,18 +197,18 @@ public final class ContactForm {
     /** What a render adds after the card's own sections (the Linked card). */
     private java.util.function.Consumer<Sections> trailing;
 
+    /** Sets what a render adds after the card's own sections. */
     public void setTrailing(java.util.function.Consumer<Sections> trailing) {
         this.trailing = trailing;
     }
 
-    /** Draws the page again from the working model, after a change outside it. */
+    /** Draws the page again from the working model, after an outside change. */
     public void refresh() {
         render();
     }
 
     /**
-     * Whether the form may be validated: always in a plain edit, in a
-     * merge only once every diverging row has been reviewed.
+     * Whether the form may save: always, in a merge once every row is reviewed.
      */
     public boolean conflictResolved() {
         return !conflict() || pending.isEmpty();
@@ -244,12 +229,10 @@ public final class ContactForm {
     }
 
     /**
-     * Whether a field or list section shows: one that carries a value
-     * or was added through a chooser this session, in conflict mode
-     * like in a plain edit. So the editor opens showing only the
-     * sections that hold data; the {@code || conflicted / changed}
-     * branch at each render site adds the rows that diverge while
-     * empty on the merged side.
+     * Whether a section shows: it carries a value or was added this session.
+     *
+     * <p>Each render site's {@code || conflicted / changed} branch adds rows
+     * that diverge while empty on the merged side.
      */
     private boolean shown(String key, boolean filled) {
         return filled || revealed.contains(key);
@@ -318,8 +301,7 @@ public final class ContactForm {
                 part.equals("suffix") ? value : name.suffix());
     }
 
-    /** Appends a structured-name component row when it carries a value,
-     *  was revealed, or (in conflict mode) disagrees. */
+    /** Appends a name component row: valued, revealed, or diverging. */
     private void namePartRow(List<View> identity, String part, int hint) {
         String key = "name." + part;
         if (shown(key, filled(key)) || unreviewed(key)) {
@@ -332,8 +314,7 @@ public final class ContactForm {
         }
     }
 
-    /** The full field catalog with each field's category, chooser label
-     *  and icon, and the action that opens its edit dialog. */
+    /** The full field catalog: category, label, icon and edit dialog each. */
     private List<Field> catalog() {
         int person = R.drawable.ic_section_person;
         int identity = R.string.section_identity;
@@ -400,14 +381,14 @@ public final class ContactForm {
         return fields;
     }
 
-    /** Whether a field can still be added: a list takes another entry any
-     *  time, a single field only while it is absent. */
+    /**
+     * Whether a field can still be added: a list always, a single if absent.
+     */
     private boolean offerable(Field field) {
         return field.list || !shown(field.key, filled(field.key));
     }
 
-    /** The main add action (FAB): every field that can still be added,
-     *  across all sections. */
+    /** The main add action (FAB): every field that can still be added. */
     public void addField() {
         List<Field> offer = new ArrayList<>();
         for (Field field : catalog()) {
@@ -418,8 +399,7 @@ public final class ContactForm {
         showChooser(offer);
     }
 
-    /** A section's add action: the same chooser, filtered to that section
-     *  (category), so its header icon only offers its own fields. */
+    /** A section's add action: the chooser filtered to that section. */
     private void addToSection(int category) {
         List<Field> offer = new ArrayList<>();
         for (Field field : catalog()) {
@@ -431,10 +411,10 @@ public final class ContactForm {
     }
 
     /**
-     * Presents the field chooser. Picking a field opens its edit dialog;
-     * saving it adds the field (and its section, when new) to the page. A
-     * lone option skips the list and opens straight away; an empty set
-     * says everything is already on the page.
+     * Presents the field chooser; a picked field opens its edit dialog.
+     *
+     * <p>A lone option opens straight away; an empty set says everything is
+     * already on the page.
      */
     private void showChooser(List<Field> fields) {
         if (fields.isEmpty()) {
@@ -471,8 +451,7 @@ public final class ContactForm {
         dialog.show();
     }
 
-    /** One icon-and-label chooser row; picking it closes the chooser and
-     *  opens the field's edit dialog. */
+    /** One chooser row; picking it closes the chooser and opens the dialog. */
     private View chooserRow(Field field, AlertDialog dialog) {
         ImageView iconView = new ImageView(activity);
         iconView.setImageResource(field.icon);
@@ -742,8 +721,11 @@ public final class ContactForm {
         }
     }
 
-    /** Marks the open conflict row reviewed (its warning clears), then
-     *  re-renders. Cancelling a dialog skips this, so the warning stays. */
+    /**
+     * Marks the open conflict row reviewed, then re-renders.
+     *
+     * <p>Cancelling a dialog skips this, so the warning stays.
+     */
     void markResolvedAndRender() {
         if (pendingResolveKey != null) {
             resolved.add(pendingResolveKey);
@@ -752,15 +734,16 @@ public final class ContactForm {
         render();
     }
 
-    /** The review key of a diverged single field, null when settled:
-     *  the row key itself, checked against the alternative paths (a
-     *  compound field like gender checks each of its components). */
+    /**
+     * The review key of a diverged single field, null when settled.
+     *
+     * <p>A compound field like gender checks each of its component paths.
+     */
     private String divergedField(String key, String... paths) {
         return conflicted(paths.length == 0 ? new String[] {key} : paths) ? key : null;
     }
 
-    /** The review key of one row of a changed list section, null when
-     *  the section is settled or the row was added this session. */
+    /** The review key of a changed list row; null if settled or added now. */
     private String divergedItem(String section, int index) {
         if (!conflict() || !changedLists.contains(section)) {
             return null;
@@ -769,17 +752,21 @@ public final class ContactForm {
         return loaded != null && index < loaded ? section + ":" + index : null;
     }
 
-    /** Whether a diverged single field still awaits review: it renders
-     *  even while empty so the divergence can be seen; once reviewed it
-     *  follows the plain rules again, so clearing its value drops the
-     *  row exactly like in a plain edit. */
+    /**
+     * Whether a diverged single field still awaits review.
+     *
+     * <p>It renders even while empty; once reviewed it follows the plain rules,
+     * so clearing its value drops the row.
+     */
     private boolean unreviewed(String key, String... paths) {
         return divergedField(key, paths) != null && !resolved.contains(key);
     }
 
-    /** Whether a changed list section still awaits review on any of
-     *  its loaded rows, so it renders even once emptied; all reviewed,
-     *  it follows the plain rules again. */
+    /**
+     * Whether a changed list section awaits review on any loaded row.
+     *
+     * <p>It renders even once emptied; all reviewed, the plain rules apply.
+     */
     private boolean unreviewedList(String section) {
         if (!conflict() || !changedLists.contains(section)) {
             return false;
@@ -793,11 +780,9 @@ public final class ContactForm {
     }
 
     /**
-     * Adds a section: its icon and accent label, then a right-aligned add
-     * icon opening the chooser filtered to this section (so its header
-     * only offers its own fields), then its items, separated from the
-     * previous section by a line in the app bar tone. An empty section
-     * vanishes.
+     * Adds a section: icon, label, an add icon filtered to it, then its items.
+     *
+     * <p>An empty section vanishes.
      */
     private void section(int title, int icon, List<View> items) {
         section(title, icon, items, false);
@@ -825,13 +810,11 @@ public final class ContactForm {
     }
 
     /**
-     * A tappable row: title over a diminished subtitle. A non-null
-     * `diverged` key marks the row as disagreeing in a conflict: it
-     * carries a trailing warning (the same glyph the list shows) until
-     * the user opens it and confirms with OK. Single fields key by
-     * their path, list rows by section and loaded position (stable
-     * while rows only get reviewed; a row added this session never
-     * wears the glyph).
+     * A tappable row: title over a diminished subtitle.
+     *
+     * <p>A non-null {@code diverged} key wears the warning glyph until opened
+     * and confirmed. Single fields key by path, list rows by section and loaded
+     * position; a row added this session never wears it.
      */
     private View entryItem(
             CharSequence title, CharSequence subtitle, String diverged, Runnable onClick) {
@@ -859,8 +842,7 @@ public final class ContactForm {
                 });
     }
 
-    /** A field's display value, or empty for an unset field: an empty
-     *  subtitle leaves the row present but blank, no "not set" filler. */
+    /** A field's display value, empty when unset: no "not set" filler. */
     private String value(String text) {
         return text.trim();
     }
@@ -898,8 +880,7 @@ public final class ContactForm {
         return index >= 0 && index < entries.size() ? entries.get(index) : new FormAddress(0, "");
     }
 
-    /** A single organization component (company or department), kept
-     *  under the model's {@code organization} object; empty when unset. */
+    /** One organization component (company or department); empty when unset. */
     String organizationPart(String part) {
         ContactOrganization organization = model.organization;
         return organization == null ? "" : organizationPart(organization, part).trim();
@@ -941,7 +922,7 @@ public final class ContactForm {
         }
     }
 
-    /** The model's string list section under the key, empty for any other key. */
+    /** The model's string list under the key, empty for any other key. */
     List<String> strings(String key) {
         switch (key) {
             case "nicknames":
@@ -959,10 +940,7 @@ public final class ContactForm {
         }
     }
 
-    /**
-     * Writes an entry back into its list: replaced in place, appended
-     * when new, dropped when emptied.
-     */
+    /** Writes an entry back: replaced, appended if new, dropped if empty. */
     static <T> void putEntry(List<T> values, int index, String filled, T entry) {
         if (filled.trim().isEmpty()) {
             if (index >= 0) {

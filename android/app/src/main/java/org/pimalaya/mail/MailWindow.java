@@ -16,33 +16,16 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * An account's frontier: the {@code Date} of the oldest message its steps
- * brought ({@link MailStep}), the edge the mail list shows it down to and
- * the body step downloads it from.
+ * An account's frontier: the oldest {@code Date} its steps brought.
  *
- * <p>Set by the account's first step, moved back by each step after it
- * ({@link #frontier}), never forward by a step: new mail lands above it.
- * Moved later only from the account's settings, which frees the bodies
- * below it. Never older than the account's bound ({@link MailScope}).
- * All mail once a step found nothing older left. A message with no date
- * falls below every frontier but all mail.
- *
- * <p>A step over one mailbox alone (a view filtered to it) moves that
- * mailbox's own frontier and never its account's, so the account's other
- * mailboxes do not show days they do not hold; a mailbox reaches down to
- * the older of the two ({@link #since(Context, String, String)}).
- *
- * <p>App state kept beside the account, as its bound is, and not in the
- * store: it is presentation and download policy, not store truth. Beside
- * it, a Gmail account keeps the oldest reception its steps brought
- * ({@link #reach}), where a round over one of its labels lists from, and
- * a JMAP account the ids its last step reached ({@link #anchors}), where
- * the next one starts.
+ * <p>The list shows down to it, bodies download from it. Steps only move it
+ * back, settings later; never under the bound ({@link MailScope}); undated mail
+ * lies below. In prefs, not the store: policy, not store truth.
  */
 public final class MailWindow {
     private static final String PREFS = "mail-window";
 
-    /** Where the own frontiers of mailboxes stepped alone are kept, by collection. */
+    /** The own frontiers of mailboxes stepped alone, by collection. */
     private static final String MAILBOXES = "mail-window-mailbox";
 
     /** What the preference holds for a frontier of all mail. */
@@ -55,8 +38,9 @@ public final class MailWindow {
     private static final String ANCHORS = ":anchors";
 
     /**
-     * How much older than its reception a message's {@code Date} may be and
-     * still move a frontier: past it, an import or a wrong clock.
+     * How much older than its reception a {@code Date} still moves a frontier.
+     *
+     * <p>Past it: an import or a wrong clock.
      */
     private static final long SKEW_MILLIS = 24L * 60 * 60 * 1000;
 
@@ -67,11 +51,10 @@ public final class MailWindow {
     }
 
     /**
-     * An account's frontier today, as the RFC 3339 instant a sort key
-     * compares against, null for all mail: its date, raised to its bound's
-     * floor. An account holding none yet (its first step owed) reads the
-     * first of the month, so nothing downloads past what a first step would
-     * set.
+     * An account's frontier today as an RFC 3339 instant, null for all mail.
+     *
+     * <p>Raised to the bound's floor. With no step yet, the first of the month,
+     * so nothing downloads past what a first step would set.
      */
     public static String since(Context context, String accountId) {
         String held = prefs(context).getString(accountId, null);
@@ -84,11 +67,10 @@ public final class MailWindow {
     }
 
     /**
-     * A mailbox's frontier today, null for all mail. On Gmail, listed whole
-     * through All Mail, the older of its own, which steps over it alone
-     * moved ({@link #moveBackMailbox}), and its account's. Elsewhere, where
-     * mailboxes step one by one after the account's first step, its own
-     * once it has one, else its account's. Raised to the account's bound.
+     * A mailbox's frontier today, null for all mail; raised to the bound.
+     *
+     * <p>On Gmail the older of its own ({@link #moveBackMailbox}) and the
+     * account's; elsewhere its own once it has one, else the account's.
      */
     public static String since(Context context, String accountId, String collection) {
         String account = since(context, accountId);
@@ -105,10 +87,10 @@ public final class MailWindow {
     }
 
     /**
-     * Whether a step over one mailbox may bring it more: its own frontier,
-     * where it holds one, is not all mail and lies above the bound's floor;
-     * on Gmail its account may too ({@link #more}), and elsewhere a mailbox
-     * with no frontier of its own may while its account may.
+     * Whether a step over one mailbox may bring it more.
+     *
+     * <p>Its own frontier, if any, is not all mail and above the bound's floor;
+     * on Gmail, or with none of its own, its account's {@link #more}.
      */
     static boolean more(Context context, String accountId, String collection) {
         String own = mailboxes(context).getString(collection, null);
@@ -123,9 +105,10 @@ public final class MailWindow {
     }
 
     /**
-     * Whether a step over the junk or the trash alone may bring it more:
-     * its own frontier alone, which none of its account's steps moves; one
-     * never stepped may.
+     * Whether a step over junk or trash alone may bring it more.
+     *
+     * <p>Its own frontier alone, which no account step moves; never stepped
+     * may.
      */
     static boolean moreAlone(Context context, String accountId, String collection) {
         String own = mailboxes(context).getString(collection, null);
@@ -134,9 +117,9 @@ public final class MailWindow {
     }
 
     /**
-     * Moves a mailbox's own frontier back to {@code date}, null for all
-     * mail: a step over it alone, which leaves its account's alone. A
-     * frontier already older stays where it is.
+     * Moves a mailbox's own frontier back to {@code date}, null for all mail.
+     *
+     * <p>A step over it alone; the account's stays, an older one stays too.
      */
     public static void moveBackMailbox(Context context, String collection, String date) {
         String held = mailboxes(context).getString(collection, null);
@@ -147,11 +130,11 @@ public final class MailWindow {
     }
 
     /**
-     * Moves the frontier a step left ({@link MailStep.Outcome}): over the
-     * account ({@code only} null) its frontier, set by a first step and
-     * moved back by the others, all mail once nothing older is left; over
-     * one mailbox alone that mailbox's own, the account's left as it is, so
-     * its other mailboxes show no day they do not hold.
+     * Moves the frontier a step left ({@link MailStep.Outcome}).
+     *
+     * <p>Over the account ({@code only} null) its own, all mail once nothing
+     * older is left; over one mailbox only that mailbox's, so the others show
+     * no day they do not hold.
      */
     public static void stepped(
             Context context, String accountId, String only, MailStep.Outcome outcome) {
@@ -169,9 +152,9 @@ public final class MailWindow {
     }
 
     /**
-     * Forgets the own frontiers of an account's mailboxes older than
-     * {@code date}, its account's moved later to it: nothing is kept below
-     * it any more. All of them for null.
+     * Forgets mailbox frontiers older than {@code date} (all for null).
+     *
+     * <p>Its account's moved later to it: nothing is kept below it.
      */
     public static void dropMailboxes(Context context, String accountId, String date) {
         String prefix = PimdirAccount.collectionId(accountId, "");
@@ -195,10 +178,7 @@ public final class MailWindow {
         return prefs(context).contains(accountId);
     }
 
-    /**
-     * Whether a step may bring an account more: its frontier is not all
-     * mail and lies above its bound's floor.
-     */
+    /** Whether a step may bring an account more: above the bound, not all. */
     static boolean more(Context context, String accountId) {
         String held = prefs(context).getString(accountId, null);
         return held != null
@@ -206,15 +186,12 @@ public final class MailWindow {
                 && MailScope.limits(held, MailScope.sinceOf(context, accountId));
     }
 
-    /** Sets an account's frontier outright, null for all mail: a first step, a migration. */
+    /** Sets an account's frontier outright, null for all mail. */
     public static void set(Context context, String accountId, String date) {
         prefs(context).edit().putString(accountId, date == null ? ALL : date).apply();
     }
 
-    /**
-     * Moves an account's frontier back to {@code date}, null for all mail;
-     * a frontier already older stays where it is.
-     */
+    /** Moves an account's frontier back to {@code date}; an older one stays. */
     static void moveBack(Context context, String accountId, String date) {
         String held = prefs(context).getString(accountId, null);
         if (ALL.equals(held) || (held != null && date != null && date.compareTo(held) >= 0)) {
@@ -223,10 +200,7 @@ public final class MailWindow {
         set(context, accountId, date);
     }
 
-    /**
-     * Raises a frontier left below {@code floor}, a narrowed bound's:
-     * nothing is kept below it any more.
-     */
+    /** Raises a frontier below a narrowed bound's {@code floor} to it. */
     static void raise(Context context, String accountId, String floor) {
         String held = prefs(context).getString(accountId, null);
         if (floor != null && held != null && (ALL.equals(held) || held.compareTo(floor) < 0)) {
@@ -234,10 +208,7 @@ public final class MailWindow {
         }
     }
 
-    /**
-     * The oldest reception an account's steps brought, in milliseconds
-     * since the epoch, null where none recorded one.
-     */
+    /** The oldest reception an account's steps brought, epoch ms, or null. */
     static Long reach(Context context, String accountId) {
         long reach = prefs(context).getLong(accountId + REACH, -1);
         return reach < 0 ? null : reach;
@@ -252,10 +223,10 @@ public final class MailWindow {
     }
 
     /**
-     * The ids a JMAP account's last step reached, oldest first, where the
-     * next one starts ({@link MailStep}): those of the step over
-     * {@code mailbox} (a view filtered to it), else of the account's; empty
-     * where no step left any.
+     * The ids a JMAP account's last step reached, oldest first.
+     *
+     * <p>Where the next starts: the step over {@code mailbox}'s, else the
+     * account's; empty where no step left any.
      */
     static List<String> anchors(Context context, String accountId, String mailbox) {
         List<String> anchors = new ArrayList<>();
@@ -278,8 +249,9 @@ public final class MailWindow {
     }
 
     /**
-     * Keeps the anchors a step over {@code mailbox} (null for the account)
-     * answered, once its messages landed; none answered keeps those held.
+     * Keeps a landed step's anchors over {@code mailbox} (null for account).
+     *
+     * <p>None answered keeps those held.
      */
     static void anchor(Context context, String accountId, String mailbox, List<String> anchors) {
         if (anchors == null || anchors.isEmpty()) {
@@ -289,7 +261,7 @@ public final class MailWindow {
         prefs(context).edit().putString(key, new JSONArray(anchors).toString()).apply();
     }
 
-    /** Forgets an account's frontier, its reach and its anchors, with the account. */
+    /** Forgets an account's frontier, reach and anchors. */
     static void forget(Context context, String accountId) {
         SharedPreferences.Editor editor =
                 prefs(context).edit().remove(accountId).remove(accountId + REACH);
@@ -303,17 +275,11 @@ public final class MailWindow {
     }
 
     /**
-     * The frontier a step's messages leave, null when it brought none: the
-     * oldest {@code Date} among them, leaving out a message dated more than
-     * a day before its reception (an import, a wrong clock), which is held
-     * and shown once the frontier passes it; the oldest of all when every
-     * one is such.
+     * The frontier a step's messages leave, null when it brought none.
      *
-     * <p>A step walked {@code byReception} (Gmail, JMAP without
-     * {@code sentAt}) left out only messages received before the oldest it
-     * brought, whose {@code Date} lies before their reception: its frontier
-     * is never older than that reception, so a message received earlier
-     * but dated later is never missing from the list above it.
+     * <p>The oldest date but those dated a day before reception (held till
+     * passed), or the oldest of all. {@code byReception} (Gmail, JMAP without
+     * {@code sentAt}) never goes below the oldest reception brought.
      */
     static String frontier(List<MailStep.Brought> brought, boolean byReception) {
         String oldest = null;
@@ -350,11 +316,10 @@ public final class MailWindow {
     }
 
     /**
-     * Gives an account set up before windows existed its frontier, once:
-     * the floor of its bound where it downloaded bodies ahead (most are
-     * held), else its inbox's first chunk as the stored inbox has it, so
-     * nothing downloads by surprise. The offline policy it carried is
-     * forgotten.
+     * Gives an account set up before windows existed its frontier, once.
+     *
+     * <p>Its bound's floor where it downloaded ahead, else its inbox's first
+     * chunk, so nothing downloads by surprise; the old policy is forgotten.
      */
     public static void migrate(Context context, MailStore store, String accountEmail) {
         String accountId = store.accountIdOf(accountEmail);
@@ -370,11 +335,10 @@ public final class MailWindow {
     }
 
     /**
-     * The frontier first chunks leave, null for all mail: the inbox's floor
-     * ({@code inboxFloor}, null where it has none or is not to be used),
-     * else the most recent of the mailboxes' floors, else all mail when
-     * every mailbox fitted in its first chunk; for an account holding no
-     * mail, the first of the month on {@code today} in {@code zone}.
+     * The frontier first chunks leave, null for all mail.
+     *
+     * <p>{@code inboxFloor} when set, else the most recent floor, else all mail
+     * when each fitted; with no mail, the first of the month in {@code zone}.
      */
     static String initial(
             boolean empty, String inboxFloor, List<String> floors, LocalDate today, ZoneId zone) {
@@ -398,7 +362,7 @@ public final class MailWindow {
         return latest;
     }
 
-    /** Midnight of {@code day} in {@code zone}, as the UTC instant a sort key compares to. */
+    /** Midnight of {@code day} in {@code zone}, as a sort key's UTC instant. */
     static String startOf(LocalDate day, ZoneId zone) {
         return day.atStartOfDay(zone).toInstant().toString();
     }

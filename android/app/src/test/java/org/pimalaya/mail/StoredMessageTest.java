@@ -20,8 +20,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The rows a list reads, synced and waiting to go out, on a seeded store:
- * every value a row carries, captured before the row was built from typed
+ * The rows a list reads, synced and waiting to go out, on a seeded store.
+ *
+ * <p>Every value a row carries, captured before rows were built from typed
  * parts (header, listing or queue row, flags) and read the same since.
  */
 @RunWith(RobolectricTestRunner.class)

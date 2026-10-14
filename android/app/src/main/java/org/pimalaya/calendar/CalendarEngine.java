@@ -24,28 +24,11 @@ import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * The calendar half of the engine: one driver per account, servicing the
- * remote yields of every calendar it holds, against its server; a
- * calendar's phone collection is its phone pass's ({@link CalendarPhonePass}),
- * against its rows in the phone's calendar provider.
+ * The calendar half of the engine: one driver per account, against its server.
  *
- * <p>It asks what changed. The enumerate is an RFC 6578 `sync-collection`
- * from the cursor the last pass stored, answering hrefs and ETags, and
- * the fetch is a `calendar-multiget` of the handles the merge asked
- * about. A quiet calendar costs one report; it used to cost every body
- * it holds, because the only listing there was carried them all.
- *
- * <p>The transport it reads and writes on is the caller's, opened once
- * for the pass and closed with it: an account's calendars run side by
- * side ({@code WorkerPool}), each worker on a transport of its own that
- * every round of its calendars shares.
- *
- * <p>Incremental listing is not wired: CalDAV's ctag and sync-token
- * rounds are what one would use, so every enumerate is a complete round
- * and reports itself as one. The engine reconciles a complete spine
- * exactly as it reconciles a delta; what it costs is one request per
- * calendar per sync, which is what the previous whole-collection refresh
- * cost too.
+ * <p>Enumerates by RFC 6578 {@code sync-collection} from the stored cursor,
+ * fetches by {@code calendar-multiget}: a quiet calendar costs one report.
+ * Phone collections are {@link CalendarPhonePass}'s.
  */
 public final class CalendarEngine extends PimdirEngine {
     /**
@@ -66,9 +49,10 @@ public final class CalendarEngine extends PimdirEngine {
     private final String accountId;
 
     /**
-     * The account's address, the owner the phone gives its calendars: what a
-     * write tells a meeting the user organizes by. Null on a driver that only
-     * stages.
+     * The account's address, the owner the phone gives its calendars.
+     *
+     * <p>What a write tells a meeting the user organizes by. Null on a driver
+     * that only stages.
      */
     private final String address;
 
@@ -78,6 +62,7 @@ public final class CalendarEngine extends PimdirEngine {
     /** The store, for the phone queue its writes reach. */
     private final PimdirDb pimdir;
 
+    /** The driver of one account's calendars, against {@code remote}. */
     public CalendarEngine(PimdirDb pimdir, Clients clients, RemoteAccount remote) {
         super(pimdir, clients);
         this.transport = remote.transport();
@@ -89,22 +74,11 @@ public final class CalendarEngine extends PimdirEngine {
     }
 
     /**
-     * Reconciles one calendar, three passes: the phone's edits pulled into
-     * the store, the exchange with the server (what the phone changed going
-     * out with it), then what the server brought projected onto the phone.
-     * Between them, the conflicts the merge can settle are settled on both
-     * sources ({@link #triage}), which a second exchange pushes.
+     * Reconciles one calendar: phone edits in, server exchange, projection out.
      *
-     * <p>What changed and not what there is. The enumerate asks the
-     * collection for the members that moved since the cursor the last
-     * pass stored, and the fetch reads the bodies of the ones the merge
-     * asks about; a quiet calendar costs one report and no body at all,
-     * where it used to cost every body it holds.
-     *
-     * <p>The hydrate is not optional. A sync that finds the remote
-     * content changed drops the body on purpose, and the agenda reads its
-     * entries by their body: without this pass a remote edit would empty
-     * the calendar until something else refetched it, which nothing does.
+     * <p>Between them {@link #triage} settles what the merge can on both
+     * sources, pushed by a second exchange. The hydrate is not optional: a
+     * remote change drops the body, and the agenda reads entries by body.
      */
     public void sync(String collection) {
         ReentrantLock lock = lock(collection);
@@ -129,8 +103,9 @@ public final class CalendarEngine extends PimdirEngine {
     }
 
     /**
-     * A phone pass that a failing provider fails alone, never the sync
-     * around it, told through this pass's progress.
+     * A phone pass a failing provider fails alone, never the sync around it.
+     *
+     * <p>Told through this pass's progress.
      */
     private void phoneSide(String collection) {
         phone.progress = progress;
@@ -138,16 +113,11 @@ public final class CalendarEngine extends PimdirEngine {
     }
 
     /**
-     * Settles what the merge can of one source's conflicted entries, and
-     * leaves the rest for the entry page (spec/conflicts.md).
+     * Settles what the merge can of a source's conflicts; answers how many.
      *
-     * <p>The triage step of a calendar pass, on any source: the calendar's
-     * own id for its server, its phone source's for the phone's. Each
-     * conflicted entry is merged three ways from the store alone, its base,
-     * the body staged here and the one the source holds, and a merge with
-     * nothing to ask is staged on the binding that conflicted, for the
-     * caller's next exchange to push. A collision stays marked, for the
-     * page. Answers how many it settled.
+     * <p>Each entry merges three ways from the store (spec/conflicts.md): a
+     * clean merge is staged on the conflicted binding for the next exchange, a
+     * collision stays for the page.
      */
     int triage(String collection) {
         return CalendarPhonePass.triage(
@@ -164,10 +134,7 @@ public final class CalendarEngine extends PimdirEngine {
         CalendarStager.staged(pimdir, collection);
     }
 
-    /**
-     * The calendar's address behind a collection id, which is what every
-     * request names it by.
-     */
+    /** The calendar URL behind a collection id, which every request names. */
     private String urlOf(String collection) {
         return PimdirAccount.nameOf(accountId, collection);
     }
@@ -178,8 +145,9 @@ public final class CalendarEngine extends PimdirEngine {
     }
 
     /**
-     * The calendar's members, and the bodies of those the round already
-     * read whole (Google, JMAP), so naming them reads nothing more.
+     * The calendar's members, and the bodies the round already read whole.
+     *
+     * <p>Google and JMAP list whole, so naming those reads nothing more.
      */
     @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
@@ -245,13 +213,12 @@ public final class CalendarEngine extends PimdirEngine {
         return keepBoundNames(collection, reply);
     }
 
-    /** One entry at its full tier, as a read or a whole listing hands it over. */
+    /** One entry at full tier, as a read or a whole listing hands it over. */
     private static JSONObject entry(Event event) throws JSONException {
         JSONObject item = new JSONObject();
         item.put("handle", event.id());
-        // The resource name is the identity: an entry is one object in
-        // one calendar, and the UID inside it is what names the series
-        // rather than the resource.
+        // NOTE: the resource name is the identity: an entry is one object in
+        // one calendar, and its UID names the series rather than the resource.
         item.put("linkId", event.id());
         item.put("hash", PimdirHash.of(event.ical()));
         item.put("body", event.ical());
@@ -284,14 +251,11 @@ public final class CalendarEngine extends PimdirEngine {
     }
 
     /**
-     * One change against the server, guarded by what the entry was read
-     * at.
+     * One change against the server, guarded by what the entry was read at.
      *
-     * <p>A precondition the server refuses is reported as a rejection
-     * rather than raised: the entry moved under the edit, so what the push
-     * was conditioned on is no longer true, and the next pass reconciles
-     * against what is there now. Raising would abort the round and take
-     * every change after it down with one stale ETag.
+     * <p>A refused precondition is reported as a rejection, not raised: the
+     * entry moved under the edit and the next pass reconciles. Raising would
+     * abort the round, every later change downed by one stale ETag.
      */
     private JSONObject pushOne(String collection, JSONObject change) throws JSONException {
         String url = urlOf(collection);
@@ -304,12 +268,11 @@ public final class CalendarEngine extends PimdirEngine {
                 if (row == null) {
                     return result(handle, false, null, null);
                 }
-                // The resource name, never the handle: a staged create waits
-                // under a provisional handle until this push assigns a real
-                // one (SYNC §2), and the name it goes out under is the entry's
-                // own. The handle is whatever came back: the name a CalDAV
-                // server filed it by, which Google chooses itself, or the id
-                // Graph, Google or JMAP minted.
+                // NOTE: the resource name, never the handle: a staged create
+                // waits under a provisional handle until this push assigns one
+                // (SYNC §2). The handle is what came back: the name a CalDAV
+                // server filed it by (Google picks it), or the id Graph,
+                // Google or JMAP minted.
                 String name = PimdirStorage.nameOf(handle);
                 try {
                     EventRef created =
@@ -321,9 +284,8 @@ public final class CalendarEngine extends PimdirEngine {
                     return result(
                             handle, true, created.id(), landed(url, created.id(), created.etag()));
                 } catch (RuntimeException failure) {
-                    // The resource is already there, which `If-None-Match: *`
-                    // is exactly what asks: the create is refused rather than
-                    // overwriting whatever holds that name.
+                    // NOTE: `If-None-Match: *` refuses the create rather than
+                    // overwrite whatever holds that name.
                     if (isPreconditionFailure(failure)) {
                         return result(handle, false, null, null);
                     }
@@ -350,8 +312,8 @@ public final class CalendarEngine extends PimdirEngine {
                     if (isPreconditionFailure(failure)) {
                         return result(handle, false, null, null);
                     }
-                    // A 422 is a part of the edit the server refuses for
-                    // good, whatever else of it landed: rejected.
+                    // NOTE: a 422 refuses part of the edit for good, whatever
+                    // else of it landed.
                     if (isRefusal(failure)) {
                         return result(handle, false, null, null);
                     }
@@ -370,7 +332,7 @@ public final class CalendarEngine extends PimdirEngine {
                             transport, account, new EventTarget(url, handle, ifMatch, address));
                 } catch (RuntimeException failure) {
                     if (isGone(failure)) {
-                        // Already gone upstream: the removal converged.
+                        // NOTE: already gone upstream: the removal converged.
                     } else if (isPreconditionFailure(failure)) {
                         return result(handle, false, null, null);
                     } else if (isRefusal(failure)) {
@@ -388,15 +350,11 @@ public final class CalendarEngine extends PimdirEngine {
     }
 
     /**
-     * The revision a write landed at: the ETag the server answered, else the
-     * one it holds the entry at now, read back.
+     * The revision a write landed at: the ETag answered, else one read back.
      *
-     * <p>A server storing something other than what it was sent answers no
-     * ETag (RFC 4791 section 5.3.4), and Google's CalDAV answers none to any
-     * PUT. A base kept with no revision reads the next listing's as a change
-     * made elsewhere, which undoes a removal staged before it: the entry is
-     * pulled back rather than deleted. A read that fails leaves the revision
-     * unknown, as before, rather than failing a write that landed.
+     * <p>A server altering what it stores, and Google's CalDAV always, answer
+     * no ETag (RFC 4791 5.3.4): a base with no revision would undo a staged
+     * removal. A failed read leaves it unknown.
      */
     private String landed(String url, String id, String answered) {
         if (answered != null) {
@@ -412,8 +370,10 @@ public final class CalendarEngine extends PimdirEngine {
     }
 
     /**
-     * Whether the server, or the bridge for an object no write of the
-     * backend can carry, refused the change for good: a 422.
+     * Whether the change was refused for good: a 422.
+     *
+     * <p>By the server, or by the bridge for an object no write of the backend
+     * can carry.
      */
     private static boolean isRefusal(Exception failure) {
         return Integer.valueOf(422).equals(status(failure));

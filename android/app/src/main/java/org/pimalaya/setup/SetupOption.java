@@ -5,14 +5,10 @@ import org.pimalaya.client.AuthMethod;
 /** One offered way to connect one domain: a server and a way in. */
 final class SetupOption {
     /**
-     * The discovered service this connects, or null when nothing
-     * discovered it: a provider sign-in, or manual entry.
+     * The discovered service this connects, or null when nothing discovered it.
      *
-     * <p>Kept beside the label, which is the same thing in the
-     * reader's words. What reads it is the submission section, which
-     * a JMAP option has nothing to offer: RFC 8621 submits through
-     * the session it reads from, so an SMTP server under it would be
-     * a second account nobody asked for.
+     * <p>Read by the submission section: a JMAP option offers none, RFC 8621
+     * submitting through the session it reads from.
      */
     final String service;
 
@@ -23,15 +19,11 @@ final class SetupOption {
     final String baseUrl;
 
     /**
-     * The RFC 8707 resource an OAuth grant is asked for, or null when the
-     * service has no URI form.
+     * The RFC 8707 resource an OAuth grant asks for, or null.
      *
-     * <p>Deliberately not {@link #baseUrl}. A JMAP account's base is the
-     * internal {@code jmap://} marker the backend dispatches on, and an
-     * authorization server asked to issue a token for that URI has no idea
-     * what it names: Fastmail answers {@code invalid_target}. The resource
-     * is the HTTPS session URL the service was discovered at, which is what
-     * the server actually protects.
+     * <p>Not {@link #baseUrl}: a JMAP base is the internal {@code jmap://}
+     * marker, which Fastmail answers with {@code invalid_target}. The resource
+     * is the HTTPS session URL the service was discovered at.
      */
     final String resource;
 
@@ -56,18 +48,15 @@ final class SetupOption {
     }
 
     /**
-     * Whether reading mail through this option asks where to send: IMAP,
-     * Graph and Gmail do, manual entry being an IMAP server typed by
-     * hand.
+     * Whether reading mail through this option asks where to send.
+     *
+     * <p>IMAP, Graph and Gmail do; manual entry is an IMAP server.
      */
     boolean asksSubmission() {
         return "imap".equals(service) || readsOverApi() || isManual();
     }
 
-    /**
-     * Whether this option reads mail over a provider API, which sends
-     * through the same API and nothing else.
-     */
+    /** Whether this option reads mail over a provider API, which also sends. */
     boolean readsOverApi() {
         return "msgraph".equals(service) || "gmail".equals(service);
     }

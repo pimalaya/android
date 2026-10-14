@@ -9,8 +9,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The background fill, a step at a time: which mailbox widens next, and
- * that it stops when it may not run and resumes from the floors it reached.
+ * The background fill, a step at a time.
+ *
+ * <p>Which mailbox widens next, and that it stops when it may not run and
+ * resumes from the floors it reached.
  */
 public class MailFillTest {
     private static MailStore.Edge edge(String name, String role, boolean listed, String limit) {
@@ -18,9 +20,10 @@ public class MailFillTest {
     }
 
     /**
-     * A fill host over edges held in memory: each widening moves a mailbox's
-     * floor one day down, a mailbox reaching the first day of the month
-     * being whole.
+     * A fill host over edges in memory.
+     *
+     * <p>Each widening moves a mailbox's floor a day down; a mailbox reaching
+     * the first of the month is whole.
      */
     private static final class Host implements MailFill.Host {
         final List<MailStore.Edge> edges = new ArrayList<>();
@@ -93,7 +96,6 @@ public class MailFillTest {
 
         host.allowed = true;
         while (MailFill.step(host) == MailFill.Step.AGAIN) {
-            // the fill runs to its end
         }
         assertEquals(
                 "resumed where it stopped, the inbox and the sent mail whole first",

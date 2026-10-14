@@ -13,19 +13,17 @@ import org.pimalaya.client.Card;
 import org.pimalaya.ui.Host;
 
 /**
- * The vCard file import and export behind the contacts list: it reads a
- * chosen file off the main thread and stores each card it holds in the
- * picked addressbook, and writes the active contacts view out as a
- * single vCard file, both with the add button inert. It reaches the
- * base, accounts, the io executor and the contacts list through the
- * host, which keeps the SAF pickers and the {@code onActivityResult}
- * router and calls in through {@link #importFile} and
- * {@link #exportFile}.
+ * The vCard file import and export behind the contacts list.
+ *
+ * <p>Import stores a file's cards in the picked book, export writes the active
+ * view as one file, both off the main thread with the add button inert. The
+ * host's pickers call in through {@link #importFile} and {@link #exportFile}.
  */
 public final class VcfTransfer {
-    /** The request codes of the import and export document pickers. */
+    /** The import document picker's request code. */
     public static final int REQUEST_IMPORT = 2;
 
+    /** The export document picker's request code. */
     public static final int REQUEST_EXPORT = 3;
 
     private final Host host;
@@ -48,8 +46,7 @@ public final class VcfTransfer {
         host.startActivityForResult(intent, REQUEST_IMPORT);
     }
 
-    /** Prompts for a destination file, then exports the active view as a
-     *  single vCard file. */
+    /** Prompts for a destination, then exports the active view as one file. */
     void exportContacts() {
         if (list.visibleGroups().isEmpty()) {
             host.toast(host.getString(R.string.export_empty));
@@ -63,9 +60,10 @@ public final class VcfTransfer {
     }
 
     /**
-     * Picks the addressbook the file imports into: the hidden local book
-     * when no real account is configured, the sole book when there is one,
-     * otherwise a chooser (the local book is never offered explicitly).
+     * Picks the book a file imports into, then imports it.
+     *
+     * <p>The hidden local book without accounts, the sole book if one, else a
+     * chooser (never offering the local book).
      */
     public void importFile(Uri uri) {
         List<BookEntry> books = new ArrayList<>();
@@ -100,12 +98,11 @@ public final class VcfTransfer {
     }
 
     /**
-     * Reads a vCard file off the main thread and stores each card it holds
-     * in the chosen addressbook (a card in the local book stays unattached
-     * and shows muted until placed).
+     * Reads a vCard file off the main thread into the chosen book.
+     *
+     * <p>A card in the local book stays unattached and shows muted.
      */
     private void importInto(Uri uri, BookEntry target) {
-        // The add button goes inert while the file reads.
         host.setListBusy(true);
         host.background(
                 host.io,
@@ -148,9 +145,9 @@ public final class VcfTransfer {
     }
 
     /**
-     * Writes the active contacts view (the currently listed, search-filtered
-     * contacts) to the chosen file as one vCard file, each contact's raw
-     * document appended verbatim, off the main thread with the add button inert.
+     * Writes the listed, search-filtered contacts to the file as one vCard.
+     *
+     * <p>Documents appended verbatim, off the main thread, add button inert.
      */
     public void exportFile(Uri uri) {
         List<Group> snapshot = new ArrayList<>(list.visibleGroups());
@@ -171,8 +168,7 @@ public final class VcfTransfer {
                 });
     }
 
-    /** One vCard per contact (its primary replica's document), appended
-     *  verbatim so the file round-trips through the importer. */
+    /** One vCard per contact (primary replica), verbatim: it re-imports. */
     private String buildVcf(List<Group> groups) {
         List<String> vcards = new ArrayList<>(groups.size());
         for (Group group : groups) {

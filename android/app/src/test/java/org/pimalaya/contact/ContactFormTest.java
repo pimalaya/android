@@ -38,13 +38,11 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.shadows.ShadowDialog;
 
 /**
- * Pins the edit form end to end on the real bridge, driven through its rows
- * and dialogs as a user would: which rows render in which order with which
- * labels and diverged glyphs, what each dialog prefills (type positions,
- * chips, gender, dates), and the vCard the collected model applies to, for
- * plain edits of every field kind, present-empty values, partial and full
- * dates, a merge form and a conflict form (contact-form.txt, captured from
- * the JSON working model the records replaced).
+ * Pins the edit form end to end on the real bridge, driven as a user would.
+ *
+ * <p>Rows, order, labels, glyphs, dialog prefills and the applied vCard, over
+ * every field kind, a merge and a conflict form (contact-form.txt, captured
+ * from the JSON working model the records replaced).
  */
 @RunWith(RobolectricTestRunner.class)
 public class ContactFormTest {
@@ -159,7 +157,9 @@ public class ContactFormTest {
         collect(vcard);
     }
 
-    /** Every kind of edit on the richest card: changes, removals, present-empty values. */
+    /**
+     * Every kind of edit on the richest card, present-empty values included.
+     */
     private void editRich() throws Exception {
         String vcard = CardCorpus.VCARDS.get(1);
         out.add("== rich");

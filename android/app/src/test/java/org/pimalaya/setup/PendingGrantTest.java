@@ -26,8 +26,9 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * The in-flight OAuth grant on disk: sealed under the account key, never
- * in clear, and gone once the grant ends however it ends.
+ * The in-flight OAuth grant on disk: sealed, and gone once the grant ends.
+ *
+ * <p>Sealed under the account key, never in clear, however the grant ends.
  */
 @RunWith(RobolectricTestRunner.class)
 public class PendingGrantTest {
@@ -253,8 +254,7 @@ public class PendingGrantTest {
     }
 
     /**
-     * The persisted grant as text, its random state and verifier and its
-     * clock reading replaced by placeholders.
+     * The persisted grant as text, state, verifier and clock as placeholders.
      */
     private String persisted() throws Exception {
         String plaintext =

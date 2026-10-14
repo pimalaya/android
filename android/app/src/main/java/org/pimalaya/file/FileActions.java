@@ -23,22 +23,21 @@ import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.ui.Host;
 
 /**
- * What can be done with one file, wherever it is shown: open it, share it,
- * save it to a folder, export it. The reader's attachments and the Files tab
- * both come here, each saying where the file is read from.
+ * What can be done with one file: open, share, save to a folder, export.
  *
- * <p>A file travels as a file, never as an array: a blob, or the part a
- * message holds written out by the bridge, copied a buffer at a time, so an
- * attachment of any size opens. Every read and write runs on the io
- * executor, the outcome said in a toast.
+ * <p>The reader and the Files tab both come here. A file travels as a file,
+ * never an array (a blob, or a message's part written out), a buffer at a time,
+ * so any size opens. All on io, the outcome in a toast.
  */
 public final class FileActions {
-    /** Where one file's bytes are: its body's blob, or its message's part written out. */
+    /**
+     * Where a file's bytes are: its blob, or its message's part written out.
+     */
     public interface Source {
         File read() throws Exception;
     }
 
-    /** The keys an export waiting on the document picker survives a recreation under. */
+    /** Keys an export awaiting the picker survives a recreation under. */
     private static final String EXPORT_PATH = "files.export.path";
 
     private static final String EXPORT_NAME = "files.export.name";
@@ -50,7 +49,7 @@ public final class FileActions {
 
     private final FileStore files;
 
-    /** Runs once a save put a file into a folder: the Files list reads again. */
+    /** Run once a save filed into a folder: the Files list reads again. */
     private final Runnable changed;
 
     /** The file an export waits on the document picker for, null for none. */
@@ -58,6 +57,7 @@ public final class FileActions {
 
     private String exportName;
 
+    /** The file actions; {@code changed} runs once a save filed a file. */
     public FileActions(Host host, FileStore files, Runnable changed) {
         this.host = host;
         this.files = files;
@@ -70,6 +70,7 @@ public final class FileActions {
         state.putString(EXPORT_NAME, exportName);
     }
 
+    /** Restores an export waiting on the document picker. */
     public void restore(Bundle state) {
         exportPath = state.getString(EXPORT_PATH);
         exportName = state.getString(EXPORT_NAME);
@@ -83,8 +84,10 @@ public final class FileActions {
     }
 
     /**
-     * The media type a file is handed over as: the one stated, else the one
-     * its name's extension says when none, or only the generic one, is.
+     * The media type a file is handed over as.
+     *
+     * <p>The one stated, else the one its extension says when none, or only the
+     * generic one, is.
      */
     static String typeOf(FileStore.StoredFile file) {
         if (file.mediaType != null && !PimdirSummary.FILE.equals(file.mediaType)) {
@@ -95,8 +98,9 @@ public final class FileActions {
     }
 
     /**
-     * Opens a file in the app the phone picks for its type, through a copy
-     * in the cache ({@link OpenedCopies}).
+     * Opens a file in the app the phone picks for its type.
+     *
+     * <p>Through a copy in the cache ({@link OpenedCopies}).
      */
     public void open(FileStore.StoredFile file, Source source) {
         handOver(
@@ -122,7 +126,7 @@ public final class FileActions {
                                 label(file)));
     }
 
-    /** Copies a file into the cache, then starts what {@code intent} makes of its URI. */
+    /** Copies a file into the cache, then starts {@code intent} on its URI. */
     private void handOver(
             FileStore.StoredFile file, Source source, Function<Uri, Intent> intent) {
         host.io.execute(
@@ -146,8 +150,9 @@ public final class FileActions {
     }
 
     /**
-     * Reads the file first, then asks for a destination document, and writes
-     * it there once picked ({@link #exported}).
+     * Reads the file, then asks for a destination document.
+     *
+     * <p>Written there once picked ({@link #exported}).
      */
     void export(FileStore.StoredFile file, Source source) {
         host.io.execute(
@@ -174,8 +179,9 @@ public final class FileActions {
     }
 
     /**
-     * Writes the file an export waited on into the document picked; a
-     * document left half written, or with nothing to write, is deleted.
+     * Writes the file an export waited on into the document picked.
+     *
+     * <p>A document left half written, or with nothing to write, is deleted.
      */
     public void exported(Uri target) {
         String path = exportPath;
@@ -248,8 +254,9 @@ public final class FileActions {
     }
 
     /**
-     * Saves a file into a folder, creating it first when no id is given, and
-     * says where it went, or that it was there already.
+     * Saves a file into a folder, created first when no id is given.
+     *
+     * <p>Says where it went, or that it was there already.
      */
     private void save(FileStore.StoredFile file, Source source, String folder, String name) {
         host.io.execute(
@@ -278,7 +285,11 @@ public final class FileActions {
                 });
     }
 
-    /** Asks for a folder's name, {@code initial} filled in, handing a non-blank one on. */
+    /**
+     * Asks for a folder's name, {@code initial} filled in.
+     *
+     * <p>Hands a non-blank one to {@code done}.
+     */
     void askName(int title, int positive, String initial, Consumer<String> done) {
         EditText name = new EditText(host);
         name.setHint(R.string.attachment_folder_name);

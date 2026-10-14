@@ -14,10 +14,11 @@ import java.util.Set;
 import java.util.TreeMap;
 
 /**
- * Which scenario ran on which target, and how it went: rewritten whole after
- * every test as `matrix.md` under the report directory (`e2e.report`), so a
- * run cut short still leaves what it reached. Details are failure messages,
- * which name what was asserted, never a credential.
+ * Which scenario ran on which target, and how it went.
+ *
+ * <p>Rewritten whole after every test as `matrix.md` under `e2e.report`, so a
+ * run cut short leaves what it reached. Details are failure messages, never a
+ * credential.
  */
 final class E2eReport {
     private static final List<Result> RESULTS = new ArrayList<>();

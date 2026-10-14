@@ -14,7 +14,7 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
-/** The copies of files the app opens, in the cache, that its provider reads back. */
+/** Cached copies of the files the app opens, which its provider reads back. */
 public final class OpenedCopies {
     private OpenedCopies() {}
 
@@ -25,9 +25,10 @@ public final class OpenedCopies {
     private static final int LONGEST = 200;
 
     /**
-     * Copies one file into the cache, a buffer at a time, under a directory
-     * named after its public id so two files of one name do not meet, and
-     * answers the URI that reads it.
+     * Copies one file into the cache and answers the URI that reads it.
+     *
+     * <p>A buffer at a time, under a directory named after its public id so two
+     * files of one name do not meet.
      */
     static Uri put(Context context, long seq, String name, File source) throws IOException {
         File directory = new File(new File(context.getCacheDir(), DIRECTORY), Long.toString(seq));
@@ -48,11 +49,11 @@ public final class OpenedCopies {
     }
 
     /**
-     * A name a file may go by: no separator, no control or format character
-     * (a right-to-left override, U+202E, before {@code fdp.apk} shows it as
-     * {@code kpa.pdf}), no leading dot, and at most {@link #LONGEST}
-     * bytes in UTF-8, which is what the file system counts, cut between
-     * characters and keeping the extension.
+     * A name a file may go by, at most {@link #LONGEST} bytes in UTF-8.
+     *
+     * <p>No separator, no control or format character (U+202E before {@code
+     * fdp.apk} shows {@code kpa.pdf}), no leading dot. Bytes are what the file
+     * system counts, cut between characters, keeping the extension.
      */
     static String safe(String name) {
         StringBuilder kept = new StringBuilder(name.length());
@@ -86,7 +87,7 @@ public final class OpenedCopies {
         return text.getBytes(StandardCharsets.UTF_8).length;
     }
 
-    /** The longest start of a text taking at most {@code limit} bytes in UTF-8. */
+    /** The longest prefix of {@code text} within {@code limit} UTF-8 bytes. */
     private static String cut(String text, int limit) {
         StringBuilder cut = new StringBuilder();
         int used = 0;
@@ -103,7 +104,7 @@ public final class OpenedCopies {
         return cut.toString();
     }
 
-    /** The extension of a name, after its last dot, lowercased; empty for none. */
+    /** A name's extension after its last dot, lowercased; empty for none. */
     static String extensionOf(String name) {
         int dot = name.lastIndexOf('.');
         return dot < 0 || dot == name.length() - 1
@@ -152,8 +153,9 @@ public final class OpenedCopies {
     }
 
     /**
-     * The cached copy a URI names, refused when it is not one: a path that
-     * climbs out of the directory reads nothing.
+     * The cached copy a URI names, refused when it is not one.
+     *
+     * <p>A path that climbs out of the directory reads nothing.
      */
     public static File fileOf(Context context, Uri uri) throws FileNotFoundException {
         File root = new File(context.getCacheDir(), DIRECTORY);

@@ -49,30 +49,21 @@ import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirEngine;
 
 /**
- * The CalendarContract half of the calendar mirror: the phone spoke's remote
- * adapter, serving the engine's enumerate, fetch and push yields against one
- * mirrored calendar's rows (docs/calendar-mapping.md, change detection and
- * writes). One object is one master row (its handle in {@code _SYNC_ID}) and
- * a row per override, with their reminders, attendees and URL property.
+ * The CalendarContract half of the mirror: the phone spoke's remote adapter.
  *
- * <p>Every write carries {@code CALLER_IS_SYNCADAPTER} and the account, so
- * nothing loops back as an edit; {@code DIRTY}, which only calendar apps
- * set, is the change signal, and the revision is the token stamped at
- * convergence ({@code SYNC_DATA1}) while an object's rows are clean. Pushes
- * are guarded on the rows not being dirty, the stamp in the same batch, so
- * an edit racing the pass stays for the next. The mapping itself is
- * {@link CalendarMapping}, pure and JVM-tested; this class owns what needs a
- * device.
+ * <p>An object is a master row (handle in {@code _SYNC_ID}) plus override rows
+ * (docs/calendar-mapping.md). Writes go as sync adapter; {@code DIRTY} signals
+ * a change, {@code SYNC_DATA1} holds the revision. Pushes need clean rows.
  */
 final class CalendarRemote implements PhoneSpoke {
-    /** What an object's revision starts with while a calendar app's edit waits in its rows. */
+    /** An object's revision prefix while an app's edit waits in its rows. */
     private static final String DIRTY = "dirty:";
 
     /** Selects a row no calendar app changed since it was last written. */
     private static final String CLEAN =
             "(" + Events.DIRTY + " IS NULL OR " + Events.DIRTY + " = 0)";
 
-    /** How many writes a part of an object too large for one transaction carries. */
+    /** Writes per part of an object too large for one transaction. */
     private static final int PART = 100;
 
     /** The content columns of an event row, what the mapping reads. */
@@ -152,10 +143,7 @@ final class CalendarRemote implements PhoneSpoke {
         }
     }
 
-    /**
-     * The calendar a phone collection stands for, null when the phone does
-     * not show it (no {@code Calendars} row, {@link CalendarRows#reconcile}).
-     */
+    /** A phone collection's calendar; null when the phone does not show it. */
     Target target(String collection) {
         try (Cursor cursor =
                 context.getContentResolver()
@@ -186,18 +174,18 @@ final class CalendarRemote implements PhoneSpoke {
         }
     }
 
-    /** Whether the spoke can serve the collection: the permission granted, the calendar shown. */
+    /** Whether it can serve: the permission granted, the calendar shown. */
     @Override
     public boolean available(String collection) {
         return PhoneMirror.CALENDAR.granted(context) && target(collection) != null;
     }
 
     /**
-     * Whether the calendar's rows carry anything for the store, or owe a
-     * projection: a calendar app's edit, deletion or creation, an exception
-     * row gone below the count stamped on its master, or a row projected
-     * for another device zone or another window. One provider query, the
-     * phone's share of the quiet path.
+     * Whether the rows hold changes for the store or owe a projection.
+     *
+     * <p>An app's edit, deletion or creation, an exception row gone below its
+     * master's stamped count, or a row projected for another zone or window.
+     * One provider query: the phone's share of the quiet path.
      */
     @Override
     public boolean changed(String collection) {
@@ -223,8 +211,10 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * The objects the calendar holds as the store counts them: those with
-     * rows, and those bound to it that show nothing (tasks, refused writes).
+     * The calendar's objects as the store counts them.
+     *
+     * <p>Those with rows, and those bound to it that show nothing (tasks,
+     * refused writes).
      */
     @Override
     public int count(String collection) {
@@ -239,15 +229,11 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * Services an enumerate yield: the calendar's objects, each as its handle
-     * and its revision. A delta round, never complete: only rows a calendar
-     * app deleted vanish, so a calendar the provider emptied never reads as a
-     * mass deletion. Before listing, created masters and the clones the
-     * provider's own split leaves are stamped a fresh handle, an override
-     * linked by row alone gets its master's, rows of objects the store no
-     * longer holds are purged, and clean rows projected for another zone or
-     * window are projected again. A read-only calendar takes no phone change:
-     * each is put back as the store has it.
+     * Services an enumerate: each object's handle and revision, as a delta.
+     *
+     * <p>Never complete: only rows an app deleted vanish, never a mass
+     * deletion. First, new rows get handles, rows the store dropped go, stale
+     * projections are redone, a read-only calendar is put back.
      */
     @Override
     public JSONObject enumerate(String collection) throws JSONException {
@@ -396,8 +382,9 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * Counts the objects bound to the calendar that show nothing on it, for
-     * the quiet path's member count.
+     * Counts the objects bound to the calendar that show nothing on it.
+     *
+     * <p>For the quiet path's member count.
      */
     private void hide(Target target, String collection, Set<String> shown) throws JSONException {
         JSONArray placements = offline.loadCollection(collection, null).optJSONArray("placements");
@@ -425,13 +412,11 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * Services a fetch yield: each handle's rows read back as the object.
-     * The phone carries only what the mapping does, so the body is never
-     * rebuilt from rows: the rows are merged over what the object the phone
-     * last converged on projects (field space, {@link CalendarMapping#merge})
-     * and that is patched onto it, so whatever the phone cannot hold
-     * survives. An untouched object rides back byte for byte, and every read
-     * stamps the rows converged, so a fetch is content-quiet on both sides.
+     * Services a fetch: each handle's rows read back as the object.
+     *
+     * <p>Rows merge over the last converged object
+     * ({@link CalendarMapping#merge}), patched onto it: what the phone cannot
+     * hold survives. Reads stamp rows converged, content-quiet both sides.
      */
     @Override
     public JSONObject fetch(String collection, JSONArray handles) throws JSONException {
@@ -492,9 +477,10 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * The edit patching a merged view onto its object: now as the stamp, the
-     * user's address, and the definition of every zone the view names that
-     * the platform knows, for a time the phone moved into one.
+     * The edit patching a merged view onto its object.
+     *
+     * <p>Now as the stamp, the user's address, and the definition of every
+     * known zone the view names, for a time the phone moved into one.
      */
     private JSONObject edit(JSONObject merged, Target target) throws JSONException {
         Set<String> zones = new TreeSet<>();
@@ -541,13 +527,11 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * Services a push yield: a create projects the object onto new rows, an
-     * update rewrites them in place, a remove deletes them; updates and
-     * removes are conditioned on the revision the engine last agreed on and
-     * report rejected on a mismatch, so a calendar-app edit racing the pass
-     * is reconciled by the next one. A write the provider refuses for one
-     * object leaves that object off the phone, logged, until it changes.
-     * {@code pushed} is told how many changes are through after each one.
+     * Services a push: rows created, rewritten in place, or deleted.
+     *
+     * <p>Updates and removes need the last agreed revision, else rejected: a
+     * racing app edit goes to the next pass. A refused object stays off the
+     * phone, logged, until it changes. {@code pushed} counts changes through.
      */
     @Override
     public JSONObject push(String collection, JSONArray changes, IntConsumer pushed)
@@ -584,10 +568,10 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * Pushes a create or a content change: the object's rows written in
-     * place, a create landing under the name behind its provisional handle
-     * (SYNC §2), and a create a crash left on the phone rewritten rather
-     * than duplicated.
+     * Pushes a create or content change, the object's rows written in place.
+     *
+     * <p>A create lands under the name behind its provisional handle (SYNC §2);
+     * one a crash left on the phone is rewritten, not duplicated.
      */
     private JSONObject pushWrite(Target target, String collection, JSONObject change,
             String ifMatch) throws JSONException {
@@ -644,12 +628,11 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * Writes an object's rows from its body, in place: the event rows
-     * matched and updated, sub-rows diffed one by one ({@link
-     * CalendarMapping#plan}), the convergence stamp in the same batch. Each
-     * update is guarded on its row not being dirty, or, when {@code
-     * observed} is given (putting back what a calendar app changed), on the
-     * rows still being as observed. Answers whether the batch landed.
+     * Writes an object's rows in place; answers whether the batch landed.
+     *
+     * <p>Event rows matched, sub-rows diffed ({@link CalendarMapping#plan}),
+     * the stamp in the batch. Each update needs its row clean, or as
+     * {@code observed} when given (putting an app's change back).
      */
     private boolean write(Target target, String handle, String body, List<Row> observed)
             throws JSONException {
@@ -688,10 +671,11 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * Writes an object too large for one binder transaction: its new event
-     * rows first, then, the object being all updates, the rest in parts,
-     * each behind the guards and an assertion its rows are still clean. The
-     * one case where the rows land in more than one transaction.
+     * Writes an object too large for one binder transaction.
+     *
+     * <p>New event rows first, then, all updates, the rest in parts, each
+     * behind the guards and an assertion its rows are clean. The one case where
+     * rows span transactions.
      */
     private boolean split(Target target, String handle, List<Write> plan,
             List<ContentProviderOperation> guards, String body, List<Row> observed)
@@ -738,10 +722,11 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * Stamps an object's rows converged, guarded on what was read: each row
-     * still as observed, sub-rows included, and no exception row added or
-     * gone; deleted exception rows purged in the same batch. Answers whether
-     * it landed.
+     * Stamps an object's rows converged; answers whether it landed.
+     *
+     * <p>Guarded on what was read: each row and sub-row as observed, no
+     * exception row added or gone. Deleted exception rows are purged in the
+     * same batch.
      */
     private boolean stamp(Target target, String handle, List<Row> observed, String token,
             String projected) {
@@ -780,9 +765,10 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * The assertions that an object's rows are as observed: each event row's
-     * columns, its reminders, attendees and URL property, and the count of
-     * rows the object has.
+     * Assertions that an object's rows are as observed.
+     *
+     * <p>Each event row's columns, its reminders, attendees and URL property,
+     * and the object's row count.
      */
     private List<ContentProviderOperation> asserts(Target target, String handle,
             List<Row> observed) {
@@ -829,9 +815,10 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * A plan applied as one batch behind its guards, which the provider runs
-     * as one transaction: the guards first, so they read the rows before any
-     * write of the batch, every back reference counted past them.
+     * Applies a plan as one batch behind its guards: one transaction.
+     *
+     * <p>Guards first, so they read the rows before any write; every back
+     * reference counted past them.
      */
     private void apply(List<ContentProviderOperation> guards, List<Write> plan, Target target,
             boolean guarded) throws RemoteException, OperationApplicationException {
@@ -948,8 +935,9 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * The body the phone last converged on, the patch base of every read;
-     * empty for an object created on the phone.
+     * The body the phone last converged on, every read's patch base.
+     *
+     * <p>Empty for an object created on the phone.
      */
     private String phoneBase(String collection, String handle) throws JSONException {
         JSONObject row = offline.loadRow(collection, handle);
@@ -966,9 +954,10 @@ final class CalendarRemote implements PhoneSpoke {
     }
 
     /**
-     * What a projection depends on besides the object: the device's zone
-     * for an object with a floating time, the window's month for a series
-     * listed instance by instance. Null when neither.
+     * What a projection depends on besides the object; null when nothing.
+     *
+     * <p>The device's zone for a floating time, the window's month for a series
+     * listed instance by instance.
      */
     private String projected(String body) {
         if (body.isEmpty()) {
@@ -1002,7 +991,7 @@ final class CalendarRemote implements PhoneSpoke {
         return false;
     }
 
-    /** The month the window of a listed series is placed by, which is when it moves. */
+    /** The month placing a listed series' window, which moves with it. */
     private static String month() {
         return Zones.utc(System.currentTimeMillis()).substring(0, 6);
     }
@@ -1188,7 +1177,7 @@ final class CalendarRemote implements PhoneSpoke {
         return rows;
     }
 
-    /** The rows of one object: its master or standalone rows, and its exception rows. */
+    /** One object's rows: master or standalone, and exceptions. */
     private static String itemSelection() {
         return Events.CALENDAR_ID + " = ? AND (" + Events._SYNC_ID + " = ? OR "
                 + Events.ORIGINAL_SYNC_ID + " = ? OR substr(" + Events._SYNC_ID + ", 1, ?) = ?)";

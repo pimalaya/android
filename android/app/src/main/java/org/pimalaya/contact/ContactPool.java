@@ -14,22 +14,24 @@ import org.pimalaya.client.PoolReplica;
 import org.pimalaya.client.ReplicaPool;
 
 /**
- * The merged contacts pool behind the list (docs/merged-view.md): the
- * replicas of every subscribed book with their write-time index, and
- * the bridge grouping that merges them into logical contacts (UID
- * natural keys, detached refs and link clusters resolved by
- * groupContacts). Loading and grouping are blocking (a full table scan
- * plus one JNI round), so the callers run them off the main thread.
+ * The merged contacts pool behind the list (docs/merged-view.md).
+ *
+ * <p>Every subscribed book's replicas with their index, grouped by the bridge
+ * into logical contacts. Loading and grouping block (a table scan plus a JNI
+ * round): callers run them off the main thread.
  */
 public final class ContactPool {
     private final CardStore base;
     private final PimdirContacts contacts;
 
-    /** The host's in-memory account cache, read on the main thread
-     *  only ({@link #replicaRef}); the io-side grouping receives a
-     *  snapshot instead. */
+    /**
+     * The activity's live account list, read on the main thread only.
+     *
+     * <p>The io-side grouping receives a snapshot instead.
+     */
     private final List<AccountEntry> accounts;
 
+    /** A pool over the books' switches, the contacts and the live accounts. */
     public ContactPool(CardStore base, PimdirContacts contacts, List<AccountEntry> accounts) {
         this.base = base;
         this.contacts = contacts;
@@ -48,10 +50,9 @@ public final class ContactPool {
     }
 
     /**
-     * Groups the replicas into merged rows through the bridge, the
-     * link layer (manual links, detached refs) riding along. The
-     * accounts snapshot resolves each replica's storage key without
-     * touching the live cache off the main thread.
+     * Groups the replicas into merged rows through the bridge, links included.
+     *
+     * <p>The accounts snapshot resolves storage keys off the live cache.
      */
     List<Group> group(List<Entry> entries, List<AccountEntry> accounts) {
         List<PoolReplica> replicas = new ArrayList<>();
@@ -90,9 +91,9 @@ public final class ContactPool {
     }
 
     /**
-     * The replica's storage key (docs/merged-view.md): the bare server
-     * id on account-level backends, the collection-scoped key on
-     * per-collection ones.
+     * The replica's storage key (docs/merged-view.md).
+     *
+     * <p>The bare server id on account-level backends, else collection-scoped.
      */
     private static String cardKey(Account account, String bookUrl, String id) {
         return AccountClient.isAccountLevel(account) ? id : CardStore.key(bookUrl, id);

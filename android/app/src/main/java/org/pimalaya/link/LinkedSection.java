@@ -25,15 +25,11 @@ import org.pimalaya.ui.Linked;
 import org.pimalaya.ui.Sections;
 
 /**
- * An item's links made visible (plan C.5): a Linked card listing what the
- * item references and what references it, each saying why in words and
- * opening the other item; "Link to" searching the four kinds for an item to
- * link; and unlinking.
+ * An item's links made visible (plan C.5), as a Linked card.
  *
- * <p>Inline on the pages built of cards (a contact, an entry), in a dialog
- * from the reader and the file sheet, whose layouts have no card column.
- * Every read and write runs on the io executor: a page draws its card from
- * the links last read for it, and redraws once a read lands.
+ * <p>Each link says why and opens the other item; "Link to" searches the four
+ * kinds. Inline on card pages, a dialog from the reader and file sheet. Reads
+ * and writes run on io: a page draws the links last read, then redraws.
  */
 public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
     private final Host host;
@@ -47,6 +43,7 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
     /** The dialog a tap in it closes before opening the other item. */
     private AlertDialog opening;
 
+    /** The Linked card; {@code shell} opens the other item. */
     public LinkedSection(Host host, ItemLinks links, MailStore mail, LinkShell shell) {
         this.host = host;
         this.links = links;
@@ -55,10 +52,11 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
     }
 
     /**
-     * Adds the Linked card to a page; {@code refresh} redraws the page once
-     * the links are read, or a link is added or removed. Nothing for an item
-     * that cannot be linked (a contact not saved yet, a message still in an
-     * outbox). Drawn empty while the read runs.
+     * Adds the Linked card to a page, drawn empty while the read runs.
+     *
+     * <p>{@code refresh} redraws the page once links are read, added or
+     * removed. Nothing for an item that cannot be linked (an unsaved contact, a
+     * message still in an outbox).
      */
     @Override
     public void section(Sections sections, ItemLinks.Endpoint self, Runnable refresh) {
@@ -78,7 +76,7 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
                 R.string.linked_title, R.drawable.ic_link, rows, linkTo(self, refresh), true);
     }
 
-    /** Reads an item's links off the main thread, then redraws its page with them. */
+    /** Reads an item's links off the main thread, then redraws its page. */
     private void load(ItemLinks.Endpoint self, Runnable refresh) {
         run(
                 () -> {
@@ -112,7 +110,11 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
         dialog(self, title, () -> {});
     }
 
-    /** {@link #dialog(ItemLinks.Endpoint, String)}, running {@code closed} once it goes. */
+    /**
+     * The links dialog, running {@code closed} once it goes.
+     *
+     * <p>As {@link #dialog(ItemLinks.Endpoint, String)}.
+     */
     @Override
     public void dialog(ItemLinks.Endpoint self, String title, Runnable closed) {
         if (self == null) {
@@ -144,8 +146,9 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
     }
 
     /**
-     * One link: the other item, why it is linked, and the unlink action,
-     * which an attachment does not offer: the file is the message's own, and
+     * One link: the other item, why it is linked, and an unlink action.
+     *
+     * <p>An attachment offers no unlink: the file is the message's own, and
      * unlinked it would be lost.
      */
     private View row(
@@ -176,7 +179,7 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
                 link.other == null ? null : () -> open(link.other));
     }
 
-    /** Why a link exists, in words: the rule's role, or the person who made it. */
+    /** Why a link exists, in words: the rule's role, or who made it. */
     String reason(ItemLinks.Link link) {
         if (!link.automatic()) {
             return host.getString(R.string.linked_by_you);
@@ -241,8 +244,9 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
     }
 
     /**
-     * The picker: a search field over mixed results from the four kinds; a
-     * tap links the item to the result, as the person's.
+     * The picker: a search field over mixed results from the four kinds.
+     *
+     * <p>A tap links the item to the result, as the person's.
      */
     private void pick(ItemLinks.Endpoint self, Runnable refresh) {
         EditText field = new EditText(host);

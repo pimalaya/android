@@ -19,10 +19,10 @@ import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
 /**
- * A target's IMAP server prepared over a session of its own (RFC 9051, the
- * few commands the suite needs): mailboxes created and deleted, messages
- * appended, tagged ones expunged by UID alone (RFC 4315), never by a
- * mailbox-wide EXPUNGE that would take another client's `\Deleted` mail.
+ * A target's IMAP server prepared over a session of its own (RFC 9051).
+ *
+ * <p>Mailboxes made and deleted, messages appended, tagged ones expunged by UID
+ * (RFC 4315), never by a mailbox-wide EXPUNGE taking others' `\Deleted` mail.
  */
 final class E2eImapFixture implements E2eFixture {
     private static final Pattern LITERAL = Pattern.compile("\\{(\\d+)\\+?}$");
@@ -37,8 +37,7 @@ final class E2eImapFixture implements E2eFixture {
     private boolean uidplus;
 
     /**
-     * Signs in as {@code user}: with LOGIN when {@code password} is given,
-     * with SASL XOAUTH2 when {@code token} is.
+     * Signs in as {@code user}: LOGIN with a password, XOAUTH2 with a token.
      */
     E2eImapFixture(String host, String user, String password, String token) throws IOException {
         socket = (SSLSocket) SSLSocketFactory.getDefault().createSocket(host, 993);
@@ -161,7 +160,7 @@ final class E2eImapFixture implements E2eFixture {
         }
     }
 
-    /** Every message matching {@code criteria}, in every mailbox, expunged by UID. */
+    /** Every message matching {@code criteria}, everywhere, expunged by UID. */
     private void expunge(String criteria) throws IOException {
         if (!uidplus) {
             return;
@@ -216,9 +215,10 @@ final class E2eImapFixture implements E2eFixture {
     }
 
     /**
-     * Runs one command, answering its untagged lines; a refusal fails unless
-     * {@code quiet}, which answers nothing instead. A {@code secret} command
-     * is never named in a failure.
+     * Runs one command, answering its untagged lines.
+     *
+     * <p>A refusal fails unless {@code quiet}, which answers nothing. A
+     * {@code secret} command is never named in a failure.
      */
     private List<String> run(String command, boolean secret, boolean quiet) throws IOException {
         String tag = "f" + (++next);

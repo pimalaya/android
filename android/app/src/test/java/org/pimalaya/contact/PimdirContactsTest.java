@@ -23,13 +23,10 @@ import org.robolectric.RuntimeEnvironment;
 import java.util.List;
 
 /**
- * The contacts store on the pimdir tables.
+ * Pins the contacts store's translation onto the pimdir tables, not its SQL.
  *
- * <p>These pin the translation rather than the SQL: what a staged create looks
- * like when nothing has pushed it yet, what makes an edit a pending push, what
- * membership is when the schema has no membership table, and what survives an
- * account being removed. Each of those was a column in the old schema and is a
- * relationship now, which is exactly where a migration goes wrong quietly.
+ * <p>Staged creates, pending pushes, membership, account removal: old schema
+ * columns that are relationships now, where a migration goes wrong quietly.
  */
 @RunWith(RobolectricTestRunner.class)
 public class PimdirContactsTest {
@@ -103,9 +100,8 @@ public class PimdirContactsTest {
     public void aSavedCardIsAPendingCreateUntilSomethingBindsIt() {
         contacts.save(BOOK, new Card("u1", null, null, vcard("u1", "Jane Doe")));
 
-        // A binding no base agreed on, under the provisional handle, is what
-        // says "the server has never seen this": the engine reads such a
-        // placement as a create to push.
+        // NOTE: a binding no base agreed on, under the provisional handle, is
+        // what the engine reads as a create to push.
         assertEquals(1, scalar("SELECT count(*) FROM items WHERE collection = ?", BOOK));
         assertEquals(0, scalar("SELECT count(*) FROM bindings WHERE base_present = 1"));
         assertEquals(
@@ -129,15 +125,15 @@ public class PimdirContactsTest {
 
         contacts.save(BOOK, new Card("u2", null, null, vcard("u2", "Bobby")));
 
-        // Dirty is not a flag here: the item having moved past the body its
-        // binding agreed on IS the pending push, so the two cannot disagree.
+        // NOTE: dirty is no flag: the item moved past its binding's base IS the
+        // pending push.
         assertNotEquals(base, objectOf(BOOK, "u2"));
         assertEquals("what the server last confirmed did not change", base,
                 stringOf("SELECT base_object FROM bindings WHERE link_id = 'u2'"));
         assertEquals("etag-1",
                 stringOf("SELECT base_revision FROM bindings WHERE link_id = 'u2'"));
 
-        // And the old body is still pinned, because the base names it.
+        // NOTE: the old body stays pinned because the base names it.
         assertEquals(1, scalar("SELECT count(*) FROM objects WHERE hash = ?", base));
     }
 
@@ -150,9 +146,8 @@ public class PimdirContactsTest {
         contacts.stageDelete(BOOK, "u3");
         contacts.stageDelete(BOOK, "u4");
 
-        // The synced one has to survive as a tombstone, or the next sync has
-        // nothing to tell the server about. The never-pushed one is withdrawn
-        // at once (SYNC §7): nobody to tell, so no binding, the item retained.
+        // NOTE: the synced one survives as a tombstone for the next sync; the
+        // never-pushed one is withdrawn at once (SYNC §7).
         assertEquals(1, scalar("SELECT deleted FROM items WHERE link_id = 'u3'"));
         assertEquals(1, scalar("SELECT count(*) FROM bindings WHERE link_id = 'u3'"));
         assertEquals(0, scalar("SELECT count(*) FROM bindings WHERE link_id = 'u4'"));
@@ -165,7 +160,6 @@ public class PimdirContactsTest {
     public void deletingAnOnDeviceCardLeavesNoBindingBehind() {
         collection(LocalBook.URL);
         contacts.save(LocalBook.URL, new Card("u14", null, null, vcard("u14", "Mia")));
-        // A card a removed account left behind, which no source ever bound.
         contacts.save(BOOK, new Card("u15", null, null, vcard("u15", "Noe")));
         bind(BOOK, "u15", "c15.vcf", "etag-15");
         contacts.detachToLocal(List.of(BOOK), LocalBook.URL);
@@ -173,8 +167,8 @@ public class PimdirContactsTest {
         contacts.stageDelete(LocalBook.URL, "u14");
         contacts.stageDelete(LocalBook.URL, "u15");
 
-        // No sync ever visits the on-device book, so nothing would ever clear
-        // a provisional binding left here: a hidden tombstone for good.
+        // NOTE: no sync visits the on-device book, so a provisional binding
+        // left here would be a hidden tombstone for good.
         assertEquals(0, scalar("SELECT count(*) FROM bindings"));
         assertEquals(2, scalar("SELECT count(*) FROM items WHERE collection = ?"
                 + " AND deleted = 1 AND retained_at IS NOT NULL", LocalBook.URL));
@@ -229,9 +223,8 @@ public class PimdirContactsTest {
 
         contacts.save(BOOK, new Card("u7", null, null, vcard("u7", "Gil resolved")));
 
-        // The push has to be conditioned on the state the resolution merged
-        // against, revision and body together, not on the one the conflict was
-        // first noticed at.
+        // NOTE: the push is conditioned on the state the resolution merged
+        // against, not the one the conflict was first noticed at.
         assertEquals("etag-remote",
                 stringOf("SELECT base_revision FROM bindings WHERE link_id = 'u7'"));
         assertEquals(diverging,
@@ -244,7 +237,7 @@ public class PimdirContactsTest {
                 scalar("SELECT refcount FROM objects WHERE hash = ?", diverging));
     }
 
-    /** Files a body as an object of the store, unreferenced, and answers its hash. */
+    /** Files a body as an unreferenced store object; answers its hash. */
     private String storeBody(String body) {
         String hash = PimdirHash.of(body);
         db.execSQL(
@@ -265,13 +258,11 @@ public class PimdirContactsTest {
 
         contacts.detachToLocal(List.of(BOOK, OTHER), "local://on-device");
 
-        // A card in two of the account's books collapses to one local row, and
-        // the one the user had already asked to delete does not come back.
         assertEquals(List.of("local://on-device"), contacts.collectionsOf("u8"));
         assertTrue(contacts.collectionsOf("u9").isEmpty());
 
-        // No binding travels with it: the local book has no server, so a
-        // carried base would claim an agreement with a remote that is gone.
+        // NOTE: the local book has no server, so a carried base would claim an
+        // agreement with a remote that is gone.
         assertEquals(0, scalar("SELECT count(*) FROM bindings"));
         assertEquals(0, scalar("SELECT count(*) FROM collections WHERE id = ?", BOOK));
         assertEquals(1, contacts.list("local://on-device").size());
@@ -284,8 +275,7 @@ public class PimdirContactsTest {
                         + " VALUES(?, 'u10', 1, '[]', 1)",
                 new Object[] {BOOK});
 
-        // Enumerated but not hydrated yet: an empty row would read as a broken
-        // contact rather than as one still arriving.
+        // NOTE: an empty row would read as a broken contact, not one arriving.
         assertTrue(contacts.list(BOOK).isEmpty());
     }
 
@@ -293,8 +283,8 @@ public class PimdirContactsTest {
     public void theSummaryIsWrittenSoAnotherReaderSeesTheCard() {
         contacts.save(BOOK, new Card("u11", null, null, vcard("u11", "Kim")));
 
-        // The standard's typed row (STORAGE Annex A.2), not a convention of
-        // this app's: anything else reading the store lists the card from it.
+        // NOTE: the standard's typed row (STORAGE Annex A.2): other readers of
+        // the store list the card from it.
         assertEquals("Kim", stringOf("SELECT fn FROM contact_summary WHERE link_id = 'u11'"));
         assertEquals("u11", stringOf("SELECT uid FROM contact_summary WHERE link_id = 'u11'"));
         assertEquals(
@@ -302,8 +292,8 @@ public class PimdirContactsTest {
                 stringOf("SELECT address FROM item_address WHERE link_id = 'u11'"
                         + " AND role = 'email' AND position = 0"));
 
-        // And the key it is ordered by is the casefolded name, so two writers
-        // cannot interleave the same book differently.
+        // NOTE: ordered by the casefolded name, so two writers cannot
+        // interleave the same book differently.
         assertEquals("kim", stringOf("SELECT sort_key FROM items WHERE link_id = 'u11'"));
     }
 
@@ -311,9 +301,8 @@ public class PimdirContactsTest {
     public void aRowWithNoSummaryIsRepairedRatherThanLeftInvisible() {
         contacts.save(BOOK, new Card("u12", null, null, vcard("u12", "Lena")));
 
-        // What a store written before the kind had a summary table holds: the
-        // item and its body, and nothing another reader could list it from. No
-        // sync repairs that, the bodies not having changed.
+        // NOTE: what a store written before the kind had a summary table
+        // holds; no sync repairs it, the bodies not having changed.
         db.execSQL("DELETE FROM contact_summary WHERE link_id = 'u12'");
         db.execSQL("UPDATE items SET sort_key = '' WHERE link_id = 'u12'");
 
@@ -337,8 +326,8 @@ public class PimdirContactsTest {
                         + " VALUES(?, 'u13', 1, '[]', 1)",
                 new Object[] {BOOK});
 
-        // Nothing to derive a summary from: leave it for the hydrate pass
-        // rather than writing an empty one that reads as known-nameless.
+        // NOTE: an empty summary would read as known-nameless; the hydrate
+        // pass writes it.
         assertEquals(0, contacts.repairSummaries());
     }
 

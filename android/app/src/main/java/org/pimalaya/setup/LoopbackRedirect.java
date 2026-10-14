@@ -10,11 +10,11 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Serves a custom-client grant's loopback redirect (RFC 8252 section 7.3):
- * accepts connections on the bound socket until one asks for the expected
- * path with the grant's state, answering every other with a 400, each read
- * bounded in time and size so a local app connecting first can neither hang
- * the wait nor fill the memory.
+ * Serves a custom-client grant's loopback redirect (RFC 8252 section 7.3).
+ *
+ * <p>Accepts connections until one asks for the expected path with the grant's
+ * state, answering others with a 400. Each read is bounded in time and size, so
+ * a local app connecting first can neither hang the wait nor fill the memory.
  */
 final class LoopbackRedirect {
     /** The longest request line read, the redirect's query included. */
@@ -23,13 +23,11 @@ final class LoopbackRedirect {
     private LoopbackRedirect() {}
 
     /**
-     * Waits for the redirect and rebuilds its URL from {@code origin} and the
-     * request target, or throws once the server socket's own timeout passes.
+     * Waits for the redirect and rebuilds its URL from {@code origin}.
      *
-     * @param path the redirect URI's path, "/" when it has none
-     * @param state the grant's CSRF state, which the redirect must carry
-     * @param readTimeoutMs how long one connection may take to send its line
-     * @param done the page answering the redirect
+     * <p>Throws once the server socket's own timeout passes. {@code path} is
+     * the redirect URI's ("/" when none), {@code state} the CSRF state it must
+     * carry.
      */
     static String await(
             ServerSocket server,
@@ -58,7 +56,7 @@ final class LoopbackRedirect {
         }
     }
 
-    /** The first line of the request, at most {@link #MAX_REQUEST_LINE} bytes. */
+    /** The request's first line, at most {@link #MAX_REQUEST_LINE} bytes. */
     private static String requestLine(InputStream in) throws IOException {
         ByteArrayOutputStream line = new ByteArrayOutputStream();
         while (line.size() < MAX_REQUEST_LINE) {

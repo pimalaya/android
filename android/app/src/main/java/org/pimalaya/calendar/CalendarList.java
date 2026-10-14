@@ -41,22 +41,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * The calendar screen: one agenda merging every calendar of
- * every account, the same merged view the contacts list gives contacts,
- * grouped into one card per day under the week.
+ * The calendar screen: one agenda over every account, a card per day.
  *
- * <p>Rows are <em>occurrences</em>, not stored events: a weekly meeting
- * is one row per week inside the window. Expansion runs through the
- * bridge (ical-rs, RFC 5545 complete) at load time rather than at sync
- * time, because what an event renders as depends on the week being
- * shown, and the week moves while the stored object does not.
- *
- * <p>The bridge expands on civil time, which is how RFC 5545 defines
- * recurrence, and hands each occurrence over with what it is civil in;
- * the rows are placed and labelled at the instant that names, in the
- * device's zone ({@link Zones}). A meeting at 09:00 New York shows at
- * 15:00 for a reader in Paris, and a Graph event stored in UTC at the
- * reader's hour.
+ * <p>Rows are occurrences, expanded by the bridge at load time: the shown week
+ * moves, the object does not. Expansion is civil (RFC 5545), a row placed at
+ * its instant in the device's zone ({@link Zones}).
  */
 public final class CalendarList {
     /** Seconds in a day, the threshold a length is told in days past. */
@@ -80,17 +69,19 @@ public final class CalendarList {
     private ListHeader header;
 
     /**
-     * The day the week card narrows the agenda to, as a civil `YYYYMMDD`
-     * stamp; null for the whole shown week.
+     * The day the week card narrows the agenda to; null for the whole week.
+     *
+     * <p>A civil {@code YYYYMMDD} stamp.
      */
     private String selectedDay;
 
     /** How many weeks from this one the week card shows, negative before it. */
     private int weekOffset;
 
-    /** Whether the Default chip narrows the agenda to the shown accounts' default calendars. */
+    /** Whether the Default chip narrows to the accounts' default calendars. */
     private boolean defaultOnly;
 
+    /** Builds the agenda; {@code pull} runs a pull to refresh. */
     public CalendarList(Host host, CalendarParts parts, EventView eventView, Runnable pull) {
         this.host = host;
         this.parts = parts;
@@ -101,13 +92,11 @@ public final class CalendarList {
     }
 
     /**
-     * One agenda row: an occurrence, the object it was expanded from and
-     * the calendar holding it.
+     * One agenda row: an occurrence, its object, the calendar holding it.
      *
-     * <p>The object rides along because opening a row opens the
-     * component behind it, and a recurrence's fifteenth Monday is not
-     * something the store holds: it is computed, and only the object it
-     * came from can be read for everything the row does not show.
+     * <p>The object rides along because a row opens the component behind it,
+     * and a recurrence's fifteenth Monday is computed: only its object can be
+     * read for the rest.
      */
     private static final class Row {
         final Occurrence occurrence;
@@ -128,6 +117,7 @@ public final class CalendarList {
         }
     }
 
+    /** Wires the list, its header and the week card's buttons. */
     public void setUp() {
         ListView list = host.findViewById(R.id.calendar_list);
         header = new ListHeader(host, list, Panels.CALENDAR);
@@ -138,7 +128,6 @@ public final class CalendarList {
         header.view
                 .findViewById(R.id.header_week_next)
                 .setOnClickListener(view -> moveWeek(weekOffset + 1));
-        // The week's number brings the card back to this week.
         header.view.findViewById(R.id.header_week_number).setOnClickListener(view -> moveWeek(0));
         Chips.add(
                 host,
@@ -169,15 +158,11 @@ public final class CalendarList {
     }
 
     /**
-     * Rebuilds the agenda off the stored objects, expanding each into
-     * the shown week and dropping what the merged filter hides.
+     * Rebuilds the agenda: objects expanded into the week, then filtered.
      *
-     * <p>Off the main thread: it reads every stored entry and expands each
-     * through the bridge, which a store of thousands makes long enough to
-     * freeze the screen it runs on. The rows land on the main thread, the
-     * last reload asked winning. An entry's expansion is kept while the
-     * week and its object stay the same, so a reload after a sync expands
-     * only what the sync changed.
+     * <p>Off the main thread, the last reload winning: thousands of expansions
+     * would freeze it. An expansion is kept while week and object stay, so a
+     * reload after a sync expands only what changed.
      */
     public void reload() {
         // NOTE: the shown week alone, since the agenda never lists past it
@@ -220,9 +205,9 @@ public final class CalendarList {
     private final ExecutorService reads = Executors.newSingleThreadExecutor();
 
     /**
-     * Each entry's occurrences in the window last expanded, by collection and
-     * id, with the object they were expanded from: read on {@link #reads}
-     * alone.
+     * Each entry's last expanded occurrences, with their object.
+     *
+     * <p>By collection and id; read on {@link #reads} alone.
      */
     private final Map<String, Expanded> expanded = new HashMap<>();
 
@@ -240,7 +225,11 @@ public final class CalendarList {
         }
     }
 
-    /** The agenda's rows in {@code [from, until)}, earliest first; on {@link #reads}. */
+    /**
+     * The agenda's rows in {@code [from, until)}, earliest first.
+     *
+     * <p>On {@link #reads}.
+     */
     private List<Row> rowsOf(
             String from, String until, MergedFilter filter, Set<String> defaults) {
         if (!from.equals(expandedFrom)) {
@@ -290,11 +279,7 @@ public final class CalendarList {
         return read;
     }
 
-    /**
-     * Lays out what the week card lets through: the day picked in it,
-     * or with none picked the seven days of the week it shows, this
-     * week included.
-     */
+    /** Lays out the picked day, else the seven days of the shown week. */
     private void render() {
         String today = today();
         String first = shownWeek(today);
@@ -316,8 +301,10 @@ public final class CalendarList {
     }
 
     /**
-     * Whether the agenda lists a civil day: the picked day alone when
-     * there is one, else the seven days from the shown week's first.
+     * Whether the agenda lists a civil day.
+     *
+     * <p>The picked day alone when there is one, else the seven days from the
+     * shown week's first.
      */
     static boolean kept(String day, String selectedDay, String weekFirst) {
         if (selectedDay != null) {
@@ -327,9 +314,10 @@ public final class CalendarList {
     }
 
     /**
-     * The day an occurrence starts on, where the device is: an all-day
-     * one on its date, which is in no zone, anything else on the day its
-     * instant falls on.
+     * The day an occurrence starts on, where the device is.
+     *
+     * <p>An all-day one on its date, which is in no zone; anything else on the
+     * day its instant falls on.
      */
     private static String dayOf(Row row) {
         if (row.occurrence.start().isDate()) {
@@ -341,9 +329,9 @@ public final class CalendarList {
     }
 
     /**
-     * What a day's card is headed with: today and tomorrow by name, then
-     * the weekday and the date, since an agenda is read by the calendar
-     * and not by distance.
+     * A day card's heading: today, tomorrow, else the weekday and date.
+     *
+     * <p>An agenda is read by the calendar, not by distance.
      */
     private String dayLabel(String day) {
         String today = today();
@@ -362,10 +350,10 @@ public final class CalendarList {
     }
 
     /**
-     * Fills the week card: the shown week's seven days, each a weekday
-     * over its number, under the month and year and the week's number.
-     * Today takes the accent, and a day pressed takes a filled disc and
-     * narrows the agenda to itself, pressing it again widening it back.
+     * Fills the week card: seven days under month, year and week number.
+     *
+     * <p>Today takes the accent; a pressed day takes a filled disc and narrows
+     * the agenda to itself, pressed again widening it back.
      */
     private void week(String today) {
         String first = shownWeek(today);
@@ -488,6 +476,7 @@ public final class CalendarList {
         return text;
     }
 
+    /** The list's header, with the week card. */
     public ListHeader header() {
         return header;
     }
@@ -522,7 +511,7 @@ public final class CalendarList {
                 moment.get(java.util.Calendar.DAY_OF_MONTH));
     }
 
-    /** A civil `YYYYMMDD` stamp as a calendar in the device's zone and locale. */
+    /** A {@code YYYYMMDD} stamp as a Calendar in the device zone and locale. */
     private static java.util.Calendar calendarOf(String stamp) {
         java.util.Calendar moment = java.util.Calendar.getInstance();
         moment.clear();
@@ -543,9 +532,10 @@ public final class CalendarList {
     }
 
     /**
-     * The seconds an occurrence runs, never negative: between the
-     * instants its ends name, so an event starting in one zone and ending
-     * in another (a flight) is as long as it is.
+     * The seconds an occurrence runs, never negative.
+     *
+     * <p>Between the instants its ends name, so a flight starting in one zone
+     * and ending in another is as long as it is.
      */
     static long secondsBetween(EventTime start, EventTime end) {
         long length = (Zones.instant(end) - Zones.instant(start)) / 1000;
@@ -553,10 +543,11 @@ public final class CalendarList {
     }
 
     /**
-     * How long an occurrence runs, told in the coarsest unit that stays
-     * honest: days past a day, whole hours when it is whole hours,
-     * minutes below the hour. Empty when it is a moment rather than a
-     * span, which every journal entry and most to-dos are.
+     * How long an occurrence runs, in the coarsest honest unit.
+     *
+     * <p>Days past a day, whole hours when whole, minutes below the hour. Empty
+     * for a moment rather than a span, as every journal entry and most to-dos
+     * are.
      */
     static String durationLabel(Context context, Occurrence occurrence) {
         if (occurrence.allDay()) {
@@ -582,13 +573,10 @@ public final class CalendarList {
     }
 
     /**
-     * How far off an occurrence is, in the app's shared date vocabulary:
-     * in 20 minutes, in 3 days, 2 hours ago.
+     * How far off an occurrence is: in 20 minutes, in 3 days, 2 hours ago.
      *
-     * <p>The entry page says it beside the exact moment. An all-day
-     * entry counts in whole days, since a birthday is on a day and
-     * reading it as five hours ago because the day started this morning
-     * would be nonsense.
+     * <p>Said beside the exact moment on the entry page. An all-day entry
+     * counts whole days: a birthday is on a day, never five hours ago.
      */
     static String countdownLabel(Context context, Occurrence occurrence) {
         long stamp = Zones.instant(occurrence.start());
@@ -646,29 +634,24 @@ public final class CalendarList {
                                     ? host.getString(R.string.event_untitled)
                                     : occurrence.summary());
             ((TextView) view.findViewById(R.id.event_start)).setText(startLabel(row));
-            // The warning flag of an entry both sides edited, the contact
-            // row's, on every occurrence of it: the page any of them opens
-            // asks every question the entry has.
+            // NOTE: every occurrence of an entry both sides edited is flagged:
+            // the page any of them opens asks every question the entry has.
             ImageView conflicted = view.findViewById(R.id.event_conflicted);
             conflicted.setImageTintList(
                     ColorStateList.valueOf(
                             host.ui.resolveColor(android.R.attr.colorError)));
             conflicted.setVisibility(row.event.conflicted ? View.VISIBLE : View.GONE);
-            // What kind of entry it is, by name, then how long it runs.
             String kind = host.getString(componentName(occurrence.component()));
             String duration = durationLabel(host, occurrence);
             ((TextView) view.findViewById(R.id.event_kind))
                     .setText(duration.isEmpty() ? kind : kind + " · " + duration);
 
-            // Which calendar and account it is in, the way a mail row says
-            // its mailbox and account: a merged agenda has to say where a
-            // row came from.
+            // NOTE: a merged agenda has to say where a row came from, as a
+            // mail row says its mailbox and account.
             ((TextView) view.findViewById(R.id.event_origin))
                     .setText(row.calendar.name + " · " + row.calendar.accountEmail);
 
-            // The disc stands for the calendar, initial and colour both,
-            // the way the mail row's disc stands for its sender; the
-            // colour is keyed by the calendar's id, so renaming one
+            // NOTE: the colour is keyed by the calendar's id, so renaming one
             // keeps the colour the eye learned.
             TextView avatar = view.findViewById(R.id.event_avatar);
             avatar.setText(Avatar.letter(row.calendar.name));

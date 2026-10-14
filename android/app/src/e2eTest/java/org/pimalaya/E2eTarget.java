@@ -17,10 +17,11 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 
 /**
- * One provider account reached over one protocol for one domain: where it
- * is, how its credential is obtained, which fixture prepares its server, and
- * what it supports. A new target (a Stalwart container, Microsoft Graph once
- * a user token can be supplied) is one more entry in {@link #of}.
+ * One provider account over one protocol for one domain.
+ *
+ * <p>Where it is, how its credential is obtained, which fixture prepares its
+ * server, what it supports. A new target (Stalwart, Graph with a user token) is
+ * one more entry in {@link #of}.
  */
 final class E2eTarget {
     /** The mail targets, in report order. */
@@ -61,16 +62,15 @@ final class E2eTarget {
 
     String address;
 
-    /**
-     * The discovered service the account reads over: `gmail`, `imap`,
-     * `jmap`, `carddav`, `caldav` or `gcal`.
-     */
+    /** The service read over: gmail, imap, jmap, carddav, caldav or gcal. */
     String service;
 
     /** Whether mail is submitted over SMTP, not over the reading session. */
     boolean smtp;
 
-    /** Whether the fixture can seed and read a keyword the app does not model. */
+    /**
+     * Whether the fixture can seed and read a keyword the app does not model.
+     */
     boolean keywords;
 
     /** Why the target cannot run here, null when it can. */
@@ -218,8 +218,9 @@ final class E2eTarget {
     }
 
     /**
-     * The targets `-Pe2e.targets` asks for: providers (`google`), single
-     * targets (`google-imap`) or `all`, comma separated.
+     * The targets `-Pe2e.targets` asks for, comma separated.
+     *
+     * <p>Providers (`google`), single targets (`google-imap`) or `all`.
      */
     static Set<String> asked() {
         String property = System.getProperty("e2e.targets", "");
@@ -247,9 +248,10 @@ final class E2eTarget {
     }
 
     /**
-     * The account as the connection flow builds it: discovery for the address,
-     * the domain's endpoint (and mail's submission) derived by the flow's own
-     * rules, the user put in a mail URL for a token, a fresh credential.
+     * The account as the connection flow builds it.
+     *
+     * <p>Discovery, the domain's endpoint (and mail's submission) by the flow's
+     * rules, the user in a mail URL for a token, a fresh credential.
      */
     AccountEntry account(AccountClient client) throws Exception {
         List<ServiceConfig> configs;
@@ -300,7 +302,9 @@ final class E2eTarget {
                 .with(domain, base, submit, AccountCredential.password(login, secret.call()));
     }
 
-    /** The same account submitting nowhere reachable: a phone with no network to send on. */
+    /**
+     * The same account submitting nowhere: a phone with no network to send on.
+     */
     static AccountEntry unreachable(AccountEntry account) {
         AccountConnection mail = account.connection(PimDomain.MAIL);
         return account.with(

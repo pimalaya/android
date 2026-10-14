@@ -7,17 +7,17 @@ import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Card;
 
 /**
- * The editor's working state, one object per open contact: built up
- * when a card (or merged group, or conflict) opens and replaced by a
- * fresh blank when the editor leaves, so the form, the merge flow and
- * the conflict resolution all read
- * one session instead of a dozen loose activity fields.
+ * The editor's working state, one object per open contact.
+ *
+ * <p>Built when a card, group or conflict opens, replaced by a blank when the
+ * editor leaves; the form, merge and conflict flows read this one session.
  */
 public final class EditSession {
-    /** The card open in the editor (null card means composing a new one). */
+    /** The book of the open card, or of the one being composed. */
     Addressbook book;
 
     String accountEmail;
+    /** The card open in the editor; null when composing a new one. */
     public Card card;
 
     /** The vCard the editor patches: the card's, or a fresh template. */
@@ -35,8 +35,11 @@ public final class EditSession {
     /** The editor's bar title (the shared bar is retitled per screen). */
     public CharSequence title = "";
 
-    /** Whether the editor is resolving a both-sides-edited sync
-     *  conflict: the form's picks apply onto the captured three-way
-     *  merge (vcard) and stage onto the one conflicted replica. */
+    /**
+     * Whether the editor resolves a both-sides-edited conflict.
+     *
+     * <p>The picks apply onto the captured three-way merge ({@code vcard}) and
+     * stage onto the one conflicted replica.
+     */
     public boolean resolvingConflict;
 }

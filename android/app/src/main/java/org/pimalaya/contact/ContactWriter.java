@@ -16,13 +16,11 @@ import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
 
 /**
- * The contact save fan-out behind the edit form: it reads the form
- * model and the working {@link EditSession}, stages the edited contact
- * into the base through the offline engine (offline first, nothing
- * touches the network until the next sync), and applies the
- * addressbooks dialog's placement. It reaches the store, pool and
- * accounts through the host; the host keeps the navigation and calls in
- * through {@link #save}.
+ * The contact save fan-out behind the edit form.
+ *
+ * <p>Reads the form model and the working {@link EditSession}, stages the edit
+ * through {@link ContactStager} (offline first, pushed by the next sync) and
+ * applies the addressbooks dialog's placement, over {@link ContactParts}.
  */
 final class ContactWriter {
     private final Host host;
@@ -38,12 +36,11 @@ final class ContactWriter {
     }
 
     /**
-     * Stages the edited contact in the base (offline first: nothing
-     * touches the network until the next sync pushes it) and returns to
-     * the list. The form model applies to every replica's own document
-     * (docs/merged-view.md): each keeps its UID and unmanaged
-     * properties while the managed content converges; replicas already
-     * carrying the resulting content are skipped.
+     * Stages the edited contact (pushed by the next sync), back to the list.
+     *
+     * <p>The model applies to each replica's own document
+     * (docs/merged-view.md): UIDs and unmanaged properties stay; replicas
+     * already matching are skipped.
      */
     void save() {
         String birthday = editor.form().birthday();
@@ -63,7 +60,7 @@ final class ContactWriter {
             if (editor.edit().card == null) {
                 AccountEntry account = parts.accountFor(editor.edit().accountEmail);
                 if (account == null) {
-                    // The account was deleted while the editor was open.
+                    // NOTE: the account was deleted while the editor was open.
                     host.toast(host.getString(R.string.save_failed));
                     return;
                 }
@@ -79,7 +76,6 @@ final class ContactWriter {
                 saveFanOut(model);
             }
 
-            // The copies carry the just-saved content.
             if (editor.edit().card != null && editor.edit().pendingBookState != null) {
                 applyBookState(ContactClient.applyCard(editor.edit().card.vcard(), model));
             }
@@ -93,9 +89,9 @@ final class ContactWriter {
     }
 
     /**
-     * The fan-out save: the form model applies to every card's own
-     * document, each staged through the engine (editing a conflicted
-     * replica resolves it).
+     * The fan-out save: the model onto every card's own document, each staged.
+     *
+     * <p>Editing a conflicted replica resolves it.
      */
     private void saveFanOut(ContactFields model) throws JSONException {
         ContactStager engine = new ContactStager(parts.pimdir(), parts.clients());
@@ -119,11 +115,11 @@ final class ContactWriter {
     }
 
     /**
-     * The conflict-resolution save: the form's picks apply onto the
-     * captured three-way merge (so remote's non-conflicting changes and
-     * unmanaged data survive), staged onto the one conflicted replica.
-     * Editing the conflicted placement resolves it in the engine, and the
-     * next sync pushes it guarded on the observed remote revision.
+     * The conflict save: the picks apply onto the captured three-way merge.
+     *
+     * <p>Remote's other changes and unmanaged data survive. Staged on the one
+     * conflicted replica, it resolves it; the push is guarded on the observed
+     * remote revision.
      */
     private void saveConflictResolution(ContactFields model) throws JSONException {
         Entry replica = editor.edit().replicas.get(0);
@@ -135,10 +131,7 @@ final class ContactWriter {
                         resolved);
     }
 
-    /**
-     * The merge save: the form model applies to the surviving card and
-     * every other card behind the form stages a delete.
-     */
+    /** The merge save: the model onto the survivor, deletes for the others. */
     private void saveMerge(ContactFields model) throws JSONException {
         Entry survivor = editor.edit().mergeSurvivor;
         editor.edit().mergeSurvivor = null;
@@ -170,8 +163,7 @@ final class ContactWriter {
     }
 
     /**
-     * Applies the addressbooks dialog's desired state on save: staged
-     * memberships, copies (carrying the just-saved content), removals.
+     * Applies the addressbooks dialog on save: memberships, copies, removals.
      */
     private void applyBookState(String vcard) {
         Map<String, Boolean> desired = editor.edit().pendingBookState;
@@ -204,9 +196,9 @@ final class ContactWriter {
     }
 
     /**
-     * Adds the contact to an addressbook: a staged membership when the
-     * contact already has a card on that account-level backend, a
-     * copied card sharing the vCard UID anywhere else.
+     * Adds the contact to a book, as a membership or a UID-sharing copy.
+     *
+     * <p>A membership when the account-level backend already holds a card.
      */
     private void addToBook(BookEntry target, AccountEntry account, String vcard) {
         if (AccountClient.isAccountLevel(account.server(PimDomain.CONTACTS))) {
@@ -225,9 +217,9 @@ final class ContactWriter {
     }
 
     /**
-     * Removes the contact from an addressbook: a staged membership
-     * removal when its card keeps other books, a staged delete of the
-     * card otherwise.
+     * Removes the contact from a book, as a membership or the card's delete.
+     *
+     * <p>A membership removal while its card keeps other books.
      */
     private void removeFromBook(BookEntry target, Map<String, Entry> replicaByBook) {
         Entry replica = replicaByBook.get(target.book.url());

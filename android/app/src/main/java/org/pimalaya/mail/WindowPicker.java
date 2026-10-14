@@ -20,20 +20,20 @@ import org.pimalaya.R;
 import org.pimalaya.ui.Host;
 
 /**
- * Moving mail frontiers later ({@link MailWindow}): the date picker an
- * account's settings open, which frees the bodies below the day picked,
- * and the line saying so. Moving one back is the list's "Load more"
- * alone ({@link MailStep}).
+ * Moving mail frontiers later ({@link MailWindow}): a date picker and its line.
+ *
+ * <p>Opened from account settings, it frees bodies below the day picked. Moving
+ * one back is the list's "Load more" alone ({@link MailStep}).
  */
 public final class WindowPicker {
     private WindowPicker() {}
 
     /**
-     * Opens the picker over the frontiers of {@code emails}, {@code until}
-     * their current edge (null for all mail): any day from it up to today.
-     * A day later than it frees the bodies below it once confirmed
-     * ({@link #confirmRelease}); the line under it says so, what
-     * {@code query}'s mailboxes hold below it read on {@code reads}.
+     * Opens the picker over the frontiers of {@code emails}.
+     *
+     * <p>Any day from {@code until} (null for all mail) to today; a later one
+     * frees bodies once confirmed ({@link #confirmRelease}), the line counting
+     * what {@code query}'s mailboxes hold below it, read on {@code reads}.
      */
     public static void open(
             Host host,
@@ -131,9 +131,9 @@ public final class WindowPicker {
     }
 
     /**
-     * Asks before moving the frontiers of {@code emails} later to
-     * {@code date}, which frees the bodies below it, headers and search
-     * kept ({@link MailSync#releaseWindow}).
+     * Asks before moving frontiers later to {@code date}, freeing bodies.
+     *
+     * <p>Headers and search kept ({@link MailSync#releaseWindow}).
      */
     private static void confirmRelease(
             Host host, MailSync sync, List<String> emails, String date, Runnable after) {
@@ -148,9 +148,10 @@ public final class WindowPicker {
     }
 
     /**
-     * A frontier's date as a person reads it ("1 September"), the year only
-     * when it is not this one; "All my mail" for none. Read on the device's
-     * clock, whose midnight the frontier is.
+     * A frontier's date as read ("1 September"), "All my mail" for none.
+     *
+     * <p>The year only when not this one; on the device's clock, whose midnight
+     * the frontier is.
      */
     public static String label(Context context, String date) {
         if (date == null) {

@@ -36,8 +36,9 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * What the entry page's save and delete stage, on the real bridge and
- * store: the writes, their order and the binding each lands on.
+ * What the entry page's save and delete stage, on the real bridge and store.
+ *
+ * <p>The writes, their order and the binding each lands on.
  */
 @RunWith(RobolectricTestRunner.class)
 public class EventWritesTest {
@@ -149,8 +150,9 @@ public class EventWritesTest {
     }
 
     /**
-     * The entry edited here into {@code local} and on the calendar's phone
-     * source into {@code remote}, conflicted there; answers that conflict.
+     * Conflicts the entry on the calendar's phone source; answers the conflict.
+     *
+     * <p>Edited here into {@code local}, there into {@code remote}.
      */
     private EventStore.StoredConflict phoneConflict(String local, String remote)
             throws Exception {
