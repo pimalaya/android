@@ -24,9 +24,13 @@ import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.EventConflictKind;
 import org.pimalaya.client.EventDetail;
+import org.pimalaya.client.EventDraft;
 import org.pimalaya.client.EventMerge;
+import org.pimalaya.client.EventSide;
 import org.pimalaya.client.EventTime;
+import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.client.Occurrence;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.ItemLinks;
@@ -288,7 +292,7 @@ public final class EventView {
     private EventMerge merge;
 
     /** The side each conflict was given, by its id; absent, the pre-filled one. */
-    private final Map<Integer, String> picks = new HashMap<>();
+    private final Map<Integer, EventSide> picks = new HashMap<>();
 
     /** The conflicts the user has reviewed, by id, which clears their glyph. */
     private final Set<Integer> reviewed = new HashSet<>();
@@ -337,12 +341,13 @@ public final class EventView {
         try {
             ical =
                     CalendarClient.newEvent(
-                            EVENT,
-                            uid,
-                            now(),
-                            Zones.stamp(start, false),
-                            zone.getId(),
-                            Zones.vtimezone(zone, System.currentTimeMillis()));
+                            new EventDraft(
+                                    EVENT,
+                                    uid,
+                                    now(),
+                                    Zones.stamp(start, false),
+                                    zone.getId(),
+                                    Zones.vtimezone(zone, System.currentTimeMillis())));
         } catch (Exception error) {
             Log.w("pimalaya", "new event failed", error);
             host.showError(error, R.string.event_save_failed);
@@ -476,9 +481,9 @@ public final class EventView {
             return;
         }
 
-        if (merged.resolved) {
+        if (merged.resolved()) {
             EventStore.StoredConflict settled = found;
-            String ical = merged.ical;
+            String ical = merged.ical();
             host.io.execute(
                     () -> {
                         Exception failure = null;
@@ -508,7 +513,7 @@ public final class EventView {
         open(
                 occurrence,
                 new EventStore.StoredEvent(
-                        event.collectionId, event.id, event.handle, merged.ical, event.etag),
+                        event.collectionId, event.id, event.handle, merged.ical(), event.etag),
                 calendar,
                 false);
     }
@@ -536,23 +541,23 @@ public final class EventView {
         times.clear();
         revealed.clear();
         if (detail != null) {
-            put("summary", detail.summary);
-            put("description", detail.description);
-            put("location", detail.location);
-            put("url", detail.url);
-            put("status", detail.status);
-            put("categories", detail.categories);
-            put("priority", detail.priority);
-            put("percentComplete", detail.percentComplete);
-            put("allDay", detail.allDay);
-            times.put("start", detail.start);
-            times.put("end", detail.end);
-            times.put("due", detail.due);
-            times.put("completed", detail.completed);
+            put("summary", detail.summary());
+            put("description", detail.description());
+            put("location", detail.location());
+            put("url", detail.url());
+            put("status", detail.status());
+            put("categories", detail.categories());
+            put("priority", detail.priority());
+            put("percentComplete", detail.percentComplete());
+            put("allDay", detail.allDay());
+            times.put("start", detail.start());
+            times.put("end", detail.end());
+            times.put("due", detail.due());
+            times.put("completed", detail.completed());
             // NOTE: an override's own dates are its occurrence's, and in
             // conflict mode they are the merge's rather than the row's, which
             // was expanded from the side here.
-            if (series() && (merge == null || detail.recurrenceId == null)) {
+            if (series() && (merge == null || detail.recurrenceId() == null)) {
                 occurrenceDates();
             }
         }
@@ -571,22 +576,22 @@ public final class EventView {
      * its due date is where it falls.
      */
     private void occurrenceDates() {
-        if (detail.start == null && detail.due != null) {
-            times.put("due", occurrence.start);
+        if (detail.start() == null && detail.due() != null) {
+            times.put("due", occurrence.start());
             return;
         }
-        times.put("start", occurrence.start);
-        if (detail.end != null) {
-            times.put("end", occurrence.end);
+        times.put("start", occurrence.start());
+        if (detail.end() != null) {
+            times.put("end", occurrence.end());
         }
-        if (detail.due != null) {
-            times.put("due", occurrence.end);
+        if (detail.due() != null) {
+            times.put("due", occurrence.end());
         }
     }
 
     /** Whether the page is on one occurrence of a series. */
     private boolean series() {
-        return occurrence != null && occurrence.recurrenceId != null;
+        return occurrence != null && occurrence.recurrenceId() != null;
     }
 
     /** Whether the object could be read at all: nothing is editable
@@ -607,7 +612,7 @@ public final class EventView {
 
     /** The component on the page, an event when nothing was read. */
     private String component() {
-        return detail == null ? EVENT : detail.component;
+        return detail == null ? EVENT : detail.component();
     }
 
     // ---- the page ---------------------------------------------------------
@@ -654,7 +659,7 @@ public final class EventView {
 
     /** Whether nothing awaits review. */
     private boolean settled() {
-        return merge == null || reviewed.size() == merge.conflicts.size();
+        return merge == null || reviewed.size() == merge.conflicts().size();
     }
 
     /**
@@ -668,13 +673,13 @@ public final class EventView {
         }
 
         List<View> rows = new ArrayList<>();
-        for (EventMerge.Conflict one : merge.conflicts) {
+        for (EventMerge.Conflict one : merge.conflicts()) {
             if (inPlace(one)) {
                 continue;
             }
             String title = fieldLabel(one);
-            if (one.recurrenceId != null) {
-                title = title + " · " + moment(one.recurrenceId);
+            if (one.recurrenceId() != null) {
+                title = title + " · " + moment(one.recurrenceId());
             }
             rows.add(
                     sections.row(
@@ -715,16 +720,16 @@ public final class EventView {
                             choiceLabel(rule, picked(rule)),
                             warning(rule),
                             () -> choose(rule, null)));
-        } else if (!detail.recurrence.isEmpty()) {
-            rows.add(sections.value(detail.recurrence, R.string.event_field_repeats));
+        } else if (!detail.recurrence().isEmpty()) {
+            rows.add(sections.value(detail.recurrence(), R.string.event_field_repeats));
         }
         // An occurrence an override moved says where its series had it,
         // which is the instance an edit of it alone is written against.
         if (series()
-                && Zones.instant(occurrence.recurrenceId) != Zones.instant(occurrence.start)) {
+                && Zones.instant(occurrence.recurrenceId()) != Zones.instant(occurrence.start())) {
             rows.add(
                     sections.value(
-                            moment(occurrence.recurrenceId), R.string.event_field_originally));
+                            moment(occurrence.recurrenceId()), R.string.event_field_originally));
         }
         // NOTE: the row above and the countdown below describe the
         // occurrence that was tapped, and an entry being composed was
@@ -777,10 +782,10 @@ public final class EventView {
      *  (invitations, replies), not a text field. */
     private void people() {
         List<View> rows = new ArrayList<>();
-        if (!detail.organizer.isEmpty()) {
-            rows.add(sections.value(detail.organizer, R.string.event_field_organizer));
+        if (!detail.organizer().isEmpty()) {
+            rows.add(sections.value(detail.organizer(), R.string.event_field_organizer));
         }
-        for (EventDetail.Attendee attendee : detail.attendees) {
+        for (EventDetail.Attendee attendee : detail.attendees()) {
             rows.add(sections.row(attendeeName(attendee), attendeeStanding(attendee), null, null));
         }
 
@@ -789,15 +794,15 @@ public final class EventView {
     }
 
     private String attendeeName(EventDetail.Attendee attendee) {
-        return attendee.name.isEmpty() ? attendee.address : attendee.name;
+        return attendee.name().isEmpty() ? attendee.address() : attendee.name();
     }
 
     private String attendeeStanding(EventDetail.Attendee attendee) {
         String standing =
-                attendee.status.isEmpty()
+                attendee.status().isEmpty()
                         ? host.getString(R.string.event_field_attendee)
-                        : attendee.status;
-        return attendee.name.isEmpty() ? standing : standing + " · " + attendee.address;
+                        : attendee.status();
+        return attendee.name().isEmpty() ? standing : standing + " · " + attendee.address();
     }
 
     /** Which calendar of which account holds it, and what it is. */
@@ -995,19 +1000,19 @@ public final class EventView {
         LinearLayout content = new LinearLayout(host);
         content.setOrientation(LinearLayout.VERTICAL);
         content.addView(input);
-        content.addView(chips(conflicted, choice -> input.setText(choice.value)));
+        content.addView(chips(conflicted, choice -> input.setText(choice.value())));
         dialog(
                 field.label,
                 content,
                 () -> {
                     String typed = input.getText().toString().trim();
-                    for (EventMerge.Choice choice : conflicted.choices) {
-                        if (choice.value.trim().equals(typed)) {
+                    for (EventMerge.Choice choice : conflicted.choices()) {
+                        if (choice.value().trim().equals(typed)) {
                             pick(conflicted, choice);
                             return;
                         }
                     }
-                    reviewed.add(conflicted.id);
+                    reviewed.add(conflicted.id());
                     put(field.key, typed);
                 });
     }
@@ -1099,10 +1104,10 @@ public final class EventView {
     private EventTime at(long instant, String key, boolean date) {
         ZoneId reader = ZoneId.systemDefault();
         if (date) {
-            return Zones.at(instant, new EventTime("", EventTime.DATE, "", null), reader);
+            return Zones.at(instant, new EventTime("", EventTimeKind.DATE, "", null), reader);
         }
         if ("completed".equals(key)) {
-            return Zones.at(instant, new EventTime("", EventTime.UTC, "", null), reader);
+            return Zones.at(instant, new EventTime("", EventTimeKind.UTC, "", null), reader);
         }
 
         EventTime like = times.get(key);
@@ -1110,7 +1115,7 @@ public final class EventView {
             like = times.get("start");
         }
         if (like == null || like.isDate()) {
-            like = new EventTime("", EventTime.ZONED, reader.getId(), null);
+            like = new EventTime("", EventTimeKind.ZONED, reader.getId(), null);
         }
         return Zones.at(instant, like, reader);
     }
@@ -1134,9 +1139,9 @@ public final class EventView {
 
         EventTime start = times.get("start");
         EventTime end = times.get("end");
-        if (allDay && start != null && end != null && end.time.compareTo(start.time) <= 0) {
-            LocalDateTime next = Zones.civil(start.time).plusDays(1);
-            times.put("end", new EventTime(Zones.stamp(next, true), EventTime.DATE, "", null));
+        if (allDay && start != null && end != null && end.time().compareTo(start.time()) <= 0) {
+            LocalDateTime next = Zones.civil(start.time()).plusDays(1);
+            times.put("end", new EventTime(Zones.stamp(next, true), EventTimeKind.DATE, "", null));
         }
         render();
     }
@@ -1166,8 +1171,8 @@ public final class EventView {
         if (merge == null) {
             return null;
         }
-        for (EventMerge.Conflict one : merge.conflicts) {
-            if (one.field.equals(key) && inPlace(one)) {
+        for (EventMerge.Conflict one : merge.conflicts()) {
+            if (one.field().equals(key) && inPlace(one)) {
                 return one;
             }
         }
@@ -1180,19 +1185,19 @@ public final class EventView {
      * series' row, so it is in place only on a page showing the series.
      */
     private boolean inPlace(EventMerge.Conflict one) {
-        if (!sameOccurrence(one.recurrenceId, detail.recurrenceId)) {
+        if (!sameOccurrence(one.recurrenceId(), detail.recurrenceId())) {
             return false;
         }
         // NOTE: an occurrence of a series shows its own dates, not the
         // series' a conflict on the series is about.
-        if (series() && one.recurrenceId == null && List.of(DATES).contains(one.field)) {
+        if (series() && one.recurrenceId() == null && List.of(DATES).contains(one.field())) {
             return false;
         }
-        if ("start".equals(one.field) || "recurrence".equals(one.field)) {
+        if ("start".equals(one.field()) || "recurrence".equals(one.field())) {
             return true;
         }
         for (Field field : CATALOG) {
-            if (field.key.equals(one.field) && field.of(component())) {
+            if (field.key.equals(one.field()) && field.of(component())) {
                 return true;
             }
         }
@@ -1209,7 +1214,7 @@ public final class EventView {
 
     /** The diverged glyph of a conflict not reviewed yet; null otherwise. */
     private View warning(EventMerge.Conflict one) {
-        if (one == null || reviewed.contains(one.id)) {
+        if (one == null || reviewed.contains(one.id())) {
             return null;
         }
         ImageView glyph = new ImageView(host);
@@ -1224,7 +1229,7 @@ public final class EventView {
     private View chips(EventMerge.Conflict one, Consumer<EventMerge.Choice> onPick) {
         LinearLayout chips = new LinearLayout(host);
         chips.setOrientation(LinearLayout.HORIZONTAL);
-        for (EventMerge.Choice choice : one.choices) {
+        for (EventMerge.Choice choice : one.choices()) {
             Button chip = new Button(host, null, android.R.attr.buttonStyleSmall);
             chip.setText(choiceLabel(one, choice));
             chip.setAllCaps(false);
@@ -1280,7 +1285,7 @@ public final class EventView {
             dialog.setNeutralButton(
                     R.string.event_conflict_other,
                     (view, which) -> {
-                        reviewed.add(one.id);
+                        reviewed.add(one.id());
                         other.run();
                     });
         }
@@ -1293,16 +1298,16 @@ public final class EventView {
      * and not as an edit written over it.
      */
     private void pick(EventMerge.Conflict one, EventMerge.Choice choice) {
-        picks.put(one.id, choice.side);
-        reviewed.add(one.id);
-        if ("when".equals(one.field)
-                && sameOccurrence(one.recurrenceId, detail.recurrenceId)
-                && !(series() && one.recurrenceId == null)) {
+        picks.put(one.id(), choice.side());
+        reviewed.add(one.id());
+        if ("when".equals(one.field())
+                && sameOccurrence(one.recurrenceId(), detail.recurrenceId())
+                && !(series() && one.recurrenceId() == null)) {
             // NOTE: the end row follows only where the page has one: a span
             // run by a DURATION shows none.
             String end = TODO.equals(component()) ? "due" : "end";
             for (String key : new String[] {"start", end}) {
-                EventTime time = "start".equals(key) ? choice.time : choice.end;
+                EventTime time = "start".equals(key) ? choice.time() : choice.end();
                 if ("start".equals(key) || openedTimes.get(key) != null) {
                     times.put(key, time);
                     openedTimes.put(key, time);
@@ -1314,28 +1319,28 @@ public final class EventView {
             return;
         }
 
-        if (List.of(DATES).contains(one.field)) {
-            times.put(one.field, choice.time);
-            openedTimes.put(one.field, choice.time);
-        } else if (List.of(TEXTS).contains(one.field)) {
-            put(one.field, choice.value);
+        if (List.of(DATES).contains(one.field())) {
+            times.put(one.field(), choice.time());
+            openedTimes.put(one.field(), choice.time());
+        } else if (List.of(TEXTS).contains(one.field())) {
+            put(one.field(), choice.value());
             try {
-                opened.put(one.field, choice.value);
+                opened.put(one.field(), choice.value());
             } catch (JSONException error) {
-                Log.w("pimalaya", "event field failed: " + one.field, error);
+                Log.w("pimalaya", "event field failed: " + one.field(), error);
             }
         }
     }
 
     /** The side a conflict holds now: the one picked, else the pre-filled one. */
     private EventMerge.Choice picked(EventMerge.Conflict one) {
-        String side = picks.get(one.id);
-        for (EventMerge.Choice choice : one.choices) {
-            if (choice.side.equals(side)) {
+        EventSide side = picks.get(one.id());
+        for (EventMerge.Choice choice : one.choices()) {
+            if (choice.side().equals(side)) {
                 return choice;
             }
         }
-        return one.choices.get(0);
+        return one.choices().get(0);
     }
 
     /**
@@ -1343,33 +1348,33 @@ public final class EventView {
      * and for an occurrence or the entry whole, what keeping it means.
      */
     private String choiceLabel(EventMerge.Conflict one, EventMerge.Choice choice) {
-        if (EventMerge.RECURRENCE.equals(one.kind)) {
+        if (EventConflictKind.RECURRENCE.equals(one.kind())) {
             return host.getString(
-                    choice.side.equals(one.series)
+                    choice.side().equals(one.series())
                             ? R.string.event_conflict_follow
                             : R.string.event_conflict_keep);
         }
-        if ("occurrence".equals(one.field) || "entry".equals(one.field)) {
-            if (choice.value.isEmpty()) {
+        if ("occurrence".equals(one.field()) || "entry".equals(one.field())) {
+            if (choice.value().isEmpty()) {
                 return host.getString(R.string.event_conflict_removed);
             }
             return host.getString(
-                    EventMerge.LOCAL.equals(choice.side)
+                    EventSide.LOCAL.equals(choice.side())
                             ? R.string.event_conflict_here
                             : R.string.event_conflict_there);
         }
-        if ("when".equals(one.field)) {
-            return moment(choice.time) + "\n" + moment(choice.end);
+        if ("when".equals(one.field())) {
+            return moment(choice.time()) + "\n" + moment(choice.end());
         }
-        if (choice.time != null) {
-            return moment(choice.time);
+        if (choice.time() != null) {
+            return moment(choice.time());
         }
-        return choice.value.isEmpty() ? host.getString(R.string.value_not_set) : choice.value;
+        return choice.value().isEmpty() ? host.getString(R.string.value_not_set) : choice.value();
     }
 
     /** What a conflict is called: its row's label, else the property's own name. */
     private String fieldLabel(EventMerge.Conflict one) {
-        switch (one.field) {
+        switch (one.field()) {
             case "start":
                 return host.getString(startLabel());
             case "recurrence":
@@ -1382,11 +1387,11 @@ public final class EventView {
                 return host.getString(R.string.event_conflict_entry);
             default:
                 for (Field field : CATALOG) {
-                    if (field.key.equals(one.field)) {
+                    if (field.key.equals(one.field())) {
                         return host.getString(field.label);
                     }
                 }
-                return one.field;
+                return one.field();
         }
     }
 
@@ -1425,7 +1430,7 @@ public final class EventView {
     private EventDetail detailOf(EventStore.StoredEvent event) {
         try {
             return CalendarClient.readEvent(
-                    event.ical, series() ? occurrence.recurrenceId.time : null);
+                    event.ical, series() ? occurrence.recurrenceId().time() : null);
         } catch (Exception error) {
             Log.w("pimalaya", "event read failed: " + event.id, error);
             return null;
@@ -1457,11 +1462,12 @@ public final class EventView {
             }
 
             JSONObject date = new JSONObject();
-            date.put("time", now == null ? "" : now.time);
+            date.put("time", now == null ? "" : now.time());
             if (now != null && (was == null || !sameZone(now, was))) {
-                date.put("kind", now.kind);
-                date.put("tzid", now.tzid);
-                ZoneId zone = EventTime.ZONED.equals(now.kind) ? Zones.zoneOf(now.tzid) : null;
+                date.put("kind", now.kind().wire());
+                date.put("tzid", now.tzid());
+                ZoneId zone =
+                        EventTimeKind.ZONED.equals(now.kind()) ? Zones.zoneOf(now.tzid()) : null;
                 if (zone != null && !edit.has("vtimezone")) {
                     edit.put("vtimezone", Zones.vtimezone(zone, Zones.instant(now)));
                 }
@@ -1477,11 +1483,11 @@ public final class EventView {
         if (left == null || right == null) {
             return left == right;
         }
-        return left.time.equals(right.time) && sameZone(left, right);
+        return left.time().equals(right.time()) && sameZone(left, right);
     }
 
     private static boolean sameZone(EventTime left, EventTime right) {
-        return left.kind.equals(right.kind) && Objects.equals(left.tzid, right.tzid);
+        return left.kind().equals(right.kind()) && Objects.equals(left.tzid(), right.tzid());
     }
 
     /** Now, as the UTC stamp DTSTAMP and LAST-MODIFIED are written in. */
@@ -1596,7 +1602,7 @@ public final class EventView {
         boolean isNew = creating;
         boolean rewritten = changed;
         EventStore.StoredConflict settling = conflict;
-        Map<Integer, String> chosen = new HashMap<>(picks);
+        Map<Integer, EventSide> chosen = new HashMap<>(picks);
 
         host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
         host.io.execute(
@@ -1643,8 +1649,8 @@ public final class EventView {
     private JSONObject scoped(JSONObject edit, String scope) throws JSONException {
         edit.put("scope", scope);
         if (series()) {
-            edit.put("recurrenceId", occurrence.recurrenceId.time);
-            edit.put("recurrenceInstant", Zones.utc(Zones.instant(occurrence.recurrenceId)));
+            edit.put("recurrenceId", occurrence.recurrenceId().time());
+            edit.put("recurrenceInstant", Zones.utc(Zones.instant(occurrence.recurrenceId())));
         }
         if ("following".equals(scope)) {
             edit.put("uid", UUID.randomUUID().toString());
@@ -1734,7 +1740,7 @@ public final class EventView {
         EventStore.StoredEvent target = event;
         EventStore.StoredCalendar collection = calendar;
         EventStore.StoredConflict settling = conflict;
-        Map<Integer, String> chosen = new HashMap<>(picks);
+        Map<Integer, EventSide> chosen = new HashMap<>(picks);
 
         host.setAuthLoading(R.id.fab, R.id.fab_progress, true);
         host.io.execute(

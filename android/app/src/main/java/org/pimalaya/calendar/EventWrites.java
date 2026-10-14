@@ -1,6 +1,8 @@
 package org.pimalaya.calendar;
 
 import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.EventSide;
+import org.pimalaya.client.EventSides;
 import org.pimalaya.client.EventSplit;
 import org.pimalaya.client.Flags;
 
@@ -33,7 +35,7 @@ final class EventWrites {
             boolean isNew,
             boolean rewritten,
             EventStore.StoredConflict settling,
-            Map<Integer, String> picks) {}
+            Map<Integer, EventSide> picks) {}
 
     /**
      * Stages a save: the series or the lone entry, one occurrence through
@@ -51,7 +53,7 @@ final class EventWrites {
         boolean isNew = save.isNew();
         boolean rewritten = save.rewritten();
         EventStore.StoredConflict settling = save.settling();
-        Map<Integer, String> chosen = save.picks();
+        Map<Integer, EventSide> chosen = save.picks();
 
         String source = target.ical;
         String into = collection.id;
@@ -59,7 +61,8 @@ final class EventWrites {
         if (settling != null) {
             source =
                     CalendarClient.resolveEvent(
-                            settling.base, settling.local, settling.remote, chosen);
+                            new EventSides(settling.base, settling.local, settling.remote),
+                            chosen);
             into = settling.collection;
             handle = settling.handle;
         }
@@ -70,16 +73,16 @@ final class EventWrites {
         // shown, so there is nothing to write here.
         if ("following".equals(scope)) {
             EventSplit split = CalendarClient.splitEvent(source, edited);
-            if (split.series != null) {
+            if (split.series() != null) {
                 engine.mutateAdd(
                         collection.id,
                         uid + ".ics",
-                        split.series,
+                        split.series(),
                         Flags.none(),
                         null,
                         "");
             }
-            engine.mutateEdit(into, handle, split.master, null, "");
+            engine.mutateEdit(into, handle, split.master(), null, "");
         } else {
             String written =
                     settling != null && !rewritten
@@ -110,7 +113,7 @@ final class EventWrites {
             EventStore.StoredEvent target,
             EventStore.StoredCalendar collection,
             EventStore.StoredConflict settling,
-            Map<Integer, String> chosen)
+            Map<Integer, EventSide> chosen)
             throws Exception {
         String left = null;
         if (!"all".equals(scope)) {
@@ -118,9 +121,8 @@ final class EventWrites {
                     settling == null
                             ? target.ical
                             : CalendarClient.resolveEvent(
-                                    settling.base,
-                                    settling.local,
-                                    settling.remote,
+                                    new EventSides(
+                                            settling.base, settling.local, settling.remote),
                                     chosen);
             left = CalendarClient.removeEvent(source, edit);
         }

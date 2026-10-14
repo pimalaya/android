@@ -64,6 +64,61 @@ final class ReplyShape {
         return keys;
     }
 
+    /** The raw text of each element of a raw JSON array, in order. */
+    static List<String> elements(String raw) {
+        List<String> elements = new ArrayList<>();
+        int depth = 0;
+        int start = -1;
+        boolean string = false;
+        for (int index = 0; index < raw.length(); index++) {
+            char current = raw.charAt(index);
+            if (string) {
+                if (current == '\\') {
+                    index++;
+                } else if (current == '"') {
+                    string = false;
+                }
+                continue;
+            }
+            if (current == '"') {
+                string = true;
+                if (depth == 1 && start < 0) {
+                    start = index;
+                }
+            } else if (current == '{' || current == '[') {
+                if (depth == 1 && start < 0) {
+                    start = index;
+                }
+                depth++;
+            } else if (current == '}' || current == ']') {
+                depth--;
+                if (depth == 0 && start >= 0) {
+                    elements.add(raw.substring(start, index).trim());
+                }
+            } else if (current == ',' && depth == 1) {
+                elements.add(raw.substring(start, index).trim());
+                start = -1;
+            } else if (depth == 1 && start < 0 && !Character.isWhitespace(current)) {
+                start = index;
+            }
+        }
+        return elements;
+    }
+
+    /** The raw text of a raw JSON object's top-level {@code key}'s value. */
+    static String field(String raw, String key) {
+        List<String> keys = keys(raw);
+        String object = raw.trim();
+        List<String> values = elements("[" + object.substring(1, object.length() - 1) + "]");
+        for (int index = 0; index < keys.size(); index++) {
+            if (keys.get(index).equals(key)) {
+                String pair = values.get(index);
+                return pair.substring(pair.indexOf(':', pair.indexOf('"', 1) + 1) + 1).trim();
+            }
+        }
+        throw new AssertionError("no " + key + " in " + raw);
+    }
+
     /**
      * Two JSON texts are the same value: same keys (absent distinct from
      * null), same values, key order ignored, array order kept.

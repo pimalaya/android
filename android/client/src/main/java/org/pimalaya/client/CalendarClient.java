@@ -23,16 +23,7 @@ public class CalendarClient {
 
         List<Calendar> calendars = new ArrayList<>(reply.length());
         for (int index = 0; index < reply.length(); index++) {
-            JSONObject calendar = Json.object(reply, index);
-            calendars.add(
-                    new Calendar(
-                            Json.string(calendar, "id"),
-                            Json.string(calendar, "name"),
-                            Json.string(calendar, "url"),
-                            Json.optString(calendar, "description"),
-                            Json.optString(calendar, "color"),
-                            calendar.optString("role"),
-                            calendar.optBoolean("writable", true)));
+            calendars.add(Calendar.from(Json.object(reply, index)));
         }
         return calendars;
     }
@@ -49,7 +40,7 @@ public class CalendarClient {
      */
     public EventDelta syncEvents(
             Transport transport, Account account, String calendarUrl, String cursor) {
-        JSONObject reply =
+        return EventDelta.from(
                 Replies.object(
                         Native.syncEvents(
                                 transport,
@@ -57,21 +48,7 @@ public class CalendarClient {
                                 calendarUrl,
                                 account.login,
                                 account.password,
-                                cursor == null ? "" : cursor));
-
-        JSONArray listed = reply.optJSONArray("changed");
-        List<EventRef> changed = new ArrayList<>(listed == null ? 0 : listed.length());
-        for (int index = 0; listed != null && index < listed.length(); index++) {
-            JSONObject event = Json.object(listed, index);
-            changed.add(new EventRef(Json.string(event, "id"), Json.optString(event, "etag")));
-        }
-
-        return new EventDelta(
-                changed,
-                events(reply.optJSONArray("bodies")),
-                Json.strings(reply.optJSONArray("vanished")),
-                Json.optString(reply, "token"),
-                reply.optBoolean("complete"));
+                                cursor == null ? "" : cursor)));
     }
 
     /** The iCalendar text of the named events, in one round. */
@@ -80,7 +57,7 @@ public class CalendarClient {
         if (ids.isEmpty()) {
             return List.of();
         }
-        return events(
+        return Event.list(
                 Replies.array(
                         Native.multigetEvents(
                                 transport,
@@ -89,23 +66,6 @@ public class CalendarClient {
                                 account.login,
                                 account.password,
                                 new JSONArray(ids).toString())));
-    }
-
-    /** The events of a reply's array, none for a missing one. */
-    private static List<Event> events(JSONArray reply) {
-        if (reply == null) {
-            return List.of();
-        }
-        List<Event> events = new ArrayList<>(reply.length());
-        for (int index = 0; index < reply.length(); index++) {
-            JSONObject event = Json.object(reply, index);
-            events.add(
-                    new Event(
-                            Json.string(event, "id"),
-                            Json.optString(event, "etag"),
-                            Json.string(event, "ical")));
-        }
-        return events;
     }
 
     /**
@@ -120,30 +80,9 @@ public class CalendarClient {
 
         List<Occurrence> occurrences = new ArrayList<>(reply.length());
         for (int index = 0; index < reply.length(); index++) {
-            JSONObject occurrence = Json.object(reply, index);
-            occurrences.add(
-                    new Occurrence(
-                            Json.string(occurrence, "component"),
-                            eventTime(occurrence.optJSONObject("start")),
-                            eventTime(occurrence.optJSONObject("end")),
-                            eventTime(occurrence.optJSONObject("recurrenceId")),
-                            Json.string(occurrence, "summary"),
-                            Json.string(occurrence, "location"),
-                            occurrence.optBoolean("allDay")));
+            occurrences.add(Occurrence.from(Json.object(reply, index)));
         }
         return occurrences;
-    }
-
-    /** One time of a reply, null for a missing one. */
-    private static EventTime eventTime(JSONObject time) {
-        if (time == null) {
-            return null;
-        }
-        return new EventTime(
-                time.optString("time"),
-                time.optString("kind"),
-                time.optString("tzid"),
-                time.isNull("offset") ? null : time.optInt("offset"));
     }
 
     /**
@@ -154,42 +93,8 @@ public class CalendarClient {
      * account.
      */
     public static EventDetail readEvent(String ical, String recurrenceId) {
-        JSONObject reply =
-                Replies.object(Native.readEvent(ical, recurrenceId == null ? "" : recurrenceId));
-
-        JSONArray listed = reply.optJSONArray("attendees");
-        List<EventDetail.Attendee> attendees = new ArrayList<>(listed == null ? 0 : listed.length());
-        for (int index = 0; listed != null && index < listed.length(); index++) {
-            JSONObject attendee = Json.object(listed, index);
-            attendees.add(
-                    new EventDetail.Attendee(
-                            attendee.optString("name"),
-                            attendee.optString("address"),
-                            attendee.optString("status")));
-        }
-
-        return new EventDetail(
-                reply.optString("component"),
-                reply.optString("uid"),
-                reply.optString("summary"),
-                reply.optString("description"),
-                reply.optString("location"),
-                reply.optString("url"),
-                reply.optString("status"),
-                reply.optString("categories"),
-                eventTime(reply.optJSONObject("start")),
-                eventTime(reply.optJSONObject("end")),
-                eventTime(reply.optJSONObject("due")),
-                eventTime(reply.optJSONObject("completed")),
-                reply.optBoolean("allDay"),
-                reply.optString("recurrence"),
-                reply.optString("priority"),
-                reply.optString("percentComplete"),
-                reply.optString("organizer"),
-                attendees,
-                reply.optString("created"),
-                reply.optString("lastModified"),
-                eventTime(reply.optJSONObject("recurrenceId")));
+        return EventDetail.from(
+                Replies.object(Native.readEvent(ical, recurrenceId == null ? "" : recurrenceId)));
     }
 
     /**
@@ -220,58 +125,31 @@ public class CalendarClient {
      * when none was agreed). Pure computation, no transport.
      */
     public static EventMerge mergeEvent(String base, String local, String remote) {
-        JSONObject reply = Replies.object(Native.mergeEvent(base == null ? "" : base, local, remote));
-
-        JSONArray listed = reply.optJSONArray("conflicts");
-        List<EventMerge.Conflict> conflicts =
-                new ArrayList<>(listed == null ? 0 : listed.length());
-        for (int index = 0; listed != null && index < listed.length(); index++) {
-            JSONObject conflict = Json.object(listed, index);
-            JSONArray offered = conflict.optJSONArray("choices");
-            List<EventMerge.Choice> choices =
-                    new ArrayList<>(offered == null ? 0 : offered.length());
-            for (int at = 0; offered != null && at < offered.length(); at++) {
-                JSONObject choice = Json.object(offered, at);
-                choices.add(
-                        new EventMerge.Choice(
-                                choice.optString("side"),
-                                choice.optString("value"),
-                                eventTime(choice.optJSONObject("time")),
-                                eventTime(choice.optJSONObject("end"))));
-            }
-            conflicts.add(
-                    new EventMerge.Conflict(
-                            conflict.optInt("id"),
-                            conflict.optString("kind"),
-                            conflict.optString("component"),
-                            eventTime(conflict.optJSONObject("recurrenceId")),
-                            conflict.optString("field"),
-                            Json.optString(conflict, "series"),
-                            choices));
-        }
-
-        return new EventMerge(Json.string(reply, "ical"), reply.optBoolean("resolved"), conflicts);
+        return EventMerge.from(
+                Replies.object(Native.mergeEvent(base == null ? "" : base, local, remote)));
     }
 
     /**
      * The resolution of a conflicted calendar object: its merge, each
-     * conflict {@code picks} names by its id taking that side
-     * ({@link EventMerge#LOCAL} or {@link EventMerge#REMOTE}), every other
+     * conflict {@code picks} names by its id taking that side, every other
      * the side it was pre-filled with. Pure computation, no transport.
      */
-    public static String resolveEvent(
-            String base, String local, String remote, Map<Integer, String> picks) {
+    public static String resolveEvent(EventSides bodies, Map<Integer, EventSide> picks) {
         JSONObject sides = new JSONObject();
         try {
-            for (Map.Entry<Integer, String> pick : picks.entrySet()) {
-                sides.put(String.valueOf(pick.getKey()), pick.getValue());
+            for (Map.Entry<Integer, EventSide> pick : picks.entrySet()) {
+                sides.put(String.valueOf(pick.getKey()), pick.getValue().wire());
             }
         } catch (JSONException error) {
             throw new PimalayaException("Unwritable picks: " + error.getMessage());
         }
 
         String resolved =
-                Native.resolveEvent(base == null ? "" : base, local, remote, sides.toString())
+                Native.resolveEvent(
+                                bodies.base() == null ? "" : bodies.base(),
+                                bodies.local(),
+                                bodies.remote(),
+                                sides.toString())
                         .trim();
         // NOTE: an object is the bridge's error shape here, as in writeEvent.
         if (resolved.startsWith("{")) {
@@ -288,8 +166,7 @@ public class CalendarClient {
      * computation, no transport.
      */
     public static EventSplit splitEvent(String ical, String edit) {
-        JSONObject reply = Replies.object(Native.splitEvent(ical, edit));
-        return new EventSplit(Json.string(reply, "master"), Json.optString(reply, "series"));
+        return EventSplit.from(Replies.object(Native.splitEvent(ical, edit)));
     }
 
     /**
@@ -317,29 +194,23 @@ public class CalendarClient {
      * <p>Guarded on purpose: a calendar is shared, and an unguarded PUT
      * is how one client silently overwrites another's edit.
      *
-     * <p>{@code address} is the account's: a backend that announces a
-     * write to the attendees only when asked (Google, JMAP) asks for a
-     * meeting it names the organizer of.
+     * <p>The target's {@code address} is the account's: a backend that
+     * announces a write to the attendees only when asked (Google, JMAP)
+     * asks for a meeting it names the organizer of.
      */
     public String updateEvent(
-            Transport transport,
-            Account account,
-            String calendarUrl,
-            String id,
-            String ical,
-            String etag,
-            String address) {
+            Transport transport, Account account, EventTarget target, String ical) {
         String reply =
                 Native.updateEvent(
                         transport,
                         account.baseUrl,
-                        calendarUrl,
+                        target.calendarUrl(),
                         account.login,
                         account.password,
-                        id,
+                        target.id(),
                         ical,
-                        etag == null ? "" : etag,
-                        address == null ? "" : address);
+                        target.etag() == null ? "" : target.etag(),
+                        target.address() == null ? "" : target.address());
 
         return Replies.etag(reply);
     }
@@ -351,14 +222,16 @@ public class CalendarClient {
      * empty for a date or a floating start). Pure computation, no
      * transport.
      */
-    public static String newEvent(
-            String component,
-            String uid,
-            String stamp,
-            String start,
-            String tzid,
-            String vtimezone) {
-        String created = Native.newEvent(component, uid, stamp, start, tzid, vtimezone).trim();
+    public static String newEvent(EventDraft draft) {
+        String created =
+                Native.newEvent(
+                                draft.component(),
+                                draft.uid(),
+                                draft.stamp(),
+                                draft.start(),
+                                draft.tzid(),
+                                draft.vtimezone())
+                        .trim();
 
         // NOTE: an object is the bridge's error shape here too, for the
         // same reason it is in writeEvent.
@@ -373,27 +246,22 @@ public class CalendarClient {
      * Files a new object in a calendar, guarded on the resource not
      * existing, and returns where it landed: the name asked for, or the
      * one a backend that names its own resources (Graph) gave it, with
-     * its ETag. {@code address} is the account's, as
-     * {@link #updateEvent} takes it.
+     * its ETag. The target's {@code address} is the account's, as
+     * {@link #updateEvent} takes it; its ETag is not read.
      */
     public EventRef createEvent(
-            Transport transport,
-            Account account,
-            String calendarUrl,
-            String id,
-            String ical,
-            String address) {
+            Transport transport, Account account, EventTarget target, String ical) {
         JSONObject created =
                 Replies.object(
                         Native.createEvent(
                                 transport,
                                 account.baseUrl,
-                                calendarUrl,
+                                target.calendarUrl(),
                                 account.login,
                                 account.password,
-                                id,
+                                target.id(),
                                 ical,
-                                address == null ? "" : address));
+                                target.address() == null ? "" : target.address()));
         try {
             return new EventRef(
                     created.getString("id"),
@@ -405,26 +273,20 @@ public class CalendarClient {
 
     /**
      * Removes one object from its calendar, guarded by the ETag it was
-     * read with, for the same reason the update is. {@code address} is the
-     * account's, as {@link #updateEvent} takes it.
+     * read with, for the same reason the update is. The target's
+     * {@code address} is the account's, as {@link #updateEvent} takes it.
      */
-    public void deleteEvent(
-            Transport transport,
-            Account account,
-            String calendarUrl,
-            String id,
-            String etag,
-            String address) {
+    public void deleteEvent(Transport transport, Account account, EventTarget target) {
         Replies.object(
                 Native.deleteEvent(
                         transport,
                         account.baseUrl,
-                        calendarUrl,
+                        target.calendarUrl(),
                         account.login,
                         account.password,
-                        id,
-                        etag == null ? "" : etag,
-                        address == null ? "" : address));
+                        target.id(),
+                        target.etag() == null ? "" : target.etag(),
+                        target.address() == null ? "" : target.address()));
     }
 
     /**

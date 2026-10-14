@@ -38,6 +38,7 @@ import org.pimalaya.calendar.CalendarMapping.Row;
 import org.pimalaya.calendar.CalendarMapping.Write;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventTime;
+import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
@@ -525,7 +526,7 @@ final class CalendarRemote implements PhoneSpoke {
     private static void zones(Object node, Set<String> out) {
         if (node instanceof JSONObject) {
             JSONObject object = (JSONObject) node;
-            if (EventTime.ZONED.equals(object.optString("kind"))) {
+            if (EventTimeKind.ZONED.wire().equals(object.optString("kind"))) {
                 out.add(object.optString("tzid"));
             }
             for (Iterator<String> keys = object.keys(); keys.hasNext(); ) {
@@ -975,7 +976,7 @@ final class CalendarRemote implements PhoneSpoke {
         }
         JSONObject view = CalendarClient.projectEvent(body, now());
         StringBuilder out = new StringBuilder();
-        if (view.toString().contains("\"kind\":\"" + EventTime.FLOATING + "\"")) {
+        if (view.toString().contains("\"kind\":\"" + EventTimeKind.FLOATING.wire() + "\"")) {
             out.append("zone=").append(ZoneId.systemDefault().getId());
         }
         if (view.optBoolean("listed")) {

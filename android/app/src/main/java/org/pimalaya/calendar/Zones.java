@@ -1,6 +1,7 @@
 package org.pimalaya.calendar;
 
 import org.pimalaya.client.EventTime;
+import org.pimalaya.client.EventTimeKind;
 
 import java.time.DateTimeException;
 import java.time.DayOfWeek;
@@ -274,11 +275,13 @@ public final class Zones {
      */
     static ZoneId zoneFor(List<EventTime> span, ZoneId device) {
         EventTime first = span.isEmpty() ? null : span.get(0);
-        if (first == null || !EventTime.ZONED.equals(first.kind)) {
-            return first != null && EventTime.UTC.equals(first.kind) ? ZoneOffset.UTC : device;
+        if (first == null || !EventTimeKind.ZONED.equals(first.kind())) {
+            return first != null && EventTimeKind.UTC.equals(first.kind())
+                    ? ZoneOffset.UTC
+                    : device;
         }
 
-        ZoneId named = zoneOf(first.tzid);
+        ZoneId named = zoneOf(first.tzid());
         if (named != null) {
             return named;
         }
@@ -304,11 +307,12 @@ public final class Zones {
     private static boolean matches(ZoneId zone, List<EventTime> span) {
         boolean any = false;
         for (EventTime time : span) {
-            if (time.offset == null || time.isDate()) {
+            if (time.offset() == null || time.isDate()) {
                 continue;
             }
-            Instant instant = civil(time.time).toInstant(ZoneOffset.ofTotalSeconds(time.offset));
-            if (zone.getRules().getOffset(instant).getTotalSeconds() != time.offset) {
+            Instant instant =
+                    civil(time.time()).toInstant(ZoneOffset.ofTotalSeconds(time.offset()));
+            if (zone.getRules().getOffset(instant).getTotalSeconds() != time.offset()) {
                 return false;
             }
             any = true;
@@ -335,17 +339,17 @@ public final class Zones {
      */
     static long instant(EventTime time, ZoneId reader) {
         if (time.isDate()) {
-            return civil(time.time).toLocalDate().atStartOfDay(reader).toInstant().toEpochMilli();
+            return civil(time.time()).toLocalDate().atStartOfDay(reader).toInstant().toEpochMilli();
         }
 
-        LocalDateTime local = civil(time.time);
-        if (EventTime.UTC.equals(time.kind)) {
+        LocalDateTime local = civil(time.time());
+        if (EventTimeKind.UTC.equals(time.kind())) {
             return local.toInstant(ZoneOffset.UTC).toEpochMilli();
         }
 
-        ZoneId zone = EventTime.ZONED.equals(time.kind) ? zoneOf(time.tzid) : null;
-        if (zone == null && EventTime.ZONED.equals(time.kind) && time.offset != null) {
-            zone = ZoneOffset.ofTotalSeconds(time.offset);
+        ZoneId zone = EventTimeKind.ZONED.equals(time.kind()) ? zoneOf(time.tzid()) : null;
+        if (zone == null && EventTimeKind.ZONED.equals(time.kind()) && time.offset() != null) {
+            zone = ZoneOffset.ofTotalSeconds(time.offset());
         }
         return ZonedDateTime.ofLocal(local, zone == null ? reader : zone, null)
                 .toInstant()
@@ -360,22 +364,23 @@ public final class Zones {
         Instant moment = Instant.ofEpochMilli(instant);
         if (like.isDate()) {
             return new EventTime(stamp(moment.atZone(reader).toLocalDateTime(), true),
-                    EventTime.DATE, "", null);
+                    EventTimeKind.DATE, "", null);
         }
 
         ZoneId zone = reader;
-        if (EventTime.UTC.equals(like.kind)) {
+        if (EventTimeKind.UTC.equals(like.kind())) {
             zone = ZoneOffset.UTC;
-        } else if (EventTime.ZONED.equals(like.kind)) {
-            ZoneId named = zoneOf(like.tzid);
+        } else if (EventTimeKind.ZONED.equals(like.kind())) {
+            ZoneId named = zoneOf(like.tzid());
             if (named != null) {
                 zone = named;
-            } else if (like.offset != null) {
-                zone = ZoneOffset.ofTotalSeconds(like.offset);
+            } else if (like.offset() != null) {
+                zone = ZoneOffset.ofTotalSeconds(like.offset());
             }
         }
         return new EventTime(
-                stamp(moment.atZone(zone).toLocalDateTime(), false), like.kind, like.tzid, null);
+                stamp(moment.atZone(zone).toLocalDateTime(), false), like.kind(), like.tzid(),
+                null);
     }
 
     /** An instant as a UTC {@code YYYYMMDDTHHMMSSZ} stamp. */

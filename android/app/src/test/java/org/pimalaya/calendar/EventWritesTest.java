@@ -15,6 +15,7 @@ import org.pimalaya.client.Calendar;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.EventSides;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mutation;
@@ -227,7 +228,8 @@ public class EventWritesTest {
                         entry("Planning", "20260201T100000Z"),
                         entry("Retro", "20260201T110000Z"));
         String resolved =
-                CalendarClient.resolveEvent(settling.base, settling.local, settling.remote, Map.of());
+                CalendarClient.resolveEvent(
+                        new EventSides(settling.base, settling.local, settling.remote), Map.of());
         String edited = new JSONObject().put("scope", "all").put("stamp", STAMP).toString();
 
         writes.save(

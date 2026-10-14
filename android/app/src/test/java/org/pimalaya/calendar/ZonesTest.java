@@ -8,7 +8,9 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.EventDraft;
 import org.pimalaya.client.EventTime;
+import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.client.Occurrence;
 import org.robolectric.RobolectricTestRunner;
 
@@ -39,14 +41,14 @@ public class ZonesTest {
     }
 
     private static EventTime zoned(String time, String tzid) {
-        return new EventTime(time, EventTime.ZONED, tzid, null);
+        return new EventTime(time, EventTimeKind.ZONED, tzid, null);
     }
 
     @Test
     public void aUtcTimeIsReadAsUtcAndShownAtTheReadersHour() {
         // The delta's scenario: a Graph event at 08:00 UTC, the device in
         // Paris in summer, shows at 10:00.
-        EventTime graph = new EventTime("20260706T080000", EventTime.UTC, "", null);
+        EventTime graph = new EventTime("20260706T080000", EventTimeKind.UTC, "", null);
         long instant = Zones.instant(graph, PARIS);
 
         assertEquals(at("2026-07-06T08:00:00Z"), instant);
@@ -94,15 +96,15 @@ public class ZonesTest {
     @Test
     public void aZoneTheDatabaseCannotNameIsReadAtTheOffsetItsObjectGave() {
         EventTime custom =
-                new EventTime("20260706T090000", EventTime.ZONED, "/example.org/Romance", 7200);
+                new EventTime("20260706T090000", EventTimeKind.ZONED, "/example.org/Romance", 7200);
 
         assertEquals(at("2026-07-06T07:00:00Z"), Zones.instant(custom, ZoneOffset.UTC));
     }
 
     @Test
     public void aFloatingTimeAndADateAreReadOnTheReadersClock() {
-        EventTime floating = new EventTime("20260706T090000", EventTime.FLOATING, "", null);
-        EventTime day = new EventTime("20260706", EventTime.DATE, "", null);
+        EventTime floating = new EventTime("20260706T090000", EventTimeKind.FLOATING, "", null);
+        EventTime day = new EventTime("20260706", EventTimeKind.DATE, "", null);
 
         assertEquals(at("2026-07-06T07:00:00Z"), Zones.instant(floating, PARIS));
         assertEquals(at("2026-07-06T09:00:00Z"), Zones.instant(floating, ZoneOffset.UTC));
@@ -129,13 +131,13 @@ public class ZonesTest {
         EventTime york = zoned("20260706T090000", "America/New_York");
         EventTime moved = Zones.at(at("2026-07-06T14:00:00Z"), york, PARIS);
 
-        assertEquals("20260706T100000", moved.time);
-        assertEquals(EventTime.ZONED, moved.kind);
-        assertEquals("America/New_York", moved.tzid);
+        assertEquals("20260706T100000", moved.time());
+        assertEquals(EventTimeKind.ZONED, moved.kind());
+        assertEquals("America/New_York", moved.tzid());
 
-        EventTime like = new EventTime("", EventTime.UTC, "", null);
+        EventTime like = new EventTime("", EventTimeKind.UTC, "", null);
         EventTime utc = Zones.at(at("2026-07-06T14:00:00Z"), like, PARIS);
-        assertEquals("20260706T140000", utc.time);
+        assertEquals("20260706T140000", utc.time());
         assertEquals("20260706T140000Z", Zones.utc(at("2026-07-06T14:00:00Z")));
     }
 
@@ -202,12 +204,13 @@ public class ZonesTest {
 
             String ical =
                     CalendarClient.newEvent(
-                            "VEVENT",
-                            "z",
-                            "20260101T000000Z",
-                            "20260101T000000",
-                            id,
-                            Zones.vtimezone(zone, since.toEpochMilli()));
+                            new EventDraft(
+                                    "VEVENT",
+                                    "z",
+                                    "20260101T000000Z",
+                                    "20260101T000000",
+                                    id,
+                                    Zones.vtimezone(zone, since.toEpochMilli())));
             String series =
                     ical.replace(
                             "DTSTART;TZID=" + id + ":20260101T000000\r\n",
@@ -218,14 +221,14 @@ public class ZonesTest {
                     CalendarClient.expandEvent(series, "20250101T000000", "20290101T000000");
             assertTrue(id, found.size() > samples.size() / 2);
             for (Occurrence occurrence : found) {
-                LocalDateTime local = Zones.civil(occurrence.start.time);
+                LocalDateTime local = Zones.civil(occurrence.start().time());
                 if (rules.getValidOffsets(local).size() != 1) {
                     continue;
                 }
                 assertEquals(
-                        id + " " + occurrence.start.time,
+                        id + " " + occurrence.start().time(),
                         (Integer) rules.getOffset(local).getTotalSeconds(),
-                        occurrence.start.offset);
+                        occurrence.start().offset());
             }
         }
     }
@@ -235,8 +238,8 @@ public class ZonesTest {
         // Summer and winter in Paris, under a name no database knows.
         List<EventTime> span =
                 List.of(
-                        new EventTime("20260706T090000", EventTime.ZONED, "Romance", 7200),
-                        new EventTime("20261106T090000", EventTime.ZONED, "Romance", 3600));
+                        new EventTime("20260706T090000", EventTimeKind.ZONED, "Romance", 7200),
+                        new EventTime("20261106T090000", EventTimeKind.ZONED, "Romance", 3600));
         ZoneId tokyo = ZoneId.of("Asia/Tokyo");
 
         assertEquals(PARIS, Zones.zoneFor(span, PARIS));
@@ -252,7 +255,7 @@ public class ZonesTest {
         List<EventTime> odd =
                 List.of(
                         new EventTime(
-                                "20260706T090000", EventTime.ZONED, "Odd", 7 * 3600 + 17 * 60));
+                                "20260706T090000", EventTimeKind.ZONED, "Odd", 7 * 3600 + 17 * 60));
         assertEquals(tokyo, Zones.zoneFor(odd, tokyo));
 
         // A name the database knows is that zone, and UTC is UTC.
@@ -262,7 +265,8 @@ public class ZonesTest {
         assertEquals(
                 ZoneOffset.UTC,
                 Zones.zoneFor(
-                        List.of(new EventTime("20260706T090000", EventTime.UTC, "", null)), tokyo));
+                        List.of(new EventTime("20260706T090000", EventTimeKind.UTC, "", null)),
+                        tokyo));
     }
 
     private static int count(String text, String part) {

@@ -124,7 +124,7 @@ public final class CalendarList {
             this.occurrence = occurrence;
             this.event = event;
             this.calendar = calendar;
-            this.start = Zones.instant(occurrence.start);
+            this.start = Zones.instant(occurrence.start());
         }
     }
 
@@ -332,8 +332,8 @@ public final class CalendarList {
      * instant falls on.
      */
     private static String dayOf(Row row) {
-        if (row.occurrence.start.isDate()) {
-            return row.occurrence.start.time.substring(0, 8);
+        if (row.occurrence.start().isDate()) {
+            return row.occurrence.start().time().substring(0, 8);
         }
         return Zones.stamp(
                 Instant.ofEpochMilli(row.start).atZone(ZoneId.systemDefault()).toLocalDateTime(),
@@ -494,7 +494,7 @@ public final class CalendarList {
 
     /** When an occurrence starts, as its card's leading column says it. */
     private String startLabel(Row row) {
-        if (row.occurrence.allDay) {
+        if (row.occurrence.allDay()) {
             return host.getString(R.string.event_all_day);
         }
         return Dates.time(host, row.start);
@@ -559,11 +559,11 @@ public final class CalendarList {
      * span, which every journal entry and most to-dos are.
      */
     static String durationLabel(Context context, Occurrence occurrence) {
-        if (occurrence.allDay) {
+        if (occurrence.allDay()) {
             return context.getString(R.string.event_all_day);
         }
 
-        long seconds = secondsBetween(occurrence.start, occurrence.end);
+        long seconds = secondsBetween(occurrence.start(), occurrence.end());
         if (seconds <= 0) {
             return "";
         }
@@ -591,8 +591,8 @@ public final class CalendarList {
      * would be nonsense.
      */
     static String countdownLabel(Context context, Occurrence occurrence) {
-        long stamp = Zones.instant(occurrence.start);
-        return occurrence.allDay
+        long stamp = Zones.instant(occurrence.start());
+        return occurrence.allDay()
                 ? Dates.relativeDays(context, stamp)
                 : Dates.relative(context, stamp);
     }
@@ -642,9 +642,9 @@ public final class CalendarList {
 
             ((TextView) view.findViewById(R.id.event_summary))
                     .setText(
-                            occurrence.summary.isEmpty()
+                            occurrence.summary().isEmpty()
                                     ? host.getString(R.string.event_untitled)
-                                    : occurrence.summary);
+                                    : occurrence.summary());
             ((TextView) view.findViewById(R.id.event_start)).setText(startLabel(row));
             // The warning flag of an entry both sides edited, the contact
             // row's, on every occurrence of it: the page any of them opens
@@ -655,7 +655,7 @@ public final class CalendarList {
                             host.ui.resolveColor(android.R.attr.colorError)));
             conflicted.setVisibility(row.event.conflicted ? View.VISIBLE : View.GONE);
             // What kind of entry it is, by name, then how long it runs.
-            String kind = host.getString(componentName(occurrence.component));
+            String kind = host.getString(componentName(occurrence.component()));
             String duration = durationLabel(host, occurrence);
             ((TextView) view.findViewById(R.id.event_kind))
                     .setText(duration.isEmpty() ? kind : kind + " · " + duration);

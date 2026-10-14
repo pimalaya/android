@@ -25,6 +25,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.EventTime;
+import org.pimalaya.client.EventTimeKind;
 import org.pimalaya.pimdir.PimdirHash;
 
 /**
@@ -192,8 +193,8 @@ final class CalendarMapping {
         String zone;
         String endZone;
         if (allDay) {
-            from = day(start.time);
-            until = day(end.time);
+            from = day(start.time());
+            until = day(end.time());
             if (until <= from) {
                 until = from + DAY;
             }
@@ -204,7 +205,7 @@ final class CalendarMapping {
             from = Zones.instant(start, phone.device);
             until = Zones.instant(end, phone.device);
             endZone =
-                    end.kind.equals(start.kind) && end.tzid.equals(start.tzid)
+                    end.kind().equals(start.kind()) && end.tzid().equals(start.tzid())
                             ? zone
                             : id(Zones.zoneFor(List.of(end), phone.device));
         }
@@ -326,12 +327,12 @@ final class CalendarMapping {
      */
     static long aligned(EventTime value, EventTime start, ZoneId device) {
         if (start.isDate()) {
-            return day(value.time);
+            return day(value.time());
         }
         if (value.isDate()) {
             EventTime at =
-                    new EventTime(value.time + start.time.substring(8), start.kind, start.tzid,
-                            start.offset);
+                    new EventTime(value.time() + start.time().substring(8), start.kind(),
+                            start.tzid(), start.offset());
             return Zones.instant(at, device);
         }
         return Zones.instant(value, device);
@@ -575,7 +576,8 @@ final class CalendarMapping {
         }
         String tzid = recurrenceId.optString("tzid");
         String time = recurrenceId.optString("time");
-        String wire = EventTime.UTC.equals(recurrenceId.optString("kind")) ? time + "Z" : time;
+        String wire =
+                EventTimeKind.UTC.wire().equals(recurrenceId.optString("kind")) ? time + "Z" : time;
         return tzid.isEmpty() ? wire : tzid + ":" + wire;
     }
 
@@ -1092,10 +1094,11 @@ final class CalendarMapping {
         }
         String kind = like == null ? "" : like.optString("kind");
         String civil = Zones.stamp(local(millis, zoneNamed(tz, ZoneOffset.UTC)), false);
-        if (EventTime.FLOATING.equals(kind)) {
+        if (EventTimeKind.FLOATING.wire().equals(kind)) {
             return "civil " + civil;
         }
-        if (EventTime.ZONED.equals(kind) && Zones.zoneOf(like.optString("tzid")) == null) {
+        if (EventTimeKind.ZONED.wire().equals(kind)
+                && Zones.zoneOf(like.optString("tzid")) == null) {
             return "instant " + Math.floorDiv(millis, 1000L);
         }
         return "civil " + civil + " " + id(zoneNamed(tz, ZoneOffset.UTC));
@@ -1133,19 +1136,19 @@ final class CalendarMapping {
             ZoneId device) throws JSONException {
         if (allDay) {
             return json(new EventTime(Zones.stamp(local(millis, ZoneOffset.UTC), true),
-                    EventTime.DATE, "", null));
+                    EventTimeKind.DATE, "", null));
         }
         ZoneId zone = zoneNamed(tz, device);
         String civil = Zones.stamp(local(millis, zone), false);
         String kind = like == null ? "" : like.optString("kind");
         boolean kept = tz.equals(likeZone);
 
-        if (EventTime.FLOATING.equals(kind) && (kept || zone.equals(device))) {
-            return json(new EventTime(civil, EventTime.FLOATING, "", null));
+        if (EventTimeKind.FLOATING.wire().equals(kind) && (kept || zone.equals(device))) {
+            return json(new EventTime(civil, EventTimeKind.FLOATING, "", null));
         }
-        if (EventTime.ZONED.equals(kind) && kept) {
+        if (EventTimeKind.ZONED.wire().equals(kind) && kept) {
             String tzid = like.optString("tzid");
-            JSONObject time = json(new EventTime(civil, EventTime.ZONED, tzid, null));
+            JSONObject time = json(new EventTime(civil, EventTimeKind.ZONED, tzid, null));
             if (Zones.zoneOf(tzid) == null) {
                 time.put("instant", Zones.utc(millis));
             }
@@ -1153,9 +1156,10 @@ final class CalendarMapping {
         }
         if (isUtc(zone)) {
             return json(new EventTime(
-                    Zones.stamp(local(millis, ZoneOffset.UTC), false), EventTime.UTC, "", null));
+                    Zones.stamp(local(millis, ZoneOffset.UTC), false), EventTimeKind.UTC, "",
+                    null));
         }
-        return json(new EventTime(civil, EventTime.ZONED, zone.getId(), null));
+        return json(new EventTime(civil, EventTimeKind.ZONED, zone.getId(), null));
     }
 
     /** An instant of a series' dates, in the series' start's zone and kind. */
@@ -1163,12 +1167,12 @@ final class CalendarMapping {
             throws JSONException {
         if (allDay || start == null) {
             return json(new EventTime(Zones.stamp(local(instant, ZoneOffset.UTC), true),
-                    EventTime.DATE, "", null));
+                    EventTimeKind.DATE, "", null));
         }
         EventTime like = time(start);
         EventTime at = Zones.at(instant, like, device);
-        JSONObject time = json(new EventTime(at.time, at.kind, at.tzid, like.offset));
-        if (EventTime.ZONED.equals(like.kind) && Zones.zoneOf(like.tzid) == null) {
+        JSONObject time = json(new EventTime(at.time(), at.kind(), at.tzid(), like.offset()));
+        if (EventTimeKind.ZONED.equals(like.kind()) && Zones.zoneOf(like.tzid()) == null) {
             time.put("instant", Zones.utc(instant));
         }
         return time;
@@ -1187,7 +1191,7 @@ final class CalendarMapping {
                 end == null
                         ? 0
                         : start.isDate()
-                                ? day(end.time) - day(start.time)
+                                ? day(end.time()) - day(start.time())
                                 : Zones.instant(end, device) - Zones.instant(start, device);
 
         JSONObject instance = copy(master);
@@ -1267,20 +1271,21 @@ final class CalendarMapping {
         if (allDay) {
             return civil.substring(0, 8);
         }
-        String kind = start == null ? EventTime.UTC : start.optString("kind");
+        String kind = start == null ? EventTimeKind.UTC.wire() : start.optString("kind");
         // NOTE: a date bounds every instance of its day.
         if (civil.length() == 8) {
             civil = civil + "T235959";
             utc = false;
         }
-        if (EventTime.FLOATING.equals(kind)) {
+        if (EventTimeKind.FLOATING.wire().equals(kind)) {
             return utc ? Zones.stamp(local(utcMillis(civil), device), false) : civil;
         }
         if (utc) {
             return civil + "Z";
         }
         EventTime local =
-                new EventTime(civil, kind, start == null ? "" : start.optString("tzid"),
+                new EventTime(civil, EventTimeKind.of(kind),
+                        start == null ? "" : start.optString("tzid"),
                         start == null || start.isNull("offset") ? null : start.optInt("offset"));
         return Zones.utc(Zones.instant(local, device));
     }
@@ -1527,18 +1532,18 @@ final class CalendarMapping {
         }
         return new EventTime(
                 time.optString("time"),
-                time.optString("kind"),
+                EventTimeKind.of(time.optString("kind")),
                 time.optString("tzid"),
                 time.has("offset") && !time.isNull("offset") ? time.optInt("offset") : null);
     }
 
     static JSONObject json(EventTime time) throws JSONException {
         JSONObject json = new JSONObject();
-        json.put("time", time.time);
-        json.put("kind", time.kind);
-        json.put("tzid", time.tzid);
-        if (time.offset != null) {
-            json.put("offset", time.offset);
+        json.put("time", time.time());
+        json.put("kind", time.kind().wire());
+        json.put("tzid", time.tzid());
+        if (time.offset() != null) {
+            json.put("offset", time.offset());
         }
         return json;
     }

@@ -11,6 +11,7 @@ import org.pimalaya.client.Clients;
 import org.pimalaya.client.Event;
 import org.pimalaya.client.EventDelta;
 import org.pimalaya.client.EventRef;
+import org.pimalaya.client.EventTarget;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
@@ -194,30 +195,30 @@ public final class CalendarEngine extends PimdirEngine {
         long asked = System.nanoTime();
         EventDelta delta = clients.calendar().syncEvents(transport, account, urlOf(collection), cursor);
         remote(System.nanoTime() - asked);
-        listed(delta.changed.size());
+        listed(delta.changed().size());
 
         java.util.Map<String, Event> bodies = new java.util.HashMap<>();
-        for (Event event : delta.bodies) {
-            bodies.put(event.id, event);
+        for (Event event : delta.bodies()) {
+            bodies.put(event.id(), event);
         }
 
         JSONArray items = new JSONArray();
-        for (EventRef event : delta.changed) {
-            Event body = bodies.get(event.id);
+        for (EventRef event : delta.changed()) {
+            Event body = bodies.get(event.id());
             JSONObject item = body != null ? entry(body) : new JSONObject();
-            item.put("handle", event.id);
-            if (event.etag != null) {
-                item.put("revision", event.etag);
+            item.put("handle", event.id());
+            if (event.etag() != null) {
+                item.put("revision", event.etag());
             }
             items.put(item);
         }
 
         JSONObject reply = new JSONObject();
         reply.put("items", items);
-        reply.put("vanished", new JSONArray(delta.vanished));
-        reply.put("complete", delta.complete);
-        if (delta.token != null) {
-            reply.put("checkpoint", delta.token);
+        reply.put("vanished", new JSONArray(delta.vanished()));
+        reply.put("complete", delta.complete());
+        if (delta.token() != null) {
+            reply.put("checkpoint", delta.token());
         }
         return reply;
     }
@@ -253,20 +254,20 @@ public final class CalendarEngine extends PimdirEngine {
     /** One entry at its full tier, as a read or a whole listing hands it over. */
     private static JSONObject entry(Event event) throws JSONException {
         JSONObject item = new JSONObject();
-        item.put("handle", event.id);
+        item.put("handle", event.id());
         // The resource name is the identity: an entry is one object in
         // one calendar, and the UID inside it is what names the series
         // rather than the resource.
-        item.put("linkId", event.id);
-        item.put("hash", PimdirHash.of(event.ical));
-        item.put("body", event.ical);
+        item.put("linkId", event.id());
+        item.put("hash", PimdirHash.of(event.ical()));
+        item.put("body", event.ical());
         // NOTE: no key and no summary. What an agenda row shows needs the
         // recurrence expansion, which happens at render time against the
         // window being shown, so there is nothing to write here that a
         // listing could read.
         item.put("sortKey", "");
-        if (event.etag != null) {
-            item.put("revision", event.etag);
+        if (event.etag() != null) {
+            item.put("revision", event.etag());
         }
         return item;
     }
@@ -321,12 +322,10 @@ public final class CalendarEngine extends PimdirEngine {
                             clients.calendar().createEvent(
                                     transport,
                                     account,
-                                    url,
-                                    name,
-                                    row.getString("vcard"),
-                                    address);
+                                    new EventTarget(url, name, null, address),
+                                    row.getString("vcard"));
                     return result(
-                            handle, true, created.id, landed(url, created.id, created.etag));
+                            handle, true, created.id(), landed(url, created.id(), created.etag()));
                 } catch (RuntimeException failure) {
                     // The resource is already there, which `If-None-Match: *`
                     // is exactly what asks: the create is refused rather than
@@ -350,11 +349,8 @@ public final class CalendarEngine extends PimdirEngine {
                             clients.calendar().updateEvent(
                                     transport,
                                     account,
-                                    url,
-                                    handle,
-                                    row.getString("vcard"),
-                                    ifMatch,
-                                    address);
+                                    new EventTarget(url, handle, ifMatch, address),
+                                    row.getString("vcard"));
                     return result(handle, true, null, landed(url, handle, etag));
                 } catch (RuntimeException failure) {
                     if (isPreconditionFailure(failure)) {
@@ -376,7 +372,8 @@ public final class CalendarEngine extends PimdirEngine {
                     return result(handle, false, null, null);
                 }
                 try {
-                    clients.calendar().deleteEvent(transport, account, url, handle, ifMatch, address);
+                    clients.calendar().deleteEvent(
+                            transport, account, new EventTarget(url, handle, ifMatch, address));
                 } catch (RuntimeException failure) {
                     if (isGone(failure)) {
                         // Already gone upstream: the removal converged.
@@ -413,7 +410,7 @@ public final class CalendarEngine extends PimdirEngine {
         }
         try {
             List<Event> read = clients.calendar().multigetEvents(transport, account, url, List.of(id));
-            return read.isEmpty() ? null : read.get(0).etag;
+            return read.isEmpty() ? null : read.get(0).etag();
         } catch (RuntimeException failure) {
             Log.w("pimalaya", "revision of " + id + " not read back", failure);
             return null;

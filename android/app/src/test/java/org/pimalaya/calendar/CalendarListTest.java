@@ -9,6 +9,7 @@ import java.util.Locale;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.EventTime;
+import org.pimalaya.client.EventTimeKind;
 import org.robolectric.RobolectricTestRunner;
 
 /**
@@ -22,7 +23,7 @@ import org.robolectric.RobolectricTestRunner;
 public class CalendarListTest {
     /** A floating time, read on the device's clock. */
     private static EventTime local(String time) {
-        return new EventTime(time, EventTime.FLOATING, "", null);
+        return new EventTime(time, EventTimeKind.FLOATING, "", null);
     }
 
     @Test
@@ -39,8 +40,10 @@ public class CalendarListTest {
         assertEquals(
                 27000,
                 CalendarList.secondsBetween(
-                        new EventTime("20260105T180000", EventTime.ZONED, "America/New_York", null),
-                        new EventTime("20260106T073000", EventTime.ZONED, "Europe/Paris", null)));
+                        new EventTime(
+                                "20260105T180000", EventTimeKind.ZONED, "America/New_York", null),
+                        new EventTime(
+                                "20260106T073000", EventTimeKind.ZONED, "Europe/Paris", null)));
     }
 
     @Test

@@ -77,13 +77,13 @@ public final class EventStore {
         for (Calendar calendar : calendars) {
             listed.add(
                     new PimdirCollections.Stored(
-                            PimdirAccount.collectionId(account, calendar.url),
+                            PimdirAccount.collectionId(account, calendar.url()),
                             accountEmail,
-                            calendar.name,
-                            calendar.description,
-                            calendar.color,
-                            calendar.role,
-                            calendar.writable));
+                            calendar.name(),
+                            calendar.description(),
+                            calendar.color(),
+                            calendar.role(),
+                            calendar.writable()));
         }
         collections.replace(accountEmail, PimdirSummary.CALENDAR, listed);
     }

@@ -1,17 +1,71 @@
 package org.pimalaya.client;
 
+import java.util.ArrayList;
 import java.util.List;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
- * One calendar component read whole, for the page that shows it.
+ * One calendar component read whole, for the page that shows it
+ * (rs/calendar/read.rs {@code EventDetail} 30).
  *
  * <p>A projection rather than the object: everything RFC 5545 lets a
  * VEVENT, VTODO or VJOURNAL carry that a reader would look for, in the
  * one shape all three share, with the properties only one of them has
  * left empty by the other two. One class and not three, because the page
  * differs by which sections it draws and not by what it can be handed.
+ *
+ * @param component which of the three this is
+ * @param uid {@code UID}, the identity every replica of this shares
+ * @param summary its {@code SUMMARY}
+ * @param description its {@code DESCRIPTION}
+ * @param location its {@code LOCATION}
+ * @param url its {@code URL}
+ * @param status {@code STATUS}, as written: the vocabulary differs per
+ *     component
+ * @param categories {@code CATEGORIES}, comma separated
+ * @param start {@code DTSTART}, or the {@code DUE} placing a to-do
+ *     carrying none; null when neither
+ * @param end {@code DTEND}, null when absent; only an event has one
+ * @param due {@code DUE}, null when absent; only a to-do has one
+ * @param completed {@code COMPLETED}, always UTC, null when absent; only a
+ *     to-do has one
+ * @param allDay whether the placing date is a DATE rather than a DATE-TIME
+ * @param recurrence the series' {@code RRULE}, raw, empty when it does not
+ *     repeat
+ * @param priority its {@code PRIORITY}, as written
+ * @param percentComplete {@code PERCENT-COMPLETE}, as written; only a
+ *     to-do has one
+ * @param organizer {@code ORGANIZER}, the address alone
+ * @param attendees every {@code ATTENDEE}, in the order the object lists
+ *     them
+ * @param created its {@code CREATED}, raw
+ * @param lastModified its {@code LAST-MODIFIED}, raw
+ * @param recurrenceId the {@code RECURRENCE-ID} of the override read, null
+ *     when what was read is the series or an entry that does not recur
  */
-public final class EventDetail {
+public record EventDetail(
+        String component,
+        String uid,
+        String summary,
+        String description,
+        String location,
+        String url,
+        String status,
+        String categories,
+        EventTime start,
+        EventTime end,
+        EventTime due,
+        EventTime completed,
+        boolean allDay,
+        String recurrence,
+        String priority,
+        String percentComplete,
+        String organizer,
+        List<Attendee> attendees,
+        String created,
+        String lastModified,
+        EventTime recurrenceId) {
     /** The component's wire name: {@code VEVENT}. */
     public static final String EVENT = "VEVENT";
 
@@ -21,121 +75,51 @@ public final class EventDetail {
     /** The component's wire name: {@code VJOURNAL}. */
     public static final String JOURNAL = "VJOURNAL";
 
-    /** Which of the three this is. */
-    public final String component;
+    static EventDetail from(JSONObject reply) {
+        JSONArray listed = reply.optJSONArray("attendees");
+        List<Attendee> attendees = new ArrayList<>(listed == null ? 0 : listed.length());
+        for (int index = 0; listed != null && index < listed.length(); index++) {
+            attendees.add(Attendee.from(Json.object(listed, index)));
+        }
 
-    /** {@code UID}, the identity every replica of this shares. */
-    public final String uid;
-
-    public final String summary;
-    public final String description;
-    public final String location;
-    public final String url;
-
-    /** {@code STATUS}, as written: the vocabulary differs per component. */
-    public final String status;
-
-    /** {@code CATEGORIES}, comma separated. */
-    public final String categories;
-
-    /** {@code DTSTART}, or the {@code DUE} placing a to-do carrying none; null when neither. */
-    public final EventTime start;
-
-    /** {@code DTEND}, null when absent; only an event has one. */
-    public final EventTime end;
-
-    /** {@code DUE}, null when absent; only a to-do has one. */
-    public final EventTime due;
-
-    /** {@code COMPLETED}, always UTC, null when absent; only a to-do has one. */
-    public final EventTime completed;
-
-    /** Whether the placing date is a DATE rather than a DATE-TIME. */
-    public final boolean allDay;
-
-    /** The series' {@code RRULE}, raw, empty when it does not repeat. */
-    public final String recurrence;
-
-    public final String priority;
-
-    /** {@code PERCENT-COMPLETE}, as written; only a to-do has one. */
-    public final String percentComplete;
-
-    /** {@code ORGANIZER}, the address alone. */
-    public final String organizer;
-
-    /** Every {@code ATTENDEE}, in the order the object lists them. */
-    public final List<Attendee> attendees;
-
-    public final String created;
-    public final String lastModified;
-
-    /**
-     * The {@code RECURRENCE-ID} of the override read, null when what was
-     * read is the series or an entry that does not recur.
-     */
-    public final EventTime recurrenceId;
-
-    public EventDetail(
-            String component,
-            String uid,
-            String summary,
-            String description,
-            String location,
-            String url,
-            String status,
-            String categories,
-            EventTime start,
-            EventTime end,
-            EventTime due,
-            EventTime completed,
-            boolean allDay,
-            String recurrence,
-            String priority,
-            String percentComplete,
-            String organizer,
-            List<Attendee> attendees,
-            String created,
-            String lastModified,
-            EventTime recurrenceId) {
-        this.component = component;
-        this.uid = uid;
-        this.summary = summary;
-        this.description = description;
-        this.location = location;
-        this.url = url;
-        this.status = status;
-        this.categories = categories;
-        this.start = start;
-        this.end = end;
-        this.due = due;
-        this.completed = completed;
-        this.allDay = allDay;
-        this.recurrence = recurrence;
-        this.priority = priority;
-        this.percentComplete = percentComplete;
-        this.organizer = organizer;
-        this.attendees = attendees;
-        this.created = created;
-        this.lastModified = lastModified;
-        this.recurrenceId = recurrenceId;
+        return new EventDetail(
+                reply.optString("component"),
+                reply.optString("uid"),
+                reply.optString("summary"),
+                reply.optString("description"),
+                reply.optString("location"),
+                reply.optString("url"),
+                reply.optString("status"),
+                reply.optString("categories"),
+                EventTime.from(reply.optJSONObject("start")),
+                EventTime.from(reply.optJSONObject("end")),
+                EventTime.from(reply.optJSONObject("due")),
+                EventTime.from(reply.optJSONObject("completed")),
+                reply.optBoolean("allDay"),
+                reply.optString("recurrence"),
+                reply.optString("priority"),
+                reply.optString("percentComplete"),
+                reply.optString("organizer"),
+                attendees,
+                reply.optString("created"),
+                reply.optString("lastModified"),
+                EventTime.from(reply.optJSONObject("recurrenceId")));
     }
 
-    /** One attendee of a component: who, and where they stand. */
-    public static final class Attendee {
-        /** The {@code CN} parameter, empty when there is none. */
-        public final String name;
-
-        /** The calendar user address, {@code mailto:} stripped. */
-        public final String address;
-
-        /** The {@code PARTSTAT} parameter, empty when there is none. */
-        public final String status;
-
-        public Attendee(String name, String address, String status) {
-            this.name = name;
-            this.address = address;
-            this.status = status;
+    /**
+     * One attendee of a component: who, and where they stand
+     * (rs/calendar/read.rs {@code EventAttendee} 80).
+     *
+     * @param name the {@code CN} parameter, empty when there is none
+     * @param address the calendar user address, {@code mailto:} stripped
+     * @param status the {@code PARTSTAT} parameter, empty when there is none
+     */
+    public record Attendee(String name, String address, String status) {
+        static Attendee from(JSONObject attendee) {
+            return new Attendee(
+                    attendee.optString("name"),
+                    attendee.optString("address"),
+                    attendee.optString("status"));
         }
     }
 }

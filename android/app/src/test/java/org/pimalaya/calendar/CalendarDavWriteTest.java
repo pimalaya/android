@@ -17,6 +17,7 @@ import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Event;
 import org.pimalaya.client.EventDelta;
 import org.pimalaya.client.EventRef;
+import org.pimalaya.client.EventTarget;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.OfflineClient;
@@ -81,16 +82,16 @@ public class CalendarDavWriteTest {
 
         @Override
         public EventRef createEvent(
-                Transport transport, Account account, String calendarUrl, String id,
-                String ical, String address) {
+                Transport transport, Account account, EventTarget target, String ical) {
+            String id = target.id();
             entries.put(id, new String[] {"e" + ++revisions, ical});
             return new EventRef(id, null);
         }
 
         @Override
         public String updateEvent(
-                Transport transport, Account account, String calendarUrl, String id,
-                String ical, String etag, String address) {
+                Transport transport, Account account, EventTarget target, String ical) {
+            String id = target.id();
             String[] entry = entries.get(id);
             if (entry == null) {
                 throw new PimalayaException("not found: " + id, 404);
@@ -101,9 +102,8 @@ public class CalendarDavWriteTest {
         }
 
         @Override
-        public void deleteEvent(
-                Transport transport, Account account, String calendarUrl, String id,
-                String etag, String address) {
+        public void deleteEvent(Transport transport, Account account, EventTarget target) {
+            String id = target.id();
             if (entries.remove(id) == null) {
                 throw new PimalayaException("not found: " + id, 404);
             }

@@ -83,8 +83,8 @@ public final class CalendarPhonePass extends PhonePass {
             try {
                 EventMerge merge =
                         CalendarClient.mergeEvent(conflict.base, conflict.local, conflict.remote);
-                if (merge.resolved) {
-                    on.mutateEdit(collection, conflict.handle, merge.ical, null, "");
+                if (merge.resolved()) {
+                    on.mutateEdit(collection, conflict.handle, merge.ical(), null, "");
                     settled += 1;
                 }
             } catch (RuntimeException | JSONException failure) {
