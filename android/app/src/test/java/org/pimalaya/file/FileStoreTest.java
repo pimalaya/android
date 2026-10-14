@@ -331,7 +331,7 @@ public class FileStoreTest {
         stored("m1");
         ItemLinks links = new ItemLinks(RuntimeEnvironment.getApplication(), pimdir);
         ItemLinks.Link attachment =
-                links.links(new ItemLinks.Endpoint(PimdirSummary.MAIL, "m1")).get(0);
+                links.links(ItemLinks.of(PimdirSummary.MAIL, "m1")).get(0);
 
         // NOTE: the reader offers no unlink for it; a reference removed
         // anyway takes the stand-in, and storing the body records both again.

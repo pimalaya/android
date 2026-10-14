@@ -375,7 +375,7 @@ public class ContactClient {
      * order the Android string-arrays mirror. The Rust side owns the
      * order; a test pins the arrays to it.
      */
-    public static List<List<String>> cardTypeOrder(TypeKind kind) {
+    static List<List<String>> cardTypeOrder(TypeKind kind) {
         JSONArray order = Replies.object(Native.cardTypeOrder(kind.wire())).optJSONArray("order");
 
         List<List<String>> sets = new ArrayList<>(order == null ? 0 : order.length());

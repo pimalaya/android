@@ -118,7 +118,7 @@ public class MainActivity extends Host
     private static final int REQUEST_NOTIFICATIONS = 4;
 
     /** The shared backend clients. */
-    public final Clients clients = Clients.real();
+    private final Clients clients = Clients.real();
 
     SecureStore store;
     CardStore base;

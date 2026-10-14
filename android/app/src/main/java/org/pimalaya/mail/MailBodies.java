@@ -30,7 +30,7 @@ public final class MailBodies {
     static final int CHUNK = 24;
 
     /** How many times one run tries a body before marking it failed. */
-    public static final int ATTEMPTS = 3;
+    static final int ATTEMPTS = 3;
 
     /** One stored message, as the plan reads it. */
     public static final class Row {

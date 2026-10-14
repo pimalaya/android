@@ -195,7 +195,7 @@ public final class MessageView implements FilesList.Origins {
                     Exception failure = null;
                     try {
                         MailReader.Read read =
-                                reader(message).read(message, () -> openOnline(message, account));
+                                reader().read(message, () -> openOnline(message, account));
                         if (read.body == null) {
                             throw new IllegalStateException(
                                     host.getString(R.string.message_failed));
@@ -259,16 +259,12 @@ public final class MessageView implements FilesList.Origins {
      * <p>Which is what every action in the reader and the composer needs.
      * Staging is a disk write, and the push it derives is the next sync's.
      */
-    private MailReader reader(MailStore.StoredMessage message) {
+    private MailReader reader() {
         return new MailReader(
                 parts.mail(),
                 parts.files(),
                 parts.clients().mail(),
-                new MailEngine(
-                        parts.pimdir(),
-                        parts.clients(),
-                        null,
-                        sync.accountIdOf(message.accountEmail)));
+                new MailStager(parts.pimdir(), parts.clients()));
     }
 
     /**
@@ -377,7 +373,7 @@ public final class MessageView implements FilesList.Origins {
                 throw new IllegalStateException(
                         host.getString(R.string.message_not_on_phone_later));
             }
-            reader(message).fetch(message, () -> sync.openMail(account));
+            reader().fetch(message, () -> sync.openMail(account));
             host.postAlive(mailList::reload);
             source = parts.mail().sourceFile(message);
             if (source == null) {
@@ -964,7 +960,7 @@ public final class MessageView implements FilesList.Origins {
      * mail's (another app's deep link). Browsable only, as a browser
      * would open it, so it never reaches an activity no browser could.
      */
-    public static Intent linkIntent(Uri url, boolean gesture, boolean mainFrame) {
+    static Intent linkIntent(Uri url, boolean gesture, boolean mainFrame) {
         String scheme = url == null ? null : url.getScheme();
         if (!gesture
                 || !mainFrame

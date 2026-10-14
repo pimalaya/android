@@ -54,7 +54,10 @@ public class EventStoreTest {
         items = new PimdirItems(pimdir);
         store = new EventStore(context, pimdir);
         store.replaceCalendars(
-                EMAIL, List.of(new Calendar("work", "Work", CALENDAR, "Team calendar", "#ff0000")));
+                EMAIL,
+                List.of(
+                        new Calendar(
+                                "work", "Work", CALENDAR, "Team calendar", "#ff0000", "", true)));
         collection = store.loadCalendars().get(0).id;
     }
 
@@ -86,9 +89,9 @@ public class EventStoreTest {
         // merging two people's agendas.
         String jmapUrl = "jmap://api.example.com/c1";
         store.replaceCalendars(
-                EMAIL, List.of(new Calendar("c1", "Mine", jmapUrl, null, null)));
+                EMAIL, List.of(new Calendar("c1", "Mine", jmapUrl, null, null, "", true)));
         store.replaceCalendars(
-                OTHER, List.of(new Calendar("c1", "Theirs", jmapUrl, null, null)));
+                OTHER, List.of(new Calendar("c1", "Theirs", jmapUrl, null, null, "", true)));
 
         List<EventStore.StoredCalendar> calendars = store.loadCalendars();
         assertEquals(2, calendars.size());

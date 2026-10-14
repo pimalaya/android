@@ -50,7 +50,10 @@ public class CalendarTriageTest {
         events = new EventStore(context, pimdir);
         events.replaceCalendars(
                 EMAIL,
-                List.of(new Calendar("work", "Work", "https://dav.example.org/cal/", "", null)));
+                List.of(
+                        new Calendar(
+                                "work", "Work", "https://dav.example.org/cal/", "", null, "",
+                                true)));
         calendar = events.loadCalendars().get(0).id;
         engine =
                 new CalendarEngine(

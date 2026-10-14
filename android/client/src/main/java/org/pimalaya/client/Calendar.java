@@ -28,10 +28,6 @@ public record Calendar(
     /** The role a source gives the calendar it writes to when none is named. */
     public static final String DEFAULT = "default";
 
-    public Calendar(String id, String name, String url, String description, String color) {
-        this(id, name, url, description, color, "", true);
-    }
-
     static Calendar from(JSONObject calendar) {
         return new Calendar(
                 Json.string(calendar, "id"),

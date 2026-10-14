@@ -4,8 +4,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.robolectric.RobolectricTestRunner;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,7 +12,6 @@ import java.util.List;
  * The background fill, a step at a time: which mailbox widens next, and
  * that it stops when it may not run and resumes from the floors it reached.
  */
-@RunWith(RobolectricTestRunner.class)
 public class MailFillTest {
     private static MailStore.Edge edge(String name, String role, boolean listed, String limit) {
         return new MailStore.Edge("jane@example.com", name, name, role, listed, limit);

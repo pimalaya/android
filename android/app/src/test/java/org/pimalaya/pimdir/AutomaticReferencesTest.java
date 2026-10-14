@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -18,11 +18,6 @@ import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.mail.MailStore;
-import org.pimalaya.pimdir.ItemLinks;
-import org.pimalaya.pimdir.PimdirCollections;
-import org.pimalaya.pimdir.PimdirDb;
-import org.pimalaya.pimdir.PimdirItems;
-import org.pimalaya.pimdir.PimdirSummary;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 

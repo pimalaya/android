@@ -19,8 +19,17 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.FloorReply;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.MessageSource;
+import org.pimalaya.client.MessageSources;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
@@ -86,16 +95,22 @@ public class ImapStepTest {
      * older than the one above it, each mailbox 20 minutes below the one
      * declared before it, so no two messages share a date.
      */
-    private final class Server extends MailEngine {
+    private final class Server extends MailClient {
         final Map<String, int[]> shapes = new HashMap<>();
         final List<String> read = new ArrayList<>();
 
         /** Mailboxes the server refuses to open, and how. */
         final Map<String, Integer> refused = new HashMap<>();
 
-        Server() {
-            super(pimdir, Clients.real(), null, accountId);
-        }
+        /** The account's driver, on this server. */
+        final MailEngine engine =
+                new MailEngine(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                this, new OfflineClient()),
+                        null,
+                        accountId);
 
         Server mailbox(String collection, int size, int spacing) {
             shapes.put(collection, new int[] {size, spacing, shapes.size() * 20});
@@ -122,64 +137,62 @@ public class ImapStepTest {
         }
 
         @Override
-        String floor(String collection, String before, int count) {
+        public FloorReply floor(MailSession session, String mailbox, String before, int count) {
+            String collection = store.collectionOf(EMAIL, mailbox);
             open(collection);
-            String oldest = null;
-            int taken = 0;
-            for (int uid = shapes.get(collection)[0]; uid >= 1 && taken < count; uid--) {
+            List<String> dates = new ArrayList<>();
+            for (int uid = shapes.get(collection)[0]; uid >= 1 && dates.size() < count; uid--) {
                 String date = dateOf(collection, uid);
                 if (before == null || date.compareTo(before) < 0) {
-                    taken++;
-                    oldest = date;
+                    dates.add(date);
                 }
             }
-            return taken < count ? null : oldest;
+            String floor = dates.size() < count ? null : dates.get(dates.size() - 1);
+            return new FloorReply(floor, dates.size(), dates);
         }
 
         @Override
-        List<String> newest(String collection, int count) {
+        public JSONObject enumerateMailbox(
+                MailSession session, String mailbox, JSONObject request) {
+            String collection = store.collectionOf(EMAIL, mailbox);
             open(collection);
-            List<String> newest = new ArrayList<>();
-            for (int uid = shapes.get(collection)[0]; uid >= 1 && newest.size() < count; uid--) {
-                newest.add(dateOf(collection, uid));
-            }
-            return newest;
-        }
-
-        @Override
-        protected JSONObject enumerate(JSONObject yielded) throws JSONException {
-            String collection = yielded.getString("collection");
-            open(collection);
-            JSONObject listing = yielded.getJSONObject("listing");
-            JSONObject scope = yielded.optJSONObject("scope");
-            String since = scope == null || scope.isNull("since") ? null : scope.optString("since");
-            String until = scope == null || scope.isNull("until") ? null : scope.optString("until");
-            JSONObject page =
-                    new JSONObject().put("vanished", new JSONArray()).put("last", true);
-            if ("delta".equals(listing.getString("kind"))) {
-                return page.put("items", new JSONArray()).put("complete", false)
-                        .put("checkpoint", "cp");
-            }
-            JSONArray items = new JSONArray();
-            for (int uid = shapes.get(collection)[0]; uid >= 1; uid--) {
-                String date = dateOf(collection, uid);
-                if ((since == null || date.compareTo(since) >= 0)
-                        && (until == null || date.compareTo(until) < 0)) {
-                    items.put(named(String.valueOf(uid), date));
+            try {
+                JSONObject listing = request.getJSONObject("listing");
+                JSONObject scope = request.optJSONObject("scope");
+                String since =
+                        scope == null || scope.isNull("since") ? null : scope.optString("since");
+                String until =
+                        scope == null || scope.isNull("until") ? null : scope.optString("until");
+                JSONObject page =
+                        new JSONObject().put("vanished", new JSONArray()).put("last", true);
+                if ("delta".equals(listing.getString("kind"))) {
+                    return page.put("items", new JSONArray()).put("complete", false)
+                            .put("checkpoint", "cp");
                 }
+                JSONArray items = new JSONArray();
+                for (int uid = shapes.get(collection)[0]; uid >= 1; uid--) {
+                    String date = dateOf(collection, uid);
+                    if ((since == null || date.compareTo(since) >= 0)
+                            && (until == null || date.compareTo(until) < 0)) {
+                        items.put(named(String.valueOf(uid), date));
+                    }
+                }
+                page.put("items", items).put("complete", true);
+                if (!listing.optBoolean("band")) {
+                    page.put("checkpoint", "cp");
+                }
+                return page;
+            } catch (JSONException failure) {
+                throw new AssertionError(failure);
             }
-            page.put("items", items).put("complete", true);
-            if (!listing.optBoolean("band")) {
-                page.put("checkpoint", "cp");
-            }
-            return page;
         }
 
         @Override
-        protected Map<String, File> sources(String mailbox, List<String> handles, File dir) {
-            String collection = collectionOf(mailbox);
-            Map<String, File> files = new HashMap<>();
-            for (String handle : handles) {
+        public MessageSources fetchSources(
+                MailSession session, String mailbox, List<String> ids, File dir) {
+            String collection = store.collectionOf(EMAIL, mailbox);
+            List<MessageSource> items = new ArrayList<>();
+            for (String handle : ids) {
                 read.add(collection + "/" + handle);
                 File file = new File(dir, handle + ".eml");
                 try {
@@ -187,9 +200,11 @@ public class ImapStepTest {
                 } catch (IOException failure) {
                     throw new AssertionError(failure);
                 }
-                files.put(handle, file);
+                items.add(
+                        new MessageSource(
+                                handle, null, file.getAbsolutePath(), null, file.length()));
             }
-            return files;
+            return new MessageSources(List.of(), items);
         }
 
         String body(String collection, String handle) {
@@ -201,11 +216,6 @@ public class ImapStepTest {
                             + "\r\nSubject: Subject " + handle + "\r\n\r\n" + body(collection, handle)
                             + "\r\n")
                     .getBytes(StandardCharsets.UTF_8);
-        }
-
-        @Override
-        protected JSONObject push(JSONObject yielded) throws JSONException {
-            return new JSONObject().put("results", new JSONArray());
         }
     }
 
@@ -243,7 +253,7 @@ public class ImapStepTest {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
 
         MailStep.Outcome first =
-                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
+                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
 
         // NOTE: every three hours three inbox messages and one sent: the
         // account's 50th newest is the sent mail 36 hours 20 minutes back.
@@ -273,7 +283,7 @@ public class ImapStepTest {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 0, 1);
 
         MailStep.Outcome first =
-                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
+                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
 
         assertEquals(50, first.brought);
         assertEquals(25, held(inbox)[1]);
@@ -289,7 +299,7 @@ public class ImapStepTest {
     @Test
     public void bodiesOnceLinkedAcrossMailboxesAreReleasedOnceAndReadAgain() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 0, 1);
-        new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
+        new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
 
         // NOTE: what the store-wide lookup left: the sent UID 120 filed
         // with the inbox's UID 120 body, its base moved with it.
@@ -329,7 +339,7 @@ public class ImapStepTest {
                     rows.add(row);
                 }
             }
-            server.download(collection, rows);
+            server.engine.download(collection, rows);
         }
         assertEquals(List.of(inbox + "/120", sent + "/120"), server.read);
         assertEquals(server.body(inbox, "120"), bodyOf(inbox, "120"));
@@ -348,7 +358,7 @@ public class ImapStepTest {
         Server server = new Server().mailbox(inbox, 20, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
 
         MailStep.Outcome first =
-                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
+                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
 
         assertNull("all mail", first.frontier);
         assertTrue(first.exhausted);
@@ -360,12 +370,12 @@ public class ImapStepTest {
     public void aLaterStepReadsTheBodiesBetweenTheNewFrontierAndTheOld() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
         MailStep.Outcome first =
-                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
+                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
         MailWindow.set(context, accountId, first.frontier);
         int readFirst = server.read.size();
 
         MailStep.Outcome next =
-                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, false));
+                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, false));
 
         assertTrue(next.frontier.compareTo(first.frontier) < 0);
         assertEquals(50, next.brought);
@@ -380,9 +390,10 @@ public class ImapStepTest {
     public void aStepCountsTheBodiesItsListingLeftToRead() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
         List<int[]> told = Collections.synchronizedList(new ArrayList<>());
-        server.tally = new MailTally((landed, planned) -> told.add(new int[] {landed, planned}));
+        server.engine.tally =
+                new MailTally((landed, planned) -> told.add(new int[] {landed, planned}));
 
-        new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
+        new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
 
         assertArrayEquals(
                 "planned once the mailboxes are listed", new int[] {0, 50}, told.get(0));
@@ -395,7 +406,7 @@ public class ImapStepTest {
         server.refused.put(sent, 404);
 
         MailStep.Outcome first =
-                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
+                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
 
         assertEquals("the inbox's 50th newest", server.dateOf(inbox, 71), first.frontier);
         assertFalse(first.exhausted);
@@ -414,7 +425,11 @@ public class ImapStepTest {
         PimalayaException all =
                 assertThrows(
                         PimalayaException.class,
-                        () -> new ImapStep().run(refused, new StepRun(EMAIL, collections(), null, true)));
+                        () ->
+                                new ImapStep()
+                                        .run(
+                                                refused.engine,
+                                                new StepRun(EMAIL, collections(), null, true)));
         assertEquals(Integer.valueOf(404), all.status);
 
         Server dropped = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
@@ -422,19 +437,21 @@ public class ImapStepTest {
         assertThrows(
                 "no refusal, no skip",
                 PimalayaException.class,
-                () -> new ImapStep().run(dropped, new StepRun(EMAIL, collections(), null, true)));
+                () ->
+                        new ImapStep()
+                                .run(dropped.engine, new StepRun(EMAIL, collections(), null, true)));
     }
 
     @Test
     public void aLaterStepWidensPastAMailboxTheServerRefusesToOpen() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 10, 1);
         MailStep.Outcome first =
-                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
+                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, true));
         MailWindow.set(context, accountId, first.frontier);
         server.refused.put(sent, 404);
 
         MailStep.Outcome next =
-                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, false));
+                new ImapStep().run(server.engine, new StepRun(EMAIL, collections(), null, false));
 
         assertTrue(next.frontier.compareTo(first.frontier) < 0);
         assertFalse("the refused mailbox is not held whole", next.exhausted);

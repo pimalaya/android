@@ -123,7 +123,7 @@ public class SecureStore {
     }
 
     /** The stored account of this address, or null. */
-    public AccountEntry find(String email) {
+    AccountEntry find(String email) {
         for (AccountEntry entry : loadAll()) {
             if (entry.email.equals(email)) {
                 return entry;

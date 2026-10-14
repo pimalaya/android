@@ -53,7 +53,7 @@ final class GmailStep implements MailStep {
             }
         }
         StepRequest request = engine.stepRequest(only, names);
-        File dir = engine.scratch();
+        File dir = MailEngine.scratch(engine.context());
         try {
             NamedStep step = engine.stepRead(collections, request, dir);
             List<NamedStepItem> items = step.items();

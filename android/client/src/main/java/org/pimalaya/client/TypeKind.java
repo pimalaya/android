@@ -4,7 +4,7 @@ package org.pimalaya.client;
  * The edit form's type spinners (rs/contact/form.rs {@code card_type_order}
  * 224), each addressing its own ordered type-set vocabulary.
  */
-public enum TypeKind {
+enum TypeKind {
     /** The phone TYPE sets. */
     PHONE("phone"),
     /** The email TYPE sets. */
@@ -23,7 +23,7 @@ public enum TypeKind {
     }
 
     /** The value as the bridge spells it. */
-    public String wire() {
+    String wire() {
         return wire;
     }
 }

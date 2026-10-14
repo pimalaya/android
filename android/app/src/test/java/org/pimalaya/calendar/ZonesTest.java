@@ -31,6 +31,8 @@ import java.util.regex.Pattern;
  * <p>Worth pinning because a time read in the wrong zone shows hours
  * off with nothing on the screen to say so, and a {@code VTIMEZONE}
  * written wrong moves an entry for every other client reading it.
+ * Under Robolectric for the one reason that the native library loads into
+ * one class loader per process: a zone's entry is expanded by the bridge.
  */
 @RunWith(RobolectricTestRunner.class)
 public class ZonesTest {

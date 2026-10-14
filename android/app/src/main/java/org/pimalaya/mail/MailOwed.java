@@ -19,7 +19,7 @@ import java.util.Set;
  * owed survives a restart: an arrival dated below its frontier left over a
  * restart would otherwise stay a summary until opened.
  */
-public final class MailOwed {
+final class MailOwed {
     private static final String PREFS = "mail-owed";
     private static final String KEY = "owed";
 
@@ -30,7 +30,7 @@ public final class MailOwed {
     }
 
     /** The key one message is owed under. */
-    public static String key(String collection, String linkId) {
+    static String key(String collection, String linkId) {
         return collection + "\n" + linkId;
     }
 

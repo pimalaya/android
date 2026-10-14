@@ -7,12 +7,19 @@ import android.content.Context;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.GraphStepReply;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MailWire;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.NamedStep;
 import org.pimalaya.client.NamedStepItem;
+import org.pimalaya.client.OfflineClient;
+import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.StepRequest;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
@@ -87,21 +94,19 @@ public class StepRequestTest {
 );
 
     /** An account whose steps bring nothing, recording what they ask. */
-    private static final class Engine extends MailEngine {
+    private static final class Server extends MailClient {
         final List<StepRequest> asked = new ArrayList<>();
 
-        Engine(PimdirDb pimdir, String accountId) {
-            super(pimdir, Clients.real(), null, accountId);
-        }
-
         @Override
-        protected NamedStep stepped(StepRequest request, File dir) {
+        public NamedStep step(
+                MailSession session, StepRequest request, File dir, OfflineDriver store) {
             asked.add(request);
             return new NamedStep(null, false, false, "h", List.of());
         }
 
         @Override
-        protected GraphStepReply graphStepped(StepRequest request, File dir) {
+        public GraphStepReply graphStep(
+                MailSession session, StepRequest request, File dir, OfflineDriver store) {
             asked.add(request);
             return new GraphStepReply(false, List.of());
         }
@@ -155,15 +160,23 @@ public class StepRequestTest {
                 for (String only : new String[] {null, clients}) {
                     String label =
                             kind + " s" + state + " only=" + (only == null ? "-" : "Clients");
-                    Engine engine = new Engine(pimdir, accountId);
+                    Server server = new Server();
+                    MailEngine engine =
+                            new MailEngine(
+                                    pimdir,
+                                    new Clients(
+                                            new AccountClient(), new ContactClient(),
+                                            new CalendarClient(), server, new OfflineClient()),
+                                    null,
+                                    accountId);
                     if (kind.equals("imap")) {
-                        engine.asked.add(engine.stepRequest(only, null));
+                        server.asked.add(engine.stepRequest(only, null));
                     } else if (kind.equals("graph")) {
                         new GraphStep().run(engine, new StepRun(email, collections, only, false));
                     } else {
                         new GmailStep().run(engine, new StepRun(email, collections, only, false));
                     }
-                    for (StepRequest request : engine.asked) {
+                    for (StepRequest request : server.asked) {
                         asked.add(label);
                         requests.add(request);
                         bounds.add(MailScope.sinceOf(context, accountId));

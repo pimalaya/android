@@ -17,11 +17,19 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.R;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Flags;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.MessageSources;
 import org.pimalaya.client.NamedStep;
 import org.pimalaya.client.NamedStepItem;
+import org.pimalaya.client.OfflineClient;
+import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.StepRequest;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -38,6 +46,7 @@ import java.nio.file.Files;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -100,7 +109,7 @@ public class MailStepTest {
     }
 
     /** A Gmail account whose next step serves {@code next}. */
-    private final class Server extends MailEngine {
+    private final class Server extends MailClient {
         List<Mail> next = List.of();
         List<String> anchors;
         final List<Set<String>> held = new ArrayList<>();
@@ -110,12 +119,19 @@ public class MailStepTest {
         /** The messages whose file the bridge fails to write. */
         Set<String> missing = Set.of();
 
-        Server() {
-            super(pimdir, Clients.real(), null, accountId);
-        }
+        /** The account's driver, on this server. */
+        final MailEngine engine =
+                new MailEngine(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                this, new OfflineClient()),
+                        null,
+                        accountId);
 
         @Override
-        protected NamedStep stepped(StepRequest request, File dir) {
+        public NamedStep step(
+                MailSession session, StepRequest request, File dir, OfflineDriver store) {
             try {
                 // NOTE: the bridge asks which of what it lists the store
                 // holds; this account lists every message it served.
@@ -124,7 +140,7 @@ public class MailStepTest {
                         listing.add(mail.id);
                     }
                 }
-                this.held.add(held(listing));
+                this.held.add(held(store, listing));
                 asked.add(request);
                 List<NamedStepItem> items = new ArrayList<>();
                 for (Mail mail : next) {
@@ -152,15 +168,29 @@ public class MailStepTest {
             }
         }
 
-        @Override
-        protected java.util.Map<String, File> sources(
-                String mailbox, List<String> handles, File dir) {
-            return java.util.Map.of();
+        /** Which of a listed page the store holds, asked as the bridge asks it. */
+        private Set<String> held(OfflineDriver store, List<String> listing) {
+            try {
+                String asked =
+                        new JSONObject()
+                                .put("op", "held")
+                                .put("handles", new JSONArray(listing))
+                                .toString();
+                JSONArray held = new JSONObject(store.serve(asked)).getJSONArray("held");
+                Set<String> handles = new HashSet<>();
+                for (int index = 0; index < held.length(); index++) {
+                    handles.add(held.getString(index));
+                }
+                return handles;
+            } catch (JSONException failure) {
+                throw new AssertionError(failure);
+            }
         }
 
         @Override
-        protected JSONObject push(JSONObject yielded) throws JSONException {
-            return new JSONObject().put("results", new JSONArray());
+        public MessageSources fetchSources(
+                MailSession session, String mailbox, List<String> ids, File dir) {
+            return new MessageSources(List.of(), List.of());
         }
     }
 
@@ -197,7 +227,7 @@ public class MailStepTest {
         server.next = List.of(labelled, older, imported);
 
         MailStep.Outcome first =
-                new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
+                new GmailStep().run(server.engine, new StepRun(EMAIL, mailboxes(), null, true));
 
         assertEquals(3, held(inbox));
         assertEquals(1, held(clients));
@@ -218,7 +248,7 @@ public class MailStepTest {
         Mail next = new Mail("m4", "2026-10-07T09:00:00Z", now.minusSeconds(172_800), "INBOX");
         server.next = List.of(next);
         MailStep.Outcome second =
-                new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), null, false));
+                new GmailStep().run(server.engine, new StepRun(EMAIL, mailboxes(), null, false));
         assertEquals(Set.of("m1", "m2", "m3"), server.held.get(1));
         assertEquals(4, held(inbox));
         assertArrayEquals(next.source(), store.storedSource(inbox, "m4"));
@@ -240,7 +270,7 @@ public class MailStepTest {
         Mail inboxed = new Mail("m1", "2026-10-09T11:00:00Z", now, "INBOX");
         server.next = List.of(inboxed, archived);
 
-        new GmailStep().run(server, new StepRun(EMAIL, collections, null, true));
+        new GmailStep().run(server.engine, new StepRun(EMAIL, collections, null, true));
 
         assertEquals(1, held(inbox));
         assertNull("All Mail holds no body", store.storedSource(allMail, "a1"));
@@ -251,7 +281,7 @@ public class MailStepTest {
 
         // NOTE: the next step finds the archived message held.
         server.next = List.of();
-        new GmailStep().run(server, new StepRun(EMAIL, collections, null, false));
+        new GmailStep().run(server.engine, new StepRun(EMAIL, collections, null, false));
         assertEquals(Set.of("m1", "a1"), server.held.get(1));
     }
     @Test
@@ -264,7 +294,7 @@ public class MailStepTest {
                         new Mail("m1", "2026-10-09T11:00:00Z", now, "INBOX"),
                         new Mail("m2", "2019-03-01T08:00:00Z", now, "INBOX", "Clients"));
 
-        new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
+        new GmailStep().run(server.engine, new StepRun(EMAIL, mailboxes(), null, true));
 
         assertEquals("listed all the same", 2, held(inbox));
         assertNull(store.storedSource(inbox, "m2"));
@@ -289,12 +319,12 @@ public class MailStepTest {
                         new Mail("m1", "2026-10-09T11:00:00Z", now, "INBOX", "Clients"),
                         new Mail("m2", "2026-10-09T10:00:00Z", now, "INBOX"));
         server.anchors = List.of("m2", "m1");
-        new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
+        new GmailStep().run(server.engine, new StepRun(EMAIL, mailboxes(), null, true));
         assertEquals(List.of("m2", "m1"), MailWindow.anchors(context, accountId, null));
 
         server.next = List.of(new Mail("c1", "2026-10-08T10:00:00Z", now, "Clients"));
         server.anchors = List.of("c1");
-        new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), clients, false));
+        new GmailStep().run(server.engine, new StepRun(EMAIL, mailboxes(), clients, false));
         assertEquals(
                 "a view with none starts after the account's",
                 List.of("m2", "m1"),
@@ -325,9 +355,10 @@ public class MailStepTest {
                         new Mail("m1", "2026-10-09T11:00:00Z", now, "INBOX"),
                         new Mail("m2", "2026-10-09T10:00:00Z", now, "INBOX", "Clients"));
         List<int[]> told = Collections.synchronizedList(new ArrayList<>());
-        server.tally = new MailTally((landed, planned) -> told.add(new int[] {landed, planned}));
+        server.engine.tally =
+                new MailTally((landed, planned) -> told.add(new int[] {landed, planned}));
 
-        new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
+        new GmailStep().run(server.engine, new StepRun(EMAIL, mailboxes(), null, true));
 
         assertArrayEquals("planned a step before reading", new int[] {0, 50}, told.get(0));
         assertArrayEquals(

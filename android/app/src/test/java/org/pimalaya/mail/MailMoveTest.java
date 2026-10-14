@@ -17,9 +17,15 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.calendar.RemoteAccount;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Flags;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.MessageRef;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.SyncReport;
@@ -56,50 +62,58 @@ public class MailMoveTest {
     private String sent;
 
     /** A mail driver whose server verbs are recorded, listing what it is told. */
-    private final class Server extends MailEngine {
+    private final class Server extends MailClient {
         final List<String> calls = new ArrayList<>();
         JSONArray listed = new JSONArray();
 
         /** The handles the server no longer holds: a write on one answers 404. */
         final Set<String> gone = new HashSet<>();
 
-        Server() {
-            super(pimdir, Clients.real(), null, accountId);
+        /** The account's driver, on this server. */
+        final MailEngine engine =
+                new MailEngine(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                this, new OfflineClient()),
+                        null,
+                        accountId);
+
+        @Override
+        public JSONObject enumerateMailbox(
+                MailSession session, String mailbox, JSONObject request) {
+            try {
+                return new JSONObject()
+                        .put("items", listed)
+                        .put("vanished", new JSONArray())
+                        .put("complete", true)
+                        .put("last", true)
+                        .put("checkpoint", "cp");
+            } catch (JSONException failure) {
+                throw new AssertionError(failure);
+            }
         }
 
         @Override
-        protected JSONObject enumerate(JSONObject yielded) throws JSONException {
-            JSONObject page =
-                    new JSONObject()
-                            .put("items", listed)
-                            .put("vanished", new JSONArray())
-                            .put("complete", true)
-                            .put("last", true)
-                            .put("checkpoint", "cp");
-            nameByMessageId(yielded.getString("collection"), page);
-            return page;
+        public void relocate(MailSession session, MessageRef message, String target) {
+            refuseGone(message.id());
+            calls.add("relocate " + message.mailbox() + " " + message.id() + " " + target);
         }
 
         @Override
-        protected void relocate(String mailbox, String handle, String target) {
-            refuseGone(handle);
-            calls.add("relocate " + mailbox + " " + handle + " " + target);
+        public void copy(MailSession session, MessageRef message, String target) {
+            refuseGone(message.id());
+            calls.add("copy " + message.mailbox() + " " + message.id() + " " + target);
         }
 
         @Override
-        protected void copy(String mailbox, String handle, String target) {
-            refuseGone(handle);
-            calls.add("copy " + mailbox + " " + handle + " " + target);
+        public void destroy(MailSession session, MessageRef message) {
+            refuseGone(message.id());
+            calls.add("destroy " + message.mailbox() + " " + message.id());
         }
 
         @Override
-        protected void destroy(String mailbox, String handle) {
-            refuseGone(handle);
-            calls.add("destroy " + mailbox + " " + handle);
-        }
-
-        @Override
-        protected void append(String mailbox, byte[] source, Flags flags) {
+        public void append(MailSession session, String mailbox, byte[] source, Flags flags) {
             calls.add("append " + mailbox);
         }
 
@@ -182,7 +196,7 @@ public class MailMoveTest {
     }
 
     private SyncReport sync(Server server, String collection) {
-        return new OfflineClient().syncImmutable(server, collection, null, false);
+        return new OfflineClient().syncImmutable(server.engine, collection, null, false);
     }
 
     @Test

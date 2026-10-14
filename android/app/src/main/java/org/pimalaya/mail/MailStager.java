@@ -1,5 +1,7 @@
 package org.pimalaya.mail;
 
+import android.content.Context;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.pimalaya.client.Clients;
@@ -16,6 +18,11 @@ public final class MailStager extends Stager {
     public MailStager(PimdirDb pimdir, Clients clients) {
         super(pimdir, clients);
         this.pimdir = pimdir;
+    }
+
+    /** The app's context, for what the account keeps beside the store. */
+    Context context() {
+        return pimdir.context();
     }
 
     MailStore mail() {

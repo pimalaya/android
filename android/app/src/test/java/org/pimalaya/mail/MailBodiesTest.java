@@ -18,9 +18,15 @@ import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.FloorReply;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.MessageSource;
+import org.pimalaya.client.MessageSources;
 import org.pimalaya.client.OfflineClient;
+import org.pimalaya.client.OfflineDriver;
+import org.pimalaya.client.SyncReport;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -71,11 +77,11 @@ public class MailBodiesTest {
         accountId = new PimdirAccount(context).idOf(EMAIL);
         MailWindow.set(context, accountId, window);
         server = new Server();
-        server.sync(inbox);
+        server.engine.sync(inbox);
     }
 
     /** UIDs 4 to 2 are recent, newest first; UID 1 is three years old. */
-    private final class Server extends MailEngine {
+    private final class Server extends MailClient {
         final List<String> read = new ArrayList<>();
         final List<String> pushed = new ArrayList<>();
 
@@ -85,37 +91,49 @@ public class MailBodiesTest {
         /** The handles the server answers gone (deleted since they were listed). */
         final java.util.Set<String> vanished = new java.util.HashSet<>();
 
+        /** The account's driver, on this server, the changes it pushes recorded. */
+        final MailEngine engine =
+                new MailEngine(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                this, new Pushes(pushed)),
+                        null,
+                        accountId);
 
-        Server() {
-            super(pimdir, Clients.real(), null, accountId);
+        @Override
+        public FloorReply floor(MailSession session, String mailbox, String before, int count) {
+            return new FloorReply(null, 0, List.of());
         }
 
         @Override
-        String floor(String collection, String before, int count) {
-            return null;
-        }
-
-        @Override
-        protected JSONObject enumerate(JSONObject yielded) throws JSONException {
-            JSONObject page = new JSONObject().put("vanished", new JSONArray()).put("last", true);
-            if ("delta".equals(yielded.getJSONObject("listing").getString("kind"))) {
-                return page.put("items", new JSONArray()).put("complete", false)
-                        .put("checkpoint", "cp");
+        public JSONObject enumerateMailbox(
+                MailSession session, String mailbox, JSONObject request) {
+            try {
+                JSONObject page =
+                        new JSONObject().put("vanished", new JSONArray()).put("last", true);
+                if ("delta".equals(request.getJSONObject("listing").getString("kind"))) {
+                    return page.put("items", new JSONArray()).put("complete", false)
+                            .put("checkpoint", "cp");
+                }
+                JSONArray items =
+                        new JSONArray()
+                                .put(named("4", daysBack(1), 0, true))
+                                .put(named("3", daysBack(2), 40_000, false))
+                                .put(named("2", daysBack(3), 3_000_000, false))
+                                .put(named("1", daysBack(3 * 365), 1_000, false));
+                return page.put("items", items).put("complete", true).put("checkpoint", "cp");
+            } catch (JSONException failure) {
+                throw new AssertionError(failure);
             }
-            JSONArray items =
-                    new JSONArray()
-                            .put(named("4", daysBack(1), 0, true))
-                            .put(named("3", daysBack(2), 40_000, false))
-                            .put(named("2", daysBack(3), 3_000_000, false))
-                            .put(named("1", daysBack(3 * 365), 1_000, false));
-            return page.put("items", items).put("complete", true).put("checkpoint", "cp");
         }
 
         @Override
-        protected java.util.Map<String, java.io.File> sources(
-                String mailbox, List<String> handles, java.io.File dir) {
-            java.util.Map<String, java.io.File> files = new java.util.HashMap<>();
-            for (String handle : handles) {
+        public MessageSources fetchSources(
+                MailSession session, String mailbox, List<String> ids, java.io.File dir) {
+            List<String> gone = new ArrayList<>();
+            List<MessageSource> items = new ArrayList<>();
+            for (String handle : ids) {
                 read.add(handle);
                 if (vanished.contains(handle)) {
                     gone.add(handle);
@@ -132,18 +150,43 @@ public class MailBodiesTest {
                 } catch (java.io.IOException failure) {
                     throw new AssertionError(failure);
                 }
-                files.put(handle, file);
+                items.add(
+                        new MessageSource(
+                                handle, null, file.getAbsolutePath(), null, file.length()));
             }
-            return files;
+            return new MessageSources(gone, items);
+        }
+    }
+
+    /** The bridge, recording the changes each push it asks of the driver carries. */
+    private static final class Pushes extends OfflineClient {
+        private final List<String> pushed;
+
+        Pushes(List<String> pushed) {
+            this.pushed = pushed;
         }
 
         @Override
-        protected JSONObject push(JSONObject yielded) throws JSONException {
-            JSONArray changes = yielded.getJSONArray("changes");
-            for (int index = 0; index < changes.length(); index++) {
-                pushed.add(changes.getJSONObject(index).toString());
-            }
-            return new JSONObject().put("results", new JSONArray());
+        public SyncReport syncImmutable(
+                OfflineDriver driver, String collection, String since, boolean scopeBound) {
+            return super.syncImmutable(
+                    yielded -> {
+                        try {
+                            JSONObject asked = new JSONObject(yielded);
+                            if ("push".equals(asked.getString("op"))) {
+                                JSONArray changes = asked.getJSONArray("changes");
+                                for (int index = 0; index < changes.length(); index++) {
+                                    pushed.add(changes.getJSONObject(index).toString());
+                                }
+                            }
+                        } catch (JSONException failure) {
+                            throw new AssertionError(failure);
+                        }
+                        return driver.serve(yielded);
+                    },
+                    collection,
+                    since,
+                    scopeBound);
         }
     }
 
@@ -180,7 +223,7 @@ public class MailBodiesTest {
 
             @Override
             public List<MailBodies.Row> download(String accountEmail, List<MailBodies.Row> rows) {
-                return server.download(inbox, rows);
+                return server.engine.download(inbox, rows);
             }
         };
     }
@@ -241,10 +284,10 @@ public class MailBodiesTest {
     public void anArrivalDownloadsWhateverItsDate() {
         MailBodies.Row old = planned(null).get(3);
         assertEquals("1", old.linkId);
-        server.download(inbox, List.of(old));
+        server.engine.download(inbox, List.of(old));
         assertTrue("below the frontier, a plan takes nothing", server.read.isEmpty());
 
-        server.download(
+        server.engine.download(
                 inbox,
                 List.of(
                         new MailBodies.Row(
@@ -305,7 +348,7 @@ public class MailBodiesTest {
         assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
         assertArrayEquals(LATIN1, store.storedSource(inbox, "1"));
 
-        server.sync(inbox);
+        server.engine.sync(inbox);
         assertTrue("nothing pushed: " + server.pushed, server.pushed.isEmpty());
     }
 
@@ -358,7 +401,7 @@ public class MailBodiesTest {
         assertTrue("never asked again", server.read.isEmpty());
 
         server.refusing.clear();
-        server.sync(inbox);
+        server.engine.sync(inbox);
         assertFalse("a new listing", MailState.of(context).failed.contains(MailOwed.key(inbox, "3")));
         run = new MailBodies.Run(MailState.of(context));
         assertEquals(1, run.plan(EMAIL, planned(window)));
@@ -391,7 +434,7 @@ public class MailBodiesTest {
         assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
         assertTrue(server.read.isEmpty());
 
-        server.sync(inbox);
+        server.engine.sync(inbox);
         assertFalse("its mailbox listed anew", MailState.of(context).gone.contains(key));
     }
 
@@ -431,7 +474,7 @@ public class MailBodiesTest {
                         if (calls[0]++ == 0) {
                             throw new IllegalStateException("Token expired");
                         }
-                        return server.download(inbox, rows);
+                        return server.engine.download(inbox, rows);
                     }
                 };
         run = new MailBodies.Run(MailState.of(context));
@@ -478,7 +521,7 @@ public class MailBodiesTest {
         MailBodies.Row row =
                 new MailBodies.Row(
                         inbox, "5", stored.sortKey, false, stored.size, stored.attachment, true);
-        assertTrue(server.download(inbox, List.of(row)).isEmpty());
+        assertTrue(server.engine.download(inbox, List.of(row)).isEmpty());
         assertArrayEquals(LATIN1, store.storedSource(inbox, "5"));
         assertFalse("owed no more", MailOwed.owed(context, inbox, "5"));
     }

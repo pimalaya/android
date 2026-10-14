@@ -24,9 +24,6 @@ public interface MailSync {
     /** Opens one account's mail connection. */
     MailSession openMail(AccountEntry account);
 
-    /** The store id one account's collections are namespaced under. */
-    String accountIdOf(String email);
-
     /** Moves the windows of some accounts later, {@code done} run on the main thread. */
     void releaseWindow(List<String> emails, String date, Runnable done);
 }

@@ -55,7 +55,7 @@ final class GraphStep implements MailStep {
             return new Outcome(null, true, 0);
         }
 
-        File dir = engine.scratch();
+        File dir = MailEngine.scratch(engine.context());
         try {
             GraphStepReply step = engine.graphStepRead(stepped, request, dir);
             List<GraphStepItem> items = step.items();

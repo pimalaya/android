@@ -69,7 +69,7 @@ public final class PimdirSql {
     }
 
     /** Every statement, by name; unmodifiable. */
-    public static synchronized Map<String, String> all() {
+    static synchronized Map<String, String> all() {
         if (statements == null) {
             statements = load();
         }

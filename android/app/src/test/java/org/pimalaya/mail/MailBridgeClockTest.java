@@ -10,13 +10,17 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.OfflineClient;
+import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
-import org.pimalaya.pimdir.PimdirEngine;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -94,37 +98,28 @@ public class MailBridgeClockTest {
             pages[index] = page(index);
         }
 
-        PimdirEngine remote =
-                new PimdirEngine(pimdir, Clients.real()) {
-                    @Override
-                    protected PimDomain domain() {
-                        return PimDomain.MAIL;
-                    }
-
+        MailClient server =
+                new MailClient() {
                     int next;
 
                     @Override
-                    protected boolean listingsNamed() {
-                        return true;
-                    }
-
-                    @Override
-                    protected JSONObject enumerate(JSONObject yielded) throws JSONException {
-                        JSONObject listed = new JSONObject(pages[next++]);
-                        listed(listed.getJSONArray("items").length());
-                        return listed;
-                    }
-
-                    @Override
-                    protected JSONObject fetch(JSONObject yielded) {
-                        return new JSONObject();
-                    }
-
-                    @Override
-                    protected JSONObject push(JSONObject yielded) throws JSONException {
-                        return new JSONObject().put("results", new JSONArray());
+                    public JSONObject enumerateMailbox(
+                            MailSession session, String mailbox, JSONObject request) {
+                        try {
+                            return new JSONObject(pages[next++]);
+                        } catch (JSONException failure) {
+                            throw new AssertionError(failure);
+                        }
                     }
                 };
+        MailEngine remote =
+                new MailEngine(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                server, new OfflineClient()),
+                        null,
+                        new PimdirAccount(context).idOf("jane@example.com"));
 
         long started = System.nanoTime();
         new OfflineClient().syncImmutable(remote, collection, null, false);

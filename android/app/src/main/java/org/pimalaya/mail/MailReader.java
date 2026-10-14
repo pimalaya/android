@@ -35,14 +35,14 @@ public final class MailReader {
     private final FileStore files;
     private final MailClient client;
 
-    /** The message's account's driver, staging nothing: what names a pending move. */
-    private final MailEngine engine;
+    /** A driver that only stages: what names a pending move. */
+    private final MailStager stager;
 
-    public MailReader(MailStore mail, FileStore files, MailClient client, MailEngine engine) {
+    public MailReader(MailStore mail, FileStore files, MailClient client, MailStager stager) {
         this.mail = mail;
         this.files = files;
         this.client = client;
-        this.engine = engine;
+        this.stager = stager;
     }
 
     /**
@@ -68,9 +68,9 @@ public final class MailReader {
         // NOTE: a message whose reading killed the app before is not read
         // again (MailPoison).
         String key = MailOwed.key(message.collection, message.id);
-        if (!MailPoison.begin(engine.context(), key)) {
+        if (!MailPoison.begin(stager.context(), key)) {
             throw new IllegalStateException(
-                    engine.context().getString(R.string.message_unreadable));
+                    stager.context().getString(R.string.message_unreadable));
         }
         try {
             if (waiting == null && stored == null) {
@@ -79,10 +79,10 @@ public final class MailReader {
             }
             read.body = waiting != null ? client.parseMessage(waiting) : client.parseMessage(stored);
         } finally {
-            MailPoison.end(engine.context(), key);
+            MailPoison.end(stager.context(), key);
         }
         if (!message.pending()) {
-            synchronized (engine.locks.store) {
+            synchronized (stager.locks.store) {
                 files.recordAttachments(
                         mail.accountIdOf(message.accountEmail), message.id, read.body.attachments());
             }
@@ -94,15 +94,15 @@ public final class MailReader {
      * Fetches one message the store does not hold, files it and restates its
      * summary, answering the file it is stored in.
      *
-     * <p>Read as a body step reads one ({@link MailEngine#sources}): streamed
-     * by the bridge into a file of its own, described there ({@link
+     * <p>Read as a body step reads one ({@link MailClient#fetchSources}):
+     * streamed by the bridge into a file of its own, described there ({@link
      * MailClient#describeMessage}) and moved into the blob store, so a
      * message of any size opens with no copy of it on the Java heap and none
      * across the boundary.
      */
     File fetch(MailStore.StoredMessage message, Supplier<MailSession> open) {
         String[] address = addressOf(message);
-        File dir = engine.scratch();
+        File dir = MailEngine.scratch(stager.context());
         try {
             File file;
             // NOTE: a connection of its own, opened and closed around this
@@ -110,25 +110,28 @@ public final class MailReader {
             // one open for the time someone spends reading would be holding
             // it for no work at all.
             try (MailSession session = open.get()) {
-                file = engine.sources(session, address[0], List.of(address[1]), dir)
-                        .get(address[1]);
+                file =
+                        MailEngine.files(
+                                        client.fetchSources(
+                                                session, address[0], List.of(address[1]), dir))
+                                .get(address[1]);
             }
             if (file == null || !file.isFile()) {
                 throw new IllegalStateException(
-                        engine.context().getString(R.string.message_failed));
+                        stager.context().getString(R.string.message_failed));
             }
             Description described = client.describeMessage(file);
             // NOTE: the listing read the summary without the body; the body
             // just stored restates it. One writer: a fill or body step may be
             // writing beside this open.
-            synchronized (engine.locks.store) {
+            synchronized (stager.locks.store) {
                 mail.saveSource(message.collection, message.id, described.hash(), file);
                 mail.restateFromBody(message.collection, message.id, described.summary());
             }
             File stored = mail.sourceFile(message);
             if (stored == null) {
                 throw new IllegalStateException(
-                        engine.context().getString(R.string.message_failed));
+                        stager.context().getString(R.string.message_failed));
             }
             return stored;
         } finally {
@@ -143,9 +146,9 @@ public final class MailReader {
      */
     private String[] addressOf(MailStore.StoredMessage message) {
         String[] source = null;
-        synchronized (engine.locks.store) {
-            if (engine.offline.isPendingCreate(message.collection, message.id)) {
-                source = engine.offline.moveSourceOf(message.collection, message.id);
+        synchronized (stager.locks.store) {
+            if (stager.offline.isPendingCreate(message.collection, message.id)) {
+                source = stager.offline.moveSourceOf(message.collection, message.id);
             }
         }
         if (source == null) {

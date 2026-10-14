@@ -50,7 +50,7 @@ public final class AccountEntry {
     }
 
     /** One connected identity covering a single domain. */
-    public static AccountEntry of(
+    static AccountEntry of(
             String email, PimDomain domain, String baseUrl, AccountCredential credential) {
         return empty(email).with(domain, baseUrl, credential);
     }

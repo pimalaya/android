@@ -26,7 +26,7 @@ import java.util.Map;
  */
 public final class ItemLinks {
     /** The role a person's link takes. */
-    public static final String RELATED = "related";
+    static final String RELATED = "related";
 
     /** The origin of a link a person made, as opposed to a rule's {@code auto}. */
     static final String USER = "user";
@@ -47,7 +47,7 @@ public final class ItemLinks {
         public final String kind;
         public final String linkId;
 
-        public Endpoint(String kind, String linkId) {
+        Endpoint(String kind, String linkId) {
             this.kind = kind;
             this.linkId = linkId;
         }
@@ -225,7 +225,7 @@ public final class ItemLinks {
     }
 
     /** The first live placement of an endpoint in a collection of its kind, null for none. */
-    public Placement placement(Endpoint endpoint) {
+    Placement placement(Endpoint endpoint) {
         return placement(store.getReadableDatabase(), endpoint);
     }
 

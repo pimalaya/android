@@ -167,12 +167,6 @@ public final class SyncCoordinator implements MailSync {
         return passes.openMail(account);
     }
 
-    /** The store id one account's collections are namespaced under. */
-    @Override
-    public String accountIdOf(String email) {
-        return passes.accountIdOf(email);
-    }
-
     /** Each domain's filter, the shared one the list shows. */
     private MergedFilter filterOf(PimDomain domain) {
         return MergedFilter.of(host, domain);

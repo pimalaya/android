@@ -14,14 +14,21 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Flags;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.MessageRef;
 import org.pimalaya.client.OfflineClient;
+import org.pimalaya.client.OfflineDriver;
+import org.pimalaya.client.SyncReport;
+import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
-import org.pimalaya.pimdir.PimdirEngine;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -47,6 +54,7 @@ public class MailEngineTest {
     private MailStore store;
     private MailStager engine;
     private String collection;
+    private String accountId;
 
     @Before
     public void setUp() throws Exception {
@@ -55,6 +63,7 @@ public class MailEngineTest {
         store = new MailStore(context, pimdir);
         store.replaceMailboxes(EMAIL, List.of(new Mailbox("INBOX", "")));
         collection = store.collectionOf(EMAIL, "INBOX");
+        accountId = new PimdirAccount(context).idOf(EMAIL);
 
         // No account: the shape a driver that only stages runs with, which
         // is every action in the reader and the composer.
@@ -170,42 +179,69 @@ public class MailEngineTest {
                 store.flagsOf(collection, "42").with(Flags.Marker.FLAGGED, true));
 
         List<String> pushed = new ArrayList<>();
-        PimdirEngine remote =
-                new PimdirEngine(pimdir, Clients.real()) {
+        MailClient server =
+                new MailClient() {
                     @Override
-                    protected PimDomain domain() {
-                        return PimDomain.MAIL;
+                    public JSONObject enumerateMailbox(
+                            MailSession session, String mailbox, JSONObject request) {
+                        try {
+                            JSONObject item =
+                                    new JSONObject()
+                                            .put("handle", "42")
+                                            .put("flags", new JSONArray().put("$junk"));
+                            return new JSONObject()
+                                    .put("items", new JSONArray().put(item))
+                                    .put("vanished", new JSONArray())
+                                    .put("complete", true);
+                        } catch (JSONException failure) {
+                            throw new AssertionError(failure);
+                        }
                     }
 
                     @Override
-                    protected JSONObject enumerate(JSONObject yielded) throws JSONException {
-                        JSONObject item =
-                                new JSONObject()
-                                        .put("handle", "42")
-                                        .put("flags", new JSONArray().put("$junk"));
-                        return new JSONObject()
-                                .put("items", new JSONArray().put(item))
-                                .put("vanished", new JSONArray())
-                                .put("complete", true);
-                    }
-
+                    public void setFlag(
+                            MailSession session,
+                            MessageRef message,
+                            Flags.Marker flag,
+                            boolean add) {}
+                };
+        OfflineClient bridge =
+                new OfflineClient() {
                     @Override
-                    protected JSONObject fetch(JSONObject yielded) {
-                        return new JSONObject();
-                    }
-
-                    @Override
-                    protected JSONObject push(JSONObject yielded) throws JSONException {
-                        JSONObject change = yielded.getJSONArray("changes").getJSONObject(0);
-                        pushed.add(change.getString("op"));
-                        return new JSONObject()
-                                .put(
-                                        "results",
-                                        new JSONArray()
-                                                .put(result(change.getString("handle"), true, null, null)));
+                    public SyncReport syncImmutable(
+                            OfflineDriver driver,
+                            String collection,
+                            String since,
+                            boolean scopeBound) {
+                        return super.syncImmutable(
+                                yielded -> {
+                                    try {
+                                        JSONObject asked = new JSONObject(yielded);
+                                        if ("push".equals(asked.getString("op"))) {
+                                            JSONObject change =
+                                                    asked.getJSONArray("changes")
+                                                            .getJSONObject(0);
+                                            pushed.add(change.getString("op"));
+                                        }
+                                    } catch (JSONException failure) {
+                                        throw new AssertionError(failure);
+                                    }
+                                    return driver.serve(yielded);
+                                },
+                                collection,
+                                since,
+                                scopeBound);
                     }
                 };
-        new OfflineClient().syncImmutable(remote, collection, null, false);
+        MailEngine remote =
+                new MailEngine(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                server, bridge),
+                        null,
+                        accountId);
+        bridge.syncImmutable(remote, collection, null, false);
 
         assertEquals(List.of("setFlags"), pushed);
     }
@@ -270,65 +306,59 @@ public class MailEngineTest {
         String since = "2026-01-01T00:00:00Z";
         List<JSONObject> asked = new ArrayList<>();
         boolean[] cut = {true};
-        PimdirEngine remote =
-                new PimdirEngine(pimdir, Clients.real()) {
+        MailClient server =
+                new MailClient() {
                     @Override
-                    protected PimDomain domain() {
-                        return PimDomain.MAIL;
-                    }
-
-                    @Override
-                    protected boolean listingsNamed() {
-                        return true;
-                    }
-
-                    @Override
-                    protected JSONObject enumerate(JSONObject yielded) throws JSONException {
-                        asked.add(yielded);
-                        JSONObject listing = yielded.getJSONObject("listing");
-                        if ("delta".equals(listing.getString("kind"))) {
-                            return new JSONObject()
-                                    .put("items", new JSONArray())
-                                    .put("vanished", new JSONArray())
-                                    .put("complete", false)
-                                    .put("checkpoint", "cp-2");
-                        }
-                        if (listing.isNull("cursor")) {
+                    public JSONObject enumerateMailbox(
+                            MailSession session, String mailbox, JSONObject request) {
+                        asked.add(request);
+                        try {
+                            JSONObject listing = request.getJSONObject("listing");
+                            if ("delta".equals(listing.getString("kind"))) {
+                                return new JSONObject()
+                                        .put("items", new JSONArray())
+                                        .put("vanished", new JSONArray())
+                                        .put("complete", false)
+                                        .put("checkpoint", "cp-2");
+                            }
+                            if (listing.isNull("cursor")) {
+                                return new JSONObject()
+                                        .put(
+                                                "items",
+                                                new JSONArray()
+                                                        .put(named("101", "2026-10-07T08:00:00Z"))
+                                                        .put(named("100", "2026-10-06T08:00:00Z")))
+                                        .put("vanished", new JSONArray())
+                                        .put("complete", true)
+                                        .put("last", false)
+                                        .put("cursor", "7:100")
+                                        .put("checkpoint", "cp-1");
+                            }
+                            if (cut[0]) {
+                                cut[0] = false;
+                                throw new IllegalStateException("the connection dropped");
+                            }
                             return new JSONObject()
                                     .put(
                                             "items",
                                             new JSONArray()
-                                                    .put(named("101", "2026-10-07T08:00:00Z"))
-                                                    .put(named("100", "2026-10-06T08:00:00Z")))
+                                                    .put(named("99", "2026-02-01T08:00:00Z")))
                                     .put("vanished", new JSONArray())
                                     .put("complete", true)
-                                    .put("last", false)
-                                    .put("cursor", "7:100")
-                                    .put("checkpoint", "cp-1");
+                                    .put("last", true);
+                        } catch (JSONException failure) {
+                            throw new AssertionError(failure);
                         }
-                        if (cut[0]) {
-                            cut[0] = false;
-                            throw new IllegalStateException("the connection dropped");
-                        }
-                        return new JSONObject()
-                                .put(
-                                        "items",
-                                        new JSONArray().put(named("99", "2026-02-01T08:00:00Z")))
-                                .put("vanished", new JSONArray())
-                                .put("complete", true)
-                                .put("last", true);
-                    }
-
-                    @Override
-                    protected JSONObject fetch(JSONObject yielded) {
-                        return new JSONObject();
-                    }
-
-                    @Override
-                    protected JSONObject push(JSONObject yielded) throws JSONException {
-                        return new JSONObject().put("results", new JSONArray());
                     }
                 };
+        MailEngine remote =
+                new MailEngine(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                server, new OfflineClient()),
+                        null,
+                        accountId);
 
         try {
             new OfflineClient().syncImmutable(remote, collection, since, false);

@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.client;
 
 import static org.junit.Assert.assertEquals;
 
@@ -7,8 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.pimalaya.client.ContactClient;
-import org.pimalaya.client.TypeKind;
+import org.pimalaya.R;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 

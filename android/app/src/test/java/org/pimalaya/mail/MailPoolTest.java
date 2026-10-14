@@ -12,8 +12,15 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.FloorReply;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -84,6 +91,7 @@ public class MailPoolTest {
         pimdir = new PimdirDb(context);
         store = new MailStore(context, pimdir);
         accountId = new PimdirAccount(context).idOf(EMAIL);
+        watchWrites();
     }
 
     /** A session of the fake server, which knows when two use it at once. */
@@ -125,30 +133,40 @@ public class MailPoolTest {
         return TOP.minusSeconds(hours * 3600).toString();
     }
 
-    /** The engine one worker runs a mailbox with, over its session. */
-    private final class Server extends MailEngine {
+    /** The server one worker reads a mailbox from, over its session. */
+    private final class Server extends MailClient {
         private final Session session;
         private final String failing;
 
+        /** The engine one worker runs a mailbox with, over this server's session. */
+        final MailEngine engine;
+
         Server(Session session, String failing) {
-            super(pimdir, Clients.real(), null, accountId);
             this.session = session;
             this.failing = failing;
+            engine =
+                    new MailEngine(
+                            pimdir,
+                            new Clients(
+                                    new AccountClient(), new ContactClient(),
+                                    new CalendarClient(), this, new OfflineClient()),
+                            null,
+                            accountId);
         }
 
         @Override
-        String floor(String collection, String before, int count) {
+        public FloorReply floor(MailSession on, String mailbox, String before, int count) {
             try {
                 session.request();
             } catch (InterruptedException interrupted) {
                 throw new IllegalStateException(interrupted);
             }
-            return null;
+            return new FloorReply(null, 0, List.of());
         }
 
         @Override
-        protected JSONObject enumerate(JSONObject yielded) throws JSONException {
-            String collection = yielded.getString("collection");
+        public JSONObject enumerateMailbox(MailSession on, String mailbox, JSONObject request) {
+            String collection = store.collectionOf(EMAIL, mailbox);
             started.add(collection);
             if (first != null) {
                 if (collection.equals(first)) {
@@ -161,49 +179,51 @@ public class MailPoolTest {
                     await(firstBegun);
                 }
             }
-            // NOTE: timed as the real driver times its bridge call.
-            long asked = System.nanoTime();
             try {
                 session.request();
             } catch (InterruptedException interrupted) {
                 throw new IllegalStateException(interrupted);
             }
-            remote(System.nanoTime() - asked);
             if (collection.equals(failing)) {
                 throw new IllegalStateException("the server refused " + collection);
             }
-            JSONArray items = new JSONArray();
-            for (int index = 0; index < SIZE; index++) {
-                String date = hoursBack(index);
-                items.put(named(collection + "-" + index, date));
-            }
-            return new JSONObject()
-                    .put("items", items)
-                    .put("vanished", new JSONArray())
-                    .put("complete", true)
-                    .put("last", true)
-                    .put("checkpoint", "cp");
-        }
-
-        @Override
-        protected JSONObject push(JSONObject yielded) throws JSONException {
-            return new JSONObject().put("results", new JSONArray());
-        }
-
-        @Override
-        protected void applied(JSONArray effects) {
-            if (!Thread.holdsLock(pimdir.locks().store)) {
-                writeOutsideLock.set(true);
-            }
-            int now = writing.incrementAndGet();
-            mostWriting.accumulateAndGet(now, Math::max);
             try {
-                Thread.sleep(5);
-            } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
+                JSONArray items = new JSONArray();
+                for (int index = 0; index < SIZE; index++) {
+                    String date = hoursBack(index);
+                    items.put(named(collection + "-" + index, date));
+                }
+                return new JSONObject()
+                        .put("items", items)
+                        .put("vanished", new JSONArray())
+                        .put("complete", true)
+                        .put("last", true)
+                        .put("checkpoint", "cp");
+            } catch (JSONException failure) {
+                throw new AssertionError(failure);
             }
-            writing.decrementAndGet();
         }
+    }
+
+    /**
+     * Watches the store's writes as the list does ({@link MailState#onWrite}):
+     * told inside each write a pass lands.
+     */
+    private void watchWrites() {
+        MailState.of(context).onWrite =
+                () -> {
+                    if (!Thread.holdsLock(pimdir.locks().store)) {
+                        writeOutsideLock.set(true);
+                    }
+                    int now = writing.incrementAndGet();
+                    mostWriting.accumulateAndGet(now, Math::max);
+                    try {
+                        Thread.sleep(5);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                    writing.decrementAndGet();
+                };
     }
 
     private static JSONObject named(String handle, String date) throws JSONException {
@@ -271,7 +291,7 @@ public class MailPoolTest {
                     EMAIL,
                     collections,
                     (session, collection, remote) -> {
-                        MailEngine engine = new Server(session, failing);
+                        MailEngine engine = new Server(session, failing).engine;
                         try {
                             engine.sync(collection);
                         } finally {
@@ -377,7 +397,7 @@ public class MailPoolTest {
                             EMAIL,
                             collections,
                             (session, collection, remote) -> {
-                                MailEngine engine = new Server(session, null);
+                                MailEngine engine = new Server(session, null).engine;
                                 try {
                                     engine.sync(collection);
                                 } finally {

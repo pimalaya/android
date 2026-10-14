@@ -16,10 +16,17 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.GraphStepItem;
 import org.pimalaya.client.GraphStepReply;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.OfflineClient;
+import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.StepRequest;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
@@ -33,6 +40,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -97,7 +105,7 @@ public class GraphStepTest {
     }
 
     /** A Graph account holding {@code mail}, whose next step brings {@code next}. */
-    private final class Server extends MailEngine {
+    private final class Server extends MailClient {
         final List<Mail> mail = new ArrayList<>();
         List<Mail> next = List.of();
         boolean exhausted;
@@ -105,19 +113,26 @@ public class GraphStepTest {
         final List<String> banded = new ArrayList<>();
         final List<Set<String>> heldOf = new ArrayList<>();
 
-        Server() {
-            super(pimdir, Clients.real(), null, accountId);
-        }
+        /** The account's driver, on this server. */
+        final MailEngine engine =
+                new MailEngine(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                this, new OfflineClient()),
+                        null,
+                        accountId);
 
         @Override
-        protected GraphStepReply graphStepped(StepRequest request, File dir) {
+        public GraphStepReply graphStep(
+                MailSession session, StepRequest request, File dir, OfflineDriver store) {
             asked.add(request);
             try {
                 List<String> listing = new ArrayList<>();
                 for (Mail mail : this.mail) {
                     listing.add(mail.id);
                 }
-                Set<String> held = held(listing);
+                Set<String> held = held(store, listing);
                 heldOf.add(held);
                 List<GraphStepItem> items = new ArrayList<>();
                 for (Mail mail : next) {
@@ -144,38 +159,59 @@ public class GraphStepTest {
             }
         }
 
-        @Override
-        protected JSONObject enumerate(JSONObject yielded) throws JSONException {
-            String mailbox = mailboxOf(yielded.getString("collection"));
-            JSONObject listing = yielded.getJSONObject("listing");
-            JSONObject scope = yielded.optJSONObject("scope");
-            String since = scope == null || scope.isNull("since") ? null : scope.optString("since");
-            String until = scope == null || scope.isNull("until") ? null : scope.optString("until");
-            JSONObject page = new JSONObject().put("vanished", new JSONArray()).put("last", true);
-            if ("delta".equals(listing.getString("kind"))) {
-                return page.put("items", new JSONArray())
-                        .put("complete", false)
-                        .put("checkpoint", "cp");
-            }
-            banded.add(mailbox);
-            JSONArray items = new JSONArray();
-            for (Mail mail : this.mail) {
-                if (mail.mailbox.equals(mailbox)
-                        && (since == null || mail.date.compareTo(since) >= 0)
-                        && (until == null || mail.date.compareTo(until) < 0)) {
-                    items.put(named(mail));
+        /** Which of a listed page the store holds, asked as the bridge asks it. */
+        private Set<String> held(OfflineDriver store, List<String> listing) {
+            try {
+                String asked =
+                        new JSONObject()
+                                .put("op", "held")
+                                .put("handles", new JSONArray(listing))
+                                .toString();
+                JSONArray held = new JSONObject(store.serve(asked)).getJSONArray("held");
+                Set<String> handles = new HashSet<>();
+                for (int index = 0; index < held.length(); index++) {
+                    handles.add(held.getString(index));
                 }
+                return handles;
+            } catch (JSONException failure) {
+                throw new AssertionError(failure);
             }
-            page.put("items", items).put("complete", true);
-            if (!listing.optBoolean("band")) {
-                page.put("checkpoint", "cp");
-            }
-            return page;
         }
 
         @Override
-        protected JSONObject push(JSONObject yielded) throws JSONException {
-            return new JSONObject().put("results", new JSONArray());
+        public JSONObject enumerateMailbox(
+                MailSession session, String mailbox, JSONObject request) {
+            try {
+                JSONObject listing = request.getJSONObject("listing");
+                JSONObject scope = request.optJSONObject("scope");
+                String since =
+                        scope == null || scope.isNull("since") ? null : scope.optString("since");
+                String until =
+                        scope == null || scope.isNull("until") ? null : scope.optString("until");
+                JSONObject page =
+                        new JSONObject().put("vanished", new JSONArray()).put("last", true);
+                if ("delta".equals(listing.getString("kind"))) {
+                    return page.put("items", new JSONArray())
+                            .put("complete", false)
+                            .put("checkpoint", "cp");
+                }
+                banded.add(mailbox);
+                JSONArray items = new JSONArray();
+                for (Mail mail : this.mail) {
+                    if (mail.mailbox.equals(mailbox)
+                            && (since == null || mail.date.compareTo(since) >= 0)
+                            && (until == null || mail.date.compareTo(until) < 0)) {
+                        items.put(named(mail));
+                    }
+                }
+                page.put("items", items).put("complete", true);
+                if (!listing.optBoolean("band")) {
+                    page.put("checkpoint", "cp");
+                }
+                return page;
+            } catch (JSONException failure) {
+                throw new AssertionError(failure);
+            }
         }
     }
 
@@ -230,7 +266,7 @@ public class GraphStepTest {
         server.next = List.of(newest, reply, older, imported);
 
         MailStep.Outcome first =
-                new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
+                new GraphStep().run(server.engine, new StepRun(EMAIL, mailboxes(), null, true));
 
         StepRequest request = server.asked.get(0);
         assertNull(request.frontier());
@@ -266,13 +302,13 @@ public class GraphStepTest {
         server.mail.addAll(List.of(newest, next, reply));
         server.next = List.of(newest);
         MailStep.Outcome first =
-                new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
+                new GraphStep().run(server.engine, new StepRun(EMAIL, mailboxes(), null, true));
         MailWindow.set(context, accountId, first.frontier);
 
         server.next = List.of(next, reply);
         server.banded.clear();
         MailStep.Outcome second =
-                new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), null, false));
+                new GraphStep().run(server.engine, new StepRun(EMAIL, mailboxes(), null, false));
 
         StepRequest request = server.asked.get(1);
         assertEquals(newest.date, request.frontier());
@@ -295,7 +331,7 @@ public class GraphStepTest {
         server.exhausted = true;
 
         MailStep.Outcome first =
-                new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
+                new GraphStep().run(server.engine, new StepRun(EMAIL, mailboxes(), null, true));
 
         assertTrue(first.exhausted);
         for (String collection : List.of(inbox, sent, projets)) {
@@ -316,10 +352,10 @@ public class GraphStepTest {
 
         server.next = List.of(next);
         MailStep.Outcome first =
-                new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), inbox, false));
+                new GraphStep().run(server.engine, new StepRun(EMAIL, mailboxes(), inbox, false));
         MailWindow.stepped(context, accountId, inbox, first);
         server.next = List.of(last);
-        new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), inbox, false));
+        new GraphStep().run(server.engine, new StepRun(EMAIL, mailboxes(), inbox, false));
 
         assertEquals(List.of("Inbox"), server.asked.get(0).mailboxes());
         assertEquals(newest.date, server.asked.get(0).frontier());

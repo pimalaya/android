@@ -19,6 +19,7 @@ import org.pimalaya.FakeAndroidKeyStore;
 import org.pimalaya.MainActivity;
 import org.pimalaya.account.Oauth;
 import org.pimalaya.account.SecureStore;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.OauthRequest;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
@@ -122,7 +123,7 @@ public class PendingGrantTest {
 
     /** A grant flow over an activity that is attached but never created. */
     private OauthFlow flow(MainActivity host) {
-        OauthFlow flow = new OauthFlow(host, host.clients.account(), host);
+        OauthFlow flow = new OauthFlow(host, new AccountClient(), host);
         flow.onBusy = () -> {};
         flow.onAborted = () -> {};
         return flow;

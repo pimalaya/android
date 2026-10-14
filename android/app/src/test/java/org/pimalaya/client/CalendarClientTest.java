@@ -553,7 +553,8 @@ public class CalendarClientTest {
         // NOTE: what the source does not say is no description or colour,
         // no role and writable.
         assertEquals(
-                new Calendar("bare", "bare", "https://dav.example.org/cal/bare/", null, null),
+                new Calendar(
+                        "bare", "bare", "https://dav.example.org/cal/bare/", null, null, "", true),
                 Calendar.from(
                         new JSONObject(
                                 "{\"id\":\"bare\",\"name\":\"bare\","

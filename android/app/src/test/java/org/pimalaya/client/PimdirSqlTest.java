@@ -1,4 +1,4 @@
-package org.pimalaya.pimdir;
+package org.pimalaya.client;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -11,8 +11,6 @@ import android.database.Cursor;
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.pimalaya.client.PimalayaException;
-import org.pimalaya.client.PimdirSql;
 import org.robolectric.RobolectricTestRunner;
 
 import java.util.Map;

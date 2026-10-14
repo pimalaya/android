@@ -12,9 +12,16 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Flags;
+import org.pimalaya.client.FloorReply;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -50,40 +57,51 @@ public class MailNamingTest {
     }
 
     /** A mailbox holding one message, {@code 1} unless named, that reads ids from a list. */
-    private final class Server extends MailEngine {
+    private final class Server extends MailClient {
         final List<List<String>> reads = new ArrayList<>();
         final String listed;
+
+        /** The account's driver, on this server. */
+        final MailEngine engine;
 
         Server() {
             this("1");
         }
 
         Server(String listed) {
-            super(
-                    pimdir,
-                    Clients.real(),
-                    null,
-                    new PimdirAccount(RuntimeEnvironment.getApplication()).idOf(EMAIL));
             this.listed = listed;
+            engine =
+                    new MailEngine(
+                            pimdir,
+                            new Clients(
+                                    new AccountClient(), new ContactClient(),
+                                    new CalendarClient(), this, new OfflineClient()),
+                            null,
+                            new PimdirAccount(RuntimeEnvironment.getApplication()).idOf(EMAIL));
         }
 
         @Override
-        String floor(String collection, String before, int count) {
-            return null;
+        public FloorReply floor(MailSession session, String mailbox, String before, int count) {
+            return new FloorReply(null, 0, List.of());
         }
 
         @Override
-        protected JSONObject enumerate(JSONObject yielded) throws JSONException {
-            return new JSONObject()
-                    .put("items", new JSONArray().put(named(listed)))
-                    .put("vanished", new JSONArray())
-                    .put("complete", true)
-                    .put("last", true)
-                    .put("checkpoint", "graph-delta:link");
+        public JSONObject enumerateMailbox(
+                MailSession session, String mailbox, JSONObject request) {
+            try {
+                return new JSONObject()
+                        .put("items", new JSONArray().put(named(listed)))
+                        .put("vanished", new JSONArray())
+                        .put("complete", true)
+                        .put("last", true)
+                        .put("checkpoint", "graph-delta:link");
+            } catch (JSONException failure) {
+                throw new AssertionError(failure);
+            }
         }
 
         @Override
-        protected JSONArray read(String collection, List<String> handles) {
+        public JSONArray nameMessages(MailSession session, String mailbox, List<String> handles) {
             reads.add(handles);
             JSONArray read = new JSONArray();
             for (String handle : handles) {
@@ -92,11 +110,6 @@ public class MailNamingTest {
                 }
             }
             return read;
-        }
-
-        @Override
-        protected JSONObject push(JSONObject yielded) throws JSONException {
-            return new JSONObject().put("results", new JSONArray());
         }
     }
 
@@ -127,7 +140,7 @@ public class MailNamingTest {
     @Test
     public void aDeltaMemberIsNamedByTheStoreOrReadById() throws Exception {
         Server server = new Server();
-        server.sync(inbox);
+        server.engine.sync(inbox);
 
         JSONObject page =
                 new JSONObject()
@@ -137,7 +150,7 @@ public class MailNamingTest {
                                         .put(unnamed("1"))
                                         .put(unnamed("2"))
                                         .put(unnamed("3")));
-        server.nameUnnamed(inbox, new JSONObject().put("kind", "delta"), page);
+        server.engine.nameUnnamed(inbox, new JSONObject().put("kind", "delta"), page);
 
         assertEquals(List.of(List.of("2", "3")), server.reads);
         JSONArray items = page.getJSONArray("items");
@@ -161,8 +174,8 @@ public class MailNamingTest {
         String clients = store.collectionOf(EMAIL, "Clients");
         MailPolicy.markAccountWide(context, new PimdirAccount(context).idOf(EMAIL), true);
         Server server = new Server();
-        server.sync(inbox);
-        new Server("5").sync(clients);
+        server.engine.sync(inbox);
+        new Server("5").engine.sync(clients);
 
         // NOTE: newest received first: 9 arrived after 1, the first held; 5
         // is held in another mailbox; 7 is older mail no step brought.
@@ -178,7 +191,7 @@ public class MailNamingTest {
                                         .put(unnamed("1"))
                                         .put(unnamed("5"))
                                         .put(unnamed("7")));
-        server.nameUnnamed(inbox, round, page);
+        server.engine.nameUnnamed(inbox, round, page);
         assertEquals(List.of(List.of("9", "5")), server.reads);
         JSONArray items = page.getJSONArray("items");
         assertEquals(1, items.length());
@@ -189,7 +202,7 @@ public class MailNamingTest {
         page.put(
                 "items",
                 new JSONArray().put(unnamed("9")).put(unnamed("5")).put(unnamed("7")));
-        server.nameUnnamed(inbox, round.put("band", true), page);
+        server.engine.nameUnnamed(inbox, round.put("band", true), page);
         assertEquals(List.of(List.of("5")), server.reads);
     }
 
@@ -197,10 +210,10 @@ public class MailNamingTest {
     public void aRoundOverACoveredScopeIsToldFromAFirstChunk() throws Exception {
         Server server = new Server();
         JSONObject scope = new JSONObject().put("since", DATE);
-        assertFalse("never listed", server.covered(inbox, scope));
+        assertFalse("never listed", server.engine.covered(inbox, scope));
 
-        server.sync(inbox);
-        assertTrue("listed whole", server.covered(inbox, scope));
-        assertTrue(server.covered(inbox, new JSONObject()));
+        server.engine.sync(inbox);
+        assertTrue("listed whole", server.engine.covered(inbox, scope));
+        assertTrue(server.engine.covered(inbox, new JSONObject()));
     }
 }

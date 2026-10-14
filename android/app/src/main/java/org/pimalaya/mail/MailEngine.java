@@ -74,7 +74,7 @@ import java.util.function.Supplier;
  * write, so the top of the list shows while the rest fills in, and a pass
  * cut off resumes where its last page landed.
  */
-public class MailEngine extends PimdirEngine {
+public final class MailEngine extends PimdirEngine {
     /**
      * The markers this app writes, and the only ones a push ever touches.
      *
@@ -319,17 +319,8 @@ public class MailEngine extends PimdirEngine {
     }
 
     /**
-     * The floor of a mailbox's next chunk: the oldest {@code Date} among its
-     * {@code count} newest messages dated before {@code before} (null for no
-     * ceiling), null when fewer lie below it and the mailbox is whole there.
-     */
-    String floor(String collection, String before, int count) {
-        return clients.mail().floor(session, mailboxOf(collection), before, count).floor();
-    }
-
-    /**
      * The {@code Date}s of a mailbox's {@code count} newest messages, newest
-     * first, as {@link #floor} reads them: fewer when the mailbox holds
+     * first, as {@link #timedFloor} reads them: fewer when the mailbox holds
      * fewer.
      */
     List<String> newest(String collection, int count) {
@@ -361,11 +352,16 @@ public class MailEngine extends PimdirEngine {
         Log.w("pimalaya", "mailbox refused, skipped: " + collection + ": " + failure.getMessage());
     }
 
-    /** {@link #floor}, its time counted as the network's toward the first page. */
+    /**
+     * The floor of a mailbox's next chunk: the oldest {@code Date} among its
+     * {@code count} newest messages dated before {@code before} (null for no
+     * ceiling), null when fewer lie below it and the mailbox is whole there.
+     * Its time is counted as the network's toward the first page.
+     */
     private String timedFloor(String collection, String before, int count) {
         long started = System.nanoTime();
         try {
-            return floor(collection, before, count);
+            return clients.mail().floor(session, mailboxOf(collection), before, count).floor();
         } finally {
             remote(System.nanoTime() - started);
         }
@@ -500,10 +496,10 @@ public class MailEngine extends PimdirEngine {
      * A directory of its own under the app's cache, for one read of whole
      * messages into files ({@link #sources}); the caller deletes it.
      */
-    File scratch() {
+    static File scratch(Context context) {
         File dir =
                 new File(
-                        new File(pimdir.context().getCacheDir(), SCRATCH),
+                        new File(context.getCacheDir(), SCRATCH),
                         UUID.randomUUID().toString());
         if (!dir.mkdirs()) {
             throw new IllegalStateException("Could not create " + dir);
@@ -683,7 +679,8 @@ public class MailEngine extends PimdirEngine {
      * Names the members a page listed by id and markers alone, so nothing
      * reaches the store unnamed (pimdir SYNC section 4): one the store binds
      * keeps the summary it holds, every other one is read with its summary
-     * ({@link #read}), and one gone since it was listed is left out.
+     * ({@link MailClient#nameMessages}), and one gone since it was listed is
+     * left out.
      *
      * <p>A Graph delta lists them so. So does a round over a mailbox of an
      * account stepped through account-wide (Gmail), which lists the
@@ -722,7 +719,8 @@ public class MailEngine extends PimdirEngine {
         }
         Map<String, JSONObject> read = new HashMap<>();
         if (!unbound.isEmpty()) {
-            JSONArray named = read(collection, unbound);
+            JSONArray named =
+                    clients.mail().nameMessages(session, mailboxOf(collection), unbound);
             for (int index = 0; index < named.length(); index++) {
                 JSONObject item = named.getJSONObject(index);
                 read.put(item.getString("handle"), item);
@@ -850,11 +848,6 @@ public class MailEngine extends PimdirEngine {
                 item.put("linkId", create);
             }
         }
-    }
-
-    /** The messages of a mailbox read by id with their summary, as listed. */
-    protected JSONArray read(String collection, List<String> handles) {
-        return clients.mail().nameMessages(session, mailboxOf(collection), handles);
     }
 
     @Override
@@ -1072,7 +1065,7 @@ public class MailEngine extends PimdirEngine {
         long started = System.nanoTime();
         try {
             if (!missing.isEmpty()) {
-                dir = scratch();
+                dir = scratch(pimdir.context());
                 try (MailTally.Watch counting = tally == null ? null : tally.watch(dir)) {
                     files.putAll(sources(mailboxOf(collection), missing, dir));
                 }
@@ -1172,7 +1165,7 @@ public class MailEngine extends PimdirEngine {
     /**
      * What a step over {@code only} (the collection a view filtered to it
      * steps alone, null for the account) asks the bridge ({@link
-     * #stepped}), each backend reading what it needs: about {@link
+     * #stepRead}), each backend reading what it needs: about {@link
      * MailStep#COUNT} messages the store does not hold (each listed page
      * asked of {@link #held}), below the {@code frontier} (the mailbox's
      * own over it alone, else the account's; null for all mail or until
@@ -1201,14 +1194,25 @@ public class MailEngine extends PimdirEngine {
                 mailboxes);
     }
 
-    /** {@link #stepped} as {@link #counted} reads it. */
+    /**
+     * One step of a Gmail or JMAP account read by the bridge ({@link
+     * MailStep}), as {@code request} asks ({@link #stepRequest}), of its
+     * mailbox or of the account for none, each message read into a file of
+     * {@code dir}, as {@link #counted} reads it. The bridge asks this driver
+     * which of each page it lists the store holds ({@link #held}).
+     */
     NamedStep stepRead(List<String> holding, StepRequest request, File dir) {
-        return counted(holding, request, dir, () -> stepped(request, dir));
+        return counted(
+                holding, request, dir, () -> clients.mail().step(session, request, dir, this));
     }
 
-    /** {@link #graphStepped} as {@link #counted} reads it. */
+    /** {@link #stepRead} of a Microsoft Graph account. */
     GraphStepReply graphStepRead(List<String> holding, StepRequest request, File dir) {
-        return counted(holding, request, dir, () -> graphStepped(request, dir));
+        return counted(
+                holding,
+                request,
+                dir,
+                () -> clients.mail().graphStep(session, request, dir, this));
     }
 
     /**
@@ -1236,22 +1240,6 @@ public class MailEngine extends PimdirEngine {
     }
 
     /**
-     * One step of a Gmail or JMAP account read by the bridge ({@link
-     * MailStep}), as {@code request} asks ({@link #stepRequest}), of its
-     * mailbox or of the account for none, each message read into a file of
-     * {@code dir}. The bridge asks this driver which of each page it lists
-     * the store holds ({@link #held}).
-     */
-    protected NamedStep stepped(StepRequest request, File dir) {
-        return clients.mail().step(session, request, dir, this);
-    }
-
-    /** {@link #stepped} of a Microsoft Graph account. */
-    protected GraphStepReply graphStepped(StepRequest request, File dir) {
-        return clients.mail().graphStep(session, request, dir, this);
-    }
-
-    /**
      * A Gmail or JMAP step's item as a listing names it (the engine's
      * wire), its file and labels left out.
      */
@@ -1273,29 +1261,30 @@ public class MailEngine extends PimdirEngine {
      * The handles {@link #sources} found gone (deleted since they were
      * listed), apart from those not handed over, while a download runs.
      */
-    protected final Set<String> gone = new HashSet<>();
+    private final Set<String> gone = new HashSet<>();
 
     /**
      * Some messages' sources as the server holds them, each read into a
      * file of {@code dir}, by handle; one gone left out and added to
      * {@link #gone}, one not handed over left out.
      */
-    protected Map<String, File> sources(String mailbox, List<String> handles, File dir) {
-        return sources(session, mailbox, handles, dir);
+    private Map<String, File> sources(String mailbox, List<String> handles, File dir) {
+        MessageSources reply = clients.mail().fetchSources(session, mailbox, handles, dir);
+        Map<String, File> files = files(reply);
+        gone.addAll(reply.gone());
+        return files;
     }
 
     /**
-     * {@link #sources} on {@code on}, a session other than the driver's: the
-     * reader's own, opened for the one message it fetches.
+     * The files a read of whole messages wrote, by handle: this driver's
+     * ({@link #sources}) and the reader's, on a session of its own opened
+     * for the one message it fetches ({@link MailReader#fetch}).
      */
-    protected Map<String, File> sources(
-            MailSession on, String mailbox, List<String> handles, File dir) {
-        MessageSources reply = clients.mail().fetchSources(on, mailbox, handles, dir);
+    static Map<String, File> files(MessageSources reply) {
         Map<String, File> files = new HashMap<>();
         for (MessageSource item : reply.items()) {
             files.put(item.id(), new File(item.path()));
         }
-        gone.addAll(reply.gone());
         return files;
     }
 
@@ -1354,7 +1343,7 @@ public class MailEngine extends PimdirEngine {
         String to = change.isNull("to") ? null : change.optString("to", null);
         if (to == null) {
             try {
-                destroy(mailbox, handle);
+                clients.mail().destroy(session, new MessageRef(mailbox, handle));
             } catch (RuntimeException failure) {
                 gone(mailbox, handle, failure);
             }
@@ -1367,7 +1356,7 @@ public class MailEngine extends PimdirEngine {
         // NOTE: a message gone is moved nowhere, so its target's create
         // goes as a delivered move's does.
         try {
-            relocate(mailbox, handle, mailboxOf(to));
+            clients.mail().relocate(session, new MessageRef(mailbox, handle), mailboxOf(to));
         } catch (RuntimeException failure) {
             gone(mailbox, handle, failure);
         }
@@ -1414,7 +1403,11 @@ public class MailEngine extends PimdirEngine {
             }
             // NOTE: a copy of a message gone has no arrival to wait for.
             try {
-                copy(mailboxOf(from), origin.getString("handle"), mailbox);
+                clients.mail()
+                        .copy(
+                                session,
+                                new MessageRef(mailboxOf(from), origin.getString("handle")),
+                                mailbox);
             } catch (RuntimeException failure) {
                 gone(mailboxOf(from), origin.getString("handle"), failure);
                 return result(handle, false, null, null);
@@ -1430,33 +1423,13 @@ public class MailEngine extends PimdirEngine {
         if (source == null) {
             return result(handle, false, null, null);
         }
-        append(mailbox, source, Flags.read(change.optJSONArray("flags")));
+        clients.mail().append(session, mailbox, source, Flags.read(change.optJSONArray("flags")));
         return result(handle, true, null, null);
     }
 
     /** Whether a collection is one of this account's mailboxes. */
     private boolean ownCollection(String collection) {
         return collection.startsWith(PimdirAccount.collectionId(accountId, ""));
-    }
-
-    /** Moves one message from {@code mailbox} into {@code target} on the server. */
-    protected void relocate(String mailbox, String handle, String target) {
-        clients.mail().relocate(session, new MessageRef(mailbox, handle), target);
-    }
-
-    /** Copies one message from {@code mailbox} into {@code target} on the server. */
-    protected void copy(String mailbox, String handle, String target) {
-        clients.mail().copy(session, new MessageRef(mailbox, handle), target);
-    }
-
-    /** Deletes one message for good on the server. */
-    protected void destroy(String mailbox, String handle) {
-        clients.mail().destroy(session, new MessageRef(mailbox, handle));
-    }
-
-    /** Appends one message to {@code mailbox} on the server. */
-    protected void append(String mailbox, byte[] source, Flags flags) {
-        clients.mail().append(session, mailbox, source, flags);
     }
 
     /**

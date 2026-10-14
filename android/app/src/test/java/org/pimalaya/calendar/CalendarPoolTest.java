@@ -41,7 +41,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * An account's calendars run side by side, and a calendar's entries are read
@@ -243,7 +242,7 @@ public class CalendarPoolTest {
         List<Calendar> listed = new ArrayList<>();
         for (String name : new String[] {"work", "home", "birthdays"}) {
             String url = "msgraph://example/" + name;
-            listed.add(new Calendar(name, name, url, null, null));
+            listed.add(new Calendar(name, name, url, null, null, "", true));
             Map<String, String[]> members = new LinkedHashMap<>();
             for (int index = 0; index < SIZE; index++) {
                 String id = name + "-" + index;

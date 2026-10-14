@@ -116,7 +116,8 @@ public class CalendarDavWriteTest {
         Context context = RuntimeEnvironment.getApplication();
         PimdirDb pimdir = new PimdirDb(context);
         events = new EventStore(context, pimdir);
-        events.replaceCalendars(EMAIL, List.of(new Calendar("work", "Work", URL, "", null)));
+        events.replaceCalendars(
+                EMAIL, List.of(new Calendar("work", "Work", URL, "", null, "", true)));
         calendar = events.loadCalendars().get(0).id;
         engine =
                 new CalendarEngine(

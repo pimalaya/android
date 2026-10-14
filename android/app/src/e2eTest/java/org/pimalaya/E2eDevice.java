@@ -24,7 +24,6 @@ import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.file.FileStore;
-import org.pimalaya.mail.MailEngine;
 import org.pimalaya.mail.MailReader;
 import org.pimalaya.mail.MailStager;
 import org.pimalaya.mail.MailState;
@@ -408,11 +407,7 @@ final class E2eDevice {
     }
 
     MailReader reader(String email) {
-        return new MailReader(
-                mail,
-                files,
-                clients.mail(),
-                new MailEngine(pimdir, clients, null, mail.accountIdOf(email)));
+        return new MailReader(mail, files, clients.mail(), stager(email));
     }
 
     MailSubmit submitter(String email) {

@@ -13,6 +13,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.FakeAndroidKeyStore;
 import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.AccountCredential;
+import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
@@ -104,8 +105,12 @@ public class AccountRemovalTest {
         events.replaceCalendars(
                 EMAIL,
                 List.of(
-                        new Calendar("work", "Work", "https://dav.example.org/cal/work/", null, null),
-                        new Calendar("home", "Home", "https://dav.example.org/cal/home/", null, null)));
+                        new Calendar(
+                                "work", "Work", "https://dav.example.org/cal/work/", null, null,
+                                "", true),
+                        new Calendar(
+                                "home", "Home", "https://dav.example.org/cal/home/", null, null,
+                                "", true)));
         List<PimdirCollections.Stored> calendars =
                 new PimdirCollections(pimdir, context).list(PimdirSummary.CALENDAR);
         DefaultCollection.choose(context, EMAIL, PimdirSummary.CALENDAR, calendars.get(0).id);
@@ -128,7 +133,7 @@ public class AccountRemovalTest {
                         .remove(EMAIL);
 
         assertEquals(List.of(BOOK), urls);
-        assertNull(store.find(EMAIL));
+        assertNull(AccountEntry.find(store.loadAll(), EMAIL));
         assertEquals(1, contacts.list(LocalBook.URL).size());
         assertEquals("Bob", contacts.list(LocalBook.URL).get(0).name);
         assertTrue(mail.loadMailboxes(List.of()).isEmpty());

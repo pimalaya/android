@@ -113,7 +113,9 @@ public class AccountCommitTest {
         AccountEntry stored = AccountCommit.persist(store, connected);
 
         assertEquals(Set.of(PimDomain.MAIL, PimDomain.CONTACTS), stored.domains());
-        assertEquals(Set.of(PimDomain.MAIL, PimDomain.CONTACTS), store.find(EMAIL).domains());
+        assertEquals(
+                Set.of(PimDomain.MAIL, PimDomain.CONTACTS),
+                AccountEntry.find(store.loadAll(), EMAIL).domains());
     }
 
     @Test
@@ -137,7 +139,9 @@ public class AccountCommitTest {
 
         assertEquals(1, stored.credentials().size());
         assertEquals(union.id, stored.credential(PimDomain.CONTACTS).id);
-        assertEquals(union.id, store.find(EMAIL).credential(PimDomain.CONTACTS).id);
+        assertEquals(
+                union.id,
+                AccountEntry.find(store.loadAll(), EMAIL).credential(PimDomain.CONTACTS).id);
     }
 
     @Test

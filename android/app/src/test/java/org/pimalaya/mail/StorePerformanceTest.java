@@ -14,11 +14,19 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.MessageSource;
+import org.pimalaya.client.MessageSources;
 import org.pimalaya.client.NamedStep;
+import org.pimalaya.client.OfflineClient;
+import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.client.StepRequest;
 import org.pimalaya.file.FileStore;
@@ -394,29 +402,43 @@ public class StorePerformanceTest {
 
         // The bridge asks through the driver's serve, a page at a time.
         JSONObject[] answered = new JSONObject[1];
-        new MailEngine(pimdir, Clients.real(), null, store.accountIdOf(EMAIL)) {
-            @Override
-            protected NamedStep stepped(StepRequest request, java.io.File dir) {
-                assertFalse(
-                        "no held list rides the request",
-                        Arrays.stream(StepRequest.class.getRecordComponents())
-                                .anyMatch(component -> component.getName().equals("held")));
-                try {
-                    answered[0] =
-                            new JSONObject(
-                                    serve(
-                                            new JSONObject()
-                                                    .put("op", "held")
-                                                    .put("handles",
-                                                            new JSONArray().put("i2").put("a0")
-                                                                    .put("gone"))
-                                                    .toString()));
-                    return new NamedStep(null, false, false, null, List.of());
-                } catch (Exception failure) {
-                    throw new AssertionError(failure);
-                }
-            }
-        }.stepRead(
+        MailClient bridge =
+                new MailClient() {
+                    @Override
+                    public NamedStep step(
+                            MailSession session,
+                            StepRequest request,
+                            java.io.File dir,
+                            OfflineDriver driver) {
+                        assertFalse(
+                                "no held list rides the request",
+                                Arrays.stream(StepRequest.class.getRecordComponents())
+                                        .anyMatch(component -> component.getName().equals("held")));
+                        try {
+                            answered[0] =
+                                    new JSONObject(
+                                            driver.serve(
+                                                    new JSONObject()
+                                                            .put("op", "held")
+                                                            .put("handles",
+                                                                    new JSONArray().put("i2")
+                                                                            .put("a0")
+                                                                            .put("gone"))
+                                                            .toString()));
+                            return new NamedStep(null, false, false, null, List.of());
+                        } catch (Exception failure) {
+                            throw new AssertionError(failure);
+                        }
+                    }
+                };
+        new MailEngine(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                bridge, new OfflineClient()),
+                        null,
+                        store.accountIdOf(EMAIL))
+                .stepRead(
                 List.of(inbox),
                 new StepRequest(null, 50, null, null, List.of(), null),
                 context.getCacheDir());
@@ -440,14 +462,11 @@ public class StorePerformanceTest {
                                 + "Content-Transfer-Encoding: base64\r\n\r\nJVBERi0=\r\n--b--\r\n")
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8);
         List<java.io.File> dirs = new ArrayList<>();
-        MailEngine engine =
-                new MailEngine(pimdir, Clients.real(), null, store.accountIdOf(EMAIL)) {
+        MailClient bridge =
+                new MailClient() {
                     @Override
-                    protected Map<String, java.io.File> sources(
-                            org.pimalaya.client.MailSession on,
-                            String mailbox,
-                            List<String> handles,
-                            java.io.File dir) {
+                    public MessageSources fetchSources(
+                            MailSession on, String mailbox, List<String> ids, java.io.File dir) {
                         dirs.add(dir);
                         java.io.File file = new java.io.File(dir, "42.eml");
                         try {
@@ -455,11 +474,21 @@ public class StorePerformanceTest {
                         } catch (java.io.IOException failure) {
                             throw new AssertionError(failure);
                         }
-                        return Map.of(handles.get(0), file);
+                        return new MessageSources(
+                                List.of(),
+                                List.of(
+                                        new MessageSource(
+                                                ids.get(0), null, file.getAbsolutePath(), null,
+                                                file.length())));
                     }
                 };
-        MailReader reader =
-                new MailReader(store, new FileStore(context, pimdir), new MailClient(), engine);
+        MailStager stager =
+                new MailStager(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                bridge, new OfflineClient()));
+        MailReader reader = new MailReader(store, new FileStore(context, pimdir), bridge, stager);
 
         MailStore.StoredMessage message = store.message(inbox, "42");
         MailReader.Read read = reader.read(message, () -> null);

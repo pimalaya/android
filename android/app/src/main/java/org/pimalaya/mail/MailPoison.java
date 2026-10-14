@@ -13,7 +13,7 @@ import android.content.SharedPreferences;
  * never downloaded or read again, its row saying *Download failed* and its
  * reader that it could not be read. By {@link MailOwed#key}.
  */
-public final class MailPoison {
+final class MailPoison {
     private static final String PREFS = "mail-poison";
 
     private MailPoison() {}
@@ -26,7 +26,7 @@ public final class MailPoison {
      * Marks a read about to start, false without marking when the body is
      * poisoned and must not be read.
      */
-    public static boolean begin(Context context, String key) {
+    static boolean begin(Context context, String key) {
         synchronized (MailPoison.class) {
             int died = prefs(context).getInt(key, 0);
             if (died >= MailBodies.ATTEMPTS) {
@@ -39,14 +39,14 @@ public final class MailPoison {
     }
 
     /** Clears the mark of a read that ended, however it ended. */
-    public static void end(Context context, String key) {
+    static void end(Context context, String key) {
         synchronized (MailPoison.class) {
             prefs(context).edit().remove(key).apply();
         }
     }
 
     /** Whether a body is poisoned. */
-    public static boolean poisoned(Context context, String key) {
+    static boolean poisoned(Context context, String key) {
         return prefs(context).getInt(key, 0) >= MailBodies.ATTEMPTS;
     }
 }
