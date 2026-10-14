@@ -18,7 +18,7 @@ import org.pimalaya.client.Account;
  */
 public final class LocalBook {
     /** Base URL and account-email key of the local account (never a real email). */
-    static final String ACCOUNT = "local://on-this-device";
+    public static final String ACCOUNT = "local://on-this-device";
 
     /** Collection URL of the local account's single addressbook. */
     static final String URL = "local://on-this-device/contacts";

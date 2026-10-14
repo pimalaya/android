@@ -18,8 +18,8 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 
 - [x] pimdir
 - [x] sync
-- [ ] phone
-- [ ] file
+- [x] phone
+- [x] file
 - [ ] calendar
 - [ ] contact
 - [ ] mail
@@ -81,3 +81,5 @@ Logic found in Java that belongs to Rust, collected while moving.
 - pimdir: MailStore.typed/changed are generic typed-binding plumbing (FileStore 11 calls, ItemLinks, DeletedItems, PimdirItems, PimdirDb): move to pimdir. CacheSweep (MainActivity only, sweeps mail scratch and staged files) is app lifecycle. DeletedItems restores through PimdirEngine and MailEngine: above sync. ItemLinks' search half is domain-level. DefaultCollection keeps a prefs choice and reads AccountActivation: account policy. PimdirCollections filters MailStore.ALL_MAIL. Back edges: PimdirDb -> FileStore, MailStore; PimdirItems, PimdirCollections -> MailStore; PimdirSummary -> MailDate; DeletedItems -> MailEngine, MailStore, PimdirEngine; ItemLinks -> EventStore, FileStore, MailStore; CacheSweep -> FilesList, MailEngine; DefaultCollection -> AccountActivation.
 - public for tests (phase 6 removes): PimdirDb ctor, PimdirItems.Row + put, PimdirBlobs.has/put, ItemLinks.RELATED/Endpoint ctor/placement, DefaultCollection.of(List,String), CacheSweep.AGE, PimdirStorage.sourceOf (E2eDevice), CardStore.shared. Tests left in org.pimalaya for internals: DeletedItemsTest, ItemLinksTest, DefaultCollectionTest, BodyLossRacesTest, AutomaticReferencesTest.
 - sync: RemotePass and SyncRunner reach into every domain (16 and 11 root classes): the phase 3 SyncCoordinator. PimdirEngine is the base of three engines in other packages, so its mutate*/offline/result/clock are public. TokenRenewal is credential plumbing (account). MergedFilter is a persisted view filter used by list screens (ui or per-domain). SyncSteps formats R strings for MainActivity only (ui). Public for tests: AccountEntry.of, AccountCredential.oauth, PimdirEngine.mutateCopy, PimdirEngine.Clock + listed, RemotePass.MailPass.sent (e2e), FakeAndroidKeyStore.install. Tests left in root: BackgroundCheckTest, MergedFilterTest.
+- phone: PhoneQueue.start builds OfflineEngine and calls CalendarEngine.phonePass while both engines call PhoneQueue.written: a cycle; its ctor already takes Consumer passes, so the wiring of start() moves to the root. SyncRunner -> PhoneMirror is a sync -> phone back edge.
+- file: FilesList.STAGED read by pimdir/CacheSweep (belongs in FileStore); PimdirDb -> FileStore.reconcileRoles on open. FilesList and FileActions reach into MainActivity fields (io, files, mail, postAlive, dp...): screens need a host object, not the activity. Public for tests: MailStore.forget/accountIdOf/saveSource (FileStoreTest), FileStore.partKey/attachmentsOf (AutomaticReferencesTest).

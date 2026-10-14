@@ -2,6 +2,7 @@ package org.pimalaya;
 
 import java.util.EnumSet;
 import java.util.Set;
+import org.pimalaya.phone.PhoneMirror;
 
 /**
  * The setups' opt-in switches: the books in the phone's contacts, the

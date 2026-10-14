@@ -22,6 +22,8 @@ import android.widget.TextView;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.file.FileActions;
+import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.ItemLinks;
 
 import java.util.ArrayList;
@@ -45,7 +47,7 @@ import java.util.Set;
  * read receipt the sender did not ask permission for, and a script in a
  * message has no business running.
  */
-final class MessageView {
+public final class MessageView {
     /** How wide a badge row may run: the reader's own inner width. */
     private static final int CARD_INSET = 32;
 
@@ -75,7 +77,7 @@ final class MessageView {
     }
 
     /** Opens the reader on one row, then fetches what it does not hold. */
-    void open(MailStore.StoredMessage message) {
+    public void open(MailStore.StoredMessage message) {
         current = message;
         loaded = null;
         seen = message.seen;
@@ -308,7 +310,7 @@ final class MessageView {
      * blob) would spare the rest of the message; the whole message is what
      * every backend reads today.
      */
-    java.io.File fileOf(MailStore.StoredMessage message, FileStore.StoredFile attachment) {
+    public java.io.File fileOf(MailStore.StoredMessage message, FileStore.StoredFile attachment) {
         java.io.File saved = host.files.saved(attachment);
         if (saved != null) {
             return saved;

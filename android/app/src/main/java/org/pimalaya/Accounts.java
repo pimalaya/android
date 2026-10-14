@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import org.pimalaya.client.Addressbook;
+import org.pimalaya.phone.PhoneMirror;
 
 /**
  * AccountManager plumbing, for the two kinds of Android account Pimalaya

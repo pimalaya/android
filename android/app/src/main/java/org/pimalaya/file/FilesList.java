@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.file;
 
 import android.app.AlertDialog;
 import android.content.Intent;
@@ -19,6 +19,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import org.pimalaya.Avatar;
+import org.pimalaya.CardSections;
+import org.pimalaya.Chips;
+import org.pimalaya.ListHeader;
+import org.pimalaya.LocalBook;
+import org.pimalaya.MailStore;
+import org.pimalaya.MainActivity;
+import org.pimalaya.OpenedFiles;
+import org.pimalaya.R;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.sync.MergedFilter;
@@ -70,7 +79,7 @@ public final class FilesList {
     /** The folder an import waits on the document picker for. */
     private PimdirCollections.Stored importing;
 
-    FilesList(MainActivity host) {
+    public FilesList(MainActivity host) {
         this.host = host;
     }
 
@@ -103,7 +112,7 @@ public final class FilesList {
         }
     }
 
-    void setUp() {
+    public void setUp() {
         ListView list = host.findViewById(R.id.files_list);
         header = new ListHeader(host, list, MainActivity.PANEL_FILES);
         header.empty(host.findViewById(R.id.files_empty));
@@ -157,12 +166,12 @@ public final class FilesList {
                 });
     }
 
-    ListHeader header() {
+    public ListHeader header() {
         return header;
     }
 
     /** Reads every shown collection's files off the store, then renders them. */
-    void reload() {
+    public void reload() {
         MergedFilter filter = host.filesFilter();
         host.io.execute(
                 () -> {
@@ -275,7 +284,7 @@ public final class FilesList {
      * goes by it: one card per name, so two folders of one name would read as
      * one.
      */
-    void newFolder() {
+    public void newFolder() {
         host.fileActions.askName(
                 R.string.attachment_new_folder,
                 R.string.attachment_create,
@@ -300,7 +309,7 @@ public final class FilesList {
      * Opens a file's sheet from elsewhere (a link), read off the store with
      * the message it came from.
      */
-    void openFile(String collection, String linkId) {
+    public void openFile(String collection, String linkId) {
         host.io.execute(
                 () -> {
                     Row found = null;
@@ -497,14 +506,14 @@ public final class FilesList {
     private static final String IMPORT_NAME = "files.import.name";
 
     /** Keeps a waiting import across the activity's recreation. */
-    void save(android.os.Bundle state) {
+    public void save(android.os.Bundle state) {
         if (importing != null) {
             state.putString(IMPORT_FOLDER, importing.id);
             state.putString(IMPORT_NAME, importing.name);
         }
     }
 
-    void restore(android.os.Bundle state) {
+    public void restore(android.os.Bundle state) {
         String id = state.getString(IMPORT_FOLDER);
         if (id != null) {
             importing =
@@ -527,7 +536,7 @@ public final class FilesList {
      * Imports the document picked into the folder that asked for it, copied
      * into the cache a buffer at a time, then hashed and filed from there.
      */
-    void imported(Uri source) {
+    public void imported(Uri source) {
         PimdirCollections.Stored folder = importing;
         importing = null;
         if (folder == null) {

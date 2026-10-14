@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.file;
 
 import android.content.Context;
 import android.database.Cursor;
@@ -6,6 +6,10 @@ import android.database.Cursor;
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.LocalBook;
+import org.pimalaya.MailStore;
+import org.pimalaya.OpenedFiles;
+import org.pimalaya.R;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.pimdir.ItemLinks;
@@ -60,7 +64,7 @@ public final class FileStore {
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
 
-    FileStore(Context context, PimdirDb store) {
+    public FileStore(Context context, PimdirDb store) {
         this.context = context;
         this.store = store;
         this.items = new PimdirItems(store);
@@ -77,19 +81,19 @@ public final class FileStore {
         public final String linkId;
 
         /** The file's public id, shared by its stand-in and its saved copies. */
-        final long seq;
+        public final long seq;
 
         /** The file name, empty when none is known. */
-        final String name;
+        public final String name;
 
         /** The media type, null when none is stated. */
         final String mediaType;
 
         /** The size in octets, null when unknown. */
-        final Long size;
+        public final Long size;
 
         /** An attachment's IMAP section in its message, null for any other file. */
-        final String part;
+        public final String part;
 
         /** The body a placement of the file holds, null while none does. */
         final String objectHash;
@@ -130,7 +134,7 @@ public final class FileStore {
     }
 
     /** The collection one account's stand-ins are filed in. */
-    static String attachmentsOf(String accountId) {
+    public static String attachmentsOf(String accountId) {
         return PimdirAccount.collectionId(accountId, ATTACHMENTS);
     }
 
@@ -173,12 +177,12 @@ public final class FileStore {
      * alike. Null for a message under a writer-derived key, which names no
      * identity a part could be keyed on (section 9.1).
      */
-    static String partKey(String messageLinkId, String section) {
+    public static String partKey(String messageLinkId, String section) {
         return ItemLinks.derived(messageLinkId) ? null : "part:" + messageLinkId + "#" + section;
     }
 
     /** What a file collection is called: a folder's name, or Attachments. */
-    String label(PimdirCollections.Stored collection) {
+    public String label(PimdirCollections.Stored collection) {
         return isAttachments(collection)
                 ? context.getString(R.string.files_attachments)
                 : collection.name;
@@ -192,7 +196,7 @@ public final class FileStore {
      * already recorded keeps its stand-in and gets its reference back if a
      * person removed it.
      */
-    void recordAttachments(
+    public void recordAttachments(
             String accountId, String messageLinkId, List<MessageBody.Attachment> attachments) {
         // NOTE: a message under a derived key gets no stand-in (section 14.3).
         if (attachments.isEmpty() || ItemLinks.derived(messageLinkId)) {
@@ -234,7 +238,7 @@ public final class FileStore {
     }
 
     /** The files a message attaches, in document order, read from its references. */
-    List<StoredFile> attachments(String accountId, String messageLinkId) {
+    public List<StoredFile> attachments(String accountId, String messageLinkId) {
         Map<String, Object> values = new HashMap<>();
         values.put("account", accountId);
         values.put("link_id", messageLinkId);
@@ -418,12 +422,12 @@ public final class FileStore {
     }
 
     /** The file a placement's body is stored in, null when it holds none or its blob is gone. */
-    java.io.File saved(StoredFile file) {
+    public java.io.File saved(StoredFile file) {
         return items.blobFile(file.objectHash);
     }
 
     /** The device's folders, by name. */
-    List<PimdirCollections.Stored> folders() {
+    public List<PimdirCollections.Stored> folders() {
         List<PimdirCollections.Stored> folders = new ArrayList<>();
         for (PimdirCollections.Stored collection : collections.list(PimdirSummary.FILE)) {
             if (LocalBook.ACCOUNT.equals(collection.accountEmail)
@@ -435,7 +439,7 @@ public final class FileStore {
     }
 
     /** Every account's attachments collection, by account. */
-    List<PimdirCollections.Stored> attachmentCollections() {
+    public List<PimdirCollections.Stored> attachmentCollections() {
         List<PimdirCollections.Stored> held = new ArrayList<>();
         for (PimdirCollections.Stored collection : collections.list(PimdirSummary.FILE)) {
             if (isAttachments(collection)) {
@@ -560,7 +564,7 @@ public final class FileStore {
      * Drops an account's stand-ins with their collection. Its messages' own
      * removal already took them one by one; this takes the collection.
      */
-    void forget(String accountId) {
+    public void forget(String accountId) {
         dropCollection(attachmentsOf(accountId));
         OpenedFiles.clear(context);
     }

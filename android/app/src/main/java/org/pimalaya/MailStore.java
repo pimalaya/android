@@ -15,6 +15,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimdirSql;
+import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -228,7 +229,7 @@ public final class MailStore {
      * their messages, their attachments, and whatever was still waiting to
      * go out.
      */
-    void forget(String accountEmail) {
+    public void forget(String accountEmail) {
         String outbox = outboxOf(accountEmail);
         List<PimdirQueue.Action> waiting = new ArrayList<>(queue.pending(outbox));
         for (PimdirQueue.Action action : queue.parked()) {
@@ -414,7 +415,7 @@ public final class MailStore {
     }
 
     /** The id one account's collections are namespaced under. */
-    String accountIdOf(String accountEmail) {
+    public String accountIdOf(String accountEmail) {
         return accounts.idOf(accountEmail);
     }
 
@@ -1273,7 +1274,7 @@ public final class MailStore {
      * ({@code get_mail_row}), null when the mailbox holds it no more: what a
      * file's origin and a link open.
      */
-    StoredMessage message(String collection, String linkId) {
+    public StoredMessage message(String collection, String linkId) {
         Map<String, Object> key = new HashMap<>();
         key.put("collection", collection);
         key.put("link_id", linkId);
@@ -2012,7 +2013,7 @@ public final class MailStore {
     }
 
     /** Files the message a reader just fetched, against its envelope. */
-    void saveSource(String collection, String id, byte[] source) {
+    public void saveSource(String collection, String id, byte[] source) {
         items.putObject(collection, id, source);
     }
 

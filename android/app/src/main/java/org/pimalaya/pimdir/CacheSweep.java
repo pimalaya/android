@@ -4,8 +4,8 @@ import android.content.Context;
 
 import java.io.File;
 import java.util.concurrent.TimeUnit;
-import org.pimalaya.FilesList;
 import org.pimalaya.MailEngine;
+import org.pimalaya.file.FilesList;
 
 /**
  * Removes what a run killed midway left in the cache: the folders a body

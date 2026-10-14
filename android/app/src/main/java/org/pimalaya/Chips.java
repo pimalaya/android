@@ -17,7 +17,7 @@ import java.util.function.IntConsumer;
  * <p>Hand-built on a TextView because the platform has no chip, and the
  * only thing one needs beyond a label is the two looks.
  */
-final class Chips {
+public final class Chips {
     /** Adds one chip to {@code row}, calling {@code onToggle} with each new state. */
     static void add(
             MainActivity host, LinearLayout row, int label, int icon, Consumer<Boolean> onToggle) {
@@ -35,7 +35,7 @@ final class Chips {
      * turns the others off, and {@code onPick} is told the index of the
      * one on, -1 when none is.
      */
-    static void exclusive(
+    public static void exclusive(
             MainActivity host,
             LinearLayout row,
             int[] labels,

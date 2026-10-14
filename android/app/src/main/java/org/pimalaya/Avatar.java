@@ -20,14 +20,14 @@ import android.graphics.drawable.InsetDrawable;
  * label shown on it: a renamed contact and a renamed sender keep their
  * colour.
  */
-final class Avatar {
+public final class Avatar {
     /**
      * A muted round background, its hue mapped from {@code seed}.
      *
      * <p>Saturation and value are fixed, so every disc in the app sits at
      * one weight and the hue is the only thing that varies.
      */
-    static Drawable circle(Context context, String seed) {
+    public static Drawable circle(Context context, String seed) {
         return disc(context, Color.HSVToColor(new float[] {hueOf(seed), 0.4f, 0.55f}));
     }
 
@@ -99,7 +99,7 @@ final class Avatar {
      * uppercased, or {@code #} when it starts with anything else. Also
      * the contacts list's section letter, which is why the two agree.
      */
-    static String letter(String label) {
+    public static String letter(String label) {
         String trimmed = label == null ? "" : label.trim();
         if (trimmed.isEmpty()) {
             return "#";

@@ -13,6 +13,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;

@@ -24,7 +24,7 @@ import java.util.function.Consumer;
  * list scrolls down and unfolds when it comes back up, the way a
  * reader's attention moves.
  */
-final class ListHeader {
+public final class ListHeader {
     private final MainActivity host;
     private final int panel;
     final View view;
@@ -41,7 +41,7 @@ final class ListHeader {
     /** Debounced search, so typing does not re-render per keystroke. */
     private Runnable pendingSearch;
 
-    ListHeader(MainActivity host, ListView list, int panel) {
+    public ListHeader(MainActivity host, ListView list, int panel) {
         this.host = host;
         this.panel = panel;
         this.list = list;
@@ -65,7 +65,7 @@ final class ListHeader {
      * Keeps a list's empty state centred in what this header leaves below
      * it, rather than in the whole screen where the header would cover it.
      */
-    void empty(View empty) {
+    public void empty(View empty) {
         view.addOnLayoutChangeListener(
                 (v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
                     int below = Math.max(0, bottom);
@@ -84,7 +84,7 @@ final class ListHeader {
     }
 
     /** The row a click landed on, net of this header. */
-    int rowAt(int position) {
+    public int rowAt(int position) {
         return position - list.getHeaderViewsCount();
     }
 
@@ -92,7 +92,7 @@ final class ListHeader {
         ((TextView) view.findViewById(R.id.header_title)).setText(title);
     }
 
-    void meta(String meta) {
+    public void meta(String meta) {
         ((TextView) view.findViewById(R.id.header_meta)).setText(meta);
     }
 
@@ -118,7 +118,7 @@ final class ListHeader {
      * Shows the search field, handing each settled query (trimmed, lower
      * cased) to {@code onQuery}.
      */
-    void search(int hint, Consumer<String> onQuery) {
+    public void search(int hint, Consumer<String> onQuery) {
         view.findViewById(R.id.header_search).setVisibility(View.VISIBLE);
         EditText input = view.findViewById(R.id.header_search_input);
         View clear = view.findViewById(R.id.header_search_clear);
@@ -151,7 +151,7 @@ final class ListHeader {
     }
 
     /** The chip row, shown, for the caller to fill. */
-    LinearLayout chips() {
+    public LinearLayout chips() {
         view.findViewById(R.id.header_chips_scroll).setVisibility(View.VISIBLE);
         return view.findViewById(R.id.header_chips);
     }

@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.phone;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;

@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.phone;
 
 import android.Manifest;
 import android.content.Context;
@@ -8,6 +8,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
+import org.pimalaya.PimDomain;
 
 /**
  * A phone app the store's items show in, and the permissions it takes.
@@ -36,7 +37,7 @@ public enum PhoneMirror {
     }
 
     /** The mirror showing the domain's collections, null for mail. */
-    static PhoneMirror of(PimDomain domain) {
+    public static PhoneMirror of(PimDomain domain) {
         for (PhoneMirror mirror : values()) {
             if (mirror.domain == domain) {
                 return mirror;
@@ -63,7 +64,7 @@ public enum PhoneMirror {
     }
 
     /** The permissions to ask for the wanted mirrors, those already granted left out. */
-    static String[] missing(Set<PhoneMirror> wanted, Predicate<String> has) {
+    public static String[] missing(Set<PhoneMirror> wanted, Predicate<String> has) {
         List<String> missing = new ArrayList<>();
         for (PhoneMirror mirror : wanted) {
             // NOTE: a mirror half granted asks its whole set again, so the
@@ -78,7 +79,7 @@ public enum PhoneMirror {
     }
 
     /** The wanted mirrors whose every permission is granted. */
-    static Set<PhoneMirror> granted(Set<PhoneMirror> wanted, Predicate<String> has) {
+    public static Set<PhoneMirror> granted(Set<PhoneMirror> wanted, Predicate<String> has) {
         Set<PhoneMirror> granted = EnumSet.noneOf(PhoneMirror.class);
         for (PhoneMirror mirror : wanted) {
             if (mirror.granted(has)) {

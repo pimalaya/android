@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.file;
 
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
@@ -17,6 +17,9 @@ import java.io.OutputStream;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import org.pimalaya.MainActivity;
+import org.pimalaya.OpenedFiles;
+import org.pimalaya.R;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
 
@@ -30,9 +33,9 @@ import org.pimalaya.pimdir.PimdirSummary;
  * attachment of any size opens. Every read and write runs on the io
  * executor, the outcome said in a toast.
  */
-final class FileActions {
+public final class FileActions {
     /** Where one file's bytes are: its body's blob, or its message's part written out. */
-    interface Source {
+    public interface Source {
         File read() throws Exception;
     }
 
@@ -48,23 +51,23 @@ final class FileActions {
 
     private String exportName;
 
-    FileActions(MainActivity host) {
+    public FileActions(MainActivity host) {
         this.host = host;
     }
 
     /** Keeps a waiting export across the activity's recreation. */
-    void save(Bundle state) {
+    public void save(Bundle state) {
         state.putString(EXPORT_PATH, exportPath);
         state.putString(EXPORT_NAME, exportName);
     }
 
-    void restore(Bundle state) {
+    public void restore(Bundle state) {
         exportPath = state.getString(EXPORT_PATH);
         exportName = state.getString(EXPORT_NAME);
     }
 
     /** A file's name, or what stands for none. */
-    String label(FileStore.StoredFile file) {
+    public String label(FileStore.StoredFile file) {
         return file.name.isEmpty()
                 ? host.getString(R.string.message_attachment_unnamed)
                 : file.name;
@@ -86,7 +89,7 @@ final class FileActions {
      * Opens a file in the app the phone picks for its type, through a copy
      * in the cache ({@link OpenedFiles}).
      */
-    void open(FileStore.StoredFile file, Source source) {
+    public void open(FileStore.StoredFile file, Source source) {
         handOver(
                 file,
                 source,
@@ -97,7 +100,7 @@ final class FileActions {
     }
 
     /** Shares a file with the app the user picks. */
-    void share(FileStore.StoredFile file, Source source) {
+    public void share(FileStore.StoredFile file, Source source) {
         handOver(
                 file,
                 source,
@@ -165,7 +168,7 @@ final class FileActions {
      * Writes the file an export waited on into the document picked; a
      * document left half written, or with nothing to write, is deleted.
      */
-    void exported(Uri target) {
+    public void exported(Uri target) {
         String path = exportPath;
         exportPath = null;
         exportName = null;
@@ -198,7 +201,7 @@ final class FileActions {
     }
 
     /** Asks which folder to save a file into, or to create one. */
-    void saveToFolder(FileStore.StoredFile file, Source source) {
+    public void saveToFolder(FileStore.StoredFile file, Source source) {
         host.io.execute(
                 () -> {
                     List<PimdirCollections.Stored> folders = host.files.folders();

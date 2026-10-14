@@ -23,6 +23,7 @@ import org.pimalaya.client.AuthMethod;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.ServiceConfig;
 import org.pimalaya.client.Transport;
+import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.sync.BackgroundCheck;

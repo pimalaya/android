@@ -6,9 +6,9 @@ import android.database.Cursor;
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONArray;
 import org.pimalaya.EventStore;
-import org.pimalaya.FileStore;
 import org.pimalaya.MailStore;
 import org.pimalaya.client.PimdirSql;
+import org.pimalaya.file.FileStore;
 
 import java.util.ArrayList;
 import java.util.HashMap;

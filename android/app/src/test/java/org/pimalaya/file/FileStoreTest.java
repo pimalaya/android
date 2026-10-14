@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.file;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -13,6 +13,7 @@ import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.MailStore;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.ItemLinks;

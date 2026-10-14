@@ -45,6 +45,11 @@ import org.pimalaya.client.Card;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
+import org.pimalaya.file.FileActions;
+import org.pimalaya.file.FileStore;
+import org.pimalaya.file.FilesList;
+import org.pimalaya.phone.PhoneMirror;
+import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.CacheSweep;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.ItemLinks;
@@ -94,7 +99,7 @@ public class MainActivity extends Activity {
     static final int PANEL_COMPOSE = 6;
     static final int PANEL_MESSAGE = 7;
     static final int PANEL_EVENT_VIEW = 8;
-    static final int PANEL_FILES = 9;
+    public static final int PANEL_FILES = 9;
     private static final int PANEL_AUTH = 20;
     static final int PANEL_ACCOUNT = 21;
     static final int PANEL_FILTER = 22;
@@ -134,13 +139,13 @@ public class MainActivity extends Activity {
     private static final int REQUEST_NOTIFICATIONS = 4;
     private static final int REQUEST_IMPORT = 2;
     private static final int REQUEST_EXPORT = 3;
-    static final int REQUEST_FILE_IMPORT = 5;
-    static final int REQUEST_FILE_EXPORT = 6;
+    public static final int REQUEST_FILE_IMPORT = 5;
+    public static final int REQUEST_FILE_EXPORT = 6;
 
     /** The shared backend client, the single-thread io executor, the
      *  main-thread handler and the theme helper. */
     final PimalayaClient client = new PimalayaClient();
-    final ExecutorService io = Executors.newSingleThreadExecutor();
+    public final ExecutorService io = Executors.newSingleThreadExecutor();
 
     /**
      * The executor of what someone is waiting on, a message being opened:
@@ -203,28 +208,28 @@ public class MainActivity extends Activity {
     EventView eventView;
 
     /** The mail side of the store, and the merged list over it. */
-    MailStore mail;
+    public MailStore mail;
 
     MailList mailList;
 
     /** The file side of the store: attachments and the folders they are saved into. */
-    FileStore files;
+    public FileStore files;
 
     /** The Files list, and what a file offers wherever it shows. */
-    FilesList filesList;
+    public FilesList filesList;
 
-    FileActions fileActions;
+    public FileActions fileActions;
 
     /** References between items, and the Linked card every item page shows. */
     ItemLinks links;
 
-    LinkedSection linked;
+    public LinkedSection linked;
 
     /** The Files list's filter, which no account connects as a domain. */
     private MergedFilter filesFilter;
 
     /** The reader one message row opens onto. */
-    MessageView messageView;
+    public MessageView messageView;
 
     /** The composer the mail add button opens. */
     MessageCompose compose;
@@ -3913,7 +3918,7 @@ public class MainActivity extends Activity {
     }
 
     /** The Files list's filter, as it was last left. */
-    MergedFilter filesFilter() {
+    public MergedFilter filesFilter() {
         if (filesFilter == null) {
             filesFilter = MergedFilter.files(this);
         }
@@ -4651,12 +4656,12 @@ public class MainActivity extends Activity {
         return stored;
     }
 
-    String message(Exception error, int fallback) {
+    public String message(Exception error, int fallback) {
         String message = error.getMessage();
         return message == null || message.isEmpty() ? getString(fallback) : message;
     }
 
-    void toast(String message) {
+    public void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
@@ -4666,7 +4671,7 @@ public class MainActivity extends Activity {
      * arriving after a rotation or a finish would raise dialogs
      * against a dead window (BadTokenException).
      */
-    void postAlive(Runnable action) {
+    public void postAlive(Runnable action) {
         main.post(
                 () -> {
                     if (!isDestroyed()) {
@@ -4688,7 +4693,7 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    int dp(int value) {
+    public int dp(int value) {
         return ui.dp(value);
     }
 

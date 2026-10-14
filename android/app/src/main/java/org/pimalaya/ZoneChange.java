@@ -3,6 +3,7 @@ package org.pimalaya;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirDb;
 
 /**

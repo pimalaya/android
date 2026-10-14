@@ -42,7 +42,7 @@ public final class OpenedFiles extends ContentProvider {
      * named after its public id so two files of one name do not meet, and
      * answers the URI that reads it.
      */
-    static Uri put(Context context, long seq, String name, File source) throws IOException {
+    public static Uri put(Context context, long seq, String name, File source) throws IOException {
         File directory = new File(new File(context.getCacheDir(), DIRECTORY), Long.toString(seq));
         if (!directory.isDirectory() && !directory.mkdirs()) {
             throw new IOException("Could not create " + directory);
@@ -125,7 +125,7 @@ public final class OpenedFiles extends ContentProvider {
     }
 
     /** The media type a name's extension says, null when it says none. */
-    static String typeOf(String name) {
+    public static String typeOf(String name) {
         String extension = extensionOf(name);
         return extension.isEmpty()
                 ? null
@@ -133,7 +133,7 @@ public final class OpenedFiles extends ContentProvider {
     }
 
     /** Copies a stream to another a buffer at a time. */
-    static void copy(InputStream in, OutputStream out) throws IOException {
+    public static void copy(InputStream in, OutputStream out) throws IOException {
         byte[] buffer = new byte[64 * 1024];
         for (int read = in.read(buffer); read >= 0; read = in.read(buffer)) {
             out.write(buffer, 0, read);
@@ -150,7 +150,7 @@ public final class OpenedFiles extends ContentProvider {
     }
 
     /** Drops every copy, on start and when an account goes. */
-    static void clear(Context context) {
+    public static void clear(Context context) {
         delete(new File(context.getCacheDir(), DIRECTORY));
     }
 

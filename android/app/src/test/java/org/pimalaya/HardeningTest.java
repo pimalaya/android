@@ -19,6 +19,7 @@ import java.nio.file.Files;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.file.FilesList;
 import org.pimalaya.pimdir.CacheSweep;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;

@@ -11,6 +11,7 @@ import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirBlobs;
 import org.pimalaya.pimdir.PimdirCollections;

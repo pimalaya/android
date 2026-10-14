@@ -23,7 +23,7 @@ import java.util.function.Function;
  * <p>Rows keep the order they are handed in, and a section opens wherever
  * the label changes, so the caller sorts.
  */
-final class CardSections<T> {
+public final class CardSections<T> {
     /** A header's label at its position, null at a row's. */
     private final List<String> headers = new ArrayList<>();
 
@@ -34,7 +34,7 @@ final class CardSections<T> {
     private final List<Integer> shapes = new ArrayList<>();
 
     /** Lays the rows out under their sections. */
-    void fill(List<T> items, Function<T, String> sectionOf) {
+    public void fill(List<T> items, Function<T, String> sectionOf) {
         headers.clear();
         rows.clear();
         shapes.clear();
@@ -72,20 +72,20 @@ final class CardSections<T> {
         return last ? R.drawable.row_card_bottom : R.drawable.row_card_middle;
     }
 
-    int size() {
+    public int size() {
         return rows.size();
     }
 
-    boolean isHeader(int position) {
+    public boolean isHeader(int position) {
         return headers.get(position) != null;
     }
 
-    String header(int position) {
+    public String header(int position) {
         return headers.get(position);
     }
 
     /** The row at a position, null at a header. */
-    T row(int position) {
+    public T row(int position) {
         return position >= 0 && position < rows.size() ? rows.get(position) : null;
     }
 
@@ -95,7 +95,7 @@ final class CardSections<T> {
     }
 
     /** A header's view, recycled when it can be. */
-    View headerView(int position, View recycled, ViewGroup parent) {
+    public View headerView(int position, View recycled, ViewGroup parent) {
         View view = recycled;
         if (view == null) {
             view =
@@ -107,13 +107,13 @@ final class CardSections<T> {
     }
 
     /** Whether a row is the first of its card, which no hairline tops. */
-    boolean opensCard(int position) {
+    public boolean opensCard(int position) {
         int shape = shapes.get(position);
         return shape == R.drawable.row_card_top || shape == R.drawable.row_card_single;
     }
 
     /** Rounds a row's card for its place in the section. */
-    void shape(View row, int position) {
+    public void shape(View row, int position) {
         row.findViewById(R.id.row_card).setBackgroundResource(shapes.get(position));
     }
 }

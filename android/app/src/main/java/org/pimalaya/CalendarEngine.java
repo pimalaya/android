@@ -12,6 +12,7 @@ import org.pimalaya.client.EventMerge;
 import org.pimalaya.client.EventRef;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
+import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
@@ -99,7 +100,7 @@ public final class CalendarEngine extends PimdirEngine {
      * the triggers outside a sync run ({@link CalendarRows#phonePass}).
      * Answers whether it wrote anything into the store.
      */
-    static boolean phonePass(PimdirDb pimdir, String collection) {
+    public static boolean phonePass(PimdirDb pimdir, String collection) {
         CalendarEngine engine = new CalendarEngine(pimdir, new PimalayaClient(), null, null, null, null);
         engine.phoneSide(collection);
         return engine.ingested;

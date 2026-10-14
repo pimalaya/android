@@ -30,7 +30,7 @@ import org.pimalaya.pimdir.PimdirSummary;
  * Every read and write runs on the io executor: a page draws its card from
  * the links last read for it, and redraws once a read lands.
  */
-final class LinkedSection {
+public final class LinkedSection {
     private final MainActivity host;
 
     /** The links read for an item and not drawn yet, by endpoint. */
@@ -96,7 +96,7 @@ final class LinkedSection {
     }
 
     /** The Linked card in a dialog of its own, titled by the item. */
-    void dialog(ItemLinks.Endpoint self, String title) {
+    public void dialog(ItemLinks.Endpoint self, String title) {
         dialog(self, title, () -> {});
     }
 

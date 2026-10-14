@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.phone;
 
 import android.content.Context;
 import android.os.Handler;
@@ -11,6 +11,9 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import org.pimalaya.CalendarEngine;
+import org.pimalaya.CardStore;
+import org.pimalaya.OfflineEngine;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirDb;
 
@@ -28,7 +31,7 @@ import org.pimalaya.pimdir.PimdirDb;
  * not mirror has no Android account or calendar row, and its pass returns at
  * once.
  */
-final class PhoneQueue {
+public final class PhoneQueue {
     /** How long a write waits for the ones following it. */
     static final long DELAY = 1000;
 
@@ -54,7 +57,7 @@ final class PhoneQueue {
     }
 
     /** Starts the process's queue, once. */
-    static synchronized void start(Context context) {
+    public static synchronized void start(Context context) {
         if (shared != null) {
             return;
         }
@@ -79,7 +82,7 @@ final class PhoneQueue {
     }
 
     /** A book was written; nothing before the app started the queue. */
-    static void written(String url) {
+    public static void written(String url) {
         PhoneQueue queue = shared;
         if (queue != null) {
             queue.queue(url);
@@ -87,7 +90,7 @@ final class PhoneQueue {
     }
 
     /** A calendar was written; nothing before the app started the queue. */
-    static void calendarWritten(String collection) {
+    public static void calendarWritten(String collection) {
         PhoneQueue queue = shared;
         if (queue != null) {
             queue.queueCalendar(collection);
