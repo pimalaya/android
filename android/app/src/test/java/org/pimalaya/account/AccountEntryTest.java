@@ -8,6 +8,8 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 import java.util.List;
+import org.pimalaya.client.OauthGrant;
+import org.pimalaya.client.OauthTokens;
 
 /**
  * One account is one identity covering several domains, not several
@@ -26,22 +28,14 @@ public class AccountEntryTest {
 
     private static AccountCredential oauth(String refreshToken) {
         return AccountCredential.oauth(
-                "access",
-                refreshToken,
-                "https://accounts.example.org/token",
-                "client-id",
-                null,
-                null);
+                new OauthTokens("access", "Bearer", 0, refreshToken, null, 0),
+                new OauthGrant("https://accounts.example.org/token", "client-id", null, null));
     }
 
     private static AccountCredential google(String refreshToken, String scope) {
         return AccountCredential.oauth(
-                "access",
-                refreshToken,
-                Oauth.GOOGLE_TOKEN_ENDPOINT,
-                Oauth.GOOGLE_CLIENT_ID,
-                null,
-                scope);
+                new OauthTokens("access", "Bearer", 0, refreshToken, null, 0),
+                new OauthGrant(Oauth.GOOGLE_TOKEN_ENDPOINT, Oauth.GOOGLE_CLIENT_ID, null, scope));
     }
 
     private static final String GMAIL = "https://mail.google.com/";
@@ -87,7 +81,7 @@ public class AccountEntryTest {
         AccountEntry refreshed = account.refreshed(PimDomain.CONTACTS, "fresh", "rotated");
 
         for (PimDomain domain : PimDomain.values()) {
-            assertEquals("rotated", refreshed.credential(domain).refreshToken);
+            assertEquals("rotated", refreshed.credential(domain).refreshToken());
             assertEquals("fresh", refreshed.server(domain).password);
         }
         assertEquals("one credential, however many domains name it", 1,
@@ -112,12 +106,12 @@ public class AccountEntryTest {
 
         AccountEntry refreshed = account.refreshed(PimDomain.MAIL, "fresh", "mail-rotated");
 
-        assertEquals("mail-rotated", refreshed.credential(PimDomain.MAIL).refreshToken);
+        assertEquals("mail-rotated", refreshed.credential(PimDomain.MAIL).refreshToken());
         assertEquals("fresh", refreshed.server(PimDomain.MAIL).password);
         assertEquals(
                 "the other consent keeps its own token",
                 "contacts-consent",
-                refreshed.credential(PimDomain.CONTACTS).refreshToken);
+                refreshed.credential(PimDomain.CONTACTS).refreshToken());
         assertEquals("access", refreshed.server(PimDomain.CONTACTS).password);
     }
 
@@ -202,7 +196,7 @@ public class AccountEntryTest {
         AccountEntry regranted =
                 connected.with(PimDomain.MAIL, "gmail://jane@example.org", union);
         assertEquals("one refresh token for the account", 1, regranted.credentials().size());
-        assertEquals("union-consent", regranted.credential(PimDomain.MAIL).refreshToken);
+        assertEquals("union-consent", regranted.credential(PimDomain.MAIL).refreshToken());
         assertTrue(regranted.regrantable(union).isEmpty());
     }
 

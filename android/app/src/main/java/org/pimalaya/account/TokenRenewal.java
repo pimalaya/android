@@ -50,14 +50,14 @@ public final class TokenRenewal {
             boolean same = current != null && current.id.equals(held.id);
             if (same
                     && !(Objects.equals(current.secret, held.secret)
-                            && Objects.equals(current.refreshToken, held.refreshToken))) {
+                            && Objects.equals(current.refreshToken(), held.refreshToken()))) {
                 return store.find(entry.email);
             }
 
             AccountCredential using = same ? current : held;
             Renewed renewed = refresh.run(using);
             String refreshToken =
-                    renewed.refreshToken != null ? renewed.refreshToken : using.refreshToken;
+                    renewed.refreshToken != null ? renewed.refreshToken : using.refreshToken();
             AccountEntry updated =
                     store.renew(entry.email, domain, renewed.accessToken, refreshToken);
             return updated != null

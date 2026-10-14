@@ -12,6 +12,8 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.FakeAndroidKeyStore;
+import org.pimalaya.client.OauthGrant;
+import org.pimalaya.client.OauthTokens;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -36,12 +38,8 @@ public class TokenRenewalTest {
                         PimDomain.MAIL,
                         "imaps://imap.example.org:993",
                         AccountCredential.oauth(
-                                "access-0",
-                                "refresh-0",
-                                "https://auth.example.org/token",
-                                "client",
-                                null,
-                                null)));
+                                new OauthTokens("access-0", "Bearer", 0, "refresh-0", null, 0),
+                                new OauthGrant("https://auth.example.org/token", "client", null, null))));
     }
 
     @Test
@@ -53,7 +51,7 @@ public class TokenRenewalTest {
                 credential -> {
                     int request = requests.incrementAndGet();
                     started.countDown();
-                    assertEquals("refresh-0", credential.refreshToken);
+                    assertEquals("refresh-0", credential.refreshToken());
                     try {
                         Thread.sleep(200);
                     } catch (InterruptedException ignored) {
@@ -73,12 +71,12 @@ public class TokenRenewalTest {
         for (Future<AccountEntry> renewed : java.util.List.of(first, second, third)) {
             AccountCredential credential = renewed.get(5, TimeUnit.SECONDS).credential(PimDomain.MAIL);
             assertEquals("access-1", credential.secret);
-            assertEquals("refresh-1", credential.refreshToken);
+            assertEquals("refresh-1", credential.refreshToken());
         }
         pool.shutdown();
 
         assertEquals(1, requests.get());
-        assertEquals("refresh-1", store.find(EMAIL).credential(PimDomain.MAIL).refreshToken);
+        assertEquals("refresh-1", store.find(EMAIL).credential(PimDomain.MAIL).refreshToken());
     }
 
     @Test
@@ -91,6 +89,6 @@ public class TokenRenewalTest {
                         credential -> new TokenRenewal.Renewed("access-1", null));
 
         assertEquals("access-1", renewed.credential(PimDomain.MAIL).secret);
-        assertEquals("refresh-0", store.find(EMAIL).credential(PimDomain.MAIL).refreshToken);
+        assertEquals("refresh-0", store.find(EMAIL).credential(PimDomain.MAIL).refreshToken());
     }
 }

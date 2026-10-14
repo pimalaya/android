@@ -69,17 +69,17 @@ public final class Endpoints {
      * {@code smtp://}.
      */
     public static String submissionUrl(ServiceConfig config) {
-        if (!"smtp".equals(config.service) || config.host == null) {
+        if (!"smtp".equals(config.service()) || config.host() == null) {
             return null;
         }
-        boolean tls = "tls".equalsIgnoreCase(config.security);
-        if (!tls && !"starttls".equalsIgnoreCase(config.security)) {
+        boolean tls = "tls".equalsIgnoreCase(config.security());
+        if (!tls && !"starttls".equalsIgnoreCase(config.security())) {
             Log.w(
                     "pimalaya",
-                    "skip smtp at " + config.host + ": unsupported security " + config.security);
+                    "skip smtp at " + config.host() + ": unsupported security " + config.security());
             return null;
         }
-        return (tls ? "smtps://" : "smtp://") + config.host + ":" + config.port;
+        return (tls ? "smtps://" : "smtp://") + config.host() + ":" + config.port();
     }
 
     /**
@@ -106,35 +106,35 @@ public final class Endpoints {
      * implicit would connect in the clear rather than fail.
      */
     public static String endpointUrl(ServiceConfig config, String email) {
-        if ("msgraph".equals(config.service) || "msgraphCalendar".equals(config.service)) {
+        if ("msgraph".equals(config.service()) || "msgraphCalendar".equals(config.service())) {
             return AccountClient.msgraphBase(email);
         }
-        if ("gmail".equals(config.service) || "gcal".equals(config.service)) {
+        if ("gmail".equals(config.service()) || "gcal".equals(config.service())) {
             return AccountClient.googleBase(email);
         }
-        if (config.url != null) {
+        if (config.url() != null) {
             // NOTE: an HTTP endpoint is https or nothing: a plain one, from a
             // PACC document or an autoconfig, would carry the password in
             // clear.
-            if (!"https".equals(Endpoints.scheme(config.url))) {
-                Log.w("pimalaya", "skip " + config.service + ": not https");
+            if (!"https".equals(Endpoints.scheme(config.url()))) {
+                Log.w("pimalaya", "skip " + config.service() + ": not https");
                 return null;
             }
-            return "jmap".equals(config.service)
-                    ? AccountClient.jmapBase(config.url)
-                    : config.url;
+            return "jmap".equals(config.service())
+                    ? AccountClient.jmapBase(config.url())
+                    : config.url();
         }
-        if (config.host == null || !"imap".equals(config.service)) {
+        if (config.host() == null || !"imap".equals(config.service())) {
             return null;
         }
-        if (!"tls".equalsIgnoreCase(config.security)) {
+        if (!"tls".equalsIgnoreCase(config.security())) {
             Log.w(
                     "pimalaya",
-                    "skip " + config.service + " at " + config.host
-                            + ": unsupported security " + config.security);
+                    "skip " + config.service() + " at " + config.host()
+                            + ": unsupported security " + config.security());
             return null;
         }
-        return "imaps://" + config.host + ":" + config.port;
+        return "imaps://" + config.host() + ":" + config.port();
     }
 
     /** The scheme of an endpoint, lowercased; null when it has none. */

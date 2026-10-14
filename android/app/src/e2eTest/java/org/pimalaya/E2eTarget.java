@@ -264,8 +264,8 @@ final class E2eTarget {
         String base = null;
         List<String> found = new ArrayList<>();
         for (ServiceConfig config : configs) {
-            found.add(config.service);
-            if (base == null && service.equals(config.service)) {
+            found.add(config.service());
+            if (base == null && service.equals(config.service())) {
                 base = Endpoints.endpointUrl(config, address);
             }
         }

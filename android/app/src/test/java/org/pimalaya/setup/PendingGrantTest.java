@@ -18,6 +18,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.FakeAndroidKeyStore;
 import org.pimalaya.MainActivity;
 import org.pimalaya.account.Oauth;
+import org.pimalaya.account.SecureStore;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
@@ -250,6 +251,81 @@ public class PendingGrantTest {
 
         assertTrue(busy[0]);
         assertNotNull(new PendingGrantStore(context).load());
+    }
+
+    /**
+     * The persisted grant as text, its random state and verifier and its
+     * clock reading replaced by placeholders.
+     */
+    private String persisted() throws Exception {
+        String plaintext =
+                SecureStore.open(prefs().getString("payload", null), prefs().getString("iv", null));
+        JSONObject grant = new JSONObject(plaintext);
+        return plaintext
+                .replace(grant.getString("state"), "STATE")
+                .replace(grant.getString("verifier"), "VERIFIER")
+                .replace(String.valueOf(grant.getLong(PendingGrantStore.SAVED_AT)), "SAVED");
+    }
+
+    @Test
+    public void aStartedGrantPersistsWhatThePreviousReleaseDid() throws Exception {
+        // NOTE: captured on the previous release, which an install may have
+        // left mid-grant: the next one has to read it back.
+        MainActivity host = Robolectric.buildActivity(MainActivity.class).get();
+        OauthFlow flow = startedGoogleGrant(host);
+        assertEquals(
+                "{\"clientId\":\"991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1.apps.googleusercontent.com\",\"clientSecret\":\"\",\"redirectUri\":\"com.googleusercontent.apps.991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/oauth2.googleapis.com\\/token\",\"baseUrl\":\"imaps:\\/\\/imap.gmail.com\",\"email\":\"user@gmail.com\",\"issuer\":\"\",\"savedAt\":SAVED}",
+                persisted());
+
+        flow.launchSchemeGrant(
+                "user@example.org",
+                "https://api.example.org/",
+                "client",
+                "sec",
+                "https://auth.example.org/authorize",
+                "https://auth.example.org/token",
+                "mail offline_access",
+                "https://api.example.org/jmap/session",
+                "https://auth.example.org");
+        assertEquals(
+                "{\"clientId\":\"client\",\"clientSecret\":\"sec\",\"redirectUri\":\"org.pimalaya:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"baseUrl\":\"https:\\/\\/api.example.org\\/\",\"email\":\"user@example.org\",\"issuer\":\"https:\\/\\/auth.example.org\",\"savedAt\":SAVED}",
+                persisted());
+
+        flow.launchSchemeGrant(
+                "example.org",
+                "https://api.example.org/",
+                "client",
+                null,
+                "https://auth.example.org/authorize",
+                "https://auth.example.org/token",
+                "mail",
+                null,
+                null);
+        assertEquals(
+                "{\"clientId\":\"client\",\"clientSecret\":\"\",\"redirectUri\":\"org.pimalaya:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"baseUrl\":\"https:\\/\\/api.example.org\\/\",\"email\":\"example.org\",\"issuer\":\"\",\"savedAt\":SAVED}",
+                persisted());
+        host.io.shutdownNow();
+    }
+
+    @Test
+    public void aGrantThePreviousReleasePersistedStillRedeems() throws Exception {
+        new PendingGrantStore(context).save(grant().put("issuer", ""));
+        MainActivity host = Robolectric.buildActivity(MainActivity.class).get();
+
+        // NOTE: restored from disk by a fresh flow: its state and redirect
+        // URI are what tell the grant's own redirect from any other.
+        flow(host).handleRedirect(
+                new Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse(Oauth.REDIRECT_URI + "?error=access_denied&state=forged")));
+        assertEquals(STATE, new PendingGrantStore(context).load().optString("state"));
+
+        flow(host).handleRedirect(
+                new Intent(
+                        Intent.ACTION_VIEW,
+                        Uri.parse(Oauth.REDIRECT_URI + "?error=access_denied&state=" + STATE)));
+        assertTrue(prefs().getAll().isEmpty());
+        host.io.shutdownNow();
     }
 
     @Test

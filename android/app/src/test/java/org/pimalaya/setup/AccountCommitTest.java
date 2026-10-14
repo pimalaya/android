@@ -19,6 +19,8 @@ import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.client.Addressbook;
+import org.pimalaya.client.OauthGrant;
+import org.pimalaya.client.OauthTokens;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -49,7 +51,10 @@ public class AccountCommitTest {
 
     @Test
     public void aTokenSignedMailConnectionNamesItsUser() {
-        AccountCredential grant = AccountCredential.oauth("access", "refresh", TOKEN, "app", null, "mail");
+        AccountCredential grant =
+                AccountCredential.oauth(
+                        new OauthTokens("access", "Bearer", 0, "refresh", null, 0),
+                        new OauthGrant(TOKEN, "app", null, "mail"));
         AccountEntry account =
                 AccountCommit.assemble(
                         EMAIL,
@@ -118,9 +123,13 @@ public class AccountCommitTest {
                 PimDomain.CONTACTS,
                 "https://dav.example.org/",
                 null,
-                AccountCredential.oauth("old", "old-refresh", TOKEN, "app", null, "contacts"));
+                AccountCredential.oauth(
+                        new OauthTokens("old", "Bearer", 0, "old-refresh", null, 0),
+                        new OauthGrant(TOKEN, "app", null, "contacts")));
         AccountCredential union =
-                AccountCredential.oauth("new", "new-refresh", TOKEN, "app", null, "contacts calendar");
+                AccountCredential.oauth(
+                        new OauthTokens("new", "Bearer", 0, "new-refresh", null, 0),
+                        new OauthGrant(TOKEN, "app", null, "contacts calendar"));
         AccountEntry connected =
                 AccountEntry.empty(EMAIL).with(PimDomain.CALENDAR, "https://dav.example.org/cal/", null, union);
 

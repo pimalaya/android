@@ -3,6 +3,8 @@ package org.pimalaya.setup;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import org.pimalaya.account.Endpoints;
 import org.pimalaya.account.Oauth;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.AccountClient;
@@ -16,6 +18,55 @@ import org.pimalaya.client.ServiceConfig;
  */
 final class SetupPlan {
     private SetupPlan() {}
+
+    /**
+     * The discovered half of one domain's options: one per configuration
+     * serving it and authentication method, the configurations ranked for
+     * the domain and the methods by {@link #authRank}. A configuration this
+     * app cannot drive is left out. {@code emailLogin} is the login where a
+     * configuration names none, {@code protocolName} the user-facing name of
+     * a service kind.
+     */
+    static List<SetupOption> discoveredOptions(
+            PimDomain domain,
+            List<ServiceConfig> searched,
+            String email,
+            String emailLogin,
+            Function<String, String> protocolName) {
+        List<SetupOption> options = new ArrayList<>();
+
+        List<ServiceConfig> configs = new ArrayList<>(PimDomain.configsFor(domain, searched));
+        java.util.Collections.sort(
+                configs,
+                (left, right) ->
+                        Integer.compare(domain.rank(left.service()), domain.rank(right.service())));
+
+        for (ServiceConfig config : configs) {
+            String baseUrl = Endpoints.endpointUrl(config, email);
+            if (baseUrl == null) {
+                continue;
+            }
+            String detail = config.url() != null ? hostOf(config.url()) : config.host();
+            String login = config.username() != null ? config.username() : emailLogin;
+
+            List<AuthMethod> methods = new ArrayList<>(config.auth());
+            java.util.Collections.sort(
+                    methods,
+                    (left, right) -> Integer.compare(authRank(left.type()), authRank(right.type())));
+            for (AuthMethod method : methods) {
+                options.add(
+                        new SetupOption(
+                                config.service(),
+                                protocolName.apply(config.service()),
+                                detail,
+                                baseUrl,
+                                resourceOf(config, method),
+                                method,
+                                login));
+            }
+        }
+        return options;
+    }
 
     /**
      * The standard setup's way into one domain, or null when it offers none.
@@ -42,7 +93,7 @@ final class SetupPlan {
     /** The standard setup's order: the service for the domain first, then the sign-in. */
     static int standardRank(PimDomain domain, SetupOption option, String email) {
         int service = proprietary(option, email) ? 0 : 1 + domain.rank(option.service);
-        return service * 10 + authRank(option.method.type);
+        return service * 10 + authRank(option.method.type());
     }
 
     /**
@@ -111,7 +162,7 @@ final class SetupPlan {
         AuthMethod.Type reading =
                 selected.method == null
                         ? AuthMethod.Type.PASSWORD
-                        : selected.method.type;
+                        : selected.method.type();
         return authKind(option.auth) == authKind(reading);
     }
 
@@ -178,21 +229,21 @@ final class SetupPlan {
         if (left.isManual() || right.isManual()) {
             return false;
         }
-        return left.method.type == right.method.type
+        return left.method.type() == right.method.type()
                 && java.util.Objects.equals(left.detail, right.detail)
                 && java.util.Objects.equals(left.login, right.login);
     }
 
     /** Whether two OAuth methods would send the user to the same server. */
     static boolean sameAuthorizationServer(AuthMethod left, AuthMethod right) {
-        if (left.type != right.type) {
+        if (left.type() != right.type()) {
             return false;
         }
-        if (left.issuer != null || right.issuer != null) {
-            return left.issuer != null && left.issuer.equals(right.issuer);
+        if (left.issuer() != null || right.issuer() != null) {
+            return left.issuer() != null && left.issuer().equals(right.issuer());
         }
-        return left.authorizationEndpoint != null
-                && left.authorizationEndpoint.equals(right.authorizationEndpoint);
+        return left.authorizationEndpoint() != null
+                && left.authorizationEndpoint().equals(right.authorizationEndpoint());
     }
 
     /** What one option's grant is for ({@link Oauth#audience}). */
@@ -200,7 +251,7 @@ final class SetupPlan {
         return option.method == null
                 ? Oauth.audience(null, option.resource, null)
                 : Oauth.audience(
-                        option.method.authorizationEndpoint, option.resource, option.method.scope);
+                        option.method.authorizationEndpoint(), option.resource, option.method.scope());
     }
 
     static void addScopes(java.util.Set<String> scopes, String scope) {
@@ -238,14 +289,14 @@ final class SetupPlan {
         if (fromProvider(config)) {
             return null;
         }
-        if (config.url != null) {
-            return config.url;
+        if (config.url() != null) {
+            return config.url();
         }
-        if (method == null || method.authorizationEndpoint == null) {
+        if (method == null || method.authorizationEndpoint() == null) {
             return null;
         }
         try {
-            java.net.URL endpoint = new java.net.URL(method.authorizationEndpoint);
+            java.net.URL endpoint = new java.net.URL(method.authorizationEndpoint());
             String port = endpoint.getPort() == -1 ? "" : ":" + endpoint.getPort();
             return endpoint.getProtocol() + "://" + endpoint.getHost() + port + "/";
         } catch (Exception error) {
@@ -255,6 +306,14 @@ final class SetupPlan {
 
     /** Whether a config came from a fixed provider rule (Google, Microsoft). */
     static boolean fromProvider(ServiceConfig config) {
-        return config.source != null && config.source.startsWith("provider:");
+        return config.source() != null && config.source().startsWith("provider:");
+    }
+
+    static String hostOf(String url) {
+        try {
+            return new java.net.URL(url).getHost();
+        } catch (Exception error) {
+            return url;
+        }
     }
 }

@@ -85,7 +85,7 @@ public enum PimDomain {
      * ManageSieve, POP3) serves none and is never offered.
      */
     static Set<PimDomain> servedBy(ServiceConfig config) {
-        return servedBy(config.service);
+        return servedBy(config.service());
     }
 
     /** The domains one discovered service name can serve. */

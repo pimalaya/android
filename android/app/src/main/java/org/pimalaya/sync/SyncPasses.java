@@ -27,6 +27,7 @@ import org.pimalaya.client.Clients;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.OauthGrant;
 import org.pimalaya.client.OauthTokens;
 import org.pimalaya.client.SubmissionRefused;
 import org.pimalaya.client.SubmissionUncertain;
@@ -380,16 +381,20 @@ public final class SyncPasses {
                         domain,
                         credential -> {
                             try (Transport transport = new Transport()) {
+                                OauthGrant grant = credential.renewal.grant();
+                                // NOTE: the refresh names no scope, keeping
+                                // the server's default.
                                 OauthTokens tokens =
-                                        clients.account().oauthRefresh(
+                                        clients.account().refresh(
                                                 transport,
-                                                credential.tokenEndpoint,
-                                                credential.clientId,
-                                                credential.clientSecret,
-                                                credential.refreshToken,
-                                                null);
+                                                new OauthGrant(
+                                                        grant.tokenEndpoint(),
+                                                        grant.clientId(),
+                                                        grant.clientSecret(),
+                                                        null),
+                                                credential.refreshToken());
                                 return new TokenRenewal.Renewed(
-                                        tokens.accessToken, tokens.refreshToken);
+                                        tokens.accessToken(), tokens.refreshToken());
                             }
                         });
 

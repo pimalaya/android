@@ -4,10 +4,25 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One way a {@link ServiceConfig} accepts authentication. Only the
- * fields relevant to the {@link #type} are non-null.
+ * One way a {@link ServiceConfig} accepts authentication
+ * (io-pim-discovery {@code DiscoveryAuthMethod}). Only the fields
+ * relevant to the {@link #type} are non-null.
+ *
+ * @param type the kind of method
+ * @param authorizationEndpoint authorization endpoint (code grant only)
+ * @param deviceAuthorizationEndpoint device authorization endpoint
+ *     (device grant only)
+ * @param tokenEndpoint token endpoint (both OAuth grants)
+ * @param scope space-separated scopes to request (both OAuth grants)
+ * @param issuer issuer URL ({@link Type#OAUTH_ISSUER} only)
  */
-public final class AuthMethod {
+public record AuthMethod(
+        Type type,
+        String authorizationEndpoint,
+        String deviceAuthorizationEndpoint,
+        String tokenEndpoint,
+        String scope,
+        String issuer) {
     public enum Type {
         /** Username and password login (possibly an app password). */
         PASSWORD,
@@ -21,43 +36,21 @@ public final class AuthMethod {
         OAUTH_ISSUER,
     }
 
-    public final Type type;
+    /** A username and password login. */
+    public static AuthMethod password() {
+        return new AuthMethod(Type.PASSWORD, null, null, null, null, null);
+    }
 
-    /** Authorization endpoint (code grant only). */
-    public final String authorizationEndpoint;
-
-    /** Device authorization endpoint (device grant only). */
-    public final String deviceAuthorizationEndpoint;
-
-    /** Token endpoint (both OAuth grants). */
-    public final String tokenEndpoint;
-
-    /** Space-separated scopes to request (both OAuth grants). */
-    public final String scope;
-
-    /** Issuer URL ({@link Type#OAUTH_ISSUER} only). */
-    public final String issuer;
-
-    private AuthMethod(
-            Type type,
-            String authorizationEndpoint,
-            String deviceAuthorizationEndpoint,
-            String tokenEndpoint,
-            String scope,
-            String issuer) {
-        this.type = type;
-        this.authorizationEndpoint = authorizationEndpoint;
-        this.deviceAuthorizationEndpoint = deviceAuthorizationEndpoint;
-        this.tokenEndpoint = tokenEndpoint;
-        this.scope = scope;
-        this.issuer = issuer;
+    /** A bearer token. */
+    public static AuthMethod bearer() {
+        return new AuthMethod(Type.BEARER, null, null, null, null, null);
     }
 
     /**
      * An authorization code grant the caller already knows the endpoints of,
      * for the providers that publish no discoverable configuration.
      */
-    public static AuthMethod oauthCodeGrant(
+    public static AuthMethod codeGrant(
             String authorizationEndpoint, String tokenEndpoint, String scope) {
         return new AuthMethod(
                 Type.OAUTH_AUTHORIZATION_CODE_GRANT,
@@ -68,6 +61,23 @@ public final class AuthMethod {
                 null);
     }
 
+    /** A device authorization grant. */
+    public static AuthMethod deviceGrant(
+            String deviceAuthorizationEndpoint, String tokenEndpoint, String scope) {
+        return new AuthMethod(
+                Type.OAUTH_DEVICE_AUTHORIZATION_GRANT,
+                null,
+                deviceAuthorizationEndpoint,
+                tokenEndpoint,
+                scope,
+                null);
+    }
+
+    /** OAuth with grants to resolve from the issuer's metadata. */
+    public static AuthMethod issuer(String issuer) {
+        return new AuthMethod(Type.OAUTH_ISSUER, null, null, null, null, issuer);
+    }
+
     /**
      * Parses one method from the bridge's JSON shape: {@code "password"}
      * and {@code "bearer"} as plain strings, the OAuth variants as
@@ -75,40 +85,33 @@ public final class AuthMethod {
      */
     static AuthMethod from(Object json) {
         if ("bearer".equals(json)) {
-            return new AuthMethod(Type.BEARER, null, null, null, null, null);
+            return bearer();
         }
 
         if (!(json instanceof JSONObject)) {
-            return new AuthMethod(Type.PASSWORD, null, null, null, null, null);
+            return password();
         }
 
         JSONObject method = (JSONObject) json;
         try {
             if (method.has("oauthAuthorizationCodeGrant")) {
                 JSONObject grant = method.getJSONObject("oauthAuthorizationCodeGrant");
-                return new AuthMethod(
-                        Type.OAUTH_AUTHORIZATION_CODE_GRANT,
+                return codeGrant(
                         grant.getString("authorizationEndpoint"),
-                        null,
                         grant.getString("tokenEndpoint"),
-                        grant.isNull("scope") ? null : grant.getString("scope"),
-                        null);
+                        grant.isNull("scope") ? null : grant.getString("scope"));
             }
 
             if (method.has("oauthDeviceAuthorizationGrant")) {
                 JSONObject grant = method.getJSONObject("oauthDeviceAuthorizationGrant");
-                return new AuthMethod(
-                        Type.OAUTH_DEVICE_AUTHORIZATION_GRANT,
-                        null,
+                return deviceGrant(
                         grant.getString("deviceAuthorizationEndpoint"),
                         grant.getString("tokenEndpoint"),
-                        grant.isNull("scope") ? null : grant.getString("scope"),
-                        null);
+                        grant.isNull("scope") ? null : grant.getString("scope"));
             }
 
             if (method.has("oauthIssuer")) {
-                return new AuthMethod(
-                        Type.OAUTH_ISSUER, null, null, null, null, method.getString("oauthIssuer"));
+                return issuer(method.getString("oauthIssuer"));
             }
         } catch (JSONException error) {
             throw new PimalayaException("Unreadable auth method: " + error.getMessage());

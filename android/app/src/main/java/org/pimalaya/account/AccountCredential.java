@@ -1,6 +1,8 @@
 package org.pimalaya.account;
 
 import java.util.UUID;
+import org.pimalaya.client.OauthGrant;
+import org.pimalaya.client.OauthTokens;
 
 /**
  * What one sign-in produced: the secret an account presents, and
@@ -25,6 +27,17 @@ import java.util.UUID;
  */
 public final class AccountCredential {
     /**
+     * What renews an OAuth credential without asking the user.
+     *
+     * @param refreshToken the refresh token; null when the server issued
+     *     none
+     * @param grant where and for which client the refresh runs, and the
+     *     scopes the grant holds, as the token response named them (null
+     *     for a grant stored before the scopes were kept)
+     */
+    public record Renewal(String refreshToken, OauthGrant grant) {}
+
+    /**
      * What names this credential inside its account. Opaque and minted
      * per grant: two sign-ins are two credentials even against one
      * provider, since the second cannot renew the first.
@@ -37,88 +50,41 @@ public final class AccountCredential {
     /** The password, API token or OAuth access token itself. */
     public final String secret;
 
-    /** Refresh token of an OAuth credential; null for a password one. */
-    public final String refreshToken;
+    /** How an OAuth credential renews; null for a password one. */
+    public final Renewal renewal;
 
-    /** Token endpoint the refresh runs against; null without a refresh token. */
-    public final String tokenEndpoint;
-
-    /** OAuth client the tokens were issued to; null without a refresh token. */
-    public final String clientId;
-
-    /**
-     * Secret of the OAuth client, when its registration issued one (Google
-     * desktop-type clients require it in every exchange); null for
-     * secret-less clients and password credentials.
-     */
-    public final String clientSecret;
-
-    /**
-     * The space-separated scopes the grant holds, as the token response
-     * named them; null for a password, or for a grant stored before the
-     * scopes were kept.
-     */
-    final String scope;
-
-    AccountCredential(
-            String id,
-            String login,
-            String secret,
-            String refreshToken,
-            String tokenEndpoint,
-            String clientId,
-            String clientSecret,
-            String scope) {
+    AccountCredential(String id, String login, String secret, Renewal renewal) {
         this.id = id;
         this.login = login;
         this.secret = secret;
-        this.refreshToken = refreshToken;
-        this.tokenEndpoint = tokenEndpoint;
-        this.clientId = clientId;
-        this.clientSecret = clientSecret;
-        this.scope = scope;
+        this.renewal = renewal;
     }
 
     /** A credential signed in with a login and a secret. */
     public static AccountCredential password(String login, String secret) {
-        return new AccountCredential(newId(), login, secret, null, null, null, null, null);
+        return new AccountCredential(newId(), login, secret, null);
     }
 
     /** A credential a browser grant produced, renewable on its own. */
-    public static AccountCredential oauth(
-            String accessToken,
-            String refreshToken,
-            String tokenEndpoint,
-            String clientId,
-            String clientSecret,
-            String scope) {
+    public static AccountCredential oauth(OauthTokens tokens, OauthGrant grant) {
         return new AccountCredential(
-                newId(),
-                "",
-                accessToken,
-                refreshToken,
-                tokenEndpoint,
-                clientId,
-                clientSecret,
-                scope);
+                newId(), "", tokens.accessToken(), new Renewal(tokens.refreshToken(), grant));
     }
 
     /** The same credential, renewed. Same id: it is the same consent. */
     AccountCredential withTokens(String accessToken, String refreshToken) {
         return new AccountCredential(
-                id,
-                login,
-                accessToken,
-                refreshToken,
-                tokenEndpoint,
-                clientId,
-                clientSecret,
-                scope);
+                id, login, accessToken, new Renewal(refreshToken, renewal.grant()));
+    }
+
+    /** Refresh token of an OAuth credential; null for a password one. */
+    public String refreshToken() {
+        return renewal == null ? null : renewal.refreshToken();
     }
 
     /** Whether this credential can be renewed without asking the user. */
     public boolean renewable() {
-        return refreshToken != null;
+        return refreshToken() != null;
     }
 
     /** A fresh identity for a credential a new sign-in just produced. */

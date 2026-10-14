@@ -1,5 +1,6 @@
 package org.pimalaya.client;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
@@ -8,36 +9,39 @@ import org.json.JSONObject;
  * RFC 7591 registration endpoint when the server lets a public client
  * register itself (null otherwise, meaning a pre-registered client id
  * is required).
+ *
+ * @param issuer the issuer, or null
+ * @param authorizationEndpoint the authorization endpoint, or null
+ * @param tokenEndpoint the token endpoint, or null
+ * @param registrationEndpoint RFC 7591 registration endpoint, or null when
+ *     unsupported
+ * @param scopesSupported space-separated supported scopes, empty when
+ *     unadvertised
  */
-public final class ServerMetadata {
-    public final String issuer;
-    public final String authorizationEndpoint;
-    public final String tokenEndpoint;
-
-    /** RFC 7591 registration endpoint, or null when unsupported. */
-    public final String registrationEndpoint;
-
-    /** Space-separated supported scopes, empty when unadvertised. */
-    public final String scopesSupported;
-
-    ServerMetadata(JSONObject json) {
-        this.issuer = json.optString("issuer", null);
-        this.authorizationEndpoint = json.optString("authorization_endpoint", null);
-        this.tokenEndpoint = json.optString("token_endpoint", null);
-        this.registrationEndpoint =
-                json.isNull("registration_endpoint")
-                        ? null
-                        : json.optString("registration_endpoint", null);
-
+public record ServerMetadata(
+        String issuer,
+        String authorizationEndpoint,
+        String tokenEndpoint,
+        String registrationEndpoint,
+        String scopesSupported) {
+    static ServerMetadata from(JSONObject json) {
         StringBuilder scopes = new StringBuilder();
-        org.json.JSONArray supported = json.optJSONArray("scopes_supported");
+        JSONArray supported = json.optJSONArray("scopes_supported");
         for (int index = 0; supported != null && index < supported.length(); index++) {
             if (scopes.length() > 0) {
                 scopes.append(' ');
             }
             scopes.append(supported.optString(index));
         }
-        this.scopesSupported = scopes.toString();
+
+        return new ServerMetadata(
+                json.optString("issuer", null),
+                json.optString("authorization_endpoint", null),
+                json.optString("token_endpoint", null),
+                json.isNull("registration_endpoint")
+                        ? null
+                        : json.optString("registration_endpoint", null),
+                scopes.toString());
     }
 
     /** Whether a public client can register itself here (RFC 7591). */

@@ -7,11 +7,19 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.List;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.AuthMethod;
+import org.pimalaya.client.ServiceConfig;
+import org.robolectric.RobolectricTestRunner;
 
 /**
  * Where the connection flow lets a credential go: encrypted endpoints only,
  * whatever was typed or discovered, and the user shown where it goes.
+ * Robolectric because a discovered provider API names its base through the
+ * bridge, whose library loads into the sandbox's class loader.
  */
+@RunWith(RobolectricTestRunner.class)
 public class EndpointsTest {
     @Test
     public void aTypedMailServerIsImplicitTlsOrNothing() {
@@ -102,5 +110,40 @@ public class EndpointsTest {
         assertEquals(
                 "jmap://api.example.org/jmap/session",
                 Endpoints.asUser("jmap://api.example.org/jmap/session", "jane@example.org"));
+    }
+
+    @Test
+    public void aDiscoveredSubmissionServerIsSmtpOverTlsOrStarttls() {
+        assertEquals("smtps://smtp.example.org:465", Endpoints.submissionUrl(tcp("smtp", 465, "tls")));
+        assertEquals("smtp://smtp.example.org:587", Endpoints.submissionUrl(tcp("smtp", 587, "STARTTLS")));
+        assertNull(Endpoints.submissionUrl(tcp("smtp", 25, "plain")));
+        assertNull(Endpoints.submissionUrl(tcp("imap", 993, "tls")));
+        assertNull(Endpoints.submissionUrl(http("smtp", "https://smtp.example.org/")));
+    }
+
+    @Test
+    public void aDiscoveredEndpointIsHttpsOrImplicitTlsImap() {
+        String email = "jane@example.org";
+        assertEquals("https://dav.example.org/", Endpoints.endpointUrl(http("carddav", "https://dav.example.org/"), email));
+        assertNull(Endpoints.endpointUrl(http("carddav", "http://dav.example.org/"), email));
+        assertEquals(
+                AccountClient.jmapBase("https://api.example.org/jmap/session"),
+                Endpoints.endpointUrl(http("jmap", "https://api.example.org/jmap/session"), email));
+        assertEquals(AccountClient.msgraphBase(email), Endpoints.endpointUrl(http("msgraph", "https://graph.microsoft.com/"), email));
+        assertEquals(AccountClient.msgraphBase(email), Endpoints.endpointUrl(http("msgraphCalendar", "https://graph.microsoft.com/"), email));
+        assertEquals(AccountClient.googleBase(email), Endpoints.endpointUrl(http("gmail", "https://gmail.googleapis.com/"), email));
+        assertEquals(AccountClient.googleBase(email), Endpoints.endpointUrl(http("gcal", "https://www.googleapis.com/"), email));
+        assertEquals("imaps://imap.example.org:993", Endpoints.endpointUrl(tcp("imap", 993, "TLS"), email));
+        assertNull(Endpoints.endpointUrl(tcp("imap", 143, "starttls"), email));
+        assertNull(Endpoints.endpointUrl(tcp("smtp", 465, "tls"), email));
+    }
+
+    private static ServiceConfig tcp(String service, int port, String security) {
+        return new ServiceConfig(
+                service, null, service + ".example.org", port, security, null, List.of(AuthMethod.password()), "pacc");
+    }
+
+    private static ServiceConfig http(String service, String url) {
+        return new ServiceConfig(service, url, null, 0, null, null, List.of(AuthMethod.password()), "pacc");
     }
 }

@@ -6,12 +6,16 @@ import android.util.Log;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.net.InetAddress;
-import org.json.JSONException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.account.Oauth;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.ClientRegistration;
+import org.pimalaya.client.OauthGrant;
+import org.pimalaya.client.OauthRequest;
 import org.pimalaya.client.OauthSession;
 import org.pimalaya.client.OauthTokens;
 import org.pimalaya.client.Transport;
@@ -33,14 +37,7 @@ import org.pimalaya.ui.PillField;
 public final class OauthFlow {
     /** Lands a redeemed grant back in the connection flow. */
     public interface Connector {
-        void connect(
-                Account account,
-                String email,
-                String refreshToken,
-                String tokenEndpoint,
-                String clientId,
-                String clientSecret,
-                String scope);
+        void connect(Account account, String email, OauthTokens tokens, OauthGrant grant);
     }
 
     private final Host host;
@@ -107,7 +104,9 @@ public final class OauthFlow {
      */
     void startGoogleOauth(String email, String scope, String baseUrl) {
         pendingOauth =
-                new OauthSession(Oauth.GOOGLE_CLIENT_ID, null, Oauth.GOOGLE_REDIRECT_URI, scope);
+                OauthSession.start(
+                        new OauthRequest(
+                                Oauth.GOOGLE_CLIENT_ID, null, Oauth.GOOGLE_REDIRECT_URI, scope));
         pendingTokenEndpoint = Oauth.GOOGLE_TOKEN_ENDPOINT;
         pendingBaseUrl = baseUrl;
         pendingAccountEmail = email;
@@ -119,15 +118,12 @@ public final class OauthFlow {
         // refresh token; include_granted_scopes keeps what the account
         // granted the app before (incremental authorization), so the new
         // token covers it too; login_hint preselects the entered account.
-        JSONObject extras = new JSONObject();
-        try {
-            extras.put("access_type", "offline");
-            extras.put("prompt", "consent");
-            extras.put("include_granted_scopes", "true");
-            if (email.contains("@")) {
-                extras.put("login_hint", email);
-            }
-        } catch (JSONException ignored) {
+        Map<String, String> extras = new LinkedHashMap<>();
+        extras.put("access_type", "offline");
+        extras.put("prompt", "consent");
+        extras.put("include_granted_scopes", "true");
+        if (email.contains("@")) {
+            extras.put("login_hint", email);
         }
 
         try {
@@ -148,8 +144,9 @@ public final class OauthFlow {
      */
     void startMicrosoftOauth(String email, String scope, String baseUrl) {
         pendingOauth =
-                new OauthSession(
-                        Oauth.MICROSOFT_CLIENT_ID, null, Oauth.MICROSOFT_REDIRECT_URI, scope);
+                OauthSession.start(
+                        new OauthRequest(
+                                Oauth.MICROSOFT_CLIENT_ID, null, Oauth.MICROSOFT_REDIRECT_URI, scope));
         pendingTokenEndpoint = Oauth.MICROSOFT_TOKEN_ENDPOINT;
         pendingBaseUrl = baseUrl;
         pendingAccountEmail = email;
@@ -159,12 +156,9 @@ public final class OauthFlow {
 
         // NOTE: the refresh token comes from the offline_access scope,
         // no extra parameter needed; login_hint preselects the account.
-        JSONObject extras = new JSONObject();
-        try {
-            if (email.contains("@")) {
-                extras.put("login_hint", email);
-            }
-        } catch (JSONException ignored) {
+        Map<String, String> extras = new LinkedHashMap<>();
+        if (email.contains("@")) {
+            extras.put("login_hint", email);
         }
 
         try {
@@ -225,8 +219,8 @@ public final class OauthFlow {
      * when neither is known (a grant restored after the process died).
      */
     private static String grantedScope(OauthTokens tokens, OauthSession session) {
-        if (tokens.scope != null && !tokens.scope.isEmpty()) {
-            return tokens.scope;
+        if (tokens.scope() != null && !tokens.scope().isEmpty()) {
+            return tokens.scope();
         }
         String asked = session.scope();
         return asked == null || asked.isEmpty() ? null : asked;
@@ -286,13 +280,14 @@ public final class OauthFlow {
                         host.main.post(
                                 () ->
                                         onConnected.connect(
-                                                new Account(baseUrl, "", tokens.accessToken),
+                                                new Account(baseUrl, "", tokens.accessToken()),
                                                 email,
-                                                tokens.refreshToken,
-                                                tokenEndpoint,
-                                                clientId,
-                                                clientSecret,
-                                                grantedScope(tokens, session)));
+                                                tokens,
+                                                new OauthGrant(
+                                                        tokenEndpoint,
+                                                        clientId,
+                                                        clientSecret,
+                                                        grantedScope(tokens, session))));
                     } catch (Exception error) {
                         Log.w("pimalaya", "oauth redeem failed", error);
                         host.postAlive(
@@ -432,10 +427,10 @@ public final class OauthFlow {
                     try {
                         ServerMetadata metadata;
                         try (Transport transport = new Transport()) {
-                            metadata = client.oauthServerMetadata(transport, issuer);
+                            metadata = client.serverMetadata(transport, issuer);
                         }
-                        if (metadata.authorizationEndpoint == null
-                                || metadata.tokenEndpoint == null) {
+                        if (metadata.authorizationEndpoint() == null
+                                || metadata.tokenEndpoint() == null) {
                             throw new IllegalStateException(
                                     host.getString(R.string.oauth_metadata_incomplete));
                         }
@@ -449,8 +444,8 @@ public final class OauthFlow {
                                         promptOauthClient(
                                                 email,
                                                 baseUrl,
-                                                metadata.authorizationEndpoint,
-                                                metadata.tokenEndpoint,
+                                                metadata.authorizationEndpoint(),
+                                                metadata.tokenEndpoint(),
                                                 metadata.domainScope(domains),
                                                 resource,
                                                 heading,
@@ -469,12 +464,13 @@ public final class OauthFlow {
                         String clientId;
                         try (Transport transport = new Transport()) {
                             clientId =
-                                    client.oauthRegisterClient(
+                                    client.registerClient(
                                             transport,
-                                            metadata.registrationEndpoint,
-                                            Oauth.REDIRECT_URI,
-                                            host.getString(R.string.app_name),
-                                            scope);
+                                            new ClientRegistration(
+                                                    metadata.registrationEndpoint(),
+                                                    Oauth.REDIRECT_URI,
+                                                    host.getString(R.string.app_name),
+                                                    scope));
                         }
                         Log.d(
                                 "pimalaya",
@@ -483,9 +479,9 @@ public final class OauthFlow {
                                         + ", scope \""
                                         + scope
                                         + "\", authorize "
-                                        + metadata.authorizationEndpoint
+                                        + metadata.authorizationEndpoint()
                                         + ", token "
-                                        + metadata.tokenEndpoint);
+                                        + metadata.tokenEndpoint());
 
                         host.postAlive(
                                 () ->
@@ -494,11 +490,11 @@ public final class OauthFlow {
                                                 baseUrl,
                                                 clientId,
                                                 null,
-                                                metadata.authorizationEndpoint,
-                                                metadata.tokenEndpoint,
+                                                metadata.authorizationEndpoint(),
+                                                metadata.tokenEndpoint(),
                                                 scope,
                                                 resource,
-                                                metadata.issuer));
+                                                metadata.issuer()));
                     } catch (Exception error) {
                         Log.w("pimalaya", "issuer oauth failed", error);
                         host.postAlive(
@@ -541,7 +537,9 @@ public final class OauthFlow {
             String scope,
             String resource,
             String issuer) {
-        pendingOauth = new OauthSession(clientId, clientSecret, Oauth.REDIRECT_URI, scope);
+        pendingOauth =
+                OauthSession.start(
+                        new OauthRequest(clientId, clientSecret, Oauth.REDIRECT_URI, scope));
         pendingIssuer = issuer;
         pendingTokenEndpoint = tokenEndpoint;
         pendingBaseUrl = baseUrl;
@@ -554,15 +552,12 @@ public final class OauthFlow {
         // access_type/prompt hints stay off this flow: refresh comes
         // from offline_access, and unknown parameters risk an
         // invalid_request bounce from strict servers.
-        JSONObject extras = new JSONObject();
-        try {
-            if (resource != null && !resource.isEmpty()) {
-                extras.put("resource", resource);
-            }
-            if (email.contains("@")) {
-                extras.put("login_hint", email);
-            }
-        } catch (JSONException ignored) {
+        Map<String, String> extras = new LinkedHashMap<>();
+        if (resource != null && !resource.isEmpty()) {
+            extras.put("resource", resource);
+        }
+        if (email.contains("@")) {
+            extras.put("login_hint", email);
         }
 
         try {
@@ -625,7 +620,8 @@ public final class OauthFlow {
         }
         loopbackServer = server;
 
-        OauthSession session = new OauthSession(clientId, secret, redirectUri, scope);
+        OauthSession session =
+                OauthSession.start(new OauthRequest(clientId, secret, redirectUri, scope));
         String done =
                 "<html><body style='font-family:sans-serif;text-align:center;"
                         + "margin-top:4em'>"
@@ -635,14 +631,11 @@ public final class OauthFlow {
         // NOTE: access_type=offline + prompt=consent make Google-style
         // servers issue a refresh token (ignored by servers that do not
         // use them); login_hint preselects the account.
-        JSONObject extras = new JSONObject();
-        try {
-            extras.put("access_type", "offline");
-            extras.put("prompt", "consent");
-            if (email.contains("@")) {
-                extras.put("login_hint", email);
-            }
-        } catch (JSONException ignored) {
+        Map<String, String> extras = new LinkedHashMap<>();
+        extras.put("access_type", "offline");
+        extras.put("prompt", "consent");
+        if (email.contains("@")) {
+            extras.put("login_hint", email);
         }
 
         Thread listener =
@@ -677,13 +670,14 @@ public final class OauthFlow {
                                         () ->
                                                 onConnected.connect(
                                                         new Account(
-                                                                baseUrl, "", tokens.accessToken),
+                                                                baseUrl, "", tokens.accessToken()),
                                                         email,
-                                                        tokens.refreshToken,
-                                                        tokenEndpoint,
-                                                        clientId,
-                                                        secret,
-                                                        grantedScope(tokens, session)));
+                                                        tokens,
+                                                        new OauthGrant(
+                                                                tokenEndpoint,
+                                                                clientId,
+                                                                secret,
+                                                                grantedScope(tokens, session))));
                             } catch (Exception error) {
                                 Log.w("pimalaya", "custom oauth failed", error);
                                 host.postAlive(
@@ -731,11 +725,12 @@ public final class OauthFlow {
 
         String secret = grant.optString("clientSecret");
         pendingOauth =
-                new OauthSession(
-                        grant.optString("clientId"),
-                        secret,
-                        grant.optString("redirectUri"),
-                        "",
+                OauthSession.resume(
+                        new OauthRequest(
+                                grant.optString("clientId"),
+                                secret,
+                                grant.optString("redirectUri"),
+                                ""),
                         grant.optString("state"),
                         grant.optString("verifier"));
         pendingTokenEndpoint = grant.optString("tokenEndpoint");

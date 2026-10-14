@@ -7,6 +7,8 @@ import org.junit.Test;
 
 import java.util.List;
 import java.util.Set;
+import org.pimalaya.client.AuthMethod;
+import org.pimalaya.client.ServiceConfig;
 
 /**
  * Which discovered services serve which domain, which is what the connection
@@ -107,5 +109,25 @@ public class PimDomainTest {
         // silently re-domains every account stored under it.
         assertEquals(List.of("mail", "contacts", "calendar"),
                 List.of(PimDomain.MAIL.id, PimDomain.CONTACTS.id, PimDomain.CALENDAR.id));
+    }
+
+    @Test
+    public void eachDomainKeepsTheConfigsServingItInDiscoveryOrder() {
+        ServiceConfig imap = config("imap");
+        ServiceConfig smtp = config("smtp");
+        ServiceConfig carddav = config("carddav");
+        ServiceConfig jmap = config("jmap");
+        ServiceConfig gcal = config("gcal");
+        List<ServiceConfig> configs = List.of(imap, smtp, carddav, jmap, gcal);
+
+        assertEquals(List.of(imap, jmap), PimDomain.configsFor(PimDomain.MAIL, configs));
+        assertEquals(List.of(carddav, jmap), PimDomain.configsFor(PimDomain.CONTACTS, configs));
+        assertEquals(List.of(jmap, gcal), PimDomain.configsFor(PimDomain.CALENDAR, configs));
+        assertTrue(PimDomain.configsFor(PimDomain.MAIL, List.of(smtp)).isEmpty());
+    }
+
+    private static ServiceConfig config(String service) {
+        return new ServiceConfig(
+                service, "https://" + service + ".example.org/", null, 0, null, null, List.of(AuthMethod.password()), "pacc");
     }
 }

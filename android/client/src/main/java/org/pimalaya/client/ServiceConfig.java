@@ -10,57 +10,32 @@ import org.json.JSONObject;
  * One discovered way to use one service: where to connect, how to
  * authenticate, and which mechanism found it. Produced by
  * {@link AccountClient#searchAll}.
+ *
+ * <p>Flattened from io-pim-discovery's {@code DiscoveryServiceConfig}: its
+ * endpoint into {@link #url} or {@link #host}, {@link #port} and
+ * {@link #security}, its provider into {@link #source}.
+ *
+ * @param service service kind, e.g. {@code carddav}
+ * @param url HTTP endpoint URL; null for TCP endpoints
+ * @param host TCP host; null for HTTP endpoints
+ * @param port TCP port; 0 for HTTP endpoints
+ * @param security TCP security ({@code plain}, {@code starttls},
+ *     {@code tls}); null for HTTP endpoints
+ * @param username login to present, when the mechanism advertises one
+ * @param auth authentication methods the service accepts
+ * @param source mechanism that produced this config:
+ *     {@code provider:google}, {@code provider:microsoft}, {@code pacc},
+ *     {@code dav}, ...
  */
-public final class ServiceConfig {
-    /** Service kind, e.g. {@code carddav}. */
-    public final String service;
-
-    /** HTTP endpoint URL; null for TCP endpoints. */
-    public final String url;
-
-    /** TCP host; null for HTTP endpoints. */
-    public final String host;
-
-    /** TCP port; 0 for HTTP endpoints. */
-    public final int port;
-
-    /**
-     * TCP security ({@code plain}, {@code starttls}, {@code tls});
-     * null for HTTP endpoints.
-     */
-    public final String security;
-
-    /** Login to present, when the mechanism advertises one. */
-    public final String username;
-
-    /** Authentication methods the service accepts. */
-    public final List<AuthMethod> auth;
-
-    /**
-     * Mechanism that produced this config: {@code provider:google},
-     * {@code provider:microsoft}, {@code pacc}, {@code dav}, ...
-     */
-    public final String source;
-
-    private ServiceConfig(
-            String service,
-            String url,
-            String host,
-            int port,
-            String security,
-            String username,
-            List<AuthMethod> auth,
-            String source) {
-        this.service = service;
-        this.url = url;
-        this.host = host;
-        this.port = port;
-        this.security = security;
-        this.username = username;
-        this.auth = auth;
-        this.source = source;
-    }
-
+public record ServiceConfig(
+        String service,
+        String url,
+        String host,
+        int port,
+        String security,
+        String username,
+        List<AuthMethod> auth,
+        String source) {
     /** Parses one config from the bridge's JSON shape. */
     static ServiceConfig from(JSONObject json) {
         try {

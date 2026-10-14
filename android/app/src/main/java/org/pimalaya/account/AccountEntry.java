@@ -127,8 +127,8 @@ public final class AccountEntry {
         java.util.List<String> scopes = new java.util.ArrayList<>();
         for (AccountConnection connection : connections.values()) {
             AccountCredential held = credentials.get(connection.credentialId);
-            if (held != null && held.renewable() && clientId.equals(held.clientId)) {
-                scopes.add(held.scope);
+            if (held != null && held.renewable() && clientId.equals(held.renewal.grant().clientId())) {
+                scopes.add(held.renewal.grant().scope());
             }
         }
         return Oauth.union(scopes.toArray(new String[0]));
@@ -150,11 +150,11 @@ public final class AccountEntry {
             if (held != null
                     && !held.id.equals(granted.id)
                     && held.renewable()
-                    && held.clientId != null
-                    && held.clientId.equals(granted.clientId)
-                    && held.tokenEndpoint != null
-                    && held.tokenEndpoint.equals(granted.tokenEndpoint)
-                    && Oauth.covers(granted.scope, held.scope)) {
+                    && held.renewal.grant().clientId() != null
+                    && held.renewal.grant().clientId().equals(granted.renewal.grant().clientId())
+                    && held.renewal.grant().tokenEndpoint() != null
+                    && held.renewal.grant().tokenEndpoint().equals(granted.renewal.grant().tokenEndpoint())
+                    && Oauth.covers(granted.renewal.grant().scope(), held.renewal.grant().scope())) {
                 domains.add(entry.getKey());
             }
         }

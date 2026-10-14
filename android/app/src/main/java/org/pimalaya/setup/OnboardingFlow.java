@@ -29,6 +29,8 @@ import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.AuthMethod;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.OauthGrant;
+import org.pimalaya.client.OauthTokens;
 import org.pimalaya.client.ServiceConfig;
 import org.pimalaya.client.Transport;
 import org.pimalaya.phone.Accounts;
@@ -407,7 +409,7 @@ public final class OnboardingFlow {
                                                 .account()
                                                 .searchProvider(transport, pendingEmail, null);
                             }
-                            provider = hits.isEmpty() ? null : hits.get(0).source;
+                            provider = hits.isEmpty() ? null : hits.get(0).source();
                         } catch (Exception error) {
                             Log.w("pimalaya", "provider probe failed", error);
                         }
@@ -559,7 +561,7 @@ public final class OnboardingFlow {
 
         /** Whether this card asks for a login and a password. */
         boolean password() {
-            return option.method == null || option.method.type == AuthMethod.Type.PASSWORD;
+            return option.method == null || option.method.type() == AuthMethod.Type.PASSWORD;
         }
 
         /** Whether the "same as" box is ticked, its fields reused. */
@@ -901,7 +903,7 @@ public final class OnboardingFlow {
             String detail =
                     option.isManual()
                             ? host.getString(R.string.domain_manual_detail)
-                            : optionDetail(option.detail, option.method.type);
+                            : optionDetail(option.detail, option.method.type());
             android.widget.RadioButton button =
                     optionRow(
                             body,
@@ -1039,7 +1041,7 @@ public final class OnboardingFlow {
         if (option.detail != null) {
             return option.label + " (" + option.detail + ")" + auth;
         }
-        return option.url == null ? option.label : option.label + " (" + hostOf(option.url) + ")";
+        return option.url == null ? option.label : option.label + " (" + SetupPlan.hostOf(option.url) + ")";
     }
 
     /** Shows one card's rows while its switch is on, and checks the picks. */
@@ -1205,7 +1207,7 @@ public final class OnboardingFlow {
         for (DomainSetup setup : setups.values()) {
             if (setup.ready()
                     && setup.selected.method != null
-                    && setup.selected.method.type == AuthMethod.Type.PASSWORD
+                    && setup.selected.method.type() == AuthMethod.Type.PASSWORD
                     && setup.selected.login != null
                     && !setup.selected.login.isEmpty()) {
                 shared.add(setup);
@@ -1230,38 +1232,9 @@ public final class OnboardingFlow {
      * it, so an empty list here is the address offering this domain nothing.
      */
     private List<SetupOption> optionsFor(PimDomain domain) {
-        List<SetupOption> options = new ArrayList<>();
-
-        List<ServiceConfig> configs = new ArrayList<>(PimDomain.configsFor(domain, searchedConfigs));
-        java.util.Collections.sort(
-                configs,
-                (left, right) ->
-                        Integer.compare(domain.rank(left.service), domain.rank(right.service)));
-
-        for (ServiceConfig config : configs) {
-            String baseUrl = Endpoints.endpointUrl(config, pendingEmail);
-            if (baseUrl == null) {
-                continue;
-            }
-            String detail = config.url != null ? hostOf(config.url) : config.host;
-            String login = config.username != null ? config.username : emailLogin();
-
-            List<AuthMethod> methods = new ArrayList<>(config.auth);
-            java.util.Collections.sort(
-                    methods,
-                    (left, right) -> Integer.compare(SetupPlan.authRank(left.type), SetupPlan.authRank(right.type)));
-            for (AuthMethod method : methods) {
-                options.add(
-                        new SetupOption(
-                                config.service,
-                                protocolName(config.service),
-                                detail,
-                                baseUrl,
-                                SetupPlan.resourceOf(config, method),
-                                method,
-                                login));
-            }
-        }
+        List<SetupOption> options =
+                SetupPlan.discoveredOptions(
+                        domain, searchedConfigs, pendingEmail, emailLogin(), this::protocolName);
 
         // NOTE: the provider sign-ins are contacts sign-ins (CardDAV, the
         // People API, Graph). No protocol signal reveals where contacts live at
@@ -1329,7 +1302,7 @@ public final class OnboardingFlow {
     /** Whether discovery named this service, whatever found it. */
     private boolean discovered(String service) {
         for (ServiceConfig config : searchedConfigs) {
-            if (service.equals(config.service)) {
+            if (service.equals(config.service())) {
                 return true;
             }
         }
@@ -1339,7 +1312,7 @@ public final class OnboardingFlow {
     /** Whether a provider rule named this service. */
     private boolean providerFound(String service) {
         for (ServiceConfig config : searchedConfigs) {
-            if (service.equals(config.service) && SetupPlan.fromProvider(config)) {
+            if (service.equals(config.service()) && SetupPlan.fromProvider(config)) {
                 return true;
             }
         }
@@ -1351,12 +1324,12 @@ public final class OnboardingFlow {
         return new SetupOption(
                 null,
                 host.getString(label),
-                hostOf(baseUrl),
+                SetupPlan.hostOf(baseUrl),
                 baseUrl,
                 // NOTE: Google and Microsoft authorize by scope, not by RFC 8707
                 // resource, and sending one earns an invalid_target from them.
                 null,
-                AuthMethod.oauthCodeGrant(authEndpoint, tokenEndpoint, scope),
+                AuthMethod.codeGrant(authEndpoint, tokenEndpoint, scope),
                 emailLogin());
     }
 
@@ -1389,7 +1362,7 @@ public final class OnboardingFlow {
             return option.label;
         }
         String detail = option.detail == null ? "" : " (" + option.detail + ")";
-        return option.label + detail + " · " + authName(option.method.type);
+        return option.label + detail + " · " + authName(option.method.type());
     }
 
     /** The user-facing name of an authentication method. */
@@ -1997,7 +1970,7 @@ public final class OnboardingFlow {
             DomainSetup setup = setups.get(domain);
             oauthGroup.put(domain, setup.selected.baseUrl);
             endpoints.add(setup.selected.baseUrl);
-            SetupPlan.addScopes(scopes, setup.selected.method.scope);
+            SetupPlan.addScopes(scopes, setup.selected.method.scope());
             // NOTE: submission signs in with mail's credential, so the grant
             // that reads mail has to cover sending it too.
             if (domain == PimDomain.MAIL && sends(setup) && setup.submitSelected != null) {
@@ -2008,12 +1981,12 @@ public final class OnboardingFlow {
 
         String scope = scopes.isEmpty() ? null : String.join(" ", scopes);
         String heading =
-                domainNames(step) + " · " + (option.detail != null ? option.detail : hostOf(option.baseUrl));
+                domainNames(step) + " · " + (option.detail != null ? option.detail : SetupPlan.hostOf(option.baseUrl));
         // NOTE: Google and Microsoft register no client dynamically, so their
         // grants run with the app's own registration, and only for their own
         // hosts: any other falls to a generic grant (Oauth.shipped).
         Oauth.Shipped shipped =
-                own ? null : Oauth.shipped(option.method.authorizationEndpoint, endpoints);
+                own ? null : Oauth.shipped(option.method.authorizationEndpoint(), endpoints);
         if (shipped == Oauth.Shipped.GOOGLE) {
             // NOTE: a domain added onto an account Google already granted
             // asks for the union, so the one new grant replaces the old one
@@ -2031,7 +2004,7 @@ public final class OnboardingFlow {
                     pendingEmail, Oauth.fixedScope(shipped, scope), option.baseUrl);
             return;
         }
-        if (option.method.type == AuthMethod.Type.OAUTH_ISSUER) {
+        if (option.method.type() == AuthMethod.Type.OAUTH_ISSUER) {
             // NOTE: the resource, never the base URL. A JMAP account's base is
             // the internal jmap:// marker and a mailbox's is imaps://, and an
             // authorization server asked to issue a token for either answers
@@ -2039,7 +2012,7 @@ public final class OnboardingFlow {
             oauth.startIssuerOauth(
                     pendingEmail,
                     option.baseUrl,
-                    option.method.issuer,
+                    option.method.issuer(),
                     option.resource,
                     grantedDomains(),
                     heading,
@@ -2049,8 +2022,8 @@ public final class OnboardingFlow {
         oauth.promptOauthClient(
                 pendingEmail,
                 option.baseUrl,
-                option.method.authorizationEndpoint,
-                option.method.tokenEndpoint,
+                option.method.authorizationEndpoint(),
+                option.method.tokenEndpoint(),
                 scope,
                 option.resource,
                 heading,
@@ -2089,18 +2062,11 @@ public final class OnboardingFlow {
      * the next grant while the chain does, or comes back to the sign-in page
      * for a card signed in on its own. Nothing persists yet: the account and
      * its books only store once everything is in, so backing out of the flow
-     * leaves everything untouched. The last five parameters carry the refresh
+     * leaves everything untouched. The tokens and the grant carry the refresh
      * material and the scopes granted, so expired access tokens can be
      * refreshed on later syncs and a later grant can ask for the union.
      */
-    public void connect(
-            Account candidate,
-            String email,
-            String refreshToken,
-            String tokenEndpoint,
-            String clientId,
-            String clientSecret,
-            String scope) {
+    public void connect(Account candidate, String email, OauthTokens tokens, OauthGrant grant) {
         connectedEmail = email;
 
         // NOTE: a browser grant covers every domain that chose the same
@@ -2109,15 +2075,9 @@ public final class OnboardingFlow {
         // one consent, and a provider that rotates its refresh token retires
         // every copy but the one it just issued.
         AccountCredential credential =
-                refreshToken == null
+                tokens.refreshToken() == null
                         ? AccountCredential.password(candidate.login, candidate.password)
-                        : AccountCredential.oauth(
-                                candidate.password,
-                                refreshToken,
-                                tokenEndpoint,
-                                clientId,
-                                clientSecret,
-                                scope);
+                        : AccountCredential.oauth(tokens, grant);
 
         List<PimDomain> overJmap = new ArrayList<>();
         Account jmap = null;
@@ -2787,12 +2747,12 @@ public final class OnboardingFlow {
                 continue;
             }
             boolean tls = url.startsWith("smtps:");
-            String authority = config.host + ":" + config.port;
+            String authority = config.host() + ":" + config.port();
 
-            List<AuthMethod> methods = new ArrayList<>(config.auth);
+            List<AuthMethod> methods = new ArrayList<>(config.auth());
             java.util.Collections.sort(
                     methods,
-                    (left, right) -> Integer.compare(SetupPlan.authRank(left.type), SetupPlan.authRank(right.type)));
+                    (left, right) -> Integer.compare(SetupPlan.authRank(left.type()), SetupPlan.authRank(right.type())));
             if (methods.isEmpty()) {
                 methods.add(null);
             }
@@ -2804,9 +2764,9 @@ public final class OnboardingFlow {
                                         authority,
                                         url,
                                         false,
-                                        method == null ? null : method.scope,
+                                        method == null ? null : method.scope(),
                                         null,
-                                        method == null ? null : method.type));
+                                        method == null ? null : method.type()));
             }
         }
         implicit.addAll(upgraded);
@@ -2831,14 +2791,6 @@ public final class OnboardingFlow {
             distinct.putIfAbsent(submitLabel(option), option);
         }
         return new ArrayList<>(distinct.values());
-    }
-
-    private static String hostOf(String url) {
-        try {
-            return new java.net.URL(url).getHost();
-        } catch (Exception error) {
-            return url;
-        }
     }
 
     /** One addressbook's onboarding subscribe checkbox. */

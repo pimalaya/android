@@ -166,26 +166,22 @@ public class AccountClient {
     }
 
     /**
-     * Refreshes OAuth 2.0 tokens; {@code scope} is the space-separated
-     * scope list of the original grant (null keeps the server default)
-     * and {@code clientSecret} rides along when the registration
-     * issued one (null for none). The code-exchange side lives on
-     * {@link OauthSession}.
+     * Refreshes OAuth 2.0 tokens; the grant's {@code scope} is the
+     * space-separated scope list of the original grant (null keeps the
+     * server default) and its {@code clientSecret} rides along when the
+     * registration issued one (null for none). The code-exchange side
+     * lives on {@link OauthSession}.
      */
-    public OauthTokens oauthRefresh(Transport transport, String tokenEndpoint,
-            String clientId,
-            String clientSecret,
-            String refreshToken,
-            String scope) {
+    public OauthTokens refresh(Transport transport, OauthGrant grant, String refreshToken) {
         JSONObject reply =
                 Replies.object(
                         Native.oauthRefreshAccessToken(
                                 transport,
-                                tokenEndpoint,
-                                clientId,
-                                clientSecret == null ? "" : clientSecret,
+                                grant.tokenEndpoint(),
+                                grant.clientId(),
+                                grant.clientSecret() == null ? "" : grant.clientSecret(),
                                 refreshToken,
-                                scope == null ? "" : scope));
+                                grant.scope() == null ? "" : grant.scope()));
         return OauthTokens.from(reply);
     }
 
@@ -194,8 +190,8 @@ public class AccountClient {
      * issuer, so onboarding can drive the code grant and tell whether
      * the server lets a public client register itself (RFC 7591).
      */
-    public ServerMetadata oauthServerMetadata(Transport transport, String issuer) {
-        return new ServerMetadata(Replies.object(Native.oauthServerMetadata(transport, issuer)));
+    public ServerMetadata serverMetadata(Transport transport, String issuer) {
+        return ServerMetadata.from(Replies.object(Native.oauthServerMetadata(transport, issuer)));
     }
 
     /**
@@ -205,15 +201,15 @@ public class AccountClient {
      * secret rides in {@link OauthTokens}-style JSON but a public
      * client gets none.
      */
-    public String oauthRegisterClient(Transport transport, String registrationEndpoint, String redirectUri, String clientName, String scope) {
+    public String registerClient(Transport transport, ClientRegistration registration) {
         JSONObject reply =
                 Replies.object(
                         Native.oauthRegisterClient(
                                 transport,
-                                registrationEndpoint,
-                                redirectUri,
-                                clientName == null ? "" : clientName,
-                                scope == null ? "" : scope));
+                                registration.endpoint(),
+                                registration.redirectUri(),
+                                registration.clientName() == null ? "" : registration.clientName(),
+                                registration.scope() == null ? "" : registration.scope()));
         return Json.string(reply, "client_id");
     }
 
@@ -303,7 +299,7 @@ public class AccountClient {
      * derived from one) belongs to an account-level backend.
      */
     public static boolean isAccountLevel(String url) {
-        return info(url).optBoolean("accountLevel");
+        return info(url).accountLevel();
     }
 
     /**
@@ -313,12 +309,12 @@ public class AccountClient {
      * {@code recurrenceOverrides}.
      */
     public static boolean writesOverrides(String url) {
-        return info(url).optBoolean("writesOverrides");
+        return info(url).writesOverrides();
     }
 
     /** True when a write to the calendar behind the URL carries an {@code EXDATE}. */
     public static boolean writesExdates(String url) {
-        return info(url).optBoolean("writesExdates");
+        return info(url).writesExdates();
     }
 
     /**
@@ -326,7 +322,7 @@ public class AccountClient {
      * local account's none.
      */
     public static boolean writesEvents(String url) {
-        return info(url).optBoolean("writesEvents");
+        return info(url).writesEvents();
     }
 
     /**
@@ -334,36 +330,37 @@ public class AccountClient {
      * Gmail), needing no submit endpoint of its own.
      */
     public static boolean submitsOverSession(Account account) {
-        return account != null && info(account.baseUrl).optBoolean("submitsOverSession");
+        return account != null && info(account.baseUrl).submitsOverSession();
     }
 
     /** True when the URL belongs to a plain CardDAV backend. */
     public static boolean isCarddav(String url) {
-        return "carddav".equals(info(url).optString("backend"));
+        return info(url).backend() == Backend.CARDDAV;
     }
 
     /** True when the account's backend is Microsoft Graph. */
     public static boolean isGraph(Account account) {
-        return account != null && "graph".equals(info(account.baseUrl).optString("backend"));
+        return account != null && info(account.baseUrl).backend() == Backend.GRAPH;
     }
 
     /** True when the account's backend is the Google People API. */
     public static boolean isGoogle(Account account) {
-        return account != null && "google".equals(info(account.baseUrl).optString("backend"));
+        return account != null && info(account.baseUrl).backend() == Backend.GOOGLE;
     }
 
     /** True when the account's backend speaks JMAP (RFC 8620). */
     public static boolean isJmap(Account account) {
-        return account != null && "jmap".equals(info(account.baseUrl).optString("backend"));
+        return account != null && info(account.baseUrl).backend() == Backend.JMAP;
     }
 
     /** Parsed backend info by URL, cached (pure computation). */
-    private static final Map<String, JSONObject> infos = new ConcurrentHashMap<>();
+    private static final Map<String, BackendInfo> infos = new ConcurrentHashMap<>();
 
-    /** The URL's {@code {backend, accountLevel}} info. */
-    private static JSONObject info(String url) {
+    /** What the URL tells about its backend; a null URL reads as an empty one. */
+    public static BackendInfo info(String url) {
         return infos.computeIfAbsent(
-                url == null ? "" : url, key -> Replies.object(Native.accountInfo(key)));
+                url == null ? "" : url,
+                key -> BackendInfo.from(Replies.object(Native.accountInfo(key))));
     }
 
     /** Parses a search reply into service configs. */

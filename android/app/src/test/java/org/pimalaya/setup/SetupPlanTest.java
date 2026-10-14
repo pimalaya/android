@@ -18,14 +18,14 @@ import org.pimalaya.account.Oauth;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.AuthMethod;
+import org.pimalaya.client.ServiceConfig;
 import org.robolectric.RobolectricTestRunner;
 
 /**
  * The wizard's decisions over discovered options: which picks share one
  * sign-in, which sending rows go with a reading choice, and which option the
- * standard setup picks. Password and token options cannot be built from
- * here (their methods have no public constructor), so the cases use OAuth
- * code grants and manual entry. Robolectric only because the provider
+ * standard setup picks, and the options and grant resources discovered
+ * configs give. Robolectric only because the provider
  * check reads {@link AccountClient#googleBase}, a bridge call, and the
  * bridge library loads into the sandbox's class loader.
  */
@@ -118,7 +118,7 @@ public class SetupPlanTest {
     @Test
     public void theStandardSetupPrefersTheProviderApiThenTheRankedService() {
         AuthMethod google =
-                AuthMethod.oauthCodeGrant(
+                AuthMethod.codeGrant(
                         Oauth.GOOGLE_AUTH_ENDPOINT, Oauth.GOOGLE_TOKEN_ENDPOINT, Oauth.GOOGLE_PEOPLE_SCOPE);
         SetupOption people =
                 new SetupOption(
@@ -150,8 +150,98 @@ public class SetupPlanTest {
         assertTrue(SetupPlan.authRank(AuthMethod.Type.BEARER) < SetupPlan.authRank(AuthMethod.Type.PASSWORD));
     }
 
+    @Test
+    public void aGrantAsksForTheResourceTheConfigNames() {
+        AuthMethod grant = oauth("https://auth.example.org/oauth/authorize", "mail");
+        ServiceConfig http = config("jmap", SESSION, null, "pacc", grant);
+        ServiceConfig tcp = config("imap", null, "tls", "pacc", grant);
+        ServiceConfig provider = config("gmail", "https://gmail.googleapis.com/", null, "provider:google", grant);
+
+        assertEquals(SESSION, SetupPlan.resourceOf(http, grant));
+        assertEquals("https://auth.example.org/", SetupPlan.resourceOf(tcp, grant));
+        assertEquals(
+                "https://auth.example.org:8443/",
+                SetupPlan.resourceOf(tcp, oauth("https://auth.example.org:8443/authorize", "mail")));
+        assertNull(SetupPlan.resourceOf(tcp, AuthMethod.password()));
+        assertNull(SetupPlan.resourceOf(tcp, null));
+        assertNull(SetupPlan.resourceOf(tcp, oauth("not a url", "mail")));
+        assertNull(SetupPlan.resourceOf(provider, grant));
+        assertTrue(SetupPlan.fromProvider(provider));
+        assertFalse(SetupPlan.fromProvider(http));
+    }
+
+    @Test
+    public void eachDrivableConfigOffersOneOptionPerMethodBestFirst() {
+        AuthMethod grant = oauth(AUTHORIZE, "mail");
+        AuthMethod issuer = AuthMethod.issuer("https://api.example.org");
+        List<ServiceConfig> searched =
+                List.of(
+                        config("imap", null, "tls", "pacc", AuthMethod.password(), grant),
+                        config("imap", null, "starttls", "srv", AuthMethod.password()),
+                        config("carddav", "https://dav.example.org/", null, "dav", grant),
+                        config("jmap", SESSION, null, "jmap", AuthMethod.bearer(), issuer),
+                        config("gmail", "https://gmail.googleapis.com/", null, "provider:google", grant),
+                        config("smtp", null, "tls", "pacc", AuthMethod.password()));
+
+        List<SetupOption> options =
+                SetupPlan.discoveredOptions(
+                        PimDomain.MAIL, searched, EMAIL, EMAIL, service -> "<" + service + ">");
+
+        String jmap = AccountClient.jmapBase(SESSION);
+        assertEquals(
+                List.of(
+                        "jmap|<jmap>|api.example.org|" + jmap + "|" + SESSION + "|" + issuer + "|" + EMAIL,
+                        "jmap|<jmap>|api.example.org|" + jmap + "|" + SESSION + "|" + AuthMethod.bearer() + "|" + EMAIL,
+                        "imap|<imap>|imap.example.org|imaps://imap.example.org:993|https://auth.example.org/|" + grant + "|jane",
+                        "imap|<imap>|imap.example.org|imaps://imap.example.org:993|null|" + AuthMethod.password() + "|jane",
+                        "gmail|<gmail>|gmail.googleapis.com|" + AccountClient.googleBase(EMAIL) + "|null|" + grant + "|" + EMAIL),
+                describe(options));
+        assertEquals(
+                2, SetupPlan.discoveredOptions(PimDomain.CALENDAR, searched, EMAIL, EMAIL, service -> service).size());
+        assertTrue(
+                SetupPlan.discoveredOptions(PimDomain.MAIL, searched.subList(5, 6), EMAIL, EMAIL, service -> service)
+                        .isEmpty());
+    }
+
+    private static List<String> describe(List<SetupOption> options) {
+        List<String> described = new ArrayList<>();
+        for (SetupOption option : options) {
+            described.add(
+                    option.service
+                            + "|"
+                            + option.label
+                            + "|"
+                            + option.detail
+                            + "|"
+                            + option.baseUrl
+                            + "|"
+                            + option.resource
+                            + "|"
+                            + option.method
+                            + "|"
+                            + option.login);
+        }
+        return described;
+    }
+
+    /** A discovered config: an https one when {@code url} is given, else TCP. */
+    private static ServiceConfig config(
+            String service, String url, String security, String source, AuthMethod... auth) {
+        return url != null
+                ? new ServiceConfig(service, url, null, 0, null, null, List.of(auth), source)
+                : new ServiceConfig(
+                        service,
+                        null,
+                        service + ".example.org",
+                        993,
+                        security,
+                        service.equals("imap") ? "jane" : null,
+                        List.of(auth),
+                        source);
+    }
+
     private static AuthMethod oauth(String authorize, String scope) {
-        return AuthMethod.oauthCodeGrant(authorize, "https://auth.example.org/token", scope);
+        return AuthMethod.codeGrant(authorize, "https://auth.example.org/token", scope);
     }
 
     private static SetupOption option(String service, String resource, AuthMethod method) {

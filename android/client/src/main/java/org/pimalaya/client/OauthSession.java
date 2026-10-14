@@ -1,5 +1,6 @@
 package org.pimalaya.client;
 
+import java.util.Map;
 import org.json.JSONObject;
 
 /**
@@ -28,28 +29,10 @@ public final class OauthSession {
      * registration issued one (Google desktop-type clients require it
      * in the exchange).
      */
-    public OauthSession(String clientId, String clientSecret, String redirectUri, String scope) {
-        this(
-                clientId,
-                clientSecret,
-                redirectUri,
-                scope,
-                Replies.object(Native.oauthSessionParams()));
-    }
-
-    private OauthSession(
-            String clientId,
-            String clientSecret,
-            String redirectUri,
-            String scope,
-            JSONObject params) {
-        this(
-                clientId,
-                clientSecret,
-                redirectUri,
-                scope,
-                Json.string(params, "state"),
-                Json.string(params, "verifier"));
+    public static OauthSession start(OauthRequest request) {
+        JSONObject params = Replies.object(Native.oauthSessionParams());
+        return new OauthSession(
+                request, Json.string(params, "state"), Json.string(params, "verifier"));
     }
 
     /**
@@ -58,17 +41,15 @@ public final class OauthSession {
      * user was in the browser (the scope only matters before the
      * authorization request, so it may be empty here).
      */
-    public OauthSession(
-            String clientId,
-            String clientSecret,
-            String redirectUri,
-            String scope,
-            String state,
-            String pkceVerifier) {
-        this.clientId = clientId;
-        this.clientSecret = clientSecret == null ? "" : clientSecret;
-        this.redirectUri = redirectUri;
-        this.scope = scope == null ? "" : scope;
+    public static OauthSession resume(OauthRequest request, String state, String pkceVerifier) {
+        return new OauthSession(request, state, pkceVerifier);
+    }
+
+    private OauthSession(OauthRequest request, String state, String pkceVerifier) {
+        this.clientId = request.clientId();
+        this.clientSecret = request.clientSecret() == null ? "" : request.clientSecret();
+        this.redirectUri = request.redirectUri();
+        this.scope = request.scope() == null ? "" : request.scope();
         this.state = state;
         this.pkceVerifier = pkceVerifier;
     }
@@ -94,7 +75,7 @@ public final class OauthSession {
      * (nullable), e.g. Google's {@code access_type=offline} and
      * {@code prompt=consent} without which no refresh token is issued.
      */
-    public String authorizeUrl(String authorizationEndpoint, JSONObject extras) {
+    public String authorizeUrl(String authorizationEndpoint, Map<String, String> extras) {
         JSONObject reply =
                 Replies.object(
                         Native.oauthAuthorizeUrl(
@@ -104,7 +85,7 @@ public final class OauthSession {
                                 scope,
                                 state,
                                 pkceVerifier,
-                                extras == null ? "" : extras.toString()));
+                                extras == null ? "" : new JSONObject(extras).toString()));
         return Json.string(reply, "url");
     }
 

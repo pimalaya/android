@@ -80,7 +80,7 @@ final class SetupOption {
     /** Whether this option signs in through a browser grant. */
     boolean isOauth() {
         return method != null
-                && method.type != AuthMethod.Type.PASSWORD
-                && method.type != AuthMethod.Type.BEARER;
+                && method.type() != AuthMethod.Type.PASSWORD
+                && method.type() != AuthMethod.Type.BEARER;
     }
 }

@@ -24,6 +24,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.OauthGrant;
 
 /**
  * Caches the connected accounts locally, encrypted with an AES-GCM key held in
@@ -365,15 +366,16 @@ public class SecureStore {
                 new JSONObject()
                         .put("login", credential.login)
                         .put("secret", credential.secret);
-        if (credential.refreshToken != null) {
-            object.put("refreshToken", credential.refreshToken)
-                    .put("tokenEndpoint", credential.tokenEndpoint)
-                    .put("clientId", credential.clientId);
-            if (credential.clientSecret != null) {
-                object.put("clientSecret", credential.clientSecret);
+        if (credential.renewable()) {
+            OauthGrant grant = credential.renewal.grant();
+            object.put("refreshToken", credential.refreshToken())
+                    .put("tokenEndpoint", grant.tokenEndpoint())
+                    .put("clientId", grant.clientId());
+            if (grant.clientSecret() != null) {
+                object.put("clientSecret", grant.clientSecret());
             }
-            if (credential.scope != null) {
-                object.put("scope", credential.scope);
+            if (grant.scope() != null) {
+                object.put("scope", grant.scope());
             }
         }
         return object;
@@ -439,14 +441,24 @@ public class SecureStore {
 
     private static AccountCredential decodeCredential(String id, JSONObject object)
             throws JSONException {
+        // NOTE: every version wrote the grant beside a refresh token only.
+        AccountCredential.Renewal renewal =
+                object.isNull("refreshToken")
+                        ? null
+                        : new AccountCredential.Renewal(
+                                object.optString("refreshToken"),
+                                new OauthGrant(
+                                        object.isNull("tokenEndpoint")
+                                                ? null
+                                                : object.optString("tokenEndpoint"),
+                                        object.isNull("clientId")
+                                                ? null
+                                                : object.optString("clientId"),
+                                        object.isNull("clientSecret")
+                                                ? null
+                                                : object.optString("clientSecret"),
+                                        object.isNull("scope") ? null : object.optString("scope")));
         return new AccountCredential(
-                id,
-                object.getString("login"),
-                object.getString("secret"),
-                object.isNull("refreshToken") ? null : object.optString("refreshToken"),
-                object.isNull("tokenEndpoint") ? null : object.optString("tokenEndpoint"),
-                object.isNull("clientId") ? null : object.optString("clientId"),
-                object.isNull("clientSecret") ? null : object.optString("clientSecret"),
-                object.isNull("scope") ? null : object.optString("scope"));
+                id, object.getString("login"), object.getString("secret"), renewal);
     }
 }
