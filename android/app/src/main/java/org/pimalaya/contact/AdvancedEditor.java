@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import android.app.AlertDialog;
 import android.util.TypedValue;
@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.List;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.MainActivity;
+import org.pimalaya.R;
 import org.pimalaya.client.Cards;
 
 /**
@@ -22,10 +24,10 @@ import org.pimalaya.client.Cards;
  * navigation and calls in through {@link #open}, {@link #close},
  * {@link #openSource} and {@link #applySource}.
  */
-final class AdvancedEditor {
+public final class AdvancedEditor {
     private final MainActivity host;
 
-    AdvancedEditor(MainActivity host) {
+    public AdvancedEditor(MainActivity host) {
         this.host = host;
     }
 
@@ -35,7 +37,7 @@ final class AdvancedEditor {
      * single-card contacts (and new ones): raw lines cannot fan out to
      * several physical documents.
      */
-    void open() {
+    public void open() {
         try {
             String working =
                     host.edit.advancedVcard != null ? host.edit.advancedVcard : host.edit.vcard;
@@ -49,7 +51,7 @@ final class AdvancedEditor {
     }
 
     /** Back to the form, rebuilt from the edited document. */
-    void close() {
+    public void close() {
         try {
             host.form.load(Cards.projectCard(host.edit.advancedVcard), null, null);
         } catch (Exception error) {
@@ -479,7 +481,7 @@ final class AdvancedEditor {
     }
 
     /** Applies the hand-edited source (it must reparse) and returns. */
-    void applySource() {
+    public void applySource() {
         try {
             host.edit.advancedVcard =
                     Cards.cardSource(

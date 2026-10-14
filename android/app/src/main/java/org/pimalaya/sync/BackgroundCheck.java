@@ -13,8 +13,8 @@ import java.util.Set;
 import java.util.function.Predicate;
 import org.pimalaya.AccountEntry;
 import org.pimalaya.BackgroundJob;
-import org.pimalaya.LocalBook;
 import org.pimalaya.SecureStore;
+import org.pimalaya.contact.LocalBook;
 
 /**
  * How often each account syncs in the background and whether its new mail

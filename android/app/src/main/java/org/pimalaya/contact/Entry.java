@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Card;
@@ -8,20 +8,20 @@ import org.pimalaya.client.Card;
  * in, and its write-time index columns (docs/merged-view.md), so
  * rendering never parses a vCard.
  */
-final class Entry {
-    final Addressbook book;
-    final String accountEmail;
-    final Card card;
+public final class Entry {
+    public final Addressbook book;
+    public final String accountEmail;
+    public final Card card;
     final String name;
     final String email;
     final String phone;
     final String info;
     final String uid;
-    final String hash;
-    final boolean conflicted;
+    public final String hash;
+    public final boolean conflicted;
 
     /** The replica's display name from its index, id fallback. */
-    String displayName() {
+    public String displayName() {
         return name.isEmpty() ? card.id : name;
     }
 

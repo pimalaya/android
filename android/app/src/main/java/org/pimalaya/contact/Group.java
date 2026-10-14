@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -8,9 +8,9 @@ import java.util.List;
  * UID across accounts and addressbooks, grouped by the bridge); a card
  * without a UID stays a singleton group.
  */
-final class Group {
+public final class Group {
     final String key;
-    final List<Entry> replicas = new ArrayList<>();
+    public final List<Entry> replicas = new ArrayList<>();
 
     Group(String key) {
         this.key = key;
@@ -22,7 +22,7 @@ final class Group {
 
     /** True when any replica is a both-sides-edited sync conflict
      *  awaiting the user's manual resolution. */
-    boolean conflicted() {
+    public boolean conflicted() {
         for (Entry entry : replicas) {
             if (entry.conflicted) {
                 return true;

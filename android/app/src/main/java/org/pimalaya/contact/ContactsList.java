@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import android.view.View;
 import android.widget.CheckBox;
@@ -7,6 +7,14 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.pimalaya.AccountEntry;
+import org.pimalaya.Avatar;
+import org.pimalaya.CardSections;
+import org.pimalaya.Chips;
+import org.pimalaya.ListHeader;
+import org.pimalaya.MainActivity;
+import org.pimalaya.PimDomain;
+import org.pimalaya.R;
 import org.pimalaya.sync.MergedFilter;
 
 /**
@@ -20,7 +28,7 @@ import org.pimalaya.sync.MergedFilter;
  * every return) and the flows that leave the screen (opening a contact,
  * merging, importing, syncing).
  */
-final class ContactsList {
+public final class ContactsList {
     private final MainActivity host;
 
     /** The replica pool: every subscribed book's cards, unmerged. */
@@ -48,12 +56,12 @@ final class ContactsList {
     /** Whether the Default chip narrows the list to the shown accounts' default books. */
     private boolean defaultOnly;
 
-    ContactsList(MainActivity host) {
+    public ContactsList(MainActivity host) {
         this.host = host;
     }
 
     /** Wires the list, its bar buttons, the header search and the pull-down. */
-    void setUp() {
+    public void setUp() {
         // Pull-to-refresh runs the same syncAll as the drawer; its own
         // spinner retracts right away, the sync dock carries the wait.
         androidx.swiperefreshlayout.widget.SwipeRefreshLayout refresh =
@@ -125,7 +133,7 @@ final class ContactsList {
                 });
     }
 
-    ListHeader header() {
+    public ListHeader header() {
         return header;
     }
 
@@ -137,7 +145,7 @@ final class ContactsList {
      * order. The account snapshot keeps the grouping off the live
      * main-thread cache.
      */
-    void reload() {
+    public void reload() {
         List<AccountEntry> snapshot = new ArrayList<>(host.accounts);
         host.io.execute(
                 () -> {
@@ -154,12 +162,12 @@ final class ContactsList {
 
     /** The rows currently on screen (search-filtered), for export and
      *  the birthday peek. */
-    List<Group> visibleGroups() {
+    public List<Group> visibleGroups() {
         return sortedContacts;
     }
 
     /** The merged row holding a card of this key, filter or no filter; null for none. */
-    Group groupOf(String linkId) {
+    public Group groupOf(String linkId) {
         for (Group group : groupedContacts) {
             for (Entry entry : group.replicas) {
                 if (entry.card.id.equals(linkId)) {
@@ -170,16 +178,16 @@ final class ContactsList {
         return null;
     }
 
-    boolean isSelectionMode() {
+    public boolean isSelectionMode() {
         return selectionMode;
     }
 
-    boolean isSearchOpen() {
+    public boolean isSearchOpen() {
         return !searchQuery.isEmpty();
     }
 
     /** Re-applies the filter and the query to the rows already grouped. */
-    void reRender() {
+    public void reRender() {
         render();
     }
 
@@ -399,7 +407,7 @@ final class ContactsList {
         }
     }
 
-    void exitSelection() {
+    public void exitSelection() {
         selectionMode = false;
         selectedKeys.clear();
         updateSelectionUi();
@@ -420,7 +428,7 @@ final class ContactsList {
     }
 
     /** Selects every contact, or clears them when all are already selected. */
-    void toggleSelectAll() {
+    public void toggleSelectAll() {
         boolean all = allSelected();
         selectedKeys.clear();
         if (!all) {
@@ -470,7 +478,7 @@ final class ContactsList {
     }
 
     /** Clears the query, which the header's field holds. */
-    void closeSearch() {
+    public void closeSearch() {
         // NOTE: the watcher clears the query only after its debounce, so
         // reset it now too, or an immediate reload filters the stale one.
         searchQuery = "";
@@ -500,7 +508,7 @@ final class ContactsList {
      * contacts screen shows; the host's chrome re-runs it on every
      * return).
      */
-    void updateSelectionUi() {
+    public void updateSelectionUi() {
         if (!host.onContactsScreen()) {
             return;
         }

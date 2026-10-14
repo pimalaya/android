@@ -146,7 +146,7 @@ public final class ListHeader {
     }
 
     /** Empties the search field (its watcher settles the query). */
-    void clearSearch() {
+    public void clearSearch() {
         ((EditText) view.findViewById(R.id.header_search_input)).setText("");
     }
 

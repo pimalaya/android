@@ -21,7 +21,7 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 - [x] phone
 - [x] file
 - [x] calendar
-- [ ] contact
+- [x] contact
 - [ ] mail
 - [ ] account
 - [ ] ui
@@ -84,3 +84,4 @@ Logic found in Java that belongs to Rust, collected while moving.
 - phone: PhoneQueue.start builds OfflineEngine and calls CalendarEngine.phonePass while both engines call PhoneQueue.written: a cycle; its ctor already takes Consumer passes, so the wiring of start() moves to the root. SyncRunner -> PhoneMirror is a sync -> phone back edge.
 - file: FilesList.STAGED read by pimdir/CacheSweep (belongs in FileStore); PimdirDb -> FileStore.reconcileRoles on open. FilesList and FileActions reach into MainActivity fields (io, files, mail, postAlive, dp...): screens need a host object, not the activity. Public for tests: MailStore.forget/accountIdOf/saveSource (FileStoreTest), FileStore.partKey/attachmentsOf (AutomaticReferencesTest).
 - calendar: EventStore and EventView call CardStore.rowHandle (store plumbing, pimdir). CalendarList and EventView reach into ~20 MainActivity members. Public for tests (e2e): Zones + utc, EventStore.StoredCalendar.name, StoredEvent.handle/ical. DefaultCollectionTest lives in calendar (EventStore fixture). E2eCalendarTest stays in root with the harness.
+- contact: LocalBook ("On this device") is cross-domain (FileStore, FilesList, BackgroundCheck): account or pimdir. Birthdays is contact (ContactsList only). Contact screens reach into ~25 MainActivity members (openGroup, mergeReplicas, openMerged, importContacts...: the phase 4 ContactEditor). Public for tests: BookEntry ctor (AccountsTest), PimdirContacts.Indexed + list (DeletedItemsTest, e2e).

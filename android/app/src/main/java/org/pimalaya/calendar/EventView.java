@@ -20,7 +20,6 @@ import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.CardStore;
 import org.pimalaya.Dates;
 import org.pimalaya.MainActivity;
 import org.pimalaya.R;
@@ -31,6 +30,7 @@ import org.pimalaya.client.EventSplit;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.contact.CardStore;
 import org.pimalaya.pimdir.ItemLinks;
 
 import java.time.LocalDateTime;

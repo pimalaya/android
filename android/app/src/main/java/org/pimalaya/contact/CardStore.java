@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import android.content.ContentValues;
 import android.content.Context;

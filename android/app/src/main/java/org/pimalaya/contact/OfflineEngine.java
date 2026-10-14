@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import android.content.Context;
 import android.util.Log;
@@ -18,6 +18,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.PimDomain;
 import org.pimalaya.client.Cards;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Card;
@@ -124,9 +125,9 @@ public final class OfflineEngine extends PimdirEngine {
      * conflicts left for the user.
      */
     public static final class Report {
-        final Set<String> localIn = new HashSet<>();
-        final Set<String> localOut = new HashSet<>();
-        final Set<String> localChanged = new HashSet<>();
+        public final Set<String> localIn = new HashSet<>();
+        public final Set<String> localOut = new HashSet<>();
+        public final Set<String> localChanged = new HashSet<>();
         public final Set<String> remoteIn = new HashSet<>();
         public final Set<String> remoteOut = new HashSet<>();
         public final Set<String> remoteChanged = new HashSet<>();
@@ -374,7 +375,7 @@ public final class OfflineEngine extends PimdirEngine {
      * rename moves the card in the list rather than leaving it where the
      * old name put it.
      */
-    void mutateEdit(String url, String handle, String vcard) throws JSONException {
+    public void mutateEdit(String url, String handle, String vcard) throws JSONException {
         JSONObject index = Cards.indexCard(vcard);
         mutateEdit(
                 url,

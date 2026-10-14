@@ -80,7 +80,7 @@ public final class AccountCredential {
     }
 
     /** A credential signed in with a login and a secret. */
-    static AccountCredential password(String login, String secret) {
+    public static AccountCredential password(String login, String secret) {
         return new AccountCredential(newId(), login, secret, null, null, null, null, null);
     }
 

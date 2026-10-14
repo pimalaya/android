@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;

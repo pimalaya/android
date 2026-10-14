@@ -5,10 +5,10 @@ import android.database.Cursor;
 
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.CardStore;
 
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.Event;
+import org.pimalaya.contact.CardStore;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;

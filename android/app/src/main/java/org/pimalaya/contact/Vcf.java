@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import java.util.ArrayList;
 import java.util.List;

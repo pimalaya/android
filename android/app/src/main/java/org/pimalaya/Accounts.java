@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import org.pimalaya.client.Addressbook;
+import org.pimalaya.contact.BookEntry;
+import org.pimalaya.contact.LocalBook;
 import org.pimalaya.phone.PhoneMirror;
 
 /**
@@ -282,7 +284,7 @@ public final class Accounts {
     }
 
     /** The account backing the addressbook URL, or null before reconcile. */
-    static Account findByUrl(Context context, String url) {
+    public static Account findByUrl(Context context, String url) {
         AccountManager manager = AccountManager.get(context);
         for (Account account : manager.getAccountsByType(TYPE)) {
             if (url.equals(manager.getUserData(account, DATA_URL))) {

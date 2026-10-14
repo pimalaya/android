@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import android.app.AlertDialog;
 import android.app.DatePickerDialog;
@@ -23,6 +23,7 @@ import java.util.Calendar;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.R;
 import org.pimalaya.client.Cards;
 
 /**

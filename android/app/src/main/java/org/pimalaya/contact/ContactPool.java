@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -7,6 +7,8 @@ import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.AccountEntry;
+import org.pimalaya.PimDomain;
 import org.pimalaya.client.Cards;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
@@ -19,7 +21,7 @@ import org.pimalaya.client.PimalayaClient;
  * groupContacts). Loading and grouping are blocking (a full table scan
  * plus one JNI round), so the callers run them off the main thread.
  */
-final class ContactPool {
+public final class ContactPool {
     private final CardStore base;
     private final PimdirContacts contacts;
 
@@ -28,7 +30,7 @@ final class ContactPool {
      *  snapshot instead. */
     private final List<AccountEntry> accounts;
 
-    ContactPool(CardStore base, PimdirContacts contacts, List<AccountEntry> accounts) {
+    public ContactPool(CardStore base, PimdirContacts contacts, List<AccountEntry> accounts) {
         this.base = base;
         this.contacts = contacts;
         this.accounts = accounts;
@@ -87,12 +89,12 @@ final class ContactPool {
     }
 
     /** The replica's link-layer reference, over the live account cache. */
-    String replicaRef(Entry entry) {
+    public String replicaRef(Entry entry) {
         return replicaRef(entry, accounts);
     }
 
     /** The distinct physical cards behind a merged row's replicas. */
-    Set<String> distinctRefs(List<Entry> replicas) {
+    public Set<String> distinctRefs(List<Entry> replicas) {
         Set<String> refs = new HashSet<>();
         for (Entry entry : replicas) {
             refs.add(replicaRef(entry));

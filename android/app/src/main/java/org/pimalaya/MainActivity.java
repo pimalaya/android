@@ -50,6 +50,20 @@ import org.pimalaya.client.Card;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
+import org.pimalaya.contact.AdvancedEditor;
+import org.pimalaya.contact.BookEntry;
+import org.pimalaya.contact.CardStore;
+import org.pimalaya.contact.ContactForm;
+import org.pimalaya.contact.ContactPool;
+import org.pimalaya.contact.ContactWriter;
+import org.pimalaya.contact.ContactsList;
+import org.pimalaya.contact.EditSession;
+import org.pimalaya.contact.Entry;
+import org.pimalaya.contact.Group;
+import org.pimalaya.contact.LocalBook;
+import org.pimalaya.contact.OfflineEngine;
+import org.pimalaya.contact.PimdirContacts;
+import org.pimalaya.contact.VcfTransfer;
 import org.pimalaya.file.FileActions;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.file.FilesList;
@@ -95,10 +109,10 @@ public class MainActivity extends Activity {
     // and account are whole-frame overlays sliding over it, bar included
     // (only the FAB stays above them), so their ids only have to miss
     // the flipper's range.
-    static final int PANEL_CONTACTS = 0;
-    static final int PANEL_CONTACT = 1;
-    static final int PANEL_ADVANCED = 2;
-    static final int PANEL_SOURCE = 3;
+    public static final int PANEL_CONTACTS = 0;
+    public static final int PANEL_CONTACT = 1;
+    public static final int PANEL_ADVANCED = 2;
+    public static final int PANEL_SOURCE = 3;
     static final int PANEL_MAIL = 4;
     public static final int PANEL_CALENDAR = 5;
     static final int PANEL_COMPOSE = 6;
@@ -165,23 +179,23 @@ public class MainActivity extends Activity {
     public final Ui ui = new Ui(this);
 
     SecureStore store;
-    CardStore base;
+    public CardStore base;
 
     /** The pimdir store every domain and every account shares. */
-    PimdirDb pimdir;
+    public PimdirDb pimdir;
 
     /** The contacts inside it. */
-    PimdirContacts contacts;
+    public PimdirContacts contacts;
     SyncRunner runner;
 
     /** The mail and calendar passes, behind the sync dock. */
     RemotePass remote;
     private ViewFlipper flipper;
     private ViewFlipper authFlipper;
-    ContactForm form;
+    public ContactForm form;
 
     /** Every connected account (multi-account). */
-    final List<AccountEntry> accounts = new ArrayList<>();
+    public final List<AccountEntry> accounts = new ArrayList<>();
 
     /** Whether the app is on screen, which a background run leaves alone. */
     static volatile boolean onScreen;
@@ -301,7 +315,7 @@ public class MainActivity extends Activity {
     private final List<java.util.function.Consumer<Boolean>> syncObservers = new ArrayList<>();
 
     /** The pool's loader and bridge grouping (built in onCreate). */
-    ContactPool pool;
+    public ContactPool pool;
 
     /** The contacts screen: list, adapter, search and selection. */
     private ContactsList contactsList;
@@ -315,7 +329,7 @@ public class MainActivity extends Activity {
     private Consumer<Boolean> afterNotifications;
 
     /** The editor's working state, replaced blank when it leaves. */
-    EditSession edit = new EditSession();
+    public EditSession edit = new EditSession();
 
     /** The screen currently shown: a flipper panel, or an overlay. */
     public int screen = PANEL_ROOT;
@@ -666,7 +680,7 @@ public class MainActivity extends Activity {
     }
 
     /** The account entry matching an email, or null. */
-    AccountEntry accountFor(String email) {
+    public AccountEntry accountFor(String email) {
         for (AccountEntry entry : accounts) {
             if (entry.email.equals(email)) {
                 return entry;
@@ -1368,7 +1382,7 @@ public class MainActivity extends Activity {
 
     /** True while the merged contacts list is the shown screen (the
      *  shared bar is the contacts list's only when this holds). */
-    boolean onContactsScreen() {
+    public boolean onContactsScreen() {
         return screen == PANEL_CONTACTS;
     }
 
@@ -2836,7 +2850,7 @@ public class MainActivity extends Activity {
      * server one. The drawer's sync is the one that takes every domain and
      * everything.
      */
-    void syncContacts() {
+    public void syncContacts() {
         if (syncing) {
             return;
         }
@@ -3103,7 +3117,7 @@ public class MainActivity extends Activity {
                 });
     }
 
-    void openGroup(Group group) {
+    public void openGroup(Group group) {
         if (group.conflicted()) {
             openConflict(group);
         } else {
@@ -3189,7 +3203,7 @@ public class MainActivity extends Activity {
     }
 
     /** Prompts for a vCard file to import. */
-    void importContacts() {
+    public void importContacts() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
@@ -3215,7 +3229,7 @@ public class MainActivity extends Activity {
 
     /** Prompts for a destination file, then exports the active view as a
      *  single vCard file. */
-    void exportContacts() {
+    public void exportContacts() {
         if (contactsList.visibleGroups().isEmpty()) {
             toast(getString(R.string.export_empty));
             return;
@@ -3228,7 +3242,7 @@ public class MainActivity extends Activity {
     }
 
     /** The active contacts view, for the vCard export snapshot. */
-    List<Group> visibleGroups() {
+    public List<Group> visibleGroups() {
         return contactsList.visibleGroups();
     }
 
@@ -3362,7 +3376,7 @@ public class MainActivity extends Activity {
     }
 
     /** One two-line label per addressbook of a picker dialog. */
-    CharSequence[] bookLabels(List<BookEntry> books) {
+    public CharSequence[] bookLabels(List<BookEntry> books) {
         CharSequence[] labels = new CharSequence[books.size()];
         for (int index = 0; index < books.size(); index++) {
             BookEntry entry = books.get(index);
@@ -3400,12 +3414,12 @@ public class MainActivity extends Activity {
     }
 
     /** Stages a copied card into the target addressbook. */
-    void createCopy(BookEntry target, AccountEntry account, String id, String vcard) {
+    public void createCopy(BookEntry target, AccountEntry account, String id, String vcard) {
         contacts.save(target.book.url, new Card(id, null, null, vcard));
     }
 
     /** The survivor chooser over any replica list, then the merge. */
-    void mergeReplicas(List<Entry> replicas) {
+    public void mergeReplicas(List<Entry> replicas) {
         if (pool.distinctRefs(replicas).size() < 2) {
             return;
         }
@@ -3500,7 +3514,7 @@ public class MainActivity extends Activity {
      * when they diverge. Saving stages the form onto every replica.
      * Returns false when the documents could not be read.
      */
-    boolean openMerged(List<Entry> replicas) {
+    public boolean openMerged(List<Entry> replicas) {
         Entry primary = replicas.get(0);
         edit = new EditSession();
         edit.book = primary.book;
@@ -3661,7 +3675,7 @@ public class MainActivity extends Activity {
     }
 
     /** Rebuilds the contacts list from the base (staged edits included). */
-    void reloadContacts() {
+    public void reloadContacts() {
         contactsList.reload();
     }
 
@@ -3674,7 +3688,7 @@ public class MainActivity extends Activity {
      * the hot paths read the same index from the store's columns
      * instead. Empty on a parse failure.
      */
-    JSONObject cardIndex(String vcard) {
+    public JSONObject cardIndex(String vcard) {
         try {
             return Cards.indexCard(vcard);
         } catch (Exception error) {
@@ -3730,7 +3744,7 @@ public class MainActivity extends Activity {
      * Titles the bar with a list domain's name, shown only once the
      * list's own large title has scrolled away.
      */
-    void showDomainTitle(int panel) {
+    public void showDomainTitle(int panel) {
         TextView title = findViewById(R.id.bar_title);
         title.setText(Domains.titleOf(panel));
         title.setVisibility(View.VISIBLE);
@@ -3855,7 +3869,7 @@ public class MainActivity extends Activity {
     }
 
     /** A list's add button, inert while the list works (an import, an export). */
-    void setListBusy(boolean busy) {
+    public void setListBusy(boolean busy) {
         View add = findViewById(R.id.fab_extended);
         add.setEnabled(!busy);
         add.setAlpha(busy ? 0.4f : 1f);
@@ -3898,7 +3912,7 @@ public class MainActivity extends Activity {
      * <p>Text-only: the framework popup renders forced icons flush against
      * their labels on some Android releases.
      */
-    static void item(android.widget.PopupMenu menu, int label, Runnable action) {
+    public static void item(android.widget.PopupMenu menu, int label, Runnable action) {
         menu.getMenu()
                 .add(label)
                 .setOnMenuItemClickListener(

@@ -16,6 +16,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
+import org.pimalaya.contact.Group;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirSummary;
 

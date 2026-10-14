@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import android.app.AlertDialog;
 import android.util.Log;
@@ -14,6 +14,8 @@ import java.util.UUID;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.MainActivity;
+import org.pimalaya.R;
 import org.pimalaya.client.Cards;
 import org.pimalaya.client.Card;
 

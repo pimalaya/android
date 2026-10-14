@@ -13,7 +13,7 @@ import android.widget.EditText;
 public final class Ui {
     private final Context context;
 
-    Ui(Context context) {
+    public Ui(Context context) {
         this.context = context;
     }
 
@@ -35,7 +35,7 @@ public final class Ui {
     }
 
     /** Density-independent pixels to raw pixels. */
-    int dp(int value) {
+    public int dp(int value) {
         return (int) (value * context.getResources().getDisplayMetrics().density);
     }
 

@@ -6,6 +6,8 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 import org.pimalaya.client.Card;
+import org.pimalaya.contact.BookEntry;
+import org.pimalaya.contact.PimdirContacts;
 import org.robolectric.ParameterizedRobolectricTestRunner;
 
 import java.util.Collection;

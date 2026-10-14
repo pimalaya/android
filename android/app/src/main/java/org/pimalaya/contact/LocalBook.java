@@ -1,5 +1,8 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
+import org.pimalaya.AccountCredential;
+import org.pimalaya.AccountEntry;
+import org.pimalaya.PimDomain;
 import org.pimalaya.client.Account;
 
 /**
@@ -21,10 +24,10 @@ public final class LocalBook {
     public static final String ACCOUNT = "local://on-this-device";
 
     /** Collection URL of the local account's single addressbook. */
-    static final String URL = "local://on-this-device/contacts";
+    public static final String URL = "local://on-this-device/contacts";
 
     /** Stable addressbook id of the local book. */
-    static final String ID = "contacts";
+    public static final String ID = "contacts";
 
     private LocalBook() {}
 
@@ -34,7 +37,7 @@ public final class LocalBook {
     }
 
     /** The synthesized account, its login and password unused (no transport). */
-    static AccountEntry account() {
+    public static AccountEntry account() {
         return AccountEntry.of(
                 ACCOUNT, PimDomain.CONTACTS, ACCOUNT, AccountCredential.password("", ""));
     }

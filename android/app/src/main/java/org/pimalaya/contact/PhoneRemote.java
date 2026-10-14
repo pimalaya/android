@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import android.accounts.Account;
 import android.content.ContentProviderOperation;
@@ -24,6 +24,7 @@ import java.util.function.IntConsumer;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.Accounts;
 import org.pimalaya.client.Cards;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirDb;

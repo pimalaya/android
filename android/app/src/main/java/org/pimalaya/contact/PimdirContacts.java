@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import android.database.Cursor;
 import android.util.Log;
@@ -47,7 +47,7 @@ import java.util.List;
  * pass ({@link OfflineEngine}) derives what to push from the state it finds,
  * which is why none of these take an ETag or a revision.
  */
-final class PimdirContacts {
+public final class PimdirContacts {
     /** The source name a server-synced binding carries. */
     private static final String SERVER = PimdirStorage.SERVER;
 
@@ -60,17 +60,17 @@ final class PimdirContacts {
      */
     private final OfflineEngine stager;
 
-    PimdirContacts(PimdirDb store) {
+    public PimdirContacts(PimdirDb store) {
         this.items = new PimdirItems(store);
         this.stager = new OfflineEngine(null, store, new PimalayaClient(), null, null, null);
     }
 
     /** One displayable replica: the card plus its summary. */
-    static final class Indexed {
-        final Card card;
+    public static final class Indexed {
+        public final Card card;
 
         /** Display name (FN), empty when the card has none. */
-        final String name;
+        public final String name;
 
         /** First email address, empty when the card has none. */
         final String email;
@@ -119,7 +119,7 @@ final class PimdirContacts {
      * hydrated has nothing to show, and showing it as a nameless row would read
      * as a broken contact rather than as one still arriving.
      */
-    List<Indexed> list(String collection) {
+    public List<Indexed> list(String collection) {
         SQLiteDatabase db = items.readable();
         try (Cursor cursor =
                 db.rawQuery(
@@ -158,7 +158,7 @@ final class PimdirContacts {
      * resolving push is conditioned on what it was merged against. Any other
      * card is a create.
      */
-    void save(String collection, Card card) {
+    public void save(String collection, Card card) {
         JSONObject index = indexOf(card.vcard);
         try {
             if (held(collection, card.id)) {
@@ -187,7 +187,7 @@ final class PimdirContacts {
      * create no push carried out yet is withdrawn instead by the engine,
      * there being nothing to tell the server about.
      */
-    void stageDelete(String collection, String linkId) {
+    public void stageDelete(String collection, String linkId) {
         if (!held(collection, linkId)) {
             return;
         }
@@ -240,7 +240,7 @@ final class PimdirContacts {
      * no {@code FN} is summarised as nameless and not revisited: what is
      * repaired is the missing row, not the empty name.
      */
-    int repairSummaries() {
+    public int repairSummaries() {
         SQLiteDatabase db = items.writable();
         List<String[]> stale = new ArrayList<>();
 
@@ -354,7 +354,7 @@ final class PimdirContacts {
      * longer syncs it. A staged delete is not carried either, since the user
      * already asked for that card to go.
      */
-    void detachToLocal(List<String> collections, String local) {
+    public void detachToLocal(List<String> collections, String local) {
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {

@@ -1,10 +1,13 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import android.app.AlertDialog;
 import android.net.Uri;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.pimalaya.AccountEntry;
+import org.pimalaya.MainActivity;
+import org.pimalaya.R;
 import org.pimalaya.client.Card;
 
 /**
@@ -17,10 +20,10 @@ import org.pimalaya.client.Card;
  * router and calls in through {@link #importFile} and
  * {@link #exportFile}.
  */
-final class VcfTransfer {
+public final class VcfTransfer {
     private final MainActivity host;
 
-    VcfTransfer(MainActivity host) {
+    public VcfTransfer(MainActivity host) {
         this.host = host;
     }
 
@@ -29,7 +32,7 @@ final class VcfTransfer {
      * when no real account is configured, the sole book when there is one,
      * otherwise a chooser (the local book is never offered explicitly).
      */
-    void importFile(Uri uri) {
+    public void importFile(Uri uri) {
         List<BookEntry> books = new ArrayList<>();
         BookEntry local = null;
         for (BookEntry entry : host.base.loadSubscribedAddressbooks()) {
@@ -124,7 +127,7 @@ final class VcfTransfer {
      * contacts) to the chosen file as one vCard file, each contact's raw
      * document appended verbatim, off the main thread with the add button inert.
      */
-    void exportFile(Uri uri) {
+    public void exportFile(Uri uri) {
         List<Group> snapshot = new ArrayList<>(host.visibleGroups());
         host.setListBusy(true);
         host.io.execute(

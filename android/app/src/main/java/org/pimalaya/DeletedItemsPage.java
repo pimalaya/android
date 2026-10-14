@@ -15,6 +15,8 @@ import android.widget.TextView;
 
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.contact.LocalBook;
+import org.pimalaya.contact.OfflineEngine;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.DeletedItems;
 import org.pimalaya.pimdir.PimdirCollections;

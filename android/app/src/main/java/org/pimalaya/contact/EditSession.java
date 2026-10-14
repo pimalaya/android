@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,35 +13,35 @@ import org.pimalaya.client.Card;
  * source editors, the merge flow and the conflict resolution all read
  * one session instead of a dozen loose activity fields.
  */
-final class EditSession {
+public final class EditSession {
     /** The card open in the editor (null card means composing a new one). */
-    Addressbook book;
+    public Addressbook book;
 
-    String accountEmail;
-    Card card;
+    public String accountEmail;
+    public Card card;
 
     /** The vCard the editor patches: the card's, or a fresh template. */
-    String vcard;
+    public String vcard;
 
     /** The merged group's replicas behind the editor; saving fans out. */
-    List<Entry> replicas = new ArrayList<>();
+    public List<Entry> replicas = new ArrayList<>();
 
     /** The replica the Merge action keeps; every other card is removed. */
-    Entry mergeSurvivor;
+    public Entry mergeSurvivor;
 
     /** The addressbooks dialog's desired state, applied on save. */
-    Map<String, Boolean> pendingBookState;
+    public Map<String, Boolean> pendingBookState;
 
     /** The editor's bar title (the shared bar is retitled per screen). */
-    CharSequence title = "";
+    public CharSequence title = "";
 
     /** Whether the open contact offers the advanced raw editor. */
-    boolean advancedAvailable;
+    public boolean advancedAvailable;
 
     /** Whether the editor is resolving a both-sides-edited sync
      *  conflict: the form's picks apply onto the captured three-way
      *  merge (vcard) and stage onto the one conflicted replica. */
-    boolean resolvingConflict;
+    public boolean resolvingConflict;
 
     /** The advanced editor's working document; null until it opens. */
     String advancedVcard;

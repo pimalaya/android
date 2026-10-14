@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -22,6 +22,9 @@ import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.R;
+import org.pimalaya.Sections;
+import org.pimalaya.Ui;
 import org.pimalaya.client.Cards;
 
 /**
@@ -46,7 +49,7 @@ import org.pimalaya.client.Cards;
  * fields carry one tappable chip per candidate value, and the host
  * blocks saving until every glyph cleared.
  */
-final class ContactForm {
+public final class ContactForm {
     static final int TEXT_NAME =
             InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS;
 
@@ -124,7 +127,7 @@ final class ContactForm {
     /** The per-property edit dialogs the tappable rows open. */
     private final ContactFieldDialogs dialogs;
 
-    ContactForm(Activity activity) {
+    public ContactForm(Activity activity) {
         this.activity = activity;
         this.ui = new Ui(activity);
         this.dialogs = new ContactFieldDialogs(this);
@@ -141,7 +144,7 @@ final class ContactForm {
      * `alternatives` feeding the value chips of the conflicted
      * single-field dialogs.
      */
-    void load(JSONObject model, JSONObject alternatives, JSONArray changed) {
+    public void load(JSONObject model, JSONObject alternatives, JSONArray changed) {
         this.model = model != null ? model : new JSONObject();
         this.alternatives = alternatives;
         this.changedLists = null;
@@ -175,19 +178,19 @@ final class ContactForm {
     }
 
     /** Sets the post-render hook (the host's save-gate refresh). */
-    void setOnRender(Runnable onRender) {
+    public void setOnRender(Runnable onRender) {
         this.onRender = onRender;
     }
 
     /** What a render adds after the card's own sections (the Linked card). */
     private java.util.function.Consumer<Sections> trailing;
 
-    void setTrailing(java.util.function.Consumer<Sections> trailing) {
+    public void setTrailing(java.util.function.Consumer<Sections> trailing) {
         this.trailing = trailing;
     }
 
     /** Draws the page again from the working model, after a change outside it. */
-    void refresh() {
+    public void refresh() {
         render();
     }
 
@@ -195,7 +198,7 @@ final class ContactForm {
      * Whether the form may be validated: always in a plain edit, in a
      * merge only once every diverging row has been reviewed.
      */
-    boolean conflictResolved() {
+    public boolean conflictResolved() {
         return !conflict() || pending.isEmpty();
     }
 
@@ -352,7 +355,7 @@ final class ContactForm {
 
     /** The main add action (FAB): every field that can still be added,
      *  across all sections. */
-    void addField() {
+    public void addField() {
         List<Field> offer = new ArrayList<>();
         for (Field field : catalog()) {
             if (offerable(field)) {

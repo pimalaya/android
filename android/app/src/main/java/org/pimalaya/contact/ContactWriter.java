@@ -1,10 +1,14 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.AccountEntry;
+import org.pimalaya.MainActivity;
+import org.pimalaya.PimDomain;
+import org.pimalaya.R;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.Cards;
 import org.pimalaya.client.PimalayaClient;
@@ -18,10 +22,10 @@ import org.pimalaya.client.PimalayaClient;
  * accounts through the host; the host keeps the navigation and calls in
  * through {@link #save}.
  */
-final class ContactWriter {
+public final class ContactWriter {
     private final MainActivity host;
 
-    ContactWriter(MainActivity host) {
+    public ContactWriter(MainActivity host) {
         this.host = host;
     }
 
@@ -33,7 +37,7 @@ final class ContactWriter {
      * properties while the managed content converges; replicas already
      * carrying the resulting content are skipped.
      */
-    void save() {
+    public void save() {
         String birthday = host.form.birthday();
         if (!birthday.isEmpty() && !birthday.matches("\\d{4}-\\d{2}-\\d{2}")) {
             host.toast(host.getString(R.string.invalid_birthday));

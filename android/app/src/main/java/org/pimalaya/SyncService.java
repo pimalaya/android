@@ -12,6 +12,8 @@ import android.os.IBinder;
 import android.provider.ContactsContract;
 import android.util.Log;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.contact.CardStore;
+import org.pimalaya.contact.OfflineEngine;
 import org.pimalaya.pimdir.PimdirDb;
 
 /**

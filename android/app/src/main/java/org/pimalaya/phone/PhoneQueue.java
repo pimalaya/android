@@ -11,10 +11,10 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
-import org.pimalaya.CardStore;
-import org.pimalaya.OfflineEngine;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.contact.CardStore;
+import org.pimalaya.contact.OfflineEngine;
 import org.pimalaya.pimdir.PimdirDb;
 
 /**

@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.contact;
 
 import org.pimalaya.client.Addressbook;
 
@@ -13,11 +13,11 @@ import org.pimalaya.client.Addressbook;
 public final class BookEntry {
     public final Addressbook book;
     public final String accountEmail;
-    final boolean subscribed;
+    public final boolean subscribed;
     public final boolean remoteSynced;
     public final boolean phoneSynced;
 
-    BookEntry(
+    public BookEntry(
             Addressbook book,
             String accountEmail,
             boolean subscribed,
