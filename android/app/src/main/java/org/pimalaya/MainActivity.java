@@ -1936,32 +1936,6 @@ public class MainActivity extends Host
         contact.systemBack = editor::close;
         screens.put(Panels.CONTACT, contact);
 
-        Screen advanced = new Screen();
-        advanced.chrome =
-                () -> {
-                    ((TextView) findViewById(R.id.bar_title)).setText(R.string.advanced_title);
-                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
-                    findViewById(R.id.fab).setVisibility(View.GONE);
-                };
-        advanced.barBack = editor::closeAdvanced;
-        advanced.systemBack = editor::closeAdvanced;
-        screens.put(Panels.ADVANCED, advanced);
-
-        Screen source = new Screen();
-        source.chrome =
-                () -> {
-                    ((TextView) findViewById(R.id.bar_title)).setText(R.string.advanced_source);
-                    findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
-                    android.widget.ImageButton fab = findViewById(R.id.fab);
-                    fab.setImageResource(R.drawable.ic_check);
-                    fab.setContentDescription(getString(R.string.contact_save));
-                    fab.setVisibility(View.VISIBLE);
-                };
-        source.fab = editor::applySource;
-        source.barBack = () -> showBack(Panels.ADVANCED);
-        source.systemBack = () -> showBack(Panels.ADVANCED);
-        screens.put(Panels.SOURCE, source);
-
         Screen auth = new Screen();
         auth.ownBar = true;
         auth.chrome =
@@ -2037,7 +2011,6 @@ public class MainActivity extends Host
                         R.id.mail_select_seen,
                         R.id.mail_select_flag,
                         R.id.mail_select_delete,
-                        R.id.contact_advanced,
                         R.id.contact_books,
                         R.id.contact_add_field,
                         R.id.bar_delete,
@@ -2198,10 +2171,8 @@ public class MainActivity extends Host
         // it needs none.
         padBottom(R.id.drawer_actions, 8, bottom);
         padBottom(R.id.config_container, 88, bottom);
-        padBottom(R.id.advanced_container, 24, bottom);
         padBottom(R.id.filter_actions, 16, bottom);
         padBottom(R.id.deleted_list, 24, bottom);
-        padBottom(R.id.source_input, 16, bottom);
         padBottom(R.id.email_actions, 16, bottom);
         padBottom(R.id.domain_actions, 16, bottom);
         padBottom(R.id.result_actions, 16, bottom);

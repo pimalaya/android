@@ -26,8 +26,8 @@ import org.pimalaya.ui.Picker;
 /**
  * The contact editor's flows over one working {@link EditSession}:
  * opening a merged row, a conflict or a new card into the form, merging
- * replicas, the addressbooks dialog, saving ({@link ContactWriter}) and
- * the advanced sub-editor ({@link AdvancedEditor}). The host keeps the
+ * replicas, the addressbooks dialog and saving ({@link ContactWriter}).
+ * The host keeps the
  * screen table and the chrome, which read the session through
  * {@link #edit} when they render.
  */
@@ -38,9 +38,6 @@ public final class ContactEditor {
 
     /** Rebuilds the contacts list from the base (staged edits included). */
     private final Runnable reloadList;
-
-    /** The advanced raw-vCard sub-editor over the working document. */
-    private final AdvancedEditor advancedEditor;
 
     /** The contact save fan-out over the working edit session. */
     private final ContactWriter writer;
@@ -59,7 +56,6 @@ public final class ContactEditor {
         this.parts = parts;
         this.form = form;
         this.reloadList = reloadList;
-        this.advancedEditor = new AdvancedEditor(host, this);
         this.writer = new ContactWriter(host, parts, this, reloadList);
     }
 
@@ -297,7 +293,6 @@ public final class ContactEditor {
         edit.accountEmail = accountEmail;
         edit.vcard = newVcard();
         edit.title = host.getString(R.string.contact_new);
-        edit.advancedAvailable = true;
 
         form.load(null, null, null);
         host.show(Panels.CONTACT);
@@ -344,9 +339,6 @@ public final class ContactEditor {
         }
 
         edit.title = primary.displayName();
-        // NOTE: raw lines cannot fan out to several documents, so the
-        // advanced editor only opens on single-card contacts.
-        edit.advancedAvailable = parts.pool().distinctRefs(replicas).size() == 1;
 
         form.load(model, alternatives, changed);
         host.show(Panels.CONTACT);
@@ -413,16 +405,6 @@ public final class ContactEditor {
      */
     public void save() {
         writer.save();
-    }
-
-    /** The source panel's save ({@link AdvancedEditor#applySource}). */
-    public void applySource() {
-        advancedEditor.applySource();
-    }
-
-    /** Back from the advanced editor to the form ({@link AdvancedEditor#close}). */
-    public void closeAdvanced() {
-        advancedEditor.close();
     }
 
     private static String newVcard() {

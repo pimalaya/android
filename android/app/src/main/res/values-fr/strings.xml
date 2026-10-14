@@ -505,17 +505,6 @@
     <string name="dup_reason_phone">Même téléphone</string>
     <string name="dup_reason_name">Même nom</string>
 
-    <string name="advanced_title">Édition avancée</string>
-    <string name="advanced_open">Édition avancée</string>
-    <string name="advanced_add">Ajouter une propriété</string>
-    <string name="advanced_source">Source</string>
-    <string name="advanced_prop_name">Nom</string>
-    <string name="advanced_value">Valeur</string>
-    <string name="advanced_param_name">Paramètre</string>
-    <string name="advanced_param_values">Valeurs (séparées par des virgules)</string>
-    <string name="advanced_add_param">Ajouter un paramètre</string>
-    <string name="advanced_invalid">Propriété invalide</string>
-
     <string-array name="phone_types">
         <item>Mobile</item>
         <item>Domicile</item>

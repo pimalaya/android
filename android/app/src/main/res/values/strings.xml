@@ -700,18 +700,6 @@
     <string name="dup_reason_phone">Same phone</string>
     <string name="dup_reason_name">Same name</string>
 
-    <string name="advanced_title">Advanced editing</string>
-    <string name="advanced_open">Advanced editing</string>
-    <string name="advanced_add">Add property</string>
-    <string name="advanced_source">Source</string>
-    <string name="advanced_hint" translatable="false">NAME;PARAM=value:value</string>
-    <string name="advanced_prop_name">Name</string>
-    <string name="advanced_value">Value</string>
-    <string name="advanced_param_name">Parameter</string>
-    <string name="advanced_param_values">Values (comma-separated)</string>
-    <string name="advanced_add_param">Add parameter</string>
-    <string name="advanced_invalid">Invalid property</string>
-
     <string-array name="phone_types">
         <item>Mobile</item>
         <item>Home</item>

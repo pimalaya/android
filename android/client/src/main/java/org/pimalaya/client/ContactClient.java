@@ -406,44 +406,6 @@ public class ContactClient {
     }
 
     /**
-     * Lists the card's raw property lines for the advanced editor, in
-     * source order, unfolded.
-     */
-    public static JSONArray cardProps(String vcard) {
-        return Replies.object(Native.cardProps(vcard)).optJSONArray("props");
-    }
-
-    /**
-     * Rewrites one raw property line for the advanced editor: the line
-     * replaces the property at the index (a blank line removes it),
-     * index -1 appends.
-     */
-    public static String cardSetProp(String vcard, int index, String line) {
-        return Json.string(
-                Replies.object(Native.cardSetProp(vcard, index, line)), "vcard");
-    }
-
-    /**
-     * Recomposes one property from its structured parts ({@code {name,
-     * params: [{name, values}], value}}) and rewrites it (index -1
-     * appends).
-     */
-    public static String cardSetPropParts(String vcard, int index, JSONObject prop) {
-        return Json.string(
-                Replies.object(Native.cardSetPropParts(vcard, index, prop.toString())),
-                "vcard");
-    }
-
-    /**
-     * The component labels of a structured property name (N, ADR,
-     * GENDER), empty for plain values: the advanced editor shapes its
-     * value form from them.
-     */
-    public static JSONArray cardPropLabels(String name) {
-        return Replies.object(Native.cardPropLabels(name)).optJSONArray("labels");
-    }
-
-    /**
      * The ordered type-set vocabulary the edit form's spinners address
      * for the kind ({@code phone}, {@code email}, {@code address},
      * {@code relation}, {@code gender}): each position's vCard TYPE set
@@ -453,14 +415,6 @@ public class ContactClient {
      */
     public static JSONArray cardTypeOrder(String kind) {
         return Replies.object(Native.cardTypeOrder(kind)).optJSONArray("order");
-    }
-
-    /**
-     * Validates a hand-edited vCard source (it must reparse) and
-     * returns it re-serialized.
-     */
-    public static String cardSource(String vcard) {
-        return Json.string(Replies.object(Native.cardSource(vcard)), "vcard");
     }
 
     /**

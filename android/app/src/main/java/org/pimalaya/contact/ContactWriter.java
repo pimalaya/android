@@ -67,11 +67,7 @@ final class ContactWriter {
                     host.toast(host.getString(R.string.save_failed));
                     return;
                 }
-                String source =
-                        editor.edit().advancedVcard != null
-                                ? editor.edit().advancedVcard
-                                : editor.edit().vcard;
-                String vcard = ContactClient.applyCard(source, model);
+                String vcard = ContactClient.applyCard(editor.edit().vcard, model);
                 String uid = editor.cardIndex(vcard).optString("uid");
                 String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
                 parts.contacts().save(editor.edit().book.url, new Card(id, null, null, vcard));
@@ -111,15 +107,8 @@ final class ContactWriter {
                 continue;
             }
 
-            // NOTE: a raw edit must stage even when the managed-content
-            // hash is unchanged, so the advanced document stands in.
-            String source =
-                    editor.edit().advancedVcard != null
-                            ? editor.edit().advancedVcard
-                            : entry.card.vcard;
-            String vcard = ContactClient.applyCard(source, model);
-            if (!editor.edit().advancedDirty
-                    && editor.cardIndex(vcard).optString("hash").equals(entry.hash)) {
+            String vcard = ContactClient.applyCard(entry.card.vcard, model);
+            if (editor.cardIndex(vcard).optString("hash").equals(entry.hash)) {
                 continue;
             }
             engine.edit(

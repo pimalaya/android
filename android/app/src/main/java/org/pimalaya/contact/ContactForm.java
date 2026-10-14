@@ -34,7 +34,7 @@ import org.pimalaya.ui.Ui;
  * group by theme: Identity (FN, N, BDAY, ANNIVERSARY, GENDER), Work
  * (ORG, TITLE, ROLE), then one section per list (NICKNAME, RELATED,
  * TEL, EMAIL, IMPP, ADR, URL, LANG, NOTE); everything the form does
- * not cover is reachable through the advanced raw-property editor.
+ * not cover stays in the document untouched.
  *
  * <p>The page renders from a working field model that the dialogs
  * edit in place, so {@link #collect()} just hands the model back;

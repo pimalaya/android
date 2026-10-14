@@ -44,7 +44,7 @@
         android:paddingStart="@dimen/app_bar_padding"
         android:paddingEnd="@dimen/app_bar_padding">
 
-        <!-- Editor, addressbooks, advanced and auth screens. -->
+        <!-- Editor, addressbooks and auth screens. -->
         <ImageButton
             android:id="@+id/bar_back"
             android:layout_width="40dp"
@@ -228,17 +228,6 @@
             android:tint="?android:attr/textColorPrimary"
             android:visibility="gone" />
 
-        <!-- Editor: the advanced raw-property editor. -->
-        <ImageButton
-            android:id="@+id/contact_advanced"
-            android:layout_width="@dimen/app_bar_button"
-            android:layout_height="@dimen/app_bar_button"
-            android:background="@drawable/ripple_circle"
-            android:contentDescription="@string/advanced_open"
-            android:src="@drawable/ic_advanced"
-            android:tint="?android:attr/textColorPrimary"
-            android:visibility="gone" />
-
         <!-- Editor: reveal more fields; the FAB is the validate (check)
              action. Hidden in conflict mode where nothing can be added. -->
         <ImageButton
@@ -326,10 +315,6 @@
         <include layout="@layout/panel_contacts" />
 
         <include layout="@layout/panel_contact" />
-
-        <include layout="@layout/panel_advanced" />
-
-        <include layout="@layout/panel_source" />
 
         <include layout="@layout/panel_mail" />
 

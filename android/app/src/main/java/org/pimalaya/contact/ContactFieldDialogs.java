@@ -594,9 +594,8 @@ final class ContactFieldDialogs {
     }
 
     /**
-     * A free-text field backed by a dropdown of choices (the same
-     * completer the advanced editor used for property names): the value
-     * is editable to anything, the choices only suggest. When {@code
+     * A free-text field backed by a dropdown of choices: the value is
+     * editable to anything, the choices only suggest. When {@code
      * open} the dropdown pops as the dialog opens (a fresh field), else
      * it waits for a tap (editing an existing value).
      */
