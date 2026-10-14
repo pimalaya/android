@@ -17,7 +17,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountCredential;
 import org.pimalaya.account.AccountEntry;
@@ -35,6 +34,9 @@ import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.sync.BackgroundCheck;
+import org.pimalaya.sync.SyncCoordinator;
+import org.pimalaya.sync.SyncPasses;
+import org.pimalaya.ui.Host;
 import org.pimalaya.ui.PillField;
 
 /**
@@ -68,7 +70,14 @@ public final class OnboardingFlow {
     /** The OAuth client a server registers none of. */
     public static final int STEP_OAUTH = 6;
 
-    private final MainActivity host;
+    private final Host host;
+    private final SyncPasses.Parts parts;
+
+    /** The activity's live account list (mutated on the main thread). */
+    private final List<AccountEntry> accounts;
+
+    private final SyncCoordinator sync;
+    private final SetupShell shell;
     private final OauthFlow oauth;
 
     /** Onboarding state: the entered email and its searched configs. */
@@ -154,8 +163,18 @@ public final class OnboardingFlow {
     /** The same for the phone's calendars ({@link Accounts#calendarsElsewhere}). */
     private boolean calendarsElsewhere;
 
-    public OnboardingFlow(MainActivity host, OauthFlow oauth) {
+    public OnboardingFlow(
+            Host host,
+            SyncPasses.Parts parts,
+            List<AccountEntry> accounts,
+            SyncCoordinator sync,
+            SetupShell shell,
+            OauthFlow oauth) {
         this.host = host;
+        this.parts = parts;
+        this.accounts = accounts;
+        this.sync = sync;
+        this.shell = shell;
         this.oauth = oauth;
     }
 
@@ -312,7 +331,7 @@ public final class OnboardingFlow {
         ((EditText) host.findViewById(R.id.domain_password)).setText("");
         host.setAuthLoading(R.id.email_continue, R.id.email_progress, false);
         host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, false);
-        host.showAuth(STEP_EMAIL);
+        shell.showAuth(STEP_EMAIL);
     }
 
     /** Brings a step's own buttons in line with its state, on entering it. */
@@ -381,7 +400,7 @@ public final class OnboardingFlow {
                         try {
                             List<ServiceConfig> hits;
                             try (Transport transport = new Transport()) {
-                                hits = host.client.searchProvider(transport, pendingEmail, null);
+                                hits = parts.client().searchProvider(transport, pendingEmail, null);
                             }
                             provider = hits.isEmpty() ? null : hits.get(0).source;
                         } catch (Exception error) {
@@ -398,7 +417,7 @@ public final class OnboardingFlow {
                     List<ServiceConfig> configs = new ArrayList<>();
                     Exception failure = null;
                     try {
-                        configs = host.client.searchAll(pendingEmail, null);
+                        configs = parts.client().searchAll(pendingEmail, null);
                     } catch (Exception error) {
                         // NOTE: individual failing mechanisms are skipped
                         // inside the search; this is the whole search
@@ -571,7 +590,7 @@ public final class OnboardingFlow {
         container.removeAllViews();
         setups.clear();
 
-        AccountEntry existing = host.accountFor(pendingEmail);
+        AccountEntry existing = AccountEntry.find(accounts, pendingEmail);
         boolean discovered = false;
         boolean connectable = false;
 
@@ -667,7 +686,7 @@ public final class OnboardingFlow {
         }
 
         showPasswordError(false);
-        host.showAuth(STEP_DOMAIN);
+        shell.showAuth(STEP_DOMAIN);
         resetSetupContinue();
     }
 
@@ -755,7 +774,7 @@ public final class OnboardingFlow {
                         switches.mirror(mirror, false, Set.of());
                         return;
                     }
-                    host.askMirrors(
+                    shell.askMirrors(
                             java.util.EnumSet.of(mirror),
                             granted -> toggle.setChecked(switches.mirror(mirror, true, granted)));
                 });
@@ -779,7 +798,7 @@ public final class OnboardingFlow {
                         switches.notify(false, false);
                         return;
                     }
-                    host.askNotifications(
+                    shell.askNotifications(
                             granted -> toggle.setChecked(switches.notify(true, granted)));
                 });
         return tickRow(R.string.background_notify, R.string.notify_mail_note, toggle);
@@ -1238,7 +1257,7 @@ public final class OnboardingFlow {
 
     /** Puts the running step's main button on its loader. */
     public void busy() {
-        switch (host.authStep()) {
+        switch (shell.authStep()) {
             case STEP_SIGNIN:
                 host.setAuthLoading(R.id.signin_continue, R.id.signin_progress, true);
                 break;
@@ -1259,7 +1278,7 @@ public final class OnboardingFlow {
         if (verifying) {
             return;
         }
-        switch (host.authStep()) {
+        switch (shell.authStep()) {
             case STEP_SIGNIN:
                 host.setAuthLoading(R.id.signin_continue, R.id.signin_progress, false);
                 refreshSignIn();
@@ -1539,7 +1558,7 @@ public final class OnboardingFlow {
         for (DomainSetup setup : setups.values()) {
             setup.credential = null;
         }
-        host.showAuth(STEP_DOMAIN);
+        shell.showAuth(STEP_DOMAIN);
         resetSetupContinue();
     }
 
@@ -1563,7 +1582,7 @@ public final class OnboardingFlow {
             return;
         }
         connecting = false;
-        host.showAuth(STEP_SIGNIN);
+        shell.showAuth(STEP_SIGNIN);
         resetConfigContinue();
     }
 
@@ -1601,7 +1620,7 @@ public final class OnboardingFlow {
             container.addView(signInCard(step));
         }
 
-        host.showAuth(STEP_SIGNIN);
+        shell.showAuth(STEP_SIGNIN);
         resetConfigContinue();
     }
 
@@ -2139,7 +2158,7 @@ public final class OnboardingFlow {
 
     /** The account already stored for this address, or null. */
     private AccountEntry existingAccount(String email) {
-        for (AccountEntry entry : host.accounts) {
+        for (AccountEntry entry : accounts) {
             if (entry.email.equals(email)) {
                 return entry;
             }
@@ -2220,8 +2239,8 @@ public final class OnboardingFlow {
             pendingStep = null;
         }
 
-        if (signInPage && host.authStep() == STEP_OAUTH) {
-            host.showAuth(STEP_SIGNIN);
+        if (signInPage && shell.authStep() == STEP_OAUTH) {
+            shell.showAuth(STEP_SIGNIN);
         }
         if (jmap == null) {
             granted();
@@ -2237,7 +2256,7 @@ public final class OnboardingFlow {
                     try (Transport transport = new Transport()) {
                         served =
                                 PimDomain.servedByJmap(
-                                        host.client.jmapCapabilities(transport, session));
+                                        parts.client().jmapCapabilities(transport, session));
                     } catch (Exception error) {
                         // NOTE: unread rather than refused: the grant stands,
                         // and the first sync says what the session cannot do.
@@ -2389,7 +2408,7 @@ public final class OnboardingFlow {
             if (PimalayaClient.isJmap(account)) {
                 Set<String> capabilities;
                 try (Transport transport = new Transport()) {
-                    capabilities = host.client.jmapCapabilities(transport, account);
+                    capabilities = parts.client().jmapCapabilities(transport, account);
                 }
                 if (!PimDomain.servedByJmap(capabilities).contains(domain)) {
                     return new NotServed(notServed(List.of(domain)));
@@ -2403,12 +2422,12 @@ public final class OnboardingFlow {
                     }
                 case CONTACTS:
                     try (Transport transport = new Transport()) {
-                        host.client.listAddressbooks(transport, account);
+                        parts.client().listAddressbooks(transport, account);
                     }
                     return null;
                 default:
                     try (Transport transport = new Transport()) {
-                        host.client.listCalendars(transport, account);
+                        parts.client().listCalendars(transport, account);
                     }
                     return null;
             }
@@ -2486,10 +2505,10 @@ public final class OnboardingFlow {
                     }
                     // NOTE: back on the domain step, the refused domains
                     // unticked, while the rest of the plan runs.
-                    host.showAuth(STEP_DOMAIN);
+                    shell.showAuth(STEP_DOMAIN);
                     LinearLayout domains = host.findViewById(R.id.domain_container);
                     domains.removeAllViews();
-                    domains.addView(domainCard(host.accountFor(pendingEmail)));
+                    domains.addView(domainCard(AccountEntry.find(accounts, pendingEmail)));
                     host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, true);
                     runSignIns();
                 });
@@ -2505,7 +2524,7 @@ public final class OnboardingFlow {
                     switchToAdvanced();
                 });
 
-        host.showAuth(STEP_RESULT);
+        shell.showAuth(STEP_RESULT);
     }
 
     /**
@@ -2545,7 +2564,7 @@ public final class OnboardingFlow {
         onward.setOnClickListener(view -> connected(email));
         host.findViewById(R.id.result_advanced).setVisibility(View.GONE);
 
-        host.showAuth(STEP_RESULT);
+        shell.showAuth(STEP_RESULT);
     }
 
     /**
@@ -2635,7 +2654,7 @@ public final class OnboardingFlow {
                         List<Addressbook> fetched = null;
                         if (contacts != null) {
                             try (Transport transport = new Transport()) {
-                                fetched = host.client.listAddressbooks(transport, contacts);
+                                fetched = parts.client().listAddressbooks(transport, contacts);
                             }
                         }
                         // NOTE: one provider query each, the permissions
@@ -2746,7 +2765,7 @@ public final class OnboardingFlow {
             }
         }
 
-        host.showAuth(STEP_BOOKS);
+        shell.showAuth(STEP_BOOKS);
         resetConfigContinue();
     }
 
@@ -2802,13 +2821,13 @@ public final class OnboardingFlow {
     private void commitBooks(java.util.Set<String> subscribed) {
         boolean phone = switches.mirrors.contains(PhoneMirror.CONTACTS) && !elsewhere;
         AccountCommit.books(
-                host.base,
-                new PimdirCollections(host.pimdir, host),
+                parts.cards(),
+                new PimdirCollections(parts.pimdir(), host),
                 connectedEmail,
                 pendingBooks,
                 subscribed,
                 phone);
-        host.reconcilePhone();
+        sync.reconcilePhone();
 
         finishOnboarding();
     }
@@ -2839,9 +2858,9 @@ public final class OnboardingFlow {
                     switches.mirrors.contains(PhoneMirror.CALENDAR) && !calendarsElsewhere);
         }
 
-        AccountEntry stored = AccountCommit.persist(host.store, connected);
-        host.accounts.removeIf(entry -> entry.email.equals(stored.email));
-        host.accounts.add(stored);
+        AccountEntry stored = AccountCommit.persist(parts.accounts(), connected);
+        accounts.removeIf(entry -> entry.email.equals(stored.email));
+        accounts.add(stored);
 
         // NOTE: written only when on, so setting an address up again leaves
         // its choice alone; after the save, as it may schedule the job.
@@ -2850,7 +2869,7 @@ public final class OnboardingFlow {
         }
 
         busy();
-        host.syncConnected(stored);
+        sync.syncConnected(stored);
     }
 
     /**

@@ -33,12 +33,9 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.calendar.CalendarList;
 import org.pimalaya.calendar.CalendarParts;
-import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.EventView;
-import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.ContactEditor;
 import org.pimalaya.contact.ContactForm;
@@ -54,10 +51,10 @@ import org.pimalaya.file.FilesList;
 import org.pimalaya.file.OpenedCopies;
 import org.pimalaya.filter.FilterPage;
 import org.pimalaya.filter.Filters;
+import org.pimalaya.link.LinkShell;
 import org.pimalaya.link.LinkedSection;
 import org.pimalaya.mail.MailList;
 import org.pimalaya.mail.MailParts;
-import org.pimalaya.mail.MailStager;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailWindow;
 import org.pimalaya.mail.MessageCompose;
@@ -71,6 +68,7 @@ import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.setup.AccountSettings;
 import org.pimalaya.setup.OauthFlow;
 import org.pimalaya.setup.OnboardingFlow;
+import org.pimalaya.setup.SetupShell;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
 import org.pimalaya.sync.SyncCoordinator;
@@ -100,23 +98,9 @@ import org.pimalaya.ui.SyncPill;
  * every replica. Accounts live behind the drawer the bar's logo opens;
  * syncs are manual, from there or from the pull-down.
  */
-public class MainActivity extends Host implements SyncCoordinator.Screens {
-    // NOTE: aliases of Panels until every screen names it (phase 4 of
-    // java-domain-layout).
-    public static final int PANEL_CONTACTS = Panels.CONTACTS;
-    public static final int PANEL_CONTACT = Panels.CONTACT;
-    public static final int PANEL_ADVANCED = Panels.ADVANCED;
-    public static final int PANEL_SOURCE = Panels.SOURCE;
-    public static final int PANEL_MAIL = Panels.MAIL;
-    public static final int PANEL_CALENDAR = Panels.CALENDAR;
-    public static final int PANEL_COMPOSE = Panels.COMPOSE;
-    public static final int PANEL_MESSAGE = Panels.MESSAGE;
-    public static final int PANEL_EVENT_VIEW = Panels.EVENT_VIEW;
-    public static final int PANEL_FILES = Panels.FILES;
+public class MainActivity extends Host
+        implements SyncCoordinator.Screens, SetupShell, LinkShell {
     private static final int PANEL_AUTH = 20;
-    public static final int PANEL_ACCOUNT = Panels.ACCOUNT;
-    public static final int PANEL_FILTER = Panels.FILTER;
-    public static final int PANEL_DELETED = Panels.DELETED;
 
     /**
      * The domain the app opens on, and the one every flow that finishes
@@ -125,7 +109,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
      * book are looked up when something is wanted from them, while an
      * inbox is the reason the app was opened at all.
      */
-    private static final int PANEL_ROOT = PANEL_MAIL;
+    private static final int PANEL_ROOT = Panels.MAIL;
 
     /** Whether an auth step's main button is loading, the step frozen. */
     private boolean authBusy;
@@ -136,19 +120,17 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** The shared backend client. */
     public final PimalayaClient client = new PimalayaClient();
 
-    public SecureStore store;
-    public CardStore base;
+    SecureStore store;
+    CardStore base;
 
     /** The pimdir store every domain and every account shares. */
-    public PimdirDb pimdir;
+    PimdirDb pimdir;
 
     /** The contacts inside it. */
-    public PimdirContacts contacts;
+    PimdirContacts contacts;
 
-    // NOTE: public for the account settings' window picker until they take
-    // the coordinator (phase 4 step 16 of java-domain-layout).
     /** The app's foreground sync, one pass at a time. */
-    public SyncCoordinator sync;
+    SyncCoordinator sync;
 
     /** Every remote and phone pass, behind the sync dock. */
     SyncPasses passes;
@@ -157,7 +139,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     ContactForm form;
 
     /** Every connected account (multi-account). */
-    public final List<AccountEntry> accounts = new ArrayList<>();
+    final List<AccountEntry> accounts = new ArrayList<>();
 
     /** The background run this activity last reloaded after. */
     private long reloadedRun;
@@ -165,48 +147,48 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** The filter page over a list. */
     private FilterPage filterPage;
 
-    /** The deleted items page, raised from the drawer. */
-    private final DeletedItemsPage deletedPage = new DeletedItemsPage(this);
+    /** The deleted items page, raised from the drawer (built in onCreate). */
+    private DeletedItemsPage deletedPage;
 
     /** The calendar side of the store, and the agenda over it. */
-    public EventStore events;
+    EventStore events;
 
-    public CalendarList calendarList;
+    CalendarList calendarList;
 
     /** The reader one agenda row opens onto. */
     EventView eventView;
 
     /** The mail side of the store, and the merged list over it. */
-    public MailStore mail;
+    MailStore mail;
 
-    public MailList mailList;
+    MailList mailList;
 
     /** The file side of the store: attachments and the folders they are saved into. */
-    public FileStore files;
+    FileStore files;
 
     /** The Files list, and what a file offers wherever it shows. */
-    public FilesList filesList;
+    FilesList filesList;
 
     FileActions fileActions;
 
     /** References between items, and the Linked card every item page shows. */
-    public ItemLinks links;
+    ItemLinks links;
 
     LinkedSection linked;
 
     /** The reader one message row opens onto. */
-    public MessageView messageView;
+    MessageView messageView;
 
     /** The composer the mail add button opens. */
-    public MessageCompose compose;
+    MessageCompose compose;
 
     /** The connection wizard and its OAuth grants (see onCreate wiring). */
     private OnboardingFlow onboarding;
 
     private OauthFlow oauth;
 
-    /** The full-screen account settings controller over the drawer. */
-    private final AccountSettings accountSettings = new AccountSettings(this);
+    /** The full-screen account settings controller over the drawer (built in onCreate). */
+    private AccountSettings accountSettings;
 
     /** The accounts drawer, opened by the contacts burger. */
     private androidx.drawerlayout.widget.DrawerLayout drawer;
@@ -254,11 +236,9 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         links = new ItemLinks(this, pimdir);
         // NOTE: the coordinator before the screens, which take it; it
         // touches none of them while built (the dock is read later).
-        sync =
-                new SyncCoordinator(
-                        this,
-                        new SyncPasses.Parts(pimdir, base, store, mail, events, client),
-                        this);
+        SyncPasses.Parts syncParts =
+                new SyncPasses.Parts(pimdir, base, store, mail, events, client);
+        sync = new SyncCoordinator(this, syncParts, this);
         passes = sync.passes();
         pool = new ContactPool(base, contacts, accounts);
         ContactParts contactParts =
@@ -269,7 +249,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         // NOTE: a save into a folder reads the Files list again; the list
         // is built after the reader, so the callback reads the field late.
         fileActions = new FileActions(this, files, () -> filesList.reload());
-        linked = new LinkedSection(this);
+        linked = new LinkedSection(this, links, mail, this);
         // NOTE: the entry page shows the Linked card, so it is built after
         // it; the agenda binds itself into the page it opens rows onto.
         CalendarParts calendarParts = new CalendarParts(pimdir, client, events);
@@ -291,10 +271,17 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                         this,
                         new Filters(this, passes, sync, mail, files, accounts),
                         this::filterChanged);
+        // NOTE: the settings reload the lists and count on the mail list's
+        // read executor, so the page is built after them.
+        accountSettings =
+                new AccountSettings(
+                        this, syncParts, contacts, accounts, sync, mailList.reads(), this);
+        // NOTE: a restore reloads the lists, so the page is built after them.
+        deletedPage = new DeletedItemsPage(this, syncParts, passes, accounts, this::reload);
         // NOTE: the two flows reference each other (grants land back in
         // the wizard), so one side binds late.
-        oauth = new OauthFlow(this);
-        onboarding = new OnboardingFlow(this, oauth);
+        oauth = new OauthFlow(this, client, this);
+        onboarding = new OnboardingFlow(this, syncParts, accounts, sync, this, oauth);
         oauth.onConnected = onboarding::connect;
         oauth.onAborted = onboarding::grantAborted;
         oauth.onBusy = onboarding::busy;
@@ -339,7 +326,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         findViewById(R.id.selection_close)
                 .setOnClickListener(
                         view -> {
-                            if (screen == PANEL_MAIL) {
+                            if (screen == Panels.MAIL) {
                                 mailList.exitSelection();
                             } else {
                                 contactsList.exitSelection();
@@ -348,7 +335,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         findViewById(R.id.selection_all)
                 .setOnClickListener(
                         view -> {
-                            if (screen == PANEL_MAIL) {
+                            if (screen == Panels.MAIL) {
                                 mailList.toggleSelectAll();
                             } else {
                                 contactsList.toggleSelectAll();
@@ -469,6 +456,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** Navigates the auth flow forward: the step slides in from the right. */
+    @Override
     public void showAuth(int step) {
         showAuth(step, false);
     }
@@ -529,6 +517,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** The auth flow's displayed step. */
+    @Override
     public int authStep() {
         return authFlipper.getDisplayedChild();
     }
@@ -582,16 +571,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         reloadHome();
     }
 
-    /** The account entry matching an email, or null. */
-    public AccountEntry accountFor(String email) {
-        for (AccountEntry entry : accounts) {
-            if (entry.email.equals(email)) {
-                return entry;
-            }
-        }
-        return null;
-    }
-
     /** Whether any real (non-local) account is configured. */
     private boolean hasRealAccount() {
         for (AccountEntry entry : accounts) {
@@ -607,7 +586,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
      * in a merge only once every diverging field has been reviewed.
      */
     private void updateSaveEnabled() {
-        if (screen == PANEL_CONTACT) {
+        if (screen == Panels.CONTACT) {
             gateSave(form.conflictResolved(), R.drawable.ic_check, R.string.contact_save);
         }
     }
@@ -672,15 +651,15 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     public void onBackPressed() {
         // The account settings overlay sits above the open drawer, so
         // back peels it off first.
-        if (screen == PANEL_ACCOUNT) {
+        if (screen == Panels.ACCOUNT) {
             accountSettings.leave();
             return;
         }
-        if (screen == PANEL_FILTER) {
+        if (screen == Panels.FILTER) {
             filterPage.leave();
             return;
         }
-        if (screen == PANEL_DELETED) {
+        if (screen == Panels.DELETED) {
             deletedPage.leave();
             return;
         }
@@ -688,11 +667,11 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
             drawer.closeDrawer(android.view.Gravity.START);
             return;
         }
-        if (screen == PANEL_CONTACTS && contactsList.isSelectionMode()) {
+        if (screen == Panels.CONTACTS && contactsList.isSelectionMode()) {
             contactsList.exitSelection();
             return;
         }
-        if (screen == PANEL_MAIL && mailList.isSelectionMode()) {
+        if (screen == Panels.MAIL && mailList.isSelectionMode()) {
             mailList.exitSelection();
             return;
         }
@@ -1104,11 +1083,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         return card;
     }
 
-    /** Bodies an account still downloads ({@link SyncCoordinator#bodiesLeft}). */
-    public Integer bodiesLeft(String email) {
-        return sync.bodiesLeft(email);
-    }
-
     /**
      * Opens one account's settings screen (delegated to
      * {@link AccountSettings}): the staged switches load from the store,
@@ -1126,6 +1100,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
      * they all are. Called only as a mirror's switch is turned on, in a
      * setup or in an account's settings.
      */
+    @Override
     public void askMirrors(Set<PhoneMirror> wanted, Consumer<Set<PhoneMirror>> done) {
         String[] missing = PhoneMirror.missing(wanted, this::permitted);
         if (missing.length == 0) {
@@ -1142,6 +1117,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
      * {@code done} whether the app may notify (main thread). Called only as
      * a notifications switch is turned on.
      */
+    @Override
     public void askNotifications(Consumer<Boolean> done) {
         String[] missing = BackgroundCheck.missing(Build.VERSION.SDK_INT, this::permitted);
         if (missing.length == 0) {
@@ -1226,13 +1202,13 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     public void land(PimDomain domain) {
         switch (domain) {
             case MAIL:
-                goDomain(PANEL_MAIL);
+                goDomain(Panels.MAIL);
                 break;
             case CONTACTS:
-                goDomain(PANEL_CONTACTS);
+                goDomain(Panels.CONTACTS);
                 break;
             case CALENDAR:
-                goDomain(PANEL_CALENDAR);
+                goDomain(Panels.CALENDAR);
                 break;
         }
     }
@@ -1271,7 +1247,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** Whether a sync pass is running. */
-    public boolean isSyncing() {
+    boolean isSyncing() {
         return sync.isSyncing();
     }
 
@@ -1290,33 +1266,18 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** The stored accounts connected for one domain. */
-    public List<AccountEntry> accountsFor(PimDomain domain) {
+    List<AccountEntry> accountsFor(PimDomain domain) {
         return passes.accountsFor(domain);
-    }
-
-    /** A mail driver that only stages, on the same terms. */
-    public MailStager mailStager() {
-        return new MailStager(pimdir, client);
-    }
-
-    /** A calendar driver that only stages, on the same terms. */
-    public CalendarStager calendarStager() {
-        return new CalendarStager(pimdir, client);
-    }
-
-    /** A freshly connected account ({@link SyncCoordinator#syncConnected}). */
-    public void syncConnected(AccountEntry account) {
-        sync.syncConnected(account);
     }
 
     /** The domain a list panel shows, null for any other screen. */
     private static PimDomain domainOf(int panel) {
         switch (panel) {
-            case PANEL_MAIL:
+            case Panels.MAIL:
                 return PimDomain.MAIL;
-            case PANEL_CONTACTS:
+            case Panels.CONTACTS:
                 return PimDomain.CONTACTS;
-            case PANEL_CALENDAR:
+            case Panels.CALENDAR:
                 return PimDomain.CALENDAR;
             default:
                 return null;
@@ -1331,13 +1292,8 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         }
     }
 
-    /** Runs a store-wide write while no sync runs ({@link SyncCoordinator#underSyncLock}). */
-    public void underSyncLock(int failed, Runnable write) {
-        sync.underSyncLock(failed, write);
-    }
-
     /** The contacts list's pull ({@link SyncCoordinator#syncContacts}). */
-    public void syncContacts() {
+    void syncContacts() {
         sync.syncContacts();
     }
 
@@ -1346,29 +1302,9 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         sync.syncAll();
     }
 
-    /** The subscribed addressbooks set to mirror into the phone. */
-    public List<BookEntry> phoneSyncedBooks() {
-        return passes.phoneSyncedBooks();
-    }
-
     /** The phone's accounts and calendars in line ({@link SyncCoordinator#reconcilePhone}). */
-    public void reconcilePhone() {
+    void reconcilePhone() {
         sync.reconcilePhone();
-    }
-
-    /** The phone's calendars in line ({@link SyncCoordinator#reconcileCalendars}). */
-    public void reconcileCalendars() {
-        sync.reconcileCalendars();
-    }
-
-    /** A book's phone switch turned on ({@link SyncCoordinator#showOnPhone}). */
-    public void showOnPhone(String url) {
-        sync.showOnPhone(url);
-    }
-
-    /** A book's phone switch turned off ({@link SyncCoordinator#hideFromPhone}). */
-    public void hideFromPhone(String url) {
-        sync.hideFromPhone(url);
     }
 
     @Override
@@ -1381,19 +1317,36 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         return App.of(this).state.calendarsIngested;
     }
 
-    /** The merged contact row holding a card of this key, null for none. */
-    public Group contactGroupOf(String linkId) {
-        return contactsList.groupOf(linkId);
+    /** Opens a message in the reader ({@link MessageView#open}). */
+    @Override
+    public void openMessage(MailStore.StoredMessage message) {
+        messageView.open(message);
+    }
+
+    /**
+     * Opens the merged contact row holding a card of this key in the editor
+     * ({@link ContactEditor#openGroup}); false when no row holds one.
+     */
+    @Override
+    public boolean openContact(String linkId) {
+        Group group = contactsList.groupOf(linkId);
+        if (group == null) {
+            return false;
+        }
+        editor.openGroup(group);
+        return true;
     }
 
     /** Opens one calendar resource on its page ({@link EventView#openStored}). */
+    @Override
     public void openEvent(String collection, String linkId, Runnable gone) {
         eventView.openStored(collection, linkId, gone);
     }
 
-    /** Opens a merged row in the editor ({@link ContactEditor#openGroup}). */
-    public void openGroup(Group group) {
-        editor.openGroup(group);
+    /** Opens a file's sheet ({@link FilesList#openFile}). */
+    @Override
+    public void openFile(String collection, String linkId) {
+        filesList.openFile(collection, linkId);
     }
 
     @Override
@@ -1422,7 +1375,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         findViewById(R.id.contact_add_field)
                 .setOnClickListener(
                         view -> {
-                            if (screen == PANEL_EVENT_VIEW) {
+                            if (screen == Panels.EVENT_VIEW) {
                                 eventView.addField();
                             } else {
                                 form.addField();
@@ -1432,7 +1385,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** Rebuilds the contacts list from the base (staged edits included). */
-    public void reloadContacts() {
+    void reloadContacts() {
         contactsList.reload();
     }
 
@@ -1496,8 +1449,8 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** Fades the bar's title in or out as a large title leaves or returns. */
     @Override
     public void showBarTitle(boolean shown) {
-        if (screen == PANEL_CONTACTS && contactsList.isSelectionMode()
-                || screen == PANEL_MAIL && mailList.isSelectionMode()) {
+        if (screen == Panels.CONTACTS && contactsList.isSelectionMode()
+                || screen == Panels.MAIL && mailList.isSelectionMode()) {
             return;
         }
         findViewById(R.id.bar_title).animate().alpha(shown ? 1f : 0f).setDuration(150);
@@ -1511,13 +1464,13 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** The large title heading one list. */
     @Override
     public ListHeader headerOf(int panel) {
-        if (panel == PANEL_MAIL) {
+        if (panel == Panels.MAIL) {
             return mailList.header();
         }
-        if (panel == PANEL_FILES) {
+        if (panel == Panels.FILES) {
             return filesList.header();
         }
-        return panel == PANEL_CALENDAR ? calendarList.header() : contactsList.header();
+        return panel == Panels.CALENDAR ? calendarList.header() : contactsList.header();
     }
 
     /** Raises the extended FAB as a list screen's add button. */
@@ -1641,7 +1594,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         button.setVisibility(View.VISIBLE);
         button.setImageTintList(
                 android.content.res.ColorStateList.valueOf(
-                        (panel == PANEL_FILES
+                        (panel == Panels.FILES
                                         ? MergedFilter.files(this).isActive()
                                         : domain != null && MergedFilter.of(this, domain).isActive())
                                 ? ui.resolveColor(android.R.attr.colorAccent)
@@ -1660,7 +1613,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
 
     /** Opens the filter page of the domain on screen. */
     private void openFilter() {
-        if (screen == PANEL_FILES) {
+        if (screen == Panels.FILES) {
             filterPage.openFiles();
             return;
         }
@@ -1668,16 +1621,12 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** A filter changed: the lists and the bar's filter icon follow. */
+    @Override
     public void filterChanged() {
         contactsList.reRender();
         calendarList.reload();
         mailList.reload();
         filesList.reload();
-    }
-
-    /** One domain's collections as the store holds them ({@link SyncPasses#collectionsOf}). */
-    public List<PimdirCollections.Stored> collectionsOf(PimDomain domain) {
-        return passes.collectionsOf(domain);
     }
 
     /** Navigates forward: the panels slide in from the right. */
@@ -1765,11 +1714,11 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** The whole-frame overlay view behind an overlay panel id. */
     private View overlayOf(int panel) {
         switch (panel) {
-            case PANEL_ACCOUNT:
+            case Panels.ACCOUNT:
                 return findViewById(R.id.overlay_account);
-            case PANEL_FILTER:
+            case Panels.FILTER:
                 return findViewById(R.id.overlay_filter);
-            case PANEL_DELETED:
+            case Panels.DELETED:
                 return findViewById(R.id.overlay_deleted);
             default:
                 return findViewById(R.id.overlay_auth);
@@ -1858,7 +1807,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         contacts.chrome =
                 () -> {
                     listFab(R.string.contacts_new_short, R.drawable.ic_person_add);
-                    showDomainBar(PANEL_CONTACTS);
+                    showDomainBar(Panels.CONTACTS);
                     // NOTE: after the domain bar, which a running
                     // selection then takes over.
                     contactsList.updateSelectionUi();
@@ -1872,7 +1821,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                         MainActivity.super.onBackPressed();
                     }
                 };
-        screens.put(PANEL_CONTACTS, contacts);
+        screens.put(Panels.CONTACTS, contacts);
 
         // Mail and calendar share the contacts list's chrome shape: the
         // burger, the bottom navigation and an extended add button
@@ -1881,35 +1830,35 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         mailScreen.chrome =
                 () -> {
                     listFab(R.string.compose_new, R.drawable.ic_pencil);
-                    showDomainBar(PANEL_MAIL);
+                    showDomainBar(Panels.MAIL);
                     // NOTE: reload re-applies a running selection over
                     // the domain bar.
                     mailList.reload();
                 };
         mailScreen.fab = () -> compose.open();
-        screens.put(PANEL_MAIL, mailScreen);
+        screens.put(Panels.MAIL, mailScreen);
 
         Screen calendar = new Screen();
         calendar.chrome =
                 () -> {
                     listFab(R.string.event_new, R.drawable.ic_add);
-                    showDomainBar(PANEL_CALENDAR);
+                    showDomainBar(Panels.CALENDAR);
                     // The window the agenda covers starts at today, so it
                     // is rebuilt on arrival rather than cached across days.
                     calendarList.reload();
                 };
         calendar.fab = eventView::composeNew;
-        screens.put(PANEL_CALENDAR, calendar);
+        screens.put(Panels.CALENDAR, calendar);
 
         Screen filesScreen = new Screen();
         filesScreen.chrome =
                 () -> {
                     listFab(R.string.attachment_new_folder, R.drawable.ic_add);
-                    showDomainBar(PANEL_FILES);
+                    showDomainBar(Panels.FILES);
                     filesList.reload();
                 };
         filesScreen.fab = () -> filesList.newFolder();
-        screens.put(PANEL_FILES, filesScreen);
+        screens.put(Panels.FILES, filesScreen);
 
         // The composer is a frame with a send button in the bar and a
         // back arrow that asks before losing what was typed.
@@ -1923,18 +1872,18 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                 };
         composer.barBack = () -> compose.close();
         composer.systemBack = () -> compose.close();
-        screens.put(PANEL_COMPOSE, composer);
+        screens.put(Panels.COMPOSE, composer);
 
         // The message reader: a back arrow and the message's actions,
         // untitled since the page leads with the subject itself.
-        Screen message = reader(() -> "", PANEL_MAIL);
+        Screen message = reader(() -> "", Panels.MAIL);
         Runnable readerChrome = message.chrome;
         message.chrome =
                 () -> {
                     readerChrome.run();
                     findViewById(R.id.message_actions).setVisibility(View.VISIBLE);
                 };
-        screens.put(PANEL_MESSAGE, message);
+        screens.put(Panels.MESSAGE, message);
 
         // A calendar entry's page is its form, the way a contact's is:
         // the same rows read and edited, the add-field button beside the
@@ -1955,9 +1904,9 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                     }
                 };
         entry.fab = () -> eventView.save();
-        entry.barBack = () -> showBack(PANEL_CALENDAR);
-        entry.systemBack = () -> showBack(PANEL_CALENDAR);
-        screens.put(PANEL_EVENT_VIEW, entry);
+        entry.barBack = () -> showBack(Panels.CALENDAR);
+        entry.systemBack = () -> showBack(Panels.CALENDAR);
+        screens.put(Panels.EVENT_VIEW, entry);
 
         Screen contact = new Screen();
         contact.chrome =
@@ -1985,7 +1934,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         contact.fab = editor::save;
         contact.barBack = editor::close;
         contact.systemBack = editor::close;
-        screens.put(PANEL_CONTACT, contact);
+        screens.put(Panels.CONTACT, contact);
 
         Screen advanced = new Screen();
         advanced.chrome =
@@ -1996,7 +1945,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                 };
         advanced.barBack = editor::closeAdvanced;
         advanced.systemBack = editor::closeAdvanced;
-        screens.put(PANEL_ADVANCED, advanced);
+        screens.put(Panels.ADVANCED, advanced);
 
         Screen source = new Screen();
         source.chrome =
@@ -2009,9 +1958,9 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                     fab.setVisibility(View.VISIBLE);
                 };
         source.fab = editor::applySource;
-        source.barBack = () -> showBack(PANEL_ADVANCED);
-        source.systemBack = () -> showBack(PANEL_ADVANCED);
-        screens.put(PANEL_SOURCE, source);
+        source.barBack = () -> showBack(Panels.ADVANCED);
+        source.systemBack = () -> showBack(Panels.ADVANCED);
+        screens.put(Panels.SOURCE, source);
 
         Screen auth = new Screen();
         auth.ownBar = true;
@@ -2029,17 +1978,17 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         account.ownBar = true;
         // NOTE: every setting applies when changed, so no FAB.
         account.chrome = () -> findViewById(R.id.fab).setVisibility(View.GONE);
-        screens.put(PANEL_ACCOUNT, account);
+        screens.put(Panels.ACCOUNT, account);
 
         Screen filterScreen = new Screen();
         filterScreen.ownBar = true;
         filterScreen.chrome = () -> findViewById(R.id.fab).setVisibility(View.GONE);
-        screens.put(PANEL_FILTER, filterScreen);
+        screens.put(Panels.FILTER, filterScreen);
 
         Screen deleted = new Screen();
         deleted.ownBar = true;
         deleted.chrome = () -> findViewById(R.id.fab).setVisibility(View.GONE);
-        screens.put(PANEL_DELETED, deleted);
+        screens.put(Panels.DELETED, deleted);
     }
 
     /**

@@ -19,11 +19,6 @@ public record ContactParts(
         List<AccountEntry> accounts) {
     /** The account entry matching an email, or null. */
     AccountEntry accountFor(String email) {
-        for (AccountEntry entry : accounts) {
-            if (entry.email.equals(email)) {
-                return entry;
-            }
-        }
-        return null;
+        return AccountEntry.find(accounts, email);
     }
 }

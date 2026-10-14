@@ -16,12 +16,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
-import org.pimalaya.contact.Group;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Linked;
 import org.pimalaya.ui.Sections;
 
@@ -37,7 +36,10 @@ import org.pimalaya.ui.Sections;
  * the links last read for it, and redraws once a read lands.
  */
 public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
-    private final MainActivity host;
+    private final Host host;
+    private final ItemLinks links;
+    private final MailStore mail;
+    private final LinkShell shell;
 
     /** The links read for an item and not drawn yet, by endpoint. */
     private final Map<String, List<ItemLinks.Link>> read = new HashMap<>();
@@ -45,8 +47,11 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
     /** The dialog a tap in it closes before opening the other item. */
     private AlertDialog opening;
 
-    public LinkedSection(MainActivity host) {
+    public LinkedSection(Host host, ItemLinks links, MailStore mail, LinkShell shell) {
         this.host = host;
+        this.links = links;
+        this.mail = mail;
+        this.shell = shell;
     }
 
     /**
@@ -77,7 +82,7 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
     private void load(ItemLinks.Endpoint self, Runnable refresh) {
         run(
                 () -> {
-                    List<ItemLinks.Link> links = host.links.links(self);
+                    List<ItemLinks.Link> links = this.links.links(self);
                     host.postAlive(
                             () -> {
                                 read.put(keyOf(self), links);
@@ -214,7 +219,7 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
                         (dialog, which) ->
                                 run(
                                         () -> {
-                                            host.links.remove(link);
+                                            links.remove(link);
                                             host.postAlive(refresh);
                                         }))
                 .setNegativeButton(android.R.string.cancel, null)
@@ -302,8 +307,8 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
         run(
                 () -> {
                     List<ItemLinks.Placement> found =
-                            host.mail.linkPlacements(words, ItemLinks.FOUND);
-                    found.addAll(host.links.search(words));
+                            mail.linkPlacements(words, ItemLinks.FOUND);
+                    found.addAll(links.search(words));
                     host.postAlive(
                             () -> {
                                 if (!dialog.isShowing()) {
@@ -340,7 +345,7 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
     private void link(ItemLinks.Endpoint self, ItemLinks.Placement other, Runnable refresh) {
         run(
                 () -> {
-                    boolean linked = host.links.add(self, other.endpoint);
+                    boolean linked = links.add(self, other.endpoint);
                     host.postAlive(
                             () -> {
                                 if (linked) {
@@ -364,30 +369,27 @@ public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
                 run(
                         () -> {
                             MailStore.StoredMessage message =
-                                    host.mail.message(other.collection, linkId);
+                                    mail.message(other.collection, linkId);
                             host.postAlive(
                                     () -> {
                                         if (message == null) {
                                             gone();
                                         } else {
-                                            host.messageView.open(message);
+                                            shell.openMessage(message);
                                         }
                                     });
                         });
                 break;
             case PimdirSummary.CONTACT:
-                Group group = host.contactGroupOf(linkId);
-                if (group == null) {
+                if (!shell.openContact(linkId)) {
                     gone();
-                } else {
-                    host.openGroup(group);
                 }
                 break;
             case PimdirSummary.CALENDAR:
-                host.openEvent(other.collection, linkId, this::gone);
+                shell.openEvent(other.collection, linkId, this::gone);
                 break;
             default:
-                host.filesList.openFile(other.collection, linkId);
+                shell.openFile(other.collection, linkId);
                 break;
         }
     }

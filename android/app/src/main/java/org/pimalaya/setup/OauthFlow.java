@@ -8,14 +8,15 @@ import android.widget.TextView;
 import java.net.InetAddress;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.Oauth;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.OauthSession;
 import org.pimalaya.client.OauthTokens;
+import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
 import org.pimalaya.client.ServerMetadata;
+import org.pimalaya.ui.Host;
 import org.pimalaya.ui.PillField;
 
 /**
@@ -42,7 +43,9 @@ public final class OauthFlow {
                 String scope);
     }
 
-    private final MainActivity host;
+    private final Host host;
+    private final PimalayaClient client;
+    private final SetupShell shell;
 
     /** The in-flight grant as persisted, sealed across the browser hop. */
     private final PendingGrantStore grants;
@@ -88,8 +91,10 @@ public final class OauthFlow {
     /** The loopback redirect listener, closed with the activity. */
     private java.net.ServerSocket loopbackServer;
 
-    public OauthFlow(MainActivity host) {
+    public OauthFlow(Host host, PimalayaClient client, SetupShell shell) {
         this.host = host;
+        this.client = client;
+        this.shell = shell;
         this.grants = new PendingGrantStore(host);
     }
 
@@ -395,7 +400,7 @@ public final class OauthFlow {
                     }
                 });
 
-        host.showAuth(OnboardingFlow.STEP_OAUTH);
+        shell.showAuth(OnboardingFlow.STEP_OAUTH);
         host.setAuthLoading(R.id.oauth_continue, R.id.oauth_progress, false);
         ready.run();
     }
@@ -427,7 +432,7 @@ public final class OauthFlow {
                     try {
                         ServerMetadata metadata;
                         try (Transport transport = new Transport()) {
-                            metadata = host.client.oauthServerMetadata(transport, issuer);
+                            metadata = client.oauthServerMetadata(transport, issuer);
                         }
                         if (metadata.authorizationEndpoint == null
                                 || metadata.tokenEndpoint == null) {
@@ -464,7 +469,7 @@ public final class OauthFlow {
                         String clientId;
                         try (Transport transport = new Transport()) {
                             clientId =
-                                    host.client.oauthRegisterClient(
+                                    client.oauthRegisterClient(
                                             transport,
                                             metadata.registrationEndpoint,
                                             Oauth.REDIRECT_URI,

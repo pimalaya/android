@@ -13,19 +13,23 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.ContactStager;
+import org.pimalaya.mail.MailStager;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.DeletedItems;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.Stager;
+import org.pimalaya.sync.SyncPasses;
+import org.pimalaya.ui.Host;
+import org.pimalaya.ui.Panels;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -33,6 +37,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.function.Consumer;
 
 /**
  * Deleted items: every item the store keeps after its deletion, across
@@ -48,17 +53,35 @@ public final class DeletedItemsPage {
     /** Rows shown at first and added by each "Show more". */
     private static final int SHOWN = 100;
 
-    private final MainActivity host;
+    private final Host host;
+    private final SyncPasses.Parts parts;
+    private final SyncPasses passes;
+
+    /** The activity's live account list (mutated on the main thread). */
+    private final List<AccountEntry> accounts;
+
+    /** Reloads one domain's list after a restore. */
+    private final Consumer<PimDomain> reload;
+
     private final Adapter adapter = new Adapter();
 
     private List<DeletedItems.Row> rows = new ArrayList<>();
     private int shown = SHOWN;
 
     /** The screen the page was raised over, restored on the way out. */
-    private int cameFrom = MainActivity.PANEL_MAIL;
+    private int cameFrom = Panels.MAIL;
 
-    public DeletedItemsPage(MainActivity host) {
+    public DeletedItemsPage(
+            Host host,
+            SyncPasses.Parts parts,
+            SyncPasses passes,
+            List<AccountEntry> accounts,
+            Consumer<PimDomain> reload) {
         this.host = host;
+        this.parts = parts;
+        this.passes = passes;
+        this.accounts = accounts;
+        this.reload = reload;
     }
 
     public void setUp() {
@@ -84,19 +107,19 @@ public final class DeletedItemsPage {
         shown = SHOWN;
         adapter.notifyDataSetChanged();
         ((TextView) host.findViewById(R.id.deleted_summary)).setText("");
-        host.openOverlay(MainActivity.PANEL_DELETED);
+        host.openOverlay(Panels.DELETED);
         load();
     }
 
     /** Closes the page onto the drawer it was opened over. */
     public void leave() {
-        host.closeOverlay(MainActivity.PANEL_DELETED);
+        host.closeOverlay(Panels.DELETED);
         host.screen = cameFrom;
         host.applyChrome(cameFrom);
     }
 
     private DeletedItems store() {
-        return new DeletedItems(host.pimdir, host);
+        return new DeletedItems(parts.pimdir(), host);
     }
 
     /** Reads the rows and the bytes off the main thread, then renders them. */
@@ -220,11 +243,11 @@ public final class DeletedItemsPage {
     private List<PimdirCollections.Stored> candidates(String kind) {
         switch (kind) {
             case PimdirSummary.MAIL:
-                return new PimdirCollections(host.pimdir, host).list(PimdirSummary.MAIL);
+                return new PimdirCollections(parts.pimdir(), host).list(PimdirSummary.MAIL);
             case PimdirSummary.CONTACT:
-                return host.collectionsOf(PimDomain.CONTACTS);
+                return passes.collectionsOf(PimDomain.CONTACTS);
             default:
-                return host.collectionsOf(PimDomain.CALENDAR);
+                return passes.collectionsOf(PimDomain.CALENDAR);
         }
     }
 
@@ -234,7 +257,7 @@ public final class DeletedItemsPage {
      * and JMAP pushing none yet.
      */
     private boolean appends(String email) {
-        for (AccountEntry account : host.accounts) {
+        for (AccountEntry account : accounts) {
             if (account.email.equals(email)) {
                 Account server = account.server(PimDomain.MAIL);
                 return server != null
@@ -256,13 +279,13 @@ public final class DeletedItemsPage {
                         Stager engine;
                         switch (row.kind) {
                             case PimdirSummary.MAIL:
-                                engine = host.mailStager();
+                                engine = new MailStager(parts.pimdir(), parts.client());
                                 break;
                             case PimdirSummary.CONTACT:
-                                engine = new ContactStager(host.pimdir, host.client);
+                                engine = new ContactStager(parts.pimdir(), parts.client());
                                 break;
                             default:
-                                engine = host.calendarStager();
+                                engine = new CalendarStager(parts.pimdir(), parts.client());
                         }
                         store().restore(engine, row, target);
                     } catch (DeletedItems.RefusedException refused) {
@@ -285,9 +308,9 @@ public final class DeletedItemsPage {
                                     return;
                                 }
                                 host.toast(host.getString(R.string.deleted_restored));
-                                host.reloadContacts();
-                                host.calendarList.reload();
-                                host.mailList.reload();
+                                reload.accept(PimDomain.CONTACTS);
+                                reload.accept(PimDomain.CALENDAR);
+                                reload.accept(PimDomain.MAIL);
                                 load();
                             });
                 });
@@ -327,7 +350,7 @@ public final class DeletedItemsPage {
                 () -> {
                     Exception failure = null;
                     try {
-                        synchronized (host.pimdir.locks().store) {
+                        synchronized (parts.pimdir().locks().store) {
                             store().purgeBefore(cutoff);
                         }
                     } catch (Exception error) {
@@ -429,7 +452,7 @@ public final class DeletedItemsPage {
     /** A collection of the row's kind as the reader is shown it. */
     private String label(DeletedItems.Row row, PimdirCollections.Stored collection) {
         return PimdirSummary.MAIL.equals(row.kind)
-                ? host.mail.mailboxLabel(collection)
+                ? parts.mail().mailboxLabel(collection)
                 : collection.name;
     }
 

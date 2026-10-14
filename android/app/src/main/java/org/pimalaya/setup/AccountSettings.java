@@ -19,8 +19,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.function.IntConsumer;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.AccountCredential;
@@ -32,6 +32,7 @@ import org.pimalaya.calendar.PhoneCalendars;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.BookEntry;
+import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.mail.MailScope;
 import org.pimalaya.mail.SenderName;
 import org.pimalaya.mail.WindowPicker;
@@ -39,9 +40,12 @@ import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.sync.BackgroundCheck;
+import org.pimalaya.sync.SyncCoordinator;
 import org.pimalaya.sync.SyncPasses;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.Host;
+import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.PillField;
 import org.pimalaya.ui.Sections;
 import org.pimalaya.ui.SyncPill;
@@ -55,7 +59,19 @@ import org.pimalaya.ui.SyncPill;
  * calls in through {@link #open} and {@link #leave}.
  */
 public final class AccountSettings {
-    private final MainActivity host;
+    private final Host host;
+    private final SyncPasses.Parts parts;
+    private final PimdirContacts contacts;
+
+    /** The activity's live account list (mutated on the main thread). */
+    private final List<AccountEntry> accounts;
+
+    private final SyncCoordinator sync;
+
+    /** The mail list's read executor, the window picker's counts run on. */
+    private final Executor mailReads;
+
+    private final SetupShell shell;
 
     /** The account whose settings screen is open (null outside it). */
     private String settingsEmail;
@@ -66,7 +82,7 @@ public final class AccountSettings {
      * list is still there underneath: landing the chrome on a different
      * one would leave the bar describing a screen nobody navigated to.
      */
-    private int cameFrom = MainActivity.PANEL_MAIL;
+    private int cameFrom = Panels.MAIL;
 
     /**
      * Whether another app already fills the phone's Contacts app with the
@@ -78,8 +94,21 @@ public final class AccountSettings {
     /** The same for the phone's calendars ({@link Accounts#calendarsElsewhere}). */
     private boolean calendarsElsewhere;
 
-    public AccountSettings(MainActivity host) {
+    public AccountSettings(
+            Host host,
+            SyncPasses.Parts parts,
+            PimdirContacts contacts,
+            List<AccountEntry> accounts,
+            SyncCoordinator sync,
+            Executor mailReads,
+            SetupShell shell) {
         this.host = host;
+        this.parts = parts;
+        this.contacts = contacts;
+        this.accounts = accounts;
+        this.sync = sync;
+        this.mailReads = mailReads;
+        this.shell = shell;
     }
 
     /** Wires the page's bar, scroll and remove button, once laid out. */
@@ -115,7 +144,7 @@ public final class AccountSettings {
         elsewhere = false;
         calendarsElsewhere = false;
         render();
-        host.openOverlay(MainActivity.PANEL_ACCOUNT);
+        host.openOverlay(Panels.ACCOUNT);
 
         // NOTE: one provider query each, off the main thread.
         host.io.execute(
@@ -136,7 +165,7 @@ public final class AccountSettings {
     /** Rebuilds the page from what the account holds now. */
     private void render() {
         String email = settingsEmail;
-        AccountEntry account = host.accountFor(email);
+        AccountEntry account = AccountEntry.find(accounts, email);
         if (account == null) {
             return;
         }
@@ -188,7 +217,7 @@ public final class AccountSettings {
                         host,
                         AccountActivation.enabled(host, email),
                         SyncStamps.at(host, email),
-                        host.bodiesLeft(email)),
+                        sync.bodiesLeft(email)),
                 new FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.WRAP_CONTENT,
                         FrameLayout.LayoutParams.MATCH_PARENT));
@@ -204,8 +233,8 @@ public final class AccountSettings {
         toggle.setOnCheckedChangeListener(
                 (view, checked) -> {
                     AccountActivation.set(host, email, checked);
-                    host.reloadContacts();
-                    host.filterChanged();
+                    shell.reload(PimDomain.CONTACTS);
+                    shell.filterChanged();
                     render();
                 });
         sections.section(
@@ -239,7 +268,7 @@ public final class AccountSettings {
                         () -> promptSenderName(email)));
 
         String[] scopes = host.getResources().getStringArray(R.array.mail_scopes);
-        int scope = scopeIndex(host.mail.monthsOf(email));
+        int scope = scopeIndex(parts.mail().monthsOf(email));
         rows.add(
                 sections.row(
                         host.getString(R.string.mail_scope_title),
@@ -255,7 +284,7 @@ public final class AccountSettings {
 
         // NOTE: later frees the bodies below, asked first; "Load more" alone
         // takes in older mail.
-        String window = host.mail.windowOf(email);
+        String window = parts.mail().windowOf(email);
         rows.add(
                 sections.row(
                         host.getString(R.string.account_window_title),
@@ -268,10 +297,10 @@ public final class AccountSettings {
                         () ->
                                 WindowPicker.open(
                                         host,
-                                        host.mail,
-                                        host.sync,
-                                        host.mailList.reads(),
-                                        host.mail.query(
+                                        parts.mail(),
+                                        sync,
+                                        mailReads,
+                                        parts.mail().query(
                                                 (owner, collection) -> owner.equals(email),
                                                 false,
                                                 false,
@@ -317,10 +346,10 @@ public final class AccountSettings {
                 () -> {
                     // NOTE: a narrower bound collects, so not while a
                     // background run writes the same rows.
-                    host.underSyncLock(
+                    sync.underSyncLock(
                             R.string.mail_scope_failed,
                             () -> {
-                                int collected = host.mail.bound(email, months);
+                                int collected = parts.mail().bound(email, months);
                                 Log.d(
                                         "pimalaya",
                                         "mail of " + email + " bounded to " + months
@@ -328,7 +357,7 @@ public final class AccountSettings {
                             });
                     host.postAlive(
                             () -> {
-                                host.mailList.reload();
+                                shell.reload(PimDomain.MAIL);
                                 renderIfOpen(email);
                             });
                 });
@@ -390,7 +419,7 @@ public final class AccountSettings {
                             BackgroundCheck.setNotifies(host, email, false);
                             return;
                         }
-                        host.askNotifications(
+                        shell.askNotifications(
                                 granted -> {
                                     BackgroundCheck.setNotifies(host, email, granted);
                                     notify.setChecked(granted);
@@ -422,7 +451,7 @@ public final class AccountSettings {
         boolean permitted = PhoneMirror.CONTACTS.granted(host);
         List<BookEntry> entries = new ArrayList<>();
         boolean accountOnPhone = false;
-        for (BookEntry entry : host.base.loadAllAddressbooks()) {
+        for (BookEntry entry : parts.cards().loadAllAddressbooks()) {
             if (entry.accountEmail.equals(email)) {
                 entries.add(entry);
                 accountOnPhone |= entry.subscribed && entry.phoneSynced;
@@ -504,26 +533,26 @@ public final class AccountSettings {
         if (!local || wasShown && PhoneMirror.CONTACTS.granted(host)) {
             writeBook(url, enabled, remote, local);
             if (wasShown && !local) {
-                host.hideFromPhone(url);
+                sync.hideFromPhone(url);
             }
             return;
         }
-        host.askMirrors(
+        shell.askMirrors(
                 java.util.EnumSet.of(PhoneMirror.CONTACTS),
                 granted -> {
                     boolean phone = granted.contains(PhoneMirror.CONTACTS);
                     writeBook(url, enabled, remote, phone);
                     if (phone) {
-                        host.showOnPhone(url);
+                        sync.showOnPhone(url);
                     }
                 });
     }
 
     /** Writes a book's switches as they are; the contacts root follows them. */
     private void writeBook(String url, boolean enabled, boolean remote, boolean local) {
-        host.base.setBookState(url, enabled, remote, local);
-        host.reloadContacts();
-        host.filterChanged();
+        parts.cards().setBookState(url, enabled, remote, local);
+        shell.reload(PimDomain.CONTACTS);
+        shell.filterChanged();
         render();
     }
 
@@ -541,7 +570,7 @@ public final class AccountSettings {
         }
         List<String> ids = new ArrayList<>();
         List<PimdirCollections.Stored> calendars = new ArrayList<>();
-        for (PimdirCollections.Stored calendar : host.collectionsOf(PimDomain.CALENDAR)) {
+        for (PimdirCollections.Stored calendar : sync.passes().collectionsOf(PimDomain.CALENDAR)) {
             if (calendar.accountEmail.equals(email)) {
                 ids.add(calendar.id);
                 calendars.add(calendar);
@@ -581,15 +610,15 @@ public final class AccountSettings {
     private void setCalendar(String email, String calendar, boolean on, List<String> siblings) {
         if (!on) {
             PhoneCalendars.set(host, email, calendar, false, siblings);
-            host.reconcileCalendars();
+            sync.reconcileCalendars();
             return;
         }
-        host.askMirrors(
+        shell.askMirrors(
                 java.util.EnumSet.of(PhoneMirror.CALENDAR),
                 granted -> {
                     if (granted.contains(PhoneMirror.CALENDAR)) {
                         PhoneCalendars.set(host, email, calendar, true, siblings);
-                        host.reconcileCalendars();
+                        sync.reconcileCalendars();
                     }
                     render();
                 });
@@ -825,7 +854,7 @@ public final class AccountSettings {
                         host.toast(host.getString(R.string.server_insecure));
                         return;
                     }
-                    host.store.submitThrough(email, url);
+                    parts.accounts().submitThrough(email, url);
                     render();
                 });
     }
@@ -859,7 +888,7 @@ public final class AccountSettings {
     /** Leaves the settings screen, landing on the still-open drawer. */
     public void leave() {
         settingsEmail = null;
-        host.closeOverlay(MainActivity.PANEL_ACCOUNT);
+        host.closeOverlay(Panels.ACCOUNT);
         host.screen = cameFrom;
         host.applyChrome(cameFrom);
         // NOTE: the drawer never closed under the overlay, so its rows
@@ -873,7 +902,7 @@ public final class AccountSettings {
      */
     private void confirmDeleteAccount(String email) {
         // NOTE: a running pass would write the account back as it goes.
-        if (host.isSyncing()) {
+        if (sync.isSyncing()) {
             host.toast(host.getString(R.string.sync_busy));
             return;
         }
@@ -885,7 +914,7 @@ public final class AccountSettings {
                         R.string.delete_account,
                         (dialog, which) -> {
                             deleteAccount(email);
-                            if (host.screen == MainActivity.PANEL_ACCOUNT) {
+                            if (host.screen == Panels.ACCOUNT) {
                                 leave();
                             }
                         })
@@ -894,22 +923,16 @@ public final class AccountSettings {
     }
 
     private void deleteAccount(String email) {
-        List<String> urls =
-                new AccountRemoval(
-                                host,
-                                new SyncPasses.Parts(
-                                        host.pimdir, host.base, host.store, host.mail, host.events, host.client),
-                                host.contacts)
-                        .remove(email);
-        host.accounts.removeIf(entry -> entry.email.equals(email));
+        List<String> urls = new AccountRemoval(host, parts, contacts).remove(email);
+        accounts.removeIf(entry -> entry.email.equals(email));
         host.reloadHome();
-        host.mailList.reload();
-        host.calendarList.reload();
+        shell.reload(PimDomain.MAIL);
+        shell.reload(PimDomain.CALENDAR);
 
         // NOTE: the deleted books' phone accounts go explicitly (their
         // rows are already gone, so a reconcile could not name them);
         // reconciling the remaining phone-synced set sweeps any straggler.
-        List<BookEntry> phoneBooks = host.phoneSyncedBooks();
+        List<BookEntry> phoneBooks = sync.passes().phoneSyncedBooks();
         host.io.execute(() -> {
             try {
                 for (String url : urls) {
@@ -922,6 +945,6 @@ public final class AccountSettings {
         });
         // NOTE: its calendar account goes the same way, the store having
         // forgotten its calendars.
-        host.reconcileCalendars();
+        sync.reconcileCalendars();
     }
 }

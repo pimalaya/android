@@ -3,6 +3,7 @@ package org.pimalaya.account;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -52,6 +53,16 @@ public final class AccountEntry {
     public static AccountEntry of(
             String email, PimDomain domain, String baseUrl, AccountCredential credential) {
         return empty(email).with(domain, baseUrl, credential);
+    }
+
+    /** The account entry matching an email, or null. */
+    public static AccountEntry find(List<AccountEntry> accounts, String email) {
+        for (AccountEntry entry : accounts) {
+            if (entry.email.equals(email)) {
+                return entry;
+            }
+        }
+        return null;
     }
 
     /**
