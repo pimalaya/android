@@ -11,8 +11,6 @@ import android.widget.ListView;
 import android.widget.TextView;
 
 import java.util.function.Consumer;
-import org.pimalaya.Domains;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 
 /**
@@ -28,7 +26,7 @@ import org.pimalaya.R;
  * reader's attention moves.
  */
 public final class ListHeader {
-    private final MainActivity host;
+    private final Host host;
     private final int panel;
     public final View view;
     final ListView list;
@@ -44,13 +42,13 @@ public final class ListHeader {
     /** Debounced search, so typing does not re-render per keystroke. */
     private Runnable pendingSearch;
 
-    public ListHeader(MainActivity host, ListView list, int panel) {
+    public ListHeader(Host host, ListView list, int panel) {
         this.host = host;
         this.panel = panel;
         this.list = list;
         view = LayoutInflater.from(host).inflate(R.layout.list_header, list, false);
         list.addHeaderView(view, null, false);
-        ((TextView) view.findViewById(R.id.header_title)).setText(Domains.titleOf(panel));
+        ((TextView) view.findViewById(R.id.header_title)).setText(host.titleOf(panel));
 
         list.setOnScrollListener(
                 new AbsListView.OnScrollListener() {

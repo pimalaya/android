@@ -3,6 +3,7 @@ package org.pimalaya.sync;
 import android.Manifest;
 import android.app.job.JobInfo;
 import android.app.job.JobScheduler;
+import android.app.job.JobService;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -11,7 +12,6 @@ import android.os.Build;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Predicate;
-import org.pimalaya.BackgroundJob;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.SecureStore;
@@ -19,7 +19,8 @@ import org.pimalaya.account.SecureStore;
 /**
  * How often each account syncs in the background and whether its new mail
  * notifies, as its settings say, and the periodic job that does it
- * ({@link BackgroundJob}), scheduled while any account takes part.
+ * (the one the application names, {@link Owner}), scheduled while any
+ * account takes part.
  *
  * <p>One job for every account, at the shortest period Android allows: a
  * run takes the accounts whose own interval has passed since they last
@@ -27,6 +28,11 @@ import org.pimalaya.account.SecureStore;
  * interval again.
  */
 public final class BackgroundCheck {
+    /** The application naming the job that runs the check. */
+    public interface Owner {
+        Class<? extends JobService> backgroundJob();
+    }
+
     private static final String PREFS = "background-check";
 
     /** The intervals offered, in minutes, 0 for off; the default is 15. */
@@ -148,8 +154,14 @@ public final class BackgroundCheck {
         if (jobs.getPendingJob(JOB) != null) {
             return;
         }
+        // NOTE: a context outside the app (the e2e harness) names no job.
+        Context app = context.getApplicationContext();
+        if (!(app instanceof Owner)) {
+            return;
+        }
         jobs.schedule(
-                new JobInfo.Builder(JOB, new ComponentName(context, BackgroundJob.class))
+                new JobInfo.Builder(
+                                JOB, new ComponentName(context, ((Owner) app).backgroundJob()))
                         .setPeriodic(PERIOD)
                         .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                         .setPersisted(true)

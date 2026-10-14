@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 
 /**
@@ -22,7 +21,7 @@ import org.pimalaya.R;
 public final class Chips {
     /** Adds one chip to {@code row}, calling {@code onToggle} with each new state. */
     public static void add(
-            MainActivity host, LinearLayout row, int label, int icon, Consumer<Boolean> onToggle) {
+            Host host, LinearLayout row, int label, int icon, Consumer<Boolean> onToggle) {
         TextView chip = chip(host, row, label, icon);
         chip.setOnClickListener(
                 view -> {
@@ -38,7 +37,7 @@ public final class Chips {
      * one on, -1 when none is.
      */
     public static void exclusive(
-            MainActivity host,
+            Host host,
             LinearLayout row,
             int[] labels,
             int[] icons,
@@ -61,7 +60,7 @@ public final class Chips {
         }
     }
 
-    private static TextView chip(MainActivity host, LinearLayout row, int label, int icon) {
+    private static TextView chip(Host host, LinearLayout row, int label, int icon) {
         TextView chip = new TextView(host, null, 0, R.style.Chip);
         chip.setText(label);
         LinearLayout.LayoutParams params =
@@ -72,7 +71,7 @@ public final class Chips {
         return chip;
     }
 
-    private static void draw(MainActivity host, TextView chip, int icon, boolean on) {
+    private static void draw(Host host, TextView chip, int icon, boolean on) {
         chip.setSelected(on);
         chip.setBackgroundResource(on ? R.drawable.button_pill : R.drawable.button_tonal);
         int color =

@@ -23,7 +23,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 
 /**
@@ -85,7 +84,7 @@ public final class SyncDock {
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss");
 
-    private final MainActivity host;
+    private final Host host;
 
     private final View dock;
 
@@ -120,7 +119,7 @@ public final class SyncDock {
     /** The download glyph's pulse while the background download shows. */
     private ObjectAnimator pulse;
 
-    public SyncDock(MainActivity host) {
+    public SyncDock(Host host) {
         this.host = host;
         dock = host.findViewById(R.id.sync_dock);
         dock.setOnClickListener(view -> open());

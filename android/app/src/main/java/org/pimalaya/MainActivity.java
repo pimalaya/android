@@ -1,6 +1,5 @@
 package org.pimalaya;
 
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.job.JobScheduler;
 import android.content.Intent;
@@ -8,8 +7,6 @@ import android.content.pm.PackageManager;
 import android.graphics.Insets;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
@@ -20,7 +17,6 @@ import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
-import android.widget.Toast;
 import android.widget.ViewFlipper;
 import java.net.URL;
 import java.util.ArrayList;
@@ -56,7 +52,6 @@ import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.client.PimalayaException;
 import org.pimalaya.contact.AdvancedEditor;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
@@ -109,9 +104,9 @@ import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.sync.SyncSteps;
 import org.pimalaya.trash.DeletedItemsPage;
 import org.pimalaya.ui.Avatar;
+import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.SyncDock;
-import org.pimalaya.ui.Ui;
 
 /**
  * Single-activity host walking the app's screens through a ViewFlipper.
@@ -129,7 +124,7 @@ import org.pimalaya.ui.Ui;
  * every replica. Accounts live behind the drawer the bar's logo opens;
  * syncs are manual, from there or from the pull-down.
  */
-public class MainActivity extends Activity {
+public class MainActivity extends Host {
     // NOTE: everything from contacts to event is the content flipper's
     // child indexes, in the order activity_main.xml includes them; auth
     // and account are whole-frame overlays sliding over it, bar included
@@ -187,10 +182,8 @@ public class MainActivity extends Activity {
     public static final int REQUEST_FILE_IMPORT = 5;
     public static final int REQUEST_FILE_EXPORT = 6;
 
-    /** The shared backend client, the single-thread io executor, the
-     *  main-thread handler and the theme helper. */
+    /** The shared backend client. */
     public final PimalayaClient client = new PimalayaClient();
-    public final ExecutorService io = Executors.newSingleThreadExecutor();
 
     /**
      * The executor of what someone is waiting on, a message being opened:
@@ -200,9 +193,6 @@ public class MainActivity extends Activity {
      * the store keeping one writer.
      */
     public final ExecutorService interactive = Executors.newSingleThreadExecutor();
-
-    public final Handler main = new Handler(Looper.getMainLooper());
-    public final Ui ui = new Ui(this);
 
     public SecureStore store;
     public CardStore base;
@@ -354,8 +344,9 @@ public class MainActivity extends Activity {
     /** The editor's working state, replaced blank when it leaves. */
     public EditSession edit = new EditSession();
 
-    /** The screen currently shown: a flipper panel, or an overlay. */
-    public int screen = PANEL_ROOT;
+    {
+        screen = PANEL_ROOT;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -976,14 +967,6 @@ public class MainActivity extends Activity {
     private void setUpFab(int id) {
         android.widget.ImageButton fab = findViewById(id);
         fab.setImageTintList(android.content.res.ColorStateList.valueOf(accentContrast()));
-    }
-
-    /** Black or white, whichever reads on the accent colour. */
-    public int accentContrast() {
-        int accent = resolveColor(android.R.attr.colorAccent);
-        return android.graphics.Color.luminance(accent) > 0.5f
-                ? android.graphics.Color.BLACK
-                : android.graphics.Color.WHITE;
     }
 
     @Override
@@ -3780,6 +3763,7 @@ public class MainActivity extends Activity {
     }
 
     /** Fades the bar's title in or out as a large title leaves or returns. */
+    @Override
     public void showBarTitle(boolean shown) {
         if (screen == PANEL_CONTACTS && contactsList.isSelectionMode()
                 || screen == PANEL_MAIL && mailList.isSelectionMode()) {
@@ -3788,7 +3772,13 @@ public class MainActivity extends Activity {
         findViewById(R.id.bar_title).animate().alpha(shown ? 1f : 0f).setDuration(150);
     }
 
+    @Override
+    public int titleOf(int panel) {
+        return Domains.titleOf(panel);
+    }
+
     /** The large title heading one list. */
+    @Override
     public ListHeader headerOf(int panel) {
         if (panel == PANEL_MAIL) {
             return mailList.header();
@@ -3833,6 +3823,7 @@ public class MainActivity extends Activity {
      * the width animates between the two while the label fades, so the
      * button itself shrinks rather than only losing its text.
      */
+    @Override
     public void foldFab(boolean folded) {
         if (folded == fabFolded) {
             return;
@@ -4649,11 +4640,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** Resolves a theme colour attribute to an ARGB int. */
-    public int resolveColor(int attr) {
-        return ui.resolveColor(attr);
-    }
-
     /** Dismisses the soft keyboard, e.g. when leaving the edit form. */
     public void hideKeyboard() {
         // NOTE: fall back to the flipper's window token when nothing
@@ -4700,47 +4686,6 @@ public class MainActivity extends Activity {
                     .show();
         }
         return stored;
-    }
-
-    public String message(Exception error, int fallback) {
-        String message = error.getMessage();
-        return message == null || message.isEmpty() ? getString(fallback) : message;
-    }
-
-    public void toast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-    }
-
-    /**
-     * Posts a UI continuation that only runs while the activity is
-     * alive: the io executor's sync outcomes land here, and one
-     * arriving after a rotation or a finish would raise dialogs
-     * against a dead window (BadTokenException).
-     */
-    public void postAlive(Runnable action) {
-        main.post(
-                () -> {
-                    if (!isDestroyed()) {
-                        action.run();
-                    }
-                });
-    }
-
-    /**
-     * Shows an error in a dismissible dialog rather than a toast: the
-     * full (often long, e.g. a server body) message stays on screen and
-     * scrolls until acknowledged.
-     */
-    public void showError(Exception error, int fallback) {
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.error_title)
-                .setMessage(message(error, fallback))
-                .setPositiveButton(android.R.string.ok, null)
-                .show();
-    }
-
-    public int dp(int value) {
-        return ui.dp(value);
     }
 
     /** A dimen resource in pixels (the shared item_* metrics). */

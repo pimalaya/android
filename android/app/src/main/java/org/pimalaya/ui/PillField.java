@@ -6,7 +6,6 @@ import android.view.Gravity;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 
 /**
@@ -24,7 +23,7 @@ public final class PillField {
         this.input = input;
     }
 
-    public static PillField of(MainActivity host, int hint, String value, boolean secret, boolean onCard) {
+    public static PillField of(Host host, int hint, String value, boolean secret, boolean onCard) {
         LinearLayout pill = new LinearLayout(host);
         pill.setOrientation(LinearLayout.HORIZONTAL);
         pill.setGravity(Gravity.CENTER_VERTICAL);

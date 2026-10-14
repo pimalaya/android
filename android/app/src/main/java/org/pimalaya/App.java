@@ -1,6 +1,7 @@
 package org.pimalaya;
 
 import android.app.Application;
+import android.app.job.JobService;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
@@ -12,12 +13,13 @@ import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.sync.BackgroundCheck;
 
 /**
  * The process: the one holder of what every screen, service and job of the
  * app shares. Nothing runs at creation; each part opens when first asked for.
  */
-public final class App extends Application implements PhoneQueue.Owner {
+public final class App extends Application implements PhoneQueue.Owner, BackgroundCheck.Owner {
     /** The stamps the activity, the background check and the sync adapters share. */
     final AppState state = new AppState();
 
@@ -57,6 +59,11 @@ public final class App extends Application implements PhoneQueue.Owner {
             cards = new CardStore(this, pimdir());
         }
         return cards;
+    }
+
+    @Override
+    public Class<? extends JobService> backgroundJob() {
+        return BackgroundJob.class;
     }
 
     @Override
