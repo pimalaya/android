@@ -1,10 +1,12 @@
 package org.pimalaya.account;
 
+import android.util.Log;
 import java.net.URI;
 import java.util.Collection;
 import java.util.Locale;
 import java.util.Set;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.ServiceConfig;
 
 /**
  * Where the connection flow lets a credential go, and how it names that place
@@ -58,6 +60,81 @@ public final class Endpoints {
         String scheme = scheme(url);
         boolean smtp = "smtps".equals(scheme) || "smtp".equals(scheme);
         return smtp && host(url) != null ? url : null;
+    }
+
+    /**
+     * The endpoint one discovered SMTP config submits through, or null when it
+     * is no SMTP config or names a security this client does not drive: an
+     * implicit-TLS one behind {@code smtps://}, a STARTTLS one behind
+     * {@code smtp://}.
+     */
+    public static String submissionUrl(ServiceConfig config) {
+        if (!"smtp".equals(config.service) || config.host == null) {
+            return null;
+        }
+        boolean tls = "tls".equalsIgnoreCase(config.security);
+        if (!tls && !"starttls".equalsIgnoreCase(config.security)) {
+            Log.w(
+                    "pimalaya",
+                    "skip smtp at " + config.host + ": unsupported security " + config.security);
+            return null;
+        }
+        return (tls ? "smtps://" : "smtp://") + config.host + ":" + config.port;
+    }
+
+    /**
+     * A mail endpoint signed in to with a token, naming {@code email} as its
+     * user: a token signs in to IMAP and SMTP with SASL XOAUTH2, which names
+     * its user beside the token, and the URL is where that user lives (RFC
+     * 5092 section 3.2), the credential staying the bare token every other
+     * protocol sends. Any other endpoint is returned as it is.
+     */
+    public static String asUser(String url, String email) {
+        return url.startsWith("imap") || url.startsWith("smtp")
+                ? PimalayaClient.withUser(url, email)
+                : url;
+    }
+
+    /**
+     * The URL an account for {@code email} connects to for one discovered
+     * config, or null when this app cannot drive it.
+     *
+     * <p>An HTTP endpoint arrives ready to use, when it is https. A TCP one does not: discovery
+     * reports a host, a port and a security mode, and the scheme is the client's
+     * to choose. Only implicit TLS is offered, because the IMAP client has no
+     * STARTTLS step, and a {@code starttls} endpoint driven as if it were
+     * implicit would connect in the clear rather than fail.
+     */
+    public static String endpointUrl(ServiceConfig config, String email) {
+        if ("msgraph".equals(config.service) || "msgraphCalendar".equals(config.service)) {
+            return PimalayaClient.msgraphBase(email);
+        }
+        if ("gmail".equals(config.service) || "gcal".equals(config.service)) {
+            return PimalayaClient.googleBase(email);
+        }
+        if (config.url != null) {
+            // NOTE: an HTTP endpoint is https or nothing: a plain one, from a
+            // PACC document or an autoconfig, would carry the password in
+            // clear.
+            if (!"https".equals(Endpoints.scheme(config.url))) {
+                Log.w("pimalaya", "skip " + config.service + ": not https");
+                return null;
+            }
+            return "jmap".equals(config.service)
+                    ? PimalayaClient.jmapBase(config.url)
+                    : config.url;
+        }
+        if (config.host == null || !"imap".equals(config.service)) {
+            return null;
+        }
+        if (!"tls".equalsIgnoreCase(config.security)) {
+            Log.w(
+                    "pimalaya",
+                    "skip " + config.service + " at " + config.host
+                            + ": unsupported security " + config.security);
+            return null;
+        }
+        return "imaps://" + config.host + ":" + config.port;
     }
 
     /** The scheme of an endpoint, lowercased; null when it has none. */

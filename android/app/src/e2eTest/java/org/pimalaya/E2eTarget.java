@@ -3,10 +3,10 @@ package org.pimalaya;
 import org.pimalaya.account.AccountConnection;
 import org.pimalaya.account.AccountCredential;
 import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.Endpoints;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.ServiceConfig;
-import org.pimalaya.setup.OnboardingFlow;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -266,7 +266,7 @@ final class E2eTarget {
         for (ServiceConfig config : configs) {
             found.add(config.service);
             if (base == null && service.equals(config.service)) {
-                base = OnboardingFlow.endpointUrl(config, address);
+                base = Endpoints.endpointUrl(config, address);
             }
         }
         if (base == null) {
@@ -277,7 +277,7 @@ final class E2eTarget {
         if (smtp) {
             List<String> submits = new ArrayList<>();
             for (ServiceConfig config : configs) {
-                String url = OnboardingFlow.submissionUrl(config);
+                String url = Endpoints.submissionUrl(config);
                 if (url != null) {
                     submits.add(url);
                 }
@@ -293,8 +293,8 @@ final class E2eTarget {
         }
 
         if (domain == PimDomain.MAIL && login.isEmpty()) {
-            base = OnboardingFlow.asUser(base, address);
-            submit = submit == null ? null : OnboardingFlow.asUser(submit, address);
+            base = Endpoints.asUser(base, address);
+            submit = submit == null ? null : Endpoints.asUser(submit, address);
         }
         return AccountEntry.empty(address)
                 .with(domain, base, submit, AccountCredential.password(login, secret.call()));

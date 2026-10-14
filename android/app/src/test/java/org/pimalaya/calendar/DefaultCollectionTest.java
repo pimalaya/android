@@ -169,6 +169,31 @@ public class DefaultCollectionTest {
         assertEquals("john", choice.direct.name);
     }
 
+    /** The Default chip keeps one collection per account listed, none for an account without. */
+    @Test
+    public void theDefaultChipKeepsOneDefaultPerAccount() {
+        events.replaceCalendars(
+                JANE,
+                List.of(calendar("jane", Calendar.DEFAULT, true), calendar("team", "", true)));
+        events.replaceCalendars(JOHN, List.of(calendar("b", "", true), calendar("c", "", true)));
+        Set<String> jane = new HashSet<>();
+        String b = null;
+        for (PimdirCollections.Stored calendar : calendars()) {
+            if (calendar.name.equals("jane")) {
+                jane.add(calendar.id);
+            } else if (calendar.name.equals("b")) {
+                b = calendar.id;
+            }
+        }
+
+        assertEquals(jane, DefaultCollection.shown(context, PimdirSummary.CALENDAR, calendars()));
+
+        DefaultCollection.choose(context, JOHN, PimdirSummary.CALENDAR, b);
+        Set<String> both = new HashSet<>(jane);
+        both.add(b);
+        assertEquals(both, DefaultCollection.shown(context, PimdirSummary.CALENDAR, calendars()));
+    }
+
     /** A book's role comes through the roster the same way. */
     @Test
     public void aBooksRoleIsStored() {

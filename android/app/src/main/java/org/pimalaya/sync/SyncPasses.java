@@ -602,15 +602,9 @@ public final class SyncPasses {
         }
     }
 
-    /** The stored accounts connected for one domain. */
+    /** The stored accounts connected for one domain ({@link SecureStore#accountsFor}). */
     public List<AccountEntry> accountsFor(PimDomain domain) {
-        List<AccountEntry> matching = new ArrayList<>();
-        for (AccountEntry entry : store.loadAll()) {
-            if (entry.covers(domain)) {
-                matching.add(entry);
-            }
-        }
-        return matching;
+        return store.accountsFor(domain);
     }
 
     /**
@@ -1014,17 +1008,7 @@ public final class SyncPasses {
             case CALENDAR:
                 return collections.list(PimdirSummary.CALENDAR);
             default:
-                java.util.Set<String> subscribed = new java.util.HashSet<>();
-                for (BookEntry book : base.loadSubscribedAddressbooks()) {
-                    subscribed.add(book.book.url);
-                }
-                List<PimdirCollections.Stored> books = new ArrayList<>();
-                for (PimdirCollections.Stored book : collections.list(PimdirSummary.CONTACT)) {
-                    if (subscribed.contains(book.id)) {
-                        books.add(book);
-                    }
-                }
-                return books;
+                return base.subscribedBooks(collections);
         }
     }
 }

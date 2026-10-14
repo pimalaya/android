@@ -398,6 +398,24 @@ public class CardStore extends SQLiteOpenHelper {
     }
 
     /**
+     * The subscribed address books as the store holds them, every account's,
+     * the on-device one among them.
+     */
+    public List<PimdirCollections.Stored> subscribedBooks(PimdirCollections collections) {
+        java.util.Set<String> subscribed = new java.util.HashSet<>();
+        for (BookEntry book : loadSubscribedAddressbooks()) {
+            subscribed.add(book.book.url);
+        }
+        List<PimdirCollections.Stored> books = new ArrayList<>();
+        for (PimdirCollections.Stored book : collections.list(PimdirSummary.CONTACT)) {
+            if (subscribed.contains(book.id)) {
+                books.add(book);
+            }
+        }
+        return books;
+    }
+
+    /**
      * Every known addressbook, subscribed or not (drives the subscription
      * editor): the store's contact collections, each carrying the switches this
      * database holds for it.

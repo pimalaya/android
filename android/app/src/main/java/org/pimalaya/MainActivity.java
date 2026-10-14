@@ -2383,47 +2383,10 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         return roster;
     }
 
-    /**
-     * Drops what the filters, the defaults and the account switch held of an
-     * account being deleted, before its collections go.
-     */
-    public void forgetViews(String email) {
-        for (PimDomain domain : PimDomain.values()) {
-            List<PimdirCollections.Stored> collections =
-                    domain == PimDomain.MAIL
-                            ? mail.loadMailboxes(List.of(email))
-                            : collectionsOf(domain);
-            List<String> ids = new ArrayList<>();
-            for (PimdirCollections.Stored collection : collections) {
-                if (collection.accountEmail.equals(email)) {
-                    ids.add(collection.id);
-                }
-            }
-            filterOf(domain).forget(email, ids);
-        }
-        DefaultCollection.forget(this, email);
-        AccountActivation.set(this, email, true);
-    }
-
-    /**
-     * The default collection of every account a domain's filter shows: what
-     * the Default chip narrows a list to ({@link DefaultCollection}).
-     */
+    /** The default collection of every account of a domain ({@link DefaultCollection#shown}). */
     public java.util.Set<String> shownDefaults(PimDomain domain) {
         String kind = domain == PimDomain.CALENDAR ? PimdirSummary.CALENDAR : PimdirSummary.CONTACT;
-        List<PimdirCollections.Stored> collections = collectionsOf(domain);
-        java.util.Set<String> emails = new java.util.LinkedHashSet<>();
-        for (PimdirCollections.Stored collection : collections) {
-            emails.add(collection.accountEmail);
-        }
-        java.util.Set<String> defaults = new java.util.HashSet<>();
-        for (String email : emails) {
-            PimdirCollections.Stored found = DefaultCollection.of(this, email, kind, collections);
-            if (found != null) {
-                defaults.add(found.id);
-            }
-        }
-        return defaults;
+        return DefaultCollection.shown(this, kind, collectionsOf(domain));
     }
 
     /** Navigates forward: the panels slide in from the right. */

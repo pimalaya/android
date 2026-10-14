@@ -26,7 +26,6 @@ import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.AccountCredential;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.Endpoints;
-import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.calendar.PhoneCalendars;
@@ -40,7 +39,7 @@ import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.sync.BackgroundCheck;
-import org.pimalaya.sync.FirstSync;
+import org.pimalaya.sync.SyncPasses;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.PillField;
@@ -893,43 +892,13 @@ public final class AccountSettings {
     }
 
     private void deleteAccount(String email) {
-        // NOTE: remember the books' URLs to remove the phone accounts
-        // that mirrored them.
-        List<String> urls = new ArrayList<>();
-        for (BookEntry entry : host.base.loadAllAddressbooks()) {
-            if (entry.accountEmail.equals(email)) {
-                urls.add(entry.book.url);
-            }
-        }
-        List<String> calendars = new ArrayList<>();
-        for (PimdirCollections.Stored calendar : host.collectionsOf(PimDomain.CALENDAR)) {
-            if (calendar.accountEmail.equals(email)) {
-                calendars.add(calendar.id);
-            }
-        }
-        // NOTE: before its collections go, which is what names them.
-        host.forgetViews(email);
-        PhoneCalendars.forget(host, email, calendars);
-
-        // NOTE: the account and every domain it covered. The screen shows the
-        // contacts side, but the user is deleting the account they see, and
-        // leaving a mail or calendar connection behind under the same address
-        // would be an invisible leftover.
-        host.store.remove(email);
-        // NOTE: the contacts outlive the account: they move into the on-device
-        // book, cleared of every sync marker, and the account's collections go
-        // with their bindings. The switches and the link exceptions are the
-        // app's own state and are dropped separately.
-        host.contacts.detachToLocal(urls, LocalBook.URL);
-        host.base.forgetAccount(email);
-        // NOTE: mail and events do not outlive it: they are the server's,
-        // and left behind they would stay listed under an account the
-        // filter no longer offers to hide.
-        host.mail.forget(email);
-        FirstSync.forget(host, email);
-        SenderName.set(host, email, "");
-        BackgroundCheck.forget(host, email);
-        host.events.forget(email);
+        List<String> urls =
+                new AccountRemoval(
+                                host,
+                                new SyncPasses.Parts(
+                                        host.pimdir, host.base, host.store, host.mail, host.events, host.client),
+                                host.contacts)
+                        .remove(email);
         host.accounts.removeIf(entry -> entry.email.equals(email));
         host.reloadHome();
         host.mailList.reload();

@@ -131,6 +131,17 @@ public class SecureStore {
         return null;
     }
 
+    /** The stored accounts connected for one domain. */
+    public List<AccountEntry> accountsFor(PimDomain domain) {
+        List<AccountEntry> matching = new ArrayList<>();
+        for (AccountEntry entry : loadAll()) {
+            if (entry.covers(domain)) {
+                matching.add(entry);
+            }
+        }
+        return matching;
+    }
+
     /**
      * Renews the credential one domain of a stored account signs in with, on
      * the account as stored rather than on a caller's copy, then persists;

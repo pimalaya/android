@@ -171,6 +171,26 @@ public final class DefaultCollection {
         return new Choice(null, offered, offered.indexOf(preselected));
     }
 
+    /**
+     * The default collection of every account a domain's filter shows: what
+     * the Default chip narrows a list to ({@link DefaultCollection}).
+     */
+    public static java.util.Set<String> shown(
+            Context context, String kind, List<PimdirCollections.Stored> collections) {
+        java.util.Set<String> emails = new java.util.LinkedHashSet<>();
+        for (PimdirCollections.Stored collection : collections) {
+            emails.add(collection.accountEmail);
+        }
+        java.util.Set<String> defaults = new java.util.HashSet<>();
+        for (String email : emails) {
+            PimdirCollections.Stored found = DefaultCollection.of(context, email, kind, collections);
+            if (found != null) {
+                defaults.add(found.id);
+            }
+        }
+        return defaults;
+    }
+
     /** The collections the user may write into. */
     public static List<PimdirCollections.Stored> writable(List<PimdirCollections.Stored> collections) {
         List<PimdirCollections.Stored> writable = new ArrayList<>();

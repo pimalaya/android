@@ -88,4 +88,19 @@ public class EndpointsTest {
         assertFalse(Endpoints.allOn(List.of("imap://imap.gmail.com:143"), "google", Oauth.GOOGLE_HOSTS));
         assertFalse(Endpoints.allOn(List.of("msgraph://jane@outlook.com"), "google", Oauth.GOOGLE_HOSTS));
     }
+
+    @Test
+    public void onlyMailEndpointsNameTheirUser() {
+        assertEquals(
+                "imaps://jane%40example.org@imap.example.org:993",
+                Endpoints.asUser("imaps://imap.example.org:993", "jane@example.org"));
+        assertEquals(
+                "smtp://jane%40example.org@smtp.example.org:587",
+                Endpoints.asUser("smtp://smtp.example.org:587", "jane@example.org"));
+        assertEquals(
+                "https://dav.example.org/dav/", Endpoints.asUser("https://dav.example.org/dav/", "jane@example.org"));
+        assertEquals(
+                "jmap://api.example.org/jmap/session",
+                Endpoints.asUser("jmap://api.example.org/jmap/session", "jane@example.org"));
+    }
 }
