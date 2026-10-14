@@ -41,6 +41,7 @@ import org.pimalaya.client.EventViews;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
+import org.pimalaya.pimdir.PhoneSpoke;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -62,7 +63,7 @@ import org.pimalaya.pimdir.PimdirEngine;
  * {@link CalendarMapping}, pure and JVM-tested; this class owns what needs a
  * device.
  */
-final class CalendarRemote {
+final class CalendarRemote implements PhoneSpoke {
     /** What an object's revision starts with while a calendar app's edit waits in its rows. */
     private static final String DIRTY = "dirty:";
 
@@ -185,7 +186,8 @@ final class CalendarRemote {
     }
 
     /** Whether the spoke can serve the collection: the permission granted, the calendar shown. */
-    boolean available(String collection) {
+    @Override
+    public boolean available(String collection) {
         return PhoneMirror.CALENDAR.granted(context) && target(collection) != null;
     }
 
@@ -196,7 +198,8 @@ final class CalendarRemote {
      * for another device zone or another window. One provider query, the
      * phone's share of the quiet path.
      */
-    boolean changed(String collection) {
+    @Override
+    public boolean changed(String collection) {
         Target target = requireTarget(collection);
         List<State> states = states(target, null);
         Map<String, Integer> exceptions = new HashMap<>();
@@ -222,7 +225,8 @@ final class CalendarRemote {
      * The objects the calendar holds as the store counts them: those with
      * rows, and those bound to it that show nothing (tasks, refused writes).
      */
-    int count(String collection) {
+    @Override
+    public int count(String collection) {
         Target target = requireTarget(collection);
         Set<String> items = new HashSet<>();
         for (State state : states(target, null)) {
@@ -244,7 +248,8 @@ final class CalendarRemote {
      * window are projected again. A read-only calendar takes no phone change:
      * each is put back as the store has it.
      */
-    JSONObject enumerate(String collection) throws JSONException {
+    @Override
+    public JSONObject enumerate(String collection) throws JSONException {
         Target target = requireTarget(collection);
         ContentResolver resolver = context.getContentResolver();
 
@@ -427,7 +432,8 @@ final class CalendarRemote {
      * survives. An untouched object rides back byte for byte, and every read
      * stamps the rows converged, so a fetch is content-quiet on both sides.
      */
-    JSONObject fetch(String collection, JSONArray handles) throws JSONException {
+    @Override
+    public JSONObject fetch(String collection, JSONArray handles) throws JSONException {
         JSONArray items = new JSONArray();
         for (int index = 0; index < handles.length(); index++) {
             JSONObject item = read(collection, handles.getString(index));
@@ -542,7 +548,8 @@ final class CalendarRemote {
      * object leaves that object off the phone, logged, until it changes.
      * {@code pushed} is told how many changes are through after each one.
      */
-    JSONObject push(String collection, JSONArray changes, IntConsumer pushed)
+    @Override
+    public JSONObject push(String collection, JSONArray changes, IntConsumer pushed)
             throws JSONException {
         Target target = requireTarget(collection);
         JSONArray results = new JSONArray();

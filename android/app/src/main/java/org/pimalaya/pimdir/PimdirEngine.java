@@ -334,6 +334,16 @@ public abstract class PimdirEngine extends Stager {
     /** The staged changes carried to the remote, as the reply to a push yield. */
     protected abstract JSONObject push(JSONObject yielded) throws JSONException;
 
+    /**
+     * Refuses a phone collection's yield on a server pass: a collection's
+     * phone side is its {@link PhonePass}'s, never sent to the server.
+     */
+    protected static void serverOnly(String collection) {
+        if (PimdirStorage.isPhoneCollection(collection)) {
+            throw new IllegalStateException("Phone collection on a server pass: " + collection);
+        }
+    }
+
     // ---- the wire shapes --------------------------------------------------
 
     /** One push result on the engine wire. */

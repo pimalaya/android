@@ -24,6 +24,7 @@ import org.pimalaya.client.OauthTokens;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.ContactEngine;
+import org.pimalaya.contact.ContactPhonePass;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -211,9 +212,9 @@ public final class SyncRunner {
      */
     public Exception syncPhone(ContactEngine.Report report) {
         try {
-            ContactEngine engine = new ContactEngine(base, pimdir, client, null, null, context);
+            ContactPhonePass engine = new ContactPhonePass(pimdir, client);
             for (BookEntry entry : phoneSyncedBooks()) {
-                engine.syncPhone(entry.book.url, report);
+                engine.sync(entry.book.url, report);
             }
         } catch (Exception error) {
             return error;
@@ -297,7 +298,7 @@ public final class SyncRunner {
 
     /** An engine wired to the observer's progress display, steps and counts. */
     private ContactEngine engine(Transport primary, Account account) {
-        ContactEngine engine = new ContactEngine(base, pimdir, client, primary, account, context);
+        ContactEngine engine = new ContactEngine(base, pimdir, client, primary, account);
         if (observer != null) {
             engine.progress = observer;
         }

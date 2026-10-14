@@ -146,13 +146,13 @@ public final class CalendarRows {
     /**
      * The phone pass of one shown calendar, offline: its calendar-app edits
      * brought into the store and the store's projected onto it
-     * ({@link CalendarEngine#syncPhone}). Run before its rows leave the
+     * ({@link CalendarPhonePass}). Run before its rows leave the
      * phone, on Android's upload syncs ({@link CalendarSyncService}), on the
      * app's return, in the background run, and after a device zone change.
      * Answers whether it brought a calendar-app edit in.
      */
     public static boolean phonePass(PimdirDb pimdir, String collection) {
-        return CalendarEngine.phonePass(pimdir, collection);
+        return CalendarPhonePass.pass(pimdir, collection);
     }
 
     /** Every calendar the phone shows, by collection id, whichever account holds it. */

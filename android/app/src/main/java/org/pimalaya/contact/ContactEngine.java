@@ -1,6 +1,5 @@
 package org.pimalaya.contact;
 
-import android.content.Context;
 import android.util.Log;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -33,9 +32,10 @@ import org.pimalaya.pimdir.PimdirEngine;
  * One account's offline driver: the Rust bridge runs the engine's
  * coroutines and this class services their yields, storage against the
  * pimdir store ({@link PimdirStorage}) and remote against the backend
- * clients or, for a book's phone collection, against its raw contacts
- * through the {@link PhoneRemote} adapter. Every server backend enumerates
- * incrementally from its stored cursor (CardDAV sync-collection, Graph
+ * clients; a book's phone collection is its phone pass's
+ * ({@link ContactPhonePass}), against its raw contacts. Every server
+ * backend enumerates incrementally from its stored cursor (CardDAV
+ * sync-collection, Graph
  * delta, JMAP /changes, People sync tokens), falling back to a
  * complete round when the cursor expired; the account-wide deltas of
  * JMAP and Google are projected onto each book's enumerate.
@@ -62,8 +62,8 @@ public final class ContactEngine extends PimdirEngine {
      */
     private final Transport primary;
 
-    /** The phone spoke's adapter; null on context-less (mutate) drivers. */
-    private final PhoneRemote phone;
+    /** The book's phone pass, against its raw contacts. */
+    private final ContactPhonePass phone;
 
     /** The store, for the phone queue its writes reach. */
     private final PimdirDb pimdir;
@@ -151,26 +151,68 @@ public final class ContactEngine extends PimdirEngine {
                     break;
             }
         }
+
+        /** Tallies a batch of write effects into the report, when a sync runs one. */
+        static void tallyEffects(Report tally, JSONArray effects) throws JSONException {
+            for (int index = 0; tally != null && index < effects.length(); index++) {
+                JSONObject effect = effects.getJSONObject(index);
+                tally.tally(
+                        effect.getString("collection"),
+                        effect.getString("handle"),
+                        effect.getString("kind"));
+            }
+        }
+
+        /**
+         * Tallies the accepted pushes into the sync report: an accepted
+         * add is a card in, a remove a card out, an update a card changed.
+         */
+        static void tallyPushes(Report tally, String url, JSONArray changes, JSONArray results)
+                throws JSONException {
+            if (tally == null) {
+                return;
+            }
+
+            for (int index = 0; index < changes.length() && index < results.length(); index++) {
+                if (!results.getJSONObject(index).optBoolean("accepted")) {
+                    continue;
+                }
+                JSONObject change = changes.getJSONObject(index);
+                String kind;
+                switch (change.getString("op")) {
+                    case "add":
+                        kind = "created";
+                        break;
+                    case "update":
+                        kind = "changed";
+                        break;
+                    case "remove":
+                        kind = "removed";
+                        break;
+                    default:
+                        continue;
+                }
+                tally.tally(url, change.getString("handle"), kind);
+            }
+        }
     }
 
     /**
      * Builds a driver for one account; a null account services storage
-     * yields only (local mutations never touch the remote), a null
-     * context disables the phone spoke.
+     * yields only (local mutations never touch the remote).
      */
     public ContactEngine(
             CardStore base,
             PimdirDb pimdir,
             PimalayaClient client,
             Transport primary,
-            Account account,
-            Context context) {
+            Account account) {
         super(pimdir, client);
         this.base = base;
         this.pimdir = pimdir;
         this.primary = primary;
         this.account = account;
-        this.phone = context == null ? null : new PhoneRemote(context, pimdir);
+        this.phone = new ContactPhonePass(pimdir, client);
     }
 
     /**
@@ -232,68 +274,15 @@ public final class ContactEngine extends PimdirEngine {
         }
     }
 
-    /**
-     * The phone collection's engine pass, same shape as the server
-     * one: reconcile the hub with the book's raw contacts, hydrate the
-     * bodies the phone round brought, resolve divergences by the same
-     * three-way merge. Skipped silently when the spoke is unavailable
-     * (no contacts permission, or no Android account: the book is not
-     * mirrored).
-     */
-    public void syncPhone(String url, Report report) throws JSONException {
-        if (phone == null || !phone.available(url)) {
-            return;
-        }
-
-        ReentrantLock lock = syncLock(url);
-        lock.lock();
-        try {
-            // NOTE: quiet path; nothing dirty/staged on either side and
-            // matching member counts means the engine pass would reconcile
-            // nothing. ContactsContract has no per-account changes token,
-            // so three cheap counts stand in for one.
-            String collection = PimdirStorage.phoneCollection(url);
-            if (!phone.changed(url)
-                    && !offline.pending(collection)
-                    && phone.count(url) == offline.memberCount(collection)) {
-                return;
-            }
-
-            tally = report;
-            step(Progress.STAGE_PHONE, 0);
-
-            Log.d(
-                    "pimalaya",
-                    "phone sync " + url + ": " + client.offlineSync(this, collection, false));
-            hydrate(collection);
-
-            List<JSONObject> conflicts = offline.loadConflicts(collection);
-            if (!conflicts.isEmpty()) {
-                step(Progress.STAGE_RESOLVE, conflicts.size());
-                for (JSONObject conflict : conflicts) {
-                    resolvePhoneConflict(collection, conflict);
-                }
-
-                client.offlineSync(this, collection, false);
-                hydrate(collection);
-            }
-        } finally {
-            lock.unlock();
-        }
+    /** The book's phone pass, told through this pass's progress. */
+    private void syncPhone(String url, Report report) throws JSONException {
+        phone.progress = progress;
+        phone.sync(url, report);
     }
 
     /** The book's process-wide sync lock, keyed by its collection URL. */
     private ReentrantLock syncLock(String url) {
         return locks.collection(PimdirSummary.CONTACT, url);
-    }
-
-    /**
-     * Not the phone spoke's: projecting a book onto the device downloads
-     * nothing, so a "downloading" line over it would name the wrong thing.
-     */
-    @Override
-    protected boolean downloads(String collection) {
-        return !CardStore.isPhoneCollection(collection);
     }
 
     /**
@@ -327,38 +316,6 @@ public final class ContactEngine extends PimdirEngine {
         return true;
     }
 
-    /**
-     * Resolves one phone-conflicted row the same way, and always: the
-     * phone side carries no field the user could be asked about that the
-     * merge cannot settle, so the three-way result stands.
-     *
-     * <p>The revision is refreshed from the raw contact rather than from
-     * the stored one, so the resolving push is conditioned on the state
-     * the merge reconciled with rather than the one the conflict was
-     * first noticed at.
-     */
-    private void resolvePhoneConflict(String collection, JSONObject conflict)
-            throws JSONException {
-        String handle = conflict.getString("handle");
-        JSONObject remote = phone.read(collection, handle);
-        if (remote == null) {
-            // NOTE: raw contact vanished mid-conflict; next sync
-            // reconciles the removal.
-            return;
-        }
-
-        String merged =
-                Cards.mergeCardChanges(
-                        conflict.isNull("baseVcard") ? "" : conflict.getString("baseVcard"),
-                        conflict.getString("vcard"),
-                        remote.getString("body"));
-
-        if (!remote.isNull("revision")) {
-            offline.setConflictRevision(collection, handle, remote.getString("revision"));
-        }
-        ContactStager.edit(this, collection, handle, merged);
-    }
-
     @Override
     protected void staged(String collection) {
         ContactStager.staged(pimdir, collection);
@@ -366,13 +323,7 @@ public final class ContactEngine extends PimdirEngine {
 
     @Override
     protected void applied(JSONArray effects) throws JSONException {
-        for (int index = 0; tally != null && index < effects.length(); index++) {
-            JSONObject effect = effects.getJSONObject(index);
-            tally.tally(
-                    effect.getString("collection"),
-                    effect.getString("handle"),
-                    effect.getString("kind"));
-        }
+        Report.tallyEffects(tally, effects);
     }
 
     /**
@@ -392,9 +343,7 @@ public final class ContactEngine extends PimdirEngine {
     @Override
     protected JSONObject enumerate(JSONObject yielded) throws JSONException {
         String url = yielded.getString("collection");
-        if (CardStore.isPhoneCollection(url)) {
-            return phone.enumerate(url);
-        }
+        serverOnly(url);
         String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");
 
         boolean accountLevel = PimalayaClient.isAccountLevel(account);
@@ -512,9 +461,7 @@ public final class ContactEngine extends PimdirEngine {
     protected JSONObject fetch(JSONObject yielded) throws JSONException {
         String url = yielded.getString("collection");
         JSONArray handles = yielded.getJSONArray("handles");
-        if (CardStore.isPhoneCollection(url)) {
-            return keepBoundNames(url, phone.fetch(url, handles));
-        }
+        serverOnly(url);
 
         JSONArray items = new JSONArray();
         if (isGoogle()) {
@@ -695,16 +642,7 @@ public final class ContactEngine extends PimdirEngine {
     protected JSONObject push(JSONObject yielded) throws JSONException {
         String url = yielded.getString("collection");
         JSONArray changes = yielded.getJSONArray("changes");
-        if (CardStore.isPhoneCollection(url)) {
-            step(Progress.STAGE_PROJECT, changes.length());
-            JSONObject reply =
-                    phone.push(
-                            url,
-                            changes,
-                            done -> advance(Progress.STAGE_PROJECT, done, changes.length()));
-            tallyPushes(url, changes, reply.getJSONArray("results"));
-            return reply;
-        }
+        serverOnly(url);
         step(Progress.STAGE_UPLOAD, changes.length());
 
         // NOTE: CardDAV has no batch verb, so the round parallelizes; each
@@ -729,7 +667,7 @@ public final class ContactEngine extends PimdirEngine {
             // fetch interleaves a push, and the workers must not race them.
             invalidate(url);
         }
-        tallyPushes(url, changes, results);
+        Report.tallyPushes(tally, url, changes, results);
 
         JSONObject reply = new JSONObject();
         reply.put("results", results);
@@ -1035,39 +973,6 @@ public final class ContactEngine extends PimdirEngine {
             default:
                 // NOTE: no flag pushes on any contacts backend.
                 return result(change.getString("handle"), true, null, null);
-        }
-    }
-
-    /**
-     * Tallies the accepted pushes into the sync report: an accepted
-     * add is a card in, a remove a card out, an update a card changed.
-     */
-    private void tallyPushes(String url, JSONArray changes, JSONArray results)
-            throws JSONException {
-        if (tally == null) {
-            return;
-        }
-
-        for (int index = 0; index < changes.length() && index < results.length(); index++) {
-            if (!results.getJSONObject(index).optBoolean("accepted")) {
-                continue;
-            }
-            JSONObject change = changes.getJSONObject(index);
-            String kind;
-            switch (change.getString("op")) {
-                case "add":
-                    kind = "created";
-                    break;
-                case "update":
-                    kind = "changed";
-                    break;
-                case "remove":
-                    kind = "removed";
-                    break;
-                default:
-                    continue;
-            }
-            tally.tally(url, change.getString("handle"), kind);
         }
     }
 

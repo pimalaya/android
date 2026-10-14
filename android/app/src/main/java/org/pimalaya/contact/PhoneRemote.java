@@ -27,6 +27,7 @@ import org.json.JSONObject;
 import org.pimalaya.client.Cards;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
+import org.pimalaya.pimdir.PhoneSpoke;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
 
@@ -43,7 +44,7 @@ import org.pimalaya.pimdir.PimdirStorage;
  * mapping itself lives in Mapping, pure and JVM-tested; this class owns
  * everything that needs a device.
  */
-final class PhoneRemote {
+final class PhoneRemote implements PhoneSpoke {
     private final Context context;
 
     /** The store's engine seam (the row reads behind the fetch). */
@@ -63,7 +64,9 @@ final class PhoneRemote {
      * book is mirrored, {@link Accounts#reconcile}). Callers skip the
      * phone passes otherwise; the server spoke never depends on it.
      */
-    boolean available(String url) {
+    @Override
+    public boolean available(String spoke) {
+        String url = CardStore.serverUrl(spoke);
         return PhoneMirror.CONTACTS.granted(context) && account(url) != null;
     }
 
@@ -73,7 +76,9 @@ final class PhoneRemote {
      * SOURCE_ID yet) or a deletion (DELETED). One indexed provider
      * count, half of the phone pass's quiet-path guard.
      */
-    boolean changed(String url) {
+    @Override
+    public boolean changed(String spoke) {
+        String url = CardStore.serverUrl(spoke);
         Account account = requireAccount(url);
         try (Cursor cursor =
                 context.getContentResolver()
@@ -95,7 +100,9 @@ final class PhoneRemote {
     }
 
     /** The account's live raw contacts, for the quiet-path count match. */
-    int count(String url) {
+    @Override
+    public int count(String spoke) {
+        String url = CardStore.serverUrl(spoke);
         Account account = requireAccount(url);
         try (Cursor cursor =
                 context.getContentResolver()
@@ -120,7 +127,8 @@ final class PhoneRemote {
      * longer holds are stale projections and are purged too (heals
      * interrupted deletes and pre-phone-spoke projections in one rule).
      */
-    JSONObject enumerate(String collection) throws JSONException {
+    @Override
+    public JSONObject enumerate(String collection) throws JSONException {
         String url = CardStore.serverUrl(collection);
         Account account = requireAccount(url);
         ContentResolver resolver = context.getContentResolver();
@@ -208,7 +216,8 @@ final class PhoneRemote {
      * every read stamps the row converged, so a fetch is content-quiet
      * on both sides.
      */
-    JSONObject fetch(String collection, JSONArray handles) throws JSONException {
+    @Override
+    public JSONObject fetch(String collection, JSONArray handles) throws JSONException {
         JSONArray items = new JSONArray();
         for (int index = 0; index < handles.length(); index++) {
             JSONObject item = read(collection, handles.getString(index));
@@ -313,7 +322,8 @@ final class PhoneRemote {
      * overwritten. {@code pushed} is told how many changes are through
      * after each one.
      */
-    JSONObject push(String collection, JSONArray changes, IntConsumer pushed)
+    @Override
+    public JSONObject push(String collection, JSONArray changes, IntConsumer pushed)
             throws JSONException {
         JSONArray results = new JSONArray();
         for (int index = 0; index < changes.length(); index++) {

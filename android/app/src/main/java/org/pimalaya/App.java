@@ -10,10 +10,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import org.pimalaya.account.MergedFilter;
-import org.pimalaya.calendar.CalendarEngine;
+import org.pimalaya.calendar.CalendarPhonePass;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.ContactEngine;
+import org.pimalaya.contact.ContactPhonePass;
 import org.pimalaya.mail.MailState;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
@@ -98,21 +99,18 @@ public final class App extends Application
             return;
         }
         PimdirDb pimdir = pimdir();
-        CardStore base = cards();
         phoneQueue =
                 new PhoneQueue(
                         new Handler(Looper.getMainLooper()),
                         Executors.newSingleThreadExecutor(),
                         url -> {
                             try {
-                                new ContactEngine(
-                                                base, pimdir, new PimalayaClient(), null, null,
-                                                this)
-                                        .syncPhone(url, new ContactEngine.Report());
+                                new ContactPhonePass(pimdir, new PimalayaClient())
+                                        .sync(url, new ContactEngine.Report());
                             } catch (Exception error) {
                                 Log.w("pimalaya", "phone pass failed for " + url, error);
                             }
                         },
-                        collection -> CalendarEngine.phonePass(pimdir, collection));
+                        collection -> CalendarPhonePass.pass(pimdir, collection));
     }
 }

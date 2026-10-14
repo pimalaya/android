@@ -109,7 +109,7 @@ public class ContactEngineGoogleTest {
     }
 
     private ContactEngine engine(People people) {
-        return new ContactEngine(store, pimdir, people, null, account, null);
+        return new ContactEngine(store, pimdir, people, null, account);
     }
 
     private static JSONObject enumerate(ContactEngine engine, String book, String cursor)

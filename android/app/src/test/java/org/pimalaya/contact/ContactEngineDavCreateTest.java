@@ -138,7 +138,7 @@ public class ContactEngineDavCreateTest {
     }
 
     private void sync(Dav dav) throws Exception {
-        new ContactEngine(store, pimdir, dav, null, account, null).syncBook(BOOK, true);
+        new ContactEngine(store, pimdir, dav, null, account).syncBook(BOOK, true);
     }
 
     private PimdirContacts contacts() {

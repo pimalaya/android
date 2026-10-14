@@ -63,6 +63,7 @@ import org.pimalaya.contact.EditSession;
 import org.pimalaya.contact.Entry;
 import org.pimalaya.contact.Group;
 import org.pimalaya.contact.ContactEngine;
+import org.pimalaya.contact.ContactPhonePass;
 import org.pimalaya.contact.ContactStager;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.contact.VcfTransfer;
@@ -3018,8 +3019,7 @@ public class MainActivity extends Host {
                 () -> {
                     try {
                         Accounts.reconcile(this, BookEntry.accounts(runner.phoneSyncedBooks()));
-                        ContactEngine engine =
-                                new ContactEngine(base, pimdir, client, null, null, this);
+                        ContactPhonePass engine = new ContactPhonePass(pimdir, client);
                         engine.progress =
                                 new PimdirEngine.Progress() {
                                     @Override
@@ -3033,7 +3033,7 @@ public class MainActivity extends Host {
                                         phoneStep(domain, stage, total, done);
                                     }
                                 };
-                        engine.syncPhone(url, new ContactEngine.Report());
+                        engine.sync(url, new ContactEngine.Report());
                     } catch (Exception error) {
                         Log.w("pimalaya", "first projection failed for " + url, error);
                     }
@@ -3077,8 +3077,8 @@ public class MainActivity extends Host {
         io.execute(
                 () -> {
                     try {
-                        new ContactEngine(base, pimdir, client, null, null, this)
-                                .syncPhone(url, new ContactEngine.Report());
+                        new ContactPhonePass(pimdir, client)
+                                .sync(url, new ContactEngine.Report());
                     } catch (Exception error) {
                         Log.w("pimalaya", "last phone pass failed for " + url, error);
                     }

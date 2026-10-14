@@ -111,7 +111,7 @@ public class ContactEngineGraphFetchTest {
     }
 
     private ContactEngine engine(Graph graph) {
-        return new ContactEngine(store, pimdir, graph, null, account, null);
+        return new ContactEngine(store, pimdir, graph, null, account);
     }
 
     private static List<String> handles(JSONArray items) throws Exception {
