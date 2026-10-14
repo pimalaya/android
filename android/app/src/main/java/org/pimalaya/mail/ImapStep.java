@@ -28,13 +28,12 @@ import java.util.Map;
  */
 final class ImapStep implements MailStep {
     @Override
-    public Outcome run(
-            MailEngine engine,
-            String accountEmail,
-            List<String> collections,
-            String only,
-            boolean first)
-            throws Exception {
+    public Outcome run(MailEngine engine, StepRun run) throws Exception {
+        String accountEmail = run.accountEmail();
+        List<String> collections = run.collections();
+        String only = run.only();
+        boolean first = run.first();
+
         String before =
                 first
                         ? null
@@ -44,7 +43,8 @@ final class ImapStep implements MailStep {
         Outcome outcome =
                 first
                         ? opening(engine, collections)
-                        : new WidenStep().run(engine, accountEmail, collections, only, false);
+                        : new WidenStep()
+                                .run(engine, new StepRun(accountEmail, collections, only, false));
         if (!first && outcome.frontier == null) {
             return outcome;
         }

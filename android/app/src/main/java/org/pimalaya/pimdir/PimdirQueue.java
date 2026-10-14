@@ -97,6 +97,18 @@ public final class PimdirQueue {
     }
 
     /**
+     * One action to append.
+     *
+     * @param collection the collection it is against
+     * @param accountEmail the account owning that collection
+     * @param kind the kind, an open string
+     * @param payload the versioned payload, kept as the text it is
+     * @param body the body it carries, or null when it carries none
+     */
+    public record Enqueued(
+            String collection, String accountEmail, String kind, String payload, byte[] body) {}
+
+    /**
      * Appends one action, with the body it carries.
      *
      * <p>The producer's transaction of section 15.1, in its order: the
@@ -107,8 +119,13 @@ public final class PimdirQueue {
      * zero and the next collector unlinks a message that has not been
      * sent.
      */
-    public long enqueue(String collection, String accountEmail, String kind, String payload,
-            byte[] body) {
+    public long enqueue(Enqueued action) {
+        String collection = action.collection();
+        String accountEmail = action.accountEmail();
+        String kind = action.kind();
+        String payload = action.payload();
+        byte[] body = action.body();
+
         String account = accounts.idOf(accountEmail);
         String hash = body == null ? null : PimdirHash.of(body);
 

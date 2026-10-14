@@ -254,7 +254,8 @@ public class EventWritesTest {
                 EventEdit.of(Map.of(), Map.of(), null, STAMP)
                         .scoped(EventScope.THIS, "20260119T090000", null, null);
 
-        writes.delete(EventScope.THIS, edit, target, calendar, null, Map.of());
+        writes.delete(
+                new EventWrites.Delete(EventScope.THIS, edit, target, calendar, null, Map.of()));
 
         assertEquals(List.of("edit " + calendar.id + " " + target.handle), client.staged);
         assertTrue(stored("s.ics").ical.contains("EXDATE"));
@@ -267,7 +268,8 @@ public class EventWritesTest {
                 EventEdit.of(Map.of(), Map.of(), null, STAMP)
                         .scoped(EventScope.ALL, null, null, null);
 
-        writes.delete(EventScope.ALL, edit, target, calendar, null, Map.of());
+        writes.delete(
+                new EventWrites.Delete(EventScope.ALL, edit, target, calendar, null, Map.of()));
 
         assertEquals(List.of("remove " + calendar.id + " " + target.handle), client.staged);
     }
@@ -282,7 +284,14 @@ public class EventWritesTest {
                 EventEdit.of(Map.of(), Map.of(), null, STAMP)
                         .scoped(EventScope.ALL, null, null, null);
 
-        writes.delete(EventScope.ALL, edit, stored("e.ics"), calendar, settling, Map.of());
+        writes.delete(
+                new EventWrites.Delete(
+                        EventScope.ALL,
+                        edit,
+                        stored("e.ics"),
+                        calendar,
+                        settling,
+                        Map.of()));
 
         assertEquals(List.of("remove " + settling.collection + " raw-7"), client.staged);
         assertTrue(EventStore.conflictsOf(storage, settling.collection).isEmpty());

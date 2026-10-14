@@ -242,7 +242,8 @@ public class ImapStepTest {
             throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
 
-        MailStep.Outcome first = new ImapStep().run(server, EMAIL, collections(), null, true);
+        MailStep.Outcome first =
+                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
 
         // NOTE: every three hours three inbox messages and one sent: the
         // account's 50th newest is the sent mail 36 hours 20 minutes back.
@@ -271,7 +272,8 @@ public class ImapStepTest {
         // UIDs in each: a UID names a message in its own mailbox alone.
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 0, 1);
 
-        MailStep.Outcome first = new ImapStep().run(server, EMAIL, collections(), null, true);
+        MailStep.Outcome first =
+                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
 
         assertEquals(50, first.brought);
         assertEquals(25, held(inbox)[1]);
@@ -287,7 +289,7 @@ public class ImapStepTest {
     @Test
     public void bodiesOnceLinkedAcrossMailboxesAreReleasedOnceAndReadAgain() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 0, 1);
-        new ImapStep().run(server, EMAIL, collections(), null, true);
+        new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
 
         // NOTE: what the store-wide lookup left: the sent UID 120 filed
         // with the inbox's UID 120 body, its base moved with it.
@@ -345,7 +347,8 @@ public class ImapStepTest {
     public void aSmallAccountIsHeldWholeAfterItsFirstStep() throws Exception {
         Server server = new Server().mailbox(inbox, 20, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
 
-        MailStep.Outcome first = new ImapStep().run(server, EMAIL, collections(), null, true);
+        MailStep.Outcome first =
+                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
 
         assertNull("all mail", first.frontier);
         assertTrue(first.exhausted);
@@ -356,11 +359,13 @@ public class ImapStepTest {
     @Test
     public void aLaterStepReadsTheBodiesBetweenTheNewFrontierAndTheOld() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
-        MailStep.Outcome first = new ImapStep().run(server, EMAIL, collections(), null, true);
+        MailStep.Outcome first =
+                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
         MailWindow.set(context, accountId, first.frontier);
         int readFirst = server.read.size();
 
-        MailStep.Outcome next = new ImapStep().run(server, EMAIL, collections(), null, false);
+        MailStep.Outcome next =
+                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, false));
 
         assertTrue(next.frontier.compareTo(first.frontier) < 0);
         assertEquals(50, next.brought);
@@ -377,7 +382,7 @@ public class ImapStepTest {
         List<int[]> told = Collections.synchronizedList(new ArrayList<>());
         server.tally = new MailTally((landed, planned) -> told.add(new int[] {landed, planned}));
 
-        new ImapStep().run(server, EMAIL, collections(), null, true);
+        new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
 
         assertArrayEquals(
                 "planned once the mailboxes are listed", new int[] {0, 50}, told.get(0));
@@ -389,7 +394,8 @@ public class ImapStepTest {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
         server.refused.put(sent, 404);
 
-        MailStep.Outcome first = new ImapStep().run(server, EMAIL, collections(), null, true);
+        MailStep.Outcome first =
+                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
 
         assertEquals("the inbox's 50th newest", server.dateOf(inbox, 71), first.frontier);
         assertFalse(first.exhausted);
@@ -408,7 +414,7 @@ public class ImapStepTest {
         PimalayaException all =
                 assertThrows(
                         PimalayaException.class,
-                        () -> new ImapStep().run(refused, EMAIL, collections(), null, true));
+                        () -> new ImapStep().run(refused, new StepRun(EMAIL, collections(), null, true)));
         assertEquals(Integer.valueOf(404), all.status);
 
         Server dropped = new Server().mailbox(inbox, 120, 1).mailbox(sent, 30, 3).mailbox(junk, 10, 1);
@@ -416,17 +422,19 @@ public class ImapStepTest {
         assertThrows(
                 "no refusal, no skip",
                 PimalayaException.class,
-                () -> new ImapStep().run(dropped, EMAIL, collections(), null, true));
+                () -> new ImapStep().run(dropped, new StepRun(EMAIL, collections(), null, true)));
     }
 
     @Test
     public void aLaterStepWidensPastAMailboxTheServerRefusesToOpen() throws Exception {
         Server server = new Server().mailbox(inbox, 120, 1).mailbox(sent, 120, 1).mailbox(junk, 10, 1);
-        MailStep.Outcome first = new ImapStep().run(server, EMAIL, collections(), null, true);
+        MailStep.Outcome first =
+                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, true));
         MailWindow.set(context, accountId, first.frontier);
         server.refused.put(sent, 404);
 
-        MailStep.Outcome next = new ImapStep().run(server, EMAIL, collections(), null, false);
+        MailStep.Outcome next =
+                new ImapStep().run(server, new StepRun(EMAIL, collections(), null, false));
 
         assertTrue(next.frontier.compareTo(first.frontier) < 0);
         assertFalse("the refused mailbox is not held whole", next.exhausted);

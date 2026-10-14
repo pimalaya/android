@@ -81,16 +81,26 @@ final class AccountCommit {
     }
 
     /**
-     * Stores an account's address books and subscribes the given ones, in the
-     * phone's Contacts app too when {@code phone} says so.
+     * An account's address books as the user chose them.
+     *
+     * @param email the account
+     * @param books every address book it has
+     * @param subscribed the URLs of the ones turned on
+     * @param phone whether those also show in the phone's Contacts app
      */
-    static void books(
-            CardStore cards,
-            PimdirCollections collections,
-            String email,
-            List<Addressbook> books,
-            Set<String> subscribed,
-            boolean phone) {
+    record BookChoice(
+            String email, List<Addressbook> books, Set<String> subscribed, boolean phone) {}
+
+    /**
+     * Stores an account's address books and subscribes the chosen ones, in
+     * the phone's Contacts app too when the choice says so.
+     */
+    static void books(CardStore cards, PimdirCollections collections, BookChoice choice) {
+        String email = choice.email();
+        List<Addressbook> books = choice.books();
+        Set<String> subscribed = choice.subscribed();
+        boolean phone = choice.phone();
+
         cards.replaceAddressbooks(email, books);
         collections.replace(email, PimdirSummary.CONTACT, PimdirCollections.of(email, books));
 

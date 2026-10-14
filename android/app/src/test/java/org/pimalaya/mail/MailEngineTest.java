@@ -226,7 +226,8 @@ public class MailEngineTest {
         String date = "Mon, 5 Jan 2026 09:00:00 +0000";
 
         store.outbox().queueSubmission(
-                EMAIL, "queued@example.com", "Hi", date, source.getBytes(StandardCharsets.UTF_8));
+                Submission.of(EMAIL, "queued@example.com", "Hi", date),
+                source.getBytes(StandardCharsets.UTF_8));
 
         // No item: a message on its way out is an action the engine never
         // sees, which is why nothing it stages has to be kept out of a

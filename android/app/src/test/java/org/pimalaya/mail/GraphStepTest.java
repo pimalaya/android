@@ -229,7 +229,8 @@ public class GraphStepTest {
         server.mail.addAll(List.of(newest, reply, older, imported, binned, oldest));
         server.next = List.of(newest, reply, older, imported);
 
-        MailStep.Outcome first = new GraphStep().run(server, EMAIL, mailboxes(), null, true);
+        MailStep.Outcome first =
+                new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
 
         StepRequest request = server.asked.get(0);
         assertNull(request.frontier());
@@ -264,12 +265,14 @@ public class GraphStepTest {
         Mail reply = new Mail("s0", "Sent Items", "2026-09-20T08:00:00Z", NOW);
         server.mail.addAll(List.of(newest, next, reply));
         server.next = List.of(newest);
-        MailStep.Outcome first = new GraphStep().run(server, EMAIL, mailboxes(), null, true);
+        MailStep.Outcome first =
+                new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
         MailWindow.set(context, accountId, first.frontier);
 
         server.next = List.of(next, reply);
         server.banded.clear();
-        MailStep.Outcome second = new GraphStep().run(server, EMAIL, mailboxes(), null, false);
+        MailStep.Outcome second =
+                new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), null, false));
 
         StepRequest request = server.asked.get(1);
         assertEquals(newest.date, request.frontier());
@@ -291,7 +294,8 @@ public class GraphStepTest {
         server.next = List.of(only);
         server.exhausted = true;
 
-        MailStep.Outcome first = new GraphStep().run(server, EMAIL, mailboxes(), null, true);
+        MailStep.Outcome first =
+                new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
 
         assertTrue(first.exhausted);
         for (String collection : List.of(inbox, sent, projets)) {
@@ -311,10 +315,11 @@ public class GraphStepTest {
         MailWindow.set(context, accountId, newest.date);
 
         server.next = List.of(next);
-        MailStep.Outcome first = new GraphStep().run(server, EMAIL, mailboxes(), inbox, false);
+        MailStep.Outcome first =
+                new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), inbox, false));
         MailWindow.stepped(context, accountId, inbox, first);
         server.next = List.of(last);
-        new GraphStep().run(server, EMAIL, mailboxes(), inbox, false);
+        new GraphStep().run(server, new StepRun(EMAIL, mailboxes(), inbox, false));
 
         assertEquals(List.of("Inbox"), server.asked.get(0).mailboxes());
         assertEquals(newest.date, server.asked.get(0).frontier());

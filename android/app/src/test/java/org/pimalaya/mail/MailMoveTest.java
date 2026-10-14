@@ -16,6 +16,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.calendar.CalendarEngine;
+import org.pimalaya.calendar.RemoteAccount;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
@@ -299,7 +300,8 @@ public class MailMoveTest {
     public void aSentCopyIsHiddenWhileItsSubmissionWaits() throws Exception {
         String date = "2026-10-08T09:00:00Z";
         String body = "Message-ID: <m2@example.com>\r\nSubject: Hi\r\n\r\nbody\r\n";
-        store.outbox().queueSubmission(EMAIL, "m2@example.com", "Hi", PimdirSummary.mailSortKey(date),
+        store.outbox().queueSubmission(
+                Submission.of(EMAIL, "m2@example.com", "Hi", PimdirSummary.mailSortKey(date)),
                 body.getBytes(StandardCharsets.UTF_8));
         stager().mutateAdd(
                 sent,
@@ -429,7 +431,8 @@ public class MailMoveTest {
     public void aCalendarRefusesARelocation() throws Exception {
         String calendar = PimdirAccount.collectionId(accountId, "https://dav.example.org/cal/");
         CalendarEngine engine =
-                new CalendarEngine(pimdir, Clients.real(), null, null, accountId, null);
+                new CalendarEngine(
+                        pimdir, Clients.real(), new RemoteAccount(null, null, accountId, null));
         JSONObject change =
                 new JSONObject()
                         .put("op", "remove")

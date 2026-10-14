@@ -1234,7 +1234,9 @@ public final class OnboardingFlow {
     private List<SetupOption> optionsFor(PimDomain domain) {
         List<SetupOption> options =
                 SetupPlan.discoveredOptions(
-                        domain, searchedConfigs, pendingEmail, emailLogin(), this::protocolName);
+                        domain,
+                        new SetupPlan.Discovery(searchedConfigs, pendingEmail, emailLogin()),
+                        this::protocolName);
 
         // NOTE: the provider sign-ins are contacts sign-ins (CardDAV, the
         // People API, Graph). No protocol signal reveals where contacts live at
@@ -1277,26 +1279,29 @@ public final class OnboardingFlow {
                         providerOption(
                                 R.string.config_carddav,
                                 AccountClient.googleCarddavBase(pendingEmail),
-                                Oauth.GOOGLE_AUTH_ENDPOINT,
-                                Oauth.GOOGLE_TOKEN_ENDPOINT,
-                                Oauth.GOOGLE_SCOPE));
+                                AuthMethod.codeGrant(
+                                        Oauth.GOOGLE_AUTH_ENDPOINT,
+                                        Oauth.GOOGLE_TOKEN_ENDPOINT,
+                                        Oauth.GOOGLE_SCOPE)));
             }
             options.add(
                     providerOption(
                             R.string.config_google_api,
                             AccountClient.googleBase(pendingEmail),
-                            Oauth.GOOGLE_AUTH_ENDPOINT,
-                            Oauth.GOOGLE_TOKEN_ENDPOINT,
-                            Oauth.GOOGLE_PEOPLE_SCOPE));
+                            AuthMethod.codeGrant(
+                                    Oauth.GOOGLE_AUTH_ENDPOINT,
+                                    Oauth.GOOGLE_TOKEN_ENDPOINT,
+                                    Oauth.GOOGLE_PEOPLE_SCOPE)));
             return;
         }
         options.add(
                 providerOption(
                         R.string.config_msgraph,
                         AccountClient.msgraphBase(pendingEmail),
-                        Oauth.MICROSOFT_AUTH_ENDPOINT,
-                        Oauth.MICROSOFT_TOKEN_ENDPOINT,
-                        Oauth.MICROSOFT_SCOPE));
+                        AuthMethod.codeGrant(
+                                Oauth.MICROSOFT_AUTH_ENDPOINT,
+                                Oauth.MICROSOFT_TOKEN_ENDPOINT,
+                                Oauth.MICROSOFT_SCOPE)));
     }
 
     /** Whether discovery named this service, whatever found it. */
@@ -1319,8 +1324,7 @@ public final class OnboardingFlow {
         return false;
     }
 
-    private SetupOption providerOption(
-            int label, String baseUrl, String authEndpoint, String tokenEndpoint, String scope) {
+    private SetupOption providerOption(int label, String baseUrl, AuthMethod method) {
         return new SetupOption(
                 null,
                 host.getString(label),
@@ -1329,7 +1333,7 @@ public final class OnboardingFlow {
                 // NOTE: Google and Microsoft authorize by scope, not by RFC 8707
                 // resource, and sending one earns an invalid_target from them.
                 null,
-                AuthMethod.codeGrant(authEndpoint, tokenEndpoint, scope),
+                method,
                 emailLogin());
     }
 
@@ -2010,24 +2014,18 @@ public final class OnboardingFlow {
             // authorization server asked to issue a token for either answers
             // invalid_target: neither is a URI it protects.
             oauth.startIssuerOauth(
-                    pendingEmail,
-                    option.baseUrl,
+                    new OauthFlow.Target(pendingEmail, option.baseUrl, option.resource),
                     option.method.issuer(),
-                    option.resource,
                     grantedDomains(),
-                    heading,
-                    own);
+                    new OauthFlow.Prompt(heading, own));
             return;
         }
         oauth.promptOauthClient(
-                pendingEmail,
-                option.baseUrl,
-                option.method.authorizationEndpoint(),
-                option.method.tokenEndpoint(),
+                new OauthFlow.Target(pendingEmail, option.baseUrl, option.resource),
+                new OauthFlow.AuthServer(
+                        option.method.authorizationEndpoint(), option.method.tokenEndpoint()),
                 scope,
-                option.resource,
-                heading,
-                own);
+                new OauthFlow.Prompt(heading, own));
     }
 
     /** The account already stored for this address, or null. */
@@ -2066,7 +2064,7 @@ public final class OnboardingFlow {
      * material and the scopes granted, so expired access tokens can be
      * refreshed on later syncs and a later grant can ask for the union.
      */
-    public void connect(Account candidate, String email, OauthTokens tokens, OauthGrant grant) {
+    public void connect(String email, OauthTokens tokens, OauthGrant grant) {
         connectedEmail = email;
 
         // NOTE: a browser grant covers every domain that chose the same
@@ -2076,7 +2074,7 @@ public final class OnboardingFlow {
         // every copy but the one it just issued.
         AccountCredential credential =
                 tokens.refreshToken() == null
-                        ? AccountCredential.password(candidate.login, candidate.password)
+                        ? AccountCredential.password("", tokens.accessToken())
                         : AccountCredential.oauth(tokens, grant);
 
         List<PimDomain> overJmap = new ArrayList<>();
@@ -2088,7 +2086,7 @@ public final class OnboardingFlow {
             }
             setup.baseUrl = granted.getValue();
             setup.credential = credential;
-            Account server = new Account(setup.baseUrl, candidate.login, candidate.password);
+            Account server = new Account(setup.baseUrl, "", tokens.accessToken());
             if (AccountClient.isJmap(server)) {
                 overJmap.add(setup.domain);
                 jmap = server;
@@ -2679,10 +2677,7 @@ public final class OnboardingFlow {
         AccountCommit.books(
                 parts.cards(),
                 new PimdirCollections(parts.pimdir(), host),
-                connectedEmail,
-                pendingBooks,
-                subscribed,
-                phone);
+                new AccountCommit.BookChoice(connectedEmail, pendingBooks, subscribed, phone));
         sync.reconcilePhone();
 
         finishOnboarding();

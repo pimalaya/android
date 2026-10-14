@@ -105,18 +105,31 @@ final class EventWrites {
     }
 
     /**
+     * One delete, as the page captured it on the main thread: the scope, the
+     * scoped edit naming what goes, the entry and its calendar, and the
+     * conflict it settles with the sides picked.
+     */
+    record Delete(
+            EventScope scope,
+            EventEdit edit,
+            EventStore.StoredEvent target,
+            EventStore.StoredCalendar calendar,
+            EventStore.StoredConflict settling,
+            Map<Integer, EventSide> picks) {}
+
+    /**
      * Stages a delete: all occurrences remove the entry, one or this and
      * following edit what is left of the series, unless nothing is. In
      * conflict mode both are staged on the binding that conflicted.
      */
-    void delete(
-            EventScope scope,
-            EventEdit edit,
-            EventStore.StoredEvent target,
-            EventStore.StoredCalendar collection,
-            EventStore.StoredConflict settling,
-            Map<Integer, EventSide> chosen)
-            throws Exception {
+    void delete(Delete delete) throws Exception {
+        EventScope scope = delete.scope();
+        EventEdit edit = delete.edit();
+        EventStore.StoredEvent target = delete.target();
+        EventStore.StoredCalendar collection = delete.calendar();
+        EventStore.StoredConflict settling = delete.settling();
+        Map<Integer, EventSide> chosen = delete.picks();
+
         String left = null;
         if (scope != EventScope.ALL) {
             String source =

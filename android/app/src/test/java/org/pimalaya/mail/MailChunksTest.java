@@ -262,7 +262,8 @@ public class MailChunksTest {
         server.sync(inbox);
         MailWindow.set(context, accountId, server.dateOf(71));
 
-        MailStep.Outcome first = new WidenStep().run(server, EMAIL, List.of(inbox), null, false);
+        MailStep.Outcome first =
+                new WidenStep().run(server, new StepRun(EMAIL, List.of(inbox), null, false));
         assertEquals(100, stored(inbox));
         assertEquals(server.dateOf(21), first.frontier);
         assertEquals(50, first.brought);
@@ -271,7 +272,8 @@ public class MailChunksTest {
         assertTrue("the band alone", band.getJSONObject("listing").getBoolean("band"));
 
         MailWindow.moveBack(context, accountId, first.frontier);
-        MailStep.Outcome last = new WidenStep().run(server, EMAIL, List.of(inbox), null, false);
+        MailStep.Outcome last =
+                new WidenStep().run(server, new StepRun(EMAIL, List.of(inbox), null, false));
         assertEquals(120, stored(inbox));
         assertEquals(server.dateOf(1), last.frontier);
         assertTrue("the mailbox is listed whole", last.exhausted);

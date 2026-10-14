@@ -159,9 +159,9 @@ public class StepRequestTest {
                     if (kind.equals("imap")) {
                         engine.asked.add(engine.stepRequest(only, null));
                     } else if (kind.equals("graph")) {
-                        new GraphStep().run(engine, email, collections, only, false);
+                        new GraphStep().run(engine, new StepRun(email, collections, only, false));
                     } else {
-                        new GmailStep().run(engine, email, collections, only, false);
+                        new GmailStep().run(engine, new StepRun(email, collections, only, false));
                     }
                     for (StepRequest request : engine.asked) {
                         asked.add(label);

@@ -11,7 +11,6 @@ import java.util.Map;
 import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.account.Oauth;
-import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.ClientRegistration;
 import org.pimalaya.client.OauthGrant;
@@ -37,8 +36,29 @@ import org.pimalaya.ui.PillField;
 public final class OauthFlow {
     /** Lands a redeemed grant back in the connection flow. */
     public interface Connector {
-        void connect(Account account, String email, OauthTokens tokens, OauthGrant grant);
+        void connect(String email, OauthTokens tokens, OauthGrant grant);
     }
+
+    /**
+     * The account one grant is for.
+     *
+     * @param email the address signing in, the login hint
+     * @param baseUrl the server the account is kept at
+     * @param resource the RFC 8707 resource asked for, null or empty for none
+     */
+    record Target(String email, String baseUrl, String resource) {}
+
+    /** The two endpoints of the authorization server one grant runs against. */
+    record AuthServer(String authEndpoint, String tokenEndpoint) {}
+
+    /**
+     * What the OAuth client page says.
+     *
+     * @param heading what the client is for, the page's first line
+     * @param own whether the user asked for it, rather than the server
+     *     refusing to register one
+     */
+    record Prompt(String heading, boolean own) {}
 
     private final Host host;
     private final AccountClient client;
@@ -257,7 +277,6 @@ public final class OauthFlow {
 
         OauthSession session = pendingOauth;
         String tokenEndpoint = pendingTokenEndpoint;
-        String baseUrl = pendingBaseUrl;
         String email = pendingAccountEmail;
         String clientId = pendingClientId;
         String clientSecret = pendingClientSecret;
@@ -280,7 +299,6 @@ public final class OauthFlow {
                         host.main.post(
                                 () ->
                                         onConnected.connect(
-                                                new Account(baseUrl, "", tokens.accessToken()),
                                                 email,
                                                 tokens,
                                                 new OauthGrant(
@@ -307,20 +325,13 @@ public final class OauthFlow {
      * listener, and the app's own org.pimalaya:/oauth2redirect scheme rides
      * the OS intent route instead (for servers that reject loopback
      * redirects). Back returns to the sign-in page with nothing lost.
-     *
-     * @param heading what the client is for, the page's first line
-     * @param own whether the user asked for it, rather than the server
-     *     refusing to register one
      */
-    void promptOauthClient(
-            String email,
-            String baseUrl,
-            String authEndpoint,
-            String tokenEndpoint,
-            String scope,
-            String resource,
-            String heading,
-            boolean own) {
+    void promptOauthClient(Target target, AuthServer authServer, String scope, Prompt prompt) {
+        String authEndpoint = authServer.authEndpoint();
+        String tokenEndpoint = authServer.tokenEndpoint();
+        String heading = prompt.heading();
+        boolean own = prompt.own();
+
         ((TextView) host.findViewById(R.id.oauth_line)).setText(heading);
         ((TextView) host.findViewById(R.id.oauth_message))
                 .setText(own ? R.string.oauth_message_own : R.string.oauth_message);
@@ -377,18 +388,18 @@ public final class OauthFlow {
 
                     if (redirect.startsWith("http://")) {
                         startLoopbackOauth(
-                                email, id, secret, auth, token, scopes, baseUrl, redirect,
-                                resource);
+                                target,
+                                new AuthServer(auth, token),
+                                new OauthRequest(id, secret, redirect, scopes));
                     } else if (redirect.startsWith("org.pimalaya:")) {
                         launchSchemeGrant(
-                                email,
-                                baseUrl,
-                                id,
-                                secret.isEmpty() ? null : secret,
-                                auth,
-                                token,
-                                scopes,
-                                resource,
+                                target,
+                                new AuthServer(auth, token),
+                                new OauthRequest(
+                                        id,
+                                        secret.isEmpty() ? null : secret,
+                                        Oauth.REDIRECT_URI,
+                                        scopes),
                                 null);
                     } else {
                         host.toast(host.getString(R.string.oauth_redirect_invalid));
@@ -412,14 +423,9 @@ public final class OauthFlow {
      * ({@code own}), opens the OAuth client page with the endpoints
      * prefilled, so a self-registered client id can be pasted instead.
      */
-    void startIssuerOauth(
-            String email,
-            String baseUrl,
-            String issuer,
-            String resource,
-            String domains,
-            String heading,
-            boolean own) {
+    void startIssuerOauth(Target target, String issuer, String domains, Prompt prompt) {
+        boolean own = prompt.own();
+
         onBusy.run();
 
         host.io.execute(
@@ -442,14 +448,12 @@ public final class OauthFlow {
                                     () -> {
                                         onAborted.run();
                                         promptOauthClient(
-                                                email,
-                                                baseUrl,
-                                                metadata.authorizationEndpoint(),
-                                                metadata.tokenEndpoint(),
+                                                target,
+                                                new AuthServer(
+                                                        metadata.authorizationEndpoint(),
+                                                        metadata.tokenEndpoint()),
                                                 metadata.domainScope(domains),
-                                                resource,
-                                                heading,
-                                                own);
+                                                prompt);
                                     });
                             return;
                         }
@@ -486,14 +490,12 @@ public final class OauthFlow {
                         host.postAlive(
                                 () ->
                                         launchSchemeGrant(
-                                                email,
-                                                baseUrl,
-                                                clientId,
-                                                null,
-                                                metadata.authorizationEndpoint(),
-                                                metadata.tokenEndpoint(),
-                                                scope,
-                                                resource,
+                                                target,
+                                                new AuthServer(
+                                                        metadata.authorizationEndpoint(),
+                                                        metadata.tokenEndpoint()),
+                                                new OauthRequest(
+                                                        clientId, null, Oauth.REDIRECT_URI, scope),
                                                 metadata.issuer()));
                     } catch (Exception error) {
                         Log.w("pimalaya", "issuer oauth failed", error);
@@ -528,18 +530,16 @@ public final class OauthFlow {
      * loopback redirect).
      */
     void launchSchemeGrant(
-            String email,
-            String baseUrl,
-            String clientId,
-            String clientSecret,
-            String authEndpoint,
-            String tokenEndpoint,
-            String scope,
-            String resource,
-            String issuer) {
-        pendingOauth =
-                OauthSession.start(
-                        new OauthRequest(clientId, clientSecret, Oauth.REDIRECT_URI, scope));
+            Target target, AuthServer authServer, OauthRequest request, String issuer) {
+        String email = target.email();
+        String baseUrl = target.baseUrl();
+        String resource = target.resource();
+        String authEndpoint = authServer.authEndpoint();
+        String tokenEndpoint = authServer.tokenEndpoint();
+        String clientId = request.clientId();
+        String clientSecret = request.clientSecret();
+
+        pendingOauth = OauthSession.start(request);
         pendingIssuer = issuer;
         pendingTokenEndpoint = tokenEndpoint;
         pendingBaseUrl = baseUrl;
@@ -583,16 +583,15 @@ public final class OauthFlow {
      * custom grant is not persisted, having no OS-routed redirect to resume
      * through).
      */
-    private void startLoopbackOauth(
-            String email,
-            String clientId,
-            String clientSecret,
-            String authEndpoint,
-            String tokenEndpoint,
-            String scope,
-            String baseUrl,
-            String redirectUri,
-            String resource) {
+    private void startLoopbackOauth(Target target, AuthServer authServer, OauthRequest request) {
+        String email = target.email();
+        String clientId = request.clientId();
+        String clientSecret = request.clientSecret();
+        String authEndpoint = authServer.authEndpoint();
+        String tokenEndpoint = authServer.tokenEndpoint();
+        String scope = request.scope();
+        String redirectUri = request.redirectUri();
+
         String secret = clientSecret.isEmpty() ? null : clientSecret;
 
         Uri redirect = Uri.parse(redirectUri);
@@ -669,8 +668,6 @@ public final class OauthFlow {
                                 host.main.post(
                                         () ->
                                                 onConnected.connect(
-                                                        new Account(
-                                                                baseUrl, "", tokens.accessToken()),
                                                         email,
                                                         tokens,
                                                         new OauthGrant(

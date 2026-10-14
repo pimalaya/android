@@ -1,0 +1,164 @@
+android/app/src/main/java/org/pimalaya/AuthenticatorService.java:41:addAccount:5:AccountAuthenticatorResponse response, String accountType, String authTokenType, String[] requiredFeatures, Bundle options
+android/app/src/main/java/org/pimalaya/CalendarSyncService.java:67:onPerformSync:5:Account account, Bundle extras, String authority, ContentProviderClient provider, SyncResult result
+android/app/src/main/java/org/pimalaya/OpenedFiles.java:46:query:5:Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder
+android/app/src/main/java/org/pimalaya/SyncService.java:68:onPerformSync:5:Account account, Bundle extras, String authority, ContentProviderClient provider, SyncResult result
+android/app/src/main/java/org/pimalaya/account/SecureStore.java:187:connect:5:String email, PimDomain domain, String baseUrl, String submitUrl, AccountCredential credential
+android/app/src/main/java/org/pimalaya/mail/MailBodies.java:58:Row:6:String collection, String linkId, String sortKey, boolean bodied, Long size, Integer attachment
+android/app/src/main/java/org/pimalaya/mail/MailBodies.java:68:Row:7:String collection, String linkId, String sortKey, boolean bodied, Long size, Integer attachment, boolean always
+android/app/src/main/java/org/pimalaya/mail/MailList.java:748:of:6:Host host, List<MailStore.StoredMessage> outbox, String outboxLabel, String undated, List<MailStore.Day> days, long unread
+android/app/src/main/java/org/pimalaya/mail/MailParts.java:13:record MailParts:6:PimdirDb pimdir, Clients clients, MailStore mail, FileStore files, ItemLinks links, SecureStore store
+android/app/src/main/java/org/pimalaya/mail/MailStore.java:367:record MessageHeader:7:String accountEmail, String collection, String mailbox, String id, String subject, String fromName, String fromAddress
+android/app/src/main/java/org/pimalaya/mail/MailStore.java:388:record Listing:7:String mailboxLabel, String sortKey, long seq, Flags flags, Integer attachment, Long size, boolean bodied
+android/app/src/main/java/org/pimalaya/mail/MailStore.java:630:Query:5:List<String> collections, Integer seen, Integer attachment, String pattern, List<String[]> hidden
+android/app/src/main/java/org/pimalaya/mail/MailStore.java:1385:Edge:6:String accountEmail, String mailbox, String collection, String role, boolean listed, String limit
+android/app/src/main/java/org/pimalaya/mail/MailStore.java:1395:Edge:7:String accountEmail, String mailbox, String collection, String role, boolean listed, String limit, boolean accountWide
+android/app/src/main/java/org/pimalaya/mail/MailSubmit.java:48:record Draft:9:String from, String fromName, String to, String cc, String bcc, String subject, String body, String inReplyTo, String references
+android/app/src/main/java/org/pimalaya/mail/MailSubmit.java:122:stageSentCopy:6:String sender, String messageId, String subject, String to, String date, byte[] source
+android/app/src/main/java/org/pimalaya/mail/MailWindow.java:379:initial:5:boolean empty, String inboxFloor, List<String> floors, LocalDate today, ZoneId zone
+android/app/src/main/java/org/pimalaya/mail/MessageView.java:104:MessageView:5:Host host, MailParts parts, MailSync sync, FileActions fileActions, Linked<ItemLinks.Endpoint> linked
+android/app/src/main/java/org/pimalaya/mail/RecipientField.java:203:onLayout:5:boolean changed, int left, int top, int right, int bottom
+android/app/src/main/java/org/pimalaya/mail/Submission.java:26:record Submission:5:int v, String from, String messageId, String subject, String sortKey
+android/app/src/main/java/org/pimalaya/mail/WindowPicker.java:38:open:8:Host host, MailStore mail, MailSync sync, Executor reads, MailStore.Query query, String until, List<String> emails, Runnable after
+android/app/src/main/java/org/pimalaya/mail/WindowPicker.java:138:confirmRelease:5:Host host, MailSync sync, List<String> emails, String date, Runnable after
+android/app/src/main/java/org/pimalaya/contact/BookEntry.java:23:BookEntry:5:Addressbook book, String accountEmail, boolean subscribed, boolean remoteSynced, boolean phoneSynced
+android/app/src/main/java/org/pimalaya/contact/ContactEngine.java:222:ContactEngine:5:CardStore base, PimdirDb pimdir, Clients clients, Transport primary, Account account
+android/app/src/main/java/org/pimalaya/contact/ContactFieldDialogs.java:558:dialogField:5:LinearLayout content, String path, int label, String prefill, int inputType
+android/app/src/main/java/org/pimalaya/contact/ContactFieldDialogs.java:602:autoCompleteField:5:LinearLayout content, int hint, String prefill, String[] choices, boolean open
+android/app/src/main/java/org/pimalaya/contact/ContactFieldDialogs.java:640:typedValueLine:5:LinearLayout content, Spinner type, int hint, String prefill, int inputType
+android/app/src/main/java/org/pimalaya/contact/ContactForm.java:100:Field:6:String key, int category, int label, int icon, boolean list, Runnable open
+android/app/src/main/java/org/pimalaya/contact/ContactParts.java:13:record ContactParts:6:PimdirDb pimdir, CardStore cards, PimdirContacts contacts, ContactPool pool, Clients clients, List<AccountEntry> accounts
+android/app/src/main/java/org/pimalaya/contact/PhoneRemote.java:645:stampIfUnchanged:5:ContentResolver resolver, Account account, long rawId, String token, int version
+android/app/src/main/java/org/pimalaya/trash/DeletedItemsPage.java:72:DeletedItemsPage:5:Host host, SyncPasses.Parts parts, SyncPasses passes, List<AccountEntry> accounts, Consumer<PimDomain> reload
+android/app/src/main/java/org/pimalaya/sync/SyncPasses.java:94:record Parts:6:PimdirDb pimdir, CardStore cards, SecureStore accounts, MailStore mail, EventStore events, Clients clients
+android/app/src/main/java/org/pimalaya/sync/SyncProgress.java:47:SyncProgress:6:Host host, CardStore base, Supplier<SyncPasses> passes, Supplier<SyncDock> dock, BooleanSupplier syncing, Consumer<AccountEntry> renewed
+android/app/src/main/java/org/pimalaya/setup/AccountSettings.java:97:AccountSettings:7:Host host, SyncPasses.Parts parts, PimdirContacts contacts, List<AccountEntry> accounts, SyncCoordinator sync, Executor mailReads, SetupShell shell
+android/app/src/main/java/org/pimalaya/setup/AccountSettings.java:762:choose:5:int title, int message, int choices, int current, IntConsumer picked
+android/app/src/main/java/org/pimalaya/setup/LoopbackRedirect.java:34:await:6:ServerSocket server, String origin, String path, String state, int readTimeoutMs, String done
+android/app/src/main/java/org/pimalaya/setup/OnboardingFlow.java:170:OnboardingFlow:6:Host host, SyncPasses.Parts parts, List<AccountEntry> accounts, SyncCoordinator sync, SetupShell shell, OauthFlow oauth
+android/app/src/main/java/org/pimalaya/setup/OnboardingFlow.java:822:domainRow:5:PimDomain domain, String status, boolean error, View trailing, boolean bold
+android/app/src/main/java/org/pimalaya/setup/OnboardingFlow.java:1786:Probe:5:AuthStep step, PimDomain domain, String baseUrl, String login, String secret
+android/app/src/main/java/org/pimalaya/setup/SetupOption.java:41:SetupOption:7:String service, String label, String detail, String baseUrl, String resource, AuthMethod method, String login
+android/app/src/main/java/org/pimalaya/setup/SubmitOption.java:53:SubmitOption:7:String label, String detail, String url, boolean manual, String scope, String through, AuthMethod.Type auth
+android/app/src/main/java/org/pimalaya/ui/Background.java:21:run:5:Host host, Executor on, Work<T> work, Consumer<T> done, Consumer<Exception> failed
+android/app/src/main/java/org/pimalaya/ui/CardRows.java:29:domainRow:7:Host host, int icon, String label, String status, boolean error, View trailing, boolean bold
+android/app/src/main/java/org/pimalaya/ui/Chips.java:23:add:5:Host host, LinearLayout row, int label, int icon, Consumer<Boolean> onToggle
+android/app/src/main/java/org/pimalaya/ui/Chips.java:39:exclusive:5:Host host, LinearLayout row, int[] labels, int[] icons, IntConsumer onPick
+android/app/src/main/java/org/pimalaya/ui/Picker.java:17:choose:8:Host host, int title, int none, T direct, List<T> offered, int preselected, Function<T, CharSequence> label, Consumer<T> open
+android/app/src/main/java/org/pimalaya/ui/PillField.java:26:of:5:Host host, int hint, String value, boolean secret, boolean onCard
+android/app/src/main/java/org/pimalaya/ui/Sections.java:59:section:5:int title, int icon, List<View> items, View action, boolean keepEmpty
+android/app/src/main/java/org/pimalaya/ui/SyncDock.java:294:onLayoutChange:9:View v, int left, int top, int right, int bottom, int oldLeft, int oldTop, int oldRight, int oldBottom
+android/app/src/main/java/org/pimalaya/filter/FilterPage.java:269:row:8:String label, String detail, int indent, MergedFilter.Tick tick, boolean heading, Runnable toggle, int actionLabel, Runnable action
+android/app/src/main/java/org/pimalaya/filter/Filters.java:43:Filters:6:Context context, SyncPasses passes, SyncCoordinator sync, MailStore mail, FileStore files, List<AccountEntry> accounts
+android/app/src/main/java/org/pimalaya/calendar/CalendarMapping.java:173:row:5:JSONObject component, JSONObject master, String uid, Phone phone, boolean listed
+android/app/src/main/java/org/pimalaya/calendar/CalendarMapping.java:739:component:8:JSONObject into, Row held, Row phone, JSONObject like, Phone context, boolean master, boolean listed, boolean fresh
+android/app/src/main/java/org/pimalaya/calendar/CalendarMapping.java:827:times:5:JSONObject into, Row held, Row phone, JSONObject like, Phone context
+android/app/src/main/java/org/pimalaya/calendar/CalendarMapping.java:859:series:5:JSONObject into, Row held, Row phone, JSONObject like, Phone context
+android/app/src/main/java/org/pimalaya/calendar/CalendarMapping.java:1134:timeOf:6:long millis, String tz, boolean allDay, JSONObject like, String likeZone, ZoneId device
+android/app/src/main/java/org/pimalaya/calendar/CalendarMapping.java:1354:Write:6:String table, String op, long id, int parent, long event, Map<String, Object> values
+android/app/src/main/java/org/pimalaya/calendar/CalendarMapping.java:1437:subRows:7:List<Write> writes, String table, List<Map<String, Object>> was, List<Map<String, Object>> now, int parent, long event, java.util.function.Function<Map<String, Object>, String> keyOf
+android/app/src/main/java/org/pimalaya/calendar/CalendarRemote.java:146:Target:5:Account account, long id, boolean writable, String owner, int hidden
+android/app/src/main/java/org/pimalaya/calendar/CalendarRemote.java:696:split:6:Target target, String handle, List<Write> plan, List<ContentProviderOperation> guards, String body, List<Row> observed
+android/app/src/main/java/org/pimalaya/calendar/CalendarRemote.java:746:stamp:5:Target target, String handle, List<Row> observed, String token, String projected
+android/app/src/main/java/org/pimalaya/calendar/CalendarRemote.java:810:subAsserts:6:List<ContentProviderOperation> asserts, Target target, Uri table, String column, long event, List<Map<String, Object>> rows
+android/app/src/main/java/org/pimalaya/calendar/EventStore.java:115:StoredCalendar:7:String url, String accountEmail, String id, String name, String color, boolean isDefault, boolean writable
+android/app/src/main/java/org/pimalaya/calendar/EventStore.java:172:StoredEvent:5:String collectionId, String id, String handle, String ical, String etag
+android/app/src/main/java/org/pimalaya/calendar/EventStore.java:176:StoredEvent:6:String collectionId, String id, String handle, String ical, String etag, boolean conflicted
+android/app/src/main/java/org/pimalaya/calendar/EventStore.java:275:StoredConflict:6:String collection, String handle, String linkId, String base, String local, String remote
+android/app/src/main/java/org/pimalaya/calendar/EventView.java:121:Field:5:String key, int section, int label, Kind kind, String... components
+android/app/src/main/java/org/pimalaya/calendar/EventWrites.java:31:record Save:9:EventScope scope, EventEdit edited, String uid, EventStore.StoredEvent target, EventStore.StoredCalendar calendar, boolean isNew, boolean rewritten, EventStore.StoredConflict settling, Map<Integer, EventSide> picks
+android/app/src/main/java/org/pimalaya/calendar/EventWrites.java:112:record Delete:6:EventScope scope, EventEdit edit, EventStore.StoredEvent target, EventStore.StoredCalendar calendar, EventStore.StoredConflict settling, Map<Integer, EventSide> picks
+android/app/src/main/java/org/pimalaya/calendar/PhoneCalendars.java:63:set:5:Context context, String account, String calendar, boolean on, Collection<String> siblings
+android/app/src/main/java/org/pimalaya/calendar/Zones.java:500:observance:6:StringBuilder out, boolean daylight, LocalDateTime onset, ZoneOffset from, ZoneOffset to, String recurrence
+android/app/src/main/java/org/pimalaya/pimdir/DeletedItems.java:69:Row:10:PimdirCollections.Stored collection, String kind, long seq, String linkId, String flags, String object, String sortKey, boolean full, String retainedAt, long size
+android/app/src/main/java/org/pimalaya/pimdir/ItemLinks.java:70:Placement:5:Endpoint endpoint, String collection, long seq, String title, String detail
+android/app/src/main/java/org/pimalaya/pimdir/ItemLinks.java:90:Link:5:Endpoint from, Endpoint to, String role, String origin, Placement other
+android/app/src/main/java/org/pimalaya/pimdir/PimdirCollections.java:156:Stored:5:String id, String accountEmail, String name, String description, String color
+android/app/src/main/java/org/pimalaya/pimdir/PimdirCollections.java:160:Stored:7:String id, String accountEmail, String name, String description, String color, String role, boolean writable
+android/app/src/main/java/org/pimalaya/pimdir/PimdirDb.java:418:restateInvitation:5:SQLiteDatabase db, PimdirBlobs blobs, String collection, String linkId, String hash
+android/app/src/main/java/org/pimalaya/pimdir/PimdirItems.java:79:Row:6:String linkId, String body, JSONObject summary, String sortKey, String flags, String revision
+android/app/src/main/java/org/pimalaya/pimdir/PimdirQueue.java:84:record Action:8:long id, String collection, String kind, String payload, String objectHash, String createdAt, int attempts, String error
+android/app/src/main/java/org/pimalaya/pimdir/PimdirQueue.java:108:record Enqueued:5:String collection, String accountEmail, String kind, String payload, byte[] body
+android/app/src/main/java/org/pimalaya/pimdir/PimdirStorage.java:779:applyBatchDrop:5:SQLiteDatabase db, JSONObject drop, Set<String> staged, Map<String, String> released, JSONArray effects
+android/app/src/main/java/org/pimalaya/pimdir/PimdirStorage.java:864:applyUpsert:6:SQLiteDatabase db, JSONObject placement, Set<String> superseded, Set<String> links, Map<String, String> released, Set<String> fresh
+android/app/src/main/java/org/pimalaya/pimdir/PimdirStorage.java:1033:writeBinding:9:SQLiteDatabase db, String collection, String source, String linkId, String handle, JSONObject placement, Set<String> superseded, boolean fresh, String kept
+android/app/src/main/java/org/pimalaya/pimdir/PimdirStorage.java:1813:carrySummary:6:SQLiteDatabase db, String collection, String source, String staged, JSONObject origin, String linkId
+android/app/src/main/java/org/pimalaya/pimdir/PimdirStorage.java:1842:copyRows:6:SQLiteDatabase db, String table, String fromCollection, String fromLink, String toCollection, String toLink
+android/app/src/main/java/org/pimalaya/pimdir/PimdirSummary.java:76:write:5:SQLiteDatabase db, String collection, String linkId, JSONObject summary, boolean fresh
+android/app/src/main/java/org/pimalaya/pimdir/PimdirSummary.java:170:writeAddresses:5:SQLiteDatabase db, String collection, String linkId, JSONArray addresses, boolean fresh
+android/app/src/main/java/org/pimalaya/pimdir/PimdirSummary.java:226:mail:8:String messageId, String subject, String fromName, String fromAddress, String to, String date, long size, boolean attachment
+android/app/src/main/java/org/pimalaya/pimdir/PimdirSummary.java:272:address:5:JSONArray addresses, String role, int position, String address, String name
+android/app/src/main/java/org/pimalaya/pimdir/Stager.java:219:mutateEdit:5:String collection, String handle, String body, JSONObject summary, String sortKey
+android/app/src/main/java/org/pimalaya/pimdir/Stager.java:228:mutateAdd:6:String collection, String linkId, String body, Flags flags, JSONObject summary, String sortKey
+android/app/src/main/java/org/pimalaya/pimdir/Stager.java:240:mutateAdd:6:String collection, String linkId, byte[] body, Flags flags, JSONObject summary, String sortKey
+android/app/src/main/java/org/pimalaya/file/FileStore.java:93:StoredFile:8:String collection, String linkId, long seq, String name, String mediaType, Long size, String part, String objectHash
+android/app/src/main/java/org/pimalaya/file/FileStore.java:543:place:5:String folder, String linkId, String name, String mediaType, java.io.File source
+android/app/src/main/java/org/pimalaya/file/FileStore.java:627:insert:6:SQLiteDatabase db, String collection, String linkId, String name, String hash, int level
+android/app/src/main/java/org/pimalaya/file/FilesList.java:97:FilesList:5:Host host, FileStore files, FileActions fileActions, Origins origins, Linked<ItemLinks.Endpoint> linked
+android/app/src/main/java/org/pimalaya/link/LinkedSection.java:301:search:5:String words, ItemLinks.Endpoint self, Sections sections, AlertDialog dialog, Runnable refresh
+android/client/src/main/java/org/pimalaya/client/Addressbook.java:21:record Addressbook:7:String id, String name, String url, String description, String color, String role, boolean writable
+android/client/src/main/java/org/pimalaya/client/Addressbook.java:29:Addressbook:5:String id, String name, String url, String description, String color
+android/client/src/main/java/org/pimalaya/client/AuthMethod.java:19:record AuthMethod:6:Type type, String authorizationEndpoint, String deviceAuthorizationEndpoint, String tokenEndpoint, String scope, String issuer
+android/client/src/main/java/org/pimalaya/client/BackendInfo.java:20:record BackendInfo:6:boolean accountLevel, Backend backend, boolean submitsOverSession, boolean writesEvents, boolean writesExdates, boolean writesOverrides
+android/client/src/main/java/org/pimalaya/client/Calendar.java:20:record Calendar:7:String id, String name, String url, String description, String color, String role, boolean writable
+android/client/src/main/java/org/pimalaya/client/Calendar.java:31:Calendar:5:String id, String name, String url, String description, String color
+android/client/src/main/java/org/pimalaya/client/Card.java:25:record Card:5:String id, String uri, String etag, String vcard, List<String> books
+android/client/src/main/java/org/pimalaya/client/CardIndex.java:22:record CardIndex:9:String email, List<String> emails, String hash, String info, String name, String phone, String sortKey, JSONObject summary, String uid
+android/client/src/main/java/org/pimalaya/client/Clients.java:12:record Clients:5:AccountClient account, ContactClient contact, CalendarClient calendar, MailClient mail, OfflineClient offline
+android/client/src/main/java/org/pimalaya/client/ComposeDraft.java:26:record ComposeDraft:11:String from, String fromName, String to, String cc, String bcc, String subject, String body, String date, String messageId, String inReplyTo, String references
+android/client/src/main/java/org/pimalaya/client/ConflictForm.java:19:record ConflictForm:5:Map<String, List<String>> alternatives, List<String> changed, ContactFields model, boolean resolved, String vcard
+android/client/src/main/java/org/pimalaya/client/ContactAddress.java:22:record ContactAddress:9:String city, String country, String ext, String pobox, String postcode, boolean pref, String region, String street, List<String> types
+android/client/src/main/java/org/pimalaya/client/ContactFields.java:41:record ContactFields:19:List<ContactAddress> addresses, String anniversary, String birthday, List<String> categories, String displayName, List<ContactEmail> emails, ContactGender gender, List<String> impps, List<String> languages, ContactName name, List<String> nicknames, List<String> notes, ContactOrganization organization, List<ContactPhone> phones, List<ContactRelation> relations, String role, String title, String uid, List<String> websites
+android/client/src/main/java/org/pimalaya/client/ContactName.java:17:record ContactName:5:String family, String given, String middle, String prefix, String suffix
+android/client/src/main/java/org/pimalaya/client/EventDelta.java:29:record EventDelta:5:List<EventRef> changed, List<Event> bodies, List<String> vanished, String token, boolean complete
+android/client/src/main/java/org/pimalaya/client/EventDetail.java:47:record EventDetail:21:String component, String uid, String summary, String description, String location, String url, String status, String categories, EventTime start, EventTime end, EventTime due, EventTime completed, boolean allDay, String recurrence, String priority, String percentComplete, String organizer, List<Attendee> attendees, String created, String lastModified, EventTime recurrenceId
+android/client/src/main/java/org/pimalaya/client/EventDraft.java:17:record EventDraft:6:String component, String uid, String stamp, String start, String tzid, String vtimezone
+android/client/src/main/java/org/pimalaya/client/EventEdit.java:35:record EventEdit:18:String summary, String description, String location, String url, String status, String categories, String priority, DateEdit start, DateEdit end, DateEdit due, DateEdit completed, String percentComplete, String stamp, EventScope scope, String recurrenceId, String recurrenceInstant, String uid, String vtimezone
+android/client/src/main/java/org/pimalaya/client/EventMerge.java:49:record Conflict:7:int id, EventConflictKind kind, String component, EventTime recurrenceId, String field, EventSide series, List<Choice> choices
+android/client/src/main/java/org/pimalaya/client/FormView.java:24:record FormView:9:List<FormAddress> addresses, FormDate anniversary, FormDate birthday, List<Integer> emails, FormGender gender, String name, String organization, List<Integer> phones, List<Integer> relations
+android/client/src/main/java/org/pimalaya/client/GraphStepItem.java:23:record GraphStepItem:6:String handle, List<String> mailboxes, String path, Long received, Long size, String sortKey
+android/client/src/main/java/org/pimalaya/client/MessageBody.java:31:record MessageBody:10:String subject, String from, String fromAddress, String to, String cc, String date, String kind, String body, List<Attachment> attachments, boolean attachmentMark
+android/client/src/main/java/org/pimalaya/client/MessageSource.java:19:record MessageSource:5:String id, List<String> labels, String path, Long received, long size
+android/client/src/main/java/org/pimalaya/client/Mutation.java:31:record Mutation:11:Op op, String handle, String linkId, String target, Flags flags, String hash, Integer size, String body, String bodyBase64, JSONObject summary, String sortKey
+android/client/src/main/java/org/pimalaya/client/Mutation.java:94:edit:5:String handle, String hash, String body, JSONObject summary, String sortKey
+android/client/src/main/java/org/pimalaya/client/Mutation.java:111:add:6:String linkId, Flags flags, String hash, String body, JSONObject summary, String sortKey
+android/client/src/main/java/org/pimalaya/client/Mutation.java:132:add:6:String linkId, Flags flags, String hash, byte[] body, JSONObject summary, String sortKey
+android/client/src/main/java/org/pimalaya/client/NamedStep.java:18:record NamedStep:5:List<String> anchors, boolean byReception, boolean exhausted, String historyId, List<NamedStepItem> items
+android/client/src/main/java/org/pimalaya/client/NamedStepItem.java:25:record NamedStepItem:9:List<String> flags, String handle, String linkId, List<String> mailboxes, String path, Long received, long size, String sortKey, JSONObject summary
+android/client/src/main/java/org/pimalaya/client/Native.java:113:oauthAuthorizeUrl:7:String authorizationEndpoint, String clientId, String redirectUri, String scope, String state, String pkceVerifier, String extras
+android/client/src/main/java/org/pimalaya/client/Native.java:138:oauthRequestAccessToken:7:Transport transport, String tokenEndpoint, String clientId, String clientSecret, String code, String redirectUri, String pkceVerifier
+android/client/src/main/java/org/pimalaya/client/Native.java:162:oauthRegisterClient:5:Transport transport, String registrationEndpoint, String redirectUri, String clientName, String scope
+android/client/src/main/java/org/pimalaya/client/Native.java:176:oauthRefreshAccessToken:6:Transport transport, String tokenEndpoint, String clientId, String clientSecret, String refreshToken, String scope
+android/client/src/main/java/org/pimalaya/client/Native.java:292:mailFloor:5:Transport transport, long session, String mailbox, String before, int count
+android/client/src/main/java/org/pimalaya/client/Native.java:340:mailStep:6:Transport transport, long session, String mailbox, String request, String dir, OfflineDriver store
+android/client/src/main/java/org/pimalaya/client/Native.java:356:fetchMessageSources:5:Transport transport, long session, String mailbox, String ids, String dir
+android/client/src/main/java/org/pimalaya/client/Native.java:400:setMessageFlag:6:Transport transport, long session, String mailbox, String id, String flag, boolean add
+android/client/src/main/java/org/pimalaya/client/Native.java:437:relocateMessage:5:Transport transport, long session, String mailbox, String id, String target
+android/client/src/main/java/org/pimalaya/client/Native.java:445:copyMessage:5:Transport transport, long session, String mailbox, String id, String target
+android/client/src/main/java/org/pimalaya/client/Native.java:462:appendMessage:5:Transport transport, long session, String mailbox, byte[] source, String flags
+android/client/src/main/java/org/pimalaya/client/Native.java:487:syncEvents:6:Transport transport, String baseUrl, String url, String login, String password, String cursor
+android/client/src/main/java/org/pimalaya/client/Native.java:500:multigetEvents:6:Transport transport, String baseUrl, String url, String login, String password, String ids
+android/client/src/main/java/org/pimalaya/client/Native.java:587:updateEvent:9:Transport transport, String baseUrl, String calendarUrl, String login, String password, String id, String ical, String etag, String address
+android/client/src/main/java/org/pimalaya/client/Native.java:605:newEvent:6:String component, String uid, String stamp, String start, String tzid, String vtimezone
+android/client/src/main/java/org/pimalaya/client/Native.java:618:createEvent:8:Transport transport, String baseUrl, String calendarUrl, String login, String password, String id, String ical, String address
+android/client/src/main/java/org/pimalaya/client/Native.java:633:deleteEvent:8:Transport transport, String baseUrl, String calendarUrl, String login, String password, String id, String etag, String address
+android/client/src/main/java/org/pimalaya/client/Native.java:656:listCards:5:Transport transport, String baseUrl, String addressbookUrl, String login, String password
+android/client/src/main/java/org/pimalaya/client/Native.java:669:createCard:7:Transport transport, String baseUrl, String addressbookUrl, String login, String password, String id, String vcard
+android/client/src/main/java/org/pimalaya/client/Native.java:683:readCard:6:Transport transport, String baseUrl, String addressbookUrl, String login, String password, String uri
+android/client/src/main/java/org/pimalaya/client/Native.java:698:updateCard:10:Transport transport, String baseUrl, String addressbookUrl, String login, String password, String id, String uri, String vcard, String baseVcard, String etag
+android/client/src/main/java/org/pimalaya/client/Native.java:715:deleteCard:8:Transport transport, String baseUrl, String addressbookUrl, String login, String password, String id, String uri, String etag
+android/client/src/main/java/org/pimalaya/client/Native.java:731:createCards:5:Transport transport, String baseUrl, String login, String password, String vcards
+android/client/src/main/java/org/pimalaya/client/Native.java:739:deleteCards:5:Transport transport, String baseUrl, String login, String password, String ids
+android/client/src/main/java/org/pimalaya/client/Native.java:749:pushCards:6:Transport transport, String baseUrl, String addressbookUrl, String login, String password, String changes
+android/client/src/main/java/org/pimalaya/client/Native.java:767:syncCards:6:Transport transport, String baseUrl, String addressbookUrl, String login, String password, String syncToken
+android/client/src/main/java/org/pimalaya/client/Native.java:780:multigetCards:5:Transport transport, String addressbookUrl, String login, String password, String uris
+android/client/src/main/java/org/pimalaya/client/Native.java:809:updateCardBooks:7:Transport transport, String baseUrl, String login, String password, String id, String add, String remove
+android/client/src/main/java/org/pimalaya/client/Native.java:829:offlineSync:6:OfflineDriver driver, String collection, boolean full, boolean content, String since, boolean scopeBound
+android/client/src/main/java/org/pimalaya/client/OauthTokens.java:20:record OauthTokens:6:String accessToken, String tokenType, long expiresIn, String refreshToken, String scope, long issuedAt
+android/client/src/main/java/org/pimalaya/client/Occurrence.java:27:record Occurrence:7:String component, EventTime start, EventTime end, EventTime recurrenceId, String summary, String location, boolean allDay
+android/client/src/main/java/org/pimalaya/client/PushChange.java:21:record PushChange:7:String ref, PushOp op, String id, String vcard, String baseVcard, List<String> add, List<String> remove
+android/client/src/main/java/org/pimalaya/client/PushOutcome.java:20:record PushOutcome:5:String ref, boolean accepted, String id, String etag, String error
+android/client/src/main/java/org/pimalaya/client/PushPlanFacts.java:17:record PushPlanFacts:5:Op op, String collection, String bookId, boolean origin, boolean deleted
+android/client/src/main/java/org/pimalaya/client/ServerMetadata.java:21:record ServerMetadata:5:String issuer, String authorizationEndpoint, String tokenEndpoint, String registrationEndpoint, String scopesSupported
+android/client/src/main/java/org/pimalaya/client/ServiceConfig.java:30:record ServiceConfig:8:String service, String url, String host, int port, String security, String username, List<AuthMethod> auth, String source
+android/client/src/main/java/org/pimalaya/client/StepRequest.java:21:record StepRequest:6:String mailbox, int count, String frontier, String bound, List<String> anchors, List<String> mailboxes
+android/client/src/main/java/org/pimalaya/client/SyncReport.java:16:record SyncReport:6:int conflicts, int pulled, int pushed, int refreshed, int rejected, int waiting

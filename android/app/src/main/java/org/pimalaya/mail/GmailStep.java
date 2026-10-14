@@ -36,13 +36,11 @@ import java.util.Map;
  */
 final class GmailStep implements MailStep {
     @Override
-    public Outcome run(
-            MailEngine engine,
-            String accountEmail,
-            List<String> collections,
-            String only,
-            boolean first)
-            throws JSONException {
+    public Outcome run(MailEngine engine, StepRun run) throws JSONException {
+        List<String> collections = run.collections();
+        String only = run.only();
+        boolean first = run.first();
+
         // NOTE: an account step names the mailboxes it takes, which a JMAP
         // account's query keeps to (Gmail lists All Mail whatever).
         List<String> names = null;

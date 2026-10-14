@@ -117,7 +117,7 @@ public final class CalendarRows {
                 }
                 // NOTE: an update notifies every calendar app, so one that
                 // changes nothing is not written.
-                ContentValues values = update(calendar, isPrimary, null, row.name, row.color);
+                ContentValues values = update(calendar, isPrimary, null, row);
                 if (!unchanged(values, current(context, row.id, values.keySet()))) {
                     resolver.update(
                             asSyncAdapter(
@@ -269,14 +269,14 @@ public final class CalendarRows {
 
     /**
      * A shown calendar's update, against the name and colour it last
-     * projected: either is written only when the collection's own changed.
+     * projected ({@code last}): either is written only when the
+     * collection's own changed.
      */
     static ContentValues update(
-            PimdirCollections.Stored calendar,
-            boolean primary,
-            String zone,
-            String lastName,
-            String lastColor) {
+            PimdirCollections.Stored calendar, boolean primary, String zone, Row last) {
+        String lastName = last.name;
+        String lastColor = last.color;
+
         ContentValues values = managed(calendar, primary, zone);
         if (!calendar.name.equals(lastName)) {
             named(values, calendar);

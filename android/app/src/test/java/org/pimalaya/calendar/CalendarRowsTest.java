@@ -117,7 +117,11 @@ public class CalendarRowsTest {
         PimdirCollections.Stored work = calendar("Work", "#3366CC", null, true);
 
         ContentValues values =
-                CalendarRows.update(work, false, null, "Work", String.valueOf(0xff3366cc));
+                CalendarRows.update(
+                        work,
+                        false,
+                        null,
+                        new CalendarRows.Row(0, "Work", String.valueOf(0xff3366cc)));
 
         for (String column :
                 new String[] {
@@ -142,7 +146,11 @@ public class CalendarRowsTest {
         PimdirCollections.Stored work = calendar("Office", "#3366CC", null, true);
 
         ContentValues values =
-                CalendarRows.update(work, false, null, "Work", String.valueOf(0xff3366cc));
+                CalendarRows.update(
+                        work,
+                        false,
+                        null,
+                        new CalendarRows.Row(0, "Work", String.valueOf(0xff3366cc)));
 
         assertEquals("Office", values.getAsString(Calendars.NAME));
         assertEquals("Office", values.getAsString(Calendars.CALENDAR_DISPLAY_NAME));
@@ -156,7 +164,11 @@ public class CalendarRowsTest {
         PimdirCollections.Stored work = calendar("Work", "#CC3366", null, true);
 
         ContentValues values =
-                CalendarRows.update(work, false, null, "Work", String.valueOf(0xff3366cc));
+                CalendarRows.update(
+                        work,
+                        false,
+                        null,
+                        new CalendarRows.Row(0, "Work", String.valueOf(0xff3366cc)));
 
         assertEquals(0xffcc3366, (int) values.getAsInteger(Calendars.CALENDAR_COLOR));
         assertEquals(String.valueOf(0xffcc3366), values.getAsString(Calendars.CAL_SYNC2));
@@ -167,7 +179,11 @@ public class CalendarRowsTest {
     @Test
     public void aRowNeverProjectedTakesBoth() {
         ContentValues values =
-                CalendarRows.update(calendar("Work", "#3366CC", null, true), false, null, null, null);
+                CalendarRows.update(
+                        calendar("Work", "#3366CC", null, true),
+                        false,
+                        null,
+                        new CalendarRows.Row(0, null, null));
 
         assertEquals("Work", values.getAsString(Calendars.NAME));
         assertEquals(0xff3366cc, (int) values.getAsInteger(Calendars.CALENDAR_COLOR));
@@ -180,8 +196,7 @@ public class CalendarRowsTest {
                         calendar("Work", "#3366CC", null, false),
                         false,
                         null,
-                        "Work",
-                        String.valueOf(0xff3366cc));
+                        new CalendarRows.Row(0, "Work", String.valueOf(0xff3366cc)));
 
         assertEquals(
                 Calendars.CAL_ACCESS_READ,
@@ -226,8 +241,11 @@ public class CalendarRowsTest {
     @Test
     public void anUpdateTheRowAlreadyHoldsIsNotWritten() {
         ContentValues values =
-                CalendarRows.update(calendar("Work", "#3366CC", null, true), true, null, "Work",
-                        String.valueOf(0xff3366cc));
+                CalendarRows.update(
+                        calendar("Work", "#3366CC", null, true),
+                        true,
+                        null,
+                        new CalendarRows.Row(0, "Work", String.valueOf(0xff3366cc)));
         Map<String, String> current = new HashMap<>();
         for (String column : values.keySet()) {
             current.put(column, values.getAsString(column));

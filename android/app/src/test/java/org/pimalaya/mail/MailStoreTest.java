@@ -280,10 +280,7 @@ public class MailStoreTest {
         String outbox = store.outbox().outboxOf(ONE);
 
         store.outbox().queueSubmission(
-                ONE,
-                "queued@example.org",
-                "Waiting",
-                DATE,
+                Submission.of(ONE, "queued@example.org", "Waiting", DATE),
                 SOURCE.getBytes(StandardCharsets.UTF_8));
 
         // A roster replace drops every mail collection the account no longer
@@ -317,10 +314,7 @@ public class MailStoreTest {
     public void aParkedSubmissionLeavesTheDrainAndStaysVisible() {
         mailboxes(ONE, "INBOX");
         store.outbox().queueSubmission(
-                ONE,
-                "refused@example.org",
-                "Refused",
-                DATE,
+                Submission.of(ONE, "refused@example.org", "Refused", DATE),
                 SOURCE.getBytes(StandardCharsets.UTF_8));
 
         long queued = store.outbox().outgoing(ONE).get(0).id;
@@ -340,10 +334,7 @@ public class MailStoreTest {
     public void anUncertainSubmissionWaitsForTheUserToSendItAgain() {
         mailboxes(ONE, "INBOX");
         store.outbox().queueSubmission(
-                ONE,
-                "maybe@example.org",
-                "Maybe",
-                DATE,
+                Submission.of(ONE, "maybe@example.org", "Maybe", DATE),
                 SOURCE.getBytes(StandardCharsets.UTF_8));
 
         long queued = store.outbox().outgoing(ONE).get(0).id;
@@ -371,7 +362,8 @@ public class MailStoreTest {
     public void anActionOfAnotherKindIsLeftAlone() {
         mailboxes(ONE, "INBOX");
         store.outbox().queueSubmission(
-                ONE, "mine@example.org", "Mine", DATE, SOURCE.getBytes(StandardCharsets.UTF_8));
+                Submission.of(ONE, "mine@example.org", "Mine", DATE),
+                SOURCE.getBytes(StandardCharsets.UTF_8));
         queueForeign(store.outbox().outboxOf(ONE));
 
         // Skipped rather than parked or applied: an owner that does not

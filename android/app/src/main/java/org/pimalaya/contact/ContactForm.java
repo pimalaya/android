@@ -63,6 +63,25 @@ public final class ContactForm {
     private static final int URI_INPUT =
             InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI;
 
+    /** The plain string lists, as {@link ContactFieldDialogs#stringDialog} edits them. */
+    private static final ContactFieldDialogs.StringList NICKNAMES =
+            new ContactFieldDialogs.StringList("nicknames", R.string.item_nickname, 0, TEXT_NAME);
+
+    private static final ContactFieldDialogs.StringList IMPPS =
+            new ContactFieldDialogs.StringList(
+                    "impps", R.string.item_impp, R.string.hint_impp, URI_INPUT);
+
+    private static final ContactFieldDialogs.StringList WEBSITES =
+            new ContactFieldDialogs.StringList(
+                    "websites", R.string.item_website, R.string.hint_url, URI_INPUT);
+
+    private static final ContactFieldDialogs.StringList LANGUAGES =
+            new ContactFieldDialogs.StringList(
+                    "languages",
+                    R.string.item_language,
+                    R.string.hint_language,
+                    InputType.TYPE_CLASS_TEXT);
+
     /**
      * One addable field in the catalog: the model key, the section
      * (category) it belongs to (a section-title resource, its identity),
@@ -357,7 +376,7 @@ public final class ContactForm {
 
         fields.add(new Field("nicknames", R.string.section_nicknames, R.string.item_nickname,
                 R.drawable.ic_section_label, true,
-                () -> dialogs.stringDialog("nicknames", -1, R.string.item_nickname, 0, TEXT_NAME)));
+                () -> dialogs.stringDialog(NICKNAMES, -1)));
         fields.add(new Field("relations", R.string.section_relations, R.string.item_relation,
                 R.drawable.ic_section_group, true, () -> dialogs.relationDialog(-1)));
         fields.add(new Field("phones", R.string.section_phones, R.string.item_phone,
@@ -366,18 +385,15 @@ public final class ContactForm {
                 R.drawable.ic_section_mail, true, () -> dialogs.emailDialog(-1)));
         fields.add(new Field("impps", R.string.section_impps, R.string.item_impp,
                 R.drawable.ic_section_chat, true,
-                () -> dialogs.stringDialog("impps", -1, R.string.item_impp, R.string.hint_impp,
-                        URI_INPUT)));
+                () -> dialogs.stringDialog(IMPPS, -1)));
         fields.add(new Field("addresses", R.string.section_addresses, R.string.item_address,
                 R.drawable.ic_section_location_on, true, () -> dialogs.addressDialog(-1)));
         fields.add(new Field("websites", R.string.section_websites, R.string.item_website,
                 R.drawable.ic_section_language, true,
-                () -> dialogs.stringDialog("websites", -1, R.string.item_website, R.string.hint_url,
-                        URI_INPUT)));
+                () -> dialogs.stringDialog(WEBSITES, -1)));
         fields.add(new Field("languages", R.string.section_languages, R.string.item_language,
                 R.drawable.ic_section_translate, true,
-                () -> dialogs.stringDialog("languages", -1, R.string.item_language,
-                        R.string.hint_language, InputType.TYPE_CLASS_TEXT)));
+                () -> dialogs.stringDialog(LANGUAGES, -1)));
         fields.add(new Field("notes", R.string.section_notes, R.string.item_note,
                 R.drawable.ic_section_notes, true, () -> dialogs.noteDialog(-1)));
 
@@ -544,8 +560,7 @@ public final class ContactForm {
                                 getS(R.string.item_nickname),
                                 nicknames.get(index),
                                 divergedItem("nicknames", at),
-                                () -> dialogs.stringDialog("nicknames", at, R.string.item_nickname,
-                                        0, TEXT_NAME)));
+                                () -> dialogs.stringDialog(NICKNAMES, at)));
             }
             section(R.string.section_nicknames, R.drawable.ic_section_label, items);
         }
@@ -651,10 +666,7 @@ public final class ContactForm {
                                 getS(R.string.item_impp),
                                 impps.get(index),
                                 divergedItem("impps", at),
-                                () -> dialogs.stringDialog("impps", at, R.string.item_impp,
-                                        R.string.hint_impp,
-                                        InputType.TYPE_CLASS_TEXT
-                                                | InputType.TYPE_TEXT_VARIATION_URI)));
+                                () -> dialogs.stringDialog(IMPPS, at)));
             }
             section(R.string.section_impps, R.drawable.ic_section_chat, items);
         }
@@ -686,10 +698,7 @@ public final class ContactForm {
                                 getS(R.string.item_website),
                                 websites.get(index),
                                 divergedItem("websites", at),
-                                () -> dialogs.stringDialog("websites", at, R.string.item_website,
-                                        R.string.hint_url,
-                                        InputType.TYPE_CLASS_TEXT
-                                                | InputType.TYPE_TEXT_VARIATION_URI)));
+                                () -> dialogs.stringDialog(WEBSITES, at)));
             }
             section(R.string.section_websites, R.drawable.ic_section_language, items);
         }
@@ -704,8 +713,7 @@ public final class ContactForm {
                                 getS(R.string.item_language),
                                 languages.get(index),
                                 divergedItem("languages", at),
-                                () -> dialogs.stringDialog("languages", at, R.string.item_language,
-                                        R.string.hint_language, InputType.TYPE_CLASS_TEXT)));
+                                () -> dialogs.stringDialog(LANGUAGES, at)));
             }
             section(R.string.section_languages, R.drawable.ic_section_translate, items);
         }

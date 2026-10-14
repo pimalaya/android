@@ -150,7 +150,11 @@ public class AccountCommitTest {
                         new Addressbook("home", "Home", "https://dav.example.org/home/", null, null));
         PimdirCollections collections = new PimdirCollections(pimdir, context);
 
-        AccountCommit.books(cards, collections, EMAIL, books, Set.of("https://dav.example.org/work/"), false);
+        AccountCommit.books(
+                cards,
+                collections,
+                new AccountCommit.BookChoice(
+                        EMAIL, books, Set.of("https://dav.example.org/work/"), false));
 
         Map<String, BookEntry> entries = byUrl(cards);
         assertTrue(entries.get("https://dav.example.org/work/").subscribed);
@@ -158,7 +162,11 @@ public class AccountCommitTest {
         assertFalse(entries.get("https://dav.example.org/work/").phoneSynced);
         assertFalse(entries.get("https://dav.example.org/home/").subscribed);
 
-        AccountCommit.books(cards, collections, EMAIL, books, Set.of("https://dav.example.org/work/"), true);
+        AccountCommit.books(
+                cards,
+                collections,
+                new AccountCommit.BookChoice(
+                        EMAIL, books, Set.of("https://dav.example.org/work/"), true));
 
         entries = byUrl(cards);
         assertTrue(entries.get("https://dav.example.org/work/").phoneSynced);

@@ -401,7 +401,7 @@ public final class ContactEngine extends PimdirEngine {
         if (accountLevel) {
             return accountSnapshot(url, delta);
         }
-        return snapshot(url, delta.changed(), delta.vanished(), delta.complete(), delta.token());
+        return snapshot(url, delta);
     }
 
     /**
@@ -430,13 +430,16 @@ public final class ContactEngine extends PimdirEngine {
         }
         List<String> vanished = projected.vanished();
 
-        return snapshot(url, members, vanished, delta.complete(), delta.token());
+        return snapshot(url, new CardDelta(members, vanished, delta.token(), delta.complete()));
     }
 
     /** Builds an enumerate reply, recording the ETags for the 412 quirk. */
-    private JSONObject snapshot(
-            String url, List<Card> cards, List<String> vanished, boolean complete, String token)
-            throws JSONException {
+    private JSONObject snapshot(String url, CardDelta delta) throws JSONException {
+        List<Card> cards = delta.changed();
+        List<String> vanished = delta.vanished();
+        boolean complete = delta.complete();
+        String token = delta.token();
+
         Map<String, String> etags = new HashMap<>();
         JSONArray items = new JSONArray();
         for (Card card : cards) {

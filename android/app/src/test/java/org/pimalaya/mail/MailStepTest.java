@@ -196,7 +196,8 @@ public class MailStepTest {
         Mail imported = new Mail("m3", "2019-03-01T08:00:00Z", now, "INBOX");
         server.next = List.of(labelled, older, imported);
 
-        MailStep.Outcome first = new GmailStep().run(server, EMAIL, mailboxes(), null, true);
+        MailStep.Outcome first =
+                new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
 
         assertEquals(3, held(inbox));
         assertEquals(1, held(clients));
@@ -216,7 +217,8 @@ public class MailStepTest {
         // NOTE: the next step skips what is held, and adds to the inbox.
         Mail next = new Mail("m4", "2026-10-07T09:00:00Z", now.minusSeconds(172_800), "INBOX");
         server.next = List.of(next);
-        MailStep.Outcome second = new GmailStep().run(server, EMAIL, mailboxes(), null, false);
+        MailStep.Outcome second =
+                new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), null, false));
         assertEquals(Set.of("m1", "m2", "m3"), server.held.get(1));
         assertEquals(4, held(inbox));
         assertArrayEquals(next.source(), store.storedSource(inbox, "m4"));
@@ -238,7 +240,7 @@ public class MailStepTest {
         Mail inboxed = new Mail("m1", "2026-10-09T11:00:00Z", now, "INBOX");
         server.next = List.of(inboxed, archived);
 
-        new GmailStep().run(server, EMAIL, collections, null, true);
+        new GmailStep().run(server, new StepRun(EMAIL, collections, null, true));
 
         assertEquals(1, held(inbox));
         assertNull("All Mail holds no body", store.storedSource(allMail, "a1"));
@@ -249,7 +251,7 @@ public class MailStepTest {
 
         // NOTE: the next step finds the archived message held.
         server.next = List.of();
-        new GmailStep().run(server, EMAIL, collections, null, false);
+        new GmailStep().run(server, new StepRun(EMAIL, collections, null, false));
         assertEquals(Set.of("m1", "a1"), server.held.get(1));
     }
     @Test
@@ -262,7 +264,7 @@ public class MailStepTest {
                         new Mail("m1", "2026-10-09T11:00:00Z", now, "INBOX"),
                         new Mail("m2", "2019-03-01T08:00:00Z", now, "INBOX", "Clients"));
 
-        new GmailStep().run(server, EMAIL, mailboxes(), null, true);
+        new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
 
         assertEquals("listed all the same", 2, held(inbox));
         assertNull(store.storedSource(inbox, "m2"));
@@ -287,12 +289,12 @@ public class MailStepTest {
                         new Mail("m1", "2026-10-09T11:00:00Z", now, "INBOX", "Clients"),
                         new Mail("m2", "2026-10-09T10:00:00Z", now, "INBOX"));
         server.anchors = List.of("m2", "m1");
-        new GmailStep().run(server, EMAIL, mailboxes(), null, true);
+        new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
         assertEquals(List.of("m2", "m1"), MailWindow.anchors(context, accountId, null));
 
         server.next = List.of(new Mail("c1", "2026-10-08T10:00:00Z", now, "Clients"));
         server.anchors = List.of("c1");
-        new GmailStep().run(server, EMAIL, mailboxes(), clients, false);
+        new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), clients, false));
         assertEquals(
                 "a view with none starts after the account's",
                 List.of("m2", "m1"),
@@ -325,7 +327,7 @@ public class MailStepTest {
         List<int[]> told = Collections.synchronizedList(new ArrayList<>());
         server.tally = new MailTally((landed, planned) -> told.add(new int[] {landed, planned}));
 
-        new GmailStep().run(server, EMAIL, mailboxes(), null, true);
+        new GmailStep().run(server, new StepRun(EMAIL, mailboxes(), null, true));
 
         assertArrayEquals("planned a step before reading", new int[] {0, 50}, told.get(0));
         assertArrayEquals(

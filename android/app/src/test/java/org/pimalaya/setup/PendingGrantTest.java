@@ -19,6 +19,7 @@ import org.pimalaya.FakeAndroidKeyStore;
 import org.pimalaya.MainActivity;
 import org.pimalaya.account.Oauth;
 import org.pimalaya.account.SecureStore;
+import org.pimalaya.client.OauthRequest;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
@@ -239,14 +240,11 @@ public class PendingGrantTest {
         flow.onBusy = () -> busy[0] = true;
 
         flow.launchSchemeGrant(
-                "user@example.org",
-                "https://api.example.org/",
-                "client",
-                null,
-                "https://auth.example.org/authorize",
-                "https://auth.example.org/token",
-                "mail offline_access",
-                null,
+                new OauthFlow.Target("user@example.org", "https://api.example.org/", null),
+                new OauthFlow.AuthServer(
+                        "https://auth.example.org/authorize",
+                        "https://auth.example.org/token"),
+                new OauthRequest("client", null, Oauth.REDIRECT_URI, "mail offline_access"),
                 null);
 
         assertTrue(busy[0]);
@@ -278,28 +276,25 @@ public class PendingGrantTest {
                 persisted());
 
         flow.launchSchemeGrant(
-                "user@example.org",
-                "https://api.example.org/",
-                "client",
-                "sec",
-                "https://auth.example.org/authorize",
-                "https://auth.example.org/token",
-                "mail offline_access",
-                "https://api.example.org/jmap/session",
+                new OauthFlow.Target(
+                        "user@example.org",
+                        "https://api.example.org/",
+                        "https://api.example.org/jmap/session"),
+                new OauthFlow.AuthServer(
+                        "https://auth.example.org/authorize",
+                        "https://auth.example.org/token"),
+                new OauthRequest("client", "sec", Oauth.REDIRECT_URI, "mail offline_access"),
                 "https://auth.example.org");
         assertEquals(
                 "{\"clientId\":\"client\",\"clientSecret\":\"sec\",\"redirectUri\":\"org.pimalaya:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"baseUrl\":\"https:\\/\\/api.example.org\\/\",\"email\":\"user@example.org\",\"issuer\":\"https:\\/\\/auth.example.org\",\"savedAt\":SAVED}",
                 persisted());
 
         flow.launchSchemeGrant(
-                "example.org",
-                "https://api.example.org/",
-                "client",
-                null,
-                "https://auth.example.org/authorize",
-                "https://auth.example.org/token",
-                "mail",
-                null,
+                new OauthFlow.Target("example.org", "https://api.example.org/", null),
+                new OauthFlow.AuthServer(
+                        "https://auth.example.org/authorize",
+                        "https://auth.example.org/token"),
+                new OauthRequest("client", null, Oauth.REDIRECT_URI, "mail"),
                 null);
         assertEquals(
                 "{\"clientId\":\"client\",\"clientSecret\":\"\",\"redirectUri\":\"org.pimalaya:\\/oauth2redirect\",\"state\":\"STATE\",\"verifier\":\"VERIFIER\",\"tokenEndpoint\":\"https:\\/\\/auth.example.org\\/token\",\"baseUrl\":\"https:\\/\\/api.example.org\\/\",\"email\":\"example.org\",\"issuer\":\"\",\"savedAt\":SAVED}",

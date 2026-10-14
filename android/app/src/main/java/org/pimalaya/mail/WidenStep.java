@@ -23,12 +23,12 @@ final class WidenStep implements MailStep {
     private static final int WIDENINGS = 8;
 
     @Override
-    public Outcome run(
-            MailEngine engine,
-            String accountEmail,
-            List<String> collections,
-            String only,
-            boolean first) {
+    public Outcome run(MailEngine engine, StepRun run) {
+        String accountEmail = run.accountEmail();
+        List<String> collections = run.collections();
+        String only = run.only();
+        boolean first = run.first();
+
         MailStore store = engine.mail();
         if (first) {
             RuntimeException refusal = null;

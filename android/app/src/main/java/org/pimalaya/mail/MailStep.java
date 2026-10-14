@@ -64,19 +64,10 @@ public interface MailStep {
     }
 
     /**
-     * Runs one step of the account {@code accountEmail} on the engine's
-     * session: {@code collections} its mailboxes in the order a pass takes
-     * them ({@link MailEngine#ordered}), {@code only} the one mailbox a
-     * view filtered to it steps (null for the account), {@code first} for
-     * the first sync, which opens every mailbox.
+     * Runs one step of an account on the engine's session, over the
+     * mailboxes {@code run} names.
      */
-    Outcome run(
-            MailEngine engine,
-            String accountEmail,
-            List<String> collections,
-            String only,
-            boolean first)
-            throws Exception;
+    Outcome run(MailEngine engine, StepRun run) throws Exception;
 
     /**
      * The step of an account's mail backend: Gmail and JMAP step through

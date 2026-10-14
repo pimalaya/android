@@ -56,10 +56,7 @@ public class CalendarTriageTest {
                 new CalendarEngine(
                         pimdir,
                         Clients.real(),
-                        null,
-                        null,
-                        new PimdirAccount(context).idOf(EMAIL),
-                        null);
+                        new RemoteAccount(null, null, new PimdirAccount(context).idOf(EMAIL), null));
     }
 
     /** One entry, as a side writes it at {@code stamp}. */

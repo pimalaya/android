@@ -253,20 +253,25 @@ public final class ItemLinks {
         }
         SQLiteDatabase db = store.getReadableDatabase();
         String pattern = PimdirDb.likePattern(words);
-        search(db, PimdirSummary.CONTACT, "SEARCH_CONTACTS", 8, pattern, found);
-        search(db, PimdirSummary.CALENDAR, "SEARCH_CALENDAR", 8, pattern, found);
-        search(db, PimdirSummary.FILE, "SEARCH_FILES", 7, pattern, found);
+        search(db, new KindSearch(PimdirSummary.CONTACT, "SEARCH_CONTACTS", 8), pattern, found);
+        search(db, new KindSearch(PimdirSummary.CALENDAR, "SEARCH_CALENDAR", 8), pattern, found);
+        search(db, new KindSearch(PimdirSummary.FILE, "SEARCH_FILES", 7), pattern, found);
         return new ArrayList<>(found.values());
     }
 
+    /**
+     * One kind's search: its summary kind, the canonical statement searching
+     * it, and the column that statement answers the title in.
+     */
+    private record KindSearch(String kind, String statement, int titleColumn) {}
+
     /** One kind's search statement over every collection of the kind, a page of a few. */
     private void search(
-            SQLiteDatabase db,
-            String kind,
-            String statement,
-            int titleColumn,
-            String pattern,
-            Map<String, Placement> found) {
+            SQLiteDatabase db, KindSearch search, String pattern, Map<String, Placement> found) {
+        String kind = search.kind();
+        String statement = search.statement();
+        int titleColumn = search.titleColumn();
+
         List<String> ids = new ArrayList<>();
         for (PimdirCollections.Stored collection : collections.list(kind)) {
             ids.add(collection.id);

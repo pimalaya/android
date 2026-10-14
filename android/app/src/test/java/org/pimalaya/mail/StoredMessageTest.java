@@ -97,10 +97,15 @@ public class StoredMessageTest {
                 "{\"x\":1}");
         envelope("Work", "5", "Undated", "N", null, 0, false, null, null);
 
-        store.outbox().queueSubmission(ONE, "out1@example.org", "Out one", PimdirSummary.mailSortKey(DATE),
+        store.outbox().queueSubmission(
+                Submission.of(ONE, "out1@example.org", "Out one", PimdirSummary.mailSortKey(DATE)),
                 SOURCE);
-        store.outbox().queueSubmission(ONE, "out2@example.org", "Out two", "", SOURCE);
-        store.outbox().queueSubmission(ONE, "out3@example.org", "Out three", "", SOURCE);
+        store.outbox().queueSubmission(
+                Submission.of(ONE, "out2@example.org", "Out two", ""),
+                SOURCE);
+        store.outbox().queueSubmission(
+                Submission.of(ONE, "out3@example.org", "Out three", ""),
+                SOURCE);
         store.outbox().parkOutgoing(2, "550 refused");
         store.outbox().parkUncertain(3, "eof");
 

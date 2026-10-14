@@ -78,19 +78,13 @@ public final class CalendarEngine extends PimdirEngine {
     /** The store, for the phone queue its writes reach. */
     private final PimdirDb pimdir;
 
-    public CalendarEngine(
-            PimdirDb pimdir,
-            Clients clients,
-            Transport transport,
-            Account account,
-            String accountId,
-            String address) {
+    public CalendarEngine(PimdirDb pimdir, Clients clients, RemoteAccount remote) {
         super(pimdir, clients);
-        this.transport = transport;
+        this.transport = remote.transport();
         this.pimdir = pimdir;
-        this.account = account;
-        this.accountId = accountId;
-        this.address = address;
+        this.account = remote.account();
+        this.accountId = remote.accountId();
+        this.address = remote.address();
         this.phone = new CalendarPhonePass(pimdir, clients);
     }
 

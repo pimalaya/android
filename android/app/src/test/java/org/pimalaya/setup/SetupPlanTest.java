@@ -185,7 +185,9 @@ public class SetupPlanTest {
 
         List<SetupOption> options =
                 SetupPlan.discoveredOptions(
-                        PimDomain.MAIL, searched, EMAIL, EMAIL, service -> "<" + service + ">");
+                        PimDomain.MAIL,
+                        new SetupPlan.Discovery(searched, EMAIL, EMAIL),
+                        service -> "<" + service + ">");
 
         String jmap = AccountClient.jmapBase(SESSION);
         assertEquals(
@@ -197,9 +199,17 @@ public class SetupPlanTest {
                         "gmail|<gmail>|gmail.googleapis.com|" + AccountClient.googleBase(EMAIL) + "|null|" + grant + "|" + EMAIL),
                 describe(options));
         assertEquals(
-                2, SetupPlan.discoveredOptions(PimDomain.CALENDAR, searched, EMAIL, EMAIL, service -> service).size());
+                2,
+                SetupPlan.discoveredOptions(
+                                PimDomain.CALENDAR,
+                                new SetupPlan.Discovery(searched, EMAIL, EMAIL),
+                                service -> service)
+                        .size());
         assertTrue(
-                SetupPlan.discoveredOptions(PimDomain.MAIL, searched.subList(5, 6), EMAIL, EMAIL, service -> service)
+                SetupPlan.discoveredOptions(
+                                PimDomain.MAIL,
+                                new SetupPlan.Discovery(searched.subList(5, 6), EMAIL, EMAIL),
+                                service -> service)
                         .isEmpty());
     }
 

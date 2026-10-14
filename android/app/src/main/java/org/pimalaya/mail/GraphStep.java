@@ -30,12 +30,10 @@ import java.util.Map;
  */
 final class GraphStep implements MailStep {
     @Override
-    public Outcome run(
-            MailEngine engine,
-            String accountEmail,
-            List<String> collections,
-            String only,
-            boolean first) {
+    public Outcome run(MailEngine engine, StepRun run) {
+        List<String> collections = run.collections();
+        String only = run.only();
+
         Map<String, String> roles = engine.mail().roles();
         List<String> stepped = new ArrayList<>();
         List<String> names = new ArrayList<>();

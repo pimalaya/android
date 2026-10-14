@@ -20,19 +20,27 @@ final class SetupPlan {
     private SetupPlan() {}
 
     /**
+     * What the search found for an entered address.
+     *
+     * @param searched the configurations found
+     * @param email the address entered
+     * @param emailLogin the login where a configuration names none
+     */
+    record Discovery(List<ServiceConfig> searched, String email, String emailLogin) {}
+
+    /**
      * The discovered half of one domain's options: one per configuration
      * serving it and authentication method, the configurations ranked for
      * the domain and the methods by {@link #authRank}. A configuration this
-     * app cannot drive is left out. {@code emailLogin} is the login where a
-     * configuration names none, {@code protocolName} the user-facing name of
-     * a service kind.
+     * app cannot drive is left out. {@code protocolName} is the user-facing
+     * name of a service kind.
      */
     static List<SetupOption> discoveredOptions(
-            PimDomain domain,
-            List<ServiceConfig> searched,
-            String email,
-            String emailLogin,
-            Function<String, String> protocolName) {
+            PimDomain domain, Discovery discovery, Function<String, String> protocolName) {
+        List<ServiceConfig> searched = discovery.searched();
+        String email = discovery.email();
+        String emailLogin = discovery.emailLogin();
+
         List<SetupOption> options = new ArrayList<>();
 
         List<ServiceConfig> configs = new ArrayList<>(PimDomain.configsFor(domain, searched));

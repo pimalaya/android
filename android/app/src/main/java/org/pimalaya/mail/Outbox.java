@@ -84,14 +84,14 @@ public final class Outbox {
      * a row is ordered and dated by everywhere else in this store, and
      * deriving it once here keeps the listing from parsing anything.
      */
-    void queueSubmission(String accountEmail, String messageId, String subject, String sortKey,
-            byte[] source) {
+    void queueSubmission(Submission submission, byte[] source) {
         queue.enqueue(
-                outboxOf(accountEmail),
-                accountEmail,
-                PimdirQueue.SUBMIT,
-                Submission.of(accountEmail, messageId, subject, sortKey).text(),
-                source);
+                new PimdirQueue.Enqueued(
+                        outboxOf(submission.from()),
+                        submission.from(),
+                        PimdirQueue.SUBMIT,
+                        submission.text(),
+                        source));
     }
 
     /**
@@ -176,7 +176,8 @@ public final class Outbox {
                 continue;
             }
             queueSubmission(
-                    accountEmail, message.linkId, message.subject, message.sortKey, source);
+                    Submission.of(accountEmail, message.linkId, message.subject, message.sortKey),
+                    source);
         }
 
         SQLiteDatabase db = items.writable();
@@ -294,11 +295,12 @@ public final class Outbox {
                 throw new IllegalStateException("The message to send again is gone");
             }
             queue.enqueue(
-                    action.collection(),
-                    Submission.from(action).from(),
-                    PimdirQueue.SUBMIT,
-                    action.payload(),
-                    source);
+                    new PimdirQueue.Enqueued(
+                            action.collection(),
+                            Submission.from(action).from(),
+                            PimdirQueue.SUBMIT,
+                            action.payload(),
+                            source));
             queue.acknowledge(action.id());
             return;
         }

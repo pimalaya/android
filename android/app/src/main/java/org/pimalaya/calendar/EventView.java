@@ -1749,7 +1749,9 @@ public final class EventView {
                     Exception failure = null;
                     try {
                         new EventWrites(new CalendarStager(parts.pimdir(), parts.clients()))
-                                .delete(scope, edit, target, collection, settling, chosen);
+                                .delete(
+                                        new EventWrites.Delete(
+                                                scope, edit, target, collection, settling, chosen));
                     } catch (Exception error) {
                         Log.w("pimalaya", "event delete failed: " + target.id, error);
                         failure = error;

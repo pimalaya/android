@@ -70,15 +70,16 @@ public class SubmissionTest {
     @Test
     public void thePayloadIsWrittenAsBefore() {
         String key = PimdirSummary.mailSortKey(DATE);
-        store.outbox().queueSubmission(ONE, "m1@example.org", "Hello", key, SOURCE);
+        store.outbox().queueSubmission(Submission.of(ONE, "m1@example.org", "Hello", key), SOURCE);
         store.outbox().queueSubmission(
-                ONE,
-                "a/b@example.org",
-                "Quote \" back\\slash / tab\t \u00e9 \ud83d\ude00 \u0001",
-                key,
+                Submission.of(
+                        ONE,
+                        "a/b@example.org",
+                        "Quote \" back\\slash / tab\t \u00e9 \ud83d\ude00 \u0001",
+                        key),
                 SOURCE);
-        store.outbox().queueSubmission(ONE, "empty@example.org", "", "", SOURCE);
-        store.outbox().queueSubmission(ONE, "nul@example.org", null, null, SOURCE);
+        store.outbox().queueSubmission(Submission.of(ONE, "empty@example.org", "", ""), SOURCE);
+        store.outbox().queueSubmission(Submission.of(ONE, "nul@example.org", null, null), SOURCE);
 
         assertEquals(
                 List.of(
@@ -117,8 +118,8 @@ public class SubmissionTest {
 
     @Test
     public void aPayloadWrittenBeforeReadsTheSame() {
-        store.outbox().queueSubmission(ONE, "old@example.org", "x", "", SOURCE);
-        store.outbox().queueSubmission(ONE, "bad@example.org", "x", "", SOURCE);
+        store.outbox().queueSubmission(Submission.of(ONE, "old@example.org", "x", ""), SOURCE);
+        store.outbox().queueSubmission(Submission.of(ONE, "bad@example.org", "x", ""), SOURCE);
         payload(1, OLD);
         payload(2, "not json");
 
@@ -148,7 +149,7 @@ public class SubmissionTest {
 
     @Test
     public void aResentPayloadKeepsItsText() {
-        store.outbox().queueSubmission(ONE, "old@example.org", "x", "", SOURCE);
+        store.outbox().queueSubmission(Submission.of(ONE, "old@example.org", "x", ""), SOURCE);
         payload(1, OLD);
         store.outbox().parkUncertain(1, "eof");
 

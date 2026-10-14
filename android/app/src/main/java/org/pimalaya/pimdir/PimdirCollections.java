@@ -91,8 +91,7 @@ public final class PimdirCollections {
             Set<String> listed = new HashSet<>();
             for (Stored collection : collections) {
                 listed.add(collection.id);
-                upsert(db, collection.id, account, kind, collection.name,
-                        collection.description, collection.color);
+                upsert(db, collection, account, kind);
             }
 
             for (String stale : idsOf(db, account, kind)) {
@@ -341,8 +340,13 @@ public final class PimdirCollections {
      * refresh of what the backend says, not a reset of what the store has
      * learned since.
      */
-    private static void upsert(SQLiteDatabase db, String id, String account, String kind,
-            String name, String description, String color) {
+    private static void upsert(
+            SQLiteDatabase db, Stored collection, String account, String kind) {
+        String id = collection.id;
+        String name = collection.name;
+        String description = collection.description;
+        String color = collection.color;
+
         db.execSQL(
                 "INSERT INTO collections(id, account, kind, name, description, color)"
                         + " VALUES(?, ?, ?, ?, ?, ?)"

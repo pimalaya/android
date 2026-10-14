@@ -276,8 +276,19 @@ final class ContactFieldDialogs {
                 index >= 0 ? () -> addresses.remove(index) : null);
     }
 
+    /**
+     * One plain string list: the model list it is, the dialog's title, its
+     * field's hint (0 = none) and input type.
+     */
+    record StringList(String list, int title, int hint, int inputType) {}
+
     /** A one-field dialog for the plain string lists (hint 0 = none). */
-    void stringDialog(String list, int index, int title, int hint, int inputType) {
+    void stringDialog(StringList kind, int index) {
+        String list = kind.list();
+        int title = kind.title();
+        int hint = kind.hint();
+        int inputType = kind.inputType();
+
         List<String> values = host.strings(list);
 
         LinearLayout content = dialogContent();

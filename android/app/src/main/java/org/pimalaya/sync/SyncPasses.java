@@ -20,6 +20,7 @@ import org.pimalaya.account.TokenRenewal;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.calendar.CalendarRows;
 import org.pimalaya.calendar.EventStore;
+import org.pimalaya.calendar.RemoteAccount;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Addressbook;
@@ -43,6 +44,7 @@ import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailTally;
 import org.pimalaya.mail.MailWindow;
 import org.pimalaya.mail.Outbox;
+import org.pimalaya.mail.StepRun;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -855,7 +857,7 @@ public final class SyncPasses {
             progress.collections(PimDomain.MAIL, 0, 1);
             MailStep.Outcome outcome =
                     MailStep.of(account.server(PimDomain.MAIL))
-                            .run(engine, account.email, collections, only, first);
+                            .run(engine, new StepRun(account.email, collections, only, first));
             progress.collections(PimDomain.MAIL, 1, 1);
             Log.d(
                     "pimalaya",
@@ -939,10 +941,11 @@ public final class SyncPasses {
                                                             new CalendarEngine(
                                                                     pimdir,
                                                                     clients,
-                                                                    worker,
-                                                                    server,
-                                                                    accountId,
-                                                                    account.email);
+                                                                    new RemoteAccount(
+                                                                            worker,
+                                                                            server,
+                                                                            accountId,
+                                                                            account.email));
                                                     engine.progress = alone;
                                                     try {
                                                         engine.sync(collection);
