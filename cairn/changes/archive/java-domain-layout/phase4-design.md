@@ -1,3 +1,9 @@
+---
+cairn: change
+id: java-domain-layout
+part: phase 4 design
+---
+
 # Phase 4 design: logic out of the UI (java-domain-layout)
 
 Paths are relative to `android/app/src/main/java/org/pimalaya/` unless they start with `test/` (= `android/app/src/test/java/org/pimalaya/`) or `e2e/` (= `android/app/src/e2eTest/java/org/pimalaya/`). Line numbers are of today's tree (after phase 3), re-located by name. MainActivity is 3161 lines, OnboardingFlow 3406, 553 `@Test` methods today.

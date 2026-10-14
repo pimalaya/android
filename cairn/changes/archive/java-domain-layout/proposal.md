@@ -1,7 +1,7 @@
 ---
 cairn: change
 id: java-domain-layout
-status: active
+status: landed
 created: 2026-10-14
 ---
 

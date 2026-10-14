@@ -1,3 +1,9 @@
+---
+cairn: change
+id: java-domain-layout
+part: phase 5 design
+---
+
 # Phase 5 design: typed data (java-domain-layout)
 
 Paths: `client/` = android/client/src/main/java/org/pimalaya/client/, `app/` = android/app/src/main/java/org/pimalaya/, `test/` = android/app/src/test/java/org/pimalaya/, `rs/` = rust/src/. Lines are today's tree (after phase 4). `N123` = Native.java line.

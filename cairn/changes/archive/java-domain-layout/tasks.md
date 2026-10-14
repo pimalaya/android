@@ -52,7 +52,7 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 - [x] setup: AccountRemoval (tested)
 - [x] filter: Filters (tested)
 - [x] ui: SectionsAdapter (contacts, agenda, files), CardRows, one dp/resolveColor (RecipientField keeps rounding), Background (adopted where exact), Dates for the listed sites (pinned by tests); every screen off MainActivity, TOLERATED deleted
-- [ ] MailStore split deferred to phase 5 (same StoredMessage seam), PimdirStorage split to phase 8
+- [x] MailStore split done in phase 5C; PimdirStorage split deferred to phase 8
 - [x] device smoke tests: added to the owed list
 
 ## Phase 5: typed data
@@ -68,9 +68,9 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 
 ## Phase 7: docs
 
-- [ ] package-info.java per package, root one the architecture document
-- [ ] Javadoc and comments to the java scope
-- [ ] docs/ refreshed
+- [x] package-info.java per package (15), the root one the architecture document
+- [x] Javadoc and comments to the java scope, code untouched (comments.sh): ~1,730 blocks within the ceiling, ~730 untagged comments tagged or dropped, every public item documented
+- [x] docs/ and CONTRIBUTING.md refreshed; landed plans carry a Historical banner
 
 ## Phase 8 candidates (separate change)
 

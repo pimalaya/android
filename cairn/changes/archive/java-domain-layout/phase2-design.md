@@ -1,3 +1,9 @@
+---
+cairn: change
+id: java-domain-layout
+part: phase 2 design
+---
+
 # Phase 2 design: dependency direction (java-domain-layout)
 
 Paths are relative to `android/app/src/main/java/org/pimalaya/` unless they start with `test/` (= `android/app/src/test/java/org/pimalaya/`). Line numbers are of today's tree (after phase 1), verified.

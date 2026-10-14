@@ -1,3 +1,9 @@
+---
+cairn: change
+id: java-domain-layout
+part: phase 3 design
+---
+
 # Phase 3 design: engines (java-domain-layout)
 
 Paths are relative to `android/app/src/main/java/org/pimalaya/` unless they start with `test/` (= `android/app/src/test/java/org/pimalaya/`) or `e2e/` (= `android/app/src/e2eTest/java/org/pimalaya/`, compiled in the test source set). Line numbers are of today's tree (after phase 2), verified.
