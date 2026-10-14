@@ -4,8 +4,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.MailClient;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirSummary;
 
 import java.nio.charset.StandardCharsets;
@@ -149,7 +149,7 @@ public final class MailSubmit {
      * would be refused on every sync.
      */
     static boolean marksAnswered(Account server) {
-        return !PimalayaClient.isGraph(server) && !PimalayaClient.isGoogle(server);
+        return !AccountClient.isGraph(server) && !AccountClient.isGoogle(server);
     }
 
     /** Now, as the date RFC 5322 section 3.3 writes. */

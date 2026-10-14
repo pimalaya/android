@@ -22,9 +22,9 @@ import android.widget.TextView;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.file.FileActions;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.file.FilesList;
@@ -742,7 +742,7 @@ public final class MessageView implements FilesList.Origins {
             if (parts.mail().trashOf(message.accountEmail).isEmpty()
                     && !message.pending
                     && account != null
-                    && PimalayaClient.isJmap(account.server(PimDomain.MAIL))) {
+                    && AccountClient.isJmap(account.server(PimDomain.MAIL))) {
                 refused = true;
                 continue;
             }

@@ -13,7 +13,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.PimdirEngine;
@@ -127,7 +127,7 @@ public class MailBridgeClockTest {
                 };
 
         long started = System.nanoTime();
-        new PimalayaClient().offlineSyncImmutable(remote, collection, null, false);
+        new OfflineClient().offlineSyncImmutable(remote, collection, null, false);
         long total = (System.nanoTime() - started) / 1_000_000;
 
         System.out.println("first round of " + PAGES * PAGE + " in " + total + " ms: " + remote.clock);

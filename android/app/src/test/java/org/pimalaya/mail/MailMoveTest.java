@@ -18,7 +18,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
@@ -179,7 +179,7 @@ public class MailMoveTest {
     }
 
     private String sync(Server server, String collection) {
-        return String.valueOf(new PimalayaClient().offlineSyncImmutable(server, collection, null, false));
+        return String.valueOf(new OfflineClient().offlineSyncImmutable(server, collection, null, false));
     }
 
     @Test

@@ -1,7 +1,7 @@
 package org.pimalaya.mail;
 
 import org.pimalaya.client.Account;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.AccountClient;
 
 import java.util.List;
 
@@ -84,9 +84,9 @@ public interface MailStep {
      * is filed in ({@link GmailStep}).
      */
     static MailStep of(Account server) {
-        if (PimalayaClient.isGoogle(server) || PimalayaClient.isJmap(server)) {
+        if (AccountClient.isGoogle(server) || AccountClient.isJmap(server)) {
             return new GmailStep();
         }
-        return PimalayaClient.isGraph(server) ? new GraphStep() : new ImapStep();
+        return AccountClient.isGraph(server) ? new GraphStep() : new ImapStep();
     }
 }

@@ -13,8 +13,8 @@ import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirDb;
@@ -36,7 +36,7 @@ import java.util.List;
  * and saved into a folder as a body shared by every copy of the same bytes.
  *
  * <p>The parts come from the real bridge, so the sections the stand-ins are
- * keyed by are the ones {@link PimalayaClient#messagePart} reads back.
+ * keyed by are the ones {@link MailClient#messagePart} reads back.
  */
 @RunWith(RobolectricTestRunner.class)
 public class FileStoreTest {
@@ -61,7 +61,7 @@ public class FileStoreTest {
                     + "notes\r\n"
                     + "--sep--\r\n";
 
-    private final PimalayaClient client = new PimalayaClient();
+    private final MailClient client = new MailClient();
     private PimdirDb pimdir;
     private PimdirItems items;
     private MailStore mail;

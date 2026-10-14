@@ -6,7 +6,7 @@ package org.pimalaya.account;
  * intent-filters) and the provider endpoints and scopes. The account
  * base URLs derived from these choices come from the bridge (the
  * {@code *Base} helpers on
- * {@link org.pimalaya.client.PimalayaClient}).
+ * {@link org.pimalaya.client.AccountClient}).
  *
  * <p>The endpoints and scopes belong in pimconf eventually (so every
  * Pimalaya app shares one set of provider rules). The Google client is

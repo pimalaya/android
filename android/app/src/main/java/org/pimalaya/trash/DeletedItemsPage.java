@@ -19,7 +19,7 @@ import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.contact.ContactStager;
 import org.pimalaya.mail.MailStager;
 import org.pimalaya.pimdir.DefaultCollection;
@@ -259,9 +259,9 @@ public final class DeletedItemsPage {
             if (account.email.equals(email)) {
                 Account server = account.server(PimDomain.MAIL);
                 return server != null
-                        && !PimalayaClient.isGraph(server)
-                        && !PimalayaClient.isGoogle(server)
-                        && !PimalayaClient.isJmap(server);
+                        && !AccountClient.isGraph(server)
+                        && !AccountClient.isGoogle(server)
+                        && !AccountClient.isJmap(server);
             }
         }
         return false;

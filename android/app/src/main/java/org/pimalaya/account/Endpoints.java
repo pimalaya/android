@@ -5,7 +5,7 @@ import java.net.URI;
 import java.util.Collection;
 import java.util.Locale;
 import java.util.Set;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.ServiceConfig;
 
 /**
@@ -56,7 +56,7 @@ public final class Endpoints {
      * null when it names neither {@code smtps} nor {@code smtp}.
      */
     public static String submitUrl(String entered) {
-        String url = PimalayaClient.submitUrl(entered.trim());
+        String url = AccountClient.submitUrl(entered.trim());
         String scheme = scheme(url);
         boolean smtp = "smtps".equals(scheme) || "smtp".equals(scheme);
         return smtp && host(url) != null ? url : null;
@@ -91,7 +91,7 @@ public final class Endpoints {
      */
     public static String asUser(String url, String email) {
         return url.startsWith("imap") || url.startsWith("smtp")
-                ? PimalayaClient.withUser(url, email)
+                ? AccountClient.withUser(url, email)
                 : url;
     }
 
@@ -107,10 +107,10 @@ public final class Endpoints {
      */
     public static String endpointUrl(ServiceConfig config, String email) {
         if ("msgraph".equals(config.service) || "msgraphCalendar".equals(config.service)) {
-            return PimalayaClient.msgraphBase(email);
+            return AccountClient.msgraphBase(email);
         }
         if ("gmail".equals(config.service) || "gcal".equals(config.service)) {
-            return PimalayaClient.googleBase(email);
+            return AccountClient.googleBase(email);
         }
         if (config.url != null) {
             // NOTE: an HTTP endpoint is https or nothing: a plain one, from a
@@ -121,7 +121,7 @@ public final class Endpoints {
                 return null;
             }
             return "jmap".equals(config.service)
-                    ? PimalayaClient.jmapBase(config.url)
+                    ? AccountClient.jmapBase(config.url)
                     : config.url;
         }
         if (config.host == null || !"imap".equals(config.service)) {

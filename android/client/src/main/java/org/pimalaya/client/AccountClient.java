@@ -24,8 +24,8 @@ public class AccountClient {
      * outlook.com included, their own exchanges match too). Meant to
      * run in parallel with {@link #searchAll} so the caller decides
      * what to take. Returns the raw provider configs (their source
-     * naming the provider), empty when no rule matched. Resolver as
-     * in {@link PimalayaClient#discover}.
+     * naming the provider), empty when no rule matched. The resolver
+     * is a DNS resolver, null for the default DNS-over-HTTPS one.
      */
     public List<ServiceConfig> searchProvider(Transport transport, String email, String resolver) {
         return configs(Native.searchProvider(transport, email, resolver));
@@ -44,8 +44,8 @@ public class AccountClient {
      * outputs merge in mechanism-priority order, and the merged
      * configs' endpoints are probed in parallel for the authentication
      * schemes they actually advertise, a provider rule's excepted: what
-     * it says is the provider's own word. Resolver as in
-     * {@link PimalayaClient#discover}.
+     * it says is the provider's own word. The resolver is a DNS
+     * resolver, null for the default DNS-over-HTTPS one.
      *
      * <p>The provider rules rank first, as io-pim-discovery's own sweep
      * ranks them: they name Google's and Microsoft's endpoints and sign-ins
@@ -290,7 +290,7 @@ public class AccountClient {
     /**
      * True when the account's cards are account-level resources with
      * m:n addressbook memberships (JMAP, Google): they list once per
-     * account through {@link PimalayaClient#listAccountCards}, not per addressbook.
+     * account through {@link Native#listAccountCards}, not per addressbook.
      * CardDAV and Graph cards live in the one collection they were
      * listed from and go through {@link ContactClient#listCards}.
      */

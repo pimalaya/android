@@ -292,7 +292,7 @@ public class ContactClient {
     }
 
     /** Parses a card-array reply. */
-    static List<Card> cards(String reply) {
+    private static List<Card> cards(String reply) {
         JSONArray parsed = Replies.array(reply);
         List<Card> cards = new ArrayList<>(parsed.length());
         for (int index = 0; index < parsed.length(); index++) {

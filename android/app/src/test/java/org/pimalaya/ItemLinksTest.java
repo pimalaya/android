@@ -12,8 +12,8 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.mail.MailStore;
@@ -137,7 +137,7 @@ public class ItemLinksTest {
         byte[] source = SOURCE.getBytes(StandardCharsets.UTF_8);
         mail.saveSource(inbox, "m1", source);
         files.recordAttachments(
-                mail.accountIdOf(ONE), "m1", new PimalayaClient().parseMessage(source).attachments);
+                mail.accountIdOf(ONE), "m1", new MailClient().parseMessage(source).attachments);
 
         ItemLinks.Link link = links.links(message).get(0);
         assertTrue(link.automatic());
@@ -151,7 +151,7 @@ public class ItemLinksTest {
         byte[] source = SOURCE.getBytes(StandardCharsets.UTF_8);
         mail.saveSource(inbox, "m1", source);
         files.recordAttachments(
-                mail.accountIdOf(ONE), "m1", new PimalayaClient().parseMessage(source).attachments);
+                mail.accountIdOf(ONE), "m1", new MailClient().parseMessage(source).attachments);
 
         List<ItemLinks.Placement> found = search("quarterly");
         assertEquals(2, found.size());

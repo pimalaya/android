@@ -455,11 +455,11 @@ public class MailBodiesTest {
         MailClient listing =
                 new MailClient() {
                     @Override
-                    public String enumerateMailboxRaw(
+                    public JSONObject enumerateMailbox(
                             org.pimalaya.client.MailSession session,
                             String mailbox,
                             JSONObject request) {
-                        return delta.toString();
+                        return delta;
                     }
                 };
         new MailEngine(

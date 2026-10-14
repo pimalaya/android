@@ -25,9 +25,10 @@ import org.pimalaya.account.Oauth;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.calendar.PhoneCalendars;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.AuthMethod;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.MailClient;
 import org.pimalaya.client.ServiceConfig;
 import org.pimalaya.client.Transport;
 import org.pimalaya.phone.Accounts;
@@ -633,7 +634,7 @@ public final class OnboardingFlow {
                                 new SubmitOption(
                                         host.getString(R.string.config_msgraph),
                                         "graph.microsoft.com",
-                                        PimalayaClient.msgraphBase(pendingEmail),
+                                        AccountClient.msgraphBase(pendingEmail),
                                         false,
                                         null,
                                         "msgraph",
@@ -644,7 +645,7 @@ public final class OnboardingFlow {
                                 new SubmitOption(
                                         host.getString(R.string.config_gmail),
                                         "gmail.googleapis.com",
-                                        PimalayaClient.googleBase(pendingEmail),
+                                        AccountClient.googleBase(pendingEmail),
                                         false,
                                         null,
                                         "gmail",
@@ -1302,7 +1303,7 @@ public final class OnboardingFlow {
                 options.add(
                         providerOption(
                                 R.string.config_carddav,
-                                PimalayaClient.googleCarddavBase(pendingEmail),
+                                AccountClient.googleCarddavBase(pendingEmail),
                                 Oauth.GOOGLE_AUTH_ENDPOINT,
                                 Oauth.GOOGLE_TOKEN_ENDPOINT,
                                 Oauth.GOOGLE_SCOPE));
@@ -1310,7 +1311,7 @@ public final class OnboardingFlow {
             options.add(
                     providerOption(
                             R.string.config_google_api,
-                            PimalayaClient.googleBase(pendingEmail),
+                            AccountClient.googleBase(pendingEmail),
                             Oauth.GOOGLE_AUTH_ENDPOINT,
                             Oauth.GOOGLE_TOKEN_ENDPOINT,
                             Oauth.GOOGLE_PEOPLE_SCOPE));
@@ -1319,7 +1320,7 @@ public final class OnboardingFlow {
         options.add(
                 providerOption(
                         R.string.config_msgraph,
-                        PimalayaClient.msgraphBase(pendingEmail),
+                        AccountClient.msgraphBase(pendingEmail),
                         Oauth.MICROSOFT_AUTH_ENDPOINT,
                         Oauth.MICROSOFT_TOKEN_ENDPOINT,
                         Oauth.MICROSOFT_SCOPE));
@@ -2128,7 +2129,7 @@ public final class OnboardingFlow {
             setup.baseUrl = granted.getValue();
             setup.credential = credential;
             Account server = new Account(setup.baseUrl, candidate.login, candidate.password);
-            if (PimalayaClient.isJmap(server)) {
+            if (AccountClient.isJmap(server)) {
                 overJmap.add(setup.domain);
                 jmap = server;
             }
@@ -2305,7 +2306,7 @@ public final class OnboardingFlow {
      */
     private Exception probe(PimDomain domain, Account account) {
         try {
-            if (PimalayaClient.isJmap(account)) {
+            if (AccountClient.isJmap(account)) {
                 Set<String> capabilities;
                 try (Transport transport = new Transport()) {
                     capabilities = parts.clients().contact().jmapCapabilities(transport, account);
@@ -2317,7 +2318,7 @@ public final class OnboardingFlow {
             switch (domain) {
                 case MAIL:
                     try (org.pimalaya.client.MailSession session =
-                            PimalayaClient.openMail(account)) {
+                            MailClient.openMail(account)) {
                         return null;
                     }
                 case CONTACTS:

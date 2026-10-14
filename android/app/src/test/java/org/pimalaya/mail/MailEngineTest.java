@@ -17,7 +17,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.PimdirEngine;
@@ -205,7 +205,7 @@ public class MailEngineTest {
                                                 .put(result(change.getString("handle"), true, null, null)));
                     }
                 };
-        new PimalayaClient().offlineSyncImmutable(remote, collection, null, false);
+        new OfflineClient().offlineSyncImmutable(remote, collection, null, false);
 
         assertEquals(List.of("setFlags"), pushed);
     }
@@ -330,7 +330,7 @@ public class MailEngineTest {
                 };
 
         try {
-            new PimalayaClient().offlineSyncImmutable(remote, collection, since, false);
+            new OfflineClient().offlineSyncImmutable(remote, collection, since, false);
             throw new AssertionError("the pass reports the cut");
         } catch (org.pimalaya.client.PimalayaException cut2) {
             assertTrue(cut2.getMessage().contains("dropped"));
@@ -342,7 +342,7 @@ public class MailEngineTest {
         assertTrue("a first pass is filling in", store.coverage(collection).filling);
         assertNull("and covers nothing yet", store.coverage(collection).at);
 
-        new PimalayaClient().offlineSyncImmutable(remote, collection, since, false);
+        new OfflineClient().offlineSyncImmutable(remote, collection, since, false);
         JSONObject resumed = asked.get(asked.size() - 1).getJSONObject("listing");
         assertEquals("resumed, not restarted", "7:100", resumed.getString("cursor"));
         assertEquals("1", scalar("SELECT count(*) FROM items WHERE link_id = '99'"));
@@ -350,7 +350,7 @@ public class MailEngineTest {
         // page of the round, so its close retires it.
         assertEquals("1", scalar("SELECT deleted FROM items WHERE link_id = '42'"));
 
-        new PimalayaClient().offlineSyncImmutable(remote, collection, since, false);
+        new OfflineClient().offlineSyncImmutable(remote, collection, since, false);
         JSONObject delta = asked.get(asked.size() - 1).getJSONObject("listing");
         assertEquals("a closed round leaves a delta", "delta", delta.getString("kind"));
         assertEquals("the checkpoint taken up front", "cp-1", delta.getString("checkpoint"));

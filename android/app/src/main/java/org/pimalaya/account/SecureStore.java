@@ -23,7 +23,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.AccountClient;
 
 /**
  * Caches the connected accounts locally, encrypted with an AES-GCM key held in
@@ -235,7 +235,7 @@ public class SecureStore {
             // from the URL, as the mail connection's own URL already does.
             AccountCredential credential = existing.credential(PimDomain.MAIL);
             if (submitUrl != null && credential.login.isEmpty()) {
-                submitUrl = PimalayaClient.withUser(submitUrl, email);
+                submitUrl = AccountClient.withUser(submitUrl, email);
             }
 
             AccountEntry merged =

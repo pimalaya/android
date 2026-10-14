@@ -5,8 +5,8 @@ import java.util.List;
 import java.util.Map;
 import org.pimalaya.account.Oauth;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.AuthMethod;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.ServiceConfig;
 
 /**
@@ -53,8 +53,8 @@ final class SetupPlan {
     static boolean proprietary(SetupOption option, String email) {
         if (option.service == null) {
             return option.baseUrl != null
-                    && (option.baseUrl.equals(PimalayaClient.googleBase(email))
-                            || option.baseUrl.equals(PimalayaClient.msgraphBase(email)));
+                    && (option.baseUrl.equals(AccountClient.googleBase(email))
+                            || option.baseUrl.equals(AccountClient.msgraphBase(email)));
         }
         switch (option.service) {
             case "gmail":

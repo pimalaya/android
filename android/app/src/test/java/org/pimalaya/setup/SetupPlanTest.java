@@ -16,8 +16,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.Oauth;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.AuthMethod;
-import org.pimalaya.client.PimalayaClient;
 import org.robolectric.RobolectricTestRunner;
 
 /**
@@ -26,7 +26,7 @@ import org.robolectric.RobolectricTestRunner;
  * standard setup picks. Password and token options cannot be built from
  * here (their methods have no public constructor), so the cases use OAuth
  * code grants and manual entry. Robolectric only because the provider
- * check reads {@link PimalayaClient#googleBase}, a bridge call, and the
+ * check reads {@link AccountClient#googleBase}, a bridge call, and the
  * bridge library loads into the sandbox's class loader.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -122,7 +122,7 @@ public class SetupPlanTest {
                         Oauth.GOOGLE_AUTH_ENDPOINT, Oauth.GOOGLE_TOKEN_ENDPOINT, Oauth.GOOGLE_PEOPLE_SCOPE);
         SetupOption people =
                 new SetupOption(
-                        null, "Google", "people.googleapis.com", PimalayaClient.googleBase(EMAIL), null, google, EMAIL);
+                        null, "Google", "people.googleapis.com", AccountClient.googleBase(EMAIL), null, google, EMAIL);
         SetupOption carddav = option("carddav", null, oauth(AUTHORIZE, "contacts"));
         SetupOption jmap = option("jmap", SESSION, oauth(AUTHORIZE, "contacts"));
 

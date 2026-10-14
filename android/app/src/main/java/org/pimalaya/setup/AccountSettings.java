@@ -30,7 +30,7 @@ import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.calendar.PhoneCalendars;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.mail.MailScope;
@@ -312,7 +312,7 @@ public final class AccountSettings {
         // NOTE: JMAP, Graph and Gmail submit through the account they read
         // from, so there is no server of its own to change.
         Account mail = account.server(PimDomain.MAIL);
-        if (mail != null && !PimalayaClient.submitsOverSession(mail)) {
+        if (mail != null && !AccountClient.submitsOverSession(mail)) {
             String current = mail.submitUrl;
             boolean none = current == null || current.isEmpty();
             rows.add(
@@ -704,13 +704,13 @@ public final class AccountSettings {
 
     /** The protocol one domain speaks to its server. */
     private String protocolOf(PimDomain domain, Account server) {
-        if (PimalayaClient.isGraph(server)) {
+        if (AccountClient.isGraph(server)) {
             return host.getString(R.string.config_msgraph);
         }
-        if (PimalayaClient.isJmap(server)) {
+        if (AccountClient.isJmap(server)) {
             return host.getString(R.string.config_jmap);
         }
-        boolean google = PimalayaClient.isGoogle(server);
+        boolean google = AccountClient.isGoogle(server);
         switch (domain) {
             case MAIL:
                 return host.getString(google ? R.string.config_gmail : R.string.config_imap);

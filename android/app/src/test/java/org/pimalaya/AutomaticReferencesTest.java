@@ -13,8 +13,8 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.mail.MailStore;
@@ -145,7 +145,7 @@ public class AutomaticReferencesTest {
         mail.restateFromBody(
                 inbox, linkId, PimdirSql.derive(PimdirSummary.MAIL, body).optJSONObject("summary"));
         files.recordAttachments(
-                mail.accountIdOf(ONE), linkId, new PimalayaClient().parseMessage(body).attachments);
+                mail.accountIdOf(ONE), linkId, new MailClient().parseMessage(body).attachments);
     }
 
     private long count(String sql, String... args) {
@@ -215,7 +215,7 @@ public class AutomaticReferencesTest {
         files.recordAttachments(
                 mail.accountIdOf(ONE),
                 "inv@example.org",
-                new PimalayaClient()
+                new MailClient()
                         .parseMessage(INVITATION.getBytes(StandardCharsets.UTF_8))
                         .attachments);
         String attachments = FileStore.attachmentsOf(mail.accountIdOf(ONE));

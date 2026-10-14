@@ -8,11 +8,12 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageBody;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirBlobs;
@@ -109,13 +110,13 @@ public class MailEngine extends PimdirEngine {
      * anyway, so more workers would only queue on the same bucket.
      */
     public static int sessionsOf(Account account) {
-        if (PimalayaClient.isGraph(account)) {
+        if (AccountClient.isGraph(account)) {
             return GRAPH;
         }
-        if (PimalayaClient.isJmap(account)) {
+        if (AccountClient.isJmap(account)) {
             return JMAP;
         }
-        if (PimalayaClient.isGoogle(account)) {
+        if (AccountClient.isGoogle(account)) {
             return GMAIL;
         }
         return IMAP;
@@ -161,9 +162,9 @@ public class MailEngine extends PimdirEngine {
     public List<Mailbox> mailboxes() {
         List<Mailbox> mailboxes = clients.mail().listMailboxes(session);
         Account server = session.account();
-        boolean accountWide = PimalayaClient.isGoogle(server) || PimalayaClient.isJmap(server);
+        boolean accountWide = AccountClient.isGoogle(server) || AccountClient.isJmap(server);
         MailStore.markAccountWide(pimdir.context(), accountId, accountWide);
-        MailStore.markAllMail(pimdir.context(), accountId, PimalayaClient.isGoogle(server));
+        MailStore.markAllMail(pimdir.context(), accountId, AccountClient.isGoogle(server));
         MailStore.markExpungesOne(pimdir.context(), accountId, session.expungesOne());
         if (!accountWide) {
             int released;
@@ -583,8 +584,7 @@ public class MailEngine extends PimdirEngine {
         }
 
         long started = System.nanoTime();
-        String raw = clients.mail().enumerateMailboxRaw(session, mailboxOf(collection), request);
-        JSONObject page = PimalayaClient.reply(raw);
+        JSONObject page = clients.mail().enumerateMailbox(session, mailboxOf(collection), request);
         nameUnnamed(collection, listing, page);
         nameByMessageId(collection, page);
         remote(System.nanoTime() - started);
@@ -1100,7 +1100,7 @@ public class MailEngine extends PimdirEngine {
      * restate; null when it cannot be read.
      *
      * <p>The bridge reads the file once for its hash, its summary and its
-     * parts ({@link PimalayaClient#describeMessage}), and the file is moved
+     * parts ({@link MailClient#describeMessage}), and the file is moved
      * into the blob store, never copied: no body is read on this side or
      * crosses the boundary.
      */
@@ -1147,7 +1147,7 @@ public class MailEngine extends PimdirEngine {
         } else {
             attachments.put(
                     row.linkId,
-                    PimalayaClient.attachmentsOf(described.optJSONArray("attachments")));
+                    MailClient.attachmentsOf(described.optJSONArray("attachments")));
         }
 
         JSONObject item = new JSONObject();
@@ -1382,7 +1382,7 @@ public class MailEngine extends PimdirEngine {
             return result(handle, true, null, null);
         }
 
-        if (PimalayaClient.submitsOverSession(session.account()) || mail().submitting(linkId)) {
+        if (AccountClient.submitsOverSession(session.account()) || mail().submitting(linkId)) {
             return result(handle, false, null, null);
         }
 

@@ -6,7 +6,7 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.AccountClient;
 import org.robolectric.RobolectricTestRunner;
 
 /**
@@ -24,18 +24,18 @@ public class AccountTraitsTest {
         Account jmap = new Account("jmap://api.fastmail.com/jmap/session", "", "token", null);
         Account imap = new Account("imaps://imap.example.com:993", "jane", "secret", null);
 
-        assertTrue(PimalayaClient.submitsOverSession(jmap));
-        assertFalse(PimalayaClient.submitsOverSession(imap));
-        assertFalse(PimalayaClient.submitsOverSession(null));
+        assertTrue(AccountClient.submitsOverSession(jmap));
+        assertFalse(AccountClient.submitsOverSession(imap));
+        assertFalse(AccountClient.submitsOverSession(null));
     }
 
     @Test
     public void aJmapCalendarTakesEventWritesAndOccurrences() {
         String jmap = "jmap://api.fastmail.com/jmap/session/u1/c1";
-        assertTrue(PimalayaClient.writesEvents(jmap));
-        assertTrue(PimalayaClient.writesOverrides(jmap));
-        assertTrue(PimalayaClient.writesExdates(jmap));
-        assertTrue(PimalayaClient.writesEvents("https://dav.example.com/calendars/jane/home/"));
-        assertTrue(PimalayaClient.writesEvents("msgraph://jane@outlook.com/c1"));
+        assertTrue(AccountClient.writesEvents(jmap));
+        assertTrue(AccountClient.writesOverrides(jmap));
+        assertTrue(AccountClient.writesExdates(jmap));
+        assertTrue(AccountClient.writesEvents("https://dav.example.com/calendars/jane/home/"));
+        assertTrue(AccountClient.writesEvents("msgraph://jane@outlook.com/c1"));
     }
 }

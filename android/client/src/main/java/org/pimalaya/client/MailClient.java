@@ -41,18 +41,13 @@ public class MailClient {
      * notes warn about.
      */
     public JSONObject enumerateMailbox(MailSession session, String mailbox, JSONObject request) {
-        return Replies.object(enumerateMailboxRaw(session, mailbox, request));
-    }
-
-    /**
-     * The same page as the string the bridge answered, for a caller timing
-     * the network apart from reading the reply.
-     */
-    public String enumerateMailboxRaw(MailSession session, String mailbox, JSONObject request) {
         String asked = request.toString();
-        return on(
-                session,
-                open -> Native.enumerateMailbox(open.transport(), open.handle(), mailbox, asked));
+        return Replies.object(
+                on(
+                        session,
+                        open ->
+                                Native.enumerateMailbox(
+                                        open.transport(), open.handle(), mailbox, asked)));
     }
 
     /**
