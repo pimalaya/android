@@ -85,7 +85,7 @@ public final class WindowPicker {
                                                 null,
                                                 date,
                                                 1);
-                                host.main.post(
+                                host.postAlive(
                                         () -> {
                                             if (date.equals(dateOf(picker))) {
                                                 info.setText(frees(host, freed));

@@ -13,7 +13,7 @@ import org.pimalaya.R;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.pimdir.PimdirEngine;
 import org.pimalaya.ui.Host;
-import org.pimalaya.ui.ListHeader;
+import org.pimalaya.ui.StubHost;
 import org.pimalaya.ui.SyncDock;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
@@ -118,21 +118,5 @@ public class SyncProgressTest {
     }
 
     /** An activity holding the dock's views. */
-    public static class DockHost extends Host {
-        @Override
-        public void showBarTitle(boolean shown) {}
-
-        @Override
-        public ListHeader headerOf(int panel) {
-            return null;
-        }
-
-        @Override
-        public void foldFab(boolean folded) {}
-
-        @Override
-        public int titleOf(int panel) {
-            return 0;
-        }
-    }
+    public static class DockHost extends StubHost {}
 }

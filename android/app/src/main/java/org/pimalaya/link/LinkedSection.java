@@ -22,6 +22,7 @@ import org.pimalaya.contact.Group;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.ui.Linked;
 import org.pimalaya.ui.Sections;
 
 /**
@@ -35,7 +36,7 @@ import org.pimalaya.ui.Sections;
  * Every read and write runs on the io executor: a page draws its card from
  * the links last read for it, and redraws once a read lands.
  */
-public final class LinkedSection {
+public final class LinkedSection implements Linked<ItemLinks.Endpoint> {
     private final MainActivity host;
 
     /** The links read for an item and not drawn yet, by endpoint. */
@@ -54,6 +55,7 @@ public final class LinkedSection {
      * that cannot be linked (a contact not saved yet, a message still in an
      * outbox). Drawn empty while the read runs.
      */
+    @Override
     public void section(Sections sections, ItemLinks.Endpoint self, Runnable refresh) {
         if (self == null) {
             return;
@@ -106,6 +108,7 @@ public final class LinkedSection {
     }
 
     /** {@link #dialog(ItemLinks.Endpoint, String)}, running {@code closed} once it goes. */
+    @Override
     public void dialog(ItemLinks.Endpoint self, String title, Runnable closed) {
         if (self == null) {
             return;

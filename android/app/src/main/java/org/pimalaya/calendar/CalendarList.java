@@ -180,7 +180,7 @@ public final class CalendarList {
         reads.execute(
                 () -> {
                     List<Row> read = rowsOf(from, until, filter, defaults);
-                    host.main.post(
+                    host.postAlive(
                             () -> {
                                 if (asked != generation) {
                                     return;

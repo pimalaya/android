@@ -39,6 +39,45 @@ public final class Ui {
         return (int) (value * context.getResources().getDisplayMetrics().density);
     }
 
+    /**
+     * A two-line addressbook label: the name at full size over the
+     * account email, diminished and secondary (same styling as the
+     * auth config options), so long names and emails never wrap into
+     * one unreadable line.
+     */
+    public CharSequence twoLine(String name, String email) {
+        android.text.SpannableString label = new android.text.SpannableString(name + "\n" + email);
+        int start = name.length() + 1;
+        label.setSpan(
+                new android.text.style.RelativeSizeSpan(0.8f),
+                start,
+                label.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        label.setSpan(
+                new android.text.style.ForegroundColorSpan(
+                        resolveColor(android.R.attr.textColorSecondary)),
+                start,
+                label.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return label;
+    }
+
+    /**
+     * One popup entry carrying its own action.
+     *
+     * <p>Text-only: the framework popup renders forced icons flush against
+     * their labels on some Android releases.
+     */
+    public static void item(android.widget.PopupMenu menu, int label, Runnable action) {
+        menu.getMenu()
+                .add(label)
+                .setOnMenuItemClickListener(
+                        entry -> {
+                            action.run();
+                            return true;
+                        });
+    }
+
     /** A plain no-suggestions text field, prefilled (dialog forms). */
     EditText field(int hint, String value) {
         EditText field = new EditText(context);

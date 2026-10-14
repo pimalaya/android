@@ -22,6 +22,11 @@ import org.pimalaya.client.Card;
  * {@link #exportFile}.
  */
 public final class VcfTransfer {
+    /** The request codes of the import and export document pickers. */
+    public static final int REQUEST_IMPORT = 2;
+
+    public static final int REQUEST_EXPORT = 3;
+
     private final MainActivity host;
 
     public VcfTransfer(MainActivity host) {
@@ -84,7 +89,7 @@ public final class VcfTransfer {
                     }
                     int imported = count;
                     Exception error = failure;
-                    host.main.post(
+                    host.postAlive(
                             () -> {
                                 host.setListBusy(false);
                                 if (error != null) {
@@ -140,7 +145,7 @@ public final class VcfTransfer {
                         failure = error;
                     }
                     Exception error = failure;
-                    host.main.post(
+                    host.postAlive(
                             () -> {
                                 host.setListBusy(false);
                                 if (error != null) {

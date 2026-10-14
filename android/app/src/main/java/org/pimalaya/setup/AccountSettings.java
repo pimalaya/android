@@ -45,6 +45,7 @@ import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.PillField;
 import org.pimalaya.ui.Sections;
+import org.pimalaya.ui.SyncPill;
 
 /**
  * The full-screen account settings controller behind the drawer: one
@@ -184,7 +185,8 @@ public final class AccountSettings {
         FrameLayout pill = host.findViewById(R.id.account_pill);
         pill.removeAllViews();
         pill.addView(
-                host.syncPill(
+                SyncPill.of(
+                        host,
                         AccountActivation.enabled(host, email),
                         SyncStamps.at(host, email),
                         host.bodiesLeft(email)),

@@ -17,6 +17,7 @@ import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.Chips;
 import org.pimalaya.ui.ListHeader;
+import org.pimalaya.ui.Ui;
 
 /**
  * The contacts screen: the merged list grouped into one card per
@@ -596,8 +597,8 @@ public final class ContactsList {
     /** The import/export button's menu: the two directions it covers. */
     private void showTransferMenu(View anchor) {
         android.widget.PopupMenu menu = new android.widget.PopupMenu(host, anchor);
-        MainActivity.item(menu, R.string.import_contacts, host::importContacts);
-        MainActivity.item(menu, R.string.export_contacts, host::exportContacts);
+        Ui.item(menu, R.string.import_contacts, host::importContacts);
+        Ui.item(menu, R.string.export_contacts, host::exportContacts);
         menu.show();
     }
 }

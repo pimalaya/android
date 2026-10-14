@@ -273,7 +273,7 @@ public final class MailList {
         // top of the list is what has to show while the rest fills in.
         MailState.of(host).onWrite =
                 () ->
-                        host.main.post(
+                        host.postAlive(
                                 () -> {
                                     host.main.removeCallbacks(settled);
                                     host.main.postDelayed(settled, SETTLE_MILLIS);
@@ -372,7 +372,7 @@ public final class MailList {
                         after = rows.size() < PAGE ? null : rows.get(rows.size() - 1);
                     }
 
-                    host.main.post(
+                    host.postAlive(
                             () -> {
                                 if (asked != generation) {
                                     return;
@@ -905,7 +905,7 @@ public final class MailList {
         reads.execute(
                 () -> {
                     List<MailStore.StoredMessage> rows = read(listed, shown, after, page);
-                    host.main.post(
+                    host.postAlive(
                             () -> {
                                 if (asked != generation) {
                                     return;
@@ -1256,7 +1256,7 @@ public final class MailList {
                         messages.addAll(store.all(listed));
                     }
                     messages.removeIf(message -> left.contains(keyOf(message)));
-                    host.main.post(() -> act.accept(Collections.unmodifiableList(messages)));
+                    host.postAlive(() -> act.accept(Collections.unmodifiableList(messages)));
                 });
     }
 

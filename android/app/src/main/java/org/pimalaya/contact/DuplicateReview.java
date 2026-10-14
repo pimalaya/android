@@ -84,7 +84,7 @@ final class DuplicateReview {
 
                     List<Entry> pending = first;
                     Exception scanFailure = failure;
-                    host.main.post(
+                    host.postAlive(
                             () -> {
                                 if (scanFailure != null) {
                                     host.showError(scanFailure, R.string.dup_none);

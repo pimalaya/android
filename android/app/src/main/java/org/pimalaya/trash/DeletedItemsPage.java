@@ -203,7 +203,7 @@ public final class DeletedItemsPage {
 
         CharSequence[] labels = new CharSequence[own.size()];
         for (int index = 0; index < labels.length; index++) {
-            labels[index] = host.bookLabel(label(row, own.get(index)), accountLabel(row));
+            labels[index] = host.ui.twoLine(label(row, own.get(index)), accountLabel(row));
         }
         int[] picked = {preselected};
         new AlertDialog.Builder(host)

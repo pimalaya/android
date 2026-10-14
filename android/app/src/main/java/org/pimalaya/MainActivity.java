@@ -28,8 +28,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.json.JSONObject;
@@ -95,7 +93,10 @@ import org.pimalaya.trash.DeletedItemsPage;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
+import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.Picker;
 import org.pimalaya.ui.SyncDock;
+import org.pimalaya.ui.SyncPill;
 
 /**
  * Single-activity host walking the app's screens through a ViewFlipper.
@@ -114,25 +115,22 @@ import org.pimalaya.ui.SyncDock;
  * syncs are manual, from there or from the pull-down.
  */
 public class MainActivity extends Host implements SyncCoordinator.Screens {
-    // NOTE: everything from contacts to event is the content flipper's
-    // child indexes, in the order activity_main.xml includes them; auth
-    // and account are whole-frame overlays sliding over it, bar included
-    // (only the FAB stays above them), so their ids only have to miss
-    // the flipper's range.
-    public static final int PANEL_CONTACTS = 0;
-    public static final int PANEL_CONTACT = 1;
-    public static final int PANEL_ADVANCED = 2;
-    public static final int PANEL_SOURCE = 3;
-    public static final int PANEL_MAIL = 4;
-    public static final int PANEL_CALENDAR = 5;
-    public static final int PANEL_COMPOSE = 6;
-    public static final int PANEL_MESSAGE = 7;
-    public static final int PANEL_EVENT_VIEW = 8;
-    public static final int PANEL_FILES = 9;
+    // NOTE: aliases of Panels until every screen names it (phase 4 of
+    // java-domain-layout).
+    public static final int PANEL_CONTACTS = Panels.CONTACTS;
+    public static final int PANEL_CONTACT = Panels.CONTACT;
+    public static final int PANEL_ADVANCED = Panels.ADVANCED;
+    public static final int PANEL_SOURCE = Panels.SOURCE;
+    public static final int PANEL_MAIL = Panels.MAIL;
+    public static final int PANEL_CALENDAR = Panels.CALENDAR;
+    public static final int PANEL_COMPOSE = Panels.COMPOSE;
+    public static final int PANEL_MESSAGE = Panels.MESSAGE;
+    public static final int PANEL_EVENT_VIEW = Panels.EVENT_VIEW;
+    public static final int PANEL_FILES = Panels.FILES;
     private static final int PANEL_AUTH = 20;
-    public static final int PANEL_ACCOUNT = 21;
-    public static final int PANEL_FILTER = 22;
-    public static final int PANEL_DELETED = 23;
+    public static final int PANEL_ACCOUNT = Panels.ACCOUNT;
+    public static final int PANEL_FILTER = Panels.FILTER;
+    public static final int PANEL_DELETED = Panels.DELETED;
 
     /**
      * The domain the app opens on, and the one every flow that finishes
@@ -143,45 +141,14 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
      */
     private static final int PANEL_ROOT = PANEL_MAIL;
 
-    /** The auth flow's steps, inside its own flipper under one bar. */
-    public static final int STEP_EMAIL = 0;
-
-    /** What to connect this address for, once discovery has said what it can. */
-    public static final int STEP_DOMAIN = 1;
-
-    static final int STEP_CONFIG = 2;
-    public static final int STEP_BOOKS = 3;
-
-    /** The standard setup's outcome when some servers refused the password. */
-    public static final int STEP_RESULT = 4;
-
-    /** The advanced setup's sign-ins, one card per server and login. */
-    public static final int STEP_SIGNIN = 5;
-
-    /** The OAuth client a server registers none of. */
-    public static final int STEP_OAUTH = 6;
-
     /** Whether an auth step's main button is loading, the step frozen. */
     private boolean authBusy;
 
     private static final int REQUEST_MIRRORS = 1;
     private static final int REQUEST_NOTIFICATIONS = 4;
-    private static final int REQUEST_IMPORT = 2;
-    private static final int REQUEST_EXPORT = 3;
-    public static final int REQUEST_FILE_IMPORT = 5;
-    public static final int REQUEST_FILE_EXPORT = 6;
 
     /** The shared backend client. */
     public final PimalayaClient client = new PimalayaClient();
-
-    /**
-     * The executor of what someone is waiting on, a message being opened:
-     * never queued behind a step of the background fill or of the body
-     * download, which run on {@link #io} and can hold it for seconds. What
-     * it writes to the store it writes under {@link Locks#store},
-     * the store keeping one writer.
-     */
-    public final ExecutorService interactive = Executors.newSingleThreadExecutor();
 
     public SecureStore store;
     public CardStore base;
@@ -552,12 +519,14 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         // NOTE: a first run opens on the address alone, with nothing to
         // leave for and the page's own headline in place of a title; the
         // steps after it carry a round back button of their own.
-        boolean bare = step != STEP_CONFIG && (step != STEP_EMAIL || !hasRealAccount());
+        boolean bare =
+                step != OnboardingFlow.STEP_CONFIG
+                        && (step != OnboardingFlow.STEP_EMAIL || !hasRealAccount());
         findViewById(R.id.auth_bar).setVisibility(bare ? View.GONE : View.VISIBLE);
         TextView title = findViewById(R.id.auth_title);
-        if (step == STEP_EMAIL) {
+        if (step == OnboardingFlow.STEP_EMAIL) {
             title.setText(hasRealAccount() ? R.string.add_account : R.string.auth_step_email);
-        } else if (step == STEP_CONFIG) {
+        } else if (step == OnboardingFlow.STEP_CONFIG) {
             title.setText(R.string.auth_step_config);
         }
     }
@@ -576,16 +545,16 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         // holding, so its sealed state and verifier go with it.
         oauth.cancel();
         int step = authFlipper.getDisplayedChild();
-        if (step == STEP_RESULT || step == STEP_SIGNIN) {
+        if (step == OnboardingFlow.STEP_RESULT || step == OnboardingFlow.STEP_SIGNIN) {
             onboarding.abortAuthSteps();
-        } else if (step == STEP_OAUTH || step == STEP_BOOKS) {
+        } else if (step == OnboardingFlow.STEP_OAUTH || step == OnboardingFlow.STEP_BOOKS) {
             // NOTE: nothing persists before the selection confirms, so
             // the books step steps back like any other.
             onboarding.backToSignIn();
-        } else if (step == STEP_CONFIG) {
-            showAuthBack(STEP_DOMAIN);
-        } else if (step == STEP_DOMAIN) {
-            showAuthBack(STEP_EMAIL);
+        } else if (step == OnboardingFlow.STEP_CONFIG) {
+            showAuthBack(OnboardingFlow.STEP_DOMAIN);
+        } else if (step == OnboardingFlow.STEP_DOMAIN) {
+            showAuthBack(OnboardingFlow.STEP_EMAIL);
         } else {
             cancelAuth();
         }
@@ -650,6 +619,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
      * Gates a conflict form's save FAB, a contact's or a calendar entry's:
      * the save itself once nothing awaits review, else the error disc.
      */
+    @Override
     public void gateSave(boolean ready, int icon, int description) {
         android.widget.ImageButton fab = findViewById(R.id.fab);
         if (ready) {
@@ -808,7 +778,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                     @Override
                     public void afterTextChanged(android.text.Editable s) {
                         if (screen == PANEL_AUTH
-                                && authFlipper.getDisplayedChild() == STEP_EMAIL) {
+                                && authFlipper.getDisplayedChild() == OnboardingFlow.STEP_EMAIL) {
                             setFabEnabled(R.id.email_continue, onboarding.emailSubmittable());
                         }
                     }
@@ -819,6 +789,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
      * Toggles an auth continue FAB between its arrow and an on-disc
      * loader, the button disabled while loading.
      */
+    @Override
     public void setAuthLoading(int buttonId, int progressId, boolean loading) {
         View button = findViewById(buttonId);
         if (button instanceof android.widget.ImageButton) {
@@ -873,6 +844,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** Enables or disables an auth continue FAB, dimming its disc. */
+    @Override
     public void setFabEnabled(int id, boolean enabled) {
         View fab = findViewById(id);
         fab.setEnabled(enabled);
@@ -896,7 +868,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         // a real redirect re-enters loading right after.
         if (flipper != null
                 && screen == PANEL_AUTH
-                && authFlipper.getDisplayedChild() != STEP_EMAIL) {
+                && authFlipper.getDisplayedChild() != OnboardingFlow.STEP_EMAIL) {
             onboarding.resetConfigContinue();
         }
 
@@ -1042,6 +1014,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
      * collection, which the filter narrows, so a drawer entry opening
      * one collection would be a second way of looking at the same thing.
      */
+    @Override
     public void reloadHome() {
         // With no real account the drawer shows an empty state, and its
         // sync row is hidden.
@@ -1117,7 +1090,8 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                         LinearLayout.LayoutParams.WRAP_CONTENT, dp(30));
         pillParams.topMargin = dp(12);
         card.addView(
-                syncPill(
+                SyncPill.of(
+                        this,
                         AccountActivation.enabled(this, email),
                         SyncStamps.at(this, email),
                         sync.bodiesLeft(email)),
@@ -1136,66 +1110,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** Bodies an account still downloads ({@link SyncCoordinator#bodiesLeft}). */
     public Integer bodiesLeft(String email) {
         return sync.bodiesLeft(email);
-    }
-
-    /**
-     * The pill saying where an account stands: deactivated in the plain
-     * tone, else how many bodies its window still downloads
-     * ({@code left}, null outside the body step) or when it last synced on an
-     * accent tint, or that it never has in the plain tone.
-     */
-    public View syncPill(boolean enabled, long stamp, Integer left) {
-        boolean downloading = enabled && left != null && left > 0;
-        boolean synced = downloading || (enabled && stamp > 0);
-        int color =
-                synced
-                        ? resolveColor(android.R.attr.colorAccent)
-                        : resolveColor(android.R.attr.textColorSecondary);
-
-        android.widget.ImageView glyph = new android.widget.ImageView(this);
-        glyph.setImageResource(R.drawable.ic_sync);
-        glyph.setImageTintList(ColorStateList.valueOf(color));
-
-        TextView label = new TextView(this);
-        if (!enabled) {
-            label.setText(R.string.drawer_deactivated);
-        } else if (downloading) {
-            label.setText(
-                    getResources().getQuantityString(R.plurals.drawer_downloading, left, left));
-        } else if (synced) {
-            label.setText(
-                    getString(
-                            R.string.drawer_synced,
-                            android.text.format.DateUtils.getRelativeTimeSpanString(
-                                    stamp,
-                                    System.currentTimeMillis(),
-                                    android.text.format.DateUtils.MINUTE_IN_MILLIS)));
-        } else {
-            label.setText(R.string.drawer_never_synced);
-        }
-        label.setTextColor(color);
-        label.setTextSize(13);
-        label.setTypeface(null, android.graphics.Typeface.BOLD);
-        label.setSingleLine(true);
-
-        android.graphics.drawable.GradientDrawable tint =
-                new android.graphics.drawable.GradientDrawable();
-        tint.setCornerRadius(dp(15));
-        tint.setColor((color & 0x00ffffff) | 0x24000000);
-
-        LinearLayout pill = new LinearLayout(this);
-        pill.setOrientation(LinearLayout.HORIZONTAL);
-        pill.setGravity(Gravity.CENTER_VERTICAL);
-        pill.setPadding(dp(8), 0, dp(12), 0);
-        pill.setBackground(tint);
-        pill.addView(glyph, new LinearLayout.LayoutParams(dp(16), dp(16)));
-        LinearLayout.LayoutParams labelParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT);
-        labelParams.setMarginStart(dp(8));
-        pill.addView(label, labelParams);
-        return pill;
     }
 
     /**
@@ -1669,7 +1583,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
-        startActivityForResult(intent, REQUEST_IMPORT);
+        startActivityForResult(intent, VcfTransfer.REQUEST_IMPORT);
     }
 
     @Override
@@ -1678,13 +1592,13 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         if (result != RESULT_OK || data == null || data.getData() == null) {
             return;
         }
-        if (request == REQUEST_IMPORT) {
+        if (request == VcfTransfer.REQUEST_IMPORT) {
             vcfTransfer.importFile(data.getData());
-        } else if (request == REQUEST_EXPORT) {
+        } else if (request == VcfTransfer.REQUEST_EXPORT) {
             vcfTransfer.exportFile(data.getData());
-        } else if (request == REQUEST_FILE_IMPORT) {
+        } else if (request == FilesList.REQUEST_IMPORT) {
             filesList.imported(data.getData());
-        } else if (request == REQUEST_FILE_EXPORT) {
+        } else if (request == FileActions.REQUEST_EXPORT) {
             fileActions.exported(data.getData());
         }
     }
@@ -1700,7 +1614,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("text/vcard");
         intent.putExtra(Intent.EXTRA_TITLE, "contacts.vcf");
-        startActivityForResult(intent, REQUEST_EXPORT);
+        startActivityForResult(intent, VcfTransfer.REQUEST_EXPORT);
     }
 
     /** The active contacts view, for the vCard export snapshot. */
@@ -1791,34 +1705,15 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
             java.util.function.Consumer<PimdirCollections.Stored> open) {
         DefaultCollection.Choice choice =
                 DefaultCollection.choice(this, kind, collections, filterOf(domain)::accepts);
-        if (choice.direct != null) {
-            open.accept(choice.direct);
-            return;
-        }
-        if (choice.offered.isEmpty()) {
-            toast(getString(none));
-            return;
-        }
-
-        CharSequence[] labels = new CharSequence[choice.offered.size()];
-        for (int index = 0; index < labels.length; index++) {
-            PimdirCollections.Stored collection = choice.offered.get(index);
-            labels[index] = bookLabel(collection.name, collection.accountEmail);
-        }
-        int[] picked = {choice.preselected};
-        new AlertDialog.Builder(this)
-                .setTitle(title)
-                .setSingleChoiceItems(
-                        labels, choice.preselected, (dialog, which) -> picked[0] = which)
-                .setPositiveButton(
-                        android.R.string.ok,
-                        (dialog, which) -> {
-                            if (picked[0] >= 0) {
-                                open.accept(choice.offered.get(picked[0]));
-                            }
-                        })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+        Picker.choose(
+                this,
+                title,
+                none,
+                choice.direct,
+                choice.offered,
+                choice.preselected,
+                collection -> ui.twoLine(collection.name, collection.accountEmail),
+                open);
     }
 
     /** The subscribed addressbooks the group does not already live in. */
@@ -1847,32 +1742,9 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
             labels[index] =
                     LocalBook.is(entry.accountEmail)
                             ? getString(R.string.local_book)
-                            : bookLabel(entry.book.name, entry.accountEmail);
+                            : ui.twoLine(entry.book.name, entry.accountEmail);
         }
         return labels;
-    }
-
-    /**
-     * A two-line addressbook label: the name at full size over the
-     * account email, diminished and secondary (same styling as the
-     * auth config options), so long names and emails never wrap into
-     * one unreadable line.
-     */
-    public CharSequence bookLabel(String name, String email) {
-        android.text.SpannableString label = new android.text.SpannableString(name + "\n" + email);
-        int start = name.length() + 1;
-        label.setSpan(
-                new android.text.style.RelativeSizeSpan(0.8f),
-                start,
-                label.length(),
-                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        label.setSpan(
-                new android.text.style.ForegroundColorSpan(
-                        resolveColor(android.R.attr.textColorSecondary)),
-                start,
-                label.length(),
-                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        return label;
     }
 
     /** Stages a copied card into the target addressbook. */
@@ -1901,7 +1773,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         CharSequence[] labels = new CharSequence[candidates.size()];
         for (int index = 0; index < candidates.size(); index++) {
             Entry entry = candidates.get(index);
-            labels[index] = bookLabel(entry.book.name, entry.accountEmail);
+            labels[index] = ui.twoLine(entry.book.name, entry.accountEmail);
         }
 
         new AlertDialog.Builder(this)
@@ -2198,6 +2070,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** Retitles the bar, for a page whose own edits change its title. */
+    @Override
     public void updateBarTitle(String title) {
         ((TextView) findViewById(R.id.bar_title)).setText(title);
     }
@@ -2206,6 +2079,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
      * Titles the bar with a list domain's name, shown only once the
      * list's own large title has scrolled away.
      */
+    @Override
     public void showDomainTitle(int panel) {
         TextView title = findViewById(R.id.bar_title);
         title.setText(Domains.titleOf(panel));
@@ -2332,6 +2206,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** The mail item's unread count, hidden at zero. */
+    @Override
     public void showMailBadge(int unread) {
         TextView badge = findViewById(R.id.nav_mail_badge);
         badge.setText(unread > 99 ? "99+" : String.valueOf(unread));
@@ -2339,6 +2214,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** A list's add button, inert while the list works (an import, an export). */
+    @Override
     public void setListBusy(boolean busy) {
         View add = findViewById(R.id.fab_extended);
         add.setEnabled(!busy);
@@ -2346,6 +2222,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** The composer's send button, inert while the message is written out. */
+    @Override
     public void setSending(boolean sending) {
         View send = findViewById(R.id.bar_send);
         send.setEnabled(!sending);
@@ -2374,22 +2251,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         if (target != screen) {
             showInstant(target);
         }
-    }
-
-    /**
-     * One popup entry carrying its own action.
-     *
-     * <p>Text-only: the framework popup renders forced icons flush against
-     * their labels on some Android releases.
-     */
-    public static void item(android.widget.PopupMenu menu, int label, Runnable action) {
-        menu.getMenu()
-                .add(label)
-                .setOnMenuItemClickListener(
-                        entry -> {
-                            action.run();
-                            return true;
-                        });
     }
 
     /** Opens the filter page of the domain on screen. */
@@ -2566,11 +2427,13 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** Navigates forward: the panels slide in from the right. */
+    @Override
     public void show(int panel) {
         show(panel, false);
     }
 
     /** Navigates back: the panels slide in from the left. */
+    @Override
     public void showBack(int panel) {
         show(panel, true);
     }
@@ -2607,6 +2470,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
      * current screen with a fade and a slight zoom. What is underneath
      * stays put.
      */
+    @Override
     public void openOverlay(int panel) {
         hideKeyboard();
         View overlay = overlayOf(panel);
@@ -2618,6 +2482,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** Fades the overlay back out (zooming slightly away), then hides it. */
+    @Override
     public void closeOverlay(int panel) {
         hideKeyboard();
         View overlay = overlayOf(panel);
@@ -2928,6 +2793,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
      * chrome element goes off, then the screen's own set comes back
      * (the contacts screen delegates to its selection/search state).
      */
+    @Override
     public void applyChrome(int panel) {
         // NOTE: posted, so the tab is drawn before its first sync's dialog
         // goes up over it.
@@ -3005,6 +2871,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** Dismisses the soft keyboard, e.g. when leaving the edit form. */
+    @Override
     public void hideKeyboard() {
         // NOTE: fall back to the flipper's window token when nothing
         // holds the focus (the same window either way).

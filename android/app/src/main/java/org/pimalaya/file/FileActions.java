@@ -43,6 +43,9 @@ public final class FileActions {
 
     private static final String EXPORT_NAME = "files.export.name";
 
+    /** The request code of the export document picker ({@link #exported}). */
+    public static final int REQUEST_EXPORT = 6;
+
     private final MainActivity host;
 
     /** The file an export waits on the document picker for, null for none. */
@@ -158,7 +161,7 @@ public final class FileActions {
                                                 .addCategory(Intent.CATEGORY_OPENABLE)
                                                 .setType(typeOf(file))
                                                 .putExtra(Intent.EXTRA_TITLE, exportName),
-                                        MainActivity.REQUEST_FILE_EXPORT);
+                                        REQUEST_EXPORT);
                             });
                 });
     }

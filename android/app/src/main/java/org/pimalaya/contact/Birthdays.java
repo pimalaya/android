@@ -118,7 +118,7 @@ final class Birthdays {
                                                     when);
                         }
                     }
-                    host.main.post(
+                    host.postAlive(
                             () ->
                                     new AlertDialog.Builder(host)
                                             .setTitle(R.string.birthdays_title)

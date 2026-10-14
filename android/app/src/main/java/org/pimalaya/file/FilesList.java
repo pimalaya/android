@@ -40,6 +40,9 @@ public final class FilesList {
     /** The prefix of the copy an import stages in the cache ({@link CacheSweep}). */
     public static final String STAGED = "import";
 
+    /** The request code of the import document picker ({@link #imported}). */
+    public static final int REQUEST_IMPORT = 5;
+
     /** The kind chips: folders, attachments. */
     private static final int FOLDERS = 0;
 
@@ -502,7 +505,7 @@ public final class FilesList {
                 new Intent(Intent.ACTION_OPEN_DOCUMENT)
                         .addCategory(Intent.CATEGORY_OPENABLE)
                         .setType("*/*"),
-                MainActivity.REQUEST_FILE_IMPORT);
+                REQUEST_IMPORT);
     }
 
     /**

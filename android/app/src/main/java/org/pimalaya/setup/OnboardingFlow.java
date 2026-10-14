@@ -51,6 +51,24 @@ import org.pimalaya.ui.PillField;
  * confirms, so backing out of the flow leaves everything untouched.
  */
 public final class OnboardingFlow {
+    /** The auth flow's steps, inside its own flipper under one bar. */
+    public static final int STEP_EMAIL = 0;
+
+    /** What to connect this address for, once discovery has said what it can. */
+    public static final int STEP_DOMAIN = 1;
+
+    public static final int STEP_CONFIG = 2;
+    public static final int STEP_BOOKS = 3;
+
+    /** The standard setup's outcome when some servers refused the password. */
+    public static final int STEP_RESULT = 4;
+
+    /** The advanced setup's sign-ins, one card per server and login. */
+    public static final int STEP_SIGNIN = 5;
+
+    /** The OAuth client a server registers none of. */
+    public static final int STEP_OAUTH = 6;
+
     private final MainActivity host;
     private final OauthFlow oauth;
 
@@ -295,14 +313,14 @@ public final class OnboardingFlow {
         ((EditText) host.findViewById(R.id.domain_password)).setText("");
         host.setAuthLoading(R.id.email_continue, R.id.email_progress, false);
         host.setAuthLoading(R.id.domain_connect, R.id.domain_progress, false);
-        host.showAuth(MainActivity.STEP_EMAIL);
+        host.showAuth(STEP_EMAIL);
     }
 
     /** Brings a step's own buttons in line with its state, on entering it. */
     public void refreshStep(int step) {
-        if (step == MainActivity.STEP_EMAIL) {
+        if (step == STEP_EMAIL) {
             host.setFabEnabled(R.id.email_continue, emailSubmittable());
-        } else if (step != MainActivity.STEP_OAUTH) {
+        } else if (step != STEP_OAUTH) {
             resetConfigContinue();
         }
     }
@@ -393,7 +411,7 @@ public final class OnboardingFlow {
                     List<ServiceConfig> found = configs;
                     String matched = provider;
                     Exception searchFailure = failure;
-                    host.main.post(
+                    host.postAlive(
                             () -> {
                                 host.setAuthLoading(
                                         R.id.email_continue, R.id.email_progress, false);
@@ -804,7 +822,7 @@ public final class OnboardingFlow {
         }
 
         showPasswordError(false);
-        host.showAuth(MainActivity.STEP_DOMAIN);
+        host.showAuth(STEP_DOMAIN);
         resetSetupContinue();
     }
 
@@ -1479,13 +1497,13 @@ public final class OnboardingFlow {
     /** Puts the running step's main button on its loader. */
     public void busy() {
         switch (host.authStep()) {
-            case MainActivity.STEP_SIGNIN:
+            case STEP_SIGNIN:
                 host.setAuthLoading(R.id.signin_continue, R.id.signin_progress, true);
                 break;
-            case MainActivity.STEP_OAUTH:
+            case STEP_OAUTH:
                 host.setAuthLoading(R.id.oauth_continue, R.id.oauth_progress, true);
                 break;
-            case MainActivity.STEP_BOOKS:
+            case STEP_BOOKS:
                 host.setAuthLoading(R.id.books_continue, R.id.books_progress, true);
                 break;
             default:
@@ -1500,14 +1518,14 @@ public final class OnboardingFlow {
             return;
         }
         switch (host.authStep()) {
-            case MainActivity.STEP_SIGNIN:
+            case STEP_SIGNIN:
                 host.setAuthLoading(R.id.signin_continue, R.id.signin_progress, false);
                 refreshSignIn();
                 break;
-            case MainActivity.STEP_OAUTH:
+            case STEP_OAUTH:
                 host.setAuthLoading(R.id.oauth_continue, R.id.oauth_progress, false);
                 break;
-            case MainActivity.STEP_BOOKS:
+            case STEP_BOOKS:
                 host.setAuthLoading(R.id.books_continue, R.id.books_progress, false);
                 updateBooksContinue();
                 break;
@@ -1866,7 +1884,7 @@ public final class OnboardingFlow {
         for (DomainSetup setup : setups.values()) {
             setup.credential = null;
         }
-        host.showAuth(MainActivity.STEP_DOMAIN);
+        host.showAuth(STEP_DOMAIN);
         resetSetupContinue();
     }
 
@@ -1890,7 +1908,7 @@ public final class OnboardingFlow {
             return;
         }
         connecting = false;
-        host.showAuth(MainActivity.STEP_SIGNIN);
+        host.showAuth(STEP_SIGNIN);
         resetConfigContinue();
     }
 
@@ -1928,7 +1946,7 @@ public final class OnboardingFlow {
             container.addView(signInCard(step));
         }
 
-        host.showAuth(MainActivity.STEP_SIGNIN);
+        host.showAuth(STEP_SIGNIN);
         resetConfigContinue();
     }
 
@@ -2300,6 +2318,8 @@ public final class OnboardingFlow {
                             failures.put(probe, error);
                         }
                     }
+                    // NOTE: not postAlive: the step it leads to may persist the
+                    // account (finishOnboarding), which a destroyed activity must not drop.
                     host.main.post(() -> signedIn(probes, failures));
                     pool.shutdown();
                 });
@@ -2576,8 +2596,8 @@ public final class OnboardingFlow {
             pendingStep = null;
         }
 
-        if (signInPage && host.authStep() == MainActivity.STEP_OAUTH) {
-            host.showAuth(MainActivity.STEP_SIGNIN);
+        if (signInPage && host.authStep() == STEP_OAUTH) {
+            host.showAuth(STEP_SIGNIN);
         }
         if (jmap == null) {
             granted();
@@ -2689,6 +2709,8 @@ public final class OnboardingFlow {
                             refused.put(probe.getKey(), failure);
                         }
                     }
+                    // NOTE: not postAlive: the step it leads to may persist the
+                    // account (finishOnboarding), which a destroyed activity must not drop.
                     host.main.post(() -> verified(shared, password, refused));
                     pool.shutdown();
                 });
@@ -2840,7 +2862,7 @@ public final class OnboardingFlow {
                     }
                     // NOTE: back on the domain step, the refused domains
                     // unticked, while the rest of the plan runs.
-                    host.showAuth(MainActivity.STEP_DOMAIN);
+                    host.showAuth(STEP_DOMAIN);
                     LinearLayout domains = host.findViewById(R.id.domain_container);
                     domains.removeAllViews();
                     domains.addView(domainCard(host.accountFor(pendingEmail)));
@@ -2859,7 +2881,7 @@ public final class OnboardingFlow {
                     switchToAdvanced();
                 });
 
-        host.showAuth(MainActivity.STEP_RESULT);
+        host.showAuth(STEP_RESULT);
     }
 
     /**
@@ -2899,7 +2921,7 @@ public final class OnboardingFlow {
         onward.setOnClickListener(view -> connected(email));
         host.findViewById(R.id.result_advanced).setVisibility(View.GONE);
 
-        host.showAuth(MainActivity.STEP_RESULT);
+        host.showAuth(STEP_RESULT);
     }
 
     /**
@@ -3006,6 +3028,8 @@ public final class OnboardingFlow {
                         boolean calendarsFound =
                                 calendars && Accounts.calendarsElsewhere(host, email);
                         List<Addressbook> books = fetched;
+                        // NOTE: not postAlive: the step it leads to may persist the
+                        // account (finishOnboarding), which a destroyed activity must not drop.
                         host.main.post(
                                 () -> {
                                     resetConfigContinue();
@@ -3022,7 +3046,7 @@ public final class OnboardingFlow {
                                 });
                     } catch (Exception error) {
                         Log.w("pimalaya", "connect failed", error);
-                        host.main.post(
+                        host.postAlive(
                                 () -> {
                                     resetConfigContinue();
                                     host.showError(error, R.string.connect_failed);
@@ -3104,7 +3128,7 @@ public final class OnboardingFlow {
             }
         }
 
-        host.showAuth(MainActivity.STEP_BOOKS);
+        host.showAuth(STEP_BOOKS);
         resetConfigContinue();
     }
 

@@ -276,6 +276,8 @@ public final class OauthFlow {
                 () -> {
                     try {
                         OauthTokens tokens = session.redeem(tokenEndpoint, redirectUrl, issuer);
+                        // NOTE: not postAlive: the redeemed grant persists the account
+                        // (finishOnboarding), which a destroyed activity must not drop.
                         host.main.post(
                                 () ->
                                         onConnected.connect(
@@ -288,7 +290,7 @@ public final class OauthFlow {
                                                 grantedScope(tokens, session)));
                     } catch (Exception error) {
                         Log.w("pimalaya", "oauth redeem failed", error);
-                        host.main.post(
+                        host.postAlive(
                                 () -> {
                                     onAborted.run();
                                     host.showError(error, R.string.connect_failed);
@@ -393,7 +395,7 @@ public final class OauthFlow {
                     }
                 });
 
-        host.showAuth(MainActivity.STEP_OAUTH);
+        host.showAuth(OnboardingFlow.STEP_OAUTH);
         host.setAuthLoading(R.id.oauth_continue, R.id.oauth_progress, false);
         ready.run();
     }
@@ -436,7 +438,7 @@ public final class OauthFlow {
                         if (own || !metadata.supportsDynamicRegistration()) {
                             // No dynamic registration, or the user's own
                             // client: endpoints prefilled.
-                            host.main.post(
+                            host.postAlive(
                                     () -> {
                                         onAborted.run();
                                         promptOauthClient(
@@ -480,7 +482,7 @@ public final class OauthFlow {
                                         + ", token "
                                         + metadata.tokenEndpoint);
 
-                        host.main.post(
+                        host.postAlive(
                                 () ->
                                         launchSchemeGrant(
                                                 email,
@@ -494,7 +496,7 @@ public final class OauthFlow {
                                                 metadata.issuer));
                     } catch (Exception error) {
                         Log.w("pimalaya", "issuer oauth failed", error);
-                        host.main.post(
+                        host.postAlive(
                                 () -> {
                                     onAborted.run();
                                     host.showError(error, R.string.connect_failed);
@@ -643,7 +645,7 @@ public final class OauthFlow {
                         () -> {
                             try {
                                 String authUrl = session.authorizeUrl(authEndpoint, extras);
-                                host.main.post(
+                                host.postAlive(
                                         () -> {
                                             onBusy.run();
                                             try {
@@ -664,6 +666,8 @@ public final class OauthFlow {
                                                 LOOPBACK_READ_TIMEOUT_MS,
                                                 done);
                                 OauthTokens tokens = session.redeem(tokenEndpoint, redirectUrl);
+                                // NOTE: not postAlive: the redeemed grant persists the account
+                                // (finishOnboarding), which a destroyed activity must not drop.
                                 host.main.post(
                                         () ->
                                                 onConnected.connect(
@@ -677,7 +681,7 @@ public final class OauthFlow {
                                                         grantedScope(tokens, session)));
                             } catch (Exception error) {
                                 Log.w("pimalaya", "custom oauth failed", error);
-                                host.main.post(
+                                host.postAlive(
                                         () -> {
                                             onAborted.run();
                                             host.showError(error, R.string.connect_failed);
