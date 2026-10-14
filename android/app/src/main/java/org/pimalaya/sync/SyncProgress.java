@@ -27,7 +27,7 @@ import org.pimalaya.ui.SyncDock;
  * its plan and its bar. The passes report into it from any thread; it
  * draws on the dock on the main thread.
  */
-public final class SyncProgress implements SyncPasses.Progress {
+final class SyncProgress implements SyncPasses.Progress {
     private final Host host;
 
     private final CardStore base;
@@ -85,7 +85,7 @@ public final class SyncProgress implements SyncPasses.Progress {
     }
 
     /** A pass starts on the dock, the last one's lines gone (main thread). */
-    public void started() {
+    void started() {
         synchronized (passState) {
             syncLine = "";
             syncDetail = null;
@@ -96,7 +96,7 @@ public final class SyncProgress implements SyncPasses.Progress {
     }
 
     /** The pass downloads older mail (Load more), said straight away (main thread). */
-    public void fill() {
+    void fill() {
         synchronized (passState) {
             syncFill = true;
         }
@@ -261,7 +261,7 @@ public final class SyncProgress implements SyncPasses.Progress {
     private int syncShown;
 
     /** Forgets the last pass's plan and bar (main thread, before a pass). */
-    public void resetSyncPlan() {
+    void resetSyncPlan() {
         synchronized (passState) {
             syncPlan.clear();
             syncPlanned = 0;
@@ -283,7 +283,7 @@ public final class SyncProgress implements SyncPasses.Progress {
      * section per account the pass takes, {@code only} narrowing them, each
      * weighing the collections stored for it within the scope.
      */
-    public void planSync(PimDomain domain, SyncScope scope, Collection<String> only) {
+    void planSync(PimDomain domain, SyncScope scope, Collection<String> only) {
         Map<String, Integer> weights = new LinkedHashMap<>();
         if (domain == PimDomain.CONTACTS) {
             for (BookEntry book : base.loadSubscribedAddressbooks()) {
@@ -318,7 +318,7 @@ public final class SyncProgress implements SyncPasses.Progress {
      * per account of {@code emails}, each weighing one, since every step
      * brings about as many bodies whatever the account holds.
      */
-    public void planSteps(List<String> emails) {
+    void planSteps(List<String> emails) {
         synchronized (passState) {
             syncStepping = true;
             for (String email : emails) {
@@ -362,7 +362,7 @@ public final class SyncProgress implements SyncPasses.Progress {
      * off the main thread), so a pass over several says whose it is on. The
      * counts start over, the bar holding what the pass came to.
      */
-    public void syncAccount(String accountEmail) {
+    void syncAccount(String accountEmail) {
         synchronized (passState) {
             syncAccount = accountEmail;
             syncLanded = 0;

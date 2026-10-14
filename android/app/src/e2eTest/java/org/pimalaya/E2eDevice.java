@@ -35,6 +35,7 @@ import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.sync.SyncCoordinator;
 import org.pimalaya.sync.SyncPasses;
 import org.robolectric.shadows.ShadowNetworkInfo;
 
@@ -56,7 +57,7 @@ import java.util.Set;
  *
  * <p>It drives the remote pass as the open app does: the first sync is one
  * step ({@link MailStep}), a sync is a pass listing only on Wi-Fi, Load more
- * is a step, every one gated on {@link MainActivity#wifi(Context)}, never
+ * is a step, every one gated on {@link SyncCoordinator#wifi(Context)}, never
  * bypassed: a test puts the device on Wi-Fi rather than skipping the gate.
  */
 final class E2eDevice {
@@ -123,12 +124,12 @@ final class E2eDevice {
 
     /** Whether the app's Wi-Fi gate lets mail list on this device. */
     boolean wifi() {
-        return MainActivity.wifi(context);
+        return SyncCoordinator.wifi(context);
     }
 
     /**
      * Connects a mail account as the connection flow hands it over, then runs
-     * its first sync as the mail tab does (`MainActivity.firstMail`): one
+     * its first sync as the mail tab does (`SyncCoordinator.firstMail`): one
      * step on the account's session, on Wi-Fi only.
      */
     Exception connect(AccountEntry account) {
@@ -150,7 +151,7 @@ final class E2eDevice {
     }
 
     /**
-     * One Load more over an account (`MainActivity.loadMore`): the next step
+     * One Load more over an account (`SyncCoordinator.loadMore`): the next step
      * of the one mailbox {@code only} names, or of the account for null.
      */
     Exception loadMore(String email, String only) {

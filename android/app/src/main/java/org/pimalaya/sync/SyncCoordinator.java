@@ -2,16 +2,38 @@ package org.pimalaya.sync;
 
 import android.util.Log;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import org.pimalaya.R;
+import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SyncScope;
+import org.pimalaya.calendar.CalendarRows;
+import org.pimalaya.client.MailSession;
+import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.contact.BookEntry;
+import org.pimalaya.contact.ContactEngine;
+import org.pimalaya.contact.ContactPhonePass;
+import org.pimalaya.mail.MailBodies;
+import org.pimalaya.mail.MailEngine;
+import org.pimalaya.mail.MailFill;
 import org.pimalaya.mail.MailList;
+import org.pimalaya.mail.MailOffline;
+import org.pimalaya.mail.MailOwed;
+import org.pimalaya.mail.MailState;
 import org.pimalaya.mail.MailStore;
+import org.pimalaya.mail.MailTally;
+import org.pimalaya.mail.MailWindow;
+import org.pimalaya.phone.Accounts;
+import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirEngine;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.SyncDock;
 
@@ -22,8 +44,17 @@ import org.pimalaya.ui.SyncDock;
 public final class SyncCoordinator {
     /** What only the activity does for a sync. */
     public interface Screens {
+        /** The domain whose list is on screen, null for any other screen. */
+        PimDomain shown();
+
         /** The sync dock, built after the coordinator. */
         SyncDock dock();
+
+        /** Keeps the screen on while a pass runs, the mail list's footer redrawn (main thread). */
+        void syncing(boolean active);
+
+        /** Lands on a domain's list, a freshly connected account's (main thread). */
+        void land(PimDomain domain);
 
         /** Reads a domain's list again after a pass (main thread). */
         void reload(PimDomain domain);
@@ -34,14 +65,14 @@ public final class SyncCoordinator {
         /** Whether a background run holds the sync. */
         boolean backgroundRunning();
 
-        /** Whether the network is Wi-Fi, the mail listing's condition. */
-        boolean wifi();
+        /** Redraws what shows the bodies left to download, the drawer's pills (main thread). */
+        void bodiesChanged();
 
-        /** Runs {@code then} once Wi-Fi is back, the dock saying it waits. */
-        void waitForWifi(Runnable then);
+        /** When a pass last brought a Contacts-app edit in (any thread). */
+        long contactsIngested();
 
-        /** Resumes the background fill and the body download. */
-        void fillMail();
+        /** When a pass last brought a calendar-app edit in (any thread). */
+        long calendarsIngested();
     }
 
     private final Host host;
@@ -51,6 +82,8 @@ public final class SyncCoordinator {
     private final PimdirDb pimdir;
 
     private final MailStore mail;
+
+    private final PimalayaClient client;
 
     /** The dock's model of a pass, which the passes report into. */
     private final SyncProgress progress;
@@ -68,11 +101,45 @@ public final class SyncCoordinator {
 
     private final List<Consumer<Boolean>> syncObservers = new ArrayList<>();
 
+    /** Whether the activity is in the foreground: the background fill runs only then. */
+    private volatile boolean foreground;
+
+    /** Whether a step of the background fill is queued or running. */
+    private volatile boolean filling;
+
+    /** The fill's and the body step's session pools, by account; touched on the io thread only. */
+    private final Map<String, WorkerPool<MailSession>> fillPools = new HashMap<>();
+
+    /** Whether the fill is done or failed for the loop under way; on the io thread. */
+    private boolean fillStopped;
+
+    /** The body step's plan for the loop under way, null outside one; on the io thread. */
+    private MailBodies.Run bodies;
+
+    /** Whether the body step plans again at its next step: a pass landed, a setting changed. */
+    private volatile boolean replanBodies;
+
+    /** Bodies left to download, by account, while the body step runs: the drawer pill's. */
+    private final Map<String, Integer> bodiesLeft = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * The body step's count over the loop under way, every account's
+     * summed: the sync dock's bar while older mail downloads.
+     */
+    private final MailTally bodiesTally;
+
+    /** The Contacts-app edit {@link SyncService} brought in that the list last reloaded after. */
+    private volatile long reloadedIngest;
+
+    /** The calendar-app edit {@link CalendarSyncService} brought in, the agenda reloaded after. */
+    private volatile long reloadedCalendarIngest;
+
     public SyncCoordinator(Host host, SyncPasses.Parts parts, Screens screens) {
         this.host = host;
         this.screens = screens;
         this.pimdir = parts.pimdir();
         this.mail = parts.mail();
+        this.client = parts.client();
         progress =
                 new SyncProgress(
                         host,
@@ -82,16 +149,17 @@ public final class SyncCoordinator {
                         () -> syncing,
                         screens::renewed);
         passes = new SyncPasses(host, parts, progress);
+        reloadedIngest = screens.contactsIngested();
+        reloadedCalendarIngest = screens.calendarsIngested();
+        bodiesTally =
+                new MailTally(
+                        (landed, planned) ->
+                                host.postAlive(() -> screens.dock().filled(landed, planned)));
     }
 
     /** Every remote and phone pass. */
     public SyncPasses passes() {
         return passes;
-    }
-
-    /** The dock's model of a pass. */
-    public SyncProgress progress() {
-        return progress;
     }
 
     /** Each domain's filter, the shared one the list shows. */
@@ -105,7 +173,7 @@ public final class SyncCoordinator {
      * Starts a pass: takes the process's sync lock, turning the pass down
      * while a background run holds it, whose dock already says so.
      */
-    public boolean startSync() {
+    private boolean startSync() {
         if (!pimdir.locks().takeSync()) {
             return false;
         }
@@ -114,7 +182,7 @@ public final class SyncCoordinator {
         return true;
     }
 
-    public void setSyncing(boolean value) {
+    private void setSyncing(boolean value) {
         if (syncing && !value) {
             pimdir.locks().releaseSync();
         }
@@ -181,7 +249,7 @@ public final class SyncCoordinator {
      * says nothing: the lists show what it brought, and a conflict marks
      * its own row.
      */
-    public void reportSync(SyncPasses.Outcome outcome) {
+    private void reportSync(SyncPasses.Outcome outcome) {
         if (outcome.failure != null) {
             // NOTE: the last sync's store keeps failing addressbooks usable.
             host.showError(outcome.failure, R.string.sync_failed);
@@ -213,7 +281,7 @@ public final class SyncCoordinator {
         }
         // NOTE: on a metered network the outbox still goes out, and the
         // listing waits for Wi-Fi.
-        boolean listing = screens.wifi();
+        boolean listing = wifi();
         MergedFilter filter = filterOf(PimDomain.MAIL);
         host.io.execute(
                 () -> {
@@ -228,9 +296,9 @@ public final class SyncCoordinator {
                                     host.showError(pass.failure, R.string.sync_failed);
                                 }
                                 if (!listing) {
-                                    screens.waitForWifi(() -> syncMail(role));
+                                    waitForWifi(() -> syncMail(role));
                                 }
-                                screens.fillMail();
+                                fillMail();
                             });
                 });
     }
@@ -331,7 +399,7 @@ public final class SyncCoordinator {
         if (!startSync()) {
             return;
         }
-        boolean listing = screens.wifi();
+        boolean listing = wifi();
         host.io.execute(
                 () -> {
                     progress.planSync(PimDomain.CONTACTS, SyncScope.all(host), null);
@@ -349,14 +417,1101 @@ public final class SyncCoordinator {
                                 screens.reload(PimDomain.CALENDAR);
                                 reportSync(outcome);
                                 if (!listing) {
-                                    screens.waitForWifi(() -> syncMail(null));
+                                    waitForWifi(() -> syncMail(null));
                                 }
-                                screens.fillMail();
+                                fillMail();
                                 // NOTE: one error dialog, the contacts one first.
                                 if (other != null && outcome.failure == null) {
                                     host.showError(other, R.string.sync_failed);
                                 }
                             });
+                });
+    }
+
+    /**
+     * Shows or hides the sync dock over the lists' bottom navigation: whose
+     * account and which domain and step the pass is on, over one thin bar.
+     * The lists stay usable behind it, and the screen stays on for the
+     * duration. A pass starting drops the last one's lines.
+     */
+    public void showSyncDock(boolean active) {
+        screens.syncing(active);
+        if (active) {
+            progress.started();
+            return;
+        }
+        screens.dock().synced();
+        // NOTE: an account connected while this pass ran owes its first
+        // sync to the tab it landed on, which the pass kept from starting.
+        host.main.post(() -> firstSyncIfOwed(screens.shown()));
+    }
+
+    /** The addresses of some accounts. */
+    private static List<String> emailsOf(List<AccountEntry> accounts) {
+        List<String> emails = new ArrayList<>();
+        for (AccountEntry account : accounts) {
+            emails.add(account.email);
+        }
+        return emails;
+    }
+
+    /**
+     * A freshly connected account: each domain it covers owes its first sync,
+     * and the flow lands on the first of them, whose tab runs it.
+     *
+     * <p>One domain at a time, each the first time its tab is reached, rather
+     * than all of them behind one dialog: a first sync of every mailbox's
+     * whole metadata, then every book, then every calendar, kept the user
+     * waiting on what they had not asked to see yet. The landing tab, mail
+     * when the account has it, syncs the newest chunk of every mailbox, the
+     * inbox first; the rest of the mail fills in behind it
+     * ({@link #fillMail}), and contacts and calendars sync when their tab is
+     * opened ({@link #firstSyncIfOwed}).
+     */
+    public void syncConnected(AccountEntry account) {
+        for (PimDomain domain : PimDomain.values()) {
+            if (account.covers(domain)) {
+                FirstSync.owe(host, account.email, domain);
+            }
+        }
+        host.main.post(() -> screens.land(landingOf(account)));
+    }
+
+    /** The list a freshly connected account lands on: its first domain. */
+    private static PimDomain landingOf(AccountEntry account) {
+        if (account.covers(PimDomain.MAIL)) {
+            return PimDomain.MAIL;
+        }
+        return account.covers(PimDomain.CONTACTS) ? PimDomain.CONTACTS : PimDomain.CALENDAR;
+    }
+
+    /**
+     * Runs the first sync a domain's tab owes, the first time it is reached
+     * after an account was connected: that domain alone, under the
+     * list's sync dock. Nothing when no account owes it, or while a sync runs.
+     */
+    public void firstSyncIfOwed(PimDomain domain) {
+        // NOTE: a background run holds the lock; its end calls back here.
+        if (domain == null
+                || screens.shown() != domain
+                || isSyncing()
+                || screens.backgroundRunning()
+                || host.isFinishing()) {
+            return;
+        }
+        List<AccountEntry> owing = new ArrayList<>();
+        for (String email : FirstSync.owing(host, domain)) {
+            for (AccountEntry account : passes.accountsFor(domain)) {
+                // NOTE: an account that is off keeps owing it.
+                if (account.email.equals(email) && AccountActivation.enabled(host, email)) {
+                    owing.add(account);
+                }
+            }
+        }
+        if (owing.isEmpty()) {
+            return;
+        }
+
+        switch (domain) {
+            case MAIL:
+                firstMail(owing);
+                break;
+            case CONTACTS:
+                firstContacts(owing);
+                break;
+            case CALENDAR:
+                firstCalendars(owing);
+                break;
+        }
+    }
+
+    /**
+     * The mail tab's first sync: one step of every owing account
+     * ({@link MailStep}), on its one session, on Wi-Fi only; the dock says
+     * it waits for Wi-Fi otherwise, and it runs once Wi-Fi is back.
+     */
+    private void firstMail(List<AccountEntry> owing) {
+        if (!wifi()) {
+            waitForWifi(() -> firstSyncIfOwed(screens.shown()));
+            return;
+        }
+        progress.syncAccount(null);
+        if (!startSync()) {
+            return;
+        }
+        host.io.execute(
+                () -> {
+                    progress.planSteps(emailsOf(owing));
+                    progress.syncAccount(null);
+                    Exception failure = null;
+                    for (AccountEntry account : owing) {
+                        Exception error;
+                        try (MailSession session = passes.openMail(account)) {
+                            error = passes.stepMail(account, session, null, true);
+                        } catch (Exception opened) {
+                            error = opened;
+                        }
+                        if (error == null) {
+                            FirstSync.paid(host, account.email, PimDomain.MAIL);
+                        } else if (failure == null) {
+                            failure = error;
+                        }
+                    }
+                    Exception outcome = failure;
+                    host.postAlive(
+                            () -> {
+                                setSyncing(false);
+                                screens.reload(PimDomain.MAIL);
+                                if (outcome != null) {
+                                    host.showError(outcome, R.string.sync_failed);
+                                }
+                                fillMail();
+                            });
+                });
+    }
+
+    /**
+     * The contacts tab's first sync: the remote pass over every subscribed
+     * book, the books the owing accounts just subscribed among them.
+     */
+    private void firstContacts(List<AccountEntry> owing) {
+        progress.syncAccount(null);
+        if (!startSync()) {
+            return;
+        }
+        host.io.execute(
+                () -> {
+                    progress.planSync(PimDomain.CONTACTS, SyncScope.all(host), null);
+                    SyncPasses.Outcome outcome = passes.syncRemote();
+                    if (outcome.failure == null) {
+                        for (AccountEntry account : owing) {
+                            FirstSync.paid(host, account.email, PimDomain.CONTACTS);
+                        }
+                    }
+                    host.postAlive(
+                            () -> {
+                                setSyncing(false);
+                                screens.reload(PimDomain.CONTACTS);
+                                reportSync(outcome);
+                            });
+                });
+    }
+
+    /** The calendar tab's first sync: every owing account's calendars. */
+    private void firstCalendars(List<AccountEntry> owing) {
+        progress.syncAccount(null);
+        if (!startSync()) {
+            return;
+        }
+        host.io.execute(
+                () -> {
+                    progress.planSync(PimDomain.CALENDAR, SyncScope.all(host), emailsOf(owing));
+                    progress.syncAccount(null);
+                    Exception failure = null;
+                    for (AccountEntry account : owing) {
+                        Exception error = passes.fetchCalendars(account, SyncScope.all(host));
+                        if (error == null) {
+                            FirstSync.paid(host, account.email, PimDomain.CALENDAR);
+                        } else if (failure == null) {
+                            failure = error;
+                        }
+                    }
+                    Exception outcome = failure;
+                    host.postAlive(
+                            () -> {
+                                setSyncing(false);
+                                screens.reload(PimDomain.CALENDAR);
+                                if (outcome != null) {
+                                    host.showError(outcome, R.string.sync_failed);
+                                }
+                            });
+                });
+    }
+
+    /**
+     * The first step of each mailbox of {@code taken} (by account) never
+     * listed, under the sync dock, on Wi-Fi only (once it is back otherwise):
+     * about 50 of its newest messages, their bodies downloaded after.
+     */
+    public void firstOfMailboxes(Map<String, List<String>> taken) {
+        if (!wifi()) {
+            waitForWifi(() -> firstOfMailboxes(taken));
+            return;
+        }
+        if (isSyncing()) {
+            return;
+        }
+        progress.syncAccount(null);
+        if (!startSync()) {
+            return;
+        }
+        host.io.execute(
+                () -> {
+                    Map<String, List<String>> owed = new LinkedHashMap<>();
+                    for (Map.Entry<String, List<String>> account : taken.entrySet()) {
+                        for (String collection : account.getValue()) {
+                            MailStore.Coverage coverage = mail.coverage(collection);
+                            if (coverage.at == null
+                                    && !coverage.filling
+                                    && !collection.equals(mail.outboxOf(account.getKey()))) {
+                                owed.computeIfAbsent(account.getKey(), email -> new ArrayList<>())
+                                        .add(collection);
+                            }
+                        }
+                    }
+                    progress.planSteps(new ArrayList<>(owed.keySet()));
+                    Exception failure = null;
+                    for (Map.Entry<String, List<String>> asked : owed.entrySet()) {
+                        AccountEntry account = mailAccount(asked.getKey());
+                        if (account == null
+                                || !AccountActivation.enabled(host, asked.getKey())) {
+                            continue;
+                        }
+                        try (MailSession session = passes.openMail(account)) {
+                            for (String collection : asked.getValue()) {
+                                Exception error = passes.firstOf(account, session, collection);
+                                if (failure == null) {
+                                    failure = error;
+                                }
+                            }
+                        } catch (Exception opened) {
+                            if (failure == null) {
+                                failure = opened;
+                            }
+                        }
+                    }
+                    Exception outcome = failure;
+                    replanBodies = true;
+                    host.postAlive(
+                            () -> {
+                                setSyncing(false);
+                                screens.reload(PimDomain.MAIL);
+                                if (outcome != null) {
+                                    host.showError(outcome, R.string.sync_failed);
+                                }
+                                fillMail();
+                            });
+                });
+    }
+
+    /** The mail account of an address, null when it is gone. */
+    private AccountEntry mailAccount(String email) {
+        for (AccountEntry candidate : passes.accountsFor(PimDomain.MAIL)) {
+            if (candidate.email.equals(email)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Starts the background fill when it is allowed and not running: every
+     * mailbox widened a chunk of {@link MailEngine#FILL_CHUNK} messages at a
+     * time toward its account's bound, the inbox and the sent mail first, no
+     * dialog, each page landing in the list as a pass's do.
+     *
+     * <p>One chunk per task on the io thread, so a pull or a widening the
+     * user asks for waits one chunk at most. It stops when the app leaves the
+     * foreground, Wi-Fi goes, another sync runs, or a chunk fails, and
+     * nothing is kept but the floors the store covers: the next start, on
+     * return, after a pass or when Wi-Fi is back, resumes from them. An
+     * account stepped through account-wide (Gmail) is not filled: its steps
+     * bring what it holds.
+     *
+     * <p>Each step first downloads the bodies from the frontiers on, of the
+     * mailboxes kept whole and those owed ({@link MailBodies}), and
+     * widens only once none is left that may download now, so what the
+     * list shows is readable before older headers list: never periodic
+     * work, and nothing once the app leaves the foreground. A start while
+     * the loop runs replans them, which is how a pass or a step
+     * reaches a loop under way.
+     */
+    public void fillMail() {
+        replanBodies = true;
+        if (filling || !foreground || isSyncing() || !wifi()) {
+            return;
+        }
+        filling = true;
+        host.io.execute(this::fillStep);
+    }
+
+    /** Has the body step plan again at its next step. */
+    public void replanBodies() {
+        replanBodies = true;
+    }
+
+    /** One step of the body step or the background fill, on the io thread, and the next queued. */
+    private void fillStep() {
+        if (bodies == null || replanBodies) {
+            replanBodies = false;
+            bodies = planBodies();
+        }
+        MailBodies.Step body = MailBodies.step(bodies, bodyHost());
+        Log.d("pimalaya", "mail bodies: " + body);
+
+        MailFill.Step step = null;
+        if (body != MailBodies.Step.AGAIN) {
+            step = fillStopped ? MailFill.Step.DONE : MailFill.step(fillHost());
+            Log.d("pimalaya", "mail fill: " + step);
+            if (step == MailFill.Step.DONE || step == MailFill.Step.FAILED) {
+                fillStopped = true;
+            }
+            // NOTE: a chunk listed above a window brings bodies to plan.
+            if (step == MailFill.Step.AGAIN && bodies.drained()) {
+                replanBodies = true;
+            }
+        }
+
+        if (step == MailFill.Step.AGAIN || body == MailBodies.Step.AGAIN) {
+            // NOTE: the glyph once a step worked, never for a loop that
+            // found nothing to do.
+            host.postAlive(() -> screens.dock().filling(true));
+            host.io.execute(this::fillStep);
+            return;
+        }
+        closeFillPools();
+        bodies = null;
+        fillStopped = false;
+        filling = false;
+        bodiesTally.reset();
+        host.postAlive(() -> screens.dock().filling(false));
+        if (!bodiesLeft.isEmpty()) {
+            bodiesLeft.clear();
+            host.postAlive(screens::bodiesChanged);
+        }
+    }
+
+    /** The fill step's reach: what it may do now, the mailboxes, the pools. */
+    private MailFill.Host fillHost() {
+        return new MailFill.Host() {
+            @Override
+            public boolean allowed() {
+                return fillAllowed();
+            }
+
+            @Override
+            public List<MailStore.Edge> edges() {
+                // NOTE: an account that is off syncs nothing, the
+                // background fill included, nor does a mailbox the filter
+                // unticks; one stepped through account-wide (Gmail) holds
+                // what its steps brought.
+                MergedFilter filter = MergedFilter.of(host, PimDomain.MAIL);
+                List<MailStore.Edge> edges = mail.edges();
+                edges.removeIf(
+                        edge ->
+                                edge.accountWide
+                                        || !filter.chosen(edge.collection)
+                                        || !AccountActivation.enabled(
+                                                host, edge.accountEmail));
+                return edges;
+            }
+
+            @Override
+            public int room(String accountEmail) {
+                AccountEntry account = mailAccount(accountEmail);
+                return account == null
+                        ? 1
+                        : MailEngine.sessionsOf(account.server(PimDomain.MAIL));
+            }
+
+            @Override
+            public void widen(MailStore.Edge edge) throws Exception {
+                widen(List.of(edge));
+            }
+
+            @Override
+            public void widen(List<MailStore.Edge> edges) throws Exception {
+                Exception failure =
+                        listAll(
+                                edges,
+                                (engine, collection) ->
+                                        engine.widen(collection, MailEngine.FILL_CHUNK),
+                                "mail fill stopped: ");
+                if (failure != null) {
+                    throw failure;
+                }
+            }
+        };
+    }
+
+    /**
+     * What the body step downloads this run, by account: every account that
+     * is on, its mailboxes' messages dated from their frontier on but in the
+     * junk and the trash, every message of a mailbox kept whole, and what is
+     * owed below its frontier ({@link MailOwed}); the mailboxes the mail
+     * list shows first, each part newest first, the owed ones last; none
+     * failed or gone since its mailbox was last listed
+     * ({@link MailBodies.Run#plan}). Walked on the io thread.
+     */
+    private MailBodies.Run planBodies() {
+        MailBodies.Run run = new MailBodies.Run(MailState.of(host));
+        int planned = 0;
+        // NOTE: read afresh from what was kept, off the main thread.
+        MergedFilter shown = MergedFilter.of(host, PimDomain.MAIL);
+        for (AccountEntry account : passes.accountsFor(PimDomain.MAIL)) {
+            String email = account.email;
+            if (!AccountActivation.enabled(host, email)) {
+                continue;
+            }
+            List<String> windowedFirst = new ArrayList<>();
+            List<String> windowedThen = new ArrayList<>();
+            List<String> wholeFirst = new ArrayList<>();
+            List<String> wholeThen = new ArrayList<>();
+            List<String> skipped = new ArrayList<>();
+            for (PimdirCollections.Stored stored : mail.loadMailboxes(List.of(email))) {
+                boolean whole = MailOffline.whole(host, stored.id);
+                if (!MailBodies.downloads(stored.role, whole)) {
+                    skipped.add(stored.id);
+                    continue;
+                }
+                // NOTE: a mailbox the filter unticks syncs nothing more, its
+                // bodies included; what it owes waits for it to be ticked.
+                if (!shown.chosen(stored.id)) {
+                    continue;
+                }
+                boolean first = shown.accepts(email, stored.id);
+                List<String> into =
+                        whole
+                                ? (first ? wholeFirst : wholeThen)
+                                : (first ? windowedFirst : windowedThen);
+                into.add(stored.id);
+            }
+            List<MailBodies.Row> wanted =
+                    new ArrayList<>(
+                            MailBodies.merged(
+                                    windowedRows(windowedFirst),
+                                    MailBodies.wanted(mail.bodyRows(wholeFirst, null))));
+            wanted.addAll(
+                    MailBodies.merged(
+                            windowedRows(windowedThen),
+                            MailBodies.wanted(mail.bodyRows(wholeThen, null))));
+            List<String> windowed = new ArrayList<>(windowedFirst);
+            windowed.addAll(windowedThen);
+            wanted.addAll(owed(windowed, skipped));
+            int taken = run.plan(email, wanted);
+            planned += taken;
+            if (taken == 0) {
+                bodiesLeft.remove(email);
+            } else {
+                bodiesLeft.put(email, taken);
+            }
+        }
+        // NOTE: a replan adds to what the loop landed, the bar carrying on.
+        bodiesTally.expect(planned);
+        host.postAlive(screens::bodiesChanged);
+        return run;
+    }
+
+    /**
+     * The bodies some mailboxes want from their frontier on, newest first:
+     * a mailbox stepped alone keeps a frontier older than its account's
+     * ({@link MailWindow#since(android.content.Context, String, String)}).
+     */
+    private List<MailBodies.Row> windowedRows(List<String> collections) {
+        Map<String, List<String>> bySince = new HashMap<>();
+        for (String collection : collections) {
+            bySince.computeIfAbsent(mail.mailboxWindow(collection), since -> new ArrayList<>())
+                    .add(collection);
+        }
+        List<MailBodies.Row> rows = new ArrayList<>();
+        for (Map.Entry<String, List<String>> since : bySince.entrySet()) {
+            rows =
+                    MailBodies.merged(
+                            rows,
+                            MailBodies.wanted(mail.bodyRows(since.getValue(), since.getKey())));
+        }
+        return rows;
+    }
+
+    /**
+     * The owed bodies of some mailboxes dated below their frontier, which
+     * download all the same: one dated at or after it is in the plan
+     * already. What is owed in a mailbox that downloads nothing
+     * ({@code skipped}: the junk, the trash), or by a message gone or
+     * downloaded since, is owed no more.
+     */
+    private List<MailBodies.Row> owed(List<String> windowed, List<String> skipped) {
+        List<MailBodies.Row> rows = new ArrayList<>();
+        List<String> settled = new ArrayList<>();
+        for (String key : MailOwed.all(host)) {
+            String collection = MailOwed.collectionOf(key);
+            if (skipped.contains(collection)) {
+                settled.add(key);
+                continue;
+            }
+            if (!windowed.contains(collection)) {
+                continue;
+            }
+            MailStore.StoredMessage message = mail.message(collection, MailOwed.linkIdOf(key));
+            String window = mail.mailboxWindow(collection);
+            if (message == null || message.bodied) {
+                settled.add(key);
+            } else if (window != null && message.sortKey.compareTo(window) < 0) {
+                rows.add(
+                        new MailBodies.Row(
+                                collection,
+                                message.id,
+                                message.sortKey,
+                                false,
+                                message.size,
+                                message.attachment,
+                                true));
+            }
+        }
+        MailOwed.settle(host, settled);
+        return rows;
+    }
+
+    /** The body step's reach: the network rule, the pools, the progress. */
+    private MailBodies.Host bodyHost() {
+        return new MailBodies.Host() {
+            @Override
+            public boolean allowed(String accountEmail) {
+                return bodiesAllowed(accountEmail);
+            }
+
+            @Override
+            public List<MailBodies.Row> download(String accountEmail, List<MailBodies.Row> rows)
+                    throws Exception {
+                return downloadBodies(accountEmail, rows);
+            }
+
+            @Override
+            public void progress(String accountEmail, int left) {
+                // NOTE: what the chunk took, its bodies linked without a
+                // file included, in place of the files counted as it ran.
+                Integer before = bodiesLeft.get(accountEmail);
+                bodiesTally.settle(before == null ? 0 : before - left);
+                if (left > 0) {
+                    bodiesLeft.put(accountEmail, left);
+                } else {
+                    bodiesLeft.remove(accountEmail);
+                }
+                host.postAlive(screens::bodiesChanged);
+            }
+        };
+    }
+
+    /**
+     * Whether an account's bodies may download now: the app in the
+     * foreground, no other sync, the account on, and Wi-Fi.
+     */
+    private boolean bodiesAllowed(String accountEmail) {
+        return foreground && !isSyncing() && AccountActivation.enabled(host, accountEmail) && wifi();
+    }
+
+    /**
+     * Downloads some of an account's bodies on its fill pool, a mailbox's
+     * rows split across the pool's sessions, blocking until all are in, and
+     * answers the rows whose body did not land, a job that failed giving
+     * back all of its own. Any failure closes the pool, so what is tried
+     * again runs on fresh sessions (and renews an expired token on the way);
+     * every job failing is the download failing as a whole.
+     */
+    private List<MailBodies.Row> downloadBodies(String accountEmail, List<MailBodies.Row> rows)
+            throws Exception {
+        AccountEntry account = mailAccount(accountEmail);
+        if (account == null) {
+            return List.of();
+        }
+        WorkerPool<MailSession> pool = fillPool(account);
+
+        Map<String, List<MailBodies.Row>> byCollection = new java.util.LinkedHashMap<>();
+        for (MailBodies.Row row : rows) {
+            byCollection.computeIfAbsent(row.collection, collection -> new ArrayList<>()).add(row);
+        }
+        List<String> keys = new ArrayList<>();
+        Map<String, List<MailBodies.Row>> jobs = new HashMap<>();
+        for (List<MailBodies.Row> held : byCollection.values()) {
+            int slice = Math.max(1, (held.size() + pool.size() - 1) / pool.size());
+            for (int from = 0; from < held.size(); from += slice) {
+                String key = Integer.toString(keys.size());
+                keys.add(key);
+                jobs.put(key, held.subList(from, Math.min(held.size(), from + slice)));
+            }
+        }
+
+        String accountId = passes.accountIdOf(account.email);
+        List<MailBodies.Row> failed = Collections.synchronizedList(new ArrayList<>());
+        WorkerPool.Outcome outcome =
+                pool.run(
+                        "mail pass bodies " + account.email,
+                        keys,
+                        (session, key, remote) -> {
+                            MailEngine engine = new MailEngine(pimdir, client, session, accountId);
+                            engine.tally = bodiesTally;
+                            try {
+                                List<MailBodies.Row> job = jobs.get(key);
+                                failed.addAll(engine.download(job.get(0).collection, job));
+                            } finally {
+                                remote.addAndGet(engine.remoteSoFar());
+                            }
+                        });
+        for (WorkerPool.Failure failure : outcome.failures) {
+            failed.addAll(jobs.get(failure.key));
+        }
+        if (!failed.isEmpty()) {
+            fillPools.remove(account.email);
+            pool.close();
+        }
+        if (!keys.isEmpty() && outcome.failures.size() == keys.size()) {
+            throw outcome.failure();
+        }
+        return failed;
+    }
+
+    /**
+     * Runs {@code step} over mailboxes, on the io thread: each account's on
+     * its pool ({@link WorkerPool}), side by side and in the order given,
+     * every account at once, on connections the fill keeps open between its
+     * steps. Answers the first failure, every one logged under
+     * {@code failed}; one mailbox failing leaves the others going.
+     */
+    private Exception listAll(List<MailStore.Edge> edges, MailboxStep step, String failed) {
+        Map<String, List<String>> byAccount = new java.util.LinkedHashMap<>();
+        for (MailStore.Edge edge : edges) {
+            byAccount.computeIfAbsent(edge.accountEmail, email -> new ArrayList<>())
+                    .add(edge.collection);
+        }
+
+        List<java.util.concurrent.Callable<WorkerPool.Outcome>> runs = new ArrayList<>();
+        for (Map.Entry<String, List<String>> entry : byAccount.entrySet()) {
+            AccountEntry account = mailAccount(entry.getKey());
+            if (account == null) {
+                continue;
+            }
+            WorkerPool<MailSession> held = fillPool(account);
+            String accountId = passes.accountIdOf(account.email);
+            runs.add(
+                    () ->
+                            held.run(
+                                    "mail pass " + account.email,
+                                    entry.getValue(),
+                                    (session, collection, remote) -> {
+                                        MailEngine engine =
+                                                new MailEngine(pimdir, client, session, accountId);
+                                        try {
+                                            step.run(engine, collection);
+                                        } finally {
+                                            remote.addAndGet(engine.remoteSoFar());
+                                        }
+                                    }));
+        }
+
+        Exception first = null;
+        for (WorkerPool.Outcome outcome : WorkerPool.together(runs)) {
+            for (WorkerPool.Failure failure : outcome.failures) {
+                Log.w("pimalaya", failed + failure.key, failure.error);
+            }
+            if (first == null) {
+                first = outcome.failure();
+            }
+        }
+        return first;
+    }
+
+    /** What a run does to one mailbox: a pass, a widening by a chunk. */
+    private interface MailboxStep {
+        void run(MailEngine engine, String collection) throws Exception;
+    }
+
+    /** An account's pool for the fill and the body step; on the io thread. */
+    private WorkerPool<MailSession> fillPool(AccountEntry account) {
+        WorkerPool<MailSession> pool = fillPools.get(account.email);
+        if (pool == null) {
+            pool =
+                    new WorkerPool<>(
+                            MailEngine.sessionsOf(account.server(PimDomain.MAIL)),
+                            null,
+                            () -> passes.openMail(account),
+                            MailSession::join);
+            fillPools.put(account.email, pool);
+        }
+        return pool;
+    }
+
+    /** Closes the connections the fill and the body step kept; on the io thread. */
+    private void closeFillPools() {
+        for (WorkerPool<MailSession> pool : fillPools.values()) {
+            pool.close();
+        }
+        fillPools.clear();
+    }
+
+    /**
+     * Whether the background fill may run now: the app in the foreground, no
+     * other sync, and Wi-Fi.
+     */
+    private boolean fillAllowed() {
+        return foreground && !isSyncing() && wifi();
+    }
+
+    /** Whether a network is there at all. */
+    public boolean online() {
+        android.net.ConnectivityManager connectivity =
+                host.getSystemService(android.net.ConnectivityManager.class);
+        return connectivity != null && connectivity.getActiveNetwork() != null;
+    }
+
+    /**
+     * Whether the network there is not metered: Wi-Fi or alike, the one a
+     * mail pass, step, fill or body download runs on. Opening one message
+     * is an explicit act and fetches on any network ({@link #online}).
+     */
+    public boolean wifi() {
+        return wifi(host);
+    }
+
+    /** Whether the network a context sees is not metered ({@link #wifi()}). */
+    public static boolean wifi(android.content.Context context) {
+        android.net.ConnectivityManager connectivity =
+                context.getSystemService(android.net.ConnectivityManager.class);
+        return connectivity != null
+                && connectivity.getActiveNetwork() != null
+                && !connectivity.isActiveNetworkMetered();
+    }
+
+    /** What runs once Wi-Fi is back, a mail sync asked for on mobile data; null for none. */
+    private Runnable owedOnWifi;
+
+    /**
+     * Says in the sync dock that the mail sync waits for Wi-Fi, and
+     * runs {@code then} once it is back ({@link #wifiBack}).
+     */
+    void waitForWifi(Runnable then) {
+        owedOnWifi = then;
+        if (!isSyncing()) {
+            SyncDock.Pass wait = new SyncDock.Pass();
+            wait.title = host.getString(R.string.sync_line_mail);
+            wait.line = host.getString(R.string.sync_line_wifi);
+            wait.total = -1;
+            wait.download = true;
+            screens.dock().pass(wait);
+        }
+    }
+
+    /**
+     * Whether {@link #wifiWatch} last heard an unmetered network, false
+     * until it hears one after it is registered.
+     */
+    private volatile boolean unmetered;
+
+    /**
+     * Hears Wi-Fi come back while the app is open: once per network
+     * becoming unmetered, never on the capability changes Wi-Fi reports
+     * every few seconds while it stays up (its signal, its bandwidth), each
+     * of which would start the body step and the fill again for nothing.
+     */
+    private final android.net.ConnectivityManager.NetworkCallback wifiWatch =
+            new android.net.ConnectivityManager.NetworkCallback() {
+                @Override
+                public void onCapabilitiesChanged(
+                        android.net.Network network,
+                        android.net.NetworkCapabilities capabilities) {
+                    boolean was = unmetered;
+                    unmetered =
+                            capabilities.hasCapability(
+                                    android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED);
+                    if (unmetered && !was) {
+                        host.main.post(SyncCoordinator.this::wifiBack);
+                    }
+                }
+
+                @Override
+                public void onLost(android.net.Network network) {
+                    unmetered = false;
+                }
+            };
+
+    /** Runs what waited for Wi-Fi, and the fill and the bodies after it (main thread). */
+    private void wifiBack() {
+        if (!foreground || !wifi()) {
+            return;
+        }
+        Runnable owed = owedOnWifi;
+        owedOnWifi = null;
+        if (owed != null) {
+            screens.dock().synced();
+            owed.run();
+        }
+        fillMail();
+    }
+
+    /**
+     * Takes the footer's {@code steps} ({@link MailList.Step}), one after
+     * another under the sync dock, on Wi-Fi only, each account's on its one
+     * session: a Gmail account's over All Mail or the one label it shows
+     * alone, any other account's mailbox by mailbox. Then the list is read
+     * again and the bodies the steps leave to download are planned.
+     */
+    public void loadMore(List<MailList.Step> steps) {
+        if (isSyncing() || !wifi()) {
+            return;
+        }
+        progress.syncAccount(null);
+        if (!startSync()) {
+            return;
+        }
+        progress.fill();
+        Map<String, List<String>> byAccount = new LinkedHashMap<>();
+        for (MailList.Step step : steps) {
+            byAccount.computeIfAbsent(step.email, email -> new ArrayList<>()).add(step.only);
+        }
+        host.io.execute(
+                () -> {
+                    progress.planSteps(new ArrayList<>(byAccount.keySet()));
+                    Exception failure = null;
+                    for (Map.Entry<String, List<String>> asked : byAccount.entrySet()) {
+                        String email = asked.getKey();
+                        AccountEntry account = mailAccount(email);
+                        if (account == null || !AccountActivation.enabled(host, email)) {
+                            continue;
+                        }
+                        try (MailSession session = passes.openMail(account)) {
+                            for (String only : asked.getValue()) {
+                                Exception error = passes.loadMore(account, session, only);
+                                if (failure == null) {
+                                    failure = error;
+                                }
+                            }
+                        } catch (Exception opened) {
+                            if (failure == null) {
+                                failure = opened;
+                            }
+                        }
+                    }
+                    Exception outcome = failure;
+                    replanBodies = true;
+                    host.postAlive(
+                            () -> {
+                                setSyncing(false);
+                                screens.reload(PimDomain.MAIL);
+                                if (outcome != null) {
+                                    host.showError(outcome, R.string.sync_failed);
+                                }
+                                fillMail();
+                            });
+                });
+    }
+
+    /**
+     * Moves the windows of {@code emails} later to {@code date}, on the io
+     * thread, freeing the bodies of their mail below it, headers and search
+     * kept ({@link MailStore#release}): the body step replanned first, so no
+     * step of an older plan fetches a body back, and a window moved only
+     * once its release went through, a failure said in a dialog. Turned
+     * down while a background run holds the sync lock. The list is read
+     * again and {@code done} runs on the main thread.
+     */
+    public void releaseWindow(List<String> emails, String date, Runnable done) {
+        host.io.execute(
+                () -> {
+                    replanBodies = true;
+                    underSyncLock(
+                            R.string.mail_window_release_failed,
+                            () -> {
+                                for (String email : emails) {
+                                    int released = mail.release(email, date);
+                                    MailWindow.set(host, passes.accountIdOf(email), date);
+                                    MailWindow.dropMailboxes(host, passes.accountIdOf(email), date);
+                                    Log.d(
+                                            "pimalaya",
+                                            "mail of " + email + ": " + released
+                                                    + " freed");
+                                }
+                            });
+                    host.postAlive(
+                            () -> {
+                                screens.reload(PimDomain.MAIL);
+                                fillMail();
+                                if (done != null) {
+                                    done.run();
+                                }
+                            });
+                });
+    }
+
+    /**
+     * The activity in the foreground: the fill and the body step resume,
+     * Wi-Fi coming back heard.
+     */
+    public void resumed() {
+        // NOTE: the background fill stops when the app leaves the
+        // foreground and picks up where its floors reached on return.
+        foreground = true;
+        android.net.ConnectivityManager connectivity =
+                host.getSystemService(android.net.ConnectivityManager.class);
+        if (connectivity != null) {
+            unmetered = false;
+            connectivity.registerDefaultNetworkCallback(wifiWatch);
+        }
+        fillMail();
+    }
+
+    /** The activity leaving the foreground: the fill stops, Wi-Fi no more heard. */
+    public void paused() {
+        foreground = false;
+        android.net.ConnectivityManager connectivity =
+                host.getSystemService(android.net.ConnectivityManager.class);
+        if (connectivity != null) {
+            try {
+                connectivity.unregisterNetworkCallback(wifiWatch);
+            } catch (IllegalArgumentException unregistered) {
+                // NOTE: never registered, the resume having failed early.
+            }
+        }
+    }
+
+    /** How many bodies an account's window still downloads, or null. */
+    public Integer bodiesLeft(String email) {
+        return bodiesLeft.get(email);
+    }
+
+    /**
+     * Brings the books' Android accounts in line with the books the phone
+     * mirrors, creating the missing ones and removing the rest, then the
+     * calendars' ({@link #reconcileCalendars}), off the main thread: at
+     * startup and once a setup committed its books.
+     */
+    public void reconcilePhone() {
+        host.io.execute(
+                () -> {
+                    try {
+                        Accounts.reconcile(host, BookEntry.accounts(passes.phoneSyncedBooks()));
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "phone accounts failed", error);
+                    }
+                });
+        reconcileCalendars();
+    }
+
+    /**
+     * Brings the phone's calendars in line with those it shows
+     * ({@link CalendarRows}), off the main thread: with the books, and when a
+     * calendar's switch or the account roster changes.
+     */
+    public void reconcileCalendars() {
+        host.io.execute(
+                () -> {
+                    try {
+                        CalendarRows.reconcile(host, pimdir);
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "phone calendars failed", error);
+                    }
+                });
+    }
+
+    /**
+     * The app back in the foreground: the phone pass of every mirrored book
+     * and calendar whose rows changed meanwhile, so a Contacts-app or a
+     * calendar-app edit shows at once whatever Android's own batching does,
+     * then a reload when that pass or Android's upload sync ({@link
+     * SyncService}, {@link CalendarSyncService}) brought one in. Silent, and
+     * not a sync: the process's lock is not taken.
+     */
+    public void phoneReturn() {
+        host.io.execute(
+                () -> {
+                    ContactEngine.Report report = new ContactEngine.Report();
+                    Exception failure = passes.syncPhone(report);
+                    if (failure != null) {
+                        Log.w("pimalaya", "phone pass on return failed", failure);
+                    }
+                    long ingested = screens.contactsIngested();
+                    boolean changed =
+                            !report.localIn.isEmpty()
+                                    || !report.localOut.isEmpty()
+                                    || !report.localChanged.isEmpty();
+                    if (changed || ingested != reloadedIngest) {
+                        reloadedIngest = ingested;
+                        host.postAlive(() -> screens.reload(PimDomain.CONTACTS));
+                    }
+
+                    boolean events = passes.syncPhoneCalendars();
+                    long calendarIngested = screens.calendarsIngested();
+                    if (events || calendarIngested != reloadedCalendarIngest) {
+                        reloadedCalendarIngest = calendarIngested;
+                        host.postAlive(() -> screens.reload(PimDomain.CALENDAR));
+                    }
+                });
+    }
+
+    /**
+     * A book's phone switch turned on, its permission granted: its Android
+     * account, then its first projection, under the lists' dock, its bar
+     * filling as the contacts are written, unless a sync holds the dock. The
+     * process's lock is not taken, the book's own lock being the pass's.
+     */
+    public void showOnPhone(String url) {
+        host.io.execute(
+                () -> {
+                    try {
+                        Accounts.reconcile(host, BookEntry.accounts(passes.phoneSyncedBooks()));
+                        ContactPhonePass engine = new ContactPhonePass(pimdir, client);
+                        engine.progress =
+                                new PimdirEngine.Progress() {
+                                    @Override
+                                    public void step(PimDomain domain, int stage, int count) {
+                                        phoneStep(domain, stage, count, 0);
+                                    }
+
+                                    @Override
+                                    public void advance(
+                                            PimDomain domain, int stage, int done, int total) {
+                                        phoneStep(domain, stage, total, done);
+                                    }
+                                };
+                        engine.sync(url, new ContactEngine.Report());
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "first projection failed for " + url, error);
+                    }
+                    host.postAlive(() -> phoneDock(null, 0, 0));
+                });
+    }
+
+    /**
+     * Sets the dock from a first projection's stage (any thread), its bar
+     * filled to {@code done} of the projection's {@code count}.
+     */
+    private void phoneStep(PimDomain domain, int stage, int count, int done) {
+        String text = host.getString(SyncSteps.lineOf(domain));
+        boolean counted = stage == PimdirEngine.Progress.STAGE_PROJECT && done > 0;
+        host.postAlive(() -> phoneDock(text, done, counted ? count : 0));
+    }
+
+    /** The dock during a first projection, a null line once it ended. */
+    private void phoneDock(String text, int done, int total) {
+        if (isSyncing() || screens.backgroundRunning()) {
+            return;
+        }
+        if (text == null) {
+            screens.dock().synced();
+            return;
+        }
+        SyncDock.Pass pass = new SyncDock.Pass();
+        pass.title = text;
+        pass.done = done;
+        pass.total = total;
+        screens.dock().pass(pass);
+    }
+
+    /**
+     * A book's phone switch turned off: one last phone pass, so a
+     * Contacts-app edit not yet brought in is not lost, then its Android
+     * account goes, which takes its raw contacts with it. The contacts stay
+     * in the store.
+     */
+    public void hideFromPhone(String url) {
+        host.io.execute(
+                () -> {
+                    try {
+                        new ContactPhonePass(pimdir, client)
+                                .sync(url, new ContactEngine.Report());
+                    } catch (Exception error) {
+                        Log.w("pimalaya", "last phone pass failed for " + url, error);
+                    }
+                    Accounts.remove(host, url);
+                    host.postAlive(() -> screens.reload(PimDomain.CONTACTS));
                 });
     }
 }
