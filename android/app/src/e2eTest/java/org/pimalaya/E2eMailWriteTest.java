@@ -39,15 +39,15 @@ public class E2eMailWriteTest extends E2eCase {
         pass(phone, collection);
         MailStore.StoredMessage listed = phone.message(collection, subject("junk"));
         assertNotNull("listed", listed);
-        assertFalse("unread", listed.seen);
-        assertFalse("not starred", listed.flagged);
+        assertFalse("unread", listed.seen());
+        assertFalse("not starred", listed.flagged());
 
         phone.stager(address).stageFlag(listed, Flags.Marker.FLAGGED, true);
         phone.stager(address)
                 .stageFlag(phone.message(collection, subject("junk")), Flags.Marker.SEEN, true);
         MailStore.StoredMessage staged = phone.message(collection, subject("junk"));
-        assertTrue("starred at once", staged.flagged);
-        assertTrue("read at once", staged.seen);
+        assertTrue("starred at once", staged.flagged());
+        assertTrue("read at once", staged.seen());
         assertTrue("pending", phone.owes(collection, staged.id));
 
         pass(phone, collection);
@@ -60,7 +60,7 @@ public class E2eMailWriteTest extends E2eCase {
                 () -> {
                     pass(observer, seen);
                     MailStore.StoredMessage there = observer.message(seen, subject("junk"));
-                    return there != null && there.flagged && there.seen;
+                    return there != null && there.flagged() && there.seen();
                 });
         if (target.keywords) {
             assertTrue(
@@ -76,7 +76,7 @@ public class E2eMailWriteTest extends E2eCase {
                 () -> {
                     pass(observer, seen);
                     MailStore.StoredMessage there = observer.message(seen, subject("junk"));
-                    return there != null && !there.flagged && there.seen;
+                    return there != null && !there.flagged() && there.seen();
                 });
     }
 
@@ -114,7 +114,7 @@ public class E2eMailWriteTest extends E2eCase {
         // whatever IMAP names it; `messages.trash` keeps the other labels,
         // which Gmail hides while it is in the trash.
         String trashName =
-                target.provider.equals("google") ? "TRASH" : phone.mail.trashOf(address);
+                target.provider.equals("google") ? "TRASH" : phone.mail.policy().trashOf(address);
         settles(
                 "the server holds it in " + trashName + " and not in its mailbox",
                 () -> {

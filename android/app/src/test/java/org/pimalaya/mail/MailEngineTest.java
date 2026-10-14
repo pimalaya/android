@@ -225,7 +225,7 @@ public class MailEngineTest {
         String source = "From: jane@example.com\r\nSubject: Hi\r\n\r\nthe body\r\n";
         String date = "Mon, 5 Jan 2026 09:00:00 +0000";
 
-        store.queueSubmission(
+        store.outbox().queueSubmission(
                 EMAIL, "queued@example.com", "Hi", date, source.getBytes(StandardCharsets.UTF_8));
 
         // No item: a message on its way out is an action the engine never
@@ -233,16 +233,16 @@ public class MailEngineTest {
         // reconcile or held back from a roster replace.
         assertEquals(
                 "0",
-                scalar("SELECT count(*) FROM items WHERE collection = ?", store.outboxOf(EMAIL)));
+                scalar("SELECT count(*) FROM items WHERE collection = ?", store.outbox().outboxOf(EMAIL)));
 
-        List<MailStore.Outgoing> waiting = store.outgoing(EMAIL);
+        List<Outbox.Outgoing> waiting = store.outbox().outgoing(EMAIL);
         assertEquals(1, waiting.size());
         assertEquals(source, new String(waiting.get(0).source, StandardCharsets.UTF_8));
 
         MailStore.StoredMessage row = store.loadMerged(10).get(0);
-        assertTrue("it says of itself that it has not gone yet", row.pending);
+        assertTrue("it says of itself that it has not gone yet", row.pending());
         assertEquals("Hi", row.subject);
-        assertEquals(store.outboxOf(EMAIL), row.collection);
+        assertEquals(store.outbox().outboxOf(EMAIL), row.collection);
     }
 
     /** One named member of a listed page, as a mail connector answers it. */

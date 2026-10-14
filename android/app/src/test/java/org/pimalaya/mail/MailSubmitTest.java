@@ -57,7 +57,7 @@ public class MailSubmitTest {
                         "<a@example.org>",
                         "<root@example.org> <a@example.org>"));
 
-        List<MailStore.Outgoing> waiting = store.outgoing(EMAIL);
+        List<Outbox.Outgoing> waiting = store.outbox().outgoing(EMAIL);
         assertEquals(1, waiting.size());
         String source = new String(waiting.get(0).source, StandardCharsets.UTF_8);
         assertTrue(source, source.contains("In-Reply-To: <a@example.org>\r\n"));
@@ -87,7 +87,7 @@ public class MailSubmitTest {
                         "<root@example.org> <a@example.org>");
         submit.queue(draft);
 
-        List<MailStore.Outgoing> waiting = store.outgoing(EMAIL);
+        List<Outbox.Outgoing> waiting = store.outbox().outgoing(EMAIL);
         assertEquals(1, waiting.size());
         assertEquals("fixed-16@example.com", waiting.get(0).messageId);
         assertArrayEquals(new MailClient().compose(draft), waiting.get(0).source);

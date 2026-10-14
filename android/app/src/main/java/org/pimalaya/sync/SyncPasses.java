@@ -42,6 +42,7 @@ import org.pimalaya.mail.MailStep;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailTally;
 import org.pimalaya.mail.MailWindow;
+import org.pimalaya.mail.Outbox;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -493,7 +494,7 @@ public final class SyncPasses {
         progress.account(null);
         MailPass pass = new MailPass();
         List<String> queued = new ArrayList<>();
-        for (MailStore.StoredMessage waiting : mail.outgoing()) {
+        for (MailStore.StoredMessage waiting : mail.outbox().outgoing()) {
             queued.add(waiting.accountEmail);
         }
         for (AccountEntry account : accountsFor(PimDomain.MAIL)) {
@@ -509,7 +510,7 @@ public final class SyncPasses {
                 // already in the sent mailbox by the time the walk beside it
                 // lists one.
                 try {
-                    if (scope.collection(account.email, mail.outboxOf(account.email))) {
+                    if (scope.collection(account.email, mail.outbox().outboxOf(account.email))) {
                         pass.sent += drainOutbox(account, session);
                     }
                 } catch (Exception error) {
@@ -557,29 +558,29 @@ public final class SyncPasses {
      */
     private int drainOutbox(AccountEntry account, MailSession session) throws Exception {
         int sent = 0;
-        for (MailStore.Outgoing waiting : mail.outgoing(account.email)) {
+        for (Outbox.Outgoing waiting : mail.outbox().outgoing(account.email)) {
             String filed;
             try {
                 filed = clients.mail().submit(session, waiting.source);
             } catch (SubmissionRefused refused) {
                 Log.w("pimalaya", "submission refused: " + AccountEntry.redacted(account.email), refused);
-                mail.parkOutgoing(waiting.id, refused.getMessage());
+                mail.outbox().parkOutgoing(waiting.id, refused.getMessage());
                 continue;
             } catch (SubmissionUncertain uncertain) {
                 // NOTE: the message may have gone: parked, never handed
                 // over again unasked, and the drain stops here as for any
                 // failure of the connection.
                 Log.w("pimalaya", "submission uncertain: " + AccountEntry.redacted(account.email), uncertain);
-                mail.parkUncertain(waiting.id, uncertain.getMessage());
+                mail.outbox().parkUncertain(waiting.id, uncertain.getMessage());
                 throw uncertain;
             } catch (Exception error) {
-                mail.retryOutgoing(waiting.id);
+                mail.outbox().retryOutgoing(waiting.id);
                 throw error;
             }
             if (filed != null) {
-                mail.aliasSentCopy(waiting.messageId, filed);
+                mail.policy().aliasSentCopy(waiting.messageId, filed);
             }
-            mail.acknowledge(waiting.id);
+            mail.outbox().acknowledge(waiting.id);
             sent += 1;
         }
         return sent;
@@ -824,7 +825,7 @@ public final class SyncPasses {
                 for (PimdirCollections.Stored stored : mail.loadMailboxes(List.of(account.email))) {
                     // NOTE: the outbox is the app's queue, no mailbox the
                     // server knows.
-                    if (stored.id.equals(mail.outboxOf(account.email))) {
+                    if (stored.id.equals(mail.outbox().outboxOf(account.email))) {
                         continue;
                     }
                     mailboxes.add(new Mailbox(stored.name, stored.role));

@@ -11,6 +11,7 @@ import android.content.Context;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.Flags;
 import org.pimalaya.mail.MailStore;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
@@ -93,9 +94,11 @@ public class BackgroundCheckTest {
 
     /** An unread inbox message dated {@code sortKey}, as a run reads it. */
     private static MailStore.StoredMessage unread(String id, String sortKey) {
-        return new MailStore.StoredMessage(
-                JANE, "inbox", "INBOX", "Inbox", id, "Subject", "", "a@example.org", sortKey, 1,
-                "[]", 0, null, false);
+        return MailStore.StoredMessage.synced(
+                new MailStore.StoredMessage.MessageHeader(
+                        JANE, "inbox", "INBOX", id, "Subject", "", "a@example.org"),
+                new MailStore.StoredMessage.Listing(
+                        "Inbox", sortKey, 1, Flags.none(), 0, null, false));
     }
 
     @Test

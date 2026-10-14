@@ -274,14 +274,14 @@ public class MailMoveTest {
     @Test
     public void aTrashDeleteOnAServerErasingNoSingleMessageMarksIt() throws Exception {
         file(trash, named("7", "Old"));
-        MailStore.markExpungesOne(context, accountId, false);
+        MailPolicy.markExpungesOne(context, accountId, false);
 
         assertEquals(MailStager.Deletion.MARKED, stager().stageDelete(rowIn("Trash")));
 
         // No UIDPLUS: an EXPUNGE would take every marked message, so the row
         // stays, saying so, rather than leaving and coming back.
         MailStore.StoredMessage row = rowIn("Trash");
-        assertTrue(row.deleted);
+        assertTrue(row.deleted());
         assertEquals("not a tombstone", "0",
                 scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '7'", trash));
     }
@@ -289,7 +289,7 @@ public class MailMoveTest {
     @Test
     public void aTrashDeleteOnAServerErasingOneMessageRemovesIt() throws Exception {
         file(trash, named("7", "Old"));
-        MailStore.markExpungesOne(context, accountId, true);
+        MailPolicy.markExpungesOne(context, accountId, true);
 
         assertEquals(MailStager.Deletion.ERASED, stager().stageDelete(rowIn("Trash")));
         assertNull(rowIn("Trash"));
@@ -299,7 +299,7 @@ public class MailMoveTest {
     public void aSentCopyIsHiddenWhileItsSubmissionWaits() throws Exception {
         String date = "2026-10-08T09:00:00Z";
         String body = "Message-ID: <m2@example.com>\r\nSubject: Hi\r\n\r\nbody\r\n";
-        store.queueSubmission(EMAIL, "m2@example.com", "Hi", PimdirSummary.mailSortKey(date),
+        store.outbox().queueSubmission(EMAIL, "m2@example.com", "Hi", PimdirSummary.mailSortKey(date),
                 body.getBytes(StandardCharsets.UTF_8));
         stager().mutateAdd(
                 sent,
@@ -323,7 +323,7 @@ public class MailMoveTest {
                         false,
                         "")));
 
-        store.acknowledge(store.outgoing().get(0).queued);
+        store.outbox().acknowledge(store.outbox().outgoing().get(0).queued.id());
 
         assertNotNull("shown once the submission went", rowIn("Sent"));
         assertEquals(2, store.count(store.query((account, mailbox) -> true, false, false, "")));

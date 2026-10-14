@@ -99,7 +99,7 @@ public final class MailSubmit {
         String date = draft.date();
 
         byte[] source = client.compose(draft);
-        mail.queueSubmission(
+        mail.outbox().queueSubmission(
                 sender,
                 PimdirSummary.bare(messageId),
                 subject,

@@ -1,7 +1,6 @@
 package org.pimalaya.mail;
 
 import android.content.Context;
-import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.util.Log;
 
@@ -10,7 +9,6 @@ import io.requery.android.database.sqlite.SQLiteQuery;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.R;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Flags;
@@ -67,54 +65,19 @@ import java.util.function.BiPredicate;
  * ({@link PimdirQueue}).
  */
 public final class MailStore {
-    /**
-     * The collection the outbox's queue rows are filed against.
-     *
-     * <p>A control character, which no server hands out and no user types, so
-     * it cannot collide with a mailbox the account really holds. It holds no
-     * items: an action addresses a collection, and this is the one a submission
-     * addresses.
-     */
-    private static final String OUTBOX = "\u0001outbox";
-
-    /** Which accounts keep an All Mail collection (Gmail), by account id. */
-    private static final String ALL_MAIL_PREFS = "mail-all-mail";
-
-    /** Which accounts keep their inbox alone ticked to begin with, by account id. */
-    private static final String INBOX_ONLY_PREFS = "mail-inbox-only";
-
     /** The mail roles pimdir's schema takes (STORAGE section 14). */
     private static final java.util.Set<String> ROLES =
             java.util.Set.of(
                     "inbox", "sent", "drafts", "trash", "junk", "archive", "all", "flagged",
                     "important");
 
-    /** Where each account's trash mailbox is remembered, by address. */
-    private static final String TRASH_PREFS = "mail-trash";
-
-    /** Which accounts are listed account-wide, by account id. */
-    private static final String ACCOUNT_WIDE_PREFS = "mail-account-wide";
-
-    /** Which accounts had their cross-linked bodies released, by account id. */
-    private static final String LINKS_REPAIRED_PREFS = "mail-links-repaired";
-
-    /** Which accounts' servers erase no single message (no UIDPLUS), by account id. */
-    private static final String MARKING_PREFS = "mail-marks-deleted";
-
-    /** Which sent copies a provider filed under its own Message-ID, by that id. */
-    private static final String SENT_ALIAS_PREFS = "mail-sent-alias";
-
-    /**
-     * What a parked submission's reason starts with when the message may
-     * have gone ({@link #parkUncertain}), rather than been refused.
-     */
-    static final String UNCERTAIN = "uncertain: ";
-
     private final PimdirItems items;
     private final PimdirDb store;
     private final PimdirCollections collections;
     private final PimdirAccount accounts;
     private final PimdirQueue queue;
+    private final Outbox outbox;
+    private final MailPolicy policy;
     private final Context context;
 
     public MailStore(Context context, PimdirDb store) {
@@ -123,7 +86,19 @@ public final class MailStore {
         this.collections = new PimdirCollections(store, context);
         this.accounts = new PimdirAccount(context);
         this.queue = new PimdirQueue(store, accounts);
+        this.outbox = new Outbox(context, items, accounts, queue);
+        this.policy = new MailPolicy(context, accounts);
         this.context = context;
+    }
+
+    /** The outbox: each account's submissions waiting on the store's queue. */
+    public Outbox outbox() {
+        return outbox;
+    }
+
+    /** What mail remembers of each account outside the store. */
+    public MailPolicy policy() {
+        return policy;
     }
 
     /**
@@ -142,7 +117,7 @@ public final class MailStore {
         // the version before this one would be dropped: it was a mail
         // collection, so a roster that does not list it takes it and the
         // messages in it.
-        migrateOutbox(accountEmail);
+        outbox.migrateOutbox(accountEmail);
 
         // NOTE: an account's first roster off Gmail keeps its inbox alone
         // ticked: its mailboxes step one by one, and each costs a listing.
@@ -153,19 +128,14 @@ public final class MailStore {
                 break;
             }
         }
-        if (fresh && !keepsAllMail(context, account)) {
-            context.getSharedPreferences(INBOX_ONLY_PREFS, Context.MODE_PRIVATE)
-                    .edit()
-                    .putBoolean(account, true)
-                    .apply();
+        if (fresh && !MailPolicy.keepsAllMail(context, account)) {
+            policy.markInboxOnly(account);
         }
-        boolean inboxOnly =
-                context.getSharedPreferences(INBOX_ONLY_PREFS, Context.MODE_PRIVATE)
-                        .getBoolean(account, false);
+        boolean inboxOnly = policy.inboxOnly(account);
 
         List<PimdirCollections.Stored> listed =
                 MailEngine.collectionsOf(accountEmail, account, mailboxes);
-        if (keepsAllMail(context, account)) {
+        if (MailPolicy.keepsAllMail(context, account)) {
             listed.addAll(
                     MailEngine.collectionsOf(
                             accountEmail, account, List.of(new Mailbox(PimdirCollections.ALL_MAIL, null))));
@@ -206,10 +176,7 @@ public final class MailStore {
                 break;
             }
         }
-        context.getSharedPreferences(TRASH_PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putString(accountEmail, trash)
-                .apply();
+        policy.markTrash(accountEmail, trash);
     }
 
     /**
@@ -218,67 +185,27 @@ public final class MailStore {
      * go out.
      */
     public void forget(String accountEmail) {
-        String outbox = outboxOf(accountEmail);
+        String outbox = this.outbox.outboxOf(accountEmail);
         List<PimdirQueue.Action> waiting = new ArrayList<>(queue.pending(outbox));
         for (PimdirQueue.Action action : queue.parked()) {
-            if (action.collection.equals(outbox)) {
+            if (action.collection().equals(outbox)) {
                 waiting.add(action);
             }
         }
         for (PimdirQueue.Action action : waiting) {
-            queue.acknowledge(action.id);
+            queue.acknowledge(action.id());
         }
 
         collections.replace(accountEmail, PimdirSummary.MAIL, List.of());
         new FileStore(context, store).forget(accounts.idOf(accountEmail));
-        context.getSharedPreferences(TRASH_PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .remove(accountEmail)
-                .apply();
+        policy.forgetTrash(accountEmail);
         MailScope.forget(context, accounts.idOf(accountEmail));
         MailOffline.forget(context, accounts.idOf(accountEmail));
         MailWindow.forget(context, accounts.idOf(accountEmail));
-        markAccountWide(context, accounts.idOf(accountEmail), false);
-        markAllMail(context, accounts.idOf(accountEmail), false);
-        context.getSharedPreferences(INBOX_ONLY_PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .remove(accounts.idOf(accountEmail))
-                .apply();
-        markExpungesOne(context, accounts.idOf(accountEmail), true);
-    }
-
-    /**
-     * Remembers whether an account's mailboxes are listed account-wide: one
-     * listing of the whole account, each mailbox a projection of it (Gmail's
-     * labels), so they share one floor and widen together.
-     */
-    static void markAccountWide(Context context, String accountId, boolean accountWide) {
-        SharedPreferences.Editor prefs =
-                context.getSharedPreferences(ACCOUNT_WIDE_PREFS, Context.MODE_PRIVATE).edit();
-        if (accountWide) {
-            prefs.putBoolean(accountId, true);
-        } else {
-            prefs.remove(accountId);
-        }
-        prefs.apply();
-    }
-
-    /** Remembers whether an account keeps an All Mail collection ({@link PimdirCollections#ALL_MAIL}). */
-    static void markAllMail(Context context, String accountId, boolean allMail) {
-        SharedPreferences.Editor prefs =
-                context.getSharedPreferences(ALL_MAIL_PREFS, Context.MODE_PRIVATE).edit();
-        if (allMail) {
-            prefs.putBoolean(accountId, true);
-        } else {
-            prefs.remove(accountId);
-        }
-        prefs.apply();
-    }
-
-    /** Whether an account keeps an All Mail collection ({@link #markAllMail}). */
-    static boolean keepsAllMail(Context context, String accountId) {
-        return context.getSharedPreferences(ALL_MAIL_PREFS, Context.MODE_PRIVATE)
-                .getBoolean(accountId, false);
+        MailPolicy.markAccountWide(context, accounts.idOf(accountEmail), false);
+        MailPolicy.markAllMail(context, accounts.idOf(accountEmail), false);
+        policy.forgetInboxOnly(accounts.idOf(accountEmail));
+        MailPolicy.markExpungesOne(context, accounts.idOf(accountEmail), true);
     }
 
     /** An account's All Mail collection, which it holds only if it keeps one. */
@@ -292,56 +219,8 @@ public final class MailStore {
      */
     public void ensureAllMail(String accountEmail) {
         String account = accounts.idOf(accountEmail);
-        markAllMail(context, account, true);
+        MailPolicy.markAllMail(context, account, true);
         collections.ensure(allMailOf(account), accountEmail, PimdirSummary.MAIL, PimdirCollections.ALL_MAIL);
-    }
-
-    /** Whether an account's mailboxes are listed account-wide ({@link #markAccountWide}). */
-    static boolean accountWide(Context context, String accountId) {
-        return context.getSharedPreferences(ACCOUNT_WIDE_PREFS, Context.MODE_PRIVATE)
-                .getBoolean(accountId, false);
-    }
-
-    /**
-     * Remembers whether an account's server erases one message alone, as
-     * its last session said ({@code MailSession.expungesOne}).
-     *
-     * <p>Kept beside the trash for the same reason: what it decides is what
-     * a delete in the trash stages, which a delete with no network has to
-     * know.
-     */
-    static void markExpungesOne(Context context, String accountId, boolean expungesOne) {
-        SharedPreferences.Editor prefs =
-                context.getSharedPreferences(MARKING_PREFS, Context.MODE_PRIVATE).edit();
-        if (expungesOne) {
-            prefs.remove(accountId);
-        } else {
-            prefs.putBoolean(accountId, true);
-        }
-        prefs.apply();
-    }
-
-    /**
-     * Whether a delete in one account's trash erases the message, else only
-     * marks it {@code \Deleted} ({@link #markExpungesOne}). An account no
-     * session recorded yet reads as erasing, which most servers do.
-     */
-    boolean expungesOne(String accountEmail) {
-        return !context.getSharedPreferences(MARKING_PREFS, Context.MODE_PRIVATE)
-                .getBoolean(accounts.idOf(accountEmail), false);
-    }
-
-    /**
-     * The mailbox one account deletes into, empty when it marks none.
-     *
-     * <p>Kept beside the roster rather than asked for at the moment of a
-     * delete, which is the whole difference between a delete that works with
-     * no network and one that does not: what it decides is whether the message
-     * moves, and leaves the list, or is only marked and stays in it.
-     */
-    public String trashOf(String accountEmail) {
-        return context.getSharedPreferences(TRASH_PREFS, Context.MODE_PRIVATE)
-                .getString(accountEmail, "");
     }
 
     /**
@@ -356,27 +235,6 @@ public final class MailStore {
             }
         }
         return null;
-    }
-
-    /**
-     * Whether a submission of the message is still waiting, or was refused
-     * and parked: the sent copy staged for it is not to be filed yet.
-     */
-    boolean submitting(String messageId) {
-        for (PimdirQueue.Action action : submissions()) {
-            if (messageId.equals(action.payload.optString("messageId"))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** Every submission still in an outbox, waiting or parked. */
-    private List<PimdirQueue.Action> submissions() {
-        List<PimdirQueue.Action> actions = new ArrayList<>(queue.pending());
-        actions.addAll(queue.parked());
-        actions.removeIf(action -> !PimdirQueue.SUBMIT.equals(action.kind));
-        return actions;
     }
 
     /** The body the store holds of one message, null when it holds none. */
@@ -395,11 +253,11 @@ public final class MailStore {
      * {@code MailEngine.stageDelete} stages by).
      */
     boolean erases(StoredMessage message) {
-        String trash = trashOf(message.accountEmail);
-        return !message.pending
+        String trash = policy.trashOf(message.accountEmail);
+        return !message.pending()
                 && !trash.isEmpty()
                 && trash.equals(message.mailbox)
-                && expungesOne(message.accountEmail);
+                && policy.expungesOne(message.accountEmail);
     }
 
     /** The id one account's collections are namespaced under. */
@@ -410,28 +268,6 @@ public final class MailStore {
     /** Where one account's mailbox is stored. */
     public String collectionOf(String accountEmail, String mailbox) {
         return PimdirAccount.collectionId(accounts.idOf(accountEmail), mailbox);
-    }
-
-    /** Where one account's outgoing messages wait. */
-    public String outboxOf(String accountEmail) {
-        return PimdirAccount.collectionId(accounts.idOf(accountEmail), OUTBOX);
-    }
-
-    /**
-     * Stages one composed message for the next drain to hand over.
-     *
-     * <p>The sort key rather than the date it was written from: it is what
-     * a row is ordered and dated by everywhere else in this store, and
-     * deriving it once here keeps the listing from parsing anything.
-     */
-    void queueSubmission(String accountEmail, String messageId, String subject, String sortKey,
-            byte[] source) {
-        queue.enqueue(
-                outboxOf(accountEmail),
-                accountEmail,
-                PimdirQueue.SUBMIT,
-                PimdirQueue.submission(accountEmail, messageId, subject, sortKey),
-                source);
     }
 
     /** One stored envelope, with the account it came from. */
@@ -474,9 +310,9 @@ public final class MailStore {
 
         public final long seq;
 
-        public final boolean seen;
-        final boolean answered;
-        public final boolean flagged;
+        /** The markers it carries, what the marks a row shows are read off. */
+        final Flags flags;
+
         public final boolean hasAttachment;
 
         /** The attachment mark: 1 with, 0 without, null never examined. */
@@ -489,7 +325,7 @@ public final class MailStore {
         public final boolean bodied;
 
         /**
-         * The queue row this message is, or 0 when it is a message the
+         * The queue row this message is, or null when it is a message the
          * store synced rather than one waiting to go out.
          *
          * <p>A waiting message is not an item: it is an action on the
@@ -497,7 +333,7 @@ public final class MailStore {
          * only handle there is to it, and every read and discard of one
          * addresses it by this rather than by a collection and a link id.
          */
-        final long queued;
+        final Queued queued;
 
         /**
          * The body that row pins, or null when the message is an item.
@@ -520,129 +356,141 @@ public final class MailStore {
         /**
          * Whether its row was parked because the message may have gone: the
          * whole of it was handed over and no verdict came back. Sent again
-         * only when somebody says so ({@link MailStore#resendOutgoing}).
+         * only when somebody says so ({@link Outbox#resendOutgoing}).
          */
         final boolean uncertain;
+
+        /**
+         * What every stored message carries: the account, the collection and
+         * the mailbox it is in, its key there, and what a row draws of it.
+         */
+        public record MessageHeader(
+                String accountEmail,
+                String collection,
+                String mailbox,
+                String id,
+                String subject,
+                String fromName,
+                String fromAddress) {}
+
+        /**
+         * What a synced message's list row carries beside its header.
+         *
+         * @param mailboxLabel the mailbox as the reader is shown it
+         * @param sortKey the row's sort key, null read as empty
+         * @param seq the row's sequence, the second part of its place
+         * @param flags the markers it carries
+         * @param attachment the attachment mark: 1 with, 0 without, null
+         *     never examined
+         * @param size its size in bytes, null where the store does not know it
+         * @param bodied whether the store holds its body
+         */
+        public record Listing(
+                String mailboxLabel,
+                String sortKey,
+                long seq,
+                Flags flags,
+                Integer attachment,
+                Long size,
+                boolean bodied) {}
+
+        /**
+         * The queue row a message waiting to go out is.
+         *
+         * @param id the queue row
+         * @param objectHash the body that row pins
+         * @param failed whether the server refused it, which parked its row
+         * @param uncertain whether its row was parked because the message
+         *     may have gone
+         */
+        record Queued(long id, String objectHash, boolean failed, boolean uncertain) {}
+
+        /** One message waiting on the queue, as the outbox shows it. */
+        static StoredMessage outgoing(MessageHeader header, long stamp, Flags flags, Queued queued) {
+            return new StoredMessage(header, stamp, flags, queued);
+        }
+
+        /** One synced message, as a page of the merged list reads it. */
+        public static StoredMessage synced(MessageHeader header, Listing listing) {
+            return new StoredMessage(header, listing);
+        }
+
+        private StoredMessage(MessageHeader header, long stamp, Flags flags, Queued queued) {
+            this.accountEmail = header.accountEmail();
+            this.collection = header.collection();
+            this.mailbox = header.mailbox();
+            this.mailboxLabel = header.mailbox();
+            this.id = header.id();
+            this.subject = header.subject();
+            this.fromName = header.fromName();
+            this.fromAddress = header.fromAddress();
+            this.stamp = stamp;
+            this.flags = flags;
+            this.hasAttachment = false;
+            this.attachment = 0;
+            this.size = null;
+            this.bodied = true;
+            this.queued = queued;
+            this.objectHash = queued.objectHash();
+            this.failed = queued.failed();
+            this.uncertain = queued.uncertain();
+            this.sortKey = "";
+            this.seq = 0;
+        }
+
+        private StoredMessage(MessageHeader header, Listing listing) {
+            this.accountEmail = header.accountEmail();
+            this.collection = header.collection();
+            this.mailbox = header.mailbox();
+            this.mailboxLabel = listing.mailboxLabel();
+            this.id = header.id();
+            this.subject = header.subject();
+            this.fromName = header.fromName();
+            this.fromAddress = header.fromAddress();
+            this.sortKey = listing.sortKey() == null ? "" : listing.sortKey();
+            this.seq = listing.seq();
+            // NOTE: from the key rather than the summary's date, since the
+            // key is what the row was ordered by: a label disagreeing with
+            // the order it appears in reads as a bug.
+            this.stamp = PimdirSummary.stampOf(this.sortKey);
+            this.flags = listing.flags();
+            this.hasAttachment = listing.attachment() != null && listing.attachment() == 1;
+            this.attachment = listing.attachment();
+            this.size = listing.size();
+            this.bodied = listing.bodied();
+            this.queued = null;
+            this.objectHash = null;
+            this.failed = false;
+            this.uncertain = false;
+        }
+
+        public boolean seen() {
+            return flags.has(Flags.Marker.SEEN);
+        }
+
+        boolean answered() {
+            return flags.has(Flags.Marker.ANSWERED);
+        }
+
+        public boolean flagged() {
+            return flags.has(Flags.Marker.FLAGGED);
+        }
 
         /**
          * Whether the message is waiting to go out, which is what a row
          * says of itself rather than something a caller works out: it is the
          * one state where the store holds a message no server has.
          */
-        public final boolean pending;
+        public boolean pending() {
+            return queued != null;
+        }
 
         /**
          * Whether it carries {@code \Deleted}: deleted where the server
          * expunges no single message (no UIDPLUS), and so still listed.
          */
-        public final boolean deleted;
-
-        StoredMessage(
-                String accountEmail,
-                String collection,
-                String mailbox,
-                String id,
-                String subject,
-                String fromName,
-                String fromAddress,
-                long stamp,
-                boolean seen,
-                boolean answered,
-                boolean flagged,
-                boolean hasAttachment,
-                long queued,
-                String objectHash,
-                boolean failed) {
-            this(accountEmail, collection, mailbox, id, subject, fromName, fromAddress, stamp,
-                    seen, answered, flagged, hasAttachment, queued, objectHash, failed, false);
-        }
-
-        StoredMessage(
-                String accountEmail,
-                String collection,
-                String mailbox,
-                String id,
-                String subject,
-                String fromName,
-                String fromAddress,
-                long stamp,
-                boolean seen,
-                boolean answered,
-                boolean flagged,
-                boolean hasAttachment,
-                long queued,
-                String objectHash,
-                boolean failed,
-                boolean uncertain) {
-            this.accountEmail = accountEmail;
-            this.collection = collection;
-            this.mailbox = mailbox;
-            this.mailboxLabel = mailbox;
-            this.id = id;
-            this.subject = subject;
-            this.fromName = fromName;
-            this.fromAddress = fromAddress;
-            this.stamp = stamp;
-            this.seen = seen;
-            this.answered = answered;
-            this.flagged = flagged;
-            this.hasAttachment = hasAttachment;
-            this.attachment = hasAttachment ? 1 : 0;
-            this.size = null;
-            this.bodied = true;
-            this.queued = queued;
-            this.objectHash = objectHash;
-            this.failed = failed;
-            this.uncertain = uncertain;
-            this.pending = queued != 0;
-            this.sortKey = "";
-            this.seq = 0;
-            this.deleted = false;
-        }
-
-        /** One synced message, as a page of the merged list reads it. */
-        public StoredMessage(
-                String accountEmail,
-                String collection,
-                String mailbox,
-                String mailboxLabel,
-                String id,
-                String subject,
-                String fromName,
-                String fromAddress,
-                String sortKey,
-                long seq,
-                String flags,
-                Integer attachment,
-                Long size,
-                boolean bodied) {
-            this.accountEmail = accountEmail;
-            this.collection = collection;
-            this.mailbox = mailbox;
-            this.mailboxLabel = mailboxLabel;
-            this.id = id;
-            this.subject = subject;
-            this.fromName = fromName;
-            this.fromAddress = fromAddress;
-            this.sortKey = sortKey == null ? "" : sortKey;
-            this.seq = seq;
-            // NOTE: from the key rather than the summary's date, since the
-            // key is what the row was ordered by: a label disagreeing with
-            // the order it appears in reads as a bug.
-            this.stamp = PimdirSummary.stampOf(this.sortKey);
-            this.seen = has(flags, Flags.Marker.SEEN);
-            this.answered = has(flags, Flags.Marker.ANSWERED);
-            this.flagged = has(flags, Flags.Marker.FLAGGED);
-            this.hasAttachment = attachment != null && attachment == 1;
-            this.attachment = attachment;
-            this.size = size;
-            this.bodied = bodied;
-            this.queued = 0;
-            this.objectHash = null;
-            this.failed = false;
-            this.uncertain = false;
-            this.pending = false;
-            this.deleted = has(flags, Flags.Marker.DELETED);
+        public boolean deleted() {
+            return flags.has(Flags.Marker.DELETED);
         }
 
         /** The sender as a row shows them: the name, else the address. */
@@ -653,7 +501,7 @@ public final class MailStore {
 
     /** A message's endpoint; null for one still in an outbox, which is no item. */
     public static ItemLinks.Endpoint endpointOf(StoredMessage message) {
-        return message.pending ? null : ItemLinks.of(PimdirSummary.MAIL, message.id);
+        return message.pending() ? null : ItemLinks.of(PimdirSummary.MAIL, message.id);
     }
 
     /**
@@ -696,121 +544,9 @@ public final class MailStore {
      * message they have just written and where a refusal has to be seen.
      */
     List<StoredMessage> loadMerged(int limit) {
-        List<StoredMessage> messages = new ArrayList<>(outgoing());
+        List<StoredMessage> messages = new ArrayList<>(outbox.outgoing());
         messages.addAll(page(query((account, mailbox) -> true, false, false, ""), null, 0, limit));
         return messages;
-    }
-
-    /**
-     * Everything waiting on the queue, across every account, newest first.
-     *
-     * <p>Parked rows among them: a refused message is still a message the
-     * sender wrote, and the row it shows says so rather than disappearing.
-     */
-    public List<StoredMessage> outgoing() {
-        List<StoredMessage> messages = new ArrayList<>();
-        for (PimdirQueue.Action action : submissions()) {
-            messages.add(outgoing(action));
-        }
-        java.util.Collections.sort(messages, (left, right) -> Long.compare(right.queued, left.queued));
-        return messages;
-    }
-
-    /** One queued submission as a row, read off the payload it was written with. */
-    private StoredMessage outgoing(PimdirQueue.Action action) {
-        String from = action.payload.optString("from");
-
-        return new StoredMessage(
-                from,
-                action.collection,
-                outboxName(),
-                action.payload.optString("messageId"),
-                action.payload.optString("subject"),
-                "",
-                from,
-                PimdirSummary.stampOf(action.payload.optString("sortKey")),
-                // NOTE: read, because the sender wrote it. The copy the
-                // submission files carries \\Seen for the same reason.
-                true,
-                false,
-                false,
-                false,
-                action.id,
-                action.objectHash,
-                !action.pending(),
-                action.error != null && action.error.startsWith(UNCERTAIN));
-    }
-
-    /**
-     * Moves an outbox written as items onto the queue, once.
-     *
-     * <p>The version before this one held outgoing messages as items in a
-     * mail collection of their own. Nothing syncs those rows and nothing
-     * drains them any more, and the first roster replace after the upgrade
-     * would delete the collection and cascade them away, so they are
-     * enqueued as the submissions they always were and the rows are
-     * dropped. A store with none of them pays one indexed read.
-     */
-    private void migrateOutbox(String accountEmail) {
-        String collection = outboxOf(accountEmail);
-
-        List<Stranded> stranded = new ArrayList<>();
-        try (Cursor cursor =
-                items.readable()
-                        .rawQuery(
-                                "SELECT i.link_id, i.sort_key, s.subject FROM items i"
-                                        + " LEFT JOIN mail_summary s ON s.collection = i.collection"
-                                        + " AND s.link_id = i.link_id"
-                                        + " WHERE i.collection = ? AND i.deleted = 0"
-                                        + " ORDER BY i.sort_key ASC",
-                                new String[] {collection})) {
-            while (cursor.moveToNext()) {
-                stranded.add(
-                        new Stranded(
-                                cursor.getString(0),
-                                cursor.getString(1),
-                                cursor.isNull(2) ? "" : cursor.getString(2)));
-            }
-        }
-        if (stranded.isEmpty()) {
-            return;
-        }
-
-        for (Stranded message : stranded) {
-            byte[] source = items.objectBytes(collection, message.linkId);
-            if (source == null) {
-                Log.w("pimalaya", "an outbox message had no body, dropped: " + message.linkId);
-                continue;
-            }
-            queueSubmission(
-                    accountEmail, message.linkId, message.subject, message.sortKey, source);
-        }
-
-        SQLiteDatabase db = items.writable();
-        db.beginTransaction();
-        try {
-            for (Stranded message : stranded) {
-                items.remove(db, collection, message.linkId);
-            }
-            items.collectGarbage(db);
-            db.setTransactionSuccessful();
-        } finally {
-            db.endTransaction();
-        }
-        items.unlinkCollected();
-    }
-
-    /** One message the version before this one left in an outbox of items. */
-    private static final class Stranded {
-        final String linkId;
-        final String sortKey;
-        final String subject;
-
-        Stranded(String linkId, String sortKey, String subject) {
-            this.linkId = linkId;
-            this.sortKey = sortKey;
-            this.subject = subject;
-        }
     }
 
     /**
@@ -982,11 +718,12 @@ public final class MailStore {
         // key the submission names, until a listing lands it. Hidden only
         // where the outbox shows, whose row then stands for it.
         List<String[]> hidden = new ArrayList<>();
-        for (PimdirQueue.Action action : submissions()) {
-            String from = action.payload.optString("from");
+        for (PimdirQueue.Action action : outbox.submissions()) {
+            Submission submission = Submission.from(action);
+            String from = submission.from();
             String sent = sentOf(from);
-            if (sent != null && ids.contains(sent) && accepts.test(from, outboxOf(from))) {
-                hidden.add(new String[] {sent, action.payload.optString("messageId")});
+            if (sent != null && ids.contains(sent) && accepts.test(from, outbox.outboxOf(from))) {
+                hidden.add(new String[] {sent, submission.messageId()});
             }
         }
         String trimmed = words == null ? "" : words.trim();
@@ -1295,21 +1032,23 @@ public final class MailStore {
         if (mailbox == null) {
             return null;
         }
-        return new StoredMessage(
-                mailbox.accountEmail,
-                cursor.getString(0),
-                mailbox.name,
-                mailboxLabel(mailbox),
-                cursor.getString(2),
-                cursor.isNull(9) ? "" : cursor.getString(9),
-                cursor.isNull(11) ? "" : cursor.getString(11),
-                cursor.isNull(10) ? "" : cursor.getString(10),
-                cursor.isNull(5) ? "" : cursor.getString(5),
-                cursor.getLong(1),
-                cursor.isNull(3) ? null : cursor.getString(3),
-                cursor.isNull(14) ? null : cursor.getInt(14),
-                cursor.isNull(13) ? null : cursor.getLong(13),
-                !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL);
+        return StoredMessage.synced(
+                new StoredMessage.MessageHeader(
+                        mailbox.accountEmail,
+                        cursor.getString(0),
+                        mailbox.name,
+                        cursor.getString(2),
+                        cursor.isNull(9) ? "" : cursor.getString(9),
+                        cursor.isNull(11) ? "" : cursor.getString(11),
+                        cursor.isNull(10) ? "" : cursor.getString(10)),
+                new StoredMessage.Listing(
+                        mailboxLabel(mailbox),
+                        cursor.isNull(5) ? "" : cursor.getString(5),
+                        cursor.getLong(1),
+                        flags(cursor.isNull(3) ? null : cursor.getString(3)),
+                        cursor.isNull(14) ? null : cursor.getInt(14),
+                        cursor.isNull(13) ? null : cursor.getLong(13),
+                        !cursor.isNull(4) && cursor.getInt(6) >= PimdirItems.FULL));
     }
 
     /**
@@ -1579,7 +1318,7 @@ public final class MailStore {
      */
     String firstWindow(String accountEmail) {
         String account = accounts.idOf(accountEmail);
-        boolean accountWide = accountWide(context, account);
+        boolean accountWide = MailPolicy.accountWide(context, account);
         String inbox = null;
         List<String> floors = new ArrayList<>();
         List<String> ids = new ArrayList<>();
@@ -1640,7 +1379,7 @@ public final class MailStore {
         /** The floor the list stops at for it, null where it limits nothing. */
         final String limit;
 
-        /** Whether its account is listed account-wide ({@link MailStore#markAccountWide}). */
+        /** Whether its account is listed account-wide ({@link MailPolicy#markAccountWide}). */
         public final boolean accountWide;
 
         Edge(
@@ -1687,7 +1426,7 @@ public final class MailStore {
             boolean accountWide =
                     wide.computeIfAbsent(
                             stored.accountEmail,
-                            email -> accountWide(context, accounts.idOf(email)));
+                            email -> MailPolicy.accountWide(context, accounts.idOf(email)));
             Coverage coverage = coverage(stored.id);
             edges.add(
                     new Edge(
@@ -1895,13 +1634,11 @@ public final class MailStore {
      * were freed, 0 once done.
      */
     int repairLinks(String accountId) {
-        SharedPreferences prefs =
-                context.getSharedPreferences(LINKS_REPAIRED_PREFS, Context.MODE_PRIVATE);
-        if (prefs.getBoolean(accountId, false)) {
+        if (policy.linksRepaired(accountId)) {
             return 0;
         }
         int released = releaseCrossLinked(accountId);
-        prefs.edit().putBoolean(accountId, true).apply();
+        policy.markLinksRepaired(accountId);
         return released;
     }
 
@@ -1943,7 +1680,7 @@ public final class MailStore {
      * is where it is read from.
      */
     public byte[] source(StoredMessage message) {
-        if (message.pending) {
+        if (message.pending()) {
             return queue.body(message.objectHash);
         }
         return items.objectBytes(message.collection, message.id);
@@ -1955,7 +1692,7 @@ public final class MailStore {
      * this side.
      */
     java.io.File sourceFile(StoredMessage message) {
-        return message.pending ? null : items.objectFile(message.collection, message.id);
+        return message.pending() ? null : items.objectFile(message.collection, message.id);
     }
 
     /** Files the message a reader just fetched, against its envelope. */
@@ -1972,152 +1709,6 @@ public final class MailStore {
         items.putObject(collection, id, hash, file);
     }
 
-    /** One message waiting to be sent: what the drain hands over. */
-    public static final class Outgoing {
-        /** The queue row, which is what acknowledging it addresses. */
-        public final long id;
-
-        /** The {@code Message-ID} it was stamped with, bare. */
-        public final String messageId;
-
-        public final byte[] source;
-
-        Outgoing(long id, String messageId, byte[] source) {
-            this.id = id;
-            this.messageId = messageId;
-            this.source = source;
-        }
-    }
-
-    /**
-     * The messages waiting in one account's outbox, oldest first.
-     *
-     * <p>Append order, which is the order the queue owes a drain: the
-     * sender wrote them in it, and a server may well hold two messages of
-     * one conversation apart by nothing else.
-     */
-    public List<Outgoing> outgoing(String accountEmail) {
-        String collection = outboxOf(accountEmail);
-        migrateOutbox(accountEmail);
-
-        List<Outgoing> waiting = new ArrayList<>();
-        for (PimdirQueue.Action action : queue.pending(collection)) {
-            if (!PimdirQueue.SUBMIT.equals(action.kind)) {
-                // NOTE: skipped, not parked, and not the end of the drain
-                // either: an action of a kind this app does not carry out
-                // is left exactly as it is for whatever does (STORAGE
-                // section 15.2).
-                continue;
-            }
-            byte[] source = queue.body(action.objectHash);
-            if (source != null) {
-                waiting.add(
-                        new Outgoing(action.id, action.payload.optString("messageId"), source));
-            }
-        }
-        return waiting;
-    }
-
-    /**
-     * Acknowledges one submission, which is what finishes it.
-     *
-     * <p>Cancelling rather than applying: what the action asked for
-     * happened at a server and not in the store, so there is nothing here
-     * to apply and the row is removed by the process that carried it out
-     * (STORAGE section 15.5). It releases the body's pin with it.
-     */
-    public void acknowledge(long queued) {
-        queue.acknowledge(queued);
-    }
-
-    /**
-     * Remembers that the sent copy staged for {@code messageId} arrives
-     * under {@code filed}, the {@code Message-ID} the provider stamped on
-     * what it sent instead (Gmail), so the sync lands the staged copy on
-     * the provider's rather than listing a second.
-     */
-    public void aliasSentCopy(String messageId, String filed) {
-        if (filed.equals(messageId)) {
-            return;
-        }
-        context.getSharedPreferences(SENT_ALIAS_PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .putString(filed, messageId)
-                .apply();
-    }
-
-    /**
-     * The {@code Message-ID} of the sent copy staged for a message the
-     * provider filed under {@code filed} ({@link #aliasSentCopy}), else
-     * null.
-     */
-    String stagedSentCopy(String filed) {
-        return context.getSharedPreferences(SENT_ALIAS_PREFS, Context.MODE_PRIVATE)
-                .getString(filed, null);
-    }
-
-    /** Forgets an alias once its staged copy landed on the provider's. */
-    void forgetSentAlias(String filed) {
-        context.getSharedPreferences(SENT_ALIAS_PREFS, Context.MODE_PRIVATE)
-                .edit()
-                .remove(filed)
-                .apply();
-    }
-
-    /** Records why a submission will not be tried again. */
-    public void parkOutgoing(long queued, String reason) {
-        queue.park(queued, reason);
-    }
-
-    /**
-     * Parks a submission that may have gone: the whole message was handed
-     * over and no verdict came back. Not sent again on its own, which could
-     * deliver it twice, but only once the user asks
-     * ({@link #resendOutgoing}).
-     */
-    public void parkUncertain(long queued, String reason) {
-        queue.park(queued, UNCERTAIN + reason);
-    }
-
-    /**
-     * Queues a parked submission again as a new row, at the end of the
-     * queue, and drops the parked one: the user checked the message did not
-     * go and asked for it to be sent. The new row is appended before the old
-     * one goes, so its body stays pinned throughout.
-     */
-    void resendOutgoing(long queued) {
-        for (PimdirQueue.Action action : queue.parked()) {
-            if (action.id != queued || !PimdirQueue.SUBMIT.equals(action.kind)) {
-                continue;
-            }
-            byte[] source = queue.body(action.objectHash);
-            if (source == null) {
-                throw new IllegalStateException("The message to send again is gone");
-            }
-            queue.enqueue(
-                    action.collection,
-                    action.payload.optString("from"),
-                    PimdirQueue.SUBMIT,
-                    action.payload,
-                    source);
-            queue.acknowledge(action.id);
-            return;
-        }
-    }
-
-    /** Counts one failed attempt, leaving the message where it is. */
-    public void retryOutgoing(long queued) {
-        queue.bumpAttempts(queued);
-    }
-
-    /**
-     * The name the outbox goes by in the list and the filter: a mailbox like
-     * any other to the reader, though no server holds it.
-     */
-    String outboxName() {
-        return context.getString(R.string.mail_outbox);
-    }
-
     /**
      * Every account's mailboxes as the store holds them, each with its role,
      * for the filter page, the outbox of each mail account in {@code emails}
@@ -2128,21 +1719,21 @@ public final class MailStore {
         for (String email : emails) {
             mailboxes.add(
                     new PimdirCollections.Stored(
-                            outboxOf(email), email, outboxName(), null, null));
+                            outbox.outboxOf(email), email, outbox.outboxName(), null, null));
         }
         mailboxes.addAll(collections.list(PimdirSummary.MAIL));
         return mailboxes;
     }
 
-    /** Whether the stored flag set carries one flag. */
-    private static boolean has(String flags, Flags.Marker flag) {
+    /** The stored flag set, as a row reads its marks off it. */
+    private static Flags flags(String flags) {
         try {
-            return Flags.parse(flags).has(flag);
+            return Flags.parse(flags);
         } catch (JSONException error) {
             // An unreadable flag set is an unknown one, and unknown reads as
             // unset: an unread message shows rather than hides, and no icon
             // claims a state the store cannot back up.
-            return false;
+            return Flags.none();
         }
     }
 }

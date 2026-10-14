@@ -315,7 +315,7 @@ public final class MailList {
         String words = query;
         boolean unread = unreadOnly;
         boolean attachments = attachmentsOnly;
-        String outboxLabel = store.outboxName();
+        String outboxLabel = store.outbox().outboxName();
         String undated = host.getString(R.string.date_unknown);
 
         reads.execute(
@@ -348,7 +348,7 @@ public final class MailList {
                     MailStore.Query listed = wanted.since(floor);
 
                     List<MailStore.StoredMessage> outbox = new ArrayList<>();
-                    for (MailStore.StoredMessage message : store.outgoing()) {
+                    for (MailStore.StoredMessage message : store.outbox().outgoing()) {
                         if (shown.test(message.accountEmail, message.collection)
                                 && !unread
                                 && !attachments
@@ -480,7 +480,7 @@ public final class MailList {
                 continue;
             }
             String accountId = store.accountIdOf(edge.accountEmail);
-            boolean whole = MailStore.keepsAllMail(host, accountId);
+            boolean whole = MailPolicy.keepsAllMail(host, accountId);
             stepped.merge(edge.accountEmail, 1, Integer::sum);
             if (held) {
                 showing.add(edge.accountEmail);
@@ -527,7 +527,7 @@ public final class MailList {
      */
     private boolean moreAlone(MailStore.Edge edge) {
         String accountId = store.accountIdOf(edge.accountEmail);
-        if (MailStore.keepsAllMail(host, accountId)) {
+        if (MailPolicy.keepsAllMail(host, accountId)) {
             return MailWindow.moreAlone(host, accountId, edge.collection);
         }
         return !edge.listed || edge.limit != null;
@@ -1138,7 +1138,7 @@ public final class MailList {
 
         // Unread is carried by the dot, the weight of the sender and
         // the subject, and the time taking the accent.
-        boolean unread = !message.seen && !message.pending;
+        boolean unread = !message.seen() && !message.pending();
         view.findViewById(R.id.message_dot).setVisibility(unread ? View.VISIBLE : View.GONE);
         from.setTypeface(null, unread ? Typeface.BOLD : Typeface.NORMAL);
         subject.setTypeface(null, unread ? Typeface.BOLD : Typeface.NORMAL);
@@ -1157,12 +1157,12 @@ public final class MailList {
         if (message.failed) {
             return host.getString(R.string.message_send_failed);
         }
-        if (message.pending) {
+        if (message.pending()) {
             return host.getString(R.string.message_pending);
         }
         // NOTE: deleted on a server expunging no single message, so still
         // listed until something expunges the mailbox.
-        return message.deleted
+        return message.deleted()
                 ? message.mailboxLabel + " · " + host.getString(R.string.message_marked_deleted)
                 : message.mailboxLabel;
     }
@@ -1174,11 +1174,11 @@ public final class MailList {
      */
     private void bindMarks(View view, MailStore.StoredMessage message) {
         view.findViewById(R.id.message_star)
-                .setVisibility(message.flagged ? View.VISIBLE : View.GONE);
+                .setVisibility(message.flagged() ? View.VISIBLE : View.GONE);
         view.findViewById(R.id.message_attachment)
                 .setVisibility(message.hasAttachment ? View.VISIBLE : View.GONE);
         view.findViewById(R.id.message_answered)
-                .setVisibility(message.answered ? View.VISIBLE : View.GONE);
+                .setVisibility(message.answered() ? View.VISIBLE : View.GONE);
     }
 
     // ---- the selection ----------------------------------------------------
@@ -1189,8 +1189,8 @@ public final class MailList {
 
     /** What a message is known by in the selection, across accounts. */
     private static String keyOf(MailStore.StoredMessage message) {
-        return message.pending
-                ? "\u0001queued/" + message.queued
+        return message.pending()
+                ? "\u0001queued/" + message.queued.id()
                 : message.collection + "/" + message.id;
     }
 
@@ -1307,8 +1307,8 @@ public final class MailList {
         boolean anyUnread = allSelected && layout.unread > 0;
         boolean anyPlain = allSelected;
         for (MailStore.StoredMessage message : selected.values()) {
-            anyUnread |= !message.seen && !message.pending;
-            anyPlain |= !message.flagged && !message.pending;
+            anyUnread |= !message.seen() && !message.pending();
+            anyPlain |= !message.flagged() && !message.pending();
         }
         ImageButton seen = host.findViewById(R.id.mail_select_seen);
         seen.setVisibility(selecting ? View.VISIBLE : View.GONE);
@@ -1331,7 +1331,7 @@ public final class MailList {
                 messages -> {
                     boolean anyUnread = false;
                     for (MailStore.StoredMessage message : messages) {
-                        anyUnread |= !message.seen && !message.pending;
+                        anyUnread |= !message.seen() && !message.pending();
                     }
                     messageView.stageFlag(messages, Flags.Marker.SEEN, anyUnread, this::reload);
                 });
@@ -1343,7 +1343,7 @@ public final class MailList {
                 messages -> {
                     boolean anyPlain = false;
                     for (MailStore.StoredMessage message : messages) {
-                        anyPlain |= !message.flagged && !message.pending;
+                        anyPlain |= !message.flagged() && !message.pending();
                     }
                     messageView.stageFlag(
                             messages, Flags.Marker.FLAGGED, anyPlain, this::reload);

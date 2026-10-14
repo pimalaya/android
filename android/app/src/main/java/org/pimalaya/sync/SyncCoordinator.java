@@ -666,7 +666,7 @@ public final class SyncCoordinator implements MailSync {
                             MailStore.Coverage coverage = mail.coverage(collection);
                             if (coverage.at == null
                                     && !coverage.filling
-                                    && !collection.equals(mail.outboxOf(account.getKey()))) {
+                                    && !collection.equals(mail.outbox().outboxOf(account.getKey()))) {
                                 owed.computeIfAbsent(account.getKey(), email -> new ArrayList<>())
                                         .add(collection);
                             }

@@ -118,8 +118,8 @@ public final class MessageView implements FilesList.Origins {
     public void open(MailStore.StoredMessage message) {
         current = message;
         loaded = null;
-        seen = message.seen;
-        flagged = message.flagged;
+        seen = message.seen();
+        flagged = message.flagged();
 
         header(message);
         badges(new ArrayList<>());
@@ -209,7 +209,7 @@ public final class MessageView implements FilesList.Origins {
                     // NOTE: read whether or not the body came: a message
                     // whose body was released keeps its attachments listed.
                     List<FileStore.StoredFile> files =
-                            message.pending
+                            message.pending()
                                     ? new ArrayList<>()
                                     : parts.files().attachments(
                                             parts.mail().accountIdOf(message.accountEmail),
@@ -432,7 +432,7 @@ public final class MessageView implements FilesList.Origins {
         // NOTE: a message still in the outbox has no markers to move. It
         // has never been anywhere that keeps any, and offering the toggles
         // would promise a state nothing would remember.
-        boolean pending = current != null && current.pending;
+        boolean pending = current != null && current.pending();
 
         ImageButton unread = host.findViewById(R.id.message_view_unread);
         unread.setVisibility(pending ? View.GONE : View.VISIBLE);
@@ -482,7 +482,7 @@ public final class MessageView implements FilesList.Origins {
                 () -> {
                     Exception failure = null;
                     try {
-                        parts.mail().resendOutgoing(message.queued);
+                        parts.mail().outbox().resendOutgoing(message.queued.id());
                     } catch (Exception error) {
                         Log.w("pimalaya", "send again failed", error);
                         failure = error;
@@ -622,7 +622,7 @@ public final class MessageView implements FilesList.Origins {
                 () -> {
                     Exception failure = null;
                     for (MailStore.StoredMessage message : messages) {
-                        if (message.pending) {
+                        if (message.pending()) {
                             continue;
                         }
                         try {
@@ -741,8 +741,8 @@ public final class MessageView implements FilesList.Origins {
         boolean refused = false;
         for (MailStore.StoredMessage message : messages) {
             AccountEntry account = accountOf(message.accountEmail);
-            if (parts.mail().trashOf(message.accountEmail).isEmpty()
-                    && !message.pending
+            if (parts.mail().policy().trashOf(message.accountEmail).isEmpty()
+                    && !message.pending()
                     && account != null
                     && AccountClient.isJmap(account.server(PimDomain.MAIL))) {
                 refused = true;

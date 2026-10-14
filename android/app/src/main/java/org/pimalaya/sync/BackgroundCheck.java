@@ -341,7 +341,7 @@ public final class BackgroundCheck {
                 mail.all(
                         new MailStore.Query(inbox, 0, null, null, List.of())
                                 .since(mail.windowOf(email)))) {
-            if (!message.deleted) {
+            if (!message.deleted()) {
                 unread.put(message.collection + "/" + message.id, message);
             }
         }

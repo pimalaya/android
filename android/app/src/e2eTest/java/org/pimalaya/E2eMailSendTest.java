@@ -43,7 +43,7 @@ public class E2eMailSendTest extends E2eCase {
         E2eDevice.network(RuntimeEnvironment.getApplication(), E2eDevice.Network.NONE);
         String subject = subject("sent");
         phone.submitter(address).queue(draft(subject, address, address));
-        assertEquals("queued", 1, phone.mail.outgoing(address).size());
+        assertEquals("queued", 1, phone.mail.outbox().outgoing(address).size());
         MailStore.StoredMessage staged = phone.message(sent, subject);
         assertNotNull("in Sent at once", staged);
         assertTrue("marked pending", phone.owes(sent, staged.id));
@@ -55,7 +55,7 @@ public class E2eMailSendTest extends E2eCase {
             phone.accounts.add(E2eTarget.unreachable(account));
             SyncPasses.MailPass failed = phone.sync(address, List.of(outbox, sent));
             assertNotNull("the drain failed", failed.failure);
-            assertEquals("still queued", 1, phone.mail.outgoing(address).size());
+            assertEquals("still queued", 1, phone.mail.outbox().outgoing(address).size());
             assertTrue("the copy still pending", phone.owes(sent, phone.message(sent, subject).id));
             phone.accounts.add(account);
         }
@@ -63,7 +63,7 @@ public class E2eMailSendTest extends E2eCase {
         SyncPasses.MailPass drained = phone.sync(address, List.of(outbox, sent, inbox));
         assertNoFailure(drained);
         assertEquals("handed over once", 1, drained.sent);
-        assertTrue("the outbox drained", phone.mail.outgoing(address).isEmpty());
+        assertTrue("the outbox drained", phone.mail.outbox().outgoing(address).isEmpty());
 
         E2eDevice observer = observer();
         String seenInbox = observer.role(address, "inbox");
@@ -128,7 +128,7 @@ public class E2eMailSendTest extends E2eCase {
         SyncPasses.MailPass metered = phone.sync(address, List.of(outbox, collection));
         assertNoFailure(metered);
         assertEquals("the outbox went out", 1, metered.sent);
-        assertTrue("drained", phone.mail.outgoing(address).isEmpty());
+        assertTrue("drained", phone.mail.outbox().outgoing(address).isEmpty());
         assertEquals(
                 "nothing listed on mobile data",
                 null,

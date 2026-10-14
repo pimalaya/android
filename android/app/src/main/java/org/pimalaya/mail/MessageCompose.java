@@ -275,7 +275,7 @@ public final class MessageCompose {
                                 // The parent is answered once the reply is
                                 // queued, the way the reply counts as sent:
                                 // both go out on the next sync.
-                                if (parent != null && !parent.pending) {
+                                if (parent != null && !parent.pending()) {
                                     messageView.stageFlag(
                                             parent,
                                             Flags.Marker.ANSWERED,

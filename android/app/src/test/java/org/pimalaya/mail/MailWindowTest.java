@@ -137,7 +137,7 @@ public class MailWindowTest {
     @Test
     public void aStepOverOneMailboxMovesItsOwnFrontierAndNotTheAccounts() {
         // NOTE: a Gmail account, whose mailboxes read the older of the two.
-        MailStore.markAllMail(context, ACCOUNT, true);
+        MailPolicy.markAllMail(context, ACCOUNT, true);
         String clients = PimdirAccount.collectionId(ACCOUNT, "Clients");
         String inbox = PimdirAccount.collectionId(ACCOUNT, "INBOX");
         MailWindow.stepped(context, ACCOUNT, null, new MailStep.Outcome("2026-10-01T00:00:00Z", false, 50));

@@ -76,8 +76,8 @@ public final class MailStager extends Stager {
      * {@code \Deleted} and stays.
      */
     public Deletion stageDelete(MailStore.StoredMessage message) throws JSONException {
-        if (message.pending) {
-            mail().acknowledge(message.queued);
+        if (message.pending()) {
+            mail().outbox().acknowledge(message.queued.id());
             String sent = mail().sentOf(message.accountEmail);
             if (sent != null && offline.isPendingCreate(sent, message.id)) {
                 mutateRemove(sent, PimdirStorage.provisionalOf(message.id));
@@ -86,12 +86,12 @@ public final class MailStager extends Stager {
         }
 
         String handle = offline.handleFor(message.collection, message.id);
-        String trash = mail().trashOf(message.accountEmail);
+        String trash = mail().policy().trashOf(message.accountEmail);
         if (!trash.isEmpty() && !trash.equals(message.mailbox)) {
             mutateMove(message.collection, handle, mail().collectionOf(message.accountEmail, trash));
             return Deletion.MOVED;
         }
-        if (!trash.isEmpty() && mail().expungesOne(message.accountEmail)) {
+        if (!trash.isEmpty() && mail().policy().expungesOne(message.accountEmail)) {
             mutateRemove(message.collection, handle);
             return Deletion.ERASED;
         }

@@ -73,7 +73,7 @@ public class MailStepTest {
                         new Mailbox("Clients", ""),
                         new Mailbox("TRASH", "trash")));
         accountId = new PimdirAccount(context).idOf(EMAIL);
-        MailStore.markAccountWide(context, accountId, true);
+        MailPolicy.markAccountWide(context, accountId, true);
         inbox = store.collectionOf(EMAIL, "INBOX");
         clients = store.collectionOf(EMAIL, "Clients");
         trash = store.collectionOf(EMAIL, "TRASH");

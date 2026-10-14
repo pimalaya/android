@@ -56,9 +56,9 @@ public final class MailReader {
         // NOTE: a waiting message is nothing but the body its queue row
         // carries; any other is read from its stored file, never whole on
         // this side.
-        byte[] waiting = message.pending ? mail.source(message) : null;
-        File stored = message.pending ? null : mail.sourceFile(message);
-        if (waiting == null && message.pending) {
+        byte[] waiting = message.pending() ? mail.source(message) : null;
+        File stored = message.pending() ? null : mail.sourceFile(message);
+        if (waiting == null && message.pending()) {
             // NOTE: never fetched. A message waiting to go out is nothing but
             // the body its queue row carries, so there is no server that has
             // it and no mailbox to ask: a missing body here is a lost message,
@@ -81,7 +81,7 @@ public final class MailReader {
         } finally {
             MailPoison.end(engine.context(), key);
         }
-        if (!message.pending) {
+        if (!message.pending()) {
             synchronized (engine.locks.store) {
                 files.recordAttachments(
                         mail.accountIdOf(message.accountEmail), message.id, read.body.attachments());

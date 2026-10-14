@@ -98,7 +98,7 @@ public final class MailWindow {
         }
         String mailbox =
                 MailScope.clamp(ALL.equals(own) ? null : own, MailScope.sinceOf(context, accountId));
-        if (!MailStore.keepsAllMail(context, accountId) || account == null) {
+        if (!MailPolicy.keepsAllMail(context, accountId) || account == null) {
             return mailbox;
         }
         return mailbox == null || mailbox.compareTo(account) < 0 ? mailbox : account;
@@ -116,7 +116,7 @@ public final class MailWindow {
                 own == null
                         || (!ALL.equals(own)
                                 && MailScope.limits(own, MailScope.sinceOf(context, accountId)));
-        if (own != null && !MailStore.keepsAllMail(context, accountId)) {
+        if (own != null && !MailPolicy.keepsAllMail(context, accountId)) {
             return mailbox;
         }
         return more(context, accountId) && mailbox;

@@ -126,13 +126,13 @@ public class MailFilterTest {
     @Test
     public void eachOutboxIsItsAccounts() {
         List<PimdirCollections.Stored> listed = store.loadMailboxes(List.of(JANE, JOHN));
-        assertEquals(store.outboxOf(JANE), listed.get(0).id);
-        assertEquals(store.outboxOf(JOHN), listed.get(1).id);
+        assertEquals(store.outbox().outboxOf(JANE), listed.get(0).id);
+        assertEquals(store.outbox().outboxOf(JOHN), listed.get(1).id);
         assertEquals(8, listed.size());
 
         BiPredicate<String, String> trash =
                 MailList.narrowed(MergedFilter.of(context, PimDomain.MAIL), "trash", store.roles())
                         ::collection;
-        assertFalse(trash.test(JANE, store.outboxOf(JANE)));
+        assertFalse(trash.test(JANE, store.outbox().outboxOf(JANE)));
     }
 }

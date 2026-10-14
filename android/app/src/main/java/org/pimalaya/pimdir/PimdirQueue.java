@@ -4,7 +4,6 @@ import android.database.Cursor;
 import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
-import org.json.JSONObject;
 import org.pimalaya.client.PimdirSql;
 
 import java.io.IOException;
@@ -50,9 +49,6 @@ public final class PimdirQueue {
      */
     public static final String SUBMIT = "submit";
 
-    /** The payload version this app writes and reads. */
-    private static final int VERSION = 1;
-
     /** What the queue records as the origin of a row. */
     private static final String PRODUCER = "pimalaya.android";
 
@@ -68,48 +64,32 @@ public final class PimdirQueue {
         this.accounts = accounts;
     }
 
-    /** One queued action, pending or parked. */
-    public static final class Action {
-        public final long id;
-
-        /** The collection it is against, which is what scopes a read. */
-        public final String collection;
-
-        /** The kind, an open string; this app writes {@link #SUBMIT}. */
-        public final String kind;
-
-        /** The versioned payload, as it was written. */
-        public final JSONObject payload;
-
-        /** The body the action carries, or null when it carries none. */
-        public final String objectHash;
-
-        /** When it was appended, as the statement stamped it. */
-        final String createdAt;
-
-        final int attempts;
-
-        /**
-         * What parked it, or null while it is still pending.
-         *
-         * <p>The column is the pending/parked switch itself: the drain
-         * reads the rows whose error is null, so recording one takes the
-         * action out of the drain until somebody looks at it.
-         */
-        public final String error;
-
-        Action(long id, String collection, String kind, JSONObject payload, String objectHash,
-                String createdAt, int attempts, String error) {
-            this.id = id;
-            this.collection = collection;
-            this.kind = kind;
-            this.payload = payload;
-            this.objectHash = objectHash;
-            this.createdAt = createdAt;
-            this.attempts = attempts;
-            this.error = error;
-        }
-
+    /**
+     * One queued action, pending or parked.
+     *
+     * @param id the queue row
+     * @param collection the collection it is against, which is what scopes a
+     *     read
+     * @param kind the kind, an open string; this app writes {@link #SUBMIT}
+     * @param payload the versioned payload, as it was written
+     * @param objectHash the body the action carries, or null when it carries
+     *     none
+     * @param createdAt when it was appended, as the statement stamped it
+     * @param attempts how many attempts failed
+     * @param error what parked it, or null while it is still pending. The
+     *     column is the pending/parked switch itself: the drain reads the rows
+     *     whose error is null, so recording one takes the action out of the
+     *     drain until somebody looks at it.
+     */
+    public record Action(
+            long id,
+            String collection,
+            String kind,
+            String payload,
+            String objectHash,
+            String createdAt,
+            int attempts,
+            String error) {
         /** Whether this row is waiting rather than parked. */
         public boolean pending() {
             return error == null;
@@ -127,7 +107,7 @@ public final class PimdirQueue {
      * zero and the next collector unlinks a message that has not been
      * sent.
      */
-    public long enqueue(String collection, String accountEmail, String kind, JSONObject payload,
+    public long enqueue(String collection, String accountEmail, String kind, String payload,
             byte[] body) {
         String account = accounts.idOf(accountEmail);
         String hash = body == null ? null : PimdirHash.of(body);
@@ -154,7 +134,7 @@ public final class PimdirQueue {
                     "producer", PRODUCER,
                     "collection", collection,
                     "action", kind,
-                    "payload", payload.toString(),
+                    "payload", payload,
                     "object_hash", hash));
 
             long id = lastId(db);
@@ -191,14 +171,14 @@ public final class PimdirQueue {
         for (Action action : parked) {
             whole.add(
                     new Action(
-                            action.id,
-                            action.collection,
-                            action.kind,
-                            action.payload,
-                            pinOf(action.id),
-                            action.createdAt,
-                            action.attempts,
-                            action.error));
+                            action.id(),
+                            action.collection(),
+                            action.kind(),
+                            action.payload(),
+                            pinOf(action.id()),
+                            action.createdAt(),
+                            action.attempts(),
+                            action.error()));
         }
         return whole;
     }
@@ -312,7 +292,7 @@ public final class PimdirQueue {
                                 cursor.getLong(cursor.getColumnIndexOrThrow("id")),
                                 collection != null ? collection : text(cursor, "collection"),
                                 text(cursor, "action"),
-                                payload(text(cursor, "payload")),
+                                text(cursor, "payload"),
                                 text(cursor, "object_hash"),
                                 text(cursor, "created_at"),
                                 cursor.getInt(cursor.getColumnIndexOrThrow("attempts")),
@@ -327,44 +307,9 @@ public final class PimdirQueue {
         return index < 0 || cursor.isNull(index) ? null : cursor.getString(index);
     }
 
-    /** A payload as it was written, empty when it cannot be read back. */
-    private static JSONObject payload(String json) {
-        if (json == null) {
-            return new JSONObject();
-        }
-        try {
-            return new JSONObject(json);
-        } catch (org.json.JSONException error) {
-            Log.w("pimalaya", "unreadable queue payload: " + error.getMessage());
-            return new JSONObject();
-        }
-    }
-
-    /**
-     * The payload of a submission: what this app queues.
-     *
-     * <p>It carries what a listing draws as well as what the drain needs,
-     * because a waiting message is not an item and there is no summary row
-     * beside it to read a subject and a date off. The bytes would say all
-     * of this, and parsing a message to draw a list is the one thing the
-     * sort key exists to avoid.
-     */
-    public static JSONObject submission(String from, String messageId, String subject, String sortKey) {
-        try {
-            return new JSONObject()
-                    .put("v", VERSION)
-                    .put("from", from)
-                    .put("messageId", messageId)
-                    .put("subject", subject)
-                    .put("sortKey", sortKey);
-        } catch (org.json.JSONException error) {
-            throw new IllegalStateException("Could not write the submission payload", error);
-        }
-    }
-
     /** Whether this app knows how to carry one action out. */
     static boolean known(Action action) {
-        return SUBMIT.equals(action.kind);
+        return SUBMIT.equals(action.kind());
     }
 
     /** The row the enqueue just appended. */

@@ -126,7 +126,7 @@ public class StepRequestTest {
             store.replaceMailboxes(email, boxes);
             String accountId = new PimdirAccount(context).idOf(email);
             if (kind.equals("gmail")) {
-                MailStore.markAccountWide(context, accountId, true);
+                MailPolicy.markAccountWide(context, accountId, true);
                 store.ensureAllMail(email);
             }
             List<String> collections = new ArrayList<>();

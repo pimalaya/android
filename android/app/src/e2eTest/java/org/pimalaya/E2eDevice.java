@@ -325,7 +325,7 @@ final class E2eDevice {
 
     /** The account's outbox, which a pass drains when its scope takes it. */
     String outbox(String email) {
-        return mail.outboxOf(email);
+        return mail.outbox().outboxOf(email);
     }
 
     /** What the store lists in one collection whose subject carries the text. */

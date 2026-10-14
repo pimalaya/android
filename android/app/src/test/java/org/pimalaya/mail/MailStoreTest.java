@@ -177,11 +177,11 @@ public class MailStoreTest {
         // in the item's own flag set, the attachment is a summary field,
         // because no protocol treats it as a flag.
         MailStore.StoredMessage stored = store.loadMerged(10).get(0);
-        assertTrue(stored.seen);
-        assertTrue(stored.answered);
-        assertTrue(stored.flagged);
+        assertTrue(stored.seen());
+        assertTrue(stored.answered());
+        assertTrue(stored.flagged());
         assertTrue(stored.hasAttachment);
-        assertFalse("a synced message is not pending", stored.pending);
+        assertFalse("a synced message is not pending", stored.pending());
     }
 
     @Test
@@ -277,9 +277,9 @@ public class MailStoreTest {
     @Test
     public void aQueuedMessageSurvivesARosterReplaceAndTheTrashIsRemembered() {
         mailboxes(ONE, "INBOX");
-        String outbox = store.outboxOf(ONE);
+        String outbox = store.outbox().outboxOf(ONE);
 
-        store.queueSubmission(
+        store.outbox().queueSubmission(
                 ONE,
                 "queued@example.org",
                 "Waiting",
@@ -293,71 +293,71 @@ public class MailStoreTest {
         store.replaceMailboxes(
                 ONE, List.of(new Mailbox("INBOX", ""), new Mailbox("Bin", Mailbox.TRASH)));
 
-        List<MailStore.Outgoing> waiting = store.outgoing(ONE);
+        List<Outbox.Outgoing> waiting = store.outbox().outgoing(ONE);
         assertEquals(1, waiting.size());
         assertEquals(SOURCE, new String(waiting.get(0).source, StandardCharsets.UTF_8));
 
-        assertEquals("read back with no network to ask", "Bin", store.trashOf(ONE));
+        assertEquals("read back with no network to ask", "Bin", store.policy().trashOf(ONE));
 
         // And it reads as pending, which is the one state where the store
         // holds a message no server has.
         MailStore.StoredMessage row = store.loadMerged(10).get(0);
-        assertTrue(row.pending);
+        assertTrue(row.pending());
         assertFalse(row.failed);
         assertEquals("Waiting", row.subject);
         assertEquals(outbox, row.collection);
         assertEquals(SOURCE, new String(store.source(row), StandardCharsets.UTF_8));
 
-        store.acknowledge(waiting.get(0).id);
-        assertTrue(store.outgoing(ONE).isEmpty());
+        store.outbox().acknowledge(waiting.get(0).id);
+        assertTrue(store.outbox().outgoing(ONE).isEmpty());
         assertEquals("the body goes with it", 0, scalar("SELECT count(*) FROM objects"));
     }
 
     @Test
     public void aParkedSubmissionLeavesTheDrainAndStaysVisible() {
         mailboxes(ONE, "INBOX");
-        store.queueSubmission(
+        store.outbox().queueSubmission(
                 ONE,
                 "refused@example.org",
                 "Refused",
                 DATE,
                 SOURCE.getBytes(StandardCharsets.UTF_8));
 
-        long queued = store.outgoing(ONE).get(0).id;
-        store.parkOutgoing(queued, "550 no such recipient");
+        long queued = store.outbox().outgoing(ONE).get(0).id;
+        store.outbox().parkOutgoing(queued, "550 no such recipient");
 
-        assertTrue("nothing offers it to the server again", store.outgoing(ONE).isEmpty());
+        assertTrue("nothing offers it to the server again", store.outbox().outgoing(ONE).isEmpty());
 
         // Still a message the sender wrote, so it is still shown, saying
         // that it was refused rather than disappearing.
         MailStore.StoredMessage row = store.loadMerged(10).get(0);
         assertTrue(row.failed);
-        assertTrue(row.pending);
+        assertTrue(row.pending());
         assertEquals(SOURCE, new String(store.source(row), StandardCharsets.UTF_8));
     }
 
     @Test
     public void anUncertainSubmissionWaitsForTheUserToSendItAgain() {
         mailboxes(ONE, "INBOX");
-        store.queueSubmission(
+        store.outbox().queueSubmission(
                 ONE,
                 "maybe@example.org",
                 "Maybe",
                 DATE,
                 SOURCE.getBytes(StandardCharsets.UTF_8));
 
-        long queued = store.outgoing(ONE).get(0).id;
-        store.parkUncertain(queued, "Reached unexpected EOF on SMTP stream");
+        long queued = store.outbox().outgoing(ONE).get(0).id;
+        store.outbox().parkUncertain(queued, "Reached unexpected EOF on SMTP stream");
 
         // Never handed over again on its own, which could deliver it twice.
-        assertTrue(store.outgoing(ONE).isEmpty());
+        assertTrue(store.outbox().outgoing(ONE).isEmpty());
         MailStore.StoredMessage row = store.loadMerged(10).get(0);
         assertTrue(row.uncertain);
         assertTrue(row.failed);
 
-        store.resendOutgoing(row.queued);
+        store.outbox().resendOutgoing(row.queued.id());
 
-        List<MailStore.Outgoing> waiting = store.outgoing(ONE);
+        List<Outbox.Outgoing> waiting = store.outbox().outgoing(ONE);
         assertEquals(1, waiting.size());
         assertEquals("maybe@example.org", waiting.get(0).messageId);
         assertEquals(SOURCE, new String(waiting.get(0).source, StandardCharsets.UTF_8));
@@ -370,14 +370,14 @@ public class MailStoreTest {
     @Test
     public void anActionOfAnotherKindIsLeftAlone() {
         mailboxes(ONE, "INBOX");
-        store.queueSubmission(
+        store.outbox().queueSubmission(
                 ONE, "mine@example.org", "Mine", DATE, SOURCE.getBytes(StandardCharsets.UTF_8));
-        queueForeign(store.outboxOf(ONE));
+        queueForeign(store.outbox().outboxOf(ONE));
 
         // Skipped rather than parked or applied: an owner that does not
         // recognise a kind leaves the row exactly as it found it and never
         // blocks the ones behind it (STORAGE section 15.2).
-        assertEquals(1, store.outgoing(ONE).size());
+        assertEquals(1, store.outbox().outgoing(ONE).size());
         assertEquals(
                 "the foreign row is untouched",
                 2,
@@ -396,7 +396,7 @@ public class MailStoreTest {
     @Test
     public void anOutboxWrittenAsItemsMovesOntoTheQueue() {
         mailboxes(ONE, "INBOX");
-        String outbox = store.outboxOf(ONE);
+        String outbox = store.outbox().outboxOf(ONE);
 
         // The shape the version before this one wrote: an item in a mail
         // collection of its own, which nothing drains any more and which
@@ -423,7 +423,7 @@ public class MailStoreTest {
             db.endTransaction();
         }
 
-        List<MailStore.Outgoing> waiting = store.outgoing(ONE);
+        List<Outbox.Outgoing> waiting = store.outbox().outgoing(ONE);
         assertEquals(1, waiting.size());
         assertEquals(SOURCE, new String(waiting.get(0).source, StandardCharsets.UTF_8));
 
@@ -431,17 +431,17 @@ public class MailStoreTest {
         assertEquals("and it is on the queue", 1, store.loadMerged(10).size());
 
         MailStore.StoredMessage row = store.loadMerged(10).get(0);
-        assertTrue(row.pending);
+        assertTrue(row.pending());
         assertEquals("Waiting", row.subject);
 
         // Twice is the same as once: nothing is left to move.
-        assertEquals(1, store.outgoing(ONE).size());
+        assertEquals(1, store.outbox().outgoing(ONE).size());
     }
 
     @Test
     public void anAccountMarkingNoTrashRemembersNone() {
         mailboxes(ONE, "INBOX", "Archive");
-        assertEquals("", store.trashOf(ONE));
+        assertEquals("", store.policy().trashOf(ONE));
     }
 
     /** Files one message the way a listing names it: bound, agreed, no body. */

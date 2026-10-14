@@ -53,7 +53,7 @@ public class MailFilterDefaultsTest {
 
     @Test
     public void gmailTicksEveryLabelButItsTrashAndSpam() {
-        MailStore.markAllMail(context, new PimdirAccount(context).idOf(GMAIL), true);
+        MailPolicy.markAllMail(context, new PimdirAccount(context).idOf(GMAIL), true);
         store.replaceMailboxes(GMAIL, roster());
 
         assertTrue(filter.chosen(store.collectionOf(GMAIL, "INBOX")));

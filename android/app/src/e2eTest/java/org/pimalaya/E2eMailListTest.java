@@ -100,7 +100,7 @@ public class E2eMailListTest extends E2eCase {
         String collection = phone.collection(address, mailbox);
         pass(phone, collection);
         MailStore.StoredMessage listed = phone.message(collection, subject("unread"));
-        assertFalse("listed unread", listed.seen);
+        assertFalse("listed unread", listed.seen());
 
         MessageBody body =
                 phone.reader(address).read(listed, () -> phone.passes.openMail(account)).body;
@@ -120,7 +120,7 @@ public class E2eMailListTest extends E2eCase {
         // NOTE: the reader marks it read once the body arrived, a store write.
         phone.stager(address).stageFlag(listed, Flags.Marker.SEEN, true);
         MailStore.StoredMessage staged = phone.message(collection, subject("unread"));
-        assertTrue("read at once", staged.seen);
+        assertTrue("read at once", staged.seen());
         assertTrue("pending until a sync", phone.owes(collection, staged.id));
 
         pass(phone, collection);
@@ -135,7 +135,7 @@ public class E2eMailListTest extends E2eCase {
                 () -> {
                     pass(observer, seen);
                     MailStore.StoredMessage there = observer.message(seen, subject("unread"));
-                    return there != null && there.seen;
+                    return there != null && there.seen();
                 });
     }
 }

@@ -175,9 +175,9 @@ public class MailEngine extends PimdirEngine {
         List<Mailbox> mailboxes = clients.mail().listMailboxes(session);
         Account server = session.account();
         boolean accountWide = AccountClient.isGoogle(server) || AccountClient.isJmap(server);
-        MailStore.markAccountWide(pimdir.context(), accountId, accountWide);
-        MailStore.markAllMail(pimdir.context(), accountId, AccountClient.isGoogle(server));
-        MailStore.markExpungesOne(pimdir.context(), accountId, session.expungesOne());
+        MailPolicy.markAccountWide(pimdir.context(), accountId, accountWide);
+        MailPolicy.markAllMail(pimdir.context(), accountId, AccountClient.isGoogle(server));
+        MailPolicy.markExpungesOne(pimdir.context(), accountId, session.expungesOne());
         if (!accountWide) {
             int released;
             synchronized (locks.store) {
@@ -465,7 +465,7 @@ public class MailEngine extends PimdirEngine {
 
     /** Whether the account is stepped through account-wide (Gmail). */
     private boolean accountWide() {
-        return MailStore.accountWide(pimdir.context(), accountId);
+        return MailPolicy.accountWide(pimdir.context(), accountId);
     }
 
     /**
@@ -793,7 +793,7 @@ public class MailEngine extends PimdirEngine {
         }
         // NOTE: an archived message is held in All Mail alone, which no
         // edge shows.
-        if (MailStore.keepsAllMail(pimdir.context(), accountId)) {
+        if (MailPolicy.keepsAllMail(pimdir.context(), accountId)) {
             collections.add(MailStore.allMailOf(accountId));
         }
         return collections;
@@ -840,10 +840,10 @@ public class MailEngine extends PimdirEngine {
             if (create == null) {
                 // NOTE: a provider that stamped a Message-ID of its own on
                 // what it sent (Gmail) files its copy under that one.
-                String staged = mail().stagedSentCopy(messageId);
+                String staged = mail().policy().stagedSentCopy(messageId);
                 create = staged == null ? null : creates.remove(staged);
                 if (create != null) {
-                    mail().forgetSentAlias(messageId);
+                    mail().policy().forgetSentAlias(messageId);
                 }
             }
             if (create != null) {
@@ -1422,7 +1422,7 @@ public class MailEngine extends PimdirEngine {
             return result(handle, true, null, null);
         }
 
-        if (AccountClient.submitsOverSession(session.account()) || mail().submitting(linkId)) {
+        if (AccountClient.submitsOverSession(session.account()) || mail().outbox().submitting(linkId)) {
             return result(handle, false, null, null);
         }
 

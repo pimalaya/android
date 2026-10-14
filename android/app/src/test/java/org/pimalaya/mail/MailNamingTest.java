@@ -159,7 +159,7 @@ public class MailNamingTest {
         store.replaceMailboxes(
                 EMAIL, List.of(new Mailbox("Inbox", "inbox"), new Mailbox("Clients", "")));
         String clients = store.collectionOf(EMAIL, "Clients");
-        MailStore.markAccountWide(context, new PimdirAccount(context).idOf(EMAIL), true);
+        MailPolicy.markAccountWide(context, new PimdirAccount(context).idOf(EMAIL), true);
         Server server = new Server();
         server.sync(inbox);
         new Server("5").sync(clients);
