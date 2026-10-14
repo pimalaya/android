@@ -27,6 +27,7 @@ import org.pimalaya.client.BooksUpdate;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardDelta;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ConflictForm;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.NewCard;
 import org.pimalaya.client.OfflineClient;
@@ -324,13 +325,13 @@ public final class ContactEngine extends PimdirEngine {
         String local = conflict.getString("vcard");
         String baseVcard =
                 conflict.isNull("baseVcard") ? local : conflict.getString("baseVcard");
-        JSONObject resolution =
+        ConflictForm resolution =
                 ContactClient.mergeConflictForm(baseVcard, local, conflict.getString("remoteVcard"));
-        if (!resolution.optBoolean("resolved")) {
+        if (!resolution.resolved()) {
             return false;
         }
 
-        ContactStager.edit(this, url, conflict.getString("handle"), resolution.optString("vcard"));
+        ContactStager.edit(this, url, conflict.getString("handle"), resolution.vcard());
         return true;
     }
 

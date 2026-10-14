@@ -20,11 +20,19 @@ import android.widget.ScrollView;
 import android.widget.Spinner;
 import java.util.Arrays;
 import java.util.Calendar;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import java.util.List;
+import java.util.Objects;
 import org.pimalaya.R;
+import org.pimalaya.client.ContactAddress;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.ContactEmail;
+import org.pimalaya.client.ContactGender;
+import org.pimalaya.client.ContactName;
+import org.pimalaya.client.ContactOrganization;
+import org.pimalaya.client.ContactPhone;
+import org.pimalaya.client.ContactRelation;
+import org.pimalaya.client.FormDate;
+import org.pimalaya.client.FormGender;
 
 /**
  * The per-property edit dialogs behind the contact form: one label-free
@@ -50,21 +58,17 @@ final class ContactFieldDialogs {
         LinearLayout content = dialogContent();
         EditText display =
                 dialogField(content, "displayName", R.string.hint_display_name,
-                        host.model.optString("displayName"), ContactForm.TEXT_NAME);
+                        Objects.toString(host.model.displayName, ""), ContactForm.TEXT_NAME);
 
         showDialog(
                 host.getS(R.string.hint_display_name),
                 content,
                 () -> {
-                    try {
-                        host.model.put("displayName", host.text(display));
-                        host.revealed.add("displayName");
-                    } catch (JSONException error) {
-                        throw new IllegalStateException(error);
-                    }
+                    host.model.displayName = host.text(display);
+                    host.revealed.add("displayName");
                 },
                 () -> {
-                    host.model.remove("displayName");
+                    host.model.displayName = null;
                     host.revealed.remove("displayName");
                 });
     }
@@ -81,22 +85,17 @@ final class ContactFieldDialogs {
                 host.getS(hint),
                 content,
                 () -> {
-                    try {
-                        JSONObject name = host.model.optJSONObject("name");
-                        if (name == null) {
-                            name = new JSONObject();
-                        }
-                        name.put(part, host.text(field));
-                        host.model.put("name", name);
-                        host.revealed.add("name." + part);
-                    } catch (JSONException error) {
-                        throw new IllegalStateException(error);
+                    ContactName name = host.model.name;
+                    if (name == null) {
+                        name = new ContactName("", "", "", "", "");
                     }
+                    host.model.name = ContactForm.withNamePart(name, part, host.text(field));
+                    host.revealed.add("name." + part);
                 },
                 () -> {
-                    JSONObject name = host.model.optJSONObject("name");
+                    ContactName name = host.model.name;
                     if (name != null) {
-                        name.remove(part);
+                        host.model.name = ContactForm.withNamePart(name, part, "");
                     }
                     host.revealed.remove("name." + part);
                 });
@@ -114,22 +113,19 @@ final class ContactFieldDialogs {
                 host.getS(hint),
                 content,
                 () -> {
-                    try {
-                        JSONObject organization = host.model.optJSONObject("organization");
-                        if (organization == null) {
-                            organization = new JSONObject();
-                        }
-                        organization.put(part, host.text(field));
-                        host.model.put("organization", organization);
-                        host.revealed.add("organization." + part);
-                    } catch (JSONException error) {
-                        throw new IllegalStateException(error);
+                    ContactOrganization organization = host.model.organization;
+                    if (organization == null) {
+                        organization = new ContactOrganization("", "");
                     }
+                    host.model.organization =
+                            ContactForm.withOrganizationPart(organization, part, host.text(field));
+                    host.revealed.add("organization." + part);
                 },
                 () -> {
-                    JSONObject organization = host.model.optJSONObject("organization");
+                    ContactOrganization organization = host.model.organization;
                     if (organization != null) {
-                        organization.remove(part);
+                        host.model.organization =
+                                ContactForm.withOrganizationPart(organization, part, "");
                     }
                     host.revealed.remove("organization." + part);
                 });
@@ -139,35 +135,46 @@ final class ContactFieldDialogs {
     void simpleFieldDialog(String key, int hint) {
         LinearLayout content = dialogContent();
         EditText field =
-                dialogField(content, key, hint, host.model.optString(key), ContactForm.TEXT_NAME);
+                dialogField(
+                        content,
+                        key,
+                        hint,
+                        Objects.toString(
+                                key.equals("title") ? host.model.title : host.model.role, ""),
+                        ContactForm.TEXT_NAME);
 
         showDialog(
                 host.getS(hint),
                 content,
                 () -> {
-                    try {
-                        host.model.put(key, host.text(field));
-                        host.revealed.add(key);
-                    } catch (JSONException error) {
-                        throw new IllegalStateException(error);
-                    }
+                    setSimpleField(key, host.text(field));
+                    host.revealed.add(key);
                 },
                 () -> {
-                    host.model.remove(key);
+                    setSimpleField(key, null);
                     host.revealed.remove(key);
                 });
     }
 
+    /** Sets a top-level scalar field (title, role), null for absent. */
+    private void setSimpleField(String key, String value) {
+        if (key.equals("title")) {
+            host.model.title = value;
+        } else {
+            host.model.role = value;
+        }
+    }
+
     void phoneDialog(int index) {
-        JSONArray phones = host.array("phones");
-        JSONObject entry = index >= 0 ? phones.optJSONObject(index) : null;
+        List<ContactPhone> phones = host.model.phones;
+        ContactPhone entry = index >= 0 ? phones.get(index) : null;
 
         LinearLayout content = dialogContent();
         Spinner type = typeSpinner(R.array.phone_types);
-        type.setSelection(entry == null ? 0 : host.typeAt("phones", index));
+        type.setSelection(entry == null ? 0 : ContactForm.typeAt(host.view.phones(), index));
         EditText number =
                 typedValueLine(content, type, R.string.hint_number,
-                        entry == null ? "" : entry.optString("number"),
+                        entry == null ? "" : entry.number(),
                         InputType.TYPE_CLASS_PHONE);
 
         showDialog(
@@ -178,24 +185,23 @@ final class ContactFieldDialogs {
                                 phones,
                                 index,
                                 host.text(number),
-                                ContactClient.formEntry(
-                                        "phone",
+                                ContactClient.formPhone(
                                         type.getSelectedItemPosition(),
                                         host.text(number),
-                                        entry != null && entry.optBoolean("pref"))),
+                                        entry != null && entry.pref())),
                 index >= 0 ? () -> phones.remove(index) : null);
     }
 
     void emailDialog(int index) {
-        JSONArray emails = host.array("emails");
-        JSONObject entry = index >= 0 ? emails.optJSONObject(index) : null;
+        List<ContactEmail> emails = host.model.emails;
+        ContactEmail entry = index >= 0 ? emails.get(index) : null;
 
         LinearLayout content = dialogContent();
         Spinner type = typeSpinner(R.array.email_types);
-        type.setSelection(entry == null ? 0 : host.typeAt("emails", index));
+        type.setSelection(entry == null ? 0 : ContactForm.typeAt(host.view.emails(), index));
         EditText address =
                 typedValueLine(content, type, R.string.hint_email_address,
-                        entry == null ? "" : entry.optString("address"),
+                        entry == null ? "" : entry.address(),
                         InputType.TYPE_CLASS_TEXT
                                 | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
 
@@ -207,39 +213,41 @@ final class ContactFieldDialogs {
                                 emails,
                                 index,
                                 host.text(address),
-                                ContactClient.formEntry(
-                                        "email",
+                                ContactClient.formEmail(
                                         type.getSelectedItemPosition(),
                                         host.text(address),
-                                        entry != null && entry.optBoolean("pref"))),
+                                        entry != null && entry.pref())),
                 index >= 0 ? () -> emails.remove(index) : null);
     }
 
     void addressDialog(int index) {
-        JSONArray addresses = host.array("addresses");
-        JSONObject entry = index >= 0 ? addresses.optJSONObject(index) : null;
-        JSONObject safe = entry == null ? new JSONObject() : entry;
+        List<ContactAddress> addresses = host.model.addresses;
+        ContactAddress entry = index >= 0 ? addresses.get(index) : null;
+        ContactAddress safe =
+                entry == null
+                        ? new ContactAddress("", "", "", "", "", false, "", "", List.of())
+                        : entry;
 
         LinearLayout content = dialogContent();
         RadioGroup type =
                 typeRadios(
                         content,
                         R.array.address_types,
-                        entry == null ? 0 : host.addressAt(index).optInt("index"));
+                        entry == null ? 0 : host.addressAt(index).index());
         EditText street =
-                dialogField(content, null, R.string.hint_street, safe.optString("street"),
+                dialogField(content, null, R.string.hint_street, safe.street(),
                         InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         EditText city =
-                dialogField(content, null, R.string.hint_city, safe.optString("city"),
+                dialogField(content, null, R.string.hint_city, safe.city(),
                         ContactForm.TEXT_NAME);
         EditText region =
-                dialogField(content, null, R.string.hint_region, safe.optString("region"),
+                dialogField(content, null, R.string.hint_region, safe.region(),
                         ContactForm.TEXT_NAME);
         EditText postcode =
-                dialogField(content, null, R.string.hint_postcode, safe.optString("postcode"),
+                dialogField(content, null, R.string.hint_postcode, safe.postcode(),
                         InputType.TYPE_CLASS_TEXT);
         EditText country =
-                dialogField(content, null, R.string.hint_country, safe.optString("country"),
+                dialogField(content, null, R.string.hint_country, safe.country(),
                         ContactForm.TEXT_NAME);
 
         showDialog(
@@ -249,43 +257,33 @@ final class ContactFieldDialogs {
                     String filled =
                             (host.text(street) + host.text(city) + host.text(region)
                                     + host.text(postcode) + host.text(country)).trim();
-                    try {
-                        JSONObject fresh =
-                                new JSONObject()
-                                        .put("street", host.text(street))
-                                        .put("city", host.text(city))
-                                        .put("region", host.text(region))
-                                        .put("postcode", host.text(postcode))
-                                        .put("country", host.text(country))
-                                        // NOTE: fields the dialog omits ride
-                                        // along untouched.
-                                        .put("pobox", safe.optString("pobox"))
-                                        .put("ext", safe.optString("ext"))
-                                        .put("pref", safe.optBoolean("pref"))
-                                        .put(
-                                                "types",
-                                                ContactClient.formEntry(
-                                                                "address",
-                                                                type.getCheckedRadioButtonId() - 1,
-                                                                "",
-                                                                false)
-                                                        .optJSONArray("types"));
-                        ContactForm.putEntry(addresses, index, filled, fresh);
-                    } catch (JSONException error) {
-                        throw new IllegalStateException(error);
-                    }
+                    ContactAddress fresh =
+                            new ContactAddress(
+                                    host.text(city),
+                                    host.text(country),
+                                    // NOTE: fields the dialog omits ride
+                                    // along untouched.
+                                    safe.ext(),
+                                    safe.pobox(),
+                                    host.text(postcode),
+                                    safe.pref(),
+                                    host.text(region),
+                                    host.text(street),
+                                    ContactClient.formAddressTypes(
+                                            type.getCheckedRadioButtonId() - 1));
+                    ContactForm.putEntry(addresses, index, filled, fresh);
                 },
                 index >= 0 ? () -> addresses.remove(index) : null);
     }
 
     /** A one-field dialog for the plain string lists (hint 0 = none). */
     void stringDialog(String list, int index, int title, int hint, int inputType) {
-        JSONArray values = host.array(list);
+        List<String> values = host.strings(list);
 
         LinearLayout content = dialogContent();
         EditText input =
                 dialogField(content, null, hint,
-                        index >= 0 ? values.optString(index) : "", inputType);
+                        index >= 0 ? values.get(index) : "", inputType);
 
         showDialog(
                 host.getS(title),
@@ -297,25 +295,21 @@ final class ContactFieldDialogs {
                             values.remove(index);
                         }
                     } else if (index >= 0) {
-                        try {
-                            values.put(index, fresh);
-                        } catch (JSONException error) {
-                            throw new IllegalStateException(error);
-                        }
+                        values.set(index, fresh);
                     } else {
-                        values.put(fresh);
+                        values.add(fresh);
                     }
                 },
                 index >= 0 ? () -> values.remove(index) : null);
     }
 
     void noteDialog(int index) {
-        JSONArray notes = host.array("notes");
+        List<String> notes = host.model.notes;
 
         LinearLayout content = dialogContent();
         EditText input =
                 dialogField(content, null, 0,
-                        index >= 0 ? notes.optString(index) : "",
+                        index >= 0 ? notes.get(index) : "",
                         InputType.TYPE_CLASS_TEXT
                                 | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
@@ -330,28 +324,24 @@ final class ContactFieldDialogs {
                             notes.remove(index);
                         }
                     } else if (index >= 0) {
-                        try {
-                            notes.put(index, fresh);
-                        } catch (JSONException error) {
-                            throw new IllegalStateException(error);
-                        }
+                        notes.set(index, fresh);
                     } else {
-                        notes.put(fresh);
+                        notes.add(fresh);
                     }
                 },
                 index >= 0 ? () -> notes.remove(index) : null);
     }
 
     void relationDialog(int index) {
-        JSONArray relations = host.array("relations");
-        JSONObject entry = index >= 0 ? relations.optJSONObject(index) : null;
+        List<ContactRelation> relations = host.model.relations;
+        ContactRelation entry = index >= 0 ? relations.get(index) : null;
 
         LinearLayout content = dialogContent();
         Spinner type = typeSpinner(R.array.relation_types);
-        type.setSelection(entry == null ? 0 : host.typeAt("relations", index));
+        type.setSelection(entry == null ? 0 : ContactForm.typeAt(host.view.relations(), index));
         EditText value =
                 typedValueLine(content, type, R.string.hint_relation,
-                        entry == null ? "" : entry.optString("value"), ContactForm.TEXT_NAME);
+                        entry == null ? "" : entry.value(), ContactForm.TEXT_NAME);
 
         showDialog(
                 host.getS(R.string.item_relation),
@@ -361,11 +351,10 @@ final class ContactFieldDialogs {
                                 relations,
                                 index,
                                 host.text(value),
-                                ContactClient.formEntry(
-                                        "relation",
+                                ContactClient.formRelation(
                                         type.getSelectedItemPosition(),
                                         host.text(value),
-                                        entry != null && entry.optBoolean("pref"))),
+                                        entry != null && entry.pref())),
                 index >= 0 ? () -> relations.remove(index) : null);
     }
 
@@ -392,24 +381,19 @@ final class ContactFieldDialogs {
                 content,
                 () -> {
                     String value = host.text(field);
-                    try {
-                        if (value.isEmpty()) {
-                            host.model.remove("gender");
-                        } else {
-                            int position = indexOfIgnoreCase(labels, value);
-                            host.model.put(
-                                    "gender",
-                                    position > 0
-                                            ? ContactClient.formEntry("gender", position, "", false)
-                                            : new JSONObject().put("sex", "").put("identity", value));
-                            host.revealed.add("gender");
-                        }
-                    } catch (JSONException error) {
-                        throw new IllegalStateException(error);
+                    if (value.isEmpty()) {
+                        host.model.gender = null;
+                    } else {
+                        int position = indexOfIgnoreCase(labels, value);
+                        host.model.gender =
+                                position > 0
+                                        ? ContactClient.formGender(position, "")
+                                        : new ContactGender(value, "");
+                        host.revealed.add("gender");
                     }
                 },
                 () -> {
-                    host.model.remove("gender");
+                    host.model.gender = null;
                     host.revealed.remove("gender");
                 });
     }
@@ -417,15 +401,15 @@ final class ContactFieldDialogs {
     /** The gender field's current display value: the free identity when
      *  set, otherwise the label of its sex code, else empty. */
     private String genderPrefill(String[] labels) {
-        JSONObject genderView = host.view.optJSONObject("gender");
+        FormGender genderView = host.view.gender();
         if (genderView == null) {
             return "";
         }
-        String identity = genderView.optString("identity");
+        String identity = genderView.identity();
         if (!identity.isEmpty()) {
             return identity;
         }
-        int sexIndex = genderView.optInt("sexIndex");
+        int sexIndex = genderView.sexIndex();
         return sexIndex > 0 && sexIndex < labels.length ? labels[sexIndex] : "";
     }
 
@@ -441,25 +425,21 @@ final class ContactFieldDialogs {
     /** A date field goes straight to the system date picker. */
     void pickDate(String field) {
         Calendar calendar = Calendar.getInstance();
-        JSONObject stored = host.view.optJSONObject(field);
+        FormDate stored = field.equals("birthday") ? host.view.birthday() : host.view.anniversary();
         if (stored != null) {
             // NOTE: today stands in when the stored value is not a date.
             calendar.set(
-                    stored.optInt("year"),
-                    stored.optInt("month") - 1,
-                    stored.optInt("day"));
+                    stored.year(),
+                    stored.month() - 1,
+                    stored.day());
         }
 
         DatePickerDialog dialog =
                 new DatePickerDialog(
                         host.activity,
                         (picker, year, month, day) -> {
-                            try {
-                                host.model.put(field, ContactClient.formDate(year, month + 1, day));
-                                host.revealed.add(field);
-                            } catch (JSONException error) {
-                                throw new IllegalStateException(error);
-                            }
+                            setDate(field, ContactClient.formDate(year, month + 1, day));
+                            host.revealed.add(field);
                             host.markResolvedAndRender();
                         },
                         calendar.get(Calendar.YEAR),
@@ -469,11 +449,20 @@ final class ContactFieldDialogs {
                 DatePickerDialog.BUTTON_NEUTRAL,
                 host.activity.getString(R.string.clear),
                 (d, which) -> {
-                    host.model.remove(field);
+                    setDate(field, null);
                     host.revealed.remove(field);
                     host.markResolvedAndRender();
                 });
         dialog.show();
+    }
+
+    /** Sets a date field (birthday, anniversary), null for absent. */
+    private void setDate(String field, String value) {
+        if (field.equals("birthday")) {
+            host.model.birthday = value;
+        } else {
+            host.model.anniversary = value;
+        }
     }
 
     /** The vertical field container of an edit dialog. */
@@ -566,14 +555,14 @@ final class ContactFieldDialogs {
         input.setText(prefill);
         content.addView(input);
 
-        JSONArray values = path == null || host.alternatives == null
+        List<String> values = path == null || host.alternatives == null
                 ? null
-                : host.alternatives.optJSONArray(path);
-        if (values != null && values.length() > 0) {
+                : host.alternatives.get(path);
+        if (values != null && values.size() > 0) {
             LinearLayout chips = new LinearLayout(host.activity);
             chips.setOrientation(LinearLayout.HORIZONTAL);
-            for (int index = 0; index < values.length(); index++) {
-                String candidate = values.optString(index);
+            for (int index = 0; index < values.size(); index++) {
+                String candidate = values.get(index);
                 Button chip = new Button(host.activity, null, android.R.attr.buttonStyleSmall);
                 // NOTE: the empty alternative is pickable too; it reads
                 // "Not set" and clears the field.

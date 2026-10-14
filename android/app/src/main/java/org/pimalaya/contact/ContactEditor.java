@@ -14,7 +14,10 @@ import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Card;
+import org.pimalaya.client.CardsMerge;
+import org.pimalaya.client.ConflictForm;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.ContactFields;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -107,7 +110,7 @@ public final class ContactEditor {
         String handle =
                 PimdirStorage.rowHandle(replica.card.uri(), replica.card.id());
         JSONObject bodies;
-        JSONObject resolution;
+        ConflictForm resolution;
         try {
             bodies = new PimdirStorage(parts.pimdir()).loadConflict(replica.book.url(), handle);
             if (bodies == null) {
@@ -126,13 +129,13 @@ public final class ContactEditor {
             return;
         }
 
-        if (resolution.optBoolean("resolved")) {
+        if (resolution.resolved()) {
             // Nothing needs the user: stage the clean merge and clear the
             // conflict. The toast is the tap's only visible outcome, so
             // without it the vanishing flag reads as a bug.
             try {
                 new ContactStager(parts.pimdir(), parts.clients())
-                        .edit(replica.book.url(), handle, resolution.optString("vcard"));
+                        .edit(replica.book.url(), handle, resolution.vcard());
             } catch (Exception error) {
                 host.showError(error, R.string.save_failed);
                 return;
@@ -142,21 +145,16 @@ public final class ContactEditor {
             return;
         }
 
-        JSONObject alternatives = resolution.optJSONObject("alternatives");
         edit = new EditSession();
         edit.book = replica.book;
         edit.accountEmail = replica.accountEmail;
         edit.card = replica.card;
         edit.replicas = new ArrayList<>(java.util.Collections.singletonList(replica));
         edit.resolvingConflict = true;
-        edit.vcard = resolution.optString("vcard");
+        edit.vcard = resolution.vcard();
         edit.title = replica.displayName();
 
-        org.json.JSONArray changed = resolution.optJSONArray("changed");
-        if (changed == null) {
-            changed = new org.json.JSONArray();
-        }
-        form.load(resolution.optJSONObject("model"), alternatives, changed);
+        form.load(resolution.model(), resolution.alternatives(), resolution.changed());
         host.show(Panels.CONTACT);
     }
 
@@ -314,24 +312,21 @@ public final class ContactEditor {
 
         List<String> docs = ContactMerge.documents(replicas);
 
-        JSONObject model;
-        JSONObject alternatives = null;
-        org.json.JSONArray changed = null;
+        ContactFields model;
+        Map<String, List<String>> alternatives = null;
+        List<String> changed = null;
         try {
             if (docs.size() == 1) {
                 edit.vcard = primary.card.vcard();
-                model = ContactClient.projectCardJson(primary.card.vcard());
+                model = ContactClient.projectCard(primary.card.vcard());
             } else {
-                JSONObject merged = ContactClient.mergeCards(docs);
-                edit.vcard = merged.optString("vcard");
-                model = merged.optJSONObject("model");
-                alternatives = merged.optJSONObject("alternatives");
+                CardsMerge merged = ContactClient.mergeCards(docs);
+                edit.vcard = merged.vcard();
+                model = merged.model();
+                alternatives = merged.alternatives();
                 // NOTE: a non-null changed set turns on the form's
                 // conflict mode: only the disagreeing fields show.
-                changed = merged.optJSONArray("changed");
-                if (changed == null) {
-                    changed = new org.json.JSONArray();
-                }
+                changed = merged.changed();
             }
         } catch (Exception error) {
             host.showError(error, R.string.contact_open_failed);

@@ -12,7 +12,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.CardCorpus;
@@ -98,6 +97,7 @@ public class MappingCorpusTest {
             }
         }
 
+        List<ContactFields> forms = CardCorpus.formFields();
         for (int i = 0; i < vcards.size(); i++) {
             String vcard = vcards.get(i);
             for (int j = 0; j < vcards.size(); j++) {
@@ -109,16 +109,11 @@ public class MappingCorpusTest {
                         "apply " + i + " " + j + " "
                                 + result(() -> ContactClient.applyCard(vcard, model)));
             }
-            for (int k = 0; k < CardCorpus.FORM_MODELS.size(); k++) {
-                String form = CardCorpus.FORM_MODELS.get(k);
+            for (int k = 0; k < forms.size(); k++) {
+                ContactFields form = forms.get(k);
                 out.add(
                         "form " + i + " " + k + " "
-                                + result(
-                                        () ->
-                                                ContactClient.applyCard(
-                                                        vcard,
-                                                        ContactClient.formFields(
-                                                                new JSONObject(form)))));
+                                + result(() -> ContactClient.applyCard(vcard, form)));
             }
         }
 

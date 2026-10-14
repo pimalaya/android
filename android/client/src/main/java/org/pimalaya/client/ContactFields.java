@@ -60,7 +60,7 @@ public record ContactFields(
         List<String> websites) {
     /**
      * A field model under construction, its lists mutable: what the phone
-     * mapping fills, field by field.
+     * mapping fills, field by field, and the edit form's working copy.
      */
     public static final class Builder {
         public List<ContactAddress> addresses = new ArrayList<>();
@@ -134,9 +134,8 @@ public record ContactFields(
     }
 
     /**
-     * Parses a field model: the bridge's projection, or (until the form
-     * edits records) the form's working model. A key left out reads as
-     * absent, a list left out as empty.
+     * Parses a field model the bridge answered: a projection, or a merge's
+     * prefill. A key left out reads as absent, a list left out as empty.
      */
     static ContactFields from(JSONObject model) {
         JSONObject gender = model.optJSONObject("gender");

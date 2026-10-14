@@ -18,13 +18,19 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.ContactEmail;
 import org.pimalaya.client.ContactFields;
+import org.pimalaya.client.ContactName;
+import org.pimalaya.client.ContactOrganization;
+import org.pimalaya.client.ContactPhone;
+import org.pimalaya.client.ContactRelation;
+import org.pimalaya.client.FormAddress;
+import org.pimalaya.client.FormGender;
+import org.pimalaya.client.FormView;
 import org.pimalaya.ui.Sections;
 import org.pimalaya.ui.Ui;
 
@@ -91,13 +97,14 @@ public final class ContactForm {
     private final Sections sections;
 
     /** The working field model the dialogs edit in place. */
-    JSONObject model = new JSONObject();
+    ContactFields.Builder model = new ContactFields.Builder();
 
     /** The bridge-computed view support of the current model. */
-    JSONObject view = new JSONObject();
+    FormView view =
+            new FormView(List.of(), null, null, List.of(), null, "", "", List.of(), List.of());
 
     /** Conflict alternatives by single-field path; null outside conflicts. */
-    JSONObject alternatives;
+    Map<String, List<String>> alternatives;
 
     /** Changed list sections of a conflict; null outside conflict mode. */
     private Set<String> changedLists;
@@ -145,8 +152,9 @@ public final class ContactForm {
      * `alternatives` feeding the value chips of the conflicted
      * single-field dialogs.
      */
-    public void load(JSONObject model, JSONObject alternatives, JSONArray changed) {
-        this.model = model != null ? model : new JSONObject();
+    public void load(
+            ContactFields model, Map<String, List<String>> alternatives, List<String> changed) {
+        this.model = model != null ? new ContactFields.Builder(model) : new ContactFields.Builder();
         this.alternatives = alternatives;
         this.changedLists = null;
         this.revealed.clear();
@@ -155,12 +163,11 @@ public final class ContactForm {
         this.pendingResolveKey = null;
         if (changed != null) {
             changedLists = new HashSet<>();
-            for (int index = 0; index < changed.length(); index++) {
-                String section = changed.optString(index);
+            for (String section : changed) {
                 changedLists.add(section);
-                loadedCounts.put(section, array(section).length());
+                loadedCounts.put(section, list(section).size());
             }
-        } else if (this.model.length() == 0) {
+        } else if (model == null) {
             // NOTE: a new contact opens on the common fields, not a blank
             // page: given/family name plus an empty phone and email row.
             revealed.add("name.given");
@@ -175,7 +182,7 @@ public final class ContactForm {
 
     /** The edited field model. */
     ContactFields collect() {
-        return ContactClient.formFields(model);
+        return model.build();
     }
 
     /** Sets the post-render hook (the host's save-gate refresh). */
@@ -205,12 +212,12 @@ public final class ContactForm {
 
     /** The birthday as picked, empty when unset. */
     String birthday() {
-        return model.optString("birthday").trim();
+        return Objects.toString(model.birthday, "").trim();
     }
 
     /** The anniversary as picked, empty when unset. */
     String anniversary() {
-        return model.optString("anniversary").trim();
+        return Objects.toString(model.anniversary, "").trim();
     }
 
     private boolean conflict() {
@@ -233,7 +240,7 @@ public final class ContactForm {
     boolean filled(String key) {
         switch (key) {
             case "displayName":
-                return !model.optString("displayName").trim().isEmpty();
+                return !Objects.toString(model.displayName, "").trim().isEmpty();
             case "name.prefix":
             case "name.given":
             case "name.middle":
@@ -241,26 +248,55 @@ public final class ContactForm {
             case "name.suffix":
                 return !namePart(key.substring("name.".length())).isEmpty();
             case "birthday":
+                return !Objects.toString(model.birthday, "").trim().isEmpty();
             case "anniversary":
-                return !model.optString(key).trim().isEmpty();
+                return !Objects.toString(model.anniversary, "").trim().isEmpty();
             case "gender":
-                return model.optJSONObject("gender") != null;
+                return model.gender != null;
             case "organization.company":
             case "organization.department":
                 return !organizationPart(key.substring("organization.".length())).isEmpty();
             case "title":
+                return !Objects.toString(model.title, "").trim().isEmpty();
             case "role":
-                return !model.optString(key).trim().isEmpty();
+                return !Objects.toString(model.role, "").trim().isEmpty();
             default:
-                JSONArray values = model.optJSONArray(key);
-                return values != null && values.length() > 0;
+                return !list(key).isEmpty();
         }
     }
 
     /** A single component of the structured name, empty when unset. */
     String namePart(String part) {
-        JSONObject name = model.optJSONObject("name");
-        return name == null ? "" : name.optString(part).trim();
+        ContactName name = model.name;
+        return name == null ? "" : namePart(name, part).trim();
+    }
+
+    /** One component of a structured name by its model key. */
+    static String namePart(ContactName name, String part) {
+        switch (part) {
+            case "prefix":
+                return name.prefix();
+            case "given":
+                return name.given();
+            case "middle":
+                return name.middle();
+            case "family":
+                return name.family();
+            case "suffix":
+                return name.suffix();
+            default:
+                return "";
+        }
+    }
+
+    /** The structured name with one component, by its model key, replaced. */
+    static ContactName withNamePart(ContactName name, String part, String value) {
+        return new ContactName(
+                part.equals("family") ? value : name.family(),
+                part.equals("given") ? value : name.given(),
+                part.equals("middle") ? value : name.middle(),
+                part.equals("prefix") ? value : name.prefix(),
+                part.equals("suffix") ? value : name.suffix());
     }
 
     /** Appends a structured-name component row when it carries a value,
@@ -452,7 +488,7 @@ public final class ContactForm {
 
     /** Rebuilds the whole page from the working model. */
     private void render() {
-        view = ContactClient.formView(model);
+        view = ContactClient.formView(model.build());
         container.removeAllViews();
         pending.clear();
 
@@ -463,7 +499,7 @@ public final class ContactForm {
             identity.add(
                     entryItem(
                             getS(R.string.hint_display_name),
-                            value(model.optString("displayName")),
+                            value(Objects.toString(model.displayName, "")),
                             divergedField("displayName"),
                             dialogs::displayNameDialog));
         }
@@ -476,7 +512,7 @@ public final class ContactForm {
             identity.add(
                     entryItem(
                             getS(R.string.hint_birthday),
-                            value(model.optString("birthday")),
+                            value(Objects.toString(model.birthday, "")),
                             divergedField("birthday"),
                             () -> dialogs.pickDate("birthday")));
         }
@@ -484,7 +520,7 @@ public final class ContactForm {
             identity.add(
                     entryItem(
                             getS(R.string.item_anniversary),
-                            value(model.optString("anniversary")),
+                            value(Objects.toString(model.anniversary, "")),
                             divergedField("anniversary"),
                             () -> dialogs.pickDate("anniversary")));
         }
@@ -500,13 +536,13 @@ public final class ContactForm {
 
         if (shown("nicknames", filled("nicknames")) || unreviewedList("nicknames")) {
             List<View> items = new ArrayList<>();
-            JSONArray nicknames = array("nicknames");
-            for (int index = 0; index < nicknames.length(); index++) {
+            List<String> nicknames = model.nicknames;
+            for (int index = 0; index < nicknames.size(); index++) {
                 int at = index;
                 items.add(
                         entryItem(
                                 getS(R.string.item_nickname),
-                                nicknames.optString(index),
+                                nicknames.get(index),
                                 divergedItem("nicknames", at),
                                 () -> dialogs.stringDialog("nicknames", at, R.string.item_nickname,
                                         0, TEXT_NAME)));
@@ -541,7 +577,7 @@ public final class ContactForm {
             work.add(
                     entryItem(
                             getS(R.string.hint_job_title),
-                            value(model.optString("title")),
+                            value(Objects.toString(model.title, "")),
                             divergedField("title"),
                             () -> dialogs.simpleFieldDialog("title", R.string.hint_job_title)));
         }
@@ -549,7 +585,7 @@ public final class ContactForm {
             work.add(
                     entryItem(
                             getS(R.string.hint_role),
-                            value(model.optString("role")),
+                            value(Objects.toString(model.role, "")),
                             divergedField("role"),
                             () -> dialogs.simpleFieldDialog("role", R.string.hint_role)));
         }
@@ -557,14 +593,14 @@ public final class ContactForm {
 
         if (shown("relations", filled("relations")) || unreviewedList("relations")) {
             List<View> items = new ArrayList<>();
-            JSONArray relations = array("relations");
-            for (int index = 0; index < relations.length(); index++) {
+            List<ContactRelation> relations = model.relations;
+            for (int index = 0; index < relations.size(); index++) {
                 int at = index;
-                JSONObject entry = relations.optJSONObject(index);
+                ContactRelation entry = relations.get(index);
                 items.add(
                         entryItem(
-                                typeLabel(R.array.relation_types, typeAt("relations", index)),
-                                entry.optString("value"),
+                                typeLabel(R.array.relation_types, typeAt(view.relations(), index)),
+                                entry.value(),
                                 divergedItem("relations", at),
                                 () -> dialogs.relationDialog(at)));
             }
@@ -573,14 +609,14 @@ public final class ContactForm {
 
         if (shown("phones", filled("phones")) || unreviewedList("phones")) {
             List<View> items = new ArrayList<>();
-            JSONArray phones = array("phones");
-            for (int index = 0; index < phones.length(); index++) {
+            List<ContactPhone> phones = model.phones;
+            for (int index = 0; index < phones.size(); index++) {
                 int at = index;
-                JSONObject entry = phones.optJSONObject(index);
+                ContactPhone entry = phones.get(index);
                 items.add(
                         entryItem(
-                                typeLabel(R.array.phone_types, typeAt("phones", index)),
-                                entry.optString("number"),
+                                typeLabel(R.array.phone_types, typeAt(view.phones(), index)),
+                                entry.number(),
                                 divergedItem("phones", at),
                                 () -> dialogs.phoneDialog(at)));
             }
@@ -591,14 +627,14 @@ public final class ContactForm {
 
         if (shown("emails", filled("emails")) || unreviewedList("emails")) {
             List<View> items = new ArrayList<>();
-            JSONArray emails = array("emails");
-            for (int index = 0; index < emails.length(); index++) {
+            List<ContactEmail> emails = model.emails;
+            for (int index = 0; index < emails.size(); index++) {
                 int at = index;
-                JSONObject entry = emails.optJSONObject(index);
+                ContactEmail entry = emails.get(index);
                 items.add(
                         entryItem(
-                                typeLabel(R.array.email_types, typeAt("emails", index)),
-                                entry.optString("address"),
+                                typeLabel(R.array.email_types, typeAt(view.emails(), index)),
+                                entry.address(),
                                 divergedItem("emails", at),
                                 () -> dialogs.emailDialog(at)));
             }
@@ -607,13 +643,13 @@ public final class ContactForm {
 
         if (shown("impps", filled("impps")) || unreviewedList("impps")) {
             List<View> items = new ArrayList<>();
-            JSONArray impps = array("impps");
-            for (int index = 0; index < impps.length(); index++) {
+            List<String> impps = model.impps;
+            for (int index = 0; index < impps.size(); index++) {
                 int at = index;
                 items.add(
                         entryItem(
                                 getS(R.string.item_impp),
-                                impps.optString(index),
+                                impps.get(index),
                                 divergedItem("impps", at),
                                 () -> dialogs.stringDialog("impps", at, R.string.item_impp,
                                         R.string.hint_impp,
@@ -625,15 +661,15 @@ public final class ContactForm {
 
         if (shown("addresses", filled("addresses")) || unreviewedList("addresses")) {
             List<View> items = new ArrayList<>();
-            JSONArray entries = array("addresses");
-            for (int index = 0; index < entries.length(); index++) {
+            List<?> entries = model.addresses;
+            for (int index = 0; index < entries.size(); index++) {
                 int at = index;
                 items.add(
                         entryItem(
                                 typeLabel(
                                         R.array.address_types,
-                                        addressAt(index).optInt("index")),
-                                value(addressAt(index).optString("summary")),
+                                        addressAt(index).index()),
+                                value(addressAt(index).summary()),
                                 divergedItem("addresses", at),
                                 () -> dialogs.addressDialog(at)));
             }
@@ -642,13 +678,13 @@ public final class ContactForm {
 
         if (shown("websites", filled("websites")) || unreviewedList("websites")) {
             List<View> items = new ArrayList<>();
-            JSONArray websites = array("websites");
-            for (int index = 0; index < websites.length(); index++) {
+            List<String> websites = model.websites;
+            for (int index = 0; index < websites.size(); index++) {
                 int at = index;
                 items.add(
                         entryItem(
                                 getS(R.string.item_website),
-                                websites.optString(index),
+                                websites.get(index),
                                 divergedItem("websites", at),
                                 () -> dialogs.stringDialog("websites", at, R.string.item_website,
                                         R.string.hint_url,
@@ -660,13 +696,13 @@ public final class ContactForm {
 
         if (shown("languages", filled("languages")) || unreviewedList("languages")) {
             List<View> items = new ArrayList<>();
-            JSONArray languages = array("languages");
-            for (int index = 0; index < languages.length(); index++) {
+            List<String> languages = model.languages;
+            for (int index = 0; index < languages.size(); index++) {
                 int at = index;
                 items.add(
                         entryItem(
                                 getS(R.string.item_language),
-                                languages.optString(index),
+                                languages.get(index),
                                 divergedItem("languages", at),
                                 () -> dialogs.stringDialog("languages", at, R.string.item_language,
                                         R.string.hint_language, InputType.TYPE_CLASS_TEXT)));
@@ -676,13 +712,13 @@ public final class ContactForm {
 
         if (shown("notes", filled("notes")) || unreviewedList("notes")) {
             List<View> items = new ArrayList<>();
-            JSONArray notes = array("notes");
-            for (int index = 0; index < notes.length(); index++) {
+            List<String> notes = model.notes;
+            for (int index = 0; index < notes.size(); index++) {
                 int at = index;
                 items.add(
                         entryItem(
                                 getS(R.string.item_note),
-                                notes.optString(index),
+                                notes.get(index),
                                 divergedItem("notes", at),
                                 () -> dialogs.noteDialog(at)));
             }
@@ -822,18 +858,18 @@ public final class ContactForm {
     }
 
     private String genderSummary() {
-        JSONObject gender = view.optJSONObject("gender");
+        FormGender gender = view.gender();
         if (gender == null) {
             return "";
         }
 
         List<String> parts = new ArrayList<>();
-        int sex = gender.optInt("sexIndex");
+        int sex = gender.sexIndex();
         if (sex > 0) {
             parts.add(typeLabel(R.array.gender_types, sex));
         }
-        if (!gender.optString("identity").isEmpty()) {
-            parts.add(gender.optString("identity"));
+        if (!gender.identity().isEmpty()) {
+            parts.add(gender.identity());
         }
         return String.join(" · ", parts);
     }
@@ -844,44 +880,82 @@ public final class ContactForm {
     }
 
     /** The type spinner position of a list entry, bridge-computed. */
-    int typeAt(String list, int index) {
-        JSONArray positions = view.optJSONArray(list);
-        return positions == null ? 0 : positions.optInt(index);
+    static int typeAt(List<Integer> positions, int index) {
+        return index >= 0 && index < positions.size() ? positions.get(index) : 0;
     }
 
-    /** An address entry's view support ({@code {index, summary}}). */
-    JSONObject addressAt(int index) {
-        JSONArray entries = view.optJSONArray("addresses");
-        JSONObject entry = entries == null ? null : entries.optJSONObject(index);
-        return entry == null ? new JSONObject() : entry;
+    /** An address entry's view support. */
+    FormAddress addressAt(int index) {
+        List<FormAddress> entries = view.addresses();
+        return index >= 0 && index < entries.size() ? entries.get(index) : new FormAddress(0, "");
     }
 
     /** A single organization component (company or department), kept
      *  under the model's {@code organization} object; empty when unset. */
     String organizationPart(String part) {
-        JSONObject organization = model.optJSONObject("organization");
-        return organization == null ? "" : organization.optString(part).trim();
+        ContactOrganization organization = model.organization;
+        return organization == null ? "" : organizationPart(organization, part).trim();
     }
 
-    /** The model's list under the key, created empty when absent. */
-    JSONArray array(String key) {
-        JSONArray values = model.optJSONArray(key);
-        if (values == null) {
-            values = new JSONArray();
-            try {
-                model.put(key, values);
-            } catch (JSONException error) {
-                throw new IllegalStateException(error);
-            }
+    /** One organization component by its model key. */
+    static String organizationPart(ContactOrganization organization, String part) {
+        switch (part) {
+            case "company":
+                return organization.company();
+            case "department":
+                return organization.department();
+            default:
+                return "";
         }
-        return values;
+    }
+
+    /** The organization with one component, by its model key, replaced. */
+    static ContactOrganization withOrganizationPart(
+            ContactOrganization organization, String part, String value) {
+        return new ContactOrganization(
+                part.equals("company") ? value : organization.company(),
+                part.equals("department") ? value : organization.department());
+    }
+
+    /** The model's list section under the key, empty for any other key. */
+    List<?> list(String key) {
+        switch (key) {
+            case "phones":
+                return model.phones;
+            case "emails":
+                return model.emails;
+            case "addresses":
+                return model.addresses;
+            case "relations":
+                return model.relations;
+            default:
+                return strings(key);
+        }
+    }
+
+    /** The model's string list section under the key, empty for any other key. */
+    List<String> strings(String key) {
+        switch (key) {
+            case "nicknames":
+                return model.nicknames;
+            case "notes":
+                return model.notes;
+            case "impps":
+                return model.impps;
+            case "languages":
+                return model.languages;
+            case "websites":
+                return model.websites;
+            default:
+                return new ArrayList<>();
+        }
     }
 
     /**
      * Writes an entry back into its list: replaced in place, appended
      * when new, dropped when emptied.
      */
-    static void putEntry(JSONArray values, int index, String filled, JSONObject entry) {
+    static <T> void putEntry(List<T> values, int index, String filled, T entry) {
         if (filled.trim().isEmpty()) {
             if (index >= 0) {
                 values.remove(index);
@@ -890,13 +964,9 @@ public final class ContactForm {
         }
 
         if (index >= 0) {
-            try {
-                values.put(index, entry);
-            } catch (JSONException error) {
-                throw new IllegalStateException(error);
-            }
+            values.set(index, entry);
         } else {
-            values.put(entry);
+            values.add(entry);
         }
     }
 
@@ -905,7 +975,7 @@ public final class ContactForm {
             return false;
         }
         for (String path : paths) {
-            if (alternatives.has(path)) {
+            if (alternatives.containsKey(path)) {
                 return true;
             }
         }

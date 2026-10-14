@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.json.JSONObject;
 
 /**
  * Crafted vCards, phone row sets and edit-form models the contact field
@@ -282,4 +283,13 @@ public final class CardCorpus {
                             + "\"notes\":[\"\",\"kept\"],\"websites\":[\" \"]}",
                     "{\"emails\":[{\"address\":\" a@b.c \",\"types\":[\"work\",\"home\"],"
                             + "\"pref\":true},{\"address\":\"\",\"types\":[],\"pref\":false}]}");
+
+    /** The edit-form models as field models, read with the bridge defaults. */
+    public static List<ContactFields> formFields() throws Exception {
+        List<ContactFields> fields = new ArrayList<>();
+        for (String model : FORM_MODELS) {
+            fields.add(ContactFields.from(new JSONObject(model)));
+        }
+        return fields;
+    }
 }

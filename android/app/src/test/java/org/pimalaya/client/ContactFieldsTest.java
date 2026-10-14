@@ -96,7 +96,7 @@ public class ContactFieldsTest {
     @Test
     public void aFormModelReadsWithTheBridgeDefaults() throws Exception {
         ContactFields fields =
-                ContactClient.formFields(
+                ContactFields.from(
                         new JSONObject(
                                 "{\"name\":{\"given\":\"Jane\"},\"organization\":{},"
                                         + "\"phones\":[{\"number\":\"1\"}],\"title\":\"\"}"));

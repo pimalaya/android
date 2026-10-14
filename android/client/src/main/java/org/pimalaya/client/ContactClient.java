@@ -288,22 +288,6 @@ public class ContactClient {
     }
 
     /**
-     * The projection as the edit form still holds it, a JSON working model
-     * (temporary: goes once the form edits a {@link ContactFields}).
-     */
-    public static JSONObject projectCardJson(String vcard) {
-        return Replies.object(Native.projectCard(vcard));
-    }
-
-    /**
-     * The edit form's JSON working model as a field model (temporary: goes
-     * once the form edits a {@link ContactFields}).
-     */
-    public static ContactFields formFields(JSONObject model) {
-        return ContactFields.from(model);
-    }
-
-    /**
      * Indexes a vCard for the store: the display fields the contacts
      * list renders (name, first email and phone, UID) and a normalized
      * content hash for the divergence flag of linked replicas.
@@ -326,12 +310,12 @@ public class ContactClient {
      * document, its field model (the merge form prefill) and the
      * per-field alternative values.
      */
-    public static JSONObject mergeCards(List<String> vcards) {
+    public static CardsMerge mergeCards(List<String> vcards) {
         JSONArray cards = new JSONArray();
         for (String vcard : vcards) {
             cards.put(vcard);
         }
-        return Replies.object(Native.mergeCards(cards.toString()));
+        return CardsMerge.from(Replies.object(Native.mergeCards(cards.toString())));
     }
 
     /**
@@ -352,8 +336,8 @@ public class ContactClient {
      * changed list. An empty {@code alternatives} means nothing needs the
      * user.
      */
-    public static JSONObject mergeConflictForm(String base, String local, String remote) {
-        return Replies.object(Native.mergeConflictForm(base, local, remote));
+    public static ConflictForm mergeConflictForm(String base, String local, String remote) {
+        return ConflictForm.from(Replies.object(Native.mergeConflictForm(base, local, remote)));
     }
 
     /**
@@ -391,16 +375,53 @@ public class ContactClient {
      * The edit form's view support computed from the field model:
      * summaries, type spinner positions and picker dates.
      */
-    public static JSONObject formView(JSONObject model) {
-        return Replies.object(Native.formView(model.toString()));
+    public static FormView formView(ContactFields model) {
+        return FormView.from(Replies.object(Native.formView(model.toJson().toString())));
     }
 
     /**
-     * One typed entry saved from an edit dialog, its TYPE set drawn
+     * One phone entry saved from an edit dialog, its TYPE set drawn
      * from the spinner position.
      */
-    public static JSONObject formEntry(String kind, int index, String value, boolean pref) {
-        return Replies.object(Native.formEntry(kind, index, value, pref));
+    public static ContactPhone formPhone(int index, String number, boolean pref) {
+        return ContactPhone.from(Replies.object(Native.formEntry("phone", index, number, pref)));
+    }
+
+    /**
+     * One email entry saved from an edit dialog, its TYPE set drawn
+     * from the spinner position.
+     */
+    public static ContactEmail formEmail(int index, String address, boolean pref) {
+        return ContactEmail.from(Replies.object(Native.formEntry("email", index, address, pref)));
+    }
+
+    /**
+     * One relation entry saved from an edit dialog, its TYPE set drawn
+     * from the spinner position.
+     */
+    public static ContactRelation formRelation(int index, String value, boolean pref) {
+        return ContactRelation.from(
+                Replies.object(Native.formEntry("relation", index, value, pref)));
+    }
+
+    /**
+     * An address's TYPE set saved from an edit dialog, drawn from the
+     * radio position; the dialog owns the other components.
+     */
+    public static List<String> formAddressTypes(int index) {
+        return List.copyOf(
+                Json.strings(
+                        Replies.object(Native.formEntry("address", index, "", false))
+                                .optJSONArray("types")));
+    }
+
+    /**
+     * One GENDER saved from an edit dialog, its sex code drawn from the
+     * choice position; both parts empty when sex and identity are unset.
+     */
+    public static ContactGender formGender(int index, String identity) {
+        return ContactGender.from(
+                Replies.object(Native.formEntry("gender", index, identity, false)));
     }
 
     /**
