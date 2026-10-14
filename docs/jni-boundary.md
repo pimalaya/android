@@ -1,5 +1,7 @@
 # The JNI boundary: the untyped-wire problem
 
+> Historical: written before cairn change rust-domain-layout (2026-10-13). The counts, file names (store.rs, project.rs) and the "no Rust-held sessions" claim are stale; the Rust side now replies with typed serde shapes (see rust/src/lib.rs). The Java half is the cairn change java-domain-layout; the boundary itself (one account argument, fewer crossings) is its later phase 8.
+
 The detailed problem analysis behind [jni-typing-plan.md](jni-typing-plan.md): what the JNI boundary is, why its current shape is a liability, and how the three-lever plan addresses it. Read this to understand the why; read the plan for the staged how.
 
 ## How the bridge works today

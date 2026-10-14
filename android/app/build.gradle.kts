@@ -131,7 +131,7 @@ tasks.withType<Test>().configureEach {
     val libraryPath = listOfNotNull(file("../../rust/target/debug").absolutePath, hostSqlite)
     systemProperty("java.library.path", libraryPath.joinToString(File.pathSeparator))
     if (name != "e2eTest") {
-        exclude("org/pimalaya/E2e*")
+        exclude("org/pimalaya/**/E2e*")
     }
 }
 
@@ -149,7 +149,7 @@ tasks.register<Test>("e2eTest") {
     dependsOn(unit.map { it.dependsOn })
     testClassesDirs = files(unit.map { it.testClassesDirs })
     classpath = files(unit.map { it.classpath })
-    include("org/pimalaya/E2e*")
+    include("org/pimalaya/**/E2e*")
     for (option in listOf("e2e.targets", "e2e.only", "e2e.patience", "e2e.log")) {
         providers.gradleProperty(option).orNull?.let { systemProperty(option, it) }
     }
