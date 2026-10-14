@@ -153,14 +153,21 @@ public class ItemLinksTest {
         files.recordAttachments(
                 mail.accountIdOf(ONE), "m1", new PimalayaClient().parseMessage(source).attachments);
 
-        List<ItemLinks.Placement> found = links.search("quarterly");
+        List<ItemLinks.Placement> found = search("quarterly");
         assertEquals(2, found.size());
         assertEquals(PimdirSummary.MAIL, found.get(0).endpoint.kind);
         assertEquals(PimdirSummary.FILE, found.get(1).endpoint.kind);
 
-        List<ItemLinks.Placement> people = links.search("martin");
+        List<ItemLinks.Placement> people = search("martin");
         assertEquals(1, people.size());
         assertEquals(contact.linkId, people.get(0).endpoint.linkId);
-        assertTrue(links.search("  ").isEmpty());
+        assertTrue(search("  ").isEmpty());
+    }
+
+    /** The link search as the add dialog runs it: messages, then the other kinds. */
+    private List<ItemLinks.Placement> search(String words) {
+        List<ItemLinks.Placement> found = mail.linkPlacements(words, ItemLinks.FOUND);
+        found.addAll(links.search(words));
+        return found;
     }
 }

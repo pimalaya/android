@@ -16,6 +16,7 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.file.FileStore;
+import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -647,6 +648,40 @@ public final class MailStore {
         String sender() {
             return fromName.isEmpty() ? fromAddress : fromName;
         }
+    }
+
+    /** A message's endpoint; null for one still in an outbox, which is no item. */
+    public static ItemLinks.Endpoint endpointOf(StoredMessage message) {
+        return message.pending ? null : ItemLinks.of(PimdirSummary.MAIL, message.id);
+    }
+
+    /**
+     * Messages whose words hold {@code words}, at most {@code limit}, as the
+     * link search lists them ahead of the other kinds
+     * ({@link ItemLinks#search}): through the mail search, each message once.
+     */
+    public List<ItemLinks.Placement> linkPlacements(String words, int limit) {
+        Map<String, ItemLinks.Placement> found = new LinkedHashMap<>();
+        if (words.trim().isEmpty()) {
+            return new ArrayList<>();
+        }
+        Query query = query((account, collection) -> true, false, false, words);
+        for (StoredMessage message : page(query, null, 0, limit)) {
+            ItemLinks.Endpoint endpoint = endpointOf(message);
+            if (endpoint != null) {
+                found.putIfAbsent(
+                        endpoint.linkId,
+                        new ItemLinks.Placement(
+                                endpoint,
+                                message.collection,
+                                message.seq,
+                                message.subject,
+                                message.fromName.isEmpty()
+                                        ? message.fromAddress
+                                        : message.fromName));
+            }
+        }
+        return new ArrayList<>(found.values());
     }
 
     /**

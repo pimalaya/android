@@ -20,7 +20,6 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.pimalaya.MainActivity;
-import org.pimalaya.OpenedFiles;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
@@ -29,6 +28,7 @@ import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.file.FileActions;
 import org.pimalaya.file.FileStore;
+import org.pimalaya.file.OpenedCopies;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.MailDate;
 import org.pimalaya.ui.Avatar;
@@ -184,7 +184,7 @@ public final class MessageView {
                                     : host.files.attachments(
                                             host.mail.accountIdOf(message.accountEmail),
                                             message.id);
-                    ItemLinks.Endpoint self = ItemLinks.ofMessage(message);
+                    ItemLinks.Endpoint self = MailStore.endpointOf(message);
                     int links = self == null ? -1 : host.links.links(self).size();
 
                     MessageBody outcome = loaded;
@@ -264,7 +264,7 @@ public final class MessageView {
         badge.setOnClickListener(
                 view ->
                         host.linked.dialog(
-                                ItemLinks.ofMessage(message),
+                                MailStore.endpointOf(message),
                                 message.subject,
                                 () ->
                                         host.io.execute(
@@ -272,7 +272,7 @@ public final class MessageView {
                                                     int links =
                                                             host.links
                                                                     .links(
-                                                                            ItemLinks.ofMessage(
+                                                                            MailStore.endpointOf(
                                                                                     message))
                                                                     .size();
                                                     host.postAlive(
@@ -340,9 +340,42 @@ public final class MessageView {
                 throw new IllegalStateException(host.getString(R.string.attachment_failed));
             }
         }
-        java.io.File part = OpenedFiles.partFile(host, attachment.seq);
+        java.io.File part = OpenedCopies.partFile(host, attachment.seq);
         host.client.messagePart(source, attachment.part, part);
         return part;
+    }
+
+    /**
+     * The file a stand-in is read from: the part its message holds written
+     * out ({@link #fileOf(MailStore.StoredMessage, FileStore.StoredFile)}),
+     * refused when its message is gone.
+     */
+    public java.io.File fileOf(FileStore.Origin origin, FileStore.StoredFile file) {
+        MailStore.StoredMessage message =
+                origin == null
+                        ? null
+                        : host.mail.message(origin.collection, origin.linkId);
+        if (message == null || file.part == null) {
+            throw new IllegalStateException(host.getString(R.string.files_no_message));
+        }
+        return fileOf(message, file);
+    }
+
+    /** Opens the message a file came from in the reader. */
+    public void openOrigin(FileStore.Origin origin) {
+        host.io.execute(
+                () -> {
+                    MailStore.StoredMessage message =
+                            host.mail.message(origin.collection, origin.linkId);
+                    host.postAlive(
+                            () -> {
+                                if (message == null) {
+                                    host.toast(host.getString(R.string.files_no_message));
+                                } else {
+                                    open(message);
+                                }
+                            });
+                });
     }
 
     /**

@@ -8,6 +8,7 @@ import org.json.JSONObject;
 
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.Event;
+import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -186,6 +187,10 @@ public final class EventStore {
             this.etag = etag;
             this.conflicted = conflicted;
         }
+    }
+
+    public static ItemLinks.Endpoint endpointOf(StoredEvent event) {
+        return ItemLinks.of(PimdirSummary.CALENDAR, event.id);
     }
 
     public List<StoredEvent> loadEvents() {

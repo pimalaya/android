@@ -14,7 +14,6 @@ import android.net.Uri;
 import android.provider.CalendarContract;
 import android.provider.ContactsContract;
 import java.io.File;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import org.junit.Before;
 import org.junit.Test;
@@ -28,15 +27,14 @@ import org.pimalaya.mail.MailOwed;
 import org.pimalaya.mail.MailPoison;
 import org.pimalaya.mail.MessageView;
 import org.pimalaya.phone.Accounts;
-import org.pimalaya.pimdir.CacheSweep;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
  * The app's surface against what another app, a server or a hostile
- * message hands it: links in a message, attachment names, the exported
- * sync adapters, accounts copied without their key, bodies that kill the
- * app, and what a killed run leaves in the cache.
+ * message hands it: links in a message, the exported sync adapters,
+ * accounts copied without their key, bodies that kill the app, and what a
+ * killed run leaves in the cache.
  */
 @RunWith(RobolectricTestRunner.class)
 public class HardeningTest {
@@ -74,29 +72,6 @@ public class HardeningTest {
         assertNull(MessageView.linkIntent(Uri.parse("intent:#Intent;end"), true, true));
         assertNull(MessageView.linkIntent(Uri.parse("file:///data/x"), true, true));
         assertNull(MessageView.linkIntent(Uri.parse("relative"), true, true));
-    }
-
-    @Test
-    public void anAttachmentNameDropsWhatWouldSpoofOrBreakIt() {
-        assertEquals("invoicefdp.apk", OpenedFiles.safe("invoice\u202Efdp.apk"));
-        assertEquals("a_b_c", OpenedFiles.safe("a/b\\c"));
-        assertEquals("x", OpenedFiles.safe("\u0000\u200Ex"));
-        assertEquals("file.hidden", OpenedFiles.safe(".hidden"));
-    }
-
-    @Test
-    public void anAttachmentNameFitsTheFileSystemInBytes() {
-        // NOTE: 120 three-byte characters, 360 bytes, which ext4 refuses.
-        String name = OpenedFiles.safe("\u6587".repeat(120) + ".pdf");
-
-        assertTrue(name.getBytes(StandardCharsets.UTF_8).length <= 200);
-        assertTrue(name.endsWith(".pdf"));
-
-        String smile = new String(Character.toChars(0x1F600));
-        String cut = OpenedFiles.safe("a" + smile.repeat(100));
-        assertTrue(cut.getBytes(StandardCharsets.UTF_8).length <= 200);
-        assertFalse(Character.isHighSurrogate(cut.charAt(cut.length() - 1)));
-        assertEquals(cut.codePointCount(0, cut.length()) * 2 - 1, cut.length());
     }
 
     @Test

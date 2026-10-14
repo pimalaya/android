@@ -2,23 +2,15 @@ package org.pimalaya;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
-import android.content.Context;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
-import android.webkit.MimeTypeMap;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
-import java.util.Locale;
+import org.pimalaya.file.OpenedCopies;
 import org.pimalaya.pimdir.PimdirSummary;
 
 /**
@@ -31,139 +23,6 @@ import org.pimalaya.pimdir.PimdirSummary;
  * clear, and each open writes its copy afresh.
  */
 public final class OpenedFiles extends ContentProvider {
-    /** The cache directory the copies are written under. */
-    private static final String DIRECTORY = "opened";
-
-    /** The most bytes a copy's name takes in UTF-8, its extension included. */
-    private static final int LONGEST = 200;
-
-    /**
-     * Copies one file into the cache, a buffer at a time, under a directory
-     * named after its public id so two files of one name do not meet, and
-     * answers the URI that reads it.
-     */
-    public static Uri put(Context context, long seq, String name, File source) throws IOException {
-        File directory = new File(new File(context.getCacheDir(), DIRECTORY), Long.toString(seq));
-        if (!directory.isDirectory() && !directory.mkdirs()) {
-            throw new IOException("Could not create " + directory);
-        }
-        String safe = safe(name);
-        try (InputStream in = new FileInputStream(source);
-                FileOutputStream out = new FileOutputStream(new File(directory, safe))) {
-            copy(in, out);
-        }
-        return new Uri.Builder()
-                .scheme("content")
-                .authority(context.getPackageName() + ".files")
-                .appendPath(Long.toString(seq))
-                .appendPath(safe)
-                .build();
-    }
-
-    /**
-     * A name a file may go by: no separator, no control or format character
-     * (a right-to-left override, U+202E, before {@code fdp.apk} shows it as
-     * {@code kpa.pdf}), no leading dot, and at most {@link #LONGEST}
-     * bytes in UTF-8, which is what the file system counts, cut between
-     * characters and keeping the extension.
-     */
-    static String safe(String name) {
-        StringBuilder kept = new StringBuilder(name.length());
-        name.codePoints()
-                .forEach(
-                        point -> {
-                            int type = Character.getType(point);
-                            if (type == Character.CONTROL || type == Character.FORMAT) {
-                                return;
-                            }
-                            kept.appendCodePoint(point == '/' || point == '\\' ? '_' : point);
-                        });
-        String safe = kept.toString().trim();
-        if (safe.isEmpty() || safe.startsWith(".")) {
-            safe = "file" + safe;
-        }
-        if (bytes(safe) > LONGEST) {
-            int dot = safe.lastIndexOf('.');
-            String tail = dot <= 0 ? "" : safe.substring(dot);
-            if (bytes(tail) >= LONGEST / 2) {
-                tail = "";
-            }
-            String head = safe.substring(0, safe.length() - tail.length());
-            safe = cut(head, LONGEST - bytes(tail)) + tail;
-        }
-        return safe;
-    }
-
-    /** How many bytes a text takes in UTF-8. */
-    private static int bytes(String text) {
-        return text.getBytes(StandardCharsets.UTF_8).length;
-    }
-
-    /** The longest start of a text taking at most {@code limit} bytes in UTF-8. */
-    private static String cut(String text, int limit) {
-        StringBuilder cut = new StringBuilder();
-        int used = 0;
-        for (int index = 0; index < text.length(); ) {
-            int point = text.codePointAt(index);
-            String character = new String(Character.toChars(point));
-            used += bytes(character);
-            if (used > limit) {
-                break;
-            }
-            cut.append(character);
-            index += Character.charCount(point);
-        }
-        return cut.toString();
-    }
-
-    /** The extension of a name, after its last dot, lowercased; empty for none. */
-    static String extensionOf(String name) {
-        int dot = name.lastIndexOf('.');
-        return dot < 0 || dot == name.length() - 1
-                ? ""
-                : name.substring(dot + 1).toLowerCase(Locale.ROOT);
-    }
-
-    /** The media type a name's extension says, null when it says none. */
-    public static String typeOf(String name) {
-        String extension = extensionOf(name);
-        return extension.isEmpty()
-                ? null
-                : MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
-    }
-
-    /** Copies a stream to another a buffer at a time. */
-    public static void copy(InputStream in, OutputStream out) throws IOException {
-        byte[] buffer = new byte[64 * 1024];
-        for (int read = in.read(buffer); read >= 0; read = in.read(buffer)) {
-            out.write(buffer, 0, read);
-        }
-    }
-
-    /** Where the bridge writes one attachment out of its message. */
-    public static File partFile(Context context, long seq) {
-        File parts = new File(new File(context.getCacheDir(), DIRECTORY), "parts");
-        if (!parts.isDirectory()) {
-            parts.mkdirs();
-        }
-        return new File(parts, Long.toString(seq));
-    }
-
-    /** Drops every copy, on start and when an account goes. */
-    public static void clear(Context context) {
-        delete(new File(context.getCacheDir(), DIRECTORY));
-    }
-
-    private static void delete(File file) {
-        File[] children = file.listFiles();
-        if (children != null) {
-            for (File child : children) {
-                delete(child);
-            }
-        }
-        file.delete();
-    }
-
     @Override
     public boolean onCreate() {
         return true;
@@ -171,13 +30,14 @@ public final class OpenedFiles extends ContentProvider {
 
     @Override
     public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
-        return ParcelFileDescriptor.open(fileOf(uri), ParcelFileDescriptor.MODE_READ_ONLY);
+        return ParcelFileDescriptor.open(
+                OpenedCopies.fileOf(getContext(), uri), ParcelFileDescriptor.MODE_READ_ONLY);
     }
 
     @Override
     public String getType(Uri uri) {
         String name = uri.getLastPathSegment();
-        String type = name == null ? null : typeOf(name);
+        String type = name == null ? null : OpenedCopies.typeOf(name);
         return type == null ? PimdirSummary.FILE : type;
     }
 
@@ -188,7 +48,7 @@ public final class OpenedFiles extends ContentProvider {
             String sortOrder) {
         File file;
         try {
-            file = fileOf(uri);
+            file = OpenedCopies.fileOf(getContext(), uri);
         } catch (FileNotFoundException gone) {
             return null;
         }
@@ -196,24 +56,6 @@ public final class OpenedFiles extends ContentProvider {
         MatrixCursor cursor = new MatrixCursor(columns, 1);
         cursor.addRow(new Object[] {file.getName(), file.length()});
         return cursor;
-    }
-
-    /**
-     * The cached copy a URI names, refused when it is not one: a path that
-     * climbs out of the directory reads nothing.
-     */
-    private File fileOf(Uri uri) throws FileNotFoundException {
-        File root = new File(getContext().getCacheDir(), DIRECTORY);
-        try {
-            File file = new File(root, uri.getPath()).getCanonicalFile();
-            if (!file.getPath().startsWith(root.getCanonicalPath() + File.separator)
-                    || !file.isFile()) {
-                throw new FileNotFoundException(uri.toString());
-            }
-            return file;
-        } catch (IOException error) {
-            throw new FileNotFoundException(uri.toString());
-        }
     }
 
     @Override

@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import org.pimalaya.MainActivity;
-import org.pimalaya.OpenedFiles;
 import org.pimalaya.R;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -81,13 +80,13 @@ public final class FileActions {
         if (file.mediaType != null && !PimdirSummary.FILE.equals(file.mediaType)) {
             return file.mediaType;
         }
-        String guessed = OpenedFiles.typeOf(file.name);
+        String guessed = OpenedCopies.typeOf(file.name);
         return guessed == null ? PimdirSummary.FILE : guessed;
     }
 
     /**
      * Opens a file in the app the phone picks for its type, through a copy
-     * in the cache ({@link OpenedFiles}).
+     * in the cache ({@link OpenedCopies}).
      */
     public void open(FileStore.StoredFile file, Source source) {
         handOver(
@@ -120,7 +119,7 @@ public final class FileActions {
                 () -> {
                     Uri uri;
                     try {
-                        uri = OpenedFiles.put(host, file.seq, label(file), source.read());
+                        uri = OpenedCopies.put(host, file.seq, label(file), source.read());
                     } catch (Exception error) {
                         failed(file, error);
                         return;
@@ -182,7 +181,7 @@ public final class FileActions {
                         try (InputStream in = new FileInputStream(path);
                                 OutputStream out =
                                         host.getContentResolver().openOutputStream(target)) {
-                            OpenedFiles.copy(in, out);
+                            OpenedCopies.copy(in, out);
                         }
                     } catch (Exception error) {
                         Log.w("pimalaya", "file not exported: " + path, error);

@@ -1,4 +1,4 @@
-package org.pimalaya.ui;
+package org.pimalaya.filter;
 
 import android.content.res.ColorStateList;
 import android.util.TypedValue;

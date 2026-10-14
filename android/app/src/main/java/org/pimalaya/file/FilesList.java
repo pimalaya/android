@@ -20,12 +20,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import org.pimalaya.MainActivity;
-import org.pimalaya.OpenedFiles;
 import org.pimalaya.R;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
-import org.pimalaya.mail.MailStore;
-import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.CardSections;
@@ -366,11 +363,11 @@ public final class FilesList {
         actions.add(() -> host.fileActions.export(file, bytes));
         if (row.origin != null) {
             labels.add(host.getString(R.string.files_show_message));
-            actions.add(() -> showMessage(row.origin));
+            actions.add(() -> host.messageView.openOrigin(row.origin));
         }
         labels.add(host.getString(R.string.linked_title));
         actions.add(
-                () -> host.linked.dialog(ItemLinks.ofFile(file), host.fileActions.label(file)));
+                () -> host.linked.dialog(FileStore.endpointOf(file), host.fileActions.label(file)));
         if (!row.attachment()) {
             labels.add(host.getString(R.string.files_delete));
             actions.add(() -> confirmDelete(file));
@@ -393,31 +390,7 @@ public final class FilesList {
         if (saved != null) {
             return saved;
         }
-        MailStore.StoredMessage message =
-                row.origin == null
-                        ? null
-                        : host.mail.message(row.origin.collection, row.origin.linkId);
-        if (message == null || row.file.part == null) {
-            throw new IllegalStateException(host.getString(R.string.files_no_message));
-        }
-        return host.messageView.fileOf(message, row.file);
-    }
-
-    /** Opens the message a file came from in the reader. */
-    private void showMessage(FileStore.Origin origin) {
-        host.io.execute(
-                () -> {
-                    MailStore.StoredMessage message =
-                            host.mail.message(origin.collection, origin.linkId);
-                    host.postAlive(
-                            () -> {
-                                if (message == null) {
-                                    host.toast(host.getString(R.string.files_no_message));
-                                } else {
-                                    host.messageView.open(message);
-                                }
-                            });
-                });
+        return host.messageView.fileOf(row.origin, row.file);
     }
 
     /** Deletes a folder's copy of a file, once confirmed. */
@@ -552,7 +525,7 @@ public final class FilesList {
                             if (in == null) {
                                 throw new java.io.IOException("Unreadable " + source);
                             }
-                            OpenedFiles.copy(in, out);
+                            OpenedCopies.copy(in, out);
                         }
                         host.files.importFile(
                                 folder.id,

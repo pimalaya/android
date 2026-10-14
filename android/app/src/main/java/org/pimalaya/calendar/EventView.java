@@ -28,7 +28,6 @@ import org.pimalaya.client.EventSplit;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.ui.Dates;
 import org.pimalaya.ui.Sections;
@@ -542,7 +541,7 @@ public final class EventView {
         people();
         origin();
         if (!creating) {
-            host.linked.section(sections, ItemLinks.ofEvent(event), this::render);
+            host.linked.section(sections, EventStore.endpointOf(event), this::render);
         }
 
         host.updateBarTitle(title());

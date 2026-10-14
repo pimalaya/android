@@ -5,10 +5,7 @@ import android.database.Cursor;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONArray;
-import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.PimdirSql;
-import org.pimalaya.file.FileStore;
-import org.pimalaya.mail.MailStore;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -19,12 +16,13 @@ import java.util.Map;
 /**
  * References between items (pimdir STORAGE section 14.2), as the item pages
  * read and write them: what an item links to and is linked from, a person's
- * link added or any link removed, and a search across the four kinds for an
- * item to link to.
+ * link added or any link removed, and a search across contacts, calendars
+ * and files for an item to link to (messages are the mail store's).
  *
- * <p>Which item stands for which endpoint is decided here and nowhere else
- * ({@link #ofMessage} and its siblings), so a rule about which keys may be
- * referenced (none under a writer-derived key) is one change.
+ * <p>Which key may stand for an endpoint is decided here and nowhere else
+ * ({@link #of}, which the stores' {@code endpointOf} call), so a rule about
+ * which keys may be referenced (none under a writer-derived key) is one
+ * change.
  */
 public final class ItemLinks {
     /** The role a person's link takes. */
@@ -34,14 +32,12 @@ public final class ItemLinks {
     static final String USER = "user";
 
     /** How many results each kind gives a search. */
-    private static final int FOUND = 10;
+    public static final int FOUND = 10;
 
-    private final Context context;
     private final PimdirDb store;
     private final PimdirCollections collections;
 
     public ItemLinks(Context context, PimdirDb store) {
-        this.context = context;
         this.store = store;
         this.collections = new PimdirCollections(store, context);
     }
@@ -71,7 +67,8 @@ public final class ItemLinks {
         /** A second line: a message's sender; empty for the rest. */
         public final String detail;
 
-        Placement(Endpoint endpoint, String collection, long seq, String title, String detail) {
+        public Placement(
+                Endpoint endpoint, String collection, long seq, String title, String detail) {
             this.endpoint = endpoint;
             this.collection = collection;
             this.seq = seq;
@@ -103,29 +100,16 @@ public final class ItemLinks {
         }
     }
 
-    /** A message's endpoint; null for one still in an outbox, which is no item. */
-    public static Endpoint ofMessage(MailStore.StoredMessage message) {
-        return message.pending ? null : endpoint(PimdirSummary.MAIL, message.id);
-    }
-
     /** A card's endpoint, by the key its replicas share. */
     public static Endpoint ofContact(String linkId) {
-        return endpoint(PimdirSummary.CONTACT, linkId);
-    }
-
-    public static Endpoint ofEvent(EventStore.StoredEvent event) {
-        return endpoint(PimdirSummary.CALENDAR, event.id);
-    }
-
-    public static Endpoint ofFile(FileStore.StoredFile file) {
-        return endpoint(PimdirSummary.FILE, file.linkId);
+        return of(PimdirSummary.CONTACT, linkId);
     }
 
     /**
      * An endpoint, or null when its key may not be referenced: a
      * writer-derived key names no identity (STORAGE sections 9.1, 14.2).
      */
-    private static Endpoint endpoint(String kind, String linkId) {
+    public static Endpoint of(String kind, String linkId) {
         return linkId == null || linkId.isEmpty() || derived(linkId)
                 ? null
                 : new Endpoint(kind, linkId);
@@ -258,34 +242,15 @@ public final class ItemLinks {
     }
 
     /**
-     * Items whose title holds {@code words}, a few of each kind: messages
-     * through the mail search, contacts by name or address, calendar
-     * resources by summary, files by name.
+     * Items whose title holds {@code words}, a few of each kind: contacts by
+     * name or address, calendar resources by summary, files by name.
+     * Messages come from the mail search ({@code MailStore.linkPlacements}).
      */
     public List<Placement> search(String words) {
         Map<String, Placement> found = new LinkedHashMap<>();
         if (words.trim().isEmpty()) {
             return new ArrayList<>();
         }
-
-        MailStore mail = new MailStore(context, store);
-        MailStore.Query query = mail.query((account, collection) -> true, false, false, words);
-        for (MailStore.StoredMessage message : mail.page(query, null, 0, FOUND)) {
-            Endpoint endpoint = ofMessage(message);
-            if (endpoint != null) {
-                found.putIfAbsent(
-                        key(endpoint),
-                        new Placement(
-                                endpoint,
-                                message.collection,
-                                message.seq,
-                                message.subject,
-                                message.fromName.isEmpty()
-                                        ? message.fromAddress
-                                        : message.fromName));
-            }
-        }
-
         SQLiteDatabase db = store.getReadableDatabase();
         String pattern = PimdirDb.likePattern(words);
         search(db, PimdirSummary.CONTACT, "SEARCH_CONTACTS", 8, pattern, found);
@@ -316,7 +281,7 @@ public final class ItemLinks {
         values.put("limit", FOUND);
         try (Cursor cursor = read(db, statement, values)) {
             while (cursor.moveToNext()) {
-                Endpoint endpoint = endpoint(kind, cursor.getString(2));
+                Endpoint endpoint = of(kind, cursor.getString(2));
                 if (endpoint != null) {
                     found.putIfAbsent(
                             key(endpoint),

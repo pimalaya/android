@@ -73,6 +73,9 @@ import org.pimalaya.contact.VcfTransfer;
 import org.pimalaya.file.FileActions;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.file.FilesList;
+import org.pimalaya.file.OpenedCopies;
+import org.pimalaya.filter.FilterPage;
+import org.pimalaya.link.LinkedSection;
 import org.pimalaya.mail.MailBodies;
 import org.pimalaya.mail.MailEngine;
 import org.pimalaya.mail.MailFill;
@@ -87,7 +90,6 @@ import org.pimalaya.mail.MessageCompose;
 import org.pimalaya.mail.MessageView;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
-import org.pimalaya.pimdir.CacheSweep;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -105,10 +107,8 @@ import org.pimalaya.sync.SyncLock;
 import org.pimalaya.sync.SyncRunner;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.sync.SyncSteps;
+import org.pimalaya.trash.DeletedItemsPage;
 import org.pimalaya.ui.Avatar;
-import org.pimalaya.ui.DeletedItemsPage;
-import org.pimalaya.ui.FilterPage;
-import org.pimalaya.ui.LinkedSection;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.SyncDock;
 import org.pimalaya.ui.Ui;
@@ -451,7 +451,7 @@ public class MainActivity extends Activity {
         } else {
             // NOTE: the copies handed to other apps are read while they show
             // them; a fresh start is when none is shown any more.
-            io.execute(() -> OpenedFiles.clear(this));
+            io.execute(() -> OpenedCopies.clear(this));
         }
         io.execute(() -> CacheSweep.run(this, System.currentTimeMillis()));
         mailList.setUp();

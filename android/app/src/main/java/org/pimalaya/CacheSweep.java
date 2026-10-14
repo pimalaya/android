@@ -1,4 +1,4 @@
-package org.pimalaya.pimdir;
+package org.pimalaya;
 
 import android.content.Context;
 
@@ -15,14 +15,14 @@ import org.pimalaya.mail.MailEngine;
  * start, only what is older than any run could be ({@link #AGE}), so a
  * background run writing beside the app keeps its own.
  */
-public final class CacheSweep {
+final class CacheSweep {
     private CacheSweep() {}
 
     /** How old a leftover is before it is removed. */
-    public static final long AGE = TimeUnit.HOURS.toMillis(1);
+    static final long AGE = TimeUnit.HOURS.toMillis(1);
 
     /** Removes the leftovers older than {@link #AGE} at {@code now}. */
-    public static void run(Context context, long now) {
+    static void run(Context context, long now) {
         File cache = context.getCacheDir();
         File[] sources = new File(cache, MailEngine.SCRATCH).listFiles();
         for (int index = 0; sources != null && index < sources.length; index++) {

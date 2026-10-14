@@ -1,4 +1,4 @@
-package org.pimalaya.ui;
+package org.pimalaya.link;
 
 import android.app.AlertDialog;
 import android.content.res.ColorStateList;
@@ -22,6 +22,7 @@ import org.pimalaya.contact.Group;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirSummary;
+import org.pimalaya.ui.Sections;
 
 /**
  * An item's links made visible (plan C.5): a Linked card listing what the
@@ -297,7 +298,9 @@ public final class LinkedSection {
             Runnable refresh) {
         run(
                 () -> {
-                    List<ItemLinks.Placement> found = host.links.search(words);
+                    List<ItemLinks.Placement> found =
+                            host.mail.linkPlacements(words, ItemLinks.FOUND);
+                    found.addAll(host.links.search(words));
                     host.postAlive(
                             () -> {
                                 if (!dialog.isShowing()) {

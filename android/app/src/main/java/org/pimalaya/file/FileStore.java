@@ -6,7 +6,6 @@ import android.database.Cursor;
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.OpenedFiles;
 import org.pimalaya.R;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.client.MessageBody;
@@ -105,12 +104,16 @@ public final class FileStore {
         }
     }
 
-    /** Where a file came from: the message referencing it, and who sent it. */
-    static final class Origin {
-        /** The message's mailbox, a live placement of it. */
-        final String collection;
+    public static ItemLinks.Endpoint endpointOf(StoredFile file) {
+        return ItemLinks.of(PimdirSummary.FILE, file.linkId);
+    }
 
-        final String linkId;
+    /** Where a file came from: the message referencing it, and who sent it. */
+    public static final class Origin {
+        /** The message's mailbox, a live placement of it. */
+        public final String collection;
+
+        public final String linkId;
 
         /** The sender's address, empty when unknown. */
         final String sender;
@@ -530,7 +533,7 @@ public final class FileStore {
      */
     public void forget(String accountId) {
         dropCollection(attachmentsOf(accountId));
-        OpenedFiles.clear(context);
+        OpenedCopies.clear(context);
     }
 
     /**

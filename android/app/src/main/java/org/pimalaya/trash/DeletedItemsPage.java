@@ -1,4 +1,4 @@
-package org.pimalaya.ui;
+package org.pimalaya.trash;
 
 import android.app.AlertDialog;
 import android.text.format.DateUtils;
