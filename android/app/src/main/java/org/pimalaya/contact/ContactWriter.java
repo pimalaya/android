@@ -12,6 +12,7 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.Cards;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.PimdirStorage;
 
 /**
  * The contact save fan-out behind the edit form: it reads the form
@@ -115,7 +116,7 @@ public final class ContactWriter {
             }
             engine.mutateEdit(
                     entry.book.url,
-                    CardStore.rowHandle(entry.card.uri, entry.card.id),
+                    PimdirStorage.rowHandle(entry.card.uri, entry.card.id),
                     vcard);
         }
     }
@@ -133,7 +134,7 @@ public final class ContactWriter {
         new ContactEngine(host.base, host.pimdir, host.client, null, null, null)
                 .mutateEdit(
                         replica.book.url,
-                        CardStore.rowHandle(replica.card.uri, replica.card.id),
+                        PimdirStorage.rowHandle(replica.card.uri, replica.card.id),
                         resolved);
     }
 
@@ -150,7 +151,7 @@ public final class ContactWriter {
             new ContactEngine(host.base, host.pimdir, host.client, null, null, null)
                     .mutateEdit(
                             survivor.book.url,
-                            CardStore.rowHandle(survivor.card.uri, survivor.card.id),
+                            PimdirStorage.rowHandle(survivor.card.uri, survivor.card.id),
                             vcard);
         }
 

@@ -7,7 +7,6 @@ import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.PimdirSql;
-import org.pimalaya.mail.MailStore;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -39,6 +38,24 @@ import java.util.Set;
  * them for exactly that reason.
  */
 public final class PimdirCollections {
+    /**
+     * The name of the collection a Gmail account files every message its
+     * account-wide step brings in, beside the mailboxes its labels name.
+     *
+     * <p>Gmail's All Mail, kept under the hood: a message filed under no
+     * mailbox label (archived) is stored in it alone, so the store holds
+     * every message a step read and no step reads one twice. It is never
+     * shown ({@link PimdirCollections#list}), and a control character, like
+     * the outbox, so no mailbox a server lists can collide with it.
+     */
+    public static final String ALL_MAIL = "\u0001all";
+
+    /** The collection name an account's stand-ins are filed under. */
+    public static final String ATTACHMENTS = "\u0001attachments";
+
+    /** The role an attachments collection carries (STORAGE section 14). */
+    public static final String ATTACHMENTS_ROLE = "attachments";
+
     /** Where the collections the user may not write into are kept, by id. */
     private static final String READ_ONLY_PREFS = "collections-read-only";
 
@@ -171,13 +188,13 @@ public final class PimdirCollections {
      * <p>A collection whose account this device no longer knows keeps its store
      * id as its address, so it stays visible rather than silently dropping out
      * of a listing that is meant to show everything. A Gmail account's All
-     * Mail ({@link MailStore#ALL_MAIL}) is never listed: it is the store's
+     * Mail ({@link #ALL_MAIL}) is never listed: it is the store's
      * own, for what a step already read, and no list, filter or chip shows
      * it ({@link #listAll}).
      */
     public List<Stored> list(String kind) {
         List<Stored> shown = listAll(kind);
-        shown.removeIf(stored -> MailStore.ALL_MAIL.equals(stored.name));
+        shown.removeIf(stored -> ALL_MAIL.equals(stored.name));
         return shown;
     }
 

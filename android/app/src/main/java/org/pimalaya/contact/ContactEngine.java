@@ -28,7 +28,7 @@ import org.pimalaya.client.Transport;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
-import org.pimalaya.sync.PimdirEngine;
+import org.pimalaya.pimdir.PimdirEngine;
 
 /**
  * One account's offline driver: the Rust bridge runs the engine's

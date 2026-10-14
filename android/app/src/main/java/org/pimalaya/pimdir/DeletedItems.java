@@ -9,9 +9,6 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.PimdirSql;
-import org.pimalaya.mail.MailEngine;
-import org.pimalaya.mail.MailStore;
-import org.pimalaya.sync.PimdirEngine;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -305,7 +302,7 @@ public final class DeletedItems {
                 target,
                 linkId,
                 body,
-                MailEngine.withFlag(flagsOf(row), MailEngine.DELETED, false),
+                PimdirEngine.withFlag(flagsOf(row), PimdirEngine.DELETED, false),
                 derived.optJSONObject("summary"),
                 sortKey.isEmpty() ? row.sortKey : sortKey);
     }
@@ -342,7 +339,7 @@ public final class DeletedItems {
      * many items went.
      *
      * <p>The pins are recounted by the collector rather than read back off
-     * the statement's {@code RETURNING} ({@link MailStore#changed}): a purge
+     * the statement's {@code RETURNING} ({@link PimdirDb#changed}): a purge
      * of more rows than a cursor window holds would run again on its refill.
      */
     public int purgeBefore(String cutoff) {
@@ -352,7 +349,7 @@ public final class DeletedItems {
         try {
             Map<String, Object> values = new HashMap<>();
             values.put("cutoff", cutoff);
-            purged = MailStore.changed(db, PimdirSql.bind("PURGE_RETAINED_BEFORE", values));
+            purged = PimdirDb.changed(db, PimdirSql.bind("PURGE_RETAINED_BEFORE", values));
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
@@ -395,7 +392,7 @@ public final class DeletedItems {
 
     private static Cursor query(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
-        return MailStore.typed(db, bound.sql, bound.args);
+        return PimdirDb.typed(db, bound.sql, bound.args);
     }
 
     private static void exec(SQLiteDatabase db, String name, Map<String, Object> values) {

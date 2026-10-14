@@ -5,19 +5,22 @@ import android.database.Cursor;
 import android.database.SQLException;
 import android.util.Log;
 
+import io.requery.android.database.sqlite.SQLiteCursor;
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import io.requery.android.database.sqlite.SQLiteOpenHelper;
+import io.requery.android.database.sqlite.SQLiteProgram;
+import io.requery.android.database.sqlite.SQLiteStatement;
 import org.pimalaya.client.PimdirSql;
-import org.pimalaya.file.FileStore;
-import org.pimalaya.mail.MailStore;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * The pimdir store's database, on the SQLite the app bundles.
@@ -254,7 +257,37 @@ public final class PimdirDb extends SQLiteOpenHelper {
         if (invitations) {
             backfillReferences(db, blobs);
         }
-        FileStore.reconcileRoles(db);
+        reconcileRoles(db);
+    }
+
+    /**
+     * Gives the role to the attachments collections a store written before
+     * the role holds, found by the id this class files them under; once, on
+     * open, after the role's constraint takes it.
+     */
+    private static void reconcileRoles(SQLiteDatabase db) {
+        List<String> missing = new ArrayList<>();
+        String sql = PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0];
+        try (Cursor cursor = db.rawQuery(sql, null)) {
+            while (cursor.moveToNext()) {
+                String id = cursor.getString(0);
+                if (PimdirSummary.FILE.equals(cursor.getString(2)) && cursor.isNull(9)
+                        && id.endsWith(PimdirAccount.SEPARATOR + PimdirCollections.ATTACHMENTS)) {
+                    missing.add(id);
+                }
+            }
+        }
+        for (String id : missing) {
+            setRole(db, id);
+        }
+    }
+
+    public static void setRole(SQLiteDatabase db, String collection) {
+        Map<String, Object> values = new HashMap<>();
+        values.put("collection", collection);
+        values.put("role", PimdirCollections.ATTACHMENTS_ROLE);
+        PimdirSql.Bound bound = PimdirSql.bind("SET_COLLECTION_ROLE", values);
+        db.execSQL(bound.sql, bound.args);
     }
 
     /**
@@ -336,7 +369,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
                 PimdirSql.Bound bound = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
                 List<String[]> held = new ArrayList<>();
                 int read = 0;
-                try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+                try (Cursor cursor = typed(db, bound.sql, bound.args)) {
                     while (cursor.moveToNext()) {
                         read++;
                         if (!cursor.isNull(4)) {
@@ -566,5 +599,81 @@ public final class PimdirDb extends SQLiteOpenHelper {
             db.execSQL("DROP TABLE IF EXISTS " + table);
         }
         migrate(db, 0);
+    }
+
+    /**
+     * The {@code LIKE} pattern {@code search_mail} matches: the words as
+     * typed, {@code %} around them, a literal {@code %}, {@code _} or
+     * {@code \} escaped with {@code \}, as io-pimdir's own reader builds it
+     * ({@code reader::like_pattern}).
+     */
+    public static String likePattern(String words) {
+        StringBuilder pattern = new StringBuilder("%");
+        for (char character : words.trim().toCharArray()) {
+            if (character == '%' || character == '_' || character == '\\') {
+                pattern.append('\\');
+            }
+            pattern.append(character);
+        }
+        return pattern.append('%').toString();
+    }
+
+    /**
+     * Runs a read binding each value as its own type.
+     *
+     * <p>{@code rawQuery} binds every argument as text, and the readers
+     * compare a chip against an expression with no column affinity
+     * ({@code :seen = EXISTS (...)}), where the text {@code '1'} is never the
+     * integer {@code 1}: the unread chip would match nothing.
+     */
+    public static Cursor typed(SQLiteDatabase db, String sql, Object[] args) {
+        return db.rawQueryWithFactory(
+                (database, driver, table, query) -> {
+                    bind(query, args);
+                    return new SQLiteCursor(driver, table, query);
+                },
+                sql,
+                null,
+                null);
+    }
+
+    /**
+     * Runs a canonical write for its effect alone, answering how many rows
+     * it changed ({@code changes()}), its {@code RETURNING} clause dropped.
+     *
+     * <p>Never read a write through a cursor: a cursor runs its statement
+     * again each time it refills its window (2 MB), skipping the rows it
+     * already handed out, so a {@code DELETE ... RETURNING} past one window
+     * deletes again from the top and its rows past the first window come
+     * back as none, or never end.
+     */
+    public static int changed(SQLiteDatabase db, PimdirSql.Bound bound) {
+        String sql = RETURNING.matcher(bound.sql).replaceFirst("");
+        try (SQLiteStatement statement = db.compileStatement(sql)) {
+            bind(statement, bound.args);
+            return statement.executeUpdateDelete();
+        }
+    }
+
+    /** A trailing {@code RETURNING} clause, which {@link #changed} drops. */
+    private static final Pattern RETURNING =
+            Pattern.compile("\\s+RETURNING\\s[^;]*;?\\s*$", Pattern.CASE_INSENSITIVE);
+
+    private static void bind(SQLiteProgram query, Object[] args) {
+        for (int index = 0; index < args.length; index++) {
+            Object value = args[index];
+            int position = index + 1;
+            if (value == null) {
+                query.bindNull(position);
+            } else if (value instanceof Number) {
+                query.bindLong(position, ((Number) value).longValue());
+            } else if (value instanceof Boolean) {
+                query.bindLong(position, ((Boolean) value) ? 1 : 0);
+            } else if (value instanceof byte[]) {
+                query.bindBlob(position, (byte[]) value);
+            } else {
+                query.bindString(position, value.toString());
+            }
+        }
     }
 }

@@ -1,4 +1,4 @@
-package org.pimalaya.mail;
+package org.pimalaya.pimdir;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;

@@ -99,7 +99,7 @@ import org.pimalaya.setup.OauthFlow;
 import org.pimalaya.setup.OnboardingFlow;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
-import org.pimalaya.sync.PimdirEngine;
+import org.pimalaya.pimdir.PimdirEngine;
 import org.pimalaya.sync.RemotePass;
 import org.pimalaya.sync.SyncLock;
 import org.pimalaya.sync.SyncRunner;
@@ -3174,7 +3174,7 @@ public class MainActivity extends Activity {
         }
 
         String handle =
-                CardStore.rowHandle(replica.card.uri, replica.card.id);
+                PimdirStorage.rowHandle(replica.card.uri, replica.card.id);
         JSONObject bodies;
         JSONObject resolution;
         try {

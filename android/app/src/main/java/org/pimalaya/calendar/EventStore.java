@@ -8,7 +8,6 @@ import org.json.JSONObject;
 
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.Event;
-import org.pimalaya.contact.CardStore;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -211,7 +210,7 @@ public final class EventStore {
                         new StoredEvent(
                                 cursor.getString(0),
                                 id,
-                                CardStore.rowHandle(cursor.isNull(4) ? null : cursor.getString(4), id),
+                                PimdirStorage.rowHandle(cursor.isNull(4) ? null : cursor.getString(4), id),
                                 items.body(cursor.getString(2)),
                                 cursor.isNull(3) ? "" : cursor.getString(3),
                                 conflicted.contains(cursor.getString(0) + "\n" + id)));

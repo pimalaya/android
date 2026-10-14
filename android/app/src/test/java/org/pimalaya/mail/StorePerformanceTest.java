@@ -247,7 +247,7 @@ public class StorePerformanceTest {
         values.put("before", "2002-01-01T00:00:00Z");
         PimdirSql.Bound bound = PimdirSql.bind("COLLECT_BEFORE", values);
         assertTrue("the canonical statement returns its rows", bound.sql.contains("RETURNING"));
-        assertEquals(3, MailStore.changed(db, bound));
+        assertEquals(3, PimdirDb.changed(db, bound));
         assertEquals(0, scalar("SELECT count(*) FROM items"));
     }
 
@@ -256,7 +256,7 @@ public class StorePerformanceTest {
     /** EXPLAIN QUERY PLAN of a bound read, its steps joined. */
     private String plan(PimdirSql.Bound bound) {
         StringBuilder plan = new StringBuilder();
-        try (Cursor cursor = MailStore.typed(db, "EXPLAIN QUERY PLAN " + bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(db, "EXPLAIN QUERY PLAN " + bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
                 plan.append(cursor.getString(3)).append('\n');
             }

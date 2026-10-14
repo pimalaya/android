@@ -19,7 +19,6 @@ import org.pimalaya.calendar.CalendarRows;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.Transport;
 import org.pimalaya.client.OauthTokens;
 import org.pimalaya.contact.BookEntry;
@@ -28,6 +27,7 @@ import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirEngine;
 import org.pimalaya.pimdir.PimdirSummary;
 
 /**
@@ -180,7 +180,7 @@ public final class SyncRunner {
                         entry.email, entry.server(PimDomain.CONTACTS), group.getValue(), outcome);
                 SyncStamps.mark(context, entry.email);
             } catch (Exception error) {
-                if (expiredToken(error) && contacts.renewable()) {
+                if (PimdirEngine.expiredToken(error) && contacts.renewable()) {
                     try {
                         syncAccount(entry.email, refresh(entry), group.getValue(), outcome);
                         SyncStamps.mark(context, entry.email);
@@ -274,7 +274,7 @@ public final class SyncRunner {
             } catch (Exception error) {
                 // NOTE: a 401 is the pass's to refresh on, anything else
                 // leaves the books as last stated.
-                if (expiredToken(error)) {
+                if (PimdirEngine.expiredToken(error)) {
                     throw error;
                 }
                 Log.w("pimalaya", "addressbook roles failed for " + AccountEntry.redacted(email), error);
@@ -384,7 +384,7 @@ public final class SyncRunner {
             try {
                 return call.on(used.server(domain));
             } catch (Exception error) {
-                if (!expiredToken(error) || !used.credential(domain).renewable()) {
+                if (!PimdirEngine.expiredToken(error) || !used.credential(domain).renewable()) {
                     throw error;
                 }
                 return call.on(renewedSince(used).server(domain));
@@ -428,11 +428,5 @@ public final class SyncRunner {
             }
         }
         return null;
-    }
-
-    /** True for an HTTP 401 from any backend (expired or revoked token). */
-    public static boolean expiredToken(Exception error) {
-        return error instanceof PimalayaException
-                && Integer.valueOf(401).equals(((PimalayaException) error).status);
     }
 }

@@ -124,6 +124,20 @@ public final class PimdirStorage {
     }
 
     /**
+     * A row's engine handle: the resource name its source binds it under,
+     * else the provisional handle a staged create waits under (SYNC §2).
+     *
+     * <p>Never a guess at the name the server will hand out: the handle is how
+     * the engine addresses the placement, and a create has no server name yet
+     * by definition. What it will be pushed as is
+     * {@link #resourceName(String, String)}, and what the binding ends up
+     * holding is whatever the push assigns.
+     */
+    public static String rowHandle(String uri, String id) {
+        return uri != null && !uri.isEmpty() ? uri : PimdirStorage.provisionalOf(id);
+    }
+
+    /**
      * The name behind an engine handle: the identity for a staged create, the
      * handle itself for a member a source already binds.
      *

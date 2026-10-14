@@ -7,7 +7,6 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.PimdirSql;
-import org.pimalaya.mail.MailDate;
 
 import java.util.Iterator;
 import java.util.LinkedHashMap;

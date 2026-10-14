@@ -1,6 +1,7 @@
-package org.pimalaya.sync;
+package org.pimalaya.pimdir;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
@@ -13,9 +14,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.pimdir.PimdirDb;
-import org.pimalaya.pimdir.PimdirHash;
-import org.pimalaya.pimdir.PimdirItems;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -221,5 +219,32 @@ public class PimdirEngineTest {
                         download + ": 128 of 130",
                         download + ": 130 of 130"),
                 told);
+    }
+
+    @Test
+    public void aLargeProjectionTellsOncePerPercent() {
+        int told = 0;
+        for (int done = 1; done <= 1000; done++) {
+            if (PimdirEngine.tells(done, 1000)) {
+                told += 1;
+            }
+        }
+        assertEquals(100, told);
+        assertFalse(PimdirEngine.tells(9, 1000));
+        assertTrue(PimdirEngine.tells(10, 1000));
+        assertTrue(PimdirEngine.tells(1000, 1000));
+    }
+
+    @Test
+    public void aSmallStepTellsEveryItem() {
+        for (int done = 1; done <= 3; done++) {
+            assertTrue(PimdirEngine.tells(done, 3));
+        }
+    }
+
+    @Test
+    public void nothingCountedIsNeverTold() {
+        assertFalse(PimdirEngine.tells(0, 10));
+        assertFalse(PimdirEngine.tells(1, 0));
     }
 }

@@ -5,11 +5,8 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.util.Log;
 
-import io.requery.android.database.sqlite.SQLiteCursor;
 import io.requery.android.database.sqlite.SQLiteDatabase;
-import io.requery.android.database.sqlite.SQLiteProgram;
 import io.requery.android.database.sqlite.SQLiteQuery;
-import io.requery.android.database.sqlite.SQLiteStatement;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -34,7 +31,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiPredicate;
-import java.util.regex.Pattern;
 
 /**
  * The mail side of the pimdir store: mailboxes as collections of kind
@@ -78,18 +74,6 @@ public final class MailStore {
      * addresses.
      */
     private static final String OUTBOX = "\u0001outbox";
-
-    /**
-     * The name of the collection a Gmail account files every message its
-     * account-wide step brings in, beside the mailboxes its labels name.
-     *
-     * <p>Gmail's All Mail, kept under the hood: a message filed under no
-     * mailbox label (archived) is stored in it alone, so the store holds
-     * every message a step read and no step reads one twice. It is never
-     * shown ({@link PimdirCollections#list}), and a control character, like
-     * the outbox, so no mailbox a server lists can collide with it.
-     */
-    public static final String ALL_MAIL = "\u0001all";
 
     /** Which accounts keep an All Mail collection (Gmail), by account id. */
     private static final String ALL_MAIL_PREFS = "mail-all-mail";
@@ -182,7 +166,7 @@ public final class MailStore {
         if (keepsAllMail(context, account)) {
             listed.addAll(
                     MailEngine.collectionsOf(
-                            accountEmail, account, List.of(new Mailbox(ALL_MAIL, null))));
+                            accountEmail, account, List.of(new Mailbox(PimdirCollections.ALL_MAIL, null))));
         }
 
         collections.replace(accountEmail, PimdirSummary.MAIL, listed);
@@ -277,7 +261,7 @@ public final class MailStore {
         prefs.apply();
     }
 
-    /** Remembers whether an account keeps an All Mail collection ({@link #ALL_MAIL}). */
+    /** Remembers whether an account keeps an All Mail collection ({@link PimdirCollections#ALL_MAIL}). */
     static void markAllMail(Context context, String accountId, boolean allMail) {
         SharedPreferences.Editor prefs =
                 context.getSharedPreferences(ALL_MAIL_PREFS, Context.MODE_PRIVATE).edit();
@@ -297,7 +281,7 @@ public final class MailStore {
 
     /** An account's All Mail collection, which it holds only if it keeps one. */
     public static String allMailOf(String accountId) {
-        return PimdirAccount.collectionId(accountId, ALL_MAIL);
+        return PimdirAccount.collectionId(accountId, PimdirCollections.ALL_MAIL);
     }
 
     /**
@@ -307,7 +291,7 @@ public final class MailStore {
     public void ensureAllMail(String accountEmail) {
         String account = accounts.idOf(accountEmail);
         markAllMail(context, account, true);
-        collections.ensure(allMailOf(account), accountEmail, PimdirSummary.MAIL, ALL_MAIL);
+        collections.ensure(allMailOf(account), accountEmail, PimdirSummary.MAIL, PimdirCollections.ALL_MAIL);
     }
 
     /** Whether an account's mailboxes are listed account-wide ({@link #markAccountWide}). */
@@ -974,25 +958,8 @@ public final class MailStore {
                 ids,
                 unreadOnly ? 0 : null,
                 attachmentsOnly ? 1 : null,
-                trimmed.isEmpty() ? null : likePattern(trimmed),
+                trimmed.isEmpty() ? null : PimdirDb.likePattern(trimmed),
                 hidden);
-    }
-
-    /**
-     * The {@code LIKE} pattern {@code search_mail} matches: the words as
-     * typed, {@code %} around them, a literal {@code %}, {@code _} or
-     * {@code \} escaped with {@code \}, as io-pimdir's own reader builds it
-     * ({@code reader::like_pattern}).
-     */
-    public static String likePattern(String words) {
-        StringBuilder pattern = new StringBuilder("%");
-        for (char character : words.trim().toCharArray()) {
-            if (character == '%' || character == '_' || character == '\\') {
-                pattern.append('\\');
-            }
-            pattern.append(character);
-        }
-        return pattern.append('%').toString();
     }
 
     /**
@@ -1009,7 +976,7 @@ public final class MailStore {
         PimdirSql.Bound bound = query.pattern == null && query.hidden == null
                 ? unjoined(PimdirSql.bind("COUNT_MAIL", query.values(null, -1)), query.attachment)
                 : around("SELECT count(*) FROM (", listed(query), ")");
-        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
             return cursor.moveToFirst() ? cursor.getLong(0) : 0;
         }
     }
@@ -1058,7 +1025,7 @@ public final class MailStore {
                             + " GROUP BY day ORDER BY day DESC",
                     args);
         }
-        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
                 days.add(new Day(cursor.isNull(0) ? null : cursor.getString(0), cursor.getLong(1)));
             }
@@ -1080,7 +1047,7 @@ public final class MailStore {
         values.put("since", query.since);
         PimdirSql.Bound bound = unjoined(PimdirSql.bind("COUNT_UNREAD", values), null);
         long unread = 0;
-        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
                 unread += cursor.getLong(1);
             }
@@ -1121,7 +1088,7 @@ public final class MailStore {
         values.put("until", until);
         values.put("held", held);
         PimdirSql.Bound bound = PimdirSql.bind("SUM_MAIL", values);
-        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
             return cursor.moveToFirst()
                     ? new Sum(cursor.getLong(0), cursor.getLong(1), cursor.getLong(2))
                     : new Sum(0, 0, 0);
@@ -1146,7 +1113,7 @@ public final class MailStore {
         values.put("after_seq", Long.MIN_VALUE);
         values.put("after_collection", "");
         PimdirSql.Bound bound = below(PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values), floor);
-        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
                 if (!cursor.isNull(5) && !cursor.getString(5).isEmpty()) {
                     dates.add(cursor.getString(5));
@@ -1219,7 +1186,7 @@ public final class MailStore {
     private List<StoredMessage> rows(PimdirSql.Bound bound, int limit) {
         List<StoredMessage> messages = new ArrayList<>(limit);
         Map<String, PimdirCollections.Stored> mailboxes = mailboxes();
-        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
                 StoredMessage message = row(cursor, mailboxes);
                 if (message != null) {
@@ -1281,7 +1248,7 @@ public final class MailStore {
         key.put("collection", collection);
         key.put("link_id", linkId);
         PimdirSql.Bound bound = PimdirSql.bind("GET_MAIL_ROW", key);
-        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
             return cursor.moveToFirst() ? row(cursor, mailboxes()) : null;
         }
     }
@@ -1336,7 +1303,7 @@ public final class MailStore {
                             PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values),
                             (String) values.get("after_key"));
             int read = 0;
-            try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+            try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
                 while (cursor.moveToNext()) {
                     read++;
                     String sortKey = cursor.isNull(5) ? "" : cursor.getString(5);
@@ -1440,65 +1407,6 @@ public final class MailStore {
     }
 
     /**
-     * Runs a read binding each value as its own type.
-     *
-     * <p>{@code rawQuery} binds every argument as text, and the readers
-     * compare a chip against an expression with no column affinity
-     * ({@code :seen = EXISTS (...)}), where the text {@code '1'} is never the
-     * integer {@code 1}: the unread chip would match nothing.
-     */
-    public static Cursor typed(SQLiteDatabase db, String sql, Object[] args) {
-        return db.rawQueryWithFactory(
-                (database, driver, table, query) -> {
-                    bind(query, args);
-                    return new SQLiteCursor(driver, table, query);
-                },
-                sql,
-                null,
-                null);
-    }
-
-    /**
-     * Runs a canonical write for its effect alone, answering how many rows
-     * it changed ({@code changes()}), its {@code RETURNING} clause dropped.
-     *
-     * <p>Never read a write through a cursor: a cursor runs its statement
-     * again each time it refills its window (2 MB), skipping the rows it
-     * already handed out, so a {@code DELETE ... RETURNING} past one window
-     * deletes again from the top and its rows past the first window come
-     * back as none, or never end.
-     */
-    public static int changed(SQLiteDatabase db, PimdirSql.Bound bound) {
-        String sql = RETURNING.matcher(bound.sql).replaceFirst("");
-        try (SQLiteStatement statement = db.compileStatement(sql)) {
-            bind(statement, bound.args);
-            return statement.executeUpdateDelete();
-        }
-    }
-
-    /** A trailing {@code RETURNING} clause, which {@link #changed} drops. */
-    private static final Pattern RETURNING =
-            Pattern.compile("\\s+RETURNING\\s[^;]*;?\\s*$", Pattern.CASE_INSENSITIVE);
-
-    private static void bind(SQLiteProgram query, Object[] args) {
-        for (int index = 0; index < args.length; index++) {
-            Object value = args[index];
-            int position = index + 1;
-            if (value == null) {
-                query.bindNull(position);
-            } else if (value instanceof Number) {
-                query.bindLong(position, ((Number) value).longValue());
-            } else if (value instanceof Boolean) {
-                query.bindLong(position, ((Boolean) value) ? 1 : 0);
-            } else if (value instanceof byte[]) {
-                query.bindBlob(position, (byte[]) value);
-            } else {
-                query.bindString(position, value.toString());
-            }
-        }
-    }
-
-    /**
      * Restates one message's summary from its body once the body is in
      * (pimdir STORAGE Annex A.1): the attachment mark and the size the
      * listing read without it are replaced by the body's own, and the
@@ -1573,7 +1481,7 @@ public final class MailStore {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
         PimdirSql.Bound bound = PimdirSql.bind("LIST_COVERAGE", values);
-        try (Cursor cursor = typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
                 if (!PimdirStorage.SERVER.equals(cursor.getString(0))) {
                     continue;
@@ -1762,7 +1670,7 @@ public final class MailStore {
     public Map<String, String> roles() {
         Map<String, String> roles = new HashMap<>();
         String sql = PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0];
-        try (Cursor cursor = typed(items.readable(), sql, new Object[0])) {
+        try (Cursor cursor = PimdirDb.typed(items.readable(), sql, new Object[0])) {
             while (cursor.moveToNext()) {
                 if (!cursor.isNull(9)) {
                     roles.put(cursor.getString(0), cursor.getString(9));
@@ -1823,7 +1731,7 @@ public final class MailStore {
                 Map<String, Object> values = new HashMap<>();
                 values.put("collection", stored.id);
                 values.put("before", before);
-                collected += changed(db, PimdirSql.bind("COLLECT_BEFORE", values));
+                collected += PimdirDb.changed(db, PimdirSql.bind("COLLECT_BEFORE", values));
             }
             // NOTE: the cascade drops pins no statement returns, so the
             // counts are recomputed before the collector reads them.
@@ -1867,7 +1775,7 @@ public final class MailStore {
         try {
             PimdirSql.Bound bases = PimdirSql.bind("RELEASE_BASES_BEFORE", values);
             db.execSQL(bases.sql, bases.args);
-            released = changed(db, PimdirSql.bind("RELEASE_BEFORE", values));
+            released = PimdirDb.changed(db, PimdirSql.bind("RELEASE_BEFORE", values));
             db.execSQL(PimdirSql.split(PimdirSql.of("RECOMPUTE_REFCOUNTS"))[0]);
             items.collectGarbage(db);
             db.setTransactionSuccessful();

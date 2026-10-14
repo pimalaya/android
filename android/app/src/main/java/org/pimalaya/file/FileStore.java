@@ -11,7 +11,6 @@ import org.pimalaya.R;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimdirSql;
-import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -44,12 +43,6 @@ import java.util.Map;
  * id, so renaming it moves a label.
  */
 public final class FileStore {
-    /** The collection name an account's stand-ins are filed under. */
-    private static final String ATTACHMENTS = "\u0001attachments";
-
-    /** The role an attachments collection carries (STORAGE section 14). */
-    static final String ROLE = "attachments";
-
     /** The prefix of a folder's collection name, before its random part. */
     private static final String FOLDER = "folder:";
 
@@ -135,41 +128,12 @@ public final class FileStore {
 
     /** The collection one account's stand-ins are filed in. */
     public static String attachmentsOf(String accountId) {
-        return PimdirAccount.collectionId(accountId, ATTACHMENTS);
+        return PimdirAccount.collectionId(accountId, PimdirCollections.ATTACHMENTS);
     }
 
     /** Whether a file collection holds an account's attachments rather than being a folder. */
     static boolean isAttachments(PimdirCollections.Stored collection) {
-        return ROLE.equals(collection.role);
-    }
-
-    /**
-     * Gives the role to the attachments collections a store written before
-     * the role holds, found by the id this class files them under; once, on
-     * open, after the role's constraint takes it.
-     */
-    public static void reconcileRoles(SQLiteDatabase db) {
-        List<String> missing = new ArrayList<>();
-        String sql = PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0];
-        try (Cursor cursor = db.rawQuery(sql, null)) {
-            while (cursor.moveToNext()) {
-                String id = cursor.getString(0);
-                if (PimdirSummary.FILE.equals(cursor.getString(2)) && cursor.isNull(9)
-                        && id.endsWith(PimdirAccount.SEPARATOR + ATTACHMENTS)) {
-                    missing.add(id);
-                }
-            }
-        }
-        for (String id : missing) {
-            setRole(db, id);
-        }
-    }
-
-    private static void setRole(SQLiteDatabase db, String collection) {
-        Map<String, Object> values = new HashMap<>();
-        values.put("collection", collection);
-        values.put("role", ROLE);
-        exec(db, "SET_COLLECTION_ROLE", values);
+        return PimdirCollections.ATTACHMENTS_ROLE.equals(collection.role);
     }
 
     /**
@@ -207,8 +171,8 @@ public final class FileStore {
         db.beginTransaction();
         try {
             if (kindOf(db, collection) == null) {
-                declare(db, collection, accountId, ATTACHMENTS.substring(1));
-                setRole(db, collection);
+                declare(db, collection, accountId, PimdirCollections.ATTACHMENTS.substring(1));
+                PimdirDb.setRole(db, collection);
             }
             for (MessageBody.Attachment attachment : attachments) {
                 String linkId = partKey(messageLinkId, attachment.part);
@@ -244,7 +208,7 @@ public final class FileStore {
         values.put("link_id", messageLinkId);
         PimdirSql.Bound bound = PimdirSql.bind("LIST_ATTACHMENTS", values);
         List<StoredFile> attachments = new ArrayList<>();
-        try (Cursor cursor = MailStore.typed(items.readable(), bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
                 attachments.add(
                         new StoredFile(
@@ -289,7 +253,7 @@ public final class FileStore {
         while (true) {
             PimdirSql.Bound bound = PimdirSql.bind("LIST_ATTACHMENTS_BY_ACCOUNT", values);
             int read = 0;
-            try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+            try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
                 while (cursor.moveToNext()) {
                     read++;
                     values.put("after_key", cursor.getString(10));
@@ -324,7 +288,7 @@ public final class FileStore {
     /** The one text column a statement answers, null for no row or NULL. */
     private static String text(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
-        try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
             return cursor.moveToFirst() && !cursor.isNull(0) ? cursor.getString(0) : null;
         }
     }
@@ -340,7 +304,7 @@ public final class FileStore {
         while (true) {
             PimdirSql.Bound bound = PimdirSql.bind("LIST_FILES_PAGE_ASC", values);
             int read = 0;
-            try (Cursor cursor = MailStore.typed(items.readable(), bound.sql, bound.args)) {
+            try (Cursor cursor = PimdirDb.typed(items.readable(), bound.sql, bound.args)) {
                 while (cursor.moveToNext()) {
                     read++;
                     files.add(
@@ -375,7 +339,7 @@ public final class FileStore {
         values.put("link_id", fileLinkId);
         List<String> messages = new ArrayList<>();
         PimdirSql.Bound bound = PimdirSql.bind("REFERENCES_TO", values);
-        try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
                 if (PimdirSummary.MAIL.equals(cursor.getString(0))
                         && "attachment".equals(cursor.getString(4))) {
@@ -397,7 +361,7 @@ public final class FileStore {
         Map<String, Object> values = new HashMap<>();
         values.put("link_id", messageLinkId);
         PimdirSql.Bound bound = PimdirSql.bind("LIST_LINK_PLACEMENTS", values);
-        try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
             while (cursor.moveToNext()) {
                 String collection = cursor.getString(0);
                 if (!PimdirSummary.MAIL.equals(kindOf(db, collection))) {
@@ -407,7 +371,7 @@ public final class FileStore {
                 key.put("collection", collection);
                 key.put("seq", cursor.getLong(2));
                 PimdirSql.Bound mail = PimdirSql.bind("GET_MAIL", key);
-                try (Cursor row = MailStore.typed(db, mail.sql, mail.args)) {
+                try (Cursor row = PimdirDb.typed(db, mail.sql, mail.args)) {
                     if (row.moveToFirst()) {
                         return new Origin(
                                 collection,
@@ -540,7 +504,7 @@ public final class FileStore {
             key.put("link_id", file.linkId);
             PimdirSql.Bound bound = PimdirSql.bind("DELETE_UNBOUND_ITEM", key);
             List<String> released = new ArrayList<>();
-            try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+            try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
                 while (cursor.moveToNext()) {
                     for (int column = 0; column < 2; column++) {
                         if (!cursor.isNull(column)) {
@@ -604,7 +568,7 @@ public final class FileStore {
         try {
             boolean held;
             PimdirSql.Bound holds = PimdirSql.bind("COLLECTION_HOLDS_OBJECTS", values);
-            try (Cursor cursor = MailStore.typed(db, holds.sql, holds.args)) {
+            try (Cursor cursor = PimdirDb.typed(db, holds.sql, holds.args)) {
                 held = cursor.moveToFirst() && cursor.getInt(0) == 1;
             }
             exec(db, "DELETE_COLLECTION", values);
@@ -637,7 +601,7 @@ public final class FileStore {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
         PimdirSql.Bound bound = PimdirSql.bind("LOAD_KIND", values);
-        try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
             return cursor.moveToFirst() ? cursor.getString(0) : null;
         }
     }
@@ -685,7 +649,7 @@ public final class FileStore {
         PimdirSql.Bound bound = PimdirSql.bind("ADD_REFERENCE", values);
         // NOTE: a query, not an exec: the statement answers the row it
         // recorded, and Android refuses a statement returning rows to execSQL.
-        try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
             cursor.moveToFirst();
         }
     }

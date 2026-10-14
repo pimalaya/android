@@ -476,20 +476,6 @@ public class CardStore extends SQLiteOpenHelper {
     }
 
     /**
-     * A row's engine handle: the resource name its source binds it under,
-     * else the provisional handle a staged create waits under (SYNC §2).
-     *
-     * <p>Never a guess at the name the server will hand out: the handle is how
-     * the engine addresses the placement, and a create has no server name yet
-     * by definition. What it will be pushed as is
-     * {@link #resourceName(String, String)}, and what the binding ends up
-     * holding is whatever the push assigns.
-     */
-    public static String rowHandle(String uri, String id) {
-        return uri != null && !uri.isEmpty() ? uri : PimdirStorage.provisionalOf(id);
-    }
-
-    /**
      * The name a create offers the server: CardDAV names the resource
      * {@code id.vcf}, the other backends address the bare id.
      */

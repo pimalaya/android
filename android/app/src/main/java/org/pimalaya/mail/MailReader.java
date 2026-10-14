@@ -7,7 +7,7 @@ import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.PimdirAccount;
-import org.pimalaya.sync.PimdirEngine;
+import org.pimalaya.pimdir.PimdirEngine;
 
 import java.io.File;
 import java.util.List;

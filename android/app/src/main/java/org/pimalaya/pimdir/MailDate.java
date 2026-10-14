@@ -1,4 +1,4 @@
-package org.pimalaya.mail;
+package org.pimalaya.pimdir;
 
 import java.text.ParseException;
 import java.text.SimpleDateFormat;

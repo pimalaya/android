@@ -19,8 +19,7 @@ import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
 import org.pimalaya.pimdir.PimdirStorage;
-import org.pimalaya.sync.PimdirEngine;
-import org.pimalaya.sync.SyncRunner;
+import org.pimalaya.pimdir.PimdirEngine;
 
 import java.io.File;
 import java.io.IOException;
@@ -64,22 +63,6 @@ import java.util.UUID;
  * cut off resumes where its last page landed.
  */
 public class MailEngine extends PimdirEngine {
-    /** The IMAP {@code \Seen} flag, as the store's JSON array spells it. */
-    public static final String SEEN = "\\Seen";
-
-    /** The IMAP {@code \Answered} flag: the message was replied to. */
-    static final String ANSWERED = "\\Answered";
-
-    /** The IMAP {@code \Flagged} flag: the message was marked important. */
-    public static final String FLAGGED = "\\Flagged";
-
-    /**
-     * The IMAP {@code \Deleted} flag: the message is marked for removal by
-     * a later expunge, which is what deleting means on an account naming
-     * no trash to move it into.
-     */
-    public static final String DELETED = "\\Deleted";
-
     /**
      * The markers this app writes, and the only ones a push ever touches.
      *
@@ -139,7 +122,7 @@ public class MailEngine extends PimdirEngine {
     /**
      * The account's mailboxes and the role each carries, in one round; a
      * Gmail or JMAP account's are remembered as listed account-wide, a
-     * Gmail one's as keeping an All Mail ({@link MailStore#ALL_MAIL}), and
+     * Gmail one's as keeping an All Mail ({@link PimdirCollections#ALL_MAIL}), and
      * whether the server erases one message alone. Any other account's
      * bodies once linked across its mailboxes are released, once
      * ({@link MailStore#repairLinks}).
@@ -1052,7 +1035,7 @@ public class MailEngine extends PimdirEngine {
                 }
             }
         } catch (RuntimeException failure) {
-            if (SyncRunner.expiredToken(failure)) {
+            if (expiredToken(failure)) {
                 throw failure;
             }
             Log.w("pimalaya", "bodies not downloaded: " + collection, failure);
@@ -1518,30 +1501,6 @@ public class MailEngine extends PimdirEngine {
             throw failure;
         }
         Log.w("pimalaya", "message gone from the server: " + mailbox + " " + handle);
-    }
-
-    /** Whether a marker set names one marker. */
-    static boolean has(JSONArray flags, String flag) {
-        for (int index = 0; flags != null && index < flags.length(); index++) {
-            if (flag.equals(flags.optString(index))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** The marker set with one marker added or removed. */
-    public static JSONArray withFlag(JSONArray flags, String flag, boolean add) {
-        JSONArray kept = new JSONArray();
-        for (int index = 0; flags != null && index < flags.length(); index++) {
-            if (!flag.equals(flags.optString(index))) {
-                kept.put(flags.optString(index));
-            }
-        }
-        if (add) {
-            kept.put(flag);
-        }
-        return kept;
     }
 
     /** The mailboxes of one walk, in the store's collection shape. */

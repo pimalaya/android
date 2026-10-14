@@ -14,7 +14,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.PimdirSql;
-import org.pimalaya.mail.MailStore;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -355,7 +354,7 @@ public class PimdirDbTest {
         PimdirSql.Bound page = PimdirSql.bind("LIST_MAIL_PAGE_FILTERED", values);
         StringBuilder plan = new StringBuilder();
         try (Cursor cursor =
-                MailStore.typed(db, "EXPLAIN QUERY PLAN " + page.sql, page.args)) {
+                PimdirDb.typed(db, "EXPLAIN QUERY PLAN " + page.sql, page.args)) {
             while (cursor.moveToNext()) {
                 plan.append(cursor.getString(3)).append('\n');
             }

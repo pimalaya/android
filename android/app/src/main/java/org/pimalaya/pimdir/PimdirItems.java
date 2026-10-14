@@ -6,7 +6,6 @@ import android.util.Log;
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONObject;
 import org.pimalaya.client.PimdirSql;
-import org.pimalaya.mail.MailStore;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -532,7 +531,7 @@ public final class PimdirItems {
                     PimdirSql.Bound exists =
                             PimdirSql.bind("OBJECT_EXISTS", Map.of("hash", hash));
                     boolean held;
-                    try (Cursor cursor = MailStore.typed(db, exists.sql, exists.args)) {
+                    try (Cursor cursor = PimdirDb.typed(db, exists.sql, exists.args)) {
                         held = cursor.moveToFirst();
                     }
                     if (!held && !blobs.remove(hash)) {

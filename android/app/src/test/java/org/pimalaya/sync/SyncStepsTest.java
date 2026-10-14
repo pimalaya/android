@@ -1,14 +1,13 @@
 package org.pimalaya.sync;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
 
 import android.content.res.Resources;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.pimdir.PimdirEngine;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
@@ -76,32 +75,5 @@ public class SyncStepsTest {
         assertEquals(416, SyncSteps.across(1, 3, 6, 500));
         assertEquals(1000, SyncSteps.across(4, 2, 6, 1000));
         assertEquals(300, SyncSteps.across(0, 0, 0, 300));
-    }
-
-    @Test
-    public void aLargeProjectionTellsOncePerPercent() {
-        int told = 0;
-        for (int done = 1; done <= 1000; done++) {
-            if (SyncSteps.tells(done, 1000)) {
-                told += 1;
-            }
-        }
-        assertEquals(100, told);
-        assertFalse(SyncSteps.tells(9, 1000));
-        assertTrue(SyncSteps.tells(10, 1000));
-        assertTrue(SyncSteps.tells(1000, 1000));
-    }
-
-    @Test
-    public void aSmallStepTellsEveryItem() {
-        for (int done = 1; done <= 3; done++) {
-            assertTrue(SyncSteps.tells(done, 3));
-        }
-    }
-
-    @Test
-    public void nothingCountedIsNeverTold() {
-        assertFalse(SyncSteps.tells(0, 10));
-        assertFalse(SyncSteps.tells(1, 0));
     }
 }

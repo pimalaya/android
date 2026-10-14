@@ -3,7 +3,7 @@ package org.pimalaya.mail;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.sync.PimdirEngine;
+import org.pimalaya.pimdir.PimdirEngine;
 
 import java.io.File;
 import java.util.ArrayList;

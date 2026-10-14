@@ -31,6 +31,7 @@ import org.pimalaya.mail.MailWindow;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirEngine;
 
 /**
  * The mail and calendar halves of a remote sync, the contacts half being
@@ -213,7 +214,7 @@ public final class RemotePass {
             return PimalayaClient.openMail(account.server(PimDomain.MAIL));
         } catch (Exception refused) {
             AccountCredential credential = account.credential(PimDomain.MAIL);
-            if (!SyncRunner.expiredToken(refused) || !credential.renewable()) {
+            if (!PimdirEngine.expiredToken(refused) || !credential.renewable()) {
                 throw refused instanceof RuntimeException
                         ? (RuntimeException) refused
                         : new IllegalStateException(refused);

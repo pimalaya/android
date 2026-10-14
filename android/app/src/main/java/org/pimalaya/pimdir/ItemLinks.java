@@ -154,7 +154,7 @@ public final class ItemLinks {
             values.put("kind", self.kind);
             values.put("link_id", self.linkId);
             PimdirSql.Bound bound = PimdirSql.bind(statement, values);
-            try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+            try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
                 while (cursor.moveToNext()) {
                     Endpoint from = new Endpoint(cursor.getString(0), cursor.getString(1));
                     Endpoint to = new Endpoint(cursor.getString(2), cursor.getString(3));
@@ -235,7 +235,7 @@ public final class ItemLinks {
      */
     private static boolean query(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
-        try (Cursor cursor = MailStore.typed(db, bound.sql, bound.args)) {
+        try (Cursor cursor = PimdirDb.typed(db, bound.sql, bound.args)) {
             return cursor.moveToFirst();
         }
     }
@@ -287,7 +287,7 @@ public final class ItemLinks {
         }
 
         SQLiteDatabase db = store.getReadableDatabase();
-        String pattern = MailStore.likePattern(words);
+        String pattern = PimdirDb.likePattern(words);
         search(db, PimdirSummary.CONTACT, "SEARCH_CONTACTS", 8, pattern, found);
         search(db, PimdirSummary.CALENDAR, "SEARCH_CALENDAR", 8, pattern, found);
         search(db, PimdirSummary.FILE, "SEARCH_FILES", 7, pattern, found);
@@ -337,7 +337,7 @@ public final class ItemLinks {
 
     private static Cursor read(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
-        return MailStore.typed(db, bound.sql, bound.args);
+        return PimdirDb.typed(db, bound.sql, bound.args);
     }
 
     private static String text(Cursor cursor, int column) {

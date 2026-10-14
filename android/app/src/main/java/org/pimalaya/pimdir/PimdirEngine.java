@@ -1,4 +1,4 @@
-package org.pimalaya.sync;
+package org.pimalaya.pimdir;
 
 import android.util.Log;
 
@@ -9,9 +9,6 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
-import org.pimalaya.pimdir.PimdirDb;
-import org.pimalaya.pimdir.PimdirHash;
-import org.pimalaya.pimdir.PimdirStorage;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -93,9 +90,22 @@ public abstract class PimdirEngine implements OfflineDriver {
 
     /** Tells how far a counted step is, at most once per percent. */
     protected void advance(int stage, int done, int total) {
-        if (progress != null && SyncSteps.tells(done, total)) {
+        if (progress != null && tells(done, total)) {
             progress.advance(domain(), stage, done, total);
         }
+    }
+
+    /**
+     * Whether {@code done} of {@code total} is worth telling the dock: the
+     * last item, or one crossing a percent. A projection of a thousand
+     * contacts moves the bar ten at a time rather than posting a thousand
+     * frames.
+     */
+    static boolean tells(int done, int total) {
+        if (total <= 0 || done <= 0) {
+            return false;
+        }
+        return done >= total || done * 100L / total != (done - 1) * 100L / total;
     }
 
     /** The domain this driver syncs, which its progress steps are told in. */
@@ -479,6 +489,22 @@ public abstract class PimdirEngine implements OfflineDriver {
 
     // ---- staged mutations -------------------------------------------------
 
+    /** The IMAP {@code \Seen} flag, as the store's JSON array spells it. */
+    public static final String SEEN = "\\Seen";
+
+    /** The IMAP {@code \Answered} flag: the message was replied to. */
+    public static final String ANSWERED = "\\Answered";
+
+    /** The IMAP {@code \Flagged} flag: the message was marked important. */
+    public static final String FLAGGED = "\\Flagged";
+
+    /**
+     * The IMAP {@code \Deleted} flag: the message is marked for removal by
+     * a later expunge, which is what deleting means on an account naming
+     * no trash to move it into.
+     */
+    public static final String DELETED = "\\Deleted";
+
     /**
      * Stages a flag set on one placement; the next sync pushes the
      * difference between it and the set the source last agreed on.
@@ -585,6 +611,30 @@ public abstract class PimdirEngine implements OfflineDriver {
         mutate(collection, mutation);
     }
 
+    /** Whether a marker set names one marker. */
+    public static boolean has(JSONArray flags, String flag) {
+        for (int index = 0; flags != null && index < flags.length(); index++) {
+            if (flag.equals(flags.optString(index))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The marker set with one marker added or removed. */
+    public static JSONArray withFlag(JSONArray flags, String flag, boolean add) {
+        JSONArray kept = new JSONArray();
+        for (int index = 0; flags != null && index < flags.length(); index++) {
+            if (!flag.equals(flags.optString(index))) {
+                kept.put(flags.optString(index));
+            }
+        }
+        if (add) {
+            kept.put(flag);
+        }
+        return kept;
+    }
+
     /** Stages one mutation through the engine, then tells the driver. */
     private void mutate(String collection, JSONObject mutation) {
         client.offlineMutate(this, collection, mutation);
@@ -663,5 +713,11 @@ public abstract class PimdirEngine implements OfflineDriver {
 
     protected static boolean isGone(Exception failure) {
         return Integer.valueOf(404).equals(status(failure));
+    }
+
+    /** True for an HTTP 401 from any backend (expired or revoked token). */
+    public static boolean expiredToken(Exception error) {
+        return error instanceof PimalayaException
+                && Integer.valueOf(401).equals(((PimalayaException) error).status);
     }
 }

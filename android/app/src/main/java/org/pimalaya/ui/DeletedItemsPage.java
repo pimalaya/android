@@ -25,7 +25,7 @@ import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.DeletedItems;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
-import org.pimalaya.sync.PimdirEngine;
+import org.pimalaya.pimdir.PimdirEngine;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;

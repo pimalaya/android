@@ -579,7 +579,7 @@ public class MailStoreTest {
         assertEquals(1, store.countByDay(found, "+0 minutes").size());
         // A literal wildcard is searched for, not matched by.
         assertEquals(0, store.count(all(false, false, "100%")));
-        assertEquals("%100\\%%", MailStore.likePattern("100%"));
+        assertEquals("%100\\%%", PimdirDb.likePattern("100%"));
     }
 
     @Test

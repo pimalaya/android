@@ -67,7 +67,7 @@ final class GmailStep implements MailStep {
             }
             // NOTE: every message lands in All Mail where the step holds by
             // it, an archived one there alone, so the next step finds it
-            // held and does not read it again (MailStore.ALL_MAIL).
+            // held and does not read it again (PimdirCollections.ALL_MAIL).
             String allMail = MailStore.allMailOf(engine.accountId());
             JSONArray all = members.get(allMail);
             Map<String, File> files = new HashMap<>();

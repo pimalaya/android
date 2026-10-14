@@ -28,8 +28,8 @@ import org.pimalaya.client.EventSplit;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.contact.CardStore;
 import org.pimalaya.pimdir.ItemLinks;
+import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.ui.Dates;
 import org.pimalaya.ui.Sections;
 
@@ -334,7 +334,7 @@ public final class EventView {
         open(
                 null,
                 new EventStore.StoredEvent(
-                        calendar.id, id, CardStore.rowHandle(null, id), ical, ""),
+                        calendar.id, id, PimdirStorage.rowHandle(null, id), ical, ""),
                 calendar,
                 true);
     }

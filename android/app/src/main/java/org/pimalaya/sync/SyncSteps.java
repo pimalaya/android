@@ -3,6 +3,7 @@ package org.pimalaya.sync;
 import android.content.res.Resources;
 import org.pimalaya.R;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.pimdir.PimdirEngine;
 
 /**
  * What the sync dock says and how full its bar is.
@@ -156,18 +157,5 @@ public final class SyncSteps {
         }
         long whole = (long) passed * 1000 + (long) weight * section;
         return (int) Math.min(1000, whole / planned);
-    }
-
-    /**
-     * Whether {@code done} of {@code total} is worth telling the dock: the
-     * last item, or one crossing a percent. A projection of a thousand
-     * contacts moves the bar ten at a time rather than posting a thousand
-     * frames.
-     */
-    static boolean tells(int done, int total) {
-        if (total <= 0 || done <= 0) {
-            return false;
-        }
-        return done >= total || done * 100L / total != (done - 1) * 100L / total;
     }
 }
