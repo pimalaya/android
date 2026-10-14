@@ -122,7 +122,7 @@ public final class ContactForm {
     /** Notified after every render so the host can re-gate its save. */
     private Runnable onRender;
 
-    private final Ui ui;
+    final Ui ui;
 
     /** The per-property edit dialogs the tappable rows open. */
     private final ContactFieldDialogs dialogs;
@@ -131,7 +131,7 @@ public final class ContactForm {
         this.activity = activity;
         this.ui = new Ui(activity);
         this.dialogs = new ContactFieldDialogs(this);
-        this.accentColor = resolveColor(android.R.attr.colorAccent);
+        this.accentColor = ui.resolveColor(android.R.attr.colorAccent);
         this.scroll = activity.findViewById(R.id.contact_scroll);
         this.container = activity.findViewById(R.id.contact_form);
         this.sections = new Sections(activity, container);
@@ -402,7 +402,7 @@ public final class ContactForm {
         list.setOrientation(LinearLayout.VERTICAL);
         // NOTE: bottom padding mirrors the framework title's top padding
         // so the dialog is symmetric and the last row clears the corner.
-        list.setPadding(0, dp(8), 0, dp(18));
+        list.setPadding(0, ui.dp(8), 0, ui.dp(18));
         ScrollView scroller = new ScrollView(activity);
         scroller.addView(list);
 
@@ -424,22 +424,22 @@ public final class ContactForm {
         ImageView iconView = new ImageView(activity);
         iconView.setImageResource(field.icon);
         iconView.setImageTintList(
-                ColorStateList.valueOf(resolveColor(android.R.attr.textColorSecondary)));
+                ColorStateList.valueOf(ui.resolveColor(android.R.attr.textColorSecondary)));
 
         TextView labelView = new TextView(activity);
         labelView.setText(field.label);
-        labelView.setTextColor(resolveColor(android.R.attr.textColorPrimary));
+        labelView.setTextColor(ui.resolveColor(android.R.attr.textColorPrimary));
         labelView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         LinearLayout.LayoutParams labelParams =
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        labelParams.setMarginStart(dp(12));
+        labelParams.setMarginStart(ui.dp(12));
 
         LinearLayout row = new LinearLayout(activity);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(24), dp(14), dp(24), dp(14));
+        row.setPadding(ui.dp(24), ui.dp(14), ui.dp(24), ui.dp(14));
         row.setBackgroundResource(resolveAttr(android.R.attr.selectableItemBackground));
-        row.addView(iconView, new LinearLayout.LayoutParams(dp(22), dp(22)));
+        row.addView(iconView, new LinearLayout.LayoutParams(ui.dp(22), ui.dp(22)));
         row.addView(labelView, labelParams);
         row.setOnClickListener(
                 view -> {
@@ -774,7 +774,7 @@ public final class ContactForm {
         icon.setImageTintList(ColorStateList.valueOf(accentColor));
         icon.setContentDescription(getS(label));
         icon.setBackgroundResource(resolveAttr(android.R.attr.selectableItemBackgroundBorderless));
-        icon.setPadding(dp(6), dp(6), dp(6), dp(6));
+        icon.setPadding(ui.dp(6), ui.dp(6), ui.dp(6), ui.dp(6));
         icon.setOnClickListener(view -> onClick.run());
         return icon;
     }
@@ -801,7 +801,7 @@ public final class ContactForm {
             // section headers' add-icon column instead of reading off-axis.
             warn.setImageTintList(
                     android.content.res.ColorStateList.valueOf(
-                            resolveColor(android.R.attr.colorError)));
+                            ui.resolveColor(android.R.attr.colorError)));
         }
 
         return sections.row(
@@ -921,13 +921,5 @@ public final class ContactForm {
 
     int resolveAttr(int attr) {
         return ui.resolveAttr(attr);
-    }
-
-    int resolveColor(int attr) {
-        return ui.resolveColor(attr);
-    }
-
-    int dp(int value) {
-        return ui.dp(value);
     }
 }

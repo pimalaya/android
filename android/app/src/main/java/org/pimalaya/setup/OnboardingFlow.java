@@ -36,6 +36,7 @@ import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.SyncCoordinator;
 import org.pimalaya.sync.SyncPasses;
+import org.pimalaya.ui.CardRows;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.PillField;
 
@@ -713,17 +714,14 @@ public final class OnboardingFlow {
      * on a tile, its name, and a tick.
      */
     private View domainCard(AccountEntry existing) {
-        LinearLayout card = new LinearLayout(host);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackgroundResource(R.drawable.card_group);
-        card.setClipToOutline(true);
+        LinearLayout card = CardRows.card(host);
 
         for (DomainSetup setup : setups.values()) {
             if (!connectable(setup)) {
                 continue;
             }
             if (card.getChildCount() > 0) {
-                card.addView(rowDivider());
+                card.addView(CardRows.rowDivider(host));
             }
             CheckBox tick = new CheckBox(host);
             tick.setChecked(setup.enabled);
@@ -779,7 +777,8 @@ public final class OnboardingFlow {
                             granted -> toggle.setChecked(switches.mirror(mirror, true, granted)));
                 });
         boolean contacts = mirror == PhoneMirror.CONTACTS;
-        return tickRow(
+        return CardRows.tickRow(
+                host,
                 contacts ? R.string.phone_contacts : R.string.phone_calendar,
                 contacts ? R.string.phone_contacts_note : R.string.phone_calendar_note,
                 toggle);
@@ -801,45 +800,8 @@ public final class OnboardingFlow {
                     shell.askNotifications(
                             granted -> toggle.setChecked(switches.notify(true, granted)));
                 });
-        return tickRow(R.string.background_notify, R.string.notify_mail_note, toggle);
-    }
-
-    /** An option's row under a hairline: its title over its line, then its tick. */
-    private View tickRow(int titleText, int lineText, CheckBox toggle) {
-        LinearLayout item = new LinearLayout(host);
-        item.setOrientation(LinearLayout.VERTICAL);
-        item.addView(rowDivider());
-
-        LinearLayout row = new LinearLayout(host);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(host.ui.dp(56));
-        row.setPadding(host.ui.dp(60), host.ui.dp(8), host.ui.dp(8), host.ui.dp(8));
-        TypedValue ripple = new TypedValue();
-        host.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
-        row.setForeground(host.getDrawable(ripple.resourceId));
-
-        LinearLayout text = new LinearLayout(host);
-        text.setOrientation(LinearLayout.VERTICAL);
-        TextView title = new TextView(host);
-        title.setText(titleText);
-        title.setTextSize(16);
-        title.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
-        text.addView(title);
-        TextView line = new TextView(host);
-        line.setText(lineText);
-        line.setTextSize(13);
-        line.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
-        text.addView(line);
-        LinearLayout.LayoutParams textParams =
-                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        textParams.setMarginEnd(host.ui.dp(12));
-        row.addView(text, textParams);
-        row.addView(toggle);
-        row.setOnClickListener(view -> toggle.toggle());
-
-        item.addView(row);
-        return item;
+        return CardRows.tickRow(
+                host, R.string.background_notify, R.string.notify_mail_note, toggle);
     }
 
     /**
@@ -853,77 +815,8 @@ public final class OnboardingFlow {
     /** The same row, its name in bold when it heads a card. */
     private LinearLayout domainRow(
             PimDomain domain, String status, boolean error, View trailing, boolean bold) {
-        return domainRow(domain, host.getString(domain.label), status, error, trailing, bold);
-    }
-
-    /** The same row under a name of its own, for a card covering several. */
-    private LinearLayout domainRow(
-            PimDomain domain,
-            String label,
-            String status,
-            boolean error,
-            View trailing,
-            boolean bold) {
-        LinearLayout row = new LinearLayout(host);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(host.ui.dp(60));
-        row.setPadding(host.ui.dp(14), host.ui.dp(8), host.ui.dp(8), host.ui.dp(8));
-        TypedValue ripple = new TypedValue();
-        host.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, ripple, true);
-        row.setForeground(host.getDrawable(ripple.resourceId));
-
-        android.widget.ImageView glyph = new android.widget.ImageView(host);
-        glyph.setImageResource(domain.icon);
-        glyph.setBackgroundResource(R.drawable.tile_page);
-        glyph.setScaleType(android.widget.ImageView.ScaleType.CENTER_INSIDE);
-        glyph.setPadding(host.ui.dp(6), host.ui.dp(6), host.ui.dp(6), host.ui.dp(6));
-        glyph.setImageTintList(
-                android.content.res.ColorStateList.valueOf(
-                        host.ui.resolveColor(android.R.attr.textColorPrimary)));
-        LinearLayout.LayoutParams glyphParams =
-                new LinearLayout.LayoutParams(host.ui.dp(32), host.ui.dp(32));
-        glyphParams.setMarginEnd(host.ui.dp(14));
-        row.addView(glyph, glyphParams);
-
-        LinearLayout text = new LinearLayout(host);
-        text.setOrientation(LinearLayout.VERTICAL);
-        TextView name = new TextView(host);
-        name.setText(label);
-        name.setTextSize(16);
-        if (bold) {
-            name.setTypeface(name.getTypeface(), android.graphics.Typeface.BOLD);
-        }
-        name.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
-        text.addView(name);
-        if (status != null) {
-            TextView line = new TextView(host);
-            line.setText(status);
-            line.setTextSize(13);
-            line.setTextColor(
-                    host.ui.resolveColor(
-                            error ? android.R.attr.colorError : android.R.attr.textColorSecondary));
-            text.addView(line);
-        }
-        row.addView(
-                text,
-                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-        if (trailing != null) {
-            row.addView(trailing);
-        }
-        return row;
-    }
-
-    /** The line between two rows of a card, inset past the glyph. */
-    private View rowDivider() {
-        View divider = new View(host);
-        divider.setBackgroundResource(R.color.divider_light);
-        LinearLayout.LayoutParams params =
-                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1);
-        params.setMarginStart(host.ui.dp(60));
-        divider.setLayoutParams(params);
-        return divider;
+        return CardRows.domainRow(
+                host, domain.icon, host.getString(domain.label), status, error, trailing, bold);
     }
 
     /** Whether this domain can be switched on at all, in the running mode. */
@@ -966,10 +859,7 @@ public final class OnboardingFlow {
      * for three.
      */
     private View sectionOf(DomainSetup setup, boolean alreadyConnected) {
-        LinearLayout card = new LinearLayout(host);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackgroundResource(R.drawable.card_group);
-        card.setClipToOutline(true);
+        LinearLayout card = CardRows.card(host);
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1055,7 +945,7 @@ public final class OnboardingFlow {
             LinearLayout into, String primary, String secondary, Runnable onPick) {
         LinearLayout item = new LinearLayout(host);
         item.setOrientation(LinearLayout.VERTICAL);
-        item.addView(rowDivider());
+        item.addView(CardRows.rowDivider(host));
 
         LinearLayout row = new LinearLayout(host);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -1638,7 +1528,14 @@ public final class OnboardingFlow {
         card.setLayoutParams(params);
 
         LinearLayout header =
-                domainRow(step.domains.get(0), domainNames(step), signInDetail(step), false, null, true);
+                CardRows.domainRow(
+                        host,
+                        step.domains.get(0).icon,
+                        domainNames(step),
+                        signInDetail(step),
+                        false,
+                        null,
+                        true);
         header.setPadding(0, 0, 0, host.ui.dp(4));
         header.setMinimumHeight(0);
         header.setForeground(null);
@@ -2587,10 +2484,7 @@ public final class OnboardingFlow {
     private LinearLayout resultCard() {
         LinearLayout container = host.findViewById(R.id.result_container);
         container.removeAllViews();
-        LinearLayout card = new LinearLayout(host);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setBackgroundResource(R.drawable.card_group);
-        card.setClipToOutline(true);
+        LinearLayout card = CardRows.card(host);
         container.addView(card);
         return card;
     }
@@ -2605,7 +2499,7 @@ public final class OnboardingFlow {
                                 failed ? android.R.attr.colorError : android.R.attr.colorAccent)));
         mark.setPadding(host.ui.dp(12), 0, host.ui.dp(12), 0);
         if (card.getChildCount() > 0) {
-            card.addView(rowDivider());
+            card.addView(CardRows.rowDivider(host));
         }
         card.addView(domainRow(domain, status, failed, mark));
     }
@@ -2717,15 +2611,12 @@ public final class OnboardingFlow {
             empty.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
             container.addView(empty);
         } else {
-            LinearLayout card = new LinearLayout(host);
-            card.setOrientation(LinearLayout.VERTICAL);
-            card.setBackgroundResource(R.drawable.card_group);
-            card.setClipToOutline(true);
+            LinearLayout card = CardRows.card(host);
             container.addView(card);
 
             for (Addressbook book : books) {
                 if (card.getChildCount() > 0) {
-                    View divider = rowDivider();
+                    View divider = CardRows.rowDivider(host);
                     ((LinearLayout.LayoutParams) divider.getLayoutParams())
                             .setMarginStart(host.ui.dp(20));
                     card.addView(divider);

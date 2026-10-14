@@ -480,7 +480,7 @@ final class ContactFieldDialogs {
     private LinearLayout dialogContent() {
         LinearLayout content = new LinearLayout(host.activity);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(host.dp(24), host.dp(8), host.dp(24), 0);
+        content.setPadding(host.ui.dp(24), host.ui.dp(8), host.ui.dp(24), 0);
         return content;
     }
 
@@ -653,7 +653,7 @@ final class ContactFieldDialogs {
         EditText input = dialogField(line, null, hint, prefill, inputType);
         LinearLayout.LayoutParams params =
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        params.setMarginStart(host.dp(12));
+        params.setMarginStart(host.ui.dp(12));
         input.setLayoutParams(params);
 
         content.addView(line);
@@ -670,7 +670,7 @@ final class ContactFieldDialogs {
             RadioButton option = new RadioButton(host.activity);
             option.setText(labels[index]);
             option.setId(index + 1);
-            option.setPadding(0, 0, host.dp(16), 0);
+            option.setPadding(0, 0, host.ui.dp(16), 0);
             group.addView(option);
         }
         group.check(selected + 1);

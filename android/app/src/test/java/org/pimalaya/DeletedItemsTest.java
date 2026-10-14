@@ -36,6 +36,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -118,6 +119,12 @@ public class DeletedItemsTest {
         List<DeletedItems.Row> rows = deleted.list();
         assertEquals(1, rows.size());
         return rows.get(0);
+    }
+
+    @Test
+    public void aRetentionCutoffIsStampedInUtcToTheMillisecond() {
+        assertEquals("1970-01-01T00:00:00.000Z", DeletedItems.stamp(new Date(0)));
+        assertEquals("2026-03-05T14:07:09.042Z", DeletedItems.stamp(new Date(1772719629042L)));
     }
 
     @Test

@@ -1,7 +1,6 @@
 package org.pimalaya.mail;
 
 import android.graphics.Typeface;
-import android.text.format.DateFormat;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -18,7 +17,6 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -956,7 +954,7 @@ public final class MailList {
         String day = Dates.day(host, message.stamp);
         if (day.equals(host.getString(R.string.date_today))
                 || day.equals(host.getString(R.string.date_yesterday))) {
-            return DateFormat.getTimeFormat(host).format(new Date(message.stamp));
+            return Dates.time(host, message.stamp);
         }
         return Dates.date(host, message.stamp);
     }

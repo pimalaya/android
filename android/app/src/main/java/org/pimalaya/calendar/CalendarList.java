@@ -2,7 +2,6 @@ package org.pimalaya.calendar;
 
 import android.content.Context;
 import android.content.res.ColorStateList;
-import android.text.format.DateFormat;
 import android.text.format.DateUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -33,7 +32,6 @@ import org.pimalaya.ui.SectionsAdapter;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -393,14 +391,14 @@ public final class CalendarList {
             boolean selected = day.equals(selectedDay);
 
             TextView weekday = new TextView(host);
-            weekday.setText(DateFormat.format("EEE", new Date(stamp)));
+            weekday.setText(Dates.weekday(stamp));
             weekday.setTextSize(12);
             weekday.setTypeface(null, android.graphics.Typeface.BOLD);
             weekday.setTextColor(isToday ? accent : secondary);
             weekday.setGravity(android.view.Gravity.CENTER);
 
             TextView number = new TextView(host);
-            number.setText(DateFormat.format("d", new Date(stamp)));
+            number.setText(Dates.dayOfMonth(stamp));
             number.setTextSize(17);
             number.setTypeface(null, android.graphics.Typeface.BOLD);
             number.setGravity(android.view.Gravity.CENTER);
@@ -468,7 +466,7 @@ public final class CalendarList {
 
     /** The month in full, then its year in a lighter tone. */
     private CharSequence monthOf(long stamp) {
-        String month = DateFormat.format("LLLL", new Date(stamp)).toString();
+        String month = Dates.month(stamp).toString();
         if (!month.isEmpty()) {
             month = month.substring(0, 1).toUpperCase() + month.substring(1);
         }
@@ -479,7 +477,7 @@ public final class CalendarList {
                 month.length(),
                 android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         int start = text.length();
-        text.append(' ').append(DateFormat.format("yyyy", new Date(stamp)));
+        text.append(' ').append(Dates.year(stamp));
         text.setSpan(
                 new android.text.style.ForegroundColorSpan(
                         host.ui.resolveColor(android.R.attr.textColorSecondary)),
@@ -498,7 +496,7 @@ public final class CalendarList {
         if (row.occurrence.allDay) {
             return host.getString(R.string.event_all_day);
         }
-        return DateFormat.getTimeFormat(host).format(new Date(row.start));
+        return Dates.time(host, row.start);
     }
 
     /** Today as a civil `YYYYMMDD` stamp, in the device's own zone. */

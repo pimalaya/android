@@ -1,13 +1,12 @@
 package org.pimalaya.contact;
 
 import android.app.AlertDialog;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
-import java.util.Locale;
 import org.pimalaya.R;
 import org.pimalaya.client.Cards;
+import org.pimalaya.ui.Dates;
 import org.pimalaya.ui.Host;
 
 /**
@@ -105,9 +104,7 @@ final class Birthdays {
                                                     R.plurals.birthday_in_days,
                                                     (int) soonest,
                                                     (int) soonest);
-                            String day =
-                                    new SimpleDateFormat("d MMMM", Locale.getDefault())
-                                            .format(date.getTime());
+                            String day = Dates.dayMonth(date.getTimeInMillis());
                             message =
                                     host.getResources()
                                             .getQuantityString(

@@ -10,11 +10,15 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.PimdirSql;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 
 /**
  * What the store keeps of deleted items (pimdir STORAGE §11): the rows a
@@ -330,6 +334,13 @@ public final class DeletedItems {
     }
 
     // ---- free space -------------------------------------------------------
+
+    /** An instant as the store stamps a retention (RFC 3339, UTC, milliseconds). */
+    public static String stamp(Date date) {
+        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+        format.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return format.format(date);
+    }
 
     /**
      * pimdir's {@code purge_retained_before}, then {@code collect_garbage}:

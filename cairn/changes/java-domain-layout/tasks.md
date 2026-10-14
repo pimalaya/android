@@ -45,15 +45,15 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 
 ## Phase 4: logic out of the UI
 
-- [ ] account: SetupPlanner, commit/finish assembly, guarded posts
-- [ ] mail: BodyPlan, compose draft and answered-flag rule, reply helpers
-- [ ] contact: ContactEditor out of MainActivity; composeEvent to calendar
-- [ ] calendar: EventView save decision
-- [ ] account: deleteAccount cascade
-- [ ] filters out of MainActivity
-- [ ] ui: one adapter base, Sections everywhere, one dp/resolveColor, one background-work helper, Dates everywhere
-- [ ] MailStore and PimdirStorage split along their seams
-- [ ] device smoke test owed: onboarding, contact edit, event edit, account deletion
+- [x] setup: SetupPlan (+ SetupOption, SubmitOption), AccountCommit, Endpoints URL helpers; UI-only posts guarded, data-persisting posts kept
+- [x] mail: BodyPlan, MailSubmit.Draft + marksAnswered, MailReply (all tested)
+- [x] contact: ContactEditor + ContactMerge (tested); composeNew/openStored in EventView
+- [x] calendar: EventWrites (tested)
+- [x] setup: AccountRemoval (tested)
+- [x] filter: Filters (tested)
+- [x] ui: SectionsAdapter (contacts, agenda, files), CardRows, one dp/resolveColor (RecipientField keeps rounding), Background (adopted where exact), Dates for the listed sites (pinned by tests); every screen off MainActivity, TOLERATED deleted
+- [ ] MailStore split deferred to phase 5 (same StoredMessage seam), PimdirStorage split to phase 8
+- [x] device smoke tests: added to the owed list
 
 ## Phase 5: typed data
 
@@ -117,3 +117,5 @@ Logic found in Java that belongs to Rust, collected while moving.
 - SUSPECTED PRE-EXISTING BUG (not fixed, behaviour-preserving change; predates this change since 6f15f41): with two or more mail accounts the body plan (BodyPlan.of, formerly planBodies) loops over mail.loadMailboxes(List.of(email)), which returns every account's mailboxes (collections.list(MAIL) unfiltered), and only filters by the looping account's flag and the collection's tick, not by the collection's owner. Account B's mailboxes are then downloaded under account A's session and account id. Needs a device check with two mail accounts and a fix of its own (filter by stored.accountEmail).
 - phase 4 steps 16-17: setup screens off MainActivity (SetupShell), trash and link off it (LinkShell); TOLERATED deleted from LayeringTest; Panels aliases gone; MainActivity 2223 lines, public only for overrides (Activity, Host, Screens, SetupShell, LinkShell) and `client` (PendingGrantTest). AccountEntry.find is the one account lookup. Dead, not deleted: MainActivity.leaveOnboarding. Phase 7 doc fixes: AccountSettings class Javadoc, PhoneMirror's link to MainActivity#askMirrors. Phase 8: DeletedItemsPage.appends (backend capability), AccountSettings.serverHost/protocolOf (scheme classification).
 - phase 4 step 19: ui.Background adopted only where a site matched it exactly (VcfTransfer import and export). The ~45 other io sites differ: no catch (an unchecked error crashes today; the helper would route it to failed), a Log.w in the catch (moved behind postAlive it would vanish after a rotation), shared spinner resets, finally blocks, kept main.post, other executors. Left as they are on purpose.
+- phase 4 step 20: Dates.time/weekday/dayOfMonth/month/year/dayMonth/dateTime, DeletedItems.stamp, ContactForm/Sections dp forwards gone, ui.CardRows for OnboardingFlow (accountCard differs, kept). Phase 8: DeletedItemsPage parses retainedAt (store format in the UI).
+- Phase 4 device additions: cold launch; onboarding standard and advanced (books, phone switches, notifications, OAuth scheme and loopback, a redirect after process death, rotation mid-flow, back at every step); account settings switches, window picker, delete account; contacts: open/edit/save merged, conflict, merge selection, manage books, new contact picker, vCard import/export, birthdays, duplicates, selection bar; agenda tap, pull, Default chip, edit a series (this/following/all), delete occurrence/all, new event picker, linked card; mail list pull, load more, selection actions, reader (attachments, linked, star, delete, send again), reply/reply all/forward (answered on IMAP/JMAP, not Gmail/Graph), compose offline; files open/share/export/import (also with rotation), folders, show message; filter page per domain, Apply/Reset; deleted items restore and free space; links open message/contact/event/file; lists scroll and header taps (contacts enabled, agenda not, file folders yes); dates in mail rows, agenda strip and headers, deleted items, birthdays.

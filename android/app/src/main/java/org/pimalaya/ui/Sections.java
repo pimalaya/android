@@ -77,7 +77,7 @@ public final class Sections {
                 LinearLayout.LayoutParams lineParams =
                         new LinearLayout.LayoutParams(
                                 LinearLayout.LayoutParams.MATCH_PARENT, 1);
-                lineParams.setMarginStart(dp(16));
+                lineParams.setMarginStart(ui.dp(16));
                 card.addView(line, lineParams);
             }
             card.addView(items.get(index));
@@ -90,7 +90,7 @@ public final class Sections {
                         LinearLayout.LayoutParams.WRAP_CONTENT);
         cardParams.setMarginStart(gutter);
         cardParams.setMarginEnd(gutter);
-        cardParams.topMargin = container.getChildCount() == 0 ? dp(8) : gutter;
+        cardParams.topMargin = container.getChildCount() == 0 ? ui.dp(8) : gutter;
         container.addView(card, cardParams);
     }
 
@@ -109,14 +109,14 @@ public final class Sections {
         label.setLetterSpacing(0.02f);
         LinearLayout.LayoutParams labelParams =
                 new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        labelParams.setMarginStart(dp(8));
+        labelParams.setMarginStart(ui.dp(8));
 
         LinearLayout header = new LinearLayout(activity);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(16), dp(6), dp(6), alone ? dp(6) : 0);
-        header.setMinimumHeight(dp(44));
-        header.addView(iconView, new LinearLayout.LayoutParams(dp(16), dp(16)));
+        header.setPadding(ui.dp(16), ui.dp(6), ui.dp(6), alone ? ui.dp(6) : 0);
+        header.setMinimumHeight(ui.dp(44));
+        header.addView(iconView, new LinearLayout.LayoutParams(ui.dp(16), ui.dp(16)));
         header.addView(label, labelParams);
         if (action != null) {
             header.addView(action);
@@ -151,7 +151,7 @@ public final class Sections {
         LinearLayout row = new LinearLayout(activity);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(16), dp(12), dp(16), dp(12));
+        row.setPadding(ui.dp(16), ui.dp(12), ui.dp(16), ui.dp(12));
         if (onClick != null) {
             row.setBackgroundResource(
                     ui.resolveAttr(android.R.attr.selectableItemBackground));
@@ -161,8 +161,8 @@ public final class Sections {
                 text, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         if (trailing != null) {
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(24), dp(24));
-            params.setMarginStart(dp(12));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ui.dp(24), ui.dp(24));
+            params.setMarginStart(ui.dp(12));
             row.addView(trailing, params);
         }
 
@@ -176,9 +176,5 @@ public final class Sections {
      */
     public View value(CharSequence value, int label) {
         return row(value, activity.getString(label), null, null);
-    }
-
-    int dp(int value) {
-        return ui.dp(value);
     }
 }

@@ -28,15 +28,13 @@ import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.Stager;
 import org.pimalaya.sync.SyncPasses;
+import org.pimalaya.ui.Dates;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
 
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
-import java.util.Locale;
-import java.util.TimeZone;
 import java.util.function.Consumer;
 
 /**
@@ -345,7 +343,7 @@ public final class DeletedItemsPage {
     /** Purges every item retained until now, then collects what nothing references. */
     private void free(long bytes) {
         host.findViewById(R.id.deleted_progress).setVisibility(View.VISIBLE);
-        String cutoff = stamp(new Date());
+        String cutoff = DeletedItems.stamp(new Date());
         host.io.execute(
                 () -> {
                     Exception failure = null;
@@ -371,13 +369,6 @@ public final class DeletedItemsPage {
                                 load();
                             });
                 });
-    }
-
-    /** An instant as the store stamps a retention (RFC 3339, UTC, milliseconds). */
-    private static String stamp(Date date) {
-        SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
-        format.setTimeZone(TimeZone.getTimeZone("UTC"));
-        return format.format(date);
     }
 
     // ---- rows -------------------------------------------------------------
@@ -421,7 +412,7 @@ public final class DeletedItemsPage {
         }
         if (PimdirSummary.MAIL.equals(row.kind)) {
             long stamp = PimdirSummary.stampOf(row.when);
-            return stamp == 0 ? "" : dateTime(stamp);
+            return stamp == 0 ? "" : Dates.dateTime(host, stamp);
         }
         // NOTE: an iCalendar DTSTART, a date or a date-time, read for its day.
         if (row.when.length() >= 8 && row.when.substring(0, 8).matches("\\d{8}")) {
@@ -465,21 +456,12 @@ public final class DeletedItemsPage {
         String retained = row.retainedAt.substring(0, Math.min(19, row.retainedAt.length()));
         long stamp = PimdirSummary.stampOf(retained + "Z");
         String deleted =
-                stamp == 0 ? "" : host.getString(R.string.deleted_at, dateTime(stamp));
+                stamp == 0 ? "" : host.getString(R.string.deleted_at, Dates.dateTime(host, stamp));
         if (row.stored()) {
             return deleted;
         }
         String missing = host.getString(R.string.deleted_not_stored);
         return deleted.isEmpty() ? missing : deleted + " · " + missing;
-    }
-
-    private String dateTime(long stamp) {
-        return DateUtils.formatDateTime(
-                host,
-                stamp,
-                DateUtils.FORMAT_SHOW_DATE
-                        | DateUtils.FORMAT_SHOW_TIME
-                        | DateUtils.FORMAT_ABBREV_MONTH);
     }
 
     /** The rows shown so far, and a "Show more" row while some are not. */

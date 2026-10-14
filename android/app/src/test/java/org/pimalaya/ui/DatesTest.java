@@ -74,4 +74,36 @@ public class DatesTest {
         assertEquals("in 1 day", Dates.relativeDays(context, at(1, 0)));
         assertEquals("2 days ago", Dates.relativeDays(context, at(-2, 0)));
     }
+
+    /** Thursday 5 March 2026, 14:07, in the device's zone. */
+    private static long thursdayAfternoon() {
+        Calendar moment = Calendar.getInstance();
+        moment.clear();
+        moment.set(2026, Calendar.MARCH, 5, 14, 7);
+        return moment.getTimeInMillis();
+    }
+
+    @Test
+    public void theAgendaWeekAndMonthHeadersNameTheDayByItsParts() {
+        long stamp = thursdayAfternoon();
+
+        assertEquals("Thu", Dates.weekday(stamp).toString());
+        assertEquals("5", Dates.dayOfMonth(stamp).toString());
+        assertEquals("March", Dates.month(stamp).toString());
+        assertEquals("2026", Dates.year(stamp).toString());
+    }
+
+    @Test
+    public void aBirthdayIsItsDayAndMonthWithoutTheYear() {
+        assertEquals("5 March", Dates.dayMonth(thursdayAfternoon()));
+    }
+
+    @Test
+    public void aTimeAndADeletionMomentFollowTheDeviceClock() {
+        long stamp = thursdayAfternoon();
+
+        assertEquals("2:07 PM", Dates.time(context, stamp));
+        // NOTE: ICU puts a narrow no-break space before the day period.
+        assertEquals("Mar 5, 2026, 2:07\u202fPM", Dates.dateTime(context, stamp));
+    }
 }

@@ -2,9 +2,12 @@ package org.pimalaya.ui;
 
 import android.content.Context;
 import android.text.format.DateFormat;
+import android.text.format.DateUtils;
 
+import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.Locale;
 import org.pimalaya.R;
 
 /**
@@ -112,6 +115,46 @@ public final class Dates {
     /** The date alone, as the device spells it. */
     public static String date(Context context, long stamp) {
         return DateFormat.getMediumDateFormat(context).format(new Date(stamp));
+    }
+
+    /** The time of day, on the device's 12 or 24 hour clock. */
+    public static String time(Context context, long stamp) {
+        return DateFormat.getTimeFormat(context).format(new Date(stamp));
+    }
+
+    /** The date and the time, the month abbreviated, in the device's zone. */
+    public static String dateTime(Context context, long stamp) {
+        return DateUtils.formatDateTime(
+                context,
+                stamp,
+                DateUtils.FORMAT_SHOW_DATE
+                        | DateUtils.FORMAT_SHOW_TIME
+                        | DateUtils.FORMAT_ABBREV_MONTH);
+    }
+
+    /** The day and the month in full, without the year: {@code 5 March}. */
+    public static String dayMonth(long stamp) {
+        return new SimpleDateFormat("d MMMM", Locale.getDefault()).format(new Date(stamp));
+    }
+
+    /** The weekday, abbreviated: {@code Thu}. */
+    public static CharSequence weekday(long stamp) {
+        return DateFormat.format("EEE", new Date(stamp));
+    }
+
+    /** The day of the month, without padding: {@code 5}. */
+    public static CharSequence dayOfMonth(long stamp) {
+        return DateFormat.format("d", new Date(stamp));
+    }
+
+    /** The month in full, as a standalone name: {@code March}. */
+    public static CharSequence month(long stamp) {
+        return DateFormat.format("LLLL", new Date(stamp));
+    }
+
+    /** The year, four digits: {@code 2026}. */
+    public static CharSequence year(long stamp) {
+        return DateFormat.format("yyyy", new Date(stamp));
     }
 
     /**
