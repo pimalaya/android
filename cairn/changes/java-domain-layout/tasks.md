@@ -26,7 +26,7 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 - [x] account
 - [x] ui
 - [x] shell (nothing left to move: the nine root classes)
-- [ ] OfflineEngine renamed ContactEngine
+- [x] OfflineEngine renamed ContactEngine (with its four tests)
 
 ## Phase 2: dependency direction
 
@@ -89,3 +89,4 @@ Logic found in Java that belongs to Rust, collected while moving.
 - account: two layers in one package. PimDomain, AccountEntry, AccountCredential, SecureStore, AccountActivation, Accounts are vocabulary and credential plumbing used by pimdir, sync, phone and every domain (the Rust `account` is likewise cross-cutting and low); OnboardingFlow, OauthFlow, AccountSettings are screens over every domain (~30 MainActivity members widened). Phase 2: account sits low (below sync), the setup and settings screens move to a package above the domains (decide its name then). Public for tests: AccountEntry.empty/connection/with, AccountConnection + baseUrl, OnboardingFlow.submissionUrl/asUser/endpointUrl (E2eTarget), FakeAndroidKeyStore.KEYS.
 - ui: Ui, Sections, Chips, PillField, ListHeader, CardSections, Avatar, Dates, SyncDock are shared widgets (they import only R, MainActivity, Domains). FilterPage (account, mail, pimdir, sync), DeletedItemsPage (account, client, contact, pimdir, sync) and LinkedSection (contact, mail, pimdir) are cross-domain pages driven by MainActivity (43 to 62 `host.` uses each): they go above the domains with the setup screens, not in ui.
 - shell: org.pimalaya holds exactly the nine components and app classes.
+- end of phase 1: LayeringTest run unignored reports 64 file-level violations (sync -> account 9, pimdir -> mail 7, contact -> account 7, mail -> account 6, ui -> root 7, contact -> root 6, ...). Most -> account edges vanish once account's low half sits below sync.

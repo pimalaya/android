@@ -69,7 +69,7 @@ import org.pimalaya.contact.EditSession;
 import org.pimalaya.contact.Entry;
 import org.pimalaya.contact.Group;
 import org.pimalaya.contact.LocalBook;
-import org.pimalaya.contact.OfflineEngine;
+import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.contact.VcfTransfer;
 import org.pimalaya.file.FileActions;
@@ -2993,7 +2993,7 @@ public class MainActivity extends Activity {
     private void phoneReturn() {
         io.execute(
                 () -> {
-                    OfflineEngine.Report report = new OfflineEngine.Report();
+                    ContactEngine.Report report = new ContactEngine.Report();
                     Exception failure = runner.syncPhone(report);
                     if (failure != null) {
                         Log.w("pimalaya", "phone pass on return failed", failure);
@@ -3028,8 +3028,8 @@ public class MainActivity extends Activity {
                 () -> {
                     try {
                         Accounts.reconcile(this, runner.phoneSyncedBooks());
-                        OfflineEngine engine =
-                                new OfflineEngine(base, pimdir, client, null, null, this);
+                        ContactEngine engine =
+                                new ContactEngine(base, pimdir, client, null, null, this);
                         engine.progress =
                                 new PimdirEngine.Progress() {
                                     @Override
@@ -3043,7 +3043,7 @@ public class MainActivity extends Activity {
                                         phoneStep(domain, stage, total, done);
                                     }
                                 };
-                        engine.syncPhone(url, new OfflineEngine.Report());
+                        engine.syncPhone(url, new ContactEngine.Report());
                     } catch (Exception error) {
                         Log.w("pimalaya", "first projection failed for " + url, error);
                     }
@@ -3087,8 +3087,8 @@ public class MainActivity extends Activity {
         io.execute(
                 () -> {
                     try {
-                        new OfflineEngine(base, pimdir, client, null, null, this)
-                                .syncPhone(url, new OfflineEngine.Report());
+                        new ContactEngine(base, pimdir, client, null, null, this)
+                                .syncPhone(url, new ContactEngine.Report());
                     } catch (Exception error) {
                         Log.w("pimalaya", "last phone pass failed for " + url, error);
                     }
@@ -3200,7 +3200,7 @@ public class MainActivity extends Activity {
             // conflict. The toast is the tap's only visible outcome, so
             // without it the vanishing flag reads as a bug.
             try {
-                new OfflineEngine(base, pimdir, client, null, null, null)
+                new ContactEngine(base, pimdir, client, null, null, null)
                         .mutateEdit(replica.book.url, handle, resolution.optString("vcard"));
             } catch (Exception error) {
                 showError(error, R.string.save_failed);

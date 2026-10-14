@@ -47,7 +47,7 @@ import org.pimalaya.sync.PimdirEngine;
  * conflicts by three-way merge and pushes the resolutions. Everything
  * blocks; callers run it off the main thread.
  */
-public final class OfflineEngine extends PimdirEngine {
+public final class ContactEngine extends PimdirEngine {
     /**
      * One lock per book URL, process-wide: the in-app sync, the
      * background worker and the OS-scheduled sync service can each
@@ -167,7 +167,7 @@ public final class OfflineEngine extends PimdirEngine {
      * yields only (local mutations never touch the remote), a null
      * context disables the phone spoke.
      */
-    public OfflineEngine(
+    public ContactEngine(
             CardStore base,
             PimdirDb pimdir,
             PimalayaClient client,

@@ -14,7 +14,7 @@ import android.util.Log;
 import org.pimalaya.account.Accounts;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.CardStore;
-import org.pimalaya.contact.OfflineEngine;
+import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.pimdir.PimdirDb;
 
 /**
@@ -88,9 +88,9 @@ public class SyncService extends Service {
             try {
                 PimdirDb pimdir = PimdirDb.shared(context);
                 CardStore store = CardStore.shared(context);
-                OfflineEngine engine =
-                        new OfflineEngine(store, pimdir, new PimalayaClient(), null, null, context);
-                OfflineEngine.Report report = new OfflineEngine.Report();
+                ContactEngine engine =
+                        new ContactEngine(store, pimdir, new PimalayaClient(), null, null, context);
+                ContactEngine.Report report = new ContactEngine.Report();
                 engine.syncPhone(url, report);
                 Log.d(
                         "pimalaya",

@@ -30,7 +30,7 @@ import org.robolectric.RuntimeEnvironment;
  * request a contact.
  */
 @RunWith(RobolectricTestRunner.class)
-public class OfflineEngineGraphFetchTest {
+public class ContactEngineGraphFetchTest {
     private static final String EMAIL = "jane@example.com";
     private static final String BOOK = "https://dav.example.com/books/b1/";
 
@@ -110,8 +110,8 @@ public class OfflineEngineGraphFetchTest {
                 EMAIL, PimdirSummary.CONTACT, PimdirCollections.of(EMAIL, books));
     }
 
-    private OfflineEngine engine(Graph graph) {
-        return new OfflineEngine(store, pimdir, graph, null, account, null);
+    private ContactEngine engine(Graph graph) {
+        return new ContactEngine(store, pimdir, graph, null, account, null);
     }
 
     private static List<String> handles(JSONArray items) throws Exception {

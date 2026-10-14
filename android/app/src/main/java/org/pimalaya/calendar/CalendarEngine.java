@@ -50,7 +50,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public final class CalendarEngine extends PimdirEngine {
     /**
-     * One lock per calendar, process-wide, as {@link OfflineEngine} holds one
+     * One lock per calendar, process-wide, as {@link ContactEngine} holds one
      * per book: the in-app sync, the background run, Android's upload sync
      * and the pass after a write can each reconcile the same calendar with
      * the phone, and a pass spans many store transactions. Reentrant, so a

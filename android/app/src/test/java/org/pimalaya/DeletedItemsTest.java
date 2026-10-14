@@ -21,7 +21,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.contact.OfflineEngine;
+import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.mail.MailEngine;
 import org.pimalaya.mail.MailStore;
@@ -70,8 +70,8 @@ public class DeletedItemsTest {
         }
     }
 
-    private OfflineEngine engine() {
-        return new OfflineEngine(null, pimdir, new PimalayaClient(), null, null, null);
+    private ContactEngine engine() {
+        return new ContactEngine(null, pimdir, new PimalayaClient(), null, null, null);
     }
 
     private static String vcard(String uid, String name) {

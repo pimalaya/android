@@ -30,7 +30,7 @@ import org.robolectric.RuntimeEnvironment;
  * read in one batched call, never one request a contact.
  */
 @RunWith(RobolectricTestRunner.class)
-public class OfflineEngineGoogleTest {
+public class ContactEngineGoogleTest {
     private static final String EMAIL = "jane@example.com";
     private static final String BASE = "google://" + EMAIL;
     private static final String CONTACTS = BASE + "/myContacts";
@@ -108,11 +108,11 @@ public class OfflineEngineGoogleTest {
                 EMAIL, PimdirSummary.CONTACT, PimdirCollections.of(EMAIL, books));
     }
 
-    private OfflineEngine engine(People people) {
-        return new OfflineEngine(store, pimdir, people, null, account, null);
+    private ContactEngine engine(People people) {
+        return new ContactEngine(store, pimdir, people, null, account, null);
     }
 
-    private static JSONObject enumerate(OfflineEngine engine, String book, String cursor)
+    private static JSONObject enumerate(ContactEngine engine, String book, String cursor)
             throws Exception {
         JSONObject yielded = new JSONObject();
         yielded.put("op", "enumerate");
@@ -132,7 +132,7 @@ public class OfflineEngineGoogleTest {
     @Test
     public void threeGroupsAtOneCheckpointReadPeopleOnce() throws Exception {
         People people = new People();
-        OfflineEngine engine = engine(people);
+        ContactEngine engine = engine(people);
 
         JSONObject contacts = enumerate(engine, CONTACTS, "v2:last");
         JSONObject friends = enumerate(engine, FRIENDS, "v2:last");
@@ -149,7 +149,7 @@ public class OfflineEngineGoogleTest {
     @Test
     public void aGroupAtAnotherCheckpointReadsItsOwnRound() throws Exception {
         People people = new People();
-        OfflineEngine engine = engine(people);
+        ContactEngine engine = engine(people);
 
         enumerate(engine, CONTACTS, "v2:last");
         JSONObject friends = enumerate(engine, FRIENDS, null);
@@ -163,7 +163,7 @@ public class OfflineEngineGoogleTest {
     public void aFetchReadsWhatTheRoundLacksInOneBatchedCall() throws Exception {
         People people = new People();
         people.gone.add("e");
-        OfflineEngine engine = engine(people);
+        ContactEngine engine = engine(people);
         enumerate(engine, CONTACTS, "v2:last");
 
         JSONObject fetch = new JSONObject();

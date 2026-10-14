@@ -32,7 +32,7 @@ import org.robolectric.RuntimeEnvironment;
  * a server altering what it stores answers the PUT with no ETag.
  */
 @RunWith(RobolectricTestRunner.class)
-public class OfflineEngineDavCreateTest {
+public class ContactEngineDavCreateTest {
     private static final String EMAIL = "dav-create@example.com";
     private static final String BASE = "https://dav.example.com/";
     private static final String BOOK = BASE + "books/created/";
@@ -138,7 +138,7 @@ public class OfflineEngineDavCreateTest {
     }
 
     private void sync(Dav dav) throws Exception {
-        new OfflineEngine(store, pimdir, dav, null, account, null).syncBook(BOOK, true);
+        new ContactEngine(store, pimdir, dav, null, account, null).syncBook(BOOK, true);
     }
 
     private PimdirContacts contacts() {

@@ -23,7 +23,7 @@ import org.pimalaya.account.SecureStore;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.CardStore;
-import org.pimalaya.contact.OfflineEngine;
+import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -131,7 +131,7 @@ public class BackgroundJob extends JobService {
         // NOTE: the last net under the phone's own triggers (a pass after
         // each write, Android's upload sync, the app's return), for every
         // mirrored book whether its account is due or not.
-        Exception failure = runner.syncPhone(new OfflineEngine.Report());
+        Exception failure = runner.syncPhone(new ContactEngine.Report());
         if (failure != null) {
             Log.w("pimalaya", "background phone sync failed", failure);
         }

@@ -44,7 +44,7 @@ import java.util.List;
  * </ul>
  *
  * <p>Nothing here talks to a server. Every method stages, and the next engine
- * pass ({@link OfflineEngine}) derives what to push from the state it finds,
+ * pass ({@link ContactEngine}) derives what to push from the state it finds,
  * which is why none of these take an ETag or a revision.
  */
 public final class PimdirContacts {
@@ -58,11 +58,11 @@ public final class PimdirContacts {
      * delete go through, as pimdir mutations (SYNC §7), never as direct row
      * edits.
      */
-    private final OfflineEngine stager;
+    private final ContactEngine stager;
 
     public PimdirContacts(PimdirDb store) {
         this.items = new PimdirItems(store);
-        this.stager = new OfflineEngine(null, store, new PimalayaClient(), null, null, null);
+        this.stager = new ContactEngine(null, store, new PimalayaClient(), null, null, null);
     }
 
     /** One displayable replica: the card plus its summary. */

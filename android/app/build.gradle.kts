@@ -199,7 +199,7 @@ dependencies {
 
     // Robolectric backs the engine-level tests with a real Android
     // runtime on the host JVM: the SQLite store and the framework pieces
-    // CardStore and OfflineEngine touch, combined with the real Rust
+    // CardStore and ContactEngine touch, combined with the real Rust
     // bridge loaded from the host cargo build (see cargoHostBuild).
     testImplementation("org.robolectric:robolectric:4.16.1")
 }

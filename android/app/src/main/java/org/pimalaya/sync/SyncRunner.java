@@ -23,7 +23,7 @@ import org.pimalaya.client.OauthTokens;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.LocalBook;
-import org.pimalaya.contact.OfflineEngine;
+import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -67,7 +67,7 @@ public final class SyncRunner {
         public Exception failure;
 
         /** Folds one book's report in; the sets dedupe across passes. */
-        void absorb(OfflineEngine.Report report) {
+        void absorb(ContactEngine.Report report) {
             remoteIn.addAll(report.remoteIn);
             remoteOut.addAll(report.remoteOut);
             remoteChanged.addAll(report.remoteChanged);
@@ -208,9 +208,9 @@ public final class SyncRunner {
      * failure, or null. A book with no Android account or no contacts
      * permission is skipped.
      */
-    public Exception syncPhone(OfflineEngine.Report report) {
+    public Exception syncPhone(ContactEngine.Report report) {
         try {
-            OfflineEngine engine = new OfflineEngine(base, pimdir, client, null, null, context);
+            ContactEngine engine = new ContactEngine(base, pimdir, client, null, null, context);
             for (BookEntry entry : phoneSyncedBooks()) {
                 engine.syncPhone(entry.book.url, report);
             }
@@ -279,7 +279,7 @@ public final class SyncRunner {
                 Log.w("pimalaya", "addressbook roles failed for " + Accounts.redacted(email), error);
             }
 
-            OfflineEngine engine = engine(primary, account);
+            ContactEngine engine = engine(primary, account);
             if (observer != null) {
                 observer.collections(PimDomain.CONTACTS, 0, books.size());
             }
@@ -295,8 +295,8 @@ public final class SyncRunner {
     }
 
     /** An engine wired to the observer's progress display, steps and counts. */
-    private OfflineEngine engine(Transport primary, Account account) {
-        OfflineEngine engine = new OfflineEngine(base, pimdir, client, primary, account, context);
+    private ContactEngine engine(Transport primary, Account account) {
+        ContactEngine engine = new ContactEngine(base, pimdir, client, primary, account, context);
         if (observer != null) {
             engine.progress = observer;
         }

@@ -20,18 +20,18 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * Drives OfflineEngine.serve with hand-built yield envelopes, exactly
+ * Drives ContactEngine.serve with hand-built yield envelopes, exactly
  * as the Rust engine upcalls it: the storage ops run against the real
  * store and the real bridge, so these tests pin the driver's wire
  * contract without a network.
  */
 @RunWith(RobolectricTestRunner.class)
-public class OfflineEngineServeTest {
+public class ContactEngineServeTest {
     private static final String EMAIL = "jane@example.com";
     private static final String BOOK = "https://dav.example.com/books/b1/";
 
     private CardStore store;
-    private OfflineEngine engine;
+    private ContactEngine engine;
 
     @Before
     public void setUp() {
@@ -46,7 +46,7 @@ public class OfflineEngineServeTest {
 
         // No account (storage yields only) and no context (no phone
         // spoke): the shape the mutate driver runs with.
-        engine = new OfflineEngine(store, pimdir, new PimalayaClient(), null, null, null);
+        engine = new ContactEngine(store, pimdir, new PimalayaClient(), null, null, null);
     }
 
     @Test

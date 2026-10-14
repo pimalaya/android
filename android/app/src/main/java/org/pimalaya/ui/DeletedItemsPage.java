@@ -20,7 +20,7 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.LocalBook;
-import org.pimalaya.contact.OfflineEngine;
+import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.DeletedItems;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -260,7 +260,7 @@ public final class DeletedItemsPage {
                                 break;
                             case PimdirSummary.CONTACT:
                                 engine =
-                                        new OfflineEngine(
+                                        new ContactEngine(
                                                 host.base, host.pimdir, host.client, null, null,
                                                 null);
                                 break;
