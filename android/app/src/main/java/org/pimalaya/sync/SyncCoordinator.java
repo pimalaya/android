@@ -443,7 +443,7 @@ public final class SyncCoordinator {
         screens.dock().synced();
         // NOTE: an account connected while this pass ran owes its first
         // sync to the tab it landed on, which the pass kept from starting.
-        host.main.post(() -> firstSyncIfOwed(screens.shown()));
+        host.postAlive(() -> firstSyncIfOwed(screens.shown()));
     }
 
     /** The addresses of some accounts. */
@@ -474,7 +474,7 @@ public final class SyncCoordinator {
                 FirstSync.owe(host, account.email, domain);
             }
         }
-        host.main.post(() -> screens.land(landingOf(account)));
+        host.postAlive(() -> screens.land(landingOf(account)));
     }
 
     /** The list a freshly connected account lands on: its first domain. */
@@ -1213,7 +1213,7 @@ public final class SyncCoordinator {
                             capabilities.hasCapability(
                                     android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED);
                     if (unmetered && !was) {
-                        host.main.post(SyncCoordinator.this::wifiBack);
+                        host.postAlive(SyncCoordinator.this::wifiBack);
                     }
                 }
 

@@ -37,11 +37,11 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 
 ## Phase 3: engines
 
-- [ ] stager split from remote pass, no null-selected roles
-- [ ] WorkerPool
-- [ ] SyncCoordinator out of MainActivity, SyncRunner and RemotePass
-- [ ] one phone-spoke contract
-- [ ] device smoke test owed: sync, background sync, phone mirror
+- [x] stager split from remote pass: pimdir.Stager + ContactStager, CalendarStager, MailStager; phone-only role as PhonePass (ContactPhonePass, CalendarPhonePass) over pimdir.PhoneSpoke; server engines refuse phone collections
+- [x] sync.WorkerPool (lone worker inline for mail too); ContactEngine.pushAll keeps its pool
+- [x] sync.SyncPasses (SyncRunner + RemotePass, headless), BackgroundCheck.run, sync.SyncProgress (dock model), sync.SyncCoordinator (foreground owner; MainActivity 4207 -> 3161 lines); its posts all through postAlive
+- [x] one phone-spoke contract (pimdir.PhoneSpoke, PhonePass)
+- [x] device smoke tests: added to the owed list below
 
 ## Phase 4: logic out of the UI
 
@@ -108,3 +108,5 @@ Logic found in Java that belongs to Rust, collected while moving.
 - phase 3 step 8, recorded behaviour change: WorkerPool runs a lone worker on the calling thread for mail too (calendar did already), so an interrupt of the caller (activity destroyed) reaches the inline work instead of becoming an "unopened" failure. ContactEngine.pushAll keeps its own fail-fast pool. Worker warnings now read "worker could not connect: <label>" / "worker failed: <label>", the label carrying the domain and account.
 - phase 3 steps 9-10: SyncRunner + RemotePass are sync.SyncPasses (Parts, the app's first record); BackgroundCheck.run takes a notify callback (not a returned map) so new-mail notifications still fire right after the mail pass. Phase 7 tidy-ups: dead `progress != null` checks in SyncPasses, inline java.util/android.net qualifiers, "this runner" wording. Phase 8: collectionsOf filters subscribed books in Java.
 - phase 3 steps 11-12: SyncProgress (dock model) and the SyncCoordinator skeleton; sync -> ui allowed (the coordinator draws the dock and posts through the host). SyncProgressTest reads SyncDock's private pass by reflection (phase 6: reconsider). Members public only for MainActivity's unmoved code, narrow after step 15: SyncProgress.resetSyncPlan/planSync/planSteps/syncAccount/started/fill, SyncCoordinator.startSync/setSyncing/observe/reportSync/progress. The sheet lists reached sections first in reach order, then the rest in plan order.
+- phase 3 step 16, deliberate change: the coordinator's and the dock model's eight `main.post` calls (first-sync after a pass, landing after connect, Wi-Fi back, dock renders and log lines) now go through `postAlive`, dropped once the activity is destroyed. Screens still post unguarded in about 15 places (Birthdays, MailList, VcfTransfer, OauthFlow...): phase 4's background-work helper. Owed: SyncCoordinator.backgroundShown (showBackgroundDock still in MainActivity); MainActivity dead privates booksOutside, hostOf, openAdvanced (phase 4/7).
+- Phase 3 additions: drawer sync over all domains (dock lines, rows reached first then to come, bar never back, one error dialog); pull to refresh per list, mobile data mail pull waits for Wi-Fi and runs when it returns (also after background then foreground, once); connect an account lands on its first tab and first-syncs, a tab opened during a pass syncs after it; ticking a never-listed mailbox runs its first chunk; background fill and body download with drawer pills counting down, leaving the app mid-fill, Load more and window release; a one-mailbox account pull; Gmail pass; calendar with several calendars; phone switch on shows the projection on the dock, off removes the account; contact conflict made on both sides auto-resolves; flag, delete, send mail; edit, split, delete events; edit, merge, auto-resolve contacts; restore mail, contact, event.

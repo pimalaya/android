@@ -203,7 +203,7 @@ final class SyncProgress implements SyncPasses.Progress {
                 syncAccount == null
                         ? detail
                         : host.getString(R.string.sync_line_account, syncAccount, detail);
-        host.main.post(() -> dock.get().log(line));
+        host.postAlive(() -> dock.get().log(line));
     }
 
     /** Guards the dock's state, which the pass's workers set side by side. */
@@ -370,7 +370,7 @@ final class SyncProgress implements SyncPasses.Progress {
             syncShare = 0;
             syncDetail = null;
         }
-        host.main.post(this::renderSyncDock);
+        host.postAlive(this::renderSyncDock);
     }
 
     /**
@@ -388,7 +388,7 @@ final class SyncProgress implements SyncPasses.Progress {
                 syncLog(detail);
             }
         }
-        host.main.post(this::renderSyncDock);
+        host.postAlive(this::renderSyncDock);
     }
 
     /**
@@ -409,7 +409,7 @@ final class SyncProgress implements SyncPasses.Progress {
             syncShare = SyncSteps.shareOf(domain, stage, done, total);
             syncShow();
         }
-        host.main.post(this::renderSyncDock);
+        host.postAlive(this::renderSyncDock);
     }
 
     /**
@@ -446,6 +446,6 @@ final class SyncProgress implements SyncPasses.Progress {
                 syncLog(syncDetail);
             }
         }
-        host.main.post(this::renderSyncDock);
+        host.postAlive(this::renderSyncDock);
     }
 }
