@@ -2642,7 +2642,7 @@ public final class OnboardingFlow {
                 row.setForeground(host.getDrawable(ripple.resourceId));
 
                 TextView name = new TextView(host);
-                name.setText(book.name);
+                name.setText(book.name());
                 name.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
                 name.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
                 row.addView(
@@ -2657,7 +2657,7 @@ public final class OnboardingFlow {
                         });
                 card.addView(row);
 
-                bookChoices.add(new BookChoice(book.url, subscribe));
+                bookChoices.add(new BookChoice(book.url(), subscribe));
             }
         }
 
@@ -2701,7 +2701,7 @@ public final class OnboardingFlow {
         connectedEmail = email;
         java.util.Set<String> subscribed = new java.util.HashSet<>();
         for (Addressbook book : pendingBooks) {
-            subscribed.add(book.url);
+            subscribed.add(book.url());
         }
         commitBooks(subscribed);
     }

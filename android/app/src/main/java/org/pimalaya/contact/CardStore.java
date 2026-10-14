@@ -322,12 +322,12 @@ public class CardStore extends SQLiteOpenHelper {
 
             for (Addressbook book : books) {
                 ContentValues values = new ContentValues();
-                values.put("url", book.url);
+                values.put("url", book.url());
                 values.put("account_email", accountEmail);
-                values.put("id", book.id);
-                int[] switches = byUrl.get(book.url);
+                values.put("id", book.id());
+                int[] switches = byUrl.get(book.url());
                 if (switches == null) {
-                    switches = byId.get(book.id);
+                    switches = byId.get(book.id());
                 }
                 values.put("subscribed", switches == null ? 1 : switches[0]);
                 values.put("remote_synced", switches == null ? 1 : switches[1]);
@@ -404,7 +404,7 @@ public class CardStore extends SQLiteOpenHelper {
     public List<PimdirCollections.Stored> subscribedBooks(PimdirCollections collections) {
         java.util.Set<String> subscribed = new java.util.HashSet<>();
         for (BookEntry book : loadSubscribedAddressbooks()) {
-            subscribed.add(book.book.url);
+            subscribed.add(book.book.url());
         }
         List<PimdirCollections.Stored> books = new ArrayList<>();
         for (PimdirCollections.Stored book : collections.list(PimdirSummary.CONTACT)) {

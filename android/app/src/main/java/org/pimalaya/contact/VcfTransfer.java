@@ -128,7 +128,7 @@ public final class VcfTransfer {
         for (String vcard : Vcf.split(text)) {
             String uid = editor.cardIndex(vcard).optString("uid");
             String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
-            parts.contacts().save(target.book.url, new Card(id, null, null, vcard));
+            parts.contacts().save(target.book.url(), new Card(id, null, null, vcard));
             count++;
         }
         return count;
@@ -176,7 +176,7 @@ public final class VcfTransfer {
     private String buildVcf(List<Group> groups) {
         List<String> vcards = new ArrayList<>(groups.size());
         for (Group group : groups) {
-            vcards.add(group.primary().card.vcard);
+            vcards.add(group.primary().card.vcard());
         }
         return Vcf.join(vcards);
     }

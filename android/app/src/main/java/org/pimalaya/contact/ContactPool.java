@@ -40,7 +40,7 @@ public final class ContactPool {
     List<Entry> loadEntries() {
         List<Entry> entries = new ArrayList<>();
         for (BookEntry entry : base.loadSubscribedAddressbooks()) {
-            for (PimdirContacts.Indexed indexed : contacts.list(entry.book.url)) {
+            for (PimdirContacts.Indexed indexed : contacts.list(entry.book.url())) {
                 entries.add(new Entry(entry.book, entry.accountEmail, indexed));
             }
         }
@@ -63,7 +63,7 @@ public final class ContactPool {
                                 .put("ref", replicaRef(entry, accounts))
                                 .put("uid", entry.uid)
                                 .put("name", entry.name)
-                                .put("id", entry.card.id));
+                                .put("id", entry.card.id()));
             }
             pool =
                     new JSONObject()
@@ -120,11 +120,11 @@ public final class ContactPool {
         }
         String key =
                 account == null
-                        ? CardStore.key(entry.book.url, entry.card.id)
+                        ? CardStore.key(entry.book.url(), entry.card.id())
                         : cardKey(
                                 account.server(PimDomain.CONTACTS),
-                                entry.book.url,
-                                entry.card.id);
+                                entry.book.url(),
+                                entry.card.id());
         return CardStore.replicaRef(entry.accountEmail, key);
     }
 }

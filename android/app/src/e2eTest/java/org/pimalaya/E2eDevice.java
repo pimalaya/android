@@ -232,7 +232,7 @@ final class E2eDevice {
     BookEntry book(String email, String name) {
         for (BookEntry entry : cards.loadSubscribedAddressbooks()) {
             if (entry.accountEmail.equals(email)
-                    && (name == null || name.equals(entry.book.name))) {
+                    && (name == null || name.equals(entry.book.name()))) {
                 return entry;
             }
         }

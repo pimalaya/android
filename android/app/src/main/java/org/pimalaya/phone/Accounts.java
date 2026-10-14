@@ -68,7 +68,7 @@ public final class Accounts {
             String url = manager.getUserData(account, DATA_URL);
             boolean wanted = false;
             for (Addressbook book : accountByBook.keySet()) {
-                wanted |= book.url.equals(url);
+                wanted |= book.url().equals(url);
             }
             if (!wanted) {
                 manager.removeAccountExplicitly(account);
@@ -81,7 +81,7 @@ public final class Accounts {
             if (account == null) {
                 account = new Account(name(entry.getValue(), book), TYPE);
                 Bundle data = new Bundle();
-                data.putString(DATA_URL, book.url);
+                data.putString(DATA_URL, book.url());
                 manager.addAccountExplicitly(account, null, data);
             }
 
@@ -258,7 +258,7 @@ public final class Accounts {
 
     /** The account backing the addressbook, or null before reconcile. */
     static Account find(Context context, Addressbook book) {
-        return findByUrl(context, book.url);
+        return findByUrl(context, book.url());
     }
 
     /**
@@ -287,8 +287,8 @@ public final class Accounts {
         // NOTE: the local book has no login to qualify it; its own name
         // stands alone in the phone's Contacts app.
         if (LocalBook.is(login)) {
-            return book.name;
+            return book.name();
         }
-        return book.name + " (" + login + ")";
+        return book.name() + " (" + login + ")";
     }
 }

@@ -205,7 +205,7 @@ public final class SyncPasses {
 
         Map<String, List<BookEntry>> byAccount = new LinkedHashMap<>();
         for (BookEntry entry : base.loadSubscribedAddressbooks()) {
-            if (!scope.collection(entry.accountEmail, entry.book.url)) {
+            if (!scope.collection(entry.accountEmail, entry.book.url())) {
                 continue;
             }
             byAccount
@@ -261,7 +261,7 @@ public final class SyncPasses {
         try {
             ContactPhonePass engine = new ContactPhonePass(pimdir, clients);
             for (BookEntry entry : phoneSyncedBooks()) {
-                engine.sync(entry.book.url, report);
+                engine.sync(entry.book.url(), report);
             }
         } catch (Exception error) {
             return error;
@@ -335,7 +335,7 @@ public final class SyncPasses {
 
             for (int index = 0; index < books.size(); index++) {
                 BookEntry entry = books.get(index);
-                outcome.absorb(engine.syncBook(entry.book.url, entry.remoteSynced));
+                outcome.absorb(engine.syncBook(entry.book.url(), entry.remoteSynced));
                 if (progress != null) {
                     progress.collections(PimDomain.CONTACTS, index + 1, books.size());
                 }

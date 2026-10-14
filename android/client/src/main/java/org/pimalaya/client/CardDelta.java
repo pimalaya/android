@@ -1,31 +1,41 @@
 package org.pimalaya.client;
 
+import java.util.ArrayList;
 import java.util.List;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * Incremental changes of one collection since a sync cursor: the cards
  * changed (spine-only or full, per backend), the resource names
  * removed, the next cursor to checkpoint, and whether the round listed
  * the complete member set (an initial round, or an expired cursor the
- * bridge re-ran as one).
+ * bridge re-ran as one) (rs/contact.rs {@code CardDelta} 89).
+ *
+ * @param changed cards created or updated since the cursor
+ * @param vanished resource names removed since the cursor
+ * @param token the next checkpoint cursor, null when the server sent none
+ * @param complete true when the round listed the complete member set
  */
-public final class CardDelta {
-    /** Cards created or updated since the cursor. */
-    public final List<Card> changed;
+public record CardDelta(
+        List<Card> changed, List<String> vanished, String token, boolean complete) {
+    static CardDelta from(JSONObject parsed) {
+        JSONArray rows = parsed.optJSONArray("changed");
+        List<Card> changed = new ArrayList<>(rows == null ? 0 : rows.length());
+        for (int index = 0; rows != null && index < rows.length(); index++) {
+            changed.add(Card.from(Json.object(rows, index)));
+        }
 
-    /** Resource names removed since the cursor. */
-    public final List<String> vanished;
+        JSONArray gone = parsed.optJSONArray("vanished");
+        List<String> vanished = new ArrayList<>(gone == null ? 0 : gone.length());
+        for (int index = 0; gone != null && index < gone.length(); index++) {
+            vanished.add(gone.optString(index));
+        }
 
-    /** The next checkpoint cursor, null when the server sent none. */
-    public final String token;
-
-    /** True when the round listed the complete member set. */
-    public final boolean complete;
-
-    public CardDelta(List<Card> changed, List<String> vanished, String token, boolean complete) {
-        this.changed = changed;
-        this.vanished = vanished;
-        this.token = token;
-        this.complete = complete;
+        return new CardDelta(
+                changed,
+                vanished,
+                Json.optString(parsed, "token"),
+                parsed.optBoolean("complete"));
     }
 }

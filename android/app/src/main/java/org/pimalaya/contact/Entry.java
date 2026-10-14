@@ -22,7 +22,7 @@ public final class Entry {
 
     /** The replica's display name from its index, id fallback. */
     public String displayName() {
-        return name.isEmpty() ? card.id : name;
+        return name.isEmpty() ? card.id() : name;
     }
 
     Entry(Addressbook book, String accountEmail, PimdirContacts.Indexed indexed) {

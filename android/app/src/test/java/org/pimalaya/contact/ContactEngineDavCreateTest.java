@@ -14,6 +14,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.BookCard;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Card;
@@ -21,6 +22,7 @@ import org.pimalaya.client.CardDelta;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.NewCard;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.Transport;
@@ -98,8 +100,9 @@ public class ContactEngineDavCreateTest {
 
         @Override
         public Card createCard(
-                Transport transport, Account account, String addressbookUrl, String id,
-                String vcard) {
+                Transport transport, Account account, String addressbookUrl, NewCard created) {
+            String id = created.id();
+            String vcard = created.vcard();
             String name = renames ? "g" + (cards.size() + 1) : id;
             String stored = renames ? vcard.replaceAll("UID:[^\r\n]*", "UID:" + name) : vcard;
             cards.put(name, new String[] {"e" + ++revisions, stored});
@@ -108,24 +111,24 @@ public class ContactEngineDavCreateTest {
 
         @Override
         public Card updateCard(
-                Transport transport, Account account, String addressbookUrl, Card card,
-                String baseVcard) {
-            String[] held = cards.get(card.uri);
+                Transport transport, Account account, BookCard updated, String baseVcard) {
+            Card card = updated.card();
+            String[] held = cards.get(card.uri());
             if (held == null) {
-                throw new PimalayaException("not found: " + card.uri, 404);
+                throw new PimalayaException("not found: " + card.uri(), 404);
             }
             held[0] = "e" + ++revisions;
-            held[1] = card.vcard;
-            return new Card(card.id, card.uri, answersEtag ? held[0] : null, card.vcard);
+            held[1] = card.vcard();
+            return new Card(card.id(), card.uri(), answersEtag ? held[0] : null, card.vcard());
         }
 
         @Override
-        public void deleteCard(
-                Transport transport, Account account, String addressbookUrl, Card card) {
-            if (cards.remove(card.uri) == null) {
-                throw new PimalayaException("not found: " + card.uri, 404);
+        public void deleteCard(Transport transport, Account account, BookCard removed) {
+            Card card = removed.card();
+            if (cards.remove(card.uri()) == null) {
+                throw new PimalayaException("not found: " + card.uri(), 404);
             }
-            deleted.add(card.uri);
+            deleted.add(card.uri());
         }
     }
 
@@ -200,15 +203,15 @@ public class ContactEngineDavCreateTest {
         Card created = held("Created");
         contacts().save(
                 BOOK,
-                new Card(created.id, created.uri, created.etag,
-                        created.vcard.replace("FN:Created", "FN:Edited")));
+                new Card(created.id(), created.uri(), created.etag(),
+                        created.vcard().replace("FN:Created", "FN:Edited")));
         sync(dav);
 
         String server = dav.cards.get("g1")[1];
         assertTrue("the phone's edit pushed: " + server, server.contains("FN:Edited"));
         assertTrue("the edit elsewhere kept: " + server, server.contains("TEL:+33100000000"));
         assertEquals(List.of("Edited"), names());
-        assertEquals("still the card the phone created", "u-1", held("Edited").id);
+        assertEquals("still the card the phone created", "u-1", held("Edited").id());
     }
 
     /**
@@ -222,7 +225,7 @@ public class ContactEngineDavCreateTest {
         create("u-1", "Created");
         sync(dav);
 
-        contacts().stageDelete(BOOK, held("Created").id);
+        contacts().stageDelete(BOOK, held("Created").id());
         sync(dav);
 
         assertEquals(List.of("g1"), dav.deleted);

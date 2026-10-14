@@ -23,7 +23,7 @@ final class ContactMerge {
         // The first replica of each addressbook is its candidate survivor.
         Map<String, Entry> byBook = new LinkedHashMap<>();
         for (Entry entry : replicas) {
-            byBook.putIfAbsent(entry.book.url, entry);
+            byBook.putIfAbsent(entry.book.url(), entry);
         }
         return new ArrayList<>(byBook.values());
     }
@@ -64,7 +64,7 @@ final class ContactMerge {
         Set<String> hashes = new HashSet<>();
         for (Entry entry : replicas) {
             if (hashes.add(entry.hash)) {
-                docs.add(entry.card.vcard);
+                docs.add(entry.card.vcard());
             }
         }
         return docs;
@@ -78,12 +78,12 @@ final class ContactMerge {
             List<BookEntry> books, List<Entry> replicas, Map<String, Boolean> pending) {
         Map<String, Entry> replicaByBook = new HashMap<>();
         for (Entry entry : replicas) {
-            replicaByBook.put(entry.book.url, entry);
+            replicaByBook.put(entry.book.url(), entry);
         }
 
         boolean[] checked = new boolean[books.size()];
         for (int index = 0; index < books.size(); index++) {
-            String url = books.get(index).book.url;
+            String url = books.get(index).book.url();
             Boolean state = pending == null ? null : pending.get(url);
             checked[index] = state != null ? state : replicaByBook.containsKey(url);
         }
@@ -95,7 +95,7 @@ final class ContactMerge {
         Map<String, Boolean> pending = new HashMap<>();
         boolean anyChecked = false;
         for (int index = 0; index < books.size(); index++) {
-            pending.put(books.get(index).book.url, checked[index]);
+            pending.put(books.get(index).book.url(), checked[index]);
             anyChecked |= checked[index];
         }
         // Nothing checked leaves the contact unattached,

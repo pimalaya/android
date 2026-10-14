@@ -309,13 +309,13 @@ public final class PimdirCollections {
         for (Addressbook book : books) {
             listed.add(
                     new Stored(
-                            book.url,
+                            book.url(),
                             accountEmail,
-                            book.name,
-                            book.description,
-                            book.color,
-                            book.role,
-                            book.writable));
+                            book.name(),
+                            book.description(),
+                            book.color(),
+                            book.role(),
+                            book.writable()));
         }
         return listed;
     }

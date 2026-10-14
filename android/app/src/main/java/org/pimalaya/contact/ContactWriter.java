@@ -70,7 +70,7 @@ final class ContactWriter {
                 String vcard = ContactClient.applyCard(editor.edit().vcard, model);
                 String uid = editor.cardIndex(vcard).optString("uid");
                 String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
-                parts.contacts().save(editor.edit().book.url, new Card(id, null, null, vcard));
+                parts.contacts().save(editor.edit().book.url(), new Card(id, null, null, vcard));
             } else if (editor.edit().resolvingConflict) {
                 saveConflictResolution(model);
             } else if (editor.edit().mergeSurvivor != null) {
@@ -81,7 +81,7 @@ final class ContactWriter {
 
             // The copies carry the just-saved content.
             if (editor.edit().card != null && editor.edit().pendingBookState != null) {
-                applyBookState(ContactClient.applyCard(editor.edit().card.vcard, model));
+                applyBookState(ContactClient.applyCard(editor.edit().card.vcard(), model));
             }
         } catch (Exception error) {
             host.showError(error, R.string.save_failed);
@@ -107,13 +107,13 @@ final class ContactWriter {
                 continue;
             }
 
-            String vcard = ContactClient.applyCard(entry.card.vcard, model);
+            String vcard = ContactClient.applyCard(entry.card.vcard(), model);
             if (editor.cardIndex(vcard).optString("hash").equals(entry.hash)) {
                 continue;
             }
             engine.edit(
-                    entry.book.url,
-                    PimdirStorage.rowHandle(entry.card.uri, entry.card.id),
+                    entry.book.url(),
+                    PimdirStorage.rowHandle(entry.card.uri(), entry.card.id()),
                     vcard);
         }
     }
@@ -130,8 +130,8 @@ final class ContactWriter {
         String resolved = ContactClient.applyCard(editor.edit().vcard, model);
         new ContactStager(parts.pimdir(), parts.clients())
                 .edit(
-                        replica.book.url,
-                        PimdirStorage.rowHandle(replica.card.uri, replica.card.id),
+                        replica.book.url(),
+                        PimdirStorage.rowHandle(replica.card.uri(), replica.card.id()),
                         resolved);
     }
 
@@ -143,12 +143,12 @@ final class ContactWriter {
         Entry survivor = editor.edit().mergeSurvivor;
         editor.edit().mergeSurvivor = null;
 
-        String vcard = ContactClient.applyCard(survivor.card.vcard, model);
+        String vcard = ContactClient.applyCard(survivor.card.vcard(), model);
         if (!editor.cardIndex(vcard).optString("hash").equals(survivor.hash)) {
             new ContactStager(parts.pimdir(), parts.clients())
                     .edit(
-                            survivor.book.url,
-                            PimdirStorage.rowHandle(survivor.card.uri, survivor.card.id),
+                            survivor.book.url(),
+                            PimdirStorage.rowHandle(survivor.card.uri(), survivor.card.id()),
                             vcard);
         }
 
@@ -163,7 +163,7 @@ final class ContactWriter {
             if (owner == null) {
                 continue;
             }
-            parts.contacts().stageDelete(entry.book.url, entry.card.id);
+            parts.contacts().stageDelete(entry.book.url(), entry.card.id());
         }
 
         host.toast(host.getString(R.string.merge_done));
@@ -182,12 +182,12 @@ final class ContactWriter {
 
         Map<String, Entry> replicaByBook = new HashMap<>();
         for (Entry entry : editor.edit().replicas) {
-            replicaByBook.put(entry.book.url, entry);
+            replicaByBook.put(entry.book.url(), entry);
         }
 
         for (BookEntry target : parts.cards().loadSubscribedAddressbooks()) {
-            Boolean wanted = desired.get(target.book.url);
-            if (wanted == null || wanted == replicaByBook.containsKey(target.book.url)) {
+            Boolean wanted = desired.get(target.book.url());
+            if (wanted == null || wanted == replicaByBook.containsKey(target.book.url())) {
                 continue;
             }
             AccountEntry account = parts.accountFor(target.accountEmail);
@@ -213,7 +213,7 @@ final class ContactWriter {
             for (Entry entry : editor.edit().replicas) {
                 if (entry.accountEmail.equals(target.accountEmail)) {
                     parts.contacts().stageMembership(
-                            entry.book.url, target.book.url, entry.card.id, true);
+                            entry.book.url(), target.book.url(), entry.card.id(), true);
                     return;
                 }
             }
@@ -230,7 +230,7 @@ final class ContactWriter {
      * card otherwise.
      */
     private void removeFromBook(BookEntry target, Map<String, Entry> replicaByBook) {
-        Entry replica = replicaByBook.get(target.book.url);
+        Entry replica = replicaByBook.get(target.book.url());
         if (replica == null) {
             return;
         }
@@ -245,11 +245,11 @@ final class ContactWriter {
         // Both are the same staged delete, on the placement rather than on the
         // card: what differs is only whether another placement survives it.
         if (AccountClient.isAccountLevel(owner.server(PimDomain.CONTACTS))
-                && parts.contacts().collectionsOf(replica.card.id).size() > 1) {
+                && parts.contacts().collectionsOf(replica.card.id()).size() > 1) {
             parts.contacts().stageMembership(
-                    replica.book.url, target.book.url, replica.card.id, false);
+                    replica.book.url(), target.book.url(), replica.card.id(), false);
         } else {
-            parts.contacts().stageDelete(replica.book.url, replica.card.id);
+            parts.contacts().stageDelete(replica.book.url(), replica.card.id());
         }
     }
 }

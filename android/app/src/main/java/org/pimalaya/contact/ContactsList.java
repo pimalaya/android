@@ -197,7 +197,7 @@ public final class ContactsList {
     public Group groupOf(String linkId) {
         for (Group group : groupedContacts) {
             for (Entry entry : group.replicas) {
-                if (entry.card.id.equals(linkId)) {
+                if (entry.card.id().equals(linkId)) {
                     return group;
                 }
             }
@@ -244,12 +244,12 @@ public final class ContactsList {
             // held all of them.
             boolean matches = false;
             for (Entry entry : group.replicas) {
-                if (!filter.accepts(entry.accountEmail, entry.book.url)
-                        || defaults != null && !defaults.contains(entry.book.url)) {
+                if (!filter.accepts(entry.accountEmail, entry.book.url())
+                        || defaults != null && !defaults.contains(entry.book.url())) {
                     continue;
                 }
                 if (searchQuery.isEmpty()
-                        || entry.card.vcard.toLowerCase(java.util.Locale.ROOT).contains(searchQuery)) {
+                        || entry.card.vcard().toLowerCase(java.util.Locale.ROOT).contains(searchQuery)) {
                     matches = true;
                     break;
                 }
@@ -309,7 +309,7 @@ public final class ContactsList {
 
             TextView avatar = row.findViewById(R.id.contact_avatar);
             avatar.setText(Avatar.letter(name));
-            avatar.setBackground(Avatar.circle(host, entry.card != null ? entry.card.vcard : name));
+            avatar.setBackground(Avatar.circle(host, entry.card != null ? entry.card.vcard() : name));
             boolean checked = selectedKeys.contains(group.key);
             avatar.setVisibility(checked ? View.INVISIBLE : View.VISIBLE);
             android.widget.ImageView check = row.findViewById(R.id.contact_check);
@@ -367,10 +367,10 @@ public final class ContactsList {
     private String originOf(Group group) {
         for (Entry entry : group.replicas) {
             if (!LocalBook.is(entry.accountEmail)) {
-                return entry.book.name + " · " + entry.accountEmail;
+                return entry.book.name() + " · " + entry.accountEmail;
             }
         }
-        String book = group.primary().book.name;
+        String book = group.primary().book.name();
         String device = host.getString(R.string.local_account);
         return book == null || book.isEmpty() ? device : book + " · " + device;
     }
@@ -572,7 +572,7 @@ public final class ContactsList {
         for (Group group : sortedContacts) {
             if (selectedKeys.contains(group.key)) {
                 for (Entry entry : group.replicas) {
-                    parts.contacts().stageDelete(entry.book.url, entry.card.id);
+                    parts.contacts().stageDelete(entry.book.url(), entry.card.id());
                 }
             }
         }

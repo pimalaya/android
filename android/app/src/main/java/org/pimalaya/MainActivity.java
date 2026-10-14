@@ -298,7 +298,7 @@ public class MainActivity extends Host
                                                 || editor.edit().card == null
                                                 || editor.edit().resolvingConflict
                                         ? null
-                                        : ItemLinks.ofContact(editor.edit().card.id),
+                                        : ItemLinks.ofContact(editor.edit().card.id()),
                                 form::refresh));
 
         setUpScreens();

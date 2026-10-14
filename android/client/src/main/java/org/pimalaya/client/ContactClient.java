@@ -38,16 +38,7 @@ public class ContactClient {
 
         List<Addressbook> books = new ArrayList<>(reply.length());
         for (int index = 0; index < reply.length(); index++) {
-            JSONObject book = Json.object(reply, index);
-            books.add(
-                    new Addressbook(
-                            Json.string(book, "id"),
-                            Json.string(book, "name"),
-                            Json.string(book, "url"),
-                            Json.optString(book, "description"),
-                            Json.optString(book, "color"),
-                            book.optString("role"),
-                            book.optBoolean("writable", true)));
+            books.add(Addressbook.from(Json.object(reply, index)));
         }
         return books;
     }
@@ -101,24 +92,7 @@ public class ContactClient {
                         account.password,
                         syncToken == null ? "" : syncToken);
 
-        JSONObject parsed = Replies.object(reply);
-        JSONArray rows = parsed.optJSONArray("changed");
-        List<Card> changed = new ArrayList<>(rows == null ? 0 : rows.length());
-        for (int index = 0; rows != null && index < rows.length(); index++) {
-            changed.add(card(Json.object(rows, index)));
-        }
-
-        JSONArray gone = parsed.optJSONArray("vanished");
-        List<String> vanished = new ArrayList<>(gone == null ? 0 : gone.length());
-        for (int index = 0; gone != null && index < gone.length(); index++) {
-            vanished.add(gone.optString(index));
-        }
-
-        return new CardDelta(
-                changed,
-                vanished,
-                Json.optString(parsed, "token"),
-                parsed.optBoolean("complete"));
+        return CardDelta.from(Replies.object(reply));
     }
 
     /**
@@ -163,16 +137,16 @@ public class ContactClient {
      * account-level backend, by book id: JMAP patches addressBookIds,
      * Google modifies group members.
      */
-    public void updateCardBooks(Transport transport, Account account, String cardId, List<String> add, List<String> remove) {
+    public void updateCardBooks(Transport transport, Account account, BooksUpdate update) {
         Replies.object(
                 Native.updateCardBooks(
                         transport,
                         account.baseUrl,
                         account.login,
                         account.password,
-                        cardId,
-                        books(add),
-                        books(remove)));
+                        update.cardId(),
+                        books(update.add()),
+                        books(update.remove())));
     }
 
     /**
@@ -180,8 +154,8 @@ public class ContactClient {
      * with its ETag. The backends naming the resource themselves
      * return the server-assigned id instead of the given one.
      */
-    public Card createCard(Transport transport, Account account, String addressbookUrl, String id, String vcard) {
-        return card(
+    public Card createCard(Transport transport, Account account, String addressbookUrl, NewCard card) {
+        return Card.from(
                 Replies.object(
                         Native.createCard(
                                 transport,
@@ -189,13 +163,13 @@ public class ContactClient {
                                 addressbookUrl,
                                 account.login,
                                 account.password,
-                                id,
-                                vcard)));
+                                card.id(),
+                                card.vcard())));
     }
 
     /** Reads the card at the given resource name from the addressbook collection. */
     public Card readCard(Transport transport, Account account, String addressbookUrl, String uri) {
-        return card(
+        return Card.from(
                 Replies.object(
                         Native.readCard(
                                 transport,
@@ -213,34 +187,34 @@ public class ContactClient {
      * patches to the fields the edit changed; CardDAV PUTs the full
      * vCard and ignores it.
      */
-    public Card updateCard(Transport transport, Account account, String addressbookUrl, Card card, String baseVcard) {
-        return card(
+    public Card updateCard(Transport transport, Account account, BookCard card, String baseVcard) {
+        return Card.from(
                 Replies.object(
                         Native.updateCard(
                                 transport,
                                 account.baseUrl,
-                                addressbookUrl,
+                                card.bookUrl(),
                                 account.login,
                                 account.password,
-                                card.id,
-                                card.uri == null ? "" : card.uri,
-                                card.vcard,
+                                card.card().id(),
+                                card.card().uri() == null ? "" : card.card().uri(),
+                                card.card().vcard(),
                                 baseVcard == null ? "" : baseVcard,
-                                card.etag == null ? "" : card.etag)));
+                                card.card().etag() == null ? "" : card.card().etag())));
     }
 
     /** Deletes the card from the addressbook collection. */
-    public void deleteCard(Transport transport, Account account, String addressbookUrl, Card card) {
+    public void deleteCard(Transport transport, Account account, BookCard card) {
         Replies.object(
                 Native.deleteCard(
                         transport,
                         account.baseUrl,
-                        addressbookUrl,
+                        card.bookUrl(),
                         account.login,
                         account.password,
-                        card.id,
-                        card.uri == null ? "" : card.uri,
-                        card.etag == null ? "" : card.etag));
+                        card.card().id(),
+                        card.card().uri() == null ? "" : card.card().uri(),
+                        card.card().etag() == null ? "" : card.card().etag()));
     }
 
     /**
@@ -275,15 +249,24 @@ public class ContactClient {
      * error?}} outcome per change: a rejected change reports rejected
      * instead of failing the round.
      */
-    public JSONArray pushCards(Transport transport, Account account, String addressbookUrl, JSONArray changes) {
-        return Replies.array(
-                Native.pushCards(
-                        transport,
-                        account.baseUrl,
-                        addressbookUrl,
-                        account.login,
-                        account.password,
-                        changes.toString()));
+    public List<PushOutcome> pushCards(
+            Transport transport,
+            Account account,
+            String addressbookUrl,
+            List<PushChange> changes) {
+        JSONArray batch = new JSONArray();
+        for (PushChange change : changes) {
+            batch.put(change.toJson());
+        }
+        return PushOutcome.list(
+                Replies.array(
+                        Native.pushCards(
+                                transport,
+                                account.baseUrl,
+                                addressbookUrl,
+                                account.login,
+                                account.password,
+                                batch.toString())));
     }
 
     /** Serializes a book id list for the bridge. */
@@ -293,30 +276,7 @@ public class ContactClient {
 
     /** Parses a card-array reply. */
     private static List<Card> cards(String reply) {
-        JSONArray parsed = Replies.array(reply);
-        List<Card> cards = new ArrayList<>(parsed.length());
-        for (int index = 0; index < parsed.length(); index++) {
-            cards.add(card(Json.object(parsed, index)));
-        }
-        return cards;
-    }
-
-    /** Parses a `{id, uri, etag, vcard, books?}` reply into a card. */
-    private static Card card(JSONObject reply) {
-        List<String> books = new ArrayList<>();
-        JSONArray parsed = reply.optJSONArray("books");
-        if (parsed != null) {
-            for (int index = 0; index < parsed.length(); index++) {
-                books.add(parsed.optString(index));
-            }
-        }
-
-        return new Card(
-                Json.string(reply, "id"),
-                Json.string(reply, "uri"),
-                Json.optString(reply, "etag"),
-                Json.string(reply, "vcard"),
-                books);
+        return Card.list(Replies.array(reply));
     }
 
     /**
@@ -324,7 +284,7 @@ public class ContactClient {
      * maps to ContactsContract rows (docs/contacts-mapping.md).
      */
     public static JSONObject projectCard(Card card) {
-        return Replies.object(Native.projectCard(card.vcard));
+        return Replies.object(Native.projectCard(card.vcard()));
     }
 
     /** Projects a raw vCard document onto the neutral field model. */

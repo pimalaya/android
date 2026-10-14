@@ -159,7 +159,7 @@ public class AccountCommitTest {
     private static Map<String, BookEntry> byUrl(CardStore cards) {
         Map<String, BookEntry> entries = new HashMap<>();
         for (BookEntry entry : cards.loadAllAddressbooks()) {
-            entries.put(entry.book.url, entry);
+            entries.put(entry.book.url(), entry);
         }
         return entries;
     }

@@ -57,7 +57,7 @@ final class AccountRemoval {
         List<String> urls = new ArrayList<>();
         for (BookEntry entry : base.loadAllAddressbooks()) {
             if (entry.accountEmail.equals(email)) {
-                urls.add(entry.book.url);
+                urls.add(entry.book.url());
             }
         }
         List<String> calendars = new ArrayList<>();

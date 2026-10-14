@@ -95,8 +95,8 @@ final class AccountCommit {
         collections.replace(email, PimdirSummary.CONTACT, PimdirCollections.of(email, books));
 
         for (Addressbook book : books) {
-            boolean on = subscribed.contains(book.url);
-            cards.setBookState(book.url, on, on, on && phone);
+            boolean on = subscribed.contains(book.url());
+            cards.setBookState(book.url(), on, on, on && phone);
         }
     }
 }

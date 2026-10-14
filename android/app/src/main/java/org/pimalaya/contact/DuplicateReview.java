@@ -54,7 +54,7 @@ final class DuplicateReview {
             for (Entry entry : replicas) {
                 String ref = parts.pool().replicaRef(entry);
                 if (byRef.putIfAbsent(ref, entry) == null) {
-                    cards.put(new JSONObject().put("ref", ref).put("vcard", entry.card.vcard));
+                    cards.put(new JSONObject().put("ref", ref).put("vcard", entry.card.vcard()));
                 }
             }
         } catch (JSONException error) {
@@ -131,7 +131,7 @@ final class DuplicateReview {
             name.setTextColor(host.ui.resolveColor(android.R.attr.textColorPrimary));
 
             TextView book = new TextView(host);
-            book.setText(entry.book.name);
+            book.setText(entry.book.name());
             book.setTextSize(13);
             book.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
 
@@ -200,7 +200,7 @@ final class DuplicateReview {
                 refs.put(
                         new JSONObject()
                                 .put("ref", parts.pool().replicaRef(entry))
-                                .put("book", entry.book.url));
+                                .put("book", entry.book.url()));
             }
         } catch (JSONException error) {
             throw new IllegalStateException(error);
@@ -230,10 +230,10 @@ final class DuplicateReview {
                 if (!staged.add(parts.pool().replicaRef(entry)) || uid.equals(entry.uid)) {
                     continue;
                 }
-                String vcard = ContactClient.setCardUid(entry.card.vcard, uid);
+                String vcard = ContactClient.setCardUid(entry.card.vcard(), uid);
                 parts.contacts().save(
-                        entry.book.url,
-                        new Card(entry.card.id, entry.card.uri, entry.card.etag, vcard));
+                        entry.book.url(),
+                        new Card(entry.card.id(), entry.card.uri(), entry.card.etag(), vcard));
             }
         } catch (Exception error) {
             host.showError(error, R.string.save_failed);

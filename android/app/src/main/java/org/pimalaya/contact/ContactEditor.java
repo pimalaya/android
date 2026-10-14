@@ -105,11 +105,11 @@ public final class ContactEditor {
         }
 
         String handle =
-                PimdirStorage.rowHandle(replica.card.uri, replica.card.id);
+                PimdirStorage.rowHandle(replica.card.uri(), replica.card.id());
         JSONObject bodies;
         JSONObject resolution;
         try {
-            bodies = new PimdirStorage(parts.pimdir()).loadConflict(replica.book.url, handle);
+            bodies = new PimdirStorage(parts.pimdir()).loadConflict(replica.book.url(), handle);
             if (bodies == null) {
                 // NOTE: flagged but its remote is not captured yet (the
                 // capturing sync has not run); edit it plainly.
@@ -132,7 +132,7 @@ public final class ContactEditor {
             // without it the vanishing flag reads as a bug.
             try {
                 new ContactStager(parts.pimdir(), parts.clients())
-                        .edit(replica.book.url, handle, resolution.optString("vcard"));
+                        .edit(replica.book.url(), handle, resolution.optString("vcard"));
             } catch (Exception error) {
                 host.showError(error, R.string.save_failed);
                 return;
@@ -173,7 +173,7 @@ public final class ContactEditor {
             if (LocalBook.is(entry.accountEmail)) {
                 local = entry;
             } else {
-                byUrl.put(entry.book.url, entry);
+                byUrl.put(entry.book.url(), entry);
             }
         }
 
@@ -216,14 +216,14 @@ public final class ContactEditor {
             labels[index] =
                     LocalBook.is(entry.accountEmail)
                             ? host.getString(R.string.local_book)
-                            : host.ui.twoLine(entry.book.name, entry.accountEmail);
+                            : host.ui.twoLine(entry.book.name(), entry.accountEmail);
         }
         return labels;
     }
 
     /** Stages a copied card into the target addressbook. */
     void createCopy(BookEntry target, AccountEntry account, String id, String vcard) {
-        parts.contacts().save(target.book.url, new Card(id, null, null, vcard));
+        parts.contacts().save(target.book.url(), new Card(id, null, null, vcard));
     }
 
     /** The survivor chooser over any replica list, then the merge. */
@@ -241,7 +241,7 @@ public final class ContactEditor {
         CharSequence[] labels = new CharSequence[candidates.size()];
         for (int index = 0; index < candidates.size(); index++) {
             Entry entry = candidates.get(index);
-            labels[index] = host.ui.twoLine(entry.book.name, entry.accountEmail);
+            labels[index] = host.ui.twoLine(entry.book.name(), entry.accountEmail);
         }
 
         new AlertDialog.Builder(host)
@@ -271,7 +271,7 @@ public final class ContactEditor {
         list.exitSelection();
 
         for (Entry entry : ContactMerge.doomed(replicas, survivor, parts.pool()::replicaRef)) {
-            parts.contacts().stageDelete(entry.book.url, entry.card.id);
+            parts.contacts().stageDelete(entry.book.url(), entry.card.id());
         }
 
         host.toast(host.getString(R.string.merge_done));
@@ -319,7 +319,7 @@ public final class ContactEditor {
         org.json.JSONArray changed = null;
         try {
             if (docs.size() == 1) {
-                edit.vcard = primary.card.vcard;
+                edit.vcard = primary.card.vcard();
                 model = ContactClient.projectCard(primary.card);
             } else {
                 JSONObject merged = ContactClient.mergeCards(docs);

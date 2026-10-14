@@ -143,7 +143,7 @@ public final class PimdirContacts {
                                 cursor.isNull(5) ? null : cursor.getString(5),
                                 items.body(cursor.getString(1)));
                 boolean conflicted = cursor.getInt(2) == 1 && !cursor.isNull(3);
-                cards.add(new Indexed(card, indexOf(card.vcard), conflicted));
+                cards.add(new Indexed(card, indexOf(card.vcard()), conflicted));
             }
             return cards;
         }
@@ -161,20 +161,20 @@ public final class PimdirContacts {
      * card is a create.
      */
     public void save(String collection, Card card) {
-        JSONObject index = indexOf(card.vcard);
+        JSONObject index = indexOf(card.vcard());
         try {
-            if (held(collection, card.id)) {
+            if (held(collection, card.id())) {
                 stager.mutateEdit(
                         collection,
-                        stager.offline.handleFor(collection, card.id),
-                        card.vcard,
+                        stager.offline.handleFor(collection, card.id()),
+                        card.vcard(),
                         index.optJSONObject("summary"),
                         index.optString("sortKey"));
             } else {
                 stager.mutateAdd(
                         collection,
-                        card.id,
-                        card.vcard,
+                        card.id(),
+                        card.vcard(),
                         Flags.none(),
                         index.optJSONObject("summary"),
                         index.optString("sortKey"));

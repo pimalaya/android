@@ -471,7 +471,7 @@ public final class AccountSettings {
             item.addView(
                     switchRow(
                             sections,
-                            entry.book.name,
+                            entry.book.name(),
                             entry.subscribed ? null : host.getString(R.string.book_off),
                             enable));
 
@@ -482,7 +482,7 @@ public final class AccountSettings {
                                 entry.remoteSynced,
                                 checked ->
                                         writeBook(
-                                                entry.book.url,
+                                                entry.book.url(),
                                                 true,
                                                 checked,
                                                 entry.phoneSynced)));
@@ -528,7 +528,7 @@ public final class AccountSettings {
      * last pass.
      */
     private void setBook(BookEntry entry, boolean enabled, boolean remote, boolean local) {
-        String url = entry.book.url;
+        String url = entry.book.url();
         boolean wasShown = entry.subscribed && entry.phoneSynced;
         if (!local || wasShown && PhoneMirror.CONTACTS.granted(host)) {
             writeBook(url, enabled, remote, local);

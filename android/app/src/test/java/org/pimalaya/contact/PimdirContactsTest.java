@@ -118,7 +118,7 @@ public class PimdirContactsTest {
         assertEquals("u1@example.org", listed.get(0).email);
         assertEquals("u1", listed.get(0).uid);
         assertEquals("the body round-trips through the blob directory",
-                vcard("u1", "Jane Doe"), listed.get(0).card.vcard);
+                vcard("u1", "Jane Doe"), listed.get(0).card.vcard());
     }
 
     @Test

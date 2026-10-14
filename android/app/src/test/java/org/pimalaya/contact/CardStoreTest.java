@@ -65,9 +65,9 @@ public class CardStoreTest {
         BookEntry entry = only();
 
         // Display fields come from the store, so there is one copy of them.
-        assertEquals("Book One", entry.book.name);
-        assertEquals(BOOK, entry.book.url);
-        assertEquals("b1", entry.book.id);
+        assertEquals("Book One", entry.book.name());
+        assertEquals(BOOK, entry.book.url());
+        assertEquals("b1", entry.book.id());
         assertEquals(EMAIL, entry.accountEmail);
 
         // Switches come from here, and a new book is subscribed and
@@ -85,7 +85,7 @@ public class CardStoreTest {
         roster(new Addressbook("b1", "Book One renamed", BOOK, null, null));
 
         BookEntry entry = only();
-        assertEquals("the display name follows the server", "Book One renamed", entry.book.name);
+        assertEquals("the display name follows the server", "Book One renamed", entry.book.name());
         assertTrue(entry.subscribed);
         assertFalse("the user turned remote sync off", entry.remoteSynced);
         assertTrue(entry.phoneSynced);
@@ -102,7 +102,7 @@ public class CardStoreTest {
         roster(new Addressbook("b1", "Book One", BOOK + "?recomposed", null, null));
 
         BookEntry entry = only();
-        assertEquals(BOOK + "?recomposed", entry.book.url);
+        assertEquals(BOOK + "?recomposed", entry.book.url());
         assertFalse("the user turned remote sync off", entry.remoteSynced);
         assertTrue("and left the phone spoke on", entry.phoneSynced);
     }

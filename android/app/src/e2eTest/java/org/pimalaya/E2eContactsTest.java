@@ -44,7 +44,7 @@ public class E2eContactsTest extends E2eCase {
         connected();
         BookEntry book = phone.book(address, bookName(name));
         assertNotNull("an address book listed", book);
-        String url = book.book.url;
+        String url = book.book.url();
         settles(
                 "the seeded contact synced",
                 () -> {
@@ -57,7 +57,7 @@ public class E2eContactsTest extends E2eCase {
         phone.contacts().save(url, new Card(uid, null, null, vcard(uid, subject("created"))));
         List<PimdirContacts.Indexed> staged = phone.cards(url, subject("created"));
         assertEquals("shown at once", 1, staged.size());
-        assertTrue("pending", phone.owes(url, staged.get(0).card.id));
+        assertTrue("pending", phone.owes(url, staged.get(0).card.id()));
 
         sync(phone);
         settles(
@@ -69,8 +69,8 @@ public class E2eContactsTest extends E2eCase {
 
         Card created = phone.cards(url, subject("created")).get(0).card;
         String edited =
-                created.vcard.replace(subject("created"), subject("edited"));
-        phone.contacts().save(url, new Card(created.id, created.uri, created.etag, edited));
+                created.vcard().replace(subject("created"), subject("edited"));
+        phone.contacts().save(url, new Card(created.id(), created.uri(), created.etag(), edited));
         assertEquals("edited at once", 1, phone.cards(url, subject("edited")).size());
         // NOTE: synced again while waiting: a push the server refused stays
         // staged for the pass that follows.
@@ -85,19 +85,19 @@ public class E2eContactsTest extends E2eCase {
                 });
 
         E2eDevice observer = observer();
-        BookEntry seen = observer.book(address, book.book.name);
+        BookEntry seen = observer.book(address, book.book.name());
         assertNotNull("another device lists the book", seen);
         settles(
                 "another device reads the edit",
                 () -> {
                     sync(observer);
-                    return observer.cards(seen.book.url, subject("edited")).size() == 1
+                    return observer.cards(seen.book.url(), subject("edited")).size() == 1
                             ? null
                             : "not yet";
                 });
 
         Card toDelete = phone.cards(url, subject("edited")).get(0).card;
-        phone.contacts().stageDelete(url, toDelete.id);
+        phone.contacts().stageDelete(url, toDelete.id());
         assertTrue("gone at once", phone.cards(url, subject("edited")).isEmpty());
         settles(
                 "the server holds it no more",
@@ -122,7 +122,7 @@ public class E2eContactsTest extends E2eCase {
                 () -> items.titles(name, tag).contains(subject("elsewhere")) ? null : "not yet");
 
         connected();
-        String url = phone.book(address, bookName(name)).book.url;
+        String url = phone.book(address, bookName(name)).book.url();
         settles(
                 "the seeded contact synced",
                 () -> {
@@ -130,7 +130,7 @@ public class E2eContactsTest extends E2eCase {
                     return phone.cards(url, subject("elsewhere")).size() == 1 ? null : "not yet";
                 });
         Card seeded = phone.cards(url, subject("elsewhere")).get(0).card;
-        phone.contacts().stageDelete(url, seeded.id);
+        phone.contacts().stageDelete(url, seeded.id());
         assertTrue("gone at once", phone.cards(url, subject("elsewhere")).isEmpty());
         settles(
                 "the server holds it no more",
@@ -150,7 +150,7 @@ public class E2eContactsTest extends E2eCase {
     public void aContactCreatedOnThePhoneIsDeleted() throws Exception {
         String name = scratch();
         connected();
-        String url = phone.book(address, bookName(name)).book.url;
+        String url = phone.book(address, bookName(name)).book.url();
         String uid = UUID.randomUUID().toString();
         phone.contacts().save(url, new Card(uid, null, null, vcard(uid, subject("created"))));
         settles(
@@ -160,7 +160,7 @@ public class E2eContactsTest extends E2eCase {
                     return items.titles(name, tag).contains(subject("created")) ? null : "not yet";
                 });
         Card created = phone.cards(url, subject("created")).get(0).card;
-        phone.contacts().stageDelete(url, created.id);
+        phone.contacts().stageDelete(url, created.id());
         assertTrue("gone at once", phone.cards(url, subject("created")).isEmpty());
         settles(
                 "the server holds it no more",
@@ -185,7 +185,7 @@ public class E2eContactsTest extends E2eCase {
     private String names(E2eDevice device, String url) {
         List<String> names = new java.util.ArrayList<>();
         for (PimdirContacts.Indexed indexed : device.cards(url, tag)) {
-            names.add(indexed.name + (device.owes(url, indexed.card.id) ? " (staged)" : ""));
+            names.add(indexed.name + (device.owes(url, indexed.card.id()) ? " (staged)" : ""));
         }
         return names.toString();
     }

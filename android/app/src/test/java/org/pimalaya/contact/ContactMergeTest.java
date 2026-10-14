@@ -56,7 +56,7 @@ public class ContactMergeTest {
                 ContactMerge.doomed(
                         List.of(survivor, survivorElsewhere, shared, sharedElsewhere, lone),
                         survivor,
-                        entry -> entry.card.id));
+                        entry -> entry.card.id()));
     }
 
     @Test
@@ -80,7 +80,7 @@ public class ContactMergeTest {
         assertArrayEquals(
                 new boolean[] {true, false, true},
                 ContactMerge.checked(
-                        books, replicas, Map.of(WORK.url, false, CLUB.url, true)));
+                        books, replicas, Map.of(WORK.url(), false, CLUB.url(), true)));
     }
 
     @Test
@@ -88,10 +88,10 @@ public class ContactMergeTest {
         List<BookEntry> books = List.of(listed(HOME), listed(WORK));
 
         Map<String, Boolean> none = ContactMerge.pending(books, new boolean[] {false, false});
-        assertEquals(Map.of(HOME.url, false, WORK.url, false, LocalBook.URL, true), none);
+        assertEquals(Map.of(HOME.url(), false, WORK.url(), false, LocalBook.URL, true), none);
 
         Map<String, Boolean> one = ContactMerge.pending(books, new boolean[] {false, true});
-        assertEquals(Map.of(HOME.url, false, WORK.url, true, LocalBook.URL, false), one);
+        assertEquals(Map.of(HOME.url(), false, WORK.url(), true, LocalBook.URL, false), one);
     }
 
     private static Addressbook book(String name) {
