@@ -2,7 +2,6 @@ package org.pimalaya;
 
 import static org.junit.Assert.assertTrue;
 
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -83,7 +82,6 @@ public class LayeringTest {
     /** Classes AGP generates in the root package, usable from every package. */
     private static final Set<String> GENERATED = Set.of("R", "BuildConfig");
 
-    @Ignore("phase 2 gate of cairn change java-domain-layout")
     @Test
     public void dependenciesPointOneWay() throws IOException {
         List<String> violations = new ArrayList<>();

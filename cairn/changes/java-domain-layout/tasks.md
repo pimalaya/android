@@ -30,10 +30,10 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 
 ## Phase 2: dependency direction
 
-- [ ] cycles of finding 4 broken (role labels, migration hooks, stager handed in, mail flags type, token expiry as an exception, phone pass handed in)
-- [ ] one AppState instead of UI/service static flags; mutable static sets owned
-- [ ] one lock registry
-- [ ] dependency test green
+- [x] layering of phase2-design.md: account below sync, PimdirEngine and store plumbing into pimdir, sync = orchestration above the domains, new packages setup, filter, trash, link; cycles cut by member moves (design C1-C20; C19 revised to a BackgroundCheck.Owner)
+- [x] App (manifest) owns AppState, the store, cards, phone queue, filter registry, MailState; blob pins on PimdirDb; Owner interfaces let lower packages reach App without naming it
+- [x] pimdir.Locks on the one PimdirDb replaces PimdirEngine.STORE, both SYNC_LOCKS maps and SyncLock; TokenRenewal, SecureStore and adapter guards stay (design D)
+- [x] LayeringTest enabled and green (20 screen files tolerated to reach the root until phase 4)
 
 ## Phase 3: engines
 
@@ -92,3 +92,15 @@ Logic found in Java that belongs to Rust, collected while moving.
 - end of phase 1: LayeringTest run unignored reports 64 file-level violations (sync -> account 9, pimdir -> mail 7, contact -> account 7, mail -> account 6, ui -> root 7, contact -> root 6, ...). Most -> account edges vanish once account's low half sits below sync.
 - phase 2 step 6: PhoneQueue.of tolerates a context whose application is not an Owner (e2e harness E2eDevice.Isolated answers itself as application context): no-op, as before when the queue was not started.
 - phase 2 steps 7-8, phase 7 doc fixes owed: PimdirDb.reconcileRoles Javadoc says "this class files them" (FileStore files them); PimdirStorage.rowHandle links CardStore's package-private resourceName; PimdirEngine.Progress links SyncSteps and MailPool (unresolved). PimdirDb.setRole is public (FileStore.recordAttachments also calls it); PimdirEngine.has public (MailStore and tests call it through MailEngine).
+
+## Device smoke tests owed (collected; run once, on a debug build)
+
+- Cold launch (App registered); onboarding with password and OAuth browser grant (loopback redirect); account settings open, delete an account (its phone book accounts go).
+- Mail: first sync with the list filling live; a failed or gone body on its row; compose opens (RecipientField inflated from mail); Gmail All Mail hidden; search with % or _; restore a deleted mail clears \Deleted; message view date.
+- OAuth: a 401 renews the token for mail, contacts and calendar.
+- Phone mirror: a contact edit reaches Contacts within a second; a Contacts-app edit comes back; same both ways for calendars; phone book accounts created and named as before after a sync and after account settings changes.
+- Background: background sync or notifications turned on schedules the job; a background check while the app is closed skips while on screen, reloads lists on return; a background run refused while the app syncs and the reverse; account settings show "sync busy" while syncing.
+- Time zone change reprojects floating events. New event and contact edit or merge under a provisional handle.
+- Filter page (and a background run honouring it); deleted items restore mail and contact, free space; links dialog lists messages first, clearing empties it; files open, share, export (also one whose message is gone), "show message"; any file opened through the content provider.
+- Old store gets its attachments role backfilled; a first attachment creates the Attachments collection.
+- List header titles, bar title fade, FAB fold on scroll; sync dock, chips, pill fields, error dialog and toast.
