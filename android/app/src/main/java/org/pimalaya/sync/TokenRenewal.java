@@ -3,10 +3,10 @@ package org.pimalaya.sync;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-import org.pimalaya.AccountCredential;
-import org.pimalaya.AccountEntry;
-import org.pimalaya.PimDomain;
-import org.pimalaya.SecureStore;
+import org.pimalaya.account.AccountCredential;
+import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.PimDomain;
+import org.pimalaya.account.SecureStore;
 
 /**
  * One OAuth credential renewed at a time, process-wide.

@@ -1,8 +1,8 @@
 package org.pimalaya.contact;
 
-import org.pimalaya.AccountCredential;
-import org.pimalaya.AccountEntry;
-import org.pimalaya.PimDomain;
+import org.pimalaya.account.AccountCredential;
+import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 
 /**

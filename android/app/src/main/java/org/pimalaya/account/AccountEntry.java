@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.account;
 
 import java.util.Collections;
 import java.util.EnumMap;
@@ -44,7 +44,7 @@ public final class AccountEntry {
     }
 
     /** One identity covering nothing yet, to connect domains onto. */
-    static AccountEntry empty(String email) {
+    public static AccountEntry empty(String email) {
         return new AccountEntry(email, Map.of(), Map.of());
     }
 
@@ -55,7 +55,7 @@ public final class AccountEntry {
     }
 
     /** Where a domain lives, or null when the account covers none. */
-    AccountConnection connection(PimDomain domain) {
+    public AccountConnection connection(PimDomain domain) {
         return connections.get(domain);
     }
 
@@ -157,7 +157,7 @@ public final class AccountEntry {
      * it is read and where it is written. Only mail has a second, and
      * only over SMTP.
      */
-    AccountEntry with(
+    public AccountEntry with(
             PimDomain domain, String baseUrl, String submitUrl, AccountCredential credential) {
         Map<PimDomain, AccountConnection> merged = new EnumMap<>(connections);
         AccountConnection replaced =

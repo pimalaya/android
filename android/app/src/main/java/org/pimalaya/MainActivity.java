@@ -38,6 +38,14 @@ import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.json.JSONObject;
+import org.pimalaya.account.AccountActivation;
+import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.AccountSettings;
+import org.pimalaya.account.Accounts;
+import org.pimalaya.account.OauthFlow;
+import org.pimalaya.account.OnboardingFlow;
+import org.pimalaya.account.PimDomain;
+import org.pimalaya.account.SecureStore;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.calendar.CalendarList;
 import org.pimalaya.calendar.CalendarRows;
@@ -132,7 +140,7 @@ public class MainActivity extends Activity {
     public static final int PANEL_EVENT_VIEW = 8;
     public static final int PANEL_FILES = 9;
     private static final int PANEL_AUTH = 20;
-    static final int PANEL_ACCOUNT = 21;
+    public static final int PANEL_ACCOUNT = 21;
     static final int PANEL_FILTER = 22;
     static final int PANEL_DELETED = 23;
 
@@ -146,22 +154,22 @@ public class MainActivity extends Activity {
     private static final int PANEL_ROOT = PANEL_MAIL;
 
     /** The auth flow's steps, inside its own flipper under one bar. */
-    static final int STEP_EMAIL = 0;
+    public static final int STEP_EMAIL = 0;
 
     /** What to connect this address for, once discovery has said what it can. */
-    static final int STEP_DOMAIN = 1;
+    public static final int STEP_DOMAIN = 1;
 
     static final int STEP_CONFIG = 2;
-    static final int STEP_BOOKS = 3;
+    public static final int STEP_BOOKS = 3;
 
     /** The standard setup's outcome when some servers refused the password. */
-    static final int STEP_RESULT = 4;
+    public static final int STEP_RESULT = 4;
 
     /** The advanced setup's sign-ins, one card per server and login. */
-    static final int STEP_SIGNIN = 5;
+    public static final int STEP_SIGNIN = 5;
 
     /** The OAuth client a server registers none of. */
-    static final int STEP_OAUTH = 6;
+    public static final int STEP_OAUTH = 6;
 
     /** Whether an auth step's main button is loading, the step frozen. */
     private boolean authBusy;
@@ -190,7 +198,7 @@ public class MainActivity extends Activity {
     public final Handler main = new Handler(Looper.getMainLooper());
     public final Ui ui = new Ui(this);
 
-    SecureStore store;
+    public SecureStore store;
     public CardStore base;
 
     /** The pimdir store every domain and every account shares. */
@@ -580,7 +588,7 @@ public class MainActivity extends Activity {
     }
 
     /** Navigates the auth flow forward: the step slides in from the right. */
-    void showAuth(int step) {
+    public void showAuth(int step) {
         showAuth(step, false);
     }
 
@@ -638,7 +646,7 @@ public class MainActivity extends Activity {
     }
 
     /** The auth flow's displayed step. */
-    int authStep() {
+    public int authStep() {
         return authFlipper.getDisplayedChild();
     }
 
@@ -948,7 +956,7 @@ public class MainActivity extends Activity {
     }
 
     /** Enables or disables an auth continue FAB, dimming its disc. */
-    void setFabEnabled(int id, boolean enabled) {
+    public void setFabEnabled(int id, boolean enabled) {
         View fab = findViewById(id);
         fab.setEnabled(enabled);
         fab.setAlpha(enabled ? 1f : 0.4f);
@@ -1143,7 +1151,7 @@ public class MainActivity extends Activity {
      * collection, which the filter narrows, so a drawer entry opening
      * one collection would be a second way of looking at the same thing.
      */
-    void reloadHome() {
+    public void reloadHome() {
         // With no real account the drawer shows an empty state, and its
         // sync row is hidden.
         boolean hasAccount = hasRealAccount();
@@ -1235,7 +1243,7 @@ public class MainActivity extends Activity {
     }
 
     /** How many bodies an account's window still downloads, or null. */
-    Integer bodiesLeft(String email) {
+    public Integer bodiesLeft(String email) {
         return bodiesLeft.get(email);
     }
 
@@ -1245,7 +1253,7 @@ public class MainActivity extends Activity {
      * ({@code left}, null outside the body step) or when it last synced on an
      * accent tint, or that it never has in the plain tone.
      */
-    View syncPill(boolean enabled, long stamp, Integer left) {
+    public View syncPill(boolean enabled, long stamp, Integer left) {
         boolean downloading = enabled && left != null && left > 0;
         boolean synced = downloading || (enabled && stamp > 0);
         int color =
@@ -1316,7 +1324,7 @@ public class MainActivity extends Activity {
      * they all are. Called only as a mirror's switch is turned on, in a
      * setup or in an account's settings.
      */
-    void askMirrors(Set<PhoneMirror> wanted, Consumer<Set<PhoneMirror>> done) {
+    public void askMirrors(Set<PhoneMirror> wanted, Consumer<Set<PhoneMirror>> done) {
         String[] missing = PhoneMirror.missing(wanted, this::permitted);
         if (missing.length == 0) {
             done.accept(PhoneMirror.granted(wanted, this::permitted));
@@ -1332,7 +1340,7 @@ public class MainActivity extends Activity {
      * {@code done} whether the app may notify (main thread). Called only as
      * a notifications switch is turned on.
      */
-    void askNotifications(Consumer<Boolean> done) {
+    public void askNotifications(Consumer<Boolean> done) {
         String[] missing = BackgroundCheck.missing(Build.VERSION.SDK_INT, this::permitted);
         if (missing.length == 0) {
             done.accept(true);
@@ -1844,7 +1852,7 @@ public class MainActivity extends Activity {
     }
 
     /** Whether a sync pass is running. */
-    boolean isSyncing() {
+    public boolean isSyncing() {
         return syncing;
     }
 
@@ -2029,7 +2037,7 @@ public class MainActivity extends Activity {
      * ({@link #fillMail}), and contacts and calendars sync when their tab is
      * opened ({@link #firstSyncIfOwed}).
      */
-    void syncConnected(AccountEntry account) {
+    public void syncConnected(AccountEntry account) {
         for (PimDomain domain : PimDomain.values()) {
             if (account.covers(domain)) {
                 FirstSync.owe(this, account.email, domain);
@@ -2833,7 +2841,7 @@ public class MainActivity extends Activity {
      * saying so, while one holds it; a failure is said in a dialog, under
      * {@code failed} when it names nothing itself.
      */
-    void underSyncLock(int failed, Runnable write) {
+    public void underSyncLock(int failed, Runnable write) {
         if (!SyncLock.take()) {
             postAlive(() -> toast(getString(R.string.sync_busy)));
             return;
@@ -2929,7 +2937,7 @@ public class MainActivity extends Activity {
     }
 
     /** The subscribed addressbooks set to mirror into the phone. */
-    List<BookEntry> phoneSyncedBooks() {
+    public List<BookEntry> phoneSyncedBooks() {
         return runner.phoneSyncedBooks();
     }
 
@@ -2939,7 +2947,7 @@ public class MainActivity extends Activity {
      * calendars' ({@link #reconcileCalendars}), off the main thread: at
      * startup and once a setup committed its books.
      */
-    void reconcilePhone() {
+    public void reconcilePhone() {
         io.execute(
                 () -> {
                     try {
@@ -2956,7 +2964,7 @@ public class MainActivity extends Activity {
      * ({@link CalendarRows}), off the main thread: with the books, and when a
      * calendar's switch or the account roster changes.
      */
-    void reconcileCalendars() {
+    public void reconcileCalendars() {
         io.execute(
                 () -> {
                     try {
@@ -3008,7 +3016,7 @@ public class MainActivity extends Activity {
      * filling as the contacts are written, unless a sync holds the dock. The
      * process's lock is not taken, the book's own lock being the pass's.
      */
-    void showOnPhone(String url) {
+    public void showOnPhone(String url) {
         io.execute(
                 () -> {
                     try {
@@ -3068,7 +3076,7 @@ public class MainActivity extends Activity {
      * account goes, which takes its raw contacts with it. The contacts stay
      * in the store.
      */
-    void hideFromPhone(String url) {
+    public void hideFromPhone(String url) {
         io.execute(
                 () -> {
                     try {
@@ -4084,7 +4092,7 @@ public class MainActivity extends Activity {
                 });
     }
 
-    void filterChanged() {
+    public void filterChanged() {
         contactsList.reRender();
         calendarList.reload();
         mailList.reload();
@@ -4096,7 +4104,7 @@ public class MainActivity extends Activity {
      * the mailboxes, the calendars, or the subscribed address books (the
      * on-device one among them).
      */
-    List<PimdirCollections.Stored> collectionsOf(PimDomain domain) {
+    public List<PimdirCollections.Stored> collectionsOf(PimDomain domain) {
         PimdirCollections collections = new PimdirCollections(pimdir, this);
         switch (domain) {
             case MAIL:
@@ -4156,7 +4164,7 @@ public class MainActivity extends Activity {
      * Drops what the filters, the defaults and the account switch held of an
      * account being deleted, before its collections go.
      */
-    void forgetViews(String email) {
+    public void forgetViews(String email) {
         for (PimDomain domain : PimDomain.values()) {
             List<PimdirCollections.Stored> collections =
                     domain == PimDomain.MAIL
@@ -4237,7 +4245,7 @@ public class MainActivity extends Activity {
      * current screen with a fade and a slight zoom. What is underneath
      * stays put.
      */
-    void openOverlay(int panel) {
+    public void openOverlay(int panel) {
         hideKeyboard();
         View overlay = overlayOf(panel);
         overlay.setVisibility(View.VISIBLE);
@@ -4248,7 +4256,7 @@ public class MainActivity extends Activity {
     }
 
     /** Fades the overlay back out (zooming slightly away), then hides it. */
-    void closeOverlay(int panel) {
+    public void closeOverlay(int panel) {
         hideKeyboard();
         View overlay = overlayOf(panel);
         android.view.animation.Animation exit =
@@ -4558,7 +4566,7 @@ public class MainActivity extends Activity {
      * chrome element goes off, then the screen's own set comes back
      * (the contacts screen delegates to its selection/search state).
      */
-    void applyChrome(int panel) {
+    public void applyChrome(int panel) {
         // NOTE: posted, so the tab is drawn before its first sync's dialog
         // goes up over it.
         main.post(() -> firstSyncIfOwed(panel));
@@ -4640,7 +4648,7 @@ public class MainActivity extends Activity {
     }
 
     /** Dismisses the soft keyboard, e.g. when leaving the edit form. */
-    void hideKeyboard() {
+    public void hideKeyboard() {
         // NOTE: fall back to the flipper's window token when nothing
         // holds the focus (the same window either way).
         View focus = getCurrentFocus();

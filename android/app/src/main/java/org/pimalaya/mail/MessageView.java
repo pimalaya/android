@@ -19,13 +19,13 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import org.pimalaya.AccountEntry;
 import org.pimalaya.Avatar;
 import org.pimalaya.Dates;
 import org.pimalaya.MainActivity;
 import org.pimalaya.OpenedFiles;
-import org.pimalaya.PimDomain;
 import org.pimalaya.R;
+import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;

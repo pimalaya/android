@@ -18,7 +18,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.PimDomain;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Cards;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Card;

@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.account;
 
 import android.app.AlertDialog;
 import android.text.InputType;
@@ -20,6 +20,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.IntConsumer;
+import org.pimalaya.Avatar;
+import org.pimalaya.MainActivity;
+import org.pimalaya.PillField;
+import org.pimalaya.R;
+import org.pimalaya.Sections;
 import org.pimalaya.calendar.PhoneCalendars;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
@@ -43,7 +48,7 @@ import org.pimalaya.sync.SyncStamps;
  * io executor through the host, which keeps the overlay navigation and
  * calls in through {@link #open} and {@link #leave}.
  */
-final class AccountSettings {
+public final class AccountSettings {
     private final MainActivity host;
 
     /** The account whose settings screen is open (null outside it). */
@@ -67,12 +72,12 @@ final class AccountSettings {
     /** The same for the phone's calendars ({@link Accounts#calendarsElsewhere}). */
     private boolean calendarsElsewhere;
 
-    AccountSettings(MainActivity host) {
+    public AccountSettings(MainActivity host) {
         this.host = host;
     }
 
     /** Wires the page's bar, scroll and remove button, once laid out. */
-    void bind() {
+    public void bind() {
         // NOTE: the address moves into the bar once the identity block's
         // own address has scrolled under it, as the lists hand over their
         // large title.
@@ -94,7 +99,7 @@ final class AccountSettings {
     }
 
     /** Opens one account's settings screen, fading in over the drawer. */
-    void open(String email) {
+    public void open(String email) {
         settingsEmail = email;
         cameFrom = host.screen;
 
@@ -843,7 +848,7 @@ final class AccountSettings {
     }
 
     /** Leaves the settings screen, landing on the still-open drawer. */
-    void leave() {
+    public void leave() {
         settingsEmail = null;
         host.closeOverlay(MainActivity.PANEL_ACCOUNT);
         host.screen = cameFrom;

@@ -13,6 +13,8 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.LocalBook;

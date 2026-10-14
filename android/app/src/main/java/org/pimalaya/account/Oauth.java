@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.account;
 
 /**
  * OAuth 2.0 provider defaults for the connection flow: the app's

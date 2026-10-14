@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.account;
 
 import android.content.Context;
 import android.content.SharedPreferences;

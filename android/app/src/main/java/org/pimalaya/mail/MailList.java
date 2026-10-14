@@ -31,14 +31,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
-import org.pimalaya.AccountActivation;
 import org.pimalaya.Avatar;
 import org.pimalaya.Chips;
 import org.pimalaya.Dates;
 import org.pimalaya.ListHeader;
 import org.pimalaya.MainActivity;
-import org.pimalaya.PimDomain;
 import org.pimalaya.R;
+import org.pimalaya.account.AccountActivation;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.sync.MergedFilter;
 import org.pimalaya.sync.SyncScope;
 

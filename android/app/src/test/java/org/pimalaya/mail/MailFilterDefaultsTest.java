@@ -8,7 +8,7 @@ import android.content.Context;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.pimalaya.PimDomain;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;

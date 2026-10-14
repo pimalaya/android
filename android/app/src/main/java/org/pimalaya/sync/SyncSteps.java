@@ -1,8 +1,8 @@
 package org.pimalaya.sync;
 
 import android.content.res.Resources;
-import org.pimalaya.PimDomain;
 import org.pimalaya.R;
+import org.pimalaya.account.PimDomain;
 
 /**
  * What the sync dock says and how full its bar is.

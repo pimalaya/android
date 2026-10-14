@@ -27,7 +27,7 @@ import javax.crypto.spec.SecretKeySpec;
  * runs unchanged.
  */
 public final class FakeAndroidKeyStore extends Provider {
-    static final Map<String, SecretKey> KEYS = new ConcurrentHashMap<>();
+    public static final Map<String, SecretKey> KEYS = new ConcurrentHashMap<>();
 
     private FakeAndroidKeyStore() {
         super("AndroidKeyStore", 1.0, "test stand-in");

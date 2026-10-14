@@ -11,6 +11,10 @@ import android.net.NetworkInfo;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.Accounts;
+import org.pimalaya.account.PimDomain;
+import org.pimalaya.account.SecureStore;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.MailSession;

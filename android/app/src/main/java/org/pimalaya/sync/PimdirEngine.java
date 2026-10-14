@@ -5,7 +5,7 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.PimDomain;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;

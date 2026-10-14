@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.account;
 
 /**
  * One domain's half of an account: where that domain lives, and which
@@ -22,9 +22,9 @@ package org.pimalaya;
  * connection carries a second endpoint, and every other one leaves it
  * null, as does a JMAP mail connection whose one session submits too.
  */
-final class AccountConnection {
+public final class AccountConnection {
     /** Where the domain lives. */
-    final String baseUrl;
+    public final String baseUrl;
 
     /** Which of the account's credentials signs in to it. */
     final String credentialId;

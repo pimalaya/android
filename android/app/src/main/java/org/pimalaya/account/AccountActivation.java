@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.account;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -31,7 +31,7 @@ public final class AccountActivation {
     }
 
     /** Turns the account on or off. */
-    static void set(Context context, String email, boolean enabled) {
+    public static void set(Context context, String email, boolean enabled) {
         Set<String> off = new HashSet<>(prefs(context).getStringSet(EMAILS, Set.of()));
         if (enabled) {
             off.remove(email);

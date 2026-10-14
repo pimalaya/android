@@ -5,7 +5,7 @@ import android.content.SharedPreferences;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.pimalaya.PimDomain;
+import org.pimalaya.account.PimDomain;
 
 /**
  * The first sync each domain of a freshly connected account owes, run the

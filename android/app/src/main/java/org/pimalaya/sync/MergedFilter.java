@@ -9,8 +9,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
-import org.pimalaya.AccountActivation;
-import org.pimalaya.PimDomain;
+import org.pimalaya.account.AccountActivation;
+import org.pimalaya.account.PimDomain;
 
 /**
  * One list's filter: which accounts and which of their collections it

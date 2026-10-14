@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.account;
 
 import android.content.Intent;
 import android.net.Uri;
@@ -8,6 +8,9 @@ import android.widget.TextView;
 import java.net.InetAddress;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.MainActivity;
+import org.pimalaya.PillField;
+import org.pimalaya.R;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.OauthSession;
 import org.pimalaya.client.OauthTokens;
@@ -25,9 +28,9 @@ import org.pimalaya.client.ServerMetadata;
  * persists, sealed under the account key, because the browser hop
  * routinely outlives the process.
  */
-final class OauthFlow {
+public final class OauthFlow {
     /** Lands a redeemed grant back in the connection flow. */
-    interface Connector {
+    public interface Connector {
         void connect(
                 Account account,
                 String email,
@@ -45,13 +48,13 @@ final class OauthFlow {
 
     /** Wired by the host after construction (the two flows reference
      *  each other, so one side binds late). */
-    Connector onConnected;
+    public Connector onConnected;
 
     /** Resets the config screen's continue when a grant aborts. */
-    Runnable onAborted;
+    public Runnable onAborted;
 
     /** Puts the running step's button on its loader while a grant starts. */
-    Runnable onBusy;
+    public Runnable onBusy;
 
     /** The in-flight grant: the PKCE session and the account material
      *  the redeem needs (all null or empty when no grant runs). */
@@ -84,7 +87,7 @@ final class OauthFlow {
     /** The loopback redirect listener, closed with the activity. */
     private java.net.ServerSocket loopbackServer;
 
-    OauthFlow(MainActivity host) {
+    public OauthFlow(MainActivity host) {
         this.host = host;
         this.grants = new PendingGrantStore(host);
     }
@@ -230,7 +233,7 @@ final class OauthFlow {
      * restoring a persisted one when the process died while the user
      * was in the browser.
      */
-    void handleRedirect(Intent intent) {
+    public void handleRedirect(Intent intent) {
         Uri data = intent == null ? null : intent.getData();
         if (data == null) {
             return;
@@ -500,7 +503,7 @@ final class OauthFlow {
     }
 
     /** Closes the loopback listener, if one is open. */
-    void closeLoopback() {
+    public void closeLoopback() {
         java.net.ServerSocket server = loopbackServer;
         loopbackServer = null;
         if (server != null) {
@@ -745,7 +748,7 @@ final class OauthFlow {
      * The user left the grant behind (closed or stepped back out of the
      * connection flow): forget it, so a late redirect redeems nothing.
      */
-    void cancel() {
+    public void cancel() {
         pendingOauth = null;
         clearPendingOauth();
     }

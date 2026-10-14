@@ -7,7 +7,7 @@ import android.content.Context;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.pimalaya.PimDomain;
+import org.pimalaya.account.PimDomain;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 

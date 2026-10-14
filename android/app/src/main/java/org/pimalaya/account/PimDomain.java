@@ -1,5 +1,6 @@
-package org.pimalaya;
+package org.pimalaya.account;
 
+import org.pimalaya.R;
 import org.pimalaya.client.ServiceConfig;
 
 import java.util.ArrayList;
@@ -48,7 +49,7 @@ public enum PimDomain {
     public final String id;
 
     /** The label a picker shows. */
-    final int label;
+    public final int label;
 
     /** The glyph beside that label, the one the domain bar draws. */
     final int icon;
@@ -64,7 +65,7 @@ public enum PimDomain {
     }
 
     /** The domain a stored id names, contacts when it names none. */
-    static PimDomain byId(String id) {
+    public static PimDomain byId(String id) {
         for (PimDomain domain : values()) {
             if (domain.id.equals(id)) {
                 return domain;

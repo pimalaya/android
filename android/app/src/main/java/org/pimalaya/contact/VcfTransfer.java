@@ -5,9 +5,9 @@ import android.net.Uri;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import org.pimalaya.AccountEntry;
 import org.pimalaya.MainActivity;
 import org.pimalaya.R;
+import org.pimalaya.account.AccountEntry;
 import org.pimalaya.client.Card;
 
 /**

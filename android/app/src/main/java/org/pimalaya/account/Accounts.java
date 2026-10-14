@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.account;
 
 import android.accounts.Account;
 import android.accounts.AccountManager;
@@ -70,7 +70,7 @@ public final class Accounts {
      * The full subscribed set must be passed at once: accounts absent from
      * it are purged. Calendar accounts are left alone.
      */
-    static void reconcile(Context context, List<BookEntry> books) {
+    public static void reconcile(Context context, List<BookEntry> books) {
         AccountManager manager = AccountManager.get(context);
 
         for (Account account : manager.getAccountsByType(TYPE)) {
@@ -235,7 +235,7 @@ public final class Accounts {
     }
 
     /** The addressbook collection URL backing the account, or null. */
-    static String url(Context context, Account account) {
+    public static String url(Context context, Account account) {
         return AccountManager.get(context).getUserData(account, DATA_URL);
     }
 
@@ -276,7 +276,7 @@ public final class Accounts {
      * Removes the Android account backing the addressbook URL, when one
      * exists; ContactsProvider purges its raw contacts with it.
      */
-    static void remove(Context context, String url) {
+    public static void remove(Context context, String url) {
         Account account = findByUrl(context, url);
         if (account != null) {
             AccountManager.get(context).removeAccountExplicitly(account);

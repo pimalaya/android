@@ -11,9 +11,9 @@ import android.os.Build;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Predicate;
-import org.pimalaya.AccountEntry;
 import org.pimalaya.BackgroundJob;
-import org.pimalaya.SecureStore;
+import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.SecureStore;
 import org.pimalaya.contact.LocalBook;
 
 /**

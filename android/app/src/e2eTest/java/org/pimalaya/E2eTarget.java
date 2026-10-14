@@ -1,5 +1,10 @@
 package org.pimalaya;
 
+import org.pimalaya.account.AccountConnection;
+import org.pimalaya.account.AccountCredential;
+import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.OnboardingFlow;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.ServiceConfig;
 

@@ -13,16 +13,16 @@ import android.widget.LinearLayout;
  * show/hide toggle. On a card it takes the page tone, on a page the
  * surface tone, so it always reads against what is around it.
  */
-final class PillField {
-    final LinearLayout view;
-    final EditText input;
+public final class PillField {
+    public final LinearLayout view;
+    public final EditText input;
 
     private PillField(LinearLayout view, EditText input) {
         this.view = view;
         this.input = input;
     }
 
-    static PillField of(MainActivity host, int hint, String value, boolean secret, boolean onCard) {
+    public static PillField of(MainActivity host, int hint, String value, boolean secret, boolean onCard) {
         LinearLayout pill = new LinearLayout(host);
         pill.setOrientation(LinearLayout.HORIZONTAL);
         pill.setGravity(Gravity.CENTER_VERTICAL);
@@ -79,7 +79,7 @@ final class PillField {
         return new PillField(pill, input);
     }
 
-    String text() {
+    public String text() {
         return input.getText().toString().trim();
     }
 }

@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.account;
 
 import android.app.AlertDialog;
 import android.util.Log;
@@ -17,6 +17,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.pimalaya.MainActivity;
+import org.pimalaya.PillField;
+import org.pimalaya.R;
 import org.pimalaya.calendar.PhoneCalendars;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Addressbook;
@@ -41,7 +44,7 @@ import org.pimalaya.sync.BackgroundCheck;
  * {@link #refreshStep}. Nothing persists before the selection
  * confirms, so backing out of the flow leaves everything untouched.
  */
-final class OnboardingFlow {
+public final class OnboardingFlow {
     private final MainActivity host;
     private final OauthFlow oauth;
 
@@ -128,13 +131,13 @@ final class OnboardingFlow {
     /** The same for the phone's calendars ({@link Accounts#calendarsElsewhere}). */
     private boolean calendarsElsewhere;
 
-    OnboardingFlow(MainActivity host, OauthFlow oauth) {
+    public OnboardingFlow(MainActivity host, OauthFlow oauth) {
         this.host = host;
         this.oauth = oauth;
     }
 
     /** Wires the steps' own buttons and fields, once the views exist. */
-    void bind() {
+    public void bind() {
         EditText email = host.findViewById(R.id.email_input);
         EditText password = host.findViewById(R.id.domain_password);
 
@@ -266,7 +269,7 @@ final class OnboardingFlow {
     }
 
     /** Resets the flow to its first step and shows it. */
-    void open() {
+    public void open() {
         pendingEmail = null;
         searchedConfigs = new ArrayList<>();
         matchedProvider = null;
@@ -290,7 +293,7 @@ final class OnboardingFlow {
     }
 
     /** Brings a step's own buttons in line with its state, on entering it. */
-    void refreshStep(int step) {
+    public void refreshStep(int step) {
         if (step == MainActivity.STEP_EMAIL) {
             host.setFabEnabled(R.id.email_continue, emailSubmittable());
         } else if (step != MainActivity.STEP_OAUTH) {
@@ -299,7 +302,7 @@ final class OnboardingFlow {
     }
 
     /** Whether the email field holds a submittable address or URI. */
-    boolean emailSubmittable() {
+    public boolean emailSubmittable() {
         String address =
                 ((EditText) host.findViewById(R.id.email_input)).getText().toString().trim();
         return !address.isEmpty() && !address.contains(" ");
@@ -1468,7 +1471,7 @@ final class OnboardingFlow {
     }
 
     /** Puts the running step's main button on its loader. */
-    void busy() {
+    public void busy() {
         switch (host.authStep()) {
             case MainActivity.STEP_SIGNIN:
                 host.setAuthLoading(R.id.signin_continue, R.id.signin_progress, true);
@@ -1486,7 +1489,7 @@ final class OnboardingFlow {
     }
 
     /** The running step's main button back to idle, unless a check runs. */
-    void resetConfigContinue() {
+    public void resetConfigContinue() {
         if (verifying) {
             return;
         }
@@ -1847,7 +1850,7 @@ final class OnboardingFlow {
      * would persist an account covering fewer domains than the screen still
      * shows selected.
      */
-    void abortAuthSteps() {
+    public void abortAuthSteps() {
         authSteps = null;
         pendingStep = null;
         connecting = false;
@@ -1865,7 +1868,7 @@ final class OnboardingFlow {
      * A grant that failed or was refused: the chain stops where it is, what
      * signed in keeps its credential, and the step's button comes back.
      */
-    void grantAborted() {
+    public void grantAborted() {
         connecting = false;
         resetConfigContinue();
     }
@@ -1875,7 +1878,7 @@ final class OnboardingFlow {
      * page with nothing lost, or, for a standard setup that never showed
      * one, to the domains.
      */
-    void backToSignIn() {
+    public void backToSignIn() {
         if (!signInPage) {
             abortAuthSteps();
             return;
@@ -2520,7 +2523,7 @@ final class OnboardingFlow {
      * material and the scopes granted, so expired access tokens can be
      * refreshed on later syncs and a later grant can ask for the union.
      */
-    void connect(
+    public void connect(
             Account candidate,
             String email,
             String refreshToken,
@@ -3307,7 +3310,7 @@ final class OnboardingFlow {
      * implicit-TLS one behind {@code smtps://}, a STARTTLS one behind
      * {@code smtp://}.
      */
-    static String submissionUrl(ServiceConfig config) {
+    public static String submissionUrl(ServiceConfig config) {
         if (!"smtp".equals(config.service) || config.host == null) {
             return null;
         }
@@ -3328,7 +3331,7 @@ final class OnboardingFlow {
      * 5092 section 3.2), the credential staying the bare token every other
      * protocol sends. Any other endpoint is returned as it is.
      */
-    static String asUser(String url, String email) {
+    public static String asUser(String url, String email) {
         return url.startsWith("imap") || url.startsWith("smtp")
                 ? PimalayaClient.withUser(url, email)
                 : url;
@@ -3344,7 +3347,7 @@ final class OnboardingFlow {
      * STARTTLS step, and a {@code starttls} endpoint driven as if it were
      * implicit would connect in the clear rather than fail.
      */
-    static String endpointUrl(ServiceConfig config, String email) {
+    public static String endpointUrl(ServiceConfig config, String email) {
         if ("msgraph".equals(config.service) || "msgraphCalendar".equals(config.service)) {
             return PimalayaClient.msgraphBase(email);
         }

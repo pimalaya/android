@@ -8,7 +8,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiPredicate;
-import org.pimalaya.AccountActivation;
+import org.pimalaya.account.AccountActivation;
 
 /**
  * Which calendar or address book of an account a new event or contact goes to.

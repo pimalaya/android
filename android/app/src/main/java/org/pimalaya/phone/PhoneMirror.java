@@ -8,7 +8,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
-import org.pimalaya.PimDomain;
+import org.pimalaya.account.PimDomain;
 
 /**
  * A phone app the store's items show in, and the permissions it takes.

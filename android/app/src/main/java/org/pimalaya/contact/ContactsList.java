@@ -7,14 +7,14 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import org.pimalaya.AccountEntry;
 import org.pimalaya.Avatar;
 import org.pimalaya.CardSections;
 import org.pimalaya.Chips;
 import org.pimalaya.ListHeader;
 import org.pimalaya.MainActivity;
-import org.pimalaya.PimDomain;
 import org.pimalaya.R;
+import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.sync.MergedFilter;
 
 /**

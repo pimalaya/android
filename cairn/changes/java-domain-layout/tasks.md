@@ -23,7 +23,7 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 - [x] calendar
 - [x] contact
 - [x] mail
-- [ ] account
+- [x] account
 - [ ] ui
 - [ ] shell (org.pimalaya: components, composition root)
 - [ ] OfflineEngine renamed ContactEngine
@@ -86,3 +86,4 @@ Logic found in Java that belongs to Rust, collected while moving.
 - calendar: EventStore and EventView call CardStore.rowHandle (store plumbing, pimdir). CalendarList and EventView reach into ~20 MainActivity members. Public for tests (e2e): Zones + utc, EventStore.StoredCalendar.name, StoredEvent.handle/ical. DefaultCollectionTest lives in calendar (EventStore fixture). E2eCalendarTest stays in root with the harness.
 - contact: LocalBook ("On this device") is cross-domain (FileStore, FilesList, BackgroundCheck): account or pimdir. Birthdays is contact (ContactsList only). Contact screens reach into ~25 MainActivity members (openGroup, mergeReplicas, openMerged, importContacts...: the phase 4 ContactEditor). Public for tests: BookEntry ctor (AccountsTest), PimdirContacts.Indexed + list (DeletedItemsTest, e2e).
 - mail: MailStore.typed/changed/likePattern are pimdir plumbing (ItemLinks, DeletedItems, FileStore 8 calls); MailDate.toStamp used by PimdirSummary; MailEngine.SCRATCH, withFlag, DELETED pulled into pimdir. MailBodies/MailFill scheduling driven from MainActivity: SyncCoordinator. E2e mail tests stay in root with the harness (about 50 harness members otherwise). Public for tests: MailEngine.SEEN/FLAGGED/Deletion/stageFlag/stageDelete, MailStore.trashOf/holdsBody/source/storedSource/restateFromBody/StoredMessage ctor + seen/flagged/hasAttachment/objectHash, MailWindow.since, MailReader + Read, MailSubmit, MailPoison, MailOwed.key, MailBodies.ATTEMPTS, MessageView.linkIntent. res/layout/panel_compose.xml inflates org.pimalaya.mail.RecipientField (device check: compose screen opens).
+- account: two layers in one package. PimDomain, AccountEntry, AccountCredential, SecureStore, AccountActivation, Accounts are vocabulary and credential plumbing used by pimdir, sync, phone and every domain (the Rust `account` is likewise cross-cutting and low); OnboardingFlow, OauthFlow, AccountSettings are screens over every domain (~30 MainActivity members widened). Phase 2: account sits low (below sync), the setup and settings screens move to a package above the domains (decide its name then). Public for tests: AccountEntry.empty/connection/with, AccountConnection + baseUrl, OnboardingFlow.submissionUrl/asUser/endpointUrl (E2eTarget), FakeAndroidKeyStore.KEYS.
