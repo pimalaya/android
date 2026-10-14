@@ -17,19 +17,26 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
+import org.pimalaya.account.MergedFilter;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.EventDetail;
 import org.pimalaya.client.EventMerge;
-import org.pimalaya.client.EventSplit;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.DefaultCollection;
+import org.pimalaya.pimdir.ItemLinks;
+import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.ui.Dates;
+import org.pimalaya.ui.Host;
+import org.pimalaya.ui.Linked;
+import org.pimalaya.ui.Panels;
+import org.pimalaya.ui.Picker;
 import org.pimalaya.ui.Sections;
 
 import java.time.LocalDateTime;
@@ -223,7 +230,18 @@ public final class EventView {
                 JOURNAL),
     };
 
-    private final MainActivity host;
+    private final Host host;
+    private final CalendarParts parts;
+
+    /** The Linked card the page shows its entry's references in. */
+    private final Linked<ItemLinks.Endpoint> linked;
+
+    /**
+     * The agenda a save or a delete reloads; it binds itself here when
+     * built, the two referencing each other.
+     */
+    CalendarList list;
+
     private final Sections sections;
 
     /** What is open: the row that was tapped, and where it lives. */
@@ -274,8 +292,10 @@ public final class EventView {
     /** The conflicts the user has reviewed, by id, which clears their glyph. */
     private final Set<Integer> reviewed = new HashSet<>();
 
-    public EventView(MainActivity host) {
+    public EventView(Host host, CalendarParts parts, Linked<ItemLinks.Endpoint> linked) {
         this.host = host;
+        this.parts = parts;
+        this.linked = linked;
         this.sections =
                 new Sections(host, (LinearLayout) host.findViewById(R.id.event_view_page));
     }
@@ -315,7 +335,7 @@ public final class EventView {
         String ical;
         try {
             ical =
-                    host.client.newEvent(
+                    parts.client().newEvent(
                             EVENT,
                             uid,
                             now(),
@@ -338,6 +358,43 @@ public final class EventView {
                 true);
     }
 
+    /**
+     * Starts a new calendar entry in the default calendar of the account
+     * in view, asking only when there is none, exactly as a new contact
+     * picks its address book. A read-only calendar is never offered.
+     */
+    public void composeNew() {
+        Map<String, EventStore.StoredCalendar> byId = new HashMap<>();
+        boolean readOnlyBackend = false;
+        for (EventStore.StoredCalendar calendar : parts.events().loadCalendars()) {
+            byId.put(calendar.id, calendar);
+            readOnlyBackend |= !PimalayaClient.writesEvents(calendar.url);
+        }
+        List<PimdirCollections.Stored> collections =
+                new PimdirCollections(parts.pimdir(), host).list(PimdirSummary.CALENDAR);
+        // NOTE: a backend taking no event write lists as read only, and the
+        // line for no calendar at all would leave its owner guessing why.
+        if (readOnlyBackend && DefaultCollection.writable(collections).isEmpty()) {
+            host.toast(host.getString(R.string.event_read_only));
+            return;
+        }
+        DefaultCollection.Choice choice =
+                DefaultCollection.choice(
+                        host,
+                        PimdirSummary.CALENDAR,
+                        collections,
+                        MergedFilter.of(host, PimDomain.CALENDAR)::accepts);
+        Picker.choose(
+                host,
+                R.string.event_target_title,
+                R.string.event_no_calendar,
+                choice.direct,
+                choice.offered,
+                choice.preselected,
+                collection -> host.ui.twoLine(collection.name, collection.accountEmail),
+                calendar -> compose(byId.get(calendar.id)));
+    }
+
     /** Opens the page on one agenda row, in conflict mode when it is conflicted. */
     public void open(
             Occurrence occurrence,
@@ -349,6 +406,42 @@ public final class EventView {
         } else {
             open(occurrence, event, calendar, false);
         }
+    }
+
+    /**
+     * Opens one calendar resource on its page, as its series rather than an
+     * occurrence, read off the store on the io executor; {@code gone} runs
+     * when the store holds it no more.
+     */
+    public void openStored(String collection, String linkId, Runnable gone) {
+        host.io.execute(
+                () -> {
+                    EventStore.StoredCalendar calendar = null;
+                    for (EventStore.StoredCalendar held : parts.events().loadCalendars()) {
+                        if (held.id.equals(collection)) {
+                            calendar = held;
+                        }
+                    }
+                    EventStore.StoredEvent found = null;
+                    if (calendar != null) {
+                        for (EventStore.StoredEvent event : parts.events().loadEvents()) {
+                            if (event.collectionId.equals(collection)
+                                    && event.id.equals(linkId)) {
+                                found = event;
+                            }
+                        }
+                    }
+                    EventStore.StoredCalendar in = calendar;
+                    EventStore.StoredEvent event = found;
+                    host.postAlive(
+                            () -> {
+                                if (event == null) {
+                                    gone.run();
+                                } else {
+                                    open(null, event, in);
+                                }
+                            });
+                });
     }
 
     /**
@@ -367,11 +460,11 @@ public final class EventView {
         EventStore.StoredConflict found;
         EventMerge merged;
         try {
-            found = host.events.conflictOf(event);
+            found = parts.events().conflictOf(event);
             merged =
                     found == null
                             ? null
-                            : host.client.mergeEvent(found.base, found.local, found.remote);
+                            : parts.client().mergeEvent(found.base, found.local, found.remote);
         } catch (Exception error) {
             Log.w("pimalaya", "event merge failed: " + event.id, error);
             host.showError(error, R.string.event_unreadable);
@@ -389,7 +482,7 @@ public final class EventView {
                     () -> {
                         Exception failure = null;
                         try {
-                            host.calendarStager()
+                            new CalendarStager(parts.pimdir(), parts.client())
                                     .mutateEdit(settled.collection, settled.handle, ical, null, "");
                         } catch (Exception error) {
                             Log.w("pimalaya", "event merge failed: " + event.id, error);
@@ -403,7 +496,7 @@ public final class EventView {
                                         return;
                                     }
                                     host.toast(host.getString(R.string.conflict_auto_resolved));
-                                    host.calendarList.reload();
+                                    list.reload();
                                 });
                     });
             return;
@@ -467,7 +560,7 @@ public final class EventView {
         openedTimes.putAll(times);
 
         render();
-        host.show(MainActivity.PANEL_EVENT_VIEW);
+        host.show(Panels.EVENT_VIEW);
     }
 
     /**
@@ -541,11 +634,11 @@ public final class EventView {
         people();
         origin();
         if (!creating) {
-            host.linked.section(sections, EventStore.endpointOf(event), this::render);
+            linked.section(sections, EventStore.endpointOf(event), this::render);
         }
 
         host.updateBarTitle(title());
-        if (host.screen == MainActivity.PANEL_EVENT_VIEW) {
+        if (host.screen == Panels.EVENT_VIEW) {
             gate();
         }
     }
@@ -1330,7 +1423,7 @@ public final class EventView {
      */
     private EventDetail detailOf(EventStore.StoredEvent event) {
         try {
-            return host.client.readEvent(
+            return parts.client().readEvent(
                     event.ical, series() ? occurrence.recurrenceId.time : null);
         } catch (Exception error) {
             Log.w("pimalaya", "event read failed: " + event.id, error);
@@ -1509,51 +1602,20 @@ public final class EventView {
                 () -> {
                     Exception failure = null;
                     try {
-                        CalendarStager engine = host.calendarStager();
-                        String source = target.ical;
-                        String into = collection.id;
-                        String handle = target.handle;
-                        if (settling != null) {
-                            source =
-                                    host.client.resolveEvent(
-                                            settling.base, settling.local, settling.remote, chosen);
-                            into = settling.collection;
-                            handle = settling.handle;
-                        }
-
-                        // NOTE: no summary and no key. What an agenda row
-                        // shows needs the recurrence expansion, which
-                        // happens at render time against the window being
-                        // shown, so there is nothing to write here.
-                        if ("following".equals(scope)) {
-                            EventSplit split = host.client.splitEvent(source, edited);
-                            if (split.series != null) {
-                                engine.mutateAdd(
-                                        collection.id,
-                                        uid + ".ics",
-                                        split.series,
-                                        new JSONArray(),
-                                        null,
-                                        "");
-                            }
-                            engine.mutateEdit(into, handle, split.master, null, "");
-                        } else {
-                            String written =
-                                    settling != null && !rewritten
-                                            ? source
-                                            : host.client.writeEvent(source, edited);
-                            if (isNew) {
-                                engine.mutateAdd(
-                                        collection.id,
-                                        target.id,
-                                        written,
-                                        new JSONArray(),
-                                        null,
-                                        "");
-                            } else {
-                                engine.mutateEdit(into, handle, written, null, "");
-                            }
-                        }
+                        new EventWrites(
+                                        parts.client(),
+                                        new CalendarStager(parts.pimdir(), parts.client()))
+                                .save(
+                                        new EventWrites.Save(
+                                                scope,
+                                                edited,
+                                                uid,
+                                                target,
+                                                collection,
+                                                isNew,
+                                                rewritten,
+                                                settling,
+                                                chosen));
                     } catch (Exception error) {
                         Log.w("pimalaya", "event save failed: " + target.id, error);
                         failure = error;
@@ -1568,8 +1630,8 @@ public final class EventView {
                                     return;
                                 }
                                 creating = false;
-                                host.calendarList.reload();
-                                host.showBack(MainActivity.PANEL_CALENDAR);
+                                list.reload();
+                                host.showBack(Panels.CALENDAR);
                             });
                 });
     }
@@ -1652,7 +1714,7 @@ public final class EventView {
      */
     private void delete(String scope) {
         if (creating) {
-            host.showBack(MainActivity.PANEL_CALENDAR);
+            host.showBack(Panels.CALENDAR);
             return;
         }
         if (!"all".equals(scope) && !settled()) {
@@ -1680,32 +1742,10 @@ public final class EventView {
                 () -> {
                     Exception failure = null;
                     try {
-                        CalendarStager engine = host.calendarStager();
-                        String left = null;
-                        if (!"all".equals(scope)) {
-                            String source =
-                                    settling == null
-                                            ? target.ical
-                                            : host.client.resolveEvent(
-                                                    settling.base,
-                                                    settling.local,
-                                                    settling.remote,
-                                                    chosen);
-                            left = host.client.removeEvent(source, edit);
-                        }
-                        // NOTE: a removal staged on the binding that
-                        // conflicted is the decision on it: the engine
-                        // gates the delete on the revision it recorded.
-                        if (left == null && settling != null) {
-                            engine.mutateRemove(settling.collection, settling.handle);
-                        } else if (left == null) {
-                            engine.mutateRemove(collection.id, target.handle);
-                        } else if (settling != null) {
-                            engine.mutateEdit(
-                                    settling.collection, settling.handle, left, null, "");
-                        } else {
-                            engine.mutateEdit(collection.id, target.handle, left, null, "");
-                        }
+                        new EventWrites(
+                                        parts.client(),
+                                        new CalendarStager(parts.pimdir(), parts.client()))
+                                .delete(scope, edit, target, collection, settling, chosen);
                     } catch (Exception error) {
                         Log.w("pimalaya", "event delete failed: " + target.id, error);
                         failure = error;
@@ -1719,8 +1759,8 @@ public final class EventView {
                                     host.showError(outcome, R.string.event_delete_failed);
                                     return;
                                 }
-                                host.calendarList.reload();
-                                host.showBack(MainActivity.PANEL_CALENDAR);
+                                list.reload();
+                                host.showBack(Panels.CALENDAR);
                             });
                 });
     }

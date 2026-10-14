@@ -33,6 +33,7 @@ import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.calendar.CalendarList;
+import org.pimalaya.calendar.CalendarParts;
 import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.EventView;
@@ -64,7 +65,6 @@ import org.pimalaya.mail.MessageCompose;
 import org.pimalaya.mail.MessageView;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
-import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -82,7 +82,6 @@ import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
 import org.pimalaya.ui.Panels;
-import org.pimalaya.ui.Picker;
 import org.pimalaya.ui.SyncDock;
 import org.pimalaya.ui.SyncPill;
 
@@ -177,7 +176,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     public CalendarList calendarList;
 
     /** The reader one agenda row opens onto. */
-    public EventView eventView;
+    EventView eventView;
 
     /** The mail side of the store, and the merged list over it. */
     public MailStore mail;
@@ -261,7 +260,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         editor = new ContactEditor(this, contactParts, form, this::reloadContacts);
         contactsList = new ContactsList(this, contactParts, editor, this::syncContacts);
         events = new EventStore(this, pimdir);
-        calendarList = new CalendarList(this, events);
         mail = new MailStore(this, pimdir);
         mailList = new MailList(this, mail);
         files = new FileStore(this, pimdir);
@@ -269,7 +267,11 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         filesList = new FilesList(this);
         links = new ItemLinks(this, pimdir);
         linked = new LinkedSection(this);
-        eventView = new EventView(this);
+        // NOTE: the entry page shows the Linked card, so it is built after
+        // it; the agenda binds itself into the page it opens rows onto.
+        CalendarParts calendarParts = new CalendarParts(pimdir, client, events);
+        eventView = new EventView(this, calendarParts, linked);
+        calendarList = new CalendarList(this, calendarParts, eventView, this::syncCalendars);
         messageView = new MessageView(this);
         compose = new MessageCompose(this);
         sync =
@@ -1282,7 +1284,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     }
 
     /** The agenda's pull ({@link SyncCoordinator#syncCalendars}). */
-    public void syncCalendars() {
+    void syncCalendars() {
         sync.syncCalendars();
     }
 
@@ -1429,40 +1431,9 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         return contactsList.groupOf(linkId);
     }
 
-    /**
-     * Opens one calendar resource on its page, as its series rather than an
-     * occurrence, read off the store on the io executor; {@code gone} runs
-     * when the store holds it no more.
-     */
+    /** Opens one calendar resource on its page ({@link EventView#openStored}). */
     public void openEvent(String collection, String linkId, Runnable gone) {
-        io.execute(
-                () -> {
-                    EventStore.StoredCalendar calendar = null;
-                    for (EventStore.StoredCalendar held : events.loadCalendars()) {
-                        if (held.id.equals(collection)) {
-                            calendar = held;
-                        }
-                    }
-                    EventStore.StoredEvent found = null;
-                    if (calendar != null) {
-                        for (EventStore.StoredEvent event : events.loadEvents()) {
-                            if (event.collectionId.equals(collection)
-                                    && event.id.equals(linkId)) {
-                                found = event;
-                            }
-                        }
-                    }
-                    EventStore.StoredCalendar in = calendar;
-                    EventStore.StoredEvent event = found;
-                    postAlive(
-                            () -> {
-                                if (event == null) {
-                                    gone.run();
-                                } else {
-                                    eventView.open(null, event, in);
-                                }
-                            });
-                });
+        eventView.openStored(collection, linkId, gone);
     }
 
     /** Opens a merged row in the editor ({@link ContactEditor#openGroup}). */
@@ -1485,59 +1456,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         } else if (request == FileActions.REQUEST_EXPORT) {
             fileActions.exported(data.getData());
         }
-    }
-
-    /**
-     * Starts a new calendar entry in the default calendar of the account
-     * in view, asking only when there is none, exactly as a new contact
-     * picks its address book. A read-only calendar is never offered.
-     */
-    private void composeEvent() {
-        Map<String, EventStore.StoredCalendar> byId = new HashMap<>();
-        boolean readOnlyBackend = false;
-        for (EventStore.StoredCalendar calendar : events.loadCalendars()) {
-            byId.put(calendar.id, calendar);
-            readOnlyBackend |= !PimalayaClient.writesEvents(calendar.url);
-        }
-        List<PimdirCollections.Stored> collections = collectionsOf(PimDomain.CALENDAR);
-        // NOTE: a backend taking no event write lists as read only, and the
-        // line for no calendar at all would leave its owner guessing why.
-        if (readOnlyBackend && DefaultCollection.writable(collections).isEmpty()) {
-            toast(getString(R.string.event_read_only));
-            return;
-        }
-        target(
-                PimDomain.CALENDAR,
-                PimdirSummary.CALENDAR,
-                R.string.event_target_title,
-                R.string.event_no_calendar,
-                collections,
-                calendar -> eventView.compose(byId.get(calendar.id)));
-    }
-
-    /**
-     * Opens a new item of a domain in its target collection: the default
-     * when one is plain, else the one the user picks among the writable
-     * ones, the default preselected.
-     */
-    private void target(
-            PimDomain domain,
-            String kind,
-            int title,
-            int none,
-            List<PimdirCollections.Stored> collections,
-            java.util.function.Consumer<PimdirCollections.Stored> open) {
-        DefaultCollection.Choice choice =
-                DefaultCollection.choice(this, kind, collections, filterOf(domain)::accepts);
-        Picker.choose(
-                this,
-                title,
-                none,
-                choice.direct,
-                choice.offered,
-                choice.preselected,
-                collection -> ui.twoLine(collection.name, collection.accountEmail),
-                open);
     }
 
     private void setUpContactPanel() {
@@ -1915,12 +1833,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         return roster;
     }
 
-    /** The default collection of every account of a domain ({@link DefaultCollection#shown}). */
-    public java.util.Set<String> shownDefaults(PimDomain domain) {
-        String kind = domain == PimDomain.CALENDAR ? PimdirSummary.CALENDAR : PimdirSummary.CONTACT;
-        return DefaultCollection.shown(this, kind, collectionsOf(domain));
-    }
-
     /** Navigates forward: the panels slide in from the right. */
     @Override
     public void show(int panel) {
@@ -2139,7 +2051,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                     // is rebuilt on arrival rather than cached across days.
                     calendarList.reload();
                 };
-        calendar.fab = this::composeEvent;
+        calendar.fab = eventView::composeNew;
         screens.put(PANEL_CALENDAR, calendar);
 
         Screen filesScreen = new Screen();

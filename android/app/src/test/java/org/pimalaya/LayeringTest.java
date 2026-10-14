@@ -59,9 +59,8 @@ public class LayeringTest {
     private static final Map<String, Set<String>> TOLERATED = Map.ofEntries(
             // NOTE: the six contact screens left in phase 4 steps 8 and 9:
             // they reach the ContactEditor, ContactParts and Host, not the
-            // activity.
-            Map.entry("calendar/CalendarList.java", Set.of(ROOT)),
-            Map.entry("calendar/EventView.java", Set.of(ROOT)),
+            // activity. The two calendar screens left in step 10: they reach
+            // CalendarParts, each other, the Linked card and Host.
             Map.entry("mail/MailList.java", Set.of(ROOT)),
             Map.entry("mail/MessageCompose.java", Set.of(ROOT)),
             Map.entry("mail/MessageView.java", Set.of(ROOT)),

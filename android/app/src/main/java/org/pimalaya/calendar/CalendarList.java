@@ -14,17 +14,21 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
+import org.pimalaya.pimdir.DefaultCollection;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.Chips;
 import org.pimalaya.ui.Dates;
+import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
+import org.pimalaya.ui.Panels;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -59,8 +63,15 @@ public final class CalendarList {
     /** Seconds in a day, the threshold a length is told in days past. */
     private static final long DAY = 86400;
 
-    private final MainActivity host;
+    private final Host host;
+    private final CalendarParts parts;
     private final EventStore store;
+
+    /** The page an agenda row opens onto. */
+    private final EventView eventView;
+
+    /** The pull-down's sync of the calendars. */
+    private final Runnable pull;
     private final Adapter adapter = new Adapter();
     private final CardSections<Row> sections = new CardSections<>();
 
@@ -81,9 +92,13 @@ public final class CalendarList {
     /** Whether the Default chip narrows the agenda to the shown accounts' default calendars. */
     private boolean defaultOnly;
 
-    public CalendarList(MainActivity host, EventStore store) {
+    public CalendarList(Host host, CalendarParts parts, EventView eventView, Runnable pull) {
         this.host = host;
-        this.store = store;
+        this.parts = parts;
+        this.store = parts.events();
+        this.eventView = eventView;
+        this.pull = pull;
+        eventView.list = this;
     }
 
     /**
@@ -116,7 +131,7 @@ public final class CalendarList {
 
     public void setUp() {
         ListView list = host.findViewById(R.id.calendar_list);
-        header = new ListHeader(host, list, MainActivity.PANEL_CALENDAR);
+        header = new ListHeader(host, list, Panels.CALENDAR);
         header.empty(host.findViewById(R.id.calendar_empty));
         header.view
                 .findViewById(R.id.header_week_previous)
@@ -140,7 +155,7 @@ public final class CalendarList {
                 (parent, view, position, id) -> {
                     Row row = sections.row(header.rowAt(position));
                     if (row != null) {
-                        host.eventView.open(row.occurrence, row.event, row.calendar);
+                        eventView.open(row.occurrence, row.event, row.calendar);
                     }
                 });
 
@@ -150,7 +165,7 @@ public final class CalendarList {
         refresh.setOnRefreshListener(
                 () -> {
                     refresh.setRefreshing(false);
-                    host.syncCalendars();
+                    pull.run();
                 });
     }
 
@@ -173,8 +188,15 @@ public final class CalendarList {
         // render keeps the week by instant.
         String from = plusDays(shownWeek(today()), -1);
         String until = plusDays(from, 9);
-        MergedFilter filter = host.filterOf(PimDomain.CALENDAR);
-        Set<String> defaults = defaultOnly ? host.shownDefaults(PimDomain.CALENDAR) : null;
+        MergedFilter filter = MergedFilter.of(host, PimDomain.CALENDAR);
+        Set<String> defaults =
+                defaultOnly
+                        ? DefaultCollection.shown(
+                                host,
+                                PimdirSummary.CALENDAR,
+                                new PimdirCollections(parts.pimdir(), host)
+                                        .list(PimdirSummary.CALENDAR))
+                        : null;
         int asked = ++generation;
 
         reads.execute(
@@ -248,7 +270,8 @@ public final class CalendarList {
                 try {
                     known =
                             new Expanded(
-                                    event.ical, host.client.expandEvent(event.ical, from, until));
+                                    event.ical,
+                                    parts.client().expandEvent(event.ical, from, until));
                 } catch (Exception error) {
                     // NOTE: one unparseable object must not empty the whole
                     // agenda, so it is dropped with a log and the rest render.
