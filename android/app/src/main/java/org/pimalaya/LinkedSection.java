@@ -16,6 +16,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
+import org.pimalaya.pimdir.ItemLinks;
+import org.pimalaya.pimdir.PimdirSummary;
 
 /**
  * An item's links made visible (plan C.5): a Linked card listing what the

@@ -8,6 +8,13 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimdirSql;
+import org.pimalaya.pimdir.ItemLinks;
+import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirHash;
+import org.pimalaya.pimdir.PimdirItems;
+import org.pimalaya.pimdir.PimdirSummary;
 
 import java.io.IOException;
 import java.security.SecureRandom;
@@ -32,7 +39,7 @@ import java.util.Map;
  * A folder belongs to the device ({@link LocalBook#ACCOUNT}) under a random
  * id, so renaming it moves a label.
  */
-final class FileStore {
+public final class FileStore {
     /** The collection name an account's stand-ins are filed under. */
     private static final String ATTACHMENTS = "\u0001attachments";
 
@@ -62,12 +69,12 @@ final class FileStore {
     }
 
     /** One placement of a file: a stand-in, or a folder's copy with its body. */
-    static final class StoredFile {
+    public static final class StoredFile {
         /** The collection holding this placement. */
         final String collection;
 
         /** The file's key, {@code part:} for an attachment, {@code file:} for an import. */
-        final String linkId;
+        public final String linkId;
 
         /** The file's public id, shared by its stand-in and its saved copies. */
         final long seq;
@@ -137,7 +144,7 @@ final class FileStore {
      * the role holds, found by the id this class files them under; once, on
      * open, after the role's constraint takes it.
      */
-    static void reconcileRoles(SQLiteDatabase db) {
+    public static void reconcileRoles(SQLiteDatabase db) {
         List<String> missing = new ArrayList<>();
         String sql = PimdirSql.split(PimdirSql.of("LIST_COLLECTIONS"))[0];
         try (Cursor cursor = db.rawQuery(sql, null)) {

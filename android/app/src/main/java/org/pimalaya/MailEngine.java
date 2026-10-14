@@ -11,6 +11,12 @@ import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.pimdir.PimdirBlobs;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirItems;
+import org.pimalaya.pimdir.PimdirStorage;
 
 import java.io.File;
 import java.io.IOException;
@@ -53,7 +59,7 @@ import java.util.UUID;
  * write, so the top of the list shows while the rest fills in, and a pass
  * cut off resumes where its last page landed.
  */
-class MailEngine extends PimdirEngine {
+public class MailEngine extends PimdirEngine {
     /** The IMAP {@code \Seen} flag, as the store's JSON array spells it. */
     static final String SEEN = "\\Seen";
 
@@ -68,7 +74,7 @@ class MailEngine extends PimdirEngine {
      * a later expunge, which is what deleting means on an account naming
      * no trash to move it into.
      */
-    static final String DELETED = "\\Deleted";
+    public static final String DELETED = "\\Deleted";
 
     /**
      * The markers this app writes, and the only ones a push ever touches.
@@ -457,7 +463,7 @@ class MailEngine extends PimdirEngine {
     }
 
     /** The cache folder {@link #scratch} makes its folders in. */
-    static final String SCRATCH = "mail-sources";
+    public static final String SCRATCH = "mail-sources";
 
     /**
      * A directory of its own under the app's cache, for one read of whole
@@ -1521,7 +1527,7 @@ class MailEngine extends PimdirEngine {
     }
 
     /** The marker set with one marker added or removed. */
-    static JSONArray withFlag(JSONArray flags, String flag, boolean add) {
+    public static JSONArray withFlag(JSONArray flags, String flag, boolean add) {
         JSONArray kept = new JSONArray();
         for (int index = 0; flags != null && index < flags.length(); index++) {
             if (!flag.equals(flags.optString(index))) {

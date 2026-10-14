@@ -4,6 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.PimdirSummary;
 
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;

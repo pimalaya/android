@@ -14,6 +14,9 @@ import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.Transport;
 import org.pimalaya.client.OauthTokens;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirSummary;
 
 /**
  * The one sync path behind the in-app sync: the account lookup, the

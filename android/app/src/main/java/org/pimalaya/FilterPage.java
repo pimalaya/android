@@ -10,6 +10,9 @@ import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.pimalaya.pimdir.DefaultCollection;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirSummary;
 
 /**
  * A list's filter page: each account with a checkbox, its collections

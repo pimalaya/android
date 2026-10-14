@@ -8,6 +8,9 @@ import org.json.JSONObject;
 import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirHash;
+import org.pimalaya.pimdir.PimdirStorage;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -29,7 +32,7 @@ import java.util.List;
  *
  * <p>Everything blocks; callers run it off the main thread.
  */
-abstract class PimdirEngine implements OfflineDriver {
+public abstract class PimdirEngine implements OfflineDriver {
     /** The pimdir store's engine seam (placements, writes, conflicts). */
     protected final PimdirStorage offline;
 
@@ -567,7 +570,7 @@ abstract class PimdirEngine implements OfflineDriver {
      * for a body that may not be UTF-8 text (a message's 8-bit parts), which
      * crosses in base64 so it is stored as the bytes it is.
      */
-    void mutateAdd(String collection, String linkId, byte[] body, JSONArray flags,
+    public void mutateAdd(String collection, String linkId, byte[] body, JSONArray flags,
             JSONObject summary, String sortKey) throws JSONException {
         JSONObject mutation = new JSONObject();
         mutation.put("op", "add");

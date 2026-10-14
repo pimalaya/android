@@ -12,6 +12,10 @@ import org.pimalaya.client.EventMerge;
 import org.pimalaya.client.EventRef;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
+import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirHash;
+import org.pimalaya.pimdir.PimdirStorage;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;

@@ -19,6 +19,8 @@ import org.pimalaya.client.EventDelta;
 import org.pimalaya.client.EventRef;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
+import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.pimdir.PimdirDb;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 

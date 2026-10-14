@@ -24,6 +24,8 @@ import org.pimalaya.client.Card;
 import org.pimalaya.client.CardDelta;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirStorage;
 
 /**
  * One account's offline driver: the Rust bridge runs the engine's

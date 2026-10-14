@@ -19,7 +19,7 @@ import java.util.Locale;
  * unreadable date sinks the message to the bottom rather than failing
  * the sync.
  */
-final class MailDate {
+public final class MailDate {
     /**
      * The spellings actually seen, most common first: the RFC 5322 ones
      * IMAP returns, then the RFC 3339 ones JMAP does. Neither family
@@ -38,7 +38,7 @@ final class MailDate {
     };
 
     /** Epoch milliseconds, or 0 when the date cannot be read. */
-    static long toStamp(String raw) {
+    public static long toStamp(String raw) {
         if (raw == null) {
             return 0;
         }

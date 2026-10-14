@@ -12,6 +12,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.PimdirDb;
 
 /**
  * The store's writes reaching the phone's contacts and calendars without a

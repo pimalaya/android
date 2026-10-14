@@ -15,6 +15,13 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimdirSql;
+import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirItems;
+import org.pimalaya.pimdir.PimdirQueue;
+import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.pimdir.PimdirSummary;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -57,7 +64,7 @@ import java.util.regex.Pattern;
  * all but this account's pending submissions on the store's action queue
  * ({@link PimdirQueue}).
  */
-final class MailStore {
+public final class MailStore {
     /**
      * The collection the outbox's queue rows are filed against.
      *
@@ -78,7 +85,7 @@ final class MailStore {
      * shown ({@link PimdirCollections#list}), and a control character, like
      * the outbox, so no mailbox a server lists can collide with it.
      */
-    static final String ALL_MAIL = "\u0001all";
+    public static final String ALL_MAIL = "\u0001all";
 
     /** Which accounts keep an All Mail collection (Gmail), by account id. */
     private static final String ALL_MAIL_PREFS = "mail-all-mail";
@@ -120,7 +127,7 @@ final class MailStore {
     private final PimdirQueue queue;
     private final Context context;
 
-    MailStore(Context context, PimdirDb store) {
+    public MailStore(Context context, PimdirDb store) {
         this.items = new PimdirItems(store);
         this.store = store;
         this.collections = new PimdirCollections(store, context);
@@ -438,7 +445,7 @@ final class MailStore {
     }
 
     /** One stored envelope, with the account it came from. */
-    static final class StoredMessage {
+    public static final class StoredMessage {
         final String accountEmail;
 
         /**
@@ -450,21 +457,21 @@ final class MailStore {
          * is the one its queue row is filed against, and no mailbox name
          * would lead back to it.
          */
-        final String collection;
+        public final String collection;
 
         final String mailbox;
 
         /** The mailbox as the reader is shown it ({@link MailStore#mailboxLabel}). */
         final String mailboxLabel;
 
-        final String id;
-        final String subject;
+        public final String id;
+        public final String subject;
 
         /** The sender's display name, empty when they sent none. */
-        final String fromName;
+        public final String fromName;
 
         /** The sender's address, what the row's avatar is derived from. */
-        final String fromAddress;
+        public final String fromAddress;
 
         final long stamp;
 
@@ -475,7 +482,7 @@ final class MailStore {
          */
         final String sortKey;
 
-        final long seq;
+        public final long seq;
 
         final boolean seen;
         final boolean answered;
@@ -532,7 +539,7 @@ final class MailStore {
          * says of itself rather than something a caller works out: it is the
          * one state where the store holds a message no server has.
          */
-        final boolean pending;
+        public final boolean pending;
 
         /**
          * Whether it carries {@code \Deleted}: deleted where the server
@@ -825,7 +832,7 @@ final class MailStore {
      * sizes the list, the per-day counts that place its headers and the
      * pages it loads agree.
      */
-    static final class Query {
+    public static final class Query {
         /** The collection ids, as the JSON array the readers bind. */
         final String collections;
 
@@ -936,7 +943,7 @@ final class MailStore {
      * through by account and collection id, the chips, and the words
      * searched for (empty for none).
      */
-    Query query(
+    public Query query(
             BiPredicate<String, String> accepts,
             boolean unreadOnly,
             boolean attachmentsOnly,
@@ -973,7 +980,7 @@ final class MailStore {
      * {@code \} escaped with {@code \}, as io-pimdir's own reader builds it
      * ({@code reader::like_pattern}).
      */
-    static String likePattern(String words) {
+    public static String likePattern(String words) {
         StringBuilder pattern = new StringBuilder("%");
         for (char character : words.trim().toCharArray()) {
             if (character == '%' || character == '_' || character == '\\') {
@@ -1156,7 +1163,7 @@ final class MailStore {
      * statement as a subquery, which costs the rows it skips: a fling reads
      * from the day it lands on instead ({@link #pageBelow}).
      */
-    List<StoredMessage> page(Query query, StoredMessage after, long offset, int limit) {
+    public List<StoredMessage> page(Query query, StoredMessage after, long offset, int limit) {
         if (query.size == 0 || limit <= 0) {
             return new ArrayList<>();
         }
@@ -1436,7 +1443,7 @@ final class MailStore {
      * ({@code :seen = EXISTS (...)}), where the text {@code '1'} is never the
      * integer {@code 1}: the unread chip would match nothing.
      */
-    static Cursor typed(SQLiteDatabase db, String sql, Object[] args) {
+    public static Cursor typed(SQLiteDatabase db, String sql, Object[] args) {
         return db.rawQueryWithFactory(
                 (database, driver, table, query) -> {
                     bind(query, args);
@@ -1457,7 +1464,7 @@ final class MailStore {
      * deletes again from the top and its rows past the first window come
      * back as none, or never end.
      */
-    static int changed(SQLiteDatabase db, PimdirSql.Bound bound) {
+    public static int changed(SQLiteDatabase db, PimdirSql.Bound bound) {
         String sql = RETURNING.matcher(bound.sql).replaceFirst("");
         try (SQLiteStatement statement = db.compileStatement(sql)) {
             bind(statement, bound.args);

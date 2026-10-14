@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 
 import org.json.JSONArray;
 import org.json.JSONException;
+import org.pimalaya.pimdir.PimdirAccount;
 
 import java.time.Instant;
 import java.time.LocalDate;

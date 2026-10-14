@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -36,15 +36,15 @@ import java.util.UUID;
  * already are, in {@link SecureStore}, and this class is only the bridge between
  * that roster and the store's grouping key.
  */
-final class PimdirAccount {
+public final class PimdirAccount {
     /** The separator between the account id and the collection name. */
-    static final char SEPARATOR = '/';
+    public static final char SEPARATOR = '/';
 
     private static final String PREFS = "pimdir-accounts";
 
     private final SharedPreferences prefs;
 
-    PimdirAccount(Context context) {
+    public PimdirAccount(Context context) {
         this.prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
@@ -56,7 +56,7 @@ final class PimdirAccount {
      * and the id is what reaches the store, so changing the email later is a
      * remap in these preferences rather than a rewrite of every collection.
      */
-    synchronized String idOf(String email) {
+    public synchronized String idOf(String email) {
         String id = prefs.getString(email, null);
         if (id == null) {
             id = UUID.randomUUID().toString();
@@ -94,13 +94,13 @@ final class PimdirAccount {
     }
 
     /** The account id a collection id is namespaced under: what precedes its first separator. */
-    static String accountIdOf(String collectionId) {
+    public static String accountIdOf(String collectionId) {
         int at = collectionId.indexOf(SEPARATOR);
         return at < 0 ? collectionId : collectionId.substring(0, at);
     }
 
     /** The collection id of {@code name} within the account. */
-    static String collectionId(String accountId, String name) {
+    public static String collectionId(String accountId, String name) {
         return accountId + SEPARATOR + name;
     }
 
@@ -111,7 +111,7 @@ final class PimdirAccount {
      * <p>Strips the account id and exactly one separator, so a hierarchical
      * name keeps every separator of its own.
      */
-    static String nameOf(String accountId, String collectionId) {
+    public static String nameOf(String accountId, String collectionId) {
         String prefix = accountId + SEPARATOR;
         return collectionId.startsWith(prefix)
                 ? collectionId.substring(prefix.length())

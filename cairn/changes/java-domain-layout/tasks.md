@@ -16,7 +16,7 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 
 ## Phase 1: moves only
 
-- [ ] pimdir
+- [x] pimdir
 - [ ] sync
 - [ ] phone
 - [ ] file
@@ -75,3 +75,8 @@ Paths are relative to android/. Every step ends with `:app:assembleDebug :app:te
 ## Phase 8 candidates (separate change)
 
 Logic found in Java that belongs to Rust, collected while moving.
+
+## Notes from phase 1 (inputs to phases 2 to 6)
+
+- pimdir: MailStore.typed/changed are generic typed-binding plumbing (FileStore 11 calls, ItemLinks, DeletedItems, PimdirItems, PimdirDb): move to pimdir. CacheSweep (MainActivity only, sweeps mail scratch and staged files) is app lifecycle. DeletedItems restores through PimdirEngine and MailEngine: above sync. ItemLinks' search half is domain-level. DefaultCollection keeps a prefs choice and reads AccountActivation: account policy. PimdirCollections filters MailStore.ALL_MAIL. Back edges: PimdirDb -> FileStore, MailStore; PimdirItems, PimdirCollections -> MailStore; PimdirSummary -> MailDate; DeletedItems -> MailEngine, MailStore, PimdirEngine; ItemLinks -> EventStore, FileStore, MailStore; CacheSweep -> FilesList, MailEngine; DefaultCollection -> AccountActivation.
+- public for tests (phase 6 removes): PimdirDb ctor, PimdirItems.Row + put, PimdirBlobs.has/put, ItemLinks.RELATED/Endpoint ctor/placement, DefaultCollection.of(List,String), CacheSweep.AGE, PimdirStorage.sourceOf (E2eDevice), CardStore.shared. Tests left in org.pimalaya for internals: DeletedItemsTest, ItemLinksTest, DefaultCollectionTest, BodyLossRacesTest, AutomaticReferencesTest.

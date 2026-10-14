@@ -1,10 +1,13 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import android.content.Context;
 import android.database.Cursor;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONArray;
+import org.pimalaya.EventStore;
+import org.pimalaya.FileStore;
+import org.pimalaya.MailStore;
 import org.pimalaya.client.PimdirSql;
 
 import java.util.ArrayList;
@@ -23,9 +26,9 @@ import java.util.Map;
  * ({@link #ofMessage} and its siblings), so a rule about which keys may be
  * referenced (none under a writer-derived key) is one change.
  */
-final class ItemLinks {
+public final class ItemLinks {
     /** The role a person's link takes. */
-    static final String RELATED = "related";
+    public static final String RELATED = "related";
 
     /** The origin of a link a person made, as opposed to a rule's {@code auto}. */
     static final String USER = "user";
@@ -37,36 +40,36 @@ final class ItemLinks {
     private final PimdirDb store;
     private final PimdirCollections collections;
 
-    ItemLinks(Context context, PimdirDb store) {
+    public ItemLinks(Context context, PimdirDb store) {
         this.context = context;
         this.store = store;
         this.collections = new PimdirCollections(store, context);
     }
 
     /** One end of a reference: a kind and a key, never a collection. */
-    static final class Endpoint {
-        final String kind;
-        final String linkId;
+    public static final class Endpoint {
+        public final String kind;
+        public final String linkId;
 
-        Endpoint(String kind, String linkId) {
+        public Endpoint(String kind, String linkId) {
             this.kind = kind;
             this.linkId = linkId;
         }
 
-        boolean same(Endpoint other) {
+        public boolean same(Endpoint other) {
             return kind.equals(other.kind) && linkId.equals(other.linkId);
         }
     }
 
     /** One live placement of an endpoint: where it opens, and what it is called. */
-    static final class Placement {
-        final Endpoint endpoint;
-        final String collection;
+    public static final class Placement {
+        public final Endpoint endpoint;
+        public final String collection;
         final long seq;
-        final String title;
+        public final String title;
 
         /** A second line: a message's sender; empty for the rest. */
-        final String detail;
+        public final String detail;
 
         Placement(Endpoint endpoint, String collection, long seq, String title, String detail) {
             this.endpoint = endpoint;
@@ -78,14 +81,14 @@ final class ItemLinks {
     }
 
     /** One reference as an item's page shows it, from that item's side. */
-    static final class Link {
-        final Endpoint from;
-        final Endpoint to;
-        final String role;
+    public static final class Link {
+        public final Endpoint from;
+        public final Endpoint to;
+        public final String role;
         final String origin;
 
         /** The other item, null when it has no live placement left. */
-        final Placement other;
+        public final Placement other;
 
         Link(Endpoint from, Endpoint to, String role, String origin, Placement other) {
             this.from = from;
@@ -95,26 +98,26 @@ final class ItemLinks {
             this.other = other;
         }
 
-        boolean automatic() {
+        public boolean automatic() {
             return !USER.equals(origin);
         }
     }
 
     /** A message's endpoint; null for one still in an outbox, which is no item. */
-    static Endpoint ofMessage(MailStore.StoredMessage message) {
+    public static Endpoint ofMessage(MailStore.StoredMessage message) {
         return message.pending ? null : endpoint(PimdirSummary.MAIL, message.id);
     }
 
     /** A card's endpoint, by the key its replicas share. */
-    static Endpoint ofContact(String linkId) {
+    public static Endpoint ofContact(String linkId) {
         return endpoint(PimdirSummary.CONTACT, linkId);
     }
 
-    static Endpoint ofEvent(EventStore.StoredEvent event) {
+    public static Endpoint ofEvent(EventStore.StoredEvent event) {
         return endpoint(PimdirSummary.CALENDAR, event.id);
     }
 
-    static Endpoint ofFile(FileStore.StoredFile file) {
+    public static Endpoint ofFile(FileStore.StoredFile file) {
         return endpoint(PimdirSummary.FILE, file.linkId);
     }
 
@@ -133,7 +136,7 @@ final class ItemLinks {
      * or {@code hash:} key, or a part of a message under one), which pimdir
      * neither references nor keys a stand-in on.
      */
-    static boolean derived(String linkId) {
+    public static boolean derived(String linkId) {
         String key = linkId.startsWith("part:") ? linkId.substring(5) : linkId;
         return key.startsWith("alt:") || key.startsWith("dup:") || key.startsWith("hash:");
     }
@@ -143,7 +146,7 @@ final class ItemLinks {
      * placement, sorted by the other item's kind (messages, contacts,
      * events, files) then title.
      */
-    List<Link> links(Endpoint self) {
+    public List<Link> links(Endpoint self) {
         SQLiteDatabase db = store.getReadableDatabase();
         List<Link> links = new ArrayList<>();
         for (String statement : new String[] {"REFERENCES_FROM", "REFERENCES_TO"}) {
@@ -201,7 +204,7 @@ final class ItemLinks {
      * rule's link becomes the person's: the statement answers the reference
      * standing either way.
      */
-    boolean add(Endpoint from, Endpoint to) {
+    public boolean add(Endpoint from, Endpoint to) {
         if (from.same(to)) {
             return false;
         }
@@ -216,7 +219,7 @@ final class ItemLinks {
     }
 
     /** Removes one reference, whatever its origin; a rule may record it anew. */
-    void remove(Link link) {
+    public void remove(Link link) {
         Map<String, Object> values = new HashMap<>();
         values.put("from_kind", link.from.kind);
         values.put("from_link_id", link.from.linkId);
@@ -238,7 +241,7 @@ final class ItemLinks {
     }
 
     /** The first live placement of an endpoint in a collection of its kind, null for none. */
-    Placement placement(Endpoint endpoint) {
+    public Placement placement(Endpoint endpoint) {
         return placement(store.getReadableDatabase(), endpoint);
     }
 
@@ -259,7 +262,7 @@ final class ItemLinks {
      * through the mail search, contacts by name or address, calendar
      * resources by summary, files by name.
      */
-    List<Placement> search(String words) {
+    public List<Placement> search(String words) {
         Map<String, Placement> found = new LinkedHashMap<>();
         if (words.trim().isEmpty()) {
             return new ArrayList<>();

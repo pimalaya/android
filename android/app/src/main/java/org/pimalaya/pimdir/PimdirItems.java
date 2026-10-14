@@ -1,10 +1,11 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import android.database.Cursor;
 import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONObject;
+import org.pimalaya.MailStore;
 import org.pimalaya.client.PimdirSql;
 
 import java.io.IOException;
@@ -42,23 +43,23 @@ import java.util.concurrent.ConcurrentHashMap;
  *       to release both.
  * </ul>
  */
-final class PimdirItems {
+public final class PimdirItems {
     /** The detail ladder as the schema stores it: 0 probed, 1 meta, 2 full. */
-    static final int FULL = 2;
+    public static final int FULL = 2;
 
     /** The rung below it: the item is known and its body is not stored. */
-    static final int META = 1;
+    public static final int META = 1;
 
     private final PimdirDb store;
     private final PimdirBlobs blobs;
 
-    PimdirItems(PimdirDb store) {
+    public PimdirItems(PimdirDb store) {
         this.store = store;
         this.blobs = new PimdirBlobs(store.blobs());
     }
 
     /** One item as a caller hands it over: its identity and its content. */
-    static final class Row {
+    public static final class Row {
         final String linkId;
         final String body;
 
@@ -79,7 +80,7 @@ final class PimdirItems {
          */
         final String revision;
 
-        Row(String linkId, String body, JSONObject summary, String sortKey, String flags,
+        public Row(String linkId, String body, JSONObject summary, String sortKey, String flags,
                 String revision) {
             this.linkId = linkId;
             this.body = body;
@@ -89,23 +90,23 @@ final class PimdirItems {
             this.revision = revision;
         }
 
-        Row(String linkId, String body, JSONObject summary, String sortKey) {
+        public Row(String linkId, String body, JSONObject summary, String sortKey) {
             this(linkId, body, summary, sortKey, "[]", null);
         }
     }
 
-    SQLiteDatabase readable() {
+    public SQLiteDatabase readable() {
         return store.getReadableDatabase();
     }
 
-    SQLiteDatabase writable() {
+    public SQLiteDatabase writable() {
         SQLiteDatabase db = store.getWritableDatabase();
         unlinkCollected(db, blobs);
         return db;
     }
 
     /** A body by content hash, empty when the hash names nothing stored. */
-    String body(String hash) {
+    public String body(String hash) {
         if (hash == null) {
             return "";
         }
@@ -130,7 +131,7 @@ final class PimdirItems {
      * UTF-8 would mangle a body in a legacy charset before the parser that
      * reads the header naming that charset ever saw it.
      */
-    byte[] objectBytes(String collection, String linkId) {
+    public byte[] objectBytes(String collection, String linkId) {
         String hash = objectOf(readable(), collection, linkId);
         if (hash == null) {
             return null;
@@ -157,7 +158,7 @@ final class PimdirItems {
      * not hold is not created, because a body with no row is a body no
      * listing can reach.
      */
-    void putObject(String collection, String linkId, byte[] body) {
+    public void putObject(String collection, String linkId, byte[] body) {
         String hash = PimdirHash.of(body);
         SQLiteDatabase db = writable();
         db.beginTransaction();
@@ -189,7 +190,7 @@ final class PimdirItems {
      * retention stamps, which a write clears because writing an item is exactly
      * how a retired one comes back.
      */
-    String put(SQLiteDatabase db, String collection, Row row) {
+    public String put(SQLiteDatabase db, String collection, Row row) {
         String hash = row.body == null || row.body.isEmpty() ? null : PimdirHash.of(row.body);
         if (hash != null) {
             storeObject(db, hash, row.body);
@@ -261,7 +262,7 @@ final class PimdirItems {
      * sync seam's job because only the sync knows a source dropped an item. A
      * caller reaching this has decided the item goes.
      */
-    void remove(SQLiteDatabase db, String collection, String linkId) {
+    public void remove(SQLiteDatabase db, String collection, String linkId) {
         String object = objectOf(db, collection, linkId);
         List<String> pinned = bindingObjectsOf(db, collection, linkId);
         String conflict = conflictObjectOf(db, collection, linkId);
@@ -278,7 +279,7 @@ final class PimdirItems {
     }
 
     /** Every link id a collection holds, retained rows included. */
-    List<String> linkIdsOf(SQLiteDatabase db, String collection) {
+    public List<String> linkIdsOf(SQLiteDatabase db, String collection) {
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT link_id FROM items WHERE collection = ?",
@@ -292,7 +293,7 @@ final class PimdirItems {
     }
 
     /** The item's current body hash, null when it has none or does not exist. */
-    String objectOf(SQLiteDatabase db, String collection, String linkId) {
+    public String objectOf(SQLiteDatabase db, String collection, String linkId) {
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT object_hash FROM items WHERE collection = ? AND link_id = ?",
@@ -302,7 +303,7 @@ final class PimdirItems {
     }
 
     /** Whether the collection holds the item at all. */
-    boolean knows(SQLiteDatabase db, String collection, String linkId) {
+    public boolean knows(SQLiteDatabase db, String collection, String linkId) {
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT 1 FROM items WHERE collection = ? AND link_id = ?",
@@ -315,7 +316,7 @@ final class PimdirItems {
      * The item's public id, drawn from the store-wide counter the first time a
      * link id is seen and shared by every later placement of it.
      */
-    long seqFor(SQLiteDatabase db, String linkId) {
+    public long seqFor(SQLiteDatabase db, String linkId) {
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT seq FROM items WHERE link_id = ? LIMIT 1",
@@ -352,7 +353,7 @@ final class PimdirItems {
     }
 
     /** Files a file's bytes and indexes them, streamed, leaving the refcount to the caller. */
-    void storeObject(SQLiteDatabase db, String hash, java.io.File source) {
+    public void storeObject(SQLiteDatabase db, String hash, java.io.File source) {
         try {
             blobs.put(hash, source);
         } catch (IOException error) {
@@ -387,7 +388,7 @@ final class PimdirItems {
      * to a file and hashed ({@code hash}), moved into the blob store: the
      * body never read on this side. The file is gone after it.
      */
-    void putObject(String collection, String linkId, String hash, java.io.File source) {
+    public void putObject(String collection, String linkId, String hash, java.io.File source) {
         SQLiteDatabase db = writable();
         db.beginTransaction();
         try {
@@ -412,7 +413,7 @@ final class PimdirItems {
     }
 
     /** The file one body is stored in, null when the store holds no such blob. */
-    java.io.File blobFile(String hash) {
+    public java.io.File blobFile(String hash) {
         if (hash == null) {
             return null;
         }
@@ -421,12 +422,12 @@ final class PimdirItems {
     }
 
     /** The file one item's body is stored in, null when it holds none. */
-    java.io.File objectFile(String collection, String linkId) {
+    public java.io.File objectFile(String collection, String linkId) {
         return blobFile(objectOf(readable(), collection, linkId));
     }
 
     /** Moves the refcount by the difference one reference made, never globally. */
-    void adjustRefcount(SQLiteDatabase db, String before, String after) {
+    public void adjustRefcount(SQLiteDatabase db, String before, String after) {
         if (before == null ? after == null : before.equals(after)) {
             return;
         }
@@ -446,7 +447,7 @@ final class PimdirItems {
      * Drops unreferenced objects, their blobs left for after the commit
      * ({@link #deferUnlink}).
      */
-    void collectGarbage(SQLiteDatabase db) {
+    public void collectGarbage(SQLiteDatabase db) {
         List<String> orphans = new ArrayList<>();
         try (Cursor cursor = db.rawQuery("SELECT hash FROM objects WHERE refcount <= 0", null)) {
             while (cursor.moveToNext()) {
@@ -473,7 +474,7 @@ final class PimdirItems {
      * committed ({@link #unlinkCollected}): a rollback restores the rows,
      * and a row whose blob was already unlinked would be a body lost.
      */
-    static void deferUnlink(List<String> hashes) {
+    public static void deferUnlink(List<String> hashes) {
         COLLECTED.addAll(hashes);
     }
 
@@ -486,21 +487,21 @@ final class PimdirItems {
      * writer dropping the last reference to the same hash; the file
      * stays, and the write files the row again.
      */
-    static void pin(String hash) {
+    public static void pin(String hash) {
         synchronized (PINNED) {
             PINNED.merge(hash, 1, Integer::sum);
         }
     }
 
     /** Releases one {@link #pin}. */
-    static void unpin(String hash) {
+    public static void unpin(String hash) {
         synchronized (PINNED) {
             PINNED.computeIfPresent(hash, (key, count) -> count == 1 ? null : count - 1);
         }
     }
 
     /** {@link #unlinkCollected} over this store, for a collector just committed. */
-    void unlinkCollected() {
+    public void unlinkCollected() {
         unlinkCollected(store.getWritableDatabase(), blobs);
     }
 

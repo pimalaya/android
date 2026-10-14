@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -8,6 +8,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.BiPredicate;
+import org.pimalaya.AccountActivation;
 
 /**
  * Which calendar or address book of an account a new event or contact goes to.
@@ -19,7 +20,7 @@ import java.util.function.BiPredicate;
  * filter page. The last is kept here, never written to pimdir: the store's role
  * is what a source states.
  */
-final class DefaultCollection {
+public final class DefaultCollection {
     private static final String PREFS = "default-collections";
 
     private DefaultCollection() {}
@@ -36,7 +37,7 @@ final class DefaultCollection {
      * The default among one account's collections of one kind, null when
      * none is: {@code chosen} is the user's choice, null for none.
      */
-    static PimdirCollections.Stored of(List<PimdirCollections.Stored> collections, String chosen) {
+    public static PimdirCollections.Stored of(List<PimdirCollections.Stored> collections, String chosen) {
         List<PimdirCollections.Stored> writable = writable(collections);
         for (PimdirCollections.Stored collection : writable) {
             if (collection.isDefault()) {
@@ -55,7 +56,7 @@ final class DefaultCollection {
     }
 
     /** The default among one account's collections of one kind, null when none is. */
-    static PimdirCollections.Stored of(
+    public static PimdirCollections.Stored of(
             Context context, String account, String kind, List<PimdirCollections.Stored> all) {
         List<PimdirCollections.Stored> own = new ArrayList<>();
         for (PimdirCollections.Stored collection : all) {
@@ -70,7 +71,7 @@ final class DefaultCollection {
      * Whether the user may set the collection as default: writable, among
      * several writable ones, and of an account whose source names none.
      */
-    static boolean choosable(
+    public static boolean choosable(
             PimdirCollections.Stored collection, List<PimdirCollections.Stored> own) {
         if (!collection.writable) {
             return false;
@@ -85,12 +86,12 @@ final class DefaultCollection {
     }
 
     /** Keeps the user's default for one account's kind. */
-    static void choose(Context context, String account, String kind, String collection) {
+    public static void choose(Context context, String account, String kind, String collection) {
         prefs(context).edit().putString(key(account, kind), collection).apply();
     }
 
     /** Drops the user's defaults of an account that is gone. */
-    static void forget(Context context, String account) {
+    public static void forget(Context context, String account) {
         SharedPreferences.Editor editor = prefs(context).edit();
         for (String kind : new String[] {PimdirSummary.CALENDAR, PimdirSummary.CONTACT}) {
             editor.remove(key(account, kind));
@@ -103,15 +104,15 @@ final class DefaultCollection {
      * shows one account and it has one, else a pick among the writable
      * collections of the accounts shown, the first default preselected.
      */
-    static final class Choice {
+    public static final class Choice {
         /** Where it goes without asking, null when the user is asked. */
-        final PimdirCollections.Stored direct;
+        public final PimdirCollections.Stored direct;
 
         /** What the user is offered, writable only. */
-        final List<PimdirCollections.Stored> offered;
+        public final List<PimdirCollections.Stored> offered;
 
         /** The offered collection preselected, -1 for none. */
-        final int preselected;
+        public final int preselected;
 
         private Choice(
                 PimdirCollections.Stored direct,
@@ -129,7 +130,7 @@ final class DefaultCollection {
      * collection through, else, when it lets none, every account that is on.
      * A single writable collection on offer is taken without asking.
      */
-    static Choice choice(
+    public static Choice choice(
             Context context,
             String kind,
             List<PimdirCollections.Stored> collections,
@@ -171,7 +172,7 @@ final class DefaultCollection {
     }
 
     /** The collections the user may write into. */
-    static List<PimdirCollections.Stored> writable(List<PimdirCollections.Stored> collections) {
+    public static List<PimdirCollections.Stored> writable(List<PimdirCollections.Stored> collections) {
         List<PimdirCollections.Stored> writable = new ArrayList<>();
         for (PimdirCollections.Stored collection : collections) {
             if (collection.writable) {

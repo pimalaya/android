@@ -18,6 +18,9 @@ import org.pimalaya.client.Card;
 import org.pimalaya.client.CardDelta;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 

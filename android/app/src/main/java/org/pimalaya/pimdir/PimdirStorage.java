@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import android.content.ContentValues;
 import android.database.Cursor;
@@ -50,9 +50,9 @@ import java.util.Set;
  * batch naming one handle twice means what its order says, a tombstone then
  * its withdrawal, or a drop then the upsert that restores it.
  */
-final class PimdirStorage {
+public final class PimdirStorage {
     /** The source name this app syncs a server under. */
-    static final String SERVER = "server";
+    public static final String SERVER = "server";
 
     /** The source name the phone's own contacts are reconciled under. */
     static final String PHONE = "phone";
@@ -76,7 +76,7 @@ final class PimdirStorage {
     private final PimdirBlobs blobs;
     private final PimdirItems items;
 
-    PimdirStorage(PimdirDb store) {
+    public PimdirStorage(PimdirDb store) {
         this.store = store;
         this.blobs = new PimdirBlobs(store.blobs());
         this.items = new PimdirItems(store);
@@ -85,12 +85,12 @@ final class PimdirStorage {
     // ---- the two spokes ---------------------------------------------------
 
     /** The phone collection id of an addressbook (the second engine spoke). */
-    static String phoneCollection(String collection) {
+    public static String phoneCollection(String collection) {
         return PHONE_PREFIX + collection;
     }
 
     /** True when the engine collection id addresses the phone spoke. */
-    static boolean isPhoneCollection(String collection) {
+    public static boolean isPhoneCollection(String collection) {
         return collection.startsWith(PHONE_PREFIX);
     }
 
@@ -105,21 +105,21 @@ final class PimdirStorage {
      * phone-won write leaves the item diverging from the server's base by
      * construction rather than by a second write.
      */
-    static String collectionOf(String collection) {
+    public static String collectionOf(String collection) {
         return isPhoneCollection(collection)
                 ? collection.substring(PHONE_PREFIX.length())
                 : collection;
     }
 
     /** Which of the two sources an engine collection id speaks for. */
-    static String sourceOf(String collection) {
+    public static String sourceOf(String collection) {
         return isPhoneCollection(collection) ? PHONE : SERVER;
     }
 
     // ---- provisional handles ----------------------------------------------
 
     /** The handle a create of this identity is staged under (SYNC.md §2). */
-    static String provisionalOf(String linkId) {
+    public static String provisionalOf(String linkId) {
         return PROVISIONAL + linkId;
     }
 
@@ -131,7 +131,7 @@ final class PimdirStorage {
      * never the provisional one, which is a spelling of this side's bookkeeping
      * and would land as a resource no reader could open.
      */
-    static String nameOf(String handle) {
+    public static String nameOf(String handle) {
         return handle.startsWith(PROVISIONAL) ? handle.substring(PROVISIONAL.length()) : handle;
     }
 
@@ -155,7 +155,7 @@ final class PimdirStorage {
      * long the list ({@link #scopeClause}). It is a floor and not a ceiling:
      * answering more than it asks for stays correct.
      */
-    JSONObject loadCollection(String collection, JSONObject scope) throws JSONException {
+    public JSONObject loadCollection(String collection, JSONObject scope) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         String stored = collectionOf(collection);
         String source = sourceOf(collection);
@@ -588,7 +588,7 @@ final class PimdirStorage {
      * UID diverge legitimately, so one body must never stand in for another's.
      * Mail and calendar bodies are immutable under their link id, so they dedup.
      */
-    JSONObject lookupObjects(JSONArray links) throws JSONException {
+    public JSONObject lookupObjects(JSONArray links) throws JSONException {
         return lookupObjects(links, null);
     }
 
@@ -597,7 +597,7 @@ final class PimdirStorage {
      * (STORAGE §14 binds the caller's account), every account's for a null
      * one: across accounts a link id is not a fact.
      */
-    JSONObject lookupObjects(JSONArray links, String account) throws JSONException {
+    public JSONObject lookupObjects(JSONArray links, String account) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         JSONObject objects = new JSONObject();
 
@@ -636,7 +636,7 @@ final class PimdirStorage {
      * Applies one batch of engine writes atomically, returning what it did to
      * the items for the sync report.
      */
-    JSONArray applyWrites(JSONArray writes) throws JSONException {
+    public JSONArray applyWrites(JSONArray writes) throws JSONException {
         SQLiteDatabase db = store.getWritableDatabase();
         db.beginTransaction();
         compiled = new HashMap<>();
@@ -1215,7 +1215,7 @@ final class PimdirStorage {
      * replacing it would strip every keyword this app does not model, and
      * the base is what says which of them the user actually moved.
      */
-    JSONArray baseFlags(String engineCollection, String handle) throws JSONException {
+    public JSONArray baseFlags(String engineCollection, String handle) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
@@ -1244,7 +1244,7 @@ final class PimdirStorage {
      * and {@code uri} the handle this source holds it under; on CardDAV they
      * differ, elsewhere they are the same string.
      */
-    JSONObject loadRow(String engineCollection, String handle) throws JSONException {
+    public JSONObject loadRow(String engineCollection, String handle) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
@@ -1289,7 +1289,7 @@ final class PimdirStorage {
      * leaves: with nothing previously agreed, the local side reads unchanged and
      * every remote change merges in cleanly.
      */
-    JSONObject loadConflict(String engineCollection, String handle) throws JSONException {
+    public JSONObject loadConflict(String engineCollection, String handle) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
@@ -1329,7 +1329,7 @@ final class PimdirStorage {
      * the upgrade pass is what answers. Leaving it out is what would make a
      * conflict unresolvable offline.
      */
-    List<String> handlesBelowFull(String engineCollection) {
+    public List<String> handlesBelowFull(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
@@ -1354,7 +1354,7 @@ final class PimdirStorage {
     }
 
     /** Whether this source binds anything in a collection: one indexed probe. */
-    boolean bindsAny(String engineCollection) {
+    public boolean bindsAny(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
                 db.rawQuery(
@@ -1373,7 +1373,7 @@ final class PimdirStorage {
      * holds. One seek per handle on {@code bindings_by_handle}, however many
      * the collections hold.
      */
-    Set<String> heldOf(List<String> engineCollections, List<String> handles) {
+    public Set<String> heldOf(List<String> engineCollections, List<String> handles) {
         Set<String> held = new HashSet<>();
         if (engineCollections.isEmpty() || handles.isEmpty()) {
             return held;
@@ -1409,7 +1409,7 @@ final class PimdirStorage {
      * revision has not moved is named by what the store already holds, and
      * only a new or changed one needs its body read to be named.
      */
-    Map<String, String[]> bound(String engineCollection, List<String> handles) {
+    public Map<String, String[]> bound(String engineCollection, List<String> handles) {
         Map<String, String[]> bound = new HashMap<>();
         if (handles.isEmpty()) {
             return bound;
@@ -1446,7 +1446,7 @@ final class PimdirStorage {
      * offered half-resolvable: the hydrate pass asks for it
      * ({@link #handlesBelowFull}) and the next run sees it whole.
      */
-    List<JSONObject> loadConflicts(String engineCollection) throws JSONException {
+    public List<JSONObject> loadConflicts(String engineCollection) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
@@ -1490,7 +1490,7 @@ final class PimdirStorage {
      * the resolving push is conditioned on the state the merge reconciled with
      * rather than the one the conflict was first noticed at.
      */
-    void setConflictRevision(String engineCollection, String handle, String revision) {
+    public void setConflictRevision(String engineCollection, String handle, String revision) {
         SQLiteDatabase db = store.getWritableDatabase();
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
@@ -1518,7 +1518,7 @@ final class PimdirStorage {
      * that would reconcile nothing is the difference between a sync that costs
      * nothing and one that walks every contact on the device.
      */
-    boolean pending(String engineCollection) {
+    public boolean pending(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
@@ -1549,7 +1549,7 @@ final class PimdirStorage {
      * the phone's calendar provider deletes a calendar's events with its row,
      * and a binding left behind would read them as still there.
      */
-    void forget(String engineCollection) throws JSONException {
+    public void forget(String engineCollection) throws JSONException {
         JSONArray placements = loadCollection(engineCollection, null).optJSONArray("placements");
         JSONArray drops = new JSONArray();
         for (int index = 0; placements != null && index < placements.length(); index++) {
@@ -1569,7 +1569,7 @@ final class PimdirStorage {
     }
 
     /** The live, hydrated items a source should mirror (quiet-path count). */
-    int memberCount(String engineCollection) {
+    public int memberCount(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
                 db.rawQuery(
@@ -1586,7 +1586,7 @@ final class PimdirStorage {
      * The handle the engine addresses an item by on this source: the one it
      * binds, else the provisional handle its create waits under (SYNC §2).
      */
-    String handleFor(String engineCollection, String linkId) {
+    public String handleFor(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
                 db.rawQuery(
@@ -1654,7 +1654,7 @@ final class PimdirStorage {
      * The key of the pending create a move of {@code linkId} staged in
      * {@code engineCollection}, its own or a minted one, or null.
      */
-    String pendingCreateOf(String engineCollection, String linkId) {
+    public String pendingCreateOf(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
                 db.rawQuery(
@@ -1679,7 +1679,7 @@ final class PimdirStorage {
      * same identity this source still binds in another collection. Null
      * when the create is no move's.
      */
-    String[] moveSourceOf(String engineCollection, String linkId) {
+    public String[] moveSourceOf(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
         List<String> identities = identitiesOf(linkId);
         StringBuilder marks = new StringBuilder();
@@ -1708,7 +1708,7 @@ final class PimdirStorage {
      * Whether {@code linkId} is still a pending create in the collection: a
      * live item no base of this source has agreed on.
      */
-    boolean isPendingCreate(String engineCollection, String linkId) {
+    public boolean isPendingCreate(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
                 db.rawQuery(
@@ -1732,7 +1732,7 @@ final class PimdirStorage {
      * own handle with the target's next listing. A row that is no pending
      * create any more is left alone.
      */
-    void withdrawCreate(String engineCollection, String linkId) {
+    public void withdrawCreate(String engineCollection, String linkId) {
         if (!isPendingCreate(engineCollection, linkId)) {
             return;
         }
@@ -1757,7 +1757,7 @@ final class PimdirStorage {
      * index, so a page of a large mailbox pays for its few creates rather
      * than for the mailbox.
      */
-    Map<String, String> pendingCreatesByMessageId(String engineCollection) {
+    public Map<String, String> pendingCreatesByMessageId(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
         Map<String, String> creates = new HashMap<>();
         try (Cursor cursor =

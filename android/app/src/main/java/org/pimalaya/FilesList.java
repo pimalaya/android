@@ -19,6 +19,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import org.pimalaya.pimdir.ItemLinks;
+import org.pimalaya.pimdir.PimdirCollections;
 
 /**
  * The Files screen: one card per file collection the filter shows, the
@@ -27,9 +29,9 @@ import java.util.Map;
  * <p>Read off the store on the io executor: an account's attachments in one
  * statement with their messages, newest first, a folder's files A to Z.
  */
-final class FilesList {
+public final class FilesList {
     /** The prefix of the copy an import stages in the cache ({@link CacheSweep}). */
-    static final String STAGED = "import";
+    public static final String STAGED = "import";
 
     /** The kind chips: folders, attachments. */
     private static final int FOLDERS = 0;

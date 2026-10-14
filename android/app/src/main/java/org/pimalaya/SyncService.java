@@ -12,6 +12,7 @@ import android.os.IBinder;
 import android.provider.ContactsContract;
 import android.util.Log;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.PimdirDb;
 
 /**
  * Contacts sync adapter running the phone spoke's engine pass through

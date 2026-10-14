@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import android.util.Log;
 
@@ -6,6 +6,7 @@ import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.MailDate;
 import org.pimalaya.client.PimdirSql;
 
 import java.util.Iterator;
@@ -36,18 +37,18 @@ import java.util.Map;
  * mail listing and to the head of an A-to-Z contact listing, in both cases where
  * an unsummarised item belongs.
  */
-final class PimdirSummary {
+public final class PimdirSummary {
     /** Media type of a mail item. */
-    static final String MAIL = "message/rfc822";
+    public static final String MAIL = "message/rfc822";
 
     /** Media type of a contact item. */
-    static final String CONTACT = "text/vcard";
+    public static final String CONTACT = "text/vcard";
 
     /** Media type of a calendar item. */
-    static final String CALENDAR = "text/calendar";
+    public static final String CALENDAR = "text/calendar";
 
     /** Media type of a file item: bytes, its own type in its summary (Annex A.7). */
-    static final String FILE = "application/octet-stream";
+    public static final String FILE = "application/octet-stream";
 
     // ---- writing ----------------------------------------------------------
 
@@ -63,7 +64,7 @@ final class PimdirSummary {
      * object <em>is</em> the row, its keys the columns, so nothing here holds a
      * column list that the next spec revision could leave stale.
      */
-    static void write(SQLiteDatabase db, String collection, String linkId, JSONObject summary) {
+    public static void write(SQLiteDatabase db, String collection, String linkId, JSONObject summary) {
         write(db, collection, linkId, summary, false);
     }
 
@@ -73,7 +74,7 @@ final class PimdirSummary {
      * already, so the two statements that exist for a moved summary are left
      * out. A page of new mail runs this once per message.
      */
-    static void write(
+    public static void write(
             SQLiteDatabase db, String collection, String linkId, JSONObject summary,
             boolean fresh) {
         if (summary == null) {
@@ -141,7 +142,7 @@ final class PimdirSummary {
     }
 
     /** Runs one rule for one item, or for every item with a null link id. */
-    static void link(SQLiteDatabase db, String rule, String linkId) {
+    public static void link(SQLiteDatabase db, String rule, String linkId) {
         Map<String, Object> values = new LinkedHashMap<>();
         values.put("link_id", linkId);
         exec(db, rule, values);
@@ -223,7 +224,7 @@ final class PimdirSummary {
      * survives a rename. Flags are deliberately absent: they are the item's own
      * mutable state, not part of its summary.
      */
-    static JSONObject mail(
+    public static JSONObject mail(
             String messageId,
             String subject,
             String fromName,
@@ -264,7 +265,7 @@ final class PimdirSummary {
      * The sort key of a message: its date, so a mailbox reads newest first by
      * paging the key descending.
      */
-    static String mailSortKey(String date) {
+    public static String mailSortKey(String date) {
         return rfc3339(date);
     }
 
@@ -315,7 +316,7 @@ final class PimdirSummary {
      * (recurrence is expanded on wall-clock time, so an occurrence carries no
      * offset) and widens it to the fixed-width RFC 3339 shape the column wants.
      */
-    static String calendarSortKey(String civilStamp) {
+    public static String calendarSortKey(String civilStamp) {
         if (civilStamp == null || civilStamp.length() < 8) {
             return "";
         }
@@ -367,7 +368,7 @@ final class PimdirSummary {
      * wrong date on every row, and the two are easiest to keep honest when they
      * are the same fixed shape in the same place.
      */
-    static long stampOf(String key) {
+    public static long stampOf(String key) {
         if (key == null || key.isEmpty()) {
             return 0;
         }
@@ -383,7 +384,7 @@ final class PimdirSummary {
     }
 
     /** The bare form of a {@code Message-ID}, without its angle brackets. */
-    static String bare(String messageId) {
+    public static String bare(String messageId) {
         if (messageId == null) {
             return null;
         }

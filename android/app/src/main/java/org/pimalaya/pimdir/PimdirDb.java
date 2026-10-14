@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import android.content.Context;
 import android.database.Cursor;
@@ -7,6 +7,8 @@ import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import io.requery.android.database.sqlite.SQLiteOpenHelper;
+import org.pimalaya.FileStore;
+import org.pimalaya.MailStore;
 import org.pimalaya.client.PimdirSql;
 
 import java.io.File;
@@ -38,7 +40,7 @@ import java.util.Set;
  * {@code text/calendar}) and {@code collections.account} groups by account, so
  * the merged view's two filter axes are columns rather than three databases.
  */
-final class PimdirDb extends SQLiteOpenHelper {
+public final class PimdirDb extends SQLiteOpenHelper {
     /** The store directory under the app's private files. */
     static final String DIRECTORY = "pimdir";
 
@@ -72,7 +74,7 @@ final class PimdirDb extends SQLiteOpenHelper {
      * caller, each holding the file open until the collector finds it.
      * A store under another files directory (a test's) opens its own.
      */
-    static synchronized PimdirDb shared(Context context) {
+    public static synchronized PimdirDb shared(Context context) {
         File file = new File(storeDir(context), DATABASE);
         if (shared == null || !shared.file.equals(file)) {
             shared = new PimdirDb(context.getApplicationContext() == null
@@ -82,7 +84,7 @@ final class PimdirDb extends SQLiteOpenHelper {
         return shared;
     }
 
-    PimdirDb(Context context) {
+    public PimdirDb(Context context) {
         super(context, new File(storeDir(context), DATABASE).getAbsolutePath(), null,
                 PimdirSql.version());
         this.file = new File(storeDir(context), DATABASE);
@@ -108,12 +110,12 @@ final class PimdirDb extends SQLiteOpenHelper {
      * The application context the store was opened in, for the settings a
      * driver reads beside it (an account's mail bound, {@link MailScope}).
      */
-    Context context() {
+    public Context context() {
         return context;
     }
 
     /** The content-addressed blob directory beside the database. */
-    File blobs() {
+    public File blobs() {
         return blobs;
     }
 

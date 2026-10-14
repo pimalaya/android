@@ -17,6 +17,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirSummary;
 
 /**
  * The background check ({@link BackgroundCheck}): syncs every account

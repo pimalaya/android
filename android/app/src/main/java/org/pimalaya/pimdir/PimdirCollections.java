@@ -1,9 +1,10 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import android.content.Context;
 import android.database.Cursor;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
+import org.pimalaya.MailStore;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.PimdirSql;
@@ -37,7 +38,7 @@ import java.util.Set;
  * policy about a collection, not a property of it, and pimdir has no column for
  * them for exactly that reason.
  */
-final class PimdirCollections {
+public final class PimdirCollections {
     /** Where the collections the user may not write into are kept, by id. */
     private static final String READ_ONLY_PREFS = "collections-read-only";
 
@@ -47,7 +48,7 @@ final class PimdirCollections {
     private final PimdirAccount accounts;
     private final Context context;
 
-    PimdirCollections(PimdirDb store, Context context) {
+    public PimdirCollections(PimdirDb store, Context context) {
         this.store = store;
         this.context = context;
         this.accounts = new PimdirAccount(context);
@@ -64,7 +65,7 @@ final class PimdirCollections {
      * no sync will ever touch again. It is scoped to the account and the kind,
      * so an account's calendars survive a contacts round.
      */
-    void replace(String accountEmail, String kind, List<Stored> collections) {
+    public void replace(String accountEmail, String kind, List<Stored> collections) {
         String account = accounts.idOf(accountEmail);
         SQLiteDatabase db = store.getWritableDatabase();
 
@@ -102,7 +103,7 @@ final class PimdirCollections {
      * belongs to whatever wrote it: this is how the built-in on-device book is
      * seeded on every start without resetting anything each time.
      */
-    void ensure(String id, String accountEmail, String kind, String name) {
+    public void ensure(String id, String accountEmail, String kind, String name) {
         String account = accounts.idOf(accountEmail);
         SQLiteDatabase db = store.getWritableDatabase();
 
@@ -123,24 +124,24 @@ final class PimdirCollections {
      * what they contain, not in how they are listed, and giving each its own
      * roster type would fork this class three ways for nothing.
      */
-    static final class Stored {
-        final String id;
-        final String accountEmail;
-        final String name;
-        final String description;
-        final String color;
+    public static final class Stored {
+        public final String id;
+        public final String accountEmail;
+        public final String name;
+        public final String description;
+        public final String color;
 
         /** What the source says the collection is for (pimdir's role), or null. */
-        final String role;
+        public final String role;
 
         /** Whether the user may write into it, as its source last said. */
-        final boolean writable;
+        public final boolean writable;
 
-        Stored(String id, String accountEmail, String name, String description, String color) {
+        public Stored(String id, String accountEmail, String name, String description, String color) {
             this(id, accountEmail, name, description, color, null, true);
         }
 
-        Stored(
+        public Stored(
                 String id,
                 String accountEmail,
                 String name,
@@ -158,7 +159,7 @@ final class PimdirCollections {
         }
 
         /** Whether its source names it the default of its kind. */
-        boolean isDefault() {
+        public boolean isDefault() {
             return Calendar.DEFAULT.equals(role);
         }
     }
@@ -174,14 +175,14 @@ final class PimdirCollections {
      * own, for what a step already read, and no list, filter or chip shows
      * it ({@link #listAll}).
      */
-    List<Stored> list(String kind) {
+    public List<Stored> list(String kind) {
         List<Stored> shown = listAll(kind);
         shown.removeIf(stored -> MailStore.ALL_MAIL.equals(stored.name));
         return shown;
     }
 
     /** Every collection of one kind, a Gmail account's All Mail among them. */
-    List<Stored> listAll(String kind) {
+    public List<Stored> listAll(String kind) {
         // NOTE: pimdir's own roster read, LIST_COLLECTIONS: id, account,
         // kind, name, parent, color, description, sort order, generation,
         // role, then the coverage.
@@ -234,7 +235,7 @@ final class PimdirCollections {
      * <p>Apart from {@link #replace} so a sync can refresh what an account's
      * books are for without replacing the roster the switches hang off.
      */
-    void restate(List<Stored> collections) {
+    public void restate(List<Stored> collections) {
         SQLiteDatabase db = store.getWritableDatabase();
         db.beginTransaction();
         try {
@@ -286,7 +287,7 @@ final class PimdirCollections {
     }
 
     /** An address book roster in the shape {@link #replace} takes. */
-    static List<Stored> of(String accountEmail, List<Addressbook> books) {
+    public static List<Stored> of(String accountEmail, List<Addressbook> books) {
         List<Stored> listed = new ArrayList<>(books.size());
         for (Addressbook book : books) {
             listed.add(

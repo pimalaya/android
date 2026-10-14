@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -26,10 +26,10 @@ import java.nio.charset.StandardCharsets;
  * A crash therefore leaves at worst an orphan blob, never a row pointing at a
  * body that is not fully written.
  */
-final class PimdirBlobs {
+public final class PimdirBlobs {
     private final File root;
 
-    PimdirBlobs(File root) {
+    public PimdirBlobs(File root) {
         this.root = root;
     }
 
@@ -46,7 +46,7 @@ final class PimdirBlobs {
     }
 
     /** Whether the body is already stored. */
-    boolean has(String hash) {
+    public boolean has(String hash) {
         return pathOf(hash).isFile();
     }
 
@@ -56,7 +56,7 @@ final class PimdirBlobs {
      * <p>Storing one already present is a no-op: the name is the content, so
      * the bytes cannot differ.
      */
-    void put(String hash, byte[] body) throws IOException {
+    public void put(String hash, byte[] body) throws IOException {
         File target = pathOf(hash);
         if (target.isFile()) {
             return;
@@ -117,7 +117,7 @@ final class PimdirBlobs {
      * rename cannot (another file system), it is copied ({@link
      * #put(String, File)}). The source is gone either way.
      */
-    void adopt(String hash, File source) throws IOException {
+    public void adopt(String hash, File source) throws IOException {
         try {
             File target = pathOf(hash);
             if (target.isFile()) {

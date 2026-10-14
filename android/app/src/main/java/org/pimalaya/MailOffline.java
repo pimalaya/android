@@ -2,6 +2,7 @@ package org.pimalaya;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import org.pimalaya.pimdir.PimdirAccount;
 
 /**
  * Which mailboxes are kept whole ("Download this mailbox"): listed past

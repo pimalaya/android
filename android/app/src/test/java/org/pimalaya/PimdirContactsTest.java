@@ -13,6 +13,9 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Card;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirHash;
+import org.pimalaya.pimdir.PimdirStorage;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 

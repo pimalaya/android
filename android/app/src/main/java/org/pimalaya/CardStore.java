@@ -12,6 +12,11 @@ import java.util.Map;
 import java.util.Set;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirHash;
+import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.pimdir.PimdirSummary;
 
 /**
  * The app's own state about the contacts it stores, beside the store itself.
@@ -58,7 +63,7 @@ public class CardStore extends SQLiteOpenHelper {
      * ({@link PimdirDb#shared}): one connection pool for every caller, a
      * sync adapter's included, rather than one left open per call.
      */
-    static synchronized CardStore shared(Context context) {
+    public static synchronized CardStore shared(Context context) {
         PimdirDb pimdir = PimdirDb.shared(context);
         if (shared == null || sharedOver != pimdir) {
             shared = new CardStore(context.getApplicationContext() == null

@@ -25,6 +25,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.EventTime;
+import org.pimalaya.pimdir.PimdirHash;
 
 /**
  * The pure half of the calendar mirror, both directions: the phone's view of

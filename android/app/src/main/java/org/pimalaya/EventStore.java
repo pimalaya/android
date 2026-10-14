@@ -8,6 +8,12 @@ import org.json.JSONObject;
 
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.Event;
+import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirItems;
+import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.pimdir.PimdirSummary;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -40,7 +46,7 @@ import java.util.Set;
  * picker exists it belongs beside the address books' switches, in the app's own
  * state rather than in the store.
  */
-final class EventStore {
+public final class EventStore {
     private final PimdirItems items;
     private final PimdirStorage storage;
     private final PimdirCollections collections;
@@ -141,11 +147,11 @@ final class EventStore {
     }
 
     /** One stored calendar object, still iCalendar text. */
-    static final class StoredEvent {
+    public static final class StoredEvent {
         /** The collection id of the calendar holding it. */
         final String collectionId;
 
-        final String id;
+        public final String id;
 
         /**
          * How the engine addresses the entry: the resource name the server

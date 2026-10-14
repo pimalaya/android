@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import android.content.Context;
 import android.database.Cursor;
@@ -8,6 +8,9 @@ import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.MailEngine;
+import org.pimalaya.MailStore;
+import org.pimalaya.PimdirEngine;
 import org.pimalaya.client.PimdirSql;
 
 import java.util.ArrayList;
@@ -31,35 +34,35 @@ import java.util.Map;
  * yet (no {@code retained_at}), which waits for the server and is neither
  * restored nor purged.
  */
-final class DeletedItems {
+public final class DeletedItems {
     /** Rows one keyset read takes of a collection. */
     static final int PAGE = 256;
 
     /** One deleted item, as the page lists it. */
-    static final class Row {
-        final PimdirCollections.Stored collection;
-        final String kind;
+    public static final class Row {
+        public final PimdirCollections.Stored collection;
+        public final String kind;
         final long seq;
-        final String linkId;
+        public final String linkId;
         final String flags;
         final String object;
         final String sortKey;
         final boolean full;
 
         /** When the store retained it (RFC 3339), null while a source binds it. */
-        final String retainedAt;
+        public final String retainedAt;
 
         /** What its body weighs, 0 for none. */
         final long size;
 
         /** The summary's headline: subject, name or title, empty for none. */
-        String title = "";
+        public String title = "";
 
         /** The summary's second fact: sender, organization, empty for none. */
-        String who = "";
+        public String who = "";
 
         /** The summary's date: a mail's (RFC 3339) or an event's start, empty for none. */
-        String when = "";
+        public String when = "";
 
         Row(
                 PimdirCollections.Stored collection,
@@ -85,12 +88,12 @@ final class DeletedItems {
         }
 
         /** Whether a source still binds it: the server delete is not carried out yet. */
-        boolean waiting() {
+        public boolean waiting() {
             return retainedAt == null;
         }
 
         /** Whether the store holds its body, which a restore stages. */
-        boolean stored() {
+        public boolean stored() {
             return full && object != null;
         }
     }
@@ -106,7 +109,7 @@ final class DeletedItems {
     private final Context context;
     private final PimdirItems items;
 
-    DeletedItems(PimdirDb store, Context context) {
+    public DeletedItems(PimdirDb store, Context context) {
         this.store = store;
         this.context = context;
         this.items = new PimdirItems(store);
@@ -122,7 +125,7 @@ final class DeletedItems {
      * walk reads each collection a keyset page at a time and orders the whole
      * at the end: a deletion's time is not what the store's index serves.
      */
-    List<Row> list() {
+    public List<Row> list() {
         SQLiteDatabase db = store.getReadableDatabase();
         PimdirCollections collections = new PimdirCollections(store, context);
         List<Row> rows = new ArrayList<>();
@@ -238,7 +241,7 @@ final class DeletedItems {
     }
 
     /** pimdir's {@code retained_bytes}: what retention holds store-wide, each body once. */
-    long retainedBytes() {
+    public long retainedBytes() {
         try (Cursor cursor =
                 query(store.getReadableDatabase(), "RETAINED_BYTES", new HashMap<>())) {
             return cursor.moveToFirst() ? Math.max(0, cursor.getLong(0)) : 0;
@@ -248,7 +251,7 @@ final class DeletedItems {
     // ---- restore ----------------------------------------------------------
 
     /** Why a row cannot be restored. */
-    enum Refusal {
+    public enum Refusal {
         /** A source still binds it. */
         WAITING,
         /** The store holds its summary alone. */
@@ -258,8 +261,8 @@ final class DeletedItems {
     }
 
     /** Refused restore. */
-    static final class RefusedException extends Exception {
-        final Refusal refusal;
+    public static final class RefusedException extends Exception {
+        public final Refusal refusal;
 
         RefusedException(Refusal refusal) {
             super(refusal.name());
@@ -278,7 +281,7 @@ final class DeletedItems {
      * body, its link id being the handle its last mailbox gave it, which names
      * nothing in another one.
      */
-    void restore(PimdirEngine engine, Row row, String target)
+    public void restore(PimdirEngine engine, Row row, String target)
             throws RefusedException, JSONException {
         if (row.waiting()) {
             throw new RefusedException(Refusal.WAITING);
@@ -342,7 +345,7 @@ final class DeletedItems {
      * the statement's {@code RETURNING} ({@link MailStore#changed}): a purge
      * of more rows than a cursor window holds would run again on its refill.
      */
-    int purgeBefore(String cutoff) {
+    public int purgeBefore(String cutoff) {
         SQLiteDatabase db = store.getWritableDatabase();
         int purged = 0;
         db.beginTransaction();

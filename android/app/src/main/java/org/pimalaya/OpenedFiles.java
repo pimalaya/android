@@ -19,6 +19,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import org.pimalaya.pimdir.PimdirSummary;
 
 /**
  * Hands a file the app opens to the app that shows it: the bytes are copied

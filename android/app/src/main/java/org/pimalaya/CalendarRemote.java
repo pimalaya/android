@@ -39,6 +39,9 @@ import org.pimalaya.CalendarMapping.Write;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.EventViews;
 import org.pimalaya.client.PimalayaException;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirHash;
+import org.pimalaya.pimdir.PimdirStorage;
 
 /**
  * The CalendarContract half of the calendar mirror: the phone spoke's remote

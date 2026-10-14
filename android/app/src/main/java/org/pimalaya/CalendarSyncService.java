@@ -12,6 +12,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.provider.CalendarContract;
 import android.util.Log;
+import org.pimalaya.pimdir.PimdirDb;
 
 /**
  * Calendar sync adapter: the phone pass of an address's shown calendars

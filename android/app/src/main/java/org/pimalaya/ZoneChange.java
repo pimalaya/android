@@ -3,6 +3,7 @@ package org.pimalaya;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import org.pimalaya.pimdir.PimdirDb;
 
 /**
  * The device's zone changed: the phone pass of every calendar the phone

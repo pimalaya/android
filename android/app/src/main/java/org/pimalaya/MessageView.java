@@ -22,6 +22,7 @@ import android.widget.TextView;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.ItemLinks;
 
 import java.util.ArrayList;
 import java.util.List;

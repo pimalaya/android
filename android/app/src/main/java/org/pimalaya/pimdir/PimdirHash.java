@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -27,7 +27,7 @@ import java.security.NoSuchAlgorithmException;
  * own test pins the two together. A disagreement would not fail loudly: it would
  * write blobs no reader could find.
  */
-final class PimdirHash {
+public final class PimdirHash {
     /** The value {@code store_meta.hash_algo} carries for this app's stores. */
     static final String ALGORITHM = "sha256-128";
 
@@ -37,12 +37,12 @@ final class PimdirHash {
     private static final String ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
 
     /** The content hash of a text body, as the object store names it. */
-    static String of(String body) {
+    public static String of(String body) {
         return of(body.getBytes(StandardCharsets.UTF_8));
     }
 
     /** The content hash of a body's bytes. */
-    static String of(byte[] body) {
+    public static String of(byte[] body) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(body);
             return base32(digest);
@@ -52,7 +52,7 @@ final class PimdirHash {
     }
 
     /** The content hash of a file's bytes, read a buffer at a time. */
-    static String of(java.io.File file) throws java.io.IOException {
+    public static String of(java.io.File file) throws java.io.IOException {
         try (java.io.InputStream in = new java.io.FileInputStream(file)) {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] buffer = new byte[64 * 1024];

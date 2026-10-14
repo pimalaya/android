@@ -12,6 +12,10 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Calendar;
+import org.pimalaya.pimdir.DefaultCollection;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 

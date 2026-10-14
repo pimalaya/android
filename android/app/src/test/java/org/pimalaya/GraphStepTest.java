@@ -18,6 +18,9 @@ import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 

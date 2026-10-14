@@ -25,6 +25,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Cards;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirStorage;
 
 /**
  * The ContactsContract half of the io-offline driver: the phone spoke's

@@ -45,6 +45,13 @@ import org.pimalaya.client.Card;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
+import org.pimalaya.pimdir.CacheSweep;
+import org.pimalaya.pimdir.DefaultCollection;
+import org.pimalaya.pimdir.ItemLinks;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.pimdir.PimdirSummary;
 
 /**
  * Single-activity host walking the app's screens through a ViewFlipper.

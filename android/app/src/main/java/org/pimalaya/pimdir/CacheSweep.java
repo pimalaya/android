@@ -1,9 +1,11 @@
-package org.pimalaya;
+package org.pimalaya.pimdir;
 
 import android.content.Context;
 
 import java.io.File;
 import java.util.concurrent.TimeUnit;
+import org.pimalaya.FilesList;
+import org.pimalaya.MailEngine;
 
 /**
  * Removes what a run killed midway left in the cache: the folders a body
@@ -13,14 +15,14 @@ import java.util.concurrent.TimeUnit;
  * start, only what is older than any run could be ({@link #AGE}), so a
  * background run writing beside the app keeps its own.
  */
-final class CacheSweep {
+public final class CacheSweep {
     private CacheSweep() {}
 
     /** How old a leftover is before it is removed. */
-    static final long AGE = TimeUnit.HOURS.toMillis(1);
+    public static final long AGE = TimeUnit.HOURS.toMillis(1);
 
     /** Removes the leftovers older than {@link #AGE} at {@code now}. */
-    static void run(Context context, long now) {
+    public static void run(Context context, long now) {
         File cache = context.getCacheDir();
         File[] sources = new File(cache, MailEngine.SCRATCH).listFiles();
         for (int index = 0; sources != null && index < sources.length; index++) {

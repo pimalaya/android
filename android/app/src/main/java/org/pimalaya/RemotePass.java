@@ -11,6 +11,9 @@ import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.SubmissionRefused;
 import org.pimalaya.client.SubmissionUncertain;
 import org.pimalaya.client.Transport;
+import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirDb;
 
 /**
  * The mail and calendar halves of a remote sync, the contacts half being

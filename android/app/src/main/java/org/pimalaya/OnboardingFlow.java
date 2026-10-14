@@ -23,6 +23,8 @@ import org.pimalaya.client.AuthMethod;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.ServiceConfig;
 import org.pimalaya.client.Transport;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirSummary;
 
 /**
  * The connection wizard behind the auth panel: the email (or server)

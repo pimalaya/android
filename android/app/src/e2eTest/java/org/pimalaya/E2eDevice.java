@@ -13,6 +13,10 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.PimdirAccount;
+import org.pimalaya.pimdir.PimdirDb;
+import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.robolectric.shadows.ShadowNetworkInfo;
 
 import java.io.File;

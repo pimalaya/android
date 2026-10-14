@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.function.IntConsumer;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.pimdir.PimdirCollections;
 
 /**
  * The full-screen account settings controller behind the drawer: one

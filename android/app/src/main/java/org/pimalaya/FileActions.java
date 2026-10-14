@@ -17,6 +17,8 @@ import java.io.OutputStream;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirSummary;
 
 /**
  * What can be done with one file, wherever it is shown: open it, share it,

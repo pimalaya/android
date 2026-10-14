@@ -14,7 +14,7 @@ import java.util.Set;
  * it back on brings both back. Kept as the deactivated set, so an account
  * connected later takes part without having to be enrolled.
  */
-final class AccountActivation {
+public final class AccountActivation {
     private static final String PREFS = "accounts-deactivated";
 
     private static final String EMAILS = "emails";
@@ -26,7 +26,7 @@ final class AccountActivation {
     }
 
     /** Whether the account takes part. */
-    static boolean enabled(Context context, String email) {
+    public static boolean enabled(Context context, String email) {
         return !prefs(context).getStringSet(EMAILS, Set.of()).contains(email);
     }
 
