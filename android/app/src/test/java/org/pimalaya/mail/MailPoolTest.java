@@ -17,7 +17,6 @@ import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
-import org.pimalaya.pimdir.PimdirEngine;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -192,7 +191,7 @@ public class MailPoolTest {
 
         @Override
         protected void applied(JSONArray effects) {
-            if (!Thread.holdsLock(PimdirEngine.STORE)) {
+            if (!Thread.holdsLock(pimdir.locks().store)) {
                 writeOutsideLock.set(true);
             }
             int now = writing.incrementAndGet();

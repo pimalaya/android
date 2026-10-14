@@ -83,13 +83,6 @@ public class MailEngine extends PimdirEngine {
     /** Messages one step of the background fill widens a mailbox by. */
     public static final int FILL_CHUNK = 500;
 
-    /**
-     * Told after every write a mail driver's pass lands, so a list showing
-     * the store redraws as the pages of a first pass land; null when
-     * nothing is listening. Called on the sync thread.
-     */
-    static volatile Runnable onWrite;
-
     /** The account's live connection; null on a driver that only stages,
      *  whose mutations reach no server. */
     private final MailSession session;
@@ -136,7 +129,7 @@ public class MailEngine extends PimdirEngine {
         MailStore.markExpungesOne(pimdir.context(), accountId, session.expungesOne());
         if (!accountWide) {
             int released;
-            synchronized (STORE) {
+            synchronized (locks.store) {
                 released = mail().repairLinks(accountId);
             }
             if (released > 0) {
@@ -338,7 +331,7 @@ public class MailEngine extends PimdirEngine {
                 "mail sync " + collection + " since " + since + ": "
                         + client.offlineSyncImmutable(this, collection, since, false)
                         + ", the pass so far " + clock);
-        MailBodies.relisted(collection);
+        MailState.of(pimdir.context()).relisted(collection);
     }
 
     /**
@@ -437,7 +430,7 @@ public class MailEngine extends PimdirEngine {
      * ({@code held}), so no step reads the account's every handle.
      */
     Set<String> held(List<String> handles) {
-        synchronized (STORE) {
+        synchronized (locks.store) {
             return offline.heldOf(holding, handles);
         }
     }
@@ -506,7 +499,7 @@ public class MailEngine extends PimdirEngine {
      */
     void land(String collection, JSONArray items, String checkpoint) {
         boolean empty;
-        synchronized (STORE) {
+        synchronized (locks.store) {
             empty = !offline.bindsAny(collection);
         }
         landing = new Landing(items, checkpoint, empty);
@@ -518,7 +511,7 @@ public class MailEngine extends PimdirEngine {
                     "pimalaya",
                     "mail step " + collection + " (" + items.length() + "): "
                             + client.offlineSyncImmutable(this, collection, since, false));
-            MailBodies.relisted(collection);
+            MailState.of(pimdir.context()).relisted(collection);
         } finally {
             landing = null;
         }
@@ -601,7 +594,7 @@ public class MailEngine extends PimdirEngine {
         }
         if (arrivals && !page.optBoolean("complete") && !handles.isEmpty()) {
             Map<String, String[]> bound;
-            synchronized (STORE) {
+            synchronized (locks.store) {
                 bound = offline.bound(collection, handles);
             }
             List<String> arrived = new ArrayList<>();
@@ -665,7 +658,7 @@ public class MailEngine extends PimdirEngine {
         }
 
         Map<String, String[]> bound;
-        synchronized (STORE) {
+        synchronized (locks.store) {
             bound = offline.bound(collection, unnamed);
         }
         List<String> unbound = new ArrayList<>();
@@ -715,7 +708,7 @@ public class MailEngine extends PimdirEngine {
             sawHeld = false;
         }
         Set<String> held;
-        synchronized (STORE) {
+        synchronized (locks.store) {
             held = offline.heldOf(accountCollections(), unnamed);
         }
         boolean band = listing.optBoolean("band");
@@ -769,7 +762,7 @@ public class MailEngine extends PimdirEngine {
             return;
         }
         Map<String, String> creates;
-        synchronized (STORE) {
+        synchronized (locks.store) {
             creates = offline.pendingCreatesByMessageId(collection);
         }
         if (creates.isEmpty()) {
@@ -781,7 +774,7 @@ public class MailEngine extends PimdirEngine {
             handles.add(items.getJSONObject(index).getString("handle"));
         }
         Map<String, String[]> bound;
-        synchronized (STORE) {
+        synchronized (locks.store) {
             bound = offline.bound(collection, handles);
         }
 
@@ -898,7 +891,7 @@ public class MailEngine extends PimdirEngine {
      * <p>Answers the rows whose body did not land: asked of the server and
      * not handed over, or not stored. A landed one is owed no more
      * ({@link MailOwed}); nor is one the server answered gone, which is not
-     * a failure: it is marked so ({@link MailBodies#GONE}) and left for the
+     * a failure: it is marked so ({@link MailState#gone}) and left for the
      * next listing of its mailbox to take away.
      */
     public List<MailBodies.Row> download(String collection, List<MailBodies.Row> rows) {
@@ -915,7 +908,7 @@ public class MailEngine extends PimdirEngine {
         String role = mail().roles().get(collection);
         boolean whole = MailOffline.whole(pimdir.context(), collection);
         List<String> poisoned = new ArrayList<>();
-        synchronized (STORE) {
+        synchronized (locks.store) {
             for (MailBodies.Row row : rows) {
                 if (!(row.always || MailBodies.takes(row.sortKey, window, role, whole))
                         || offline.isPendingCreate(collection, row.linkId)) {
@@ -948,12 +941,12 @@ public class MailEngine extends PimdirEngine {
             // NOTE: every write naming them has returned, committed or not:
             // one no row names (the write failed) is an orphan to unlink.
             for (String hash : pinned) {
-                PimdirItems.unpin(hash);
+                PimdirItems.unpin(pimdir, hash);
             }
-            PimdirItems.deferUnlink(pinned);
+            PimdirItems.deferUnlink(pimdir, pinned);
             pinned.clear();
         }
-        synchronized (STORE) {
+        synchronized (locks.store) {
             for (Map.Entry<String, JSONObject> summary : summaries.entrySet()) {
                 mail().restateFromBody(collection, summary.getKey(), summary.getValue());
             }
@@ -981,7 +974,7 @@ public class MailEngine extends PimdirEngine {
                 landed.add(key);
             }
         }
-        MailBodies.GONE.addAll(vanished);
+        MailState.of(pimdir.context()).gone.addAll(vanished);
         landed.addAll(vanished);
         MailOwed.settle(pimdir.context(), landed);
         if (!vanished.isEmpty()) {
@@ -1096,7 +1089,7 @@ public class MailEngine extends PimdirEngine {
         String hash = described.getString("hash");
         // NOTE: pinned before it is moved in and until the write naming it
         // has returned (download), so no collector unlinks it meanwhile.
-        PimdirItems.pin(hash);
+        PimdirItems.pin(pimdir, hash);
         pinned.add(hash);
         try {
             new PimdirBlobs(pimdir.blobs()).adopt(hash, file);
@@ -1231,7 +1224,7 @@ public class MailEngine extends PimdirEngine {
     /** Tells a listening list that a write landed, page by page. */
     @Override
     protected void applied(JSONArray effects) {
-        Runnable listener = onWrite;
+        Runnable listener = MailState.of(pimdir.context()).onWrite;
         if (listener != null && effects.length() > 0) {
             listener.run();
         }
@@ -1367,7 +1360,7 @@ public class MailEngine extends PimdirEngine {
             gone(mailbox, handle, failure);
         }
         String linkId = change.optString("linkId", handle);
-        synchronized (STORE) {
+        synchronized (locks.store) {
             String create = offline.pendingCreateOf(to, linkId);
             if (create != null) {
                 offline.withdrawCreate(to, create);
@@ -1392,7 +1385,7 @@ public class MailEngine extends PimdirEngine {
     private JSONObject pushAdd(String collection, String mailbox, String handle, JSONObject change)
             throws JSONException {
         String linkId = change.optString("linkId", PimdirStorage.nameOf(handle));
-        synchronized (STORE) {
+        synchronized (locks.store) {
             // NOTE: withdrawn since the sync loaded it, by the move it was
             // the target of, delivered on another session.
             if (!offline.isPendingCreate(collection, linkId)

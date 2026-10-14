@@ -740,7 +740,7 @@ public final class PimdirStorage {
                 statement.close();
             }
             compiled = null;
-            PimdirItems.unlinkCollected(db, blobs);
+            PimdirItems.unlinkCollected(store, db, blobs);
         }
     }
 
@@ -1758,7 +1758,7 @@ public final class PimdirStorage {
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
-            PimdirItems.unlinkCollected(db, blobs);
+            PimdirItems.unlinkCollected(store, db, blobs);
         }
     }
 
@@ -2051,7 +2051,7 @@ public final class PimdirStorage {
             db.execSQL("DELETE FROM objects WHERE hash = ?", new Object[] {hash});
         }
         // NOTE: the row goes inside the transaction, the file once it commits.
-        PimdirItems.deferUnlink(orphans);
+        PimdirItems.deferUnlink(store, orphans);
     }
 
     private static boolean sameObject(String left, String right) {

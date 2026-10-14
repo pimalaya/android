@@ -10,12 +10,9 @@ import org.pimalaya.client.PimdirSql;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Item-level writes and reads the app performs on its own, outside a sync.
@@ -100,7 +97,7 @@ public final class PimdirItems {
 
     public SQLiteDatabase writable() {
         SQLiteDatabase db = store.getWritableDatabase();
-        unlinkCollected(db, blobs);
+        unlinkCollected(store, db, blobs);
         return db;
     }
 
@@ -456,25 +453,16 @@ public final class PimdirItems {
         for (String hash : orphans) {
             db.execSQL("DELETE FROM objects WHERE hash = ?", new Object[] {hash});
         }
-        deferUnlink(orphans);
+        deferUnlink(store, orphans);
     }
-
-    /** The objects deleted in a transaction whose blobs wait for it to commit. */
-    private static final Set<String> COLLECTED = ConcurrentHashMap.newKeySet();
-
-    /**
-     * Bodies filed in the blob store ahead of the write naming them, by how
-     * many such writes are under way ({@link #pin}).
-     */
-    private static final Map<String, Integer> PINNED = new HashMap<>();
 
     /**
      * Leaves the blobs of objects a transaction just deleted until it has
      * committed ({@link #unlinkCollected}): a rollback restores the rows,
      * and a row whose blob was already unlinked would be a body lost.
      */
-    public static void deferUnlink(List<String> hashes) {
-        COLLECTED.addAll(hashes);
+    public static void deferUnlink(PimdirDb store, List<String> hashes) {
+        store.collected.addAll(hashes);
     }
 
     /**
@@ -486,22 +474,22 @@ public final class PimdirItems {
      * writer dropping the last reference to the same hash; the file
      * stays, and the write files the row again.
      */
-    public static void pin(String hash) {
-        synchronized (PINNED) {
-            PINNED.merge(hash, 1, Integer::sum);
+    public static void pin(PimdirDb store, String hash) {
+        synchronized (store.pinned) {
+            store.pinned.merge(hash, 1, Integer::sum);
         }
     }
 
     /** Releases one {@link #pin}. */
-    public static void unpin(String hash) {
-        synchronized (PINNED) {
-            PINNED.computeIfPresent(hash, (key, count) -> count == 1 ? null : count - 1);
+    public static void unpin(PimdirDb store, String hash) {
+        synchronized (store.pinned) {
+            store.pinned.computeIfPresent(hash, (key, count) -> count == 1 ? null : count - 1);
         }
     }
 
     /** {@link #unlinkCollected} over this store, for a collector just committed. */
     public void unlinkCollected() {
-        unlinkCollected(store.getWritableDatabase(), blobs);
+        unlinkCollected(store, store.getWritableDatabase(), blobs);
     }
 
     /**
@@ -515,17 +503,17 @@ public final class PimdirItems {
      * a body and committing its row while the row is read and the file
      * unlinked; a pinned body ({@link #pin}) is left for a later run.
      */
-    static void unlinkCollected(SQLiteDatabase db, PimdirBlobs blobs) {
-        if (COLLECTED.isEmpty() || db.inTransaction()) {
+    static void unlinkCollected(PimdirDb store, SQLiteDatabase db, PimdirBlobs blobs) {
+        if (store.collected.isEmpty() || db.inTransaction()) {
             return;
         }
         db.beginTransaction();
         try {
-            for (String hash : new ArrayList<>(COLLECTED)) {
-                COLLECTED.remove(hash);
-                synchronized (PINNED) {
-                    if (PINNED.containsKey(hash)) {
-                        COLLECTED.add(hash);
+            for (String hash : new ArrayList<>(store.collected)) {
+                store.collected.remove(hash);
+                synchronized (store.pinned) {
+                    if (store.pinned.containsKey(hash)) {
+                        store.collected.add(hash);
                         continue;
                     }
                     PimdirSql.Bound exists =

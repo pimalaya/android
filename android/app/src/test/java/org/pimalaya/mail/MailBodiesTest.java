@@ -58,8 +58,6 @@ public class MailBodiesTest {
 
     @Before
     public void setUp() {
-        MailBodies.FAILED.clear();
-        MailBodies.GONE.clear();
         context = RuntimeEnvironment.getApplication();
         pimdir = new PimdirDb(context);
         store = new MailStore(context, pimdir);
@@ -184,7 +182,7 @@ public class MailBodiesTest {
 
     @Test
     public void theStepRaisesOnlyBodiesWithinTheWindow() {
-        MailBodies.Run run = new MailBodies.Run();
+        MailBodies.Run run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(window));
         assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
 
@@ -198,7 +196,7 @@ public class MailBodiesTest {
     @Test
     public void aMailboxKeptWholeDownloadsPastTheWindow() {
         MailOffline.setWhole(context, inbox, true);
-        MailBodies.Run run = new MailBodies.Run();
+        MailBodies.Run run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(null));
         assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
 
@@ -224,7 +222,7 @@ public class MailBodiesTest {
 
     @Test
     public void nothingDownloadsOffWifi() {
-        MailBodies.Run run = new MailBodies.Run();
+        MailBodies.Run run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(window));
         assertEquals(MailBodies.Step.PAUSED, MailBodies.step(run, host(false)));
         assertTrue("whatever the size: " + server.read, server.read.isEmpty());
@@ -262,7 +260,7 @@ public class MailBodiesTest {
     @Test
     public void aWindowMovedLaterFreesTheBodiesBelowIt() {
         MailWindow.set(context, accountId, null);
-        MailBodies.Run run = new MailBodies.Run();
+        MailBodies.Run run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(null));
         assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
 
@@ -282,7 +280,7 @@ public class MailBodiesTest {
         // it freed: the window is read again as the chunk downloads.
         MailWindow.set(context, accountId, window);
         server.read.clear();
-        run = new MailBodies.Run();
+        run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(null));
         MailBodies.step(run, host(true));
         assertTrue("nothing fetched back: " + server.read, server.read.isEmpty());
@@ -292,12 +290,12 @@ public class MailBodiesTest {
     @Test
     public void aBodyFetchedAgainAfterAReleaseIsNoEditToPush() {
         MailWindow.set(context, accountId, null);
-        MailBodies.Run run = new MailBodies.Run();
+        MailBodies.Run run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(null));
         MailBodies.step(run, host(true));
         assertEquals(1, store.release(EMAIL, window));
 
-        run = new MailBodies.Run();
+        run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(null));
         assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
         assertArrayEquals(LATIN1, store.storedSource(inbox, "1"));
@@ -319,7 +317,7 @@ public class MailBodiesTest {
     @Test
     public void aBodyRefusedOnceIsTriedAgainLaterInTheRun() {
         server.refusing.put("3", 1);
-        MailBodies.Run run = new MailBodies.Run();
+        MailBodies.Run run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(window));
         assertEquals(MailBodies.Step.AGAIN, MailBodies.step(run, host(true)));
         assertNull("not landed yet", store.storedSource(inbox, "3"));
@@ -327,13 +325,13 @@ public class MailBodiesTest {
 
         assertEquals("tried again after the others", List.of("4", "3", "2", "3"), server.read);
         assertArrayEquals(LATIN1, store.storedSource(inbox, "3"));
-        assertFalse(MailBodies.FAILED.contains(MailOwed.key(inbox, "3")));
+        assertFalse(MailState.of(context).failed.contains(MailOwed.key(inbox, "3")));
     }
 
     @Test
     public void aBodyFailingEveryAttemptIsNotPlannedAgainUntilItsMailboxIsListedAnew() {
         server.refusing.put("3", -1);
-        MailBodies.Run run = new MailBodies.Run();
+        MailBodies.Run run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(window));
         drain(run, host(true), 10);
 
@@ -341,14 +339,14 @@ public class MailBodiesTest {
                 MailBodies.ATTEMPTS,
                 server.read.stream().filter(handle -> handle.equals("3")).count());
         assertNull(store.storedSource(inbox, "3"));
-        assertTrue(MailBodies.FAILED.contains(MailOwed.key(inbox, "3")));
+        assertTrue(MailState.of(context).failed.contains(MailOwed.key(inbox, "3")));
         assertArrayEquals("the others landed", LATIN1, store.storedSource(inbox, "2"));
 
         // NOTE: what restarted the run every few seconds on the phone: a
         // new plan right after the last, nothing listed in between.
         server.read.clear();
         for (int again = 0; again < 3; again++) {
-            run = new MailBodies.Run();
+            run = new MailBodies.Run(MailState.of(context));
             assertEquals("nothing planned", 0, run.plan(EMAIL, planned(window)));
             assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
         }
@@ -356,12 +354,12 @@ public class MailBodiesTest {
 
         server.refusing.clear();
         server.sync(inbox);
-        assertFalse("a new listing", MailBodies.FAILED.contains(MailOwed.key(inbox, "3")));
-        run = new MailBodies.Run();
+        assertFalse("a new listing", MailState.of(context).failed.contains(MailOwed.key(inbox, "3")));
+        run = new MailBodies.Run(MailState.of(context));
         assertEquals(1, run.plan(EMAIL, planned(window)));
         drain(run, host(true), 10);
         assertArrayEquals(LATIN1, store.storedSource(inbox, "3"));
-        assertFalse(MailBodies.FAILED.contains(MailOwed.key(inbox, "3")));
+        assertFalse(MailState.of(context).failed.contains(MailOwed.key(inbox, "3")));
     }
 
     @Test
@@ -369,7 +367,7 @@ public class MailBodiesTest {
         String key = MailOwed.key(inbox, "3");
         MailOwed.owe(context, inbox, List.of("3"));
         server.vanished.add("3");
-        MailBodies.Run run = new MailBodies.Run();
+        MailBodies.Run run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(window));
         drain(run, host(true), 10);
 
@@ -377,19 +375,19 @@ public class MailBodiesTest {
                 "asked once, no attempt after",
                 1,
                 server.read.stream().filter(handle -> handle.equals("3")).count());
-        assertTrue(MailBodies.GONE.contains(key));
-        assertFalse("gone is no failure", MailBodies.FAILED.contains(key));
+        assertTrue(MailState.of(context).gone.contains(key));
+        assertFalse("gone is no failure", MailState.of(context).failed.contains(key));
         assertFalse("owed no more", MailOwed.owed(context, inbox, "3"));
         assertArrayEquals("the others landed", LATIN1, store.storedSource(inbox, "2"));
 
         server.read.clear();
-        run = new MailBodies.Run();
+        run = new MailBodies.Run(MailState.of(context));
         assertEquals("nothing planned", 0, run.plan(EMAIL, planned(window)));
         assertEquals(MailBodies.Step.DONE, MailBodies.step(run, host(true)));
         assertTrue(server.read.isEmpty());
 
         server.sync(inbox);
-        assertFalse("its mailbox listed anew", MailBodies.GONE.contains(key));
+        assertFalse("its mailbox listed anew", MailState.of(context).gone.contains(key));
     }
 
     @Test
@@ -407,11 +405,11 @@ public class MailBodiesTest {
                         throw new IllegalStateException("No session");
                     }
                 };
-        MailBodies.Run run = new MailBodies.Run();
+        MailBodies.Run run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(window));
         assertEquals("put back once", MailBodies.Step.AGAIN, MailBodies.step(run, down));
         assertEquals("then the account leaves", MailBodies.Step.DONE, MailBodies.step(run, down));
-        assertTrue("no session marks no message failed", MailBodies.FAILED.isEmpty());
+        assertTrue("no session marks no message failed", MailState.of(context).failed.isEmpty());
 
         // NOTE: a token expiring mid-run: the next download renews it.
         int[] calls = {0};
@@ -431,7 +429,7 @@ public class MailBodiesTest {
                         return server.download(inbox, rows);
                     }
                 };
-        run = new MailBodies.Run();
+        run = new MailBodies.Run(MailState.of(context));
         run.plan(EMAIL, planned(window));
         drain(run, renewed, 3);
         assertEquals(List.of("4", "3", "2"), server.read);

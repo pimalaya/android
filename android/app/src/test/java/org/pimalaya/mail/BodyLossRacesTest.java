@@ -169,13 +169,13 @@ public class BodyLossRacesTest {
     public void aPinnedBodyOutlivesTheCollectorUntilReleased() throws Exception {
         String hash = PimdirHash.of(SOURCE);
         blobs.put(hash, SOURCE);
-        PimdirItems.deferUnlink(List.of(hash));
+        PimdirItems.deferUnlink(pimdir, List.of(hash));
 
-        PimdirItems.pin(hash);
+        PimdirItems.pin(pimdir, hash);
         new PimdirItems(pimdir).unlinkCollected();
         assertTrue("pinned, kept", blobs.has(hash));
 
-        PimdirItems.unpin(hash);
+        PimdirItems.unpin(pimdir, hash);
         new PimdirItems(pimdir).unlinkCollected();
         assertFalse("released and named by no row, unlinked", blobs.has(hash));
     }
@@ -193,7 +193,7 @@ public class BodyLossRacesTest {
 
         // The download moves its copy in: the file is there already, so
         // the copy goes.
-        PimdirItems.pin(hash);
+        PimdirItems.pin(pimdir, hash);
         File fetched = File.createTempFile("fetched", ".eml");
         writeFile(fetched, SOURCE);
         blobs.adopt(hash, fetched);
@@ -218,8 +218,8 @@ public class BodyLossRacesTest {
                                         .put("size", SOURCE.length)
                                         .put("persisted", true))
                         .put(full));
-        PimdirItems.unpin(hash);
-        PimdirItems.deferUnlink(List.of(hash));
+        PimdirItems.unpin(pimdir, hash);
+        PimdirItems.deferUnlink(pimdir, List.of(hash));
         new PimdirItems(pimdir).unlinkCollected();
 
         assertEquals("2", item("level", "m2"));

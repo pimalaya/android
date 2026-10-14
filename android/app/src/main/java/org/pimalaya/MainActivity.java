@@ -78,6 +78,7 @@ import org.pimalaya.mail.MailList;
 import org.pimalaya.mail.MailOffline;
 import org.pimalaya.mail.MailOwed;
 import org.pimalaya.mail.MailPool;
+import org.pimalaya.mail.MailState;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailTally;
 import org.pimalaya.mail.MailWindow;
@@ -98,7 +99,6 @@ import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
 import org.pimalaya.pimdir.PimdirEngine;
 import org.pimalaya.sync.RemotePass;
-import org.pimalaya.sync.SyncLock;
 import org.pimalaya.sync.SyncRunner;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.sync.SyncSteps;
@@ -189,7 +189,7 @@ public class MainActivity extends Host {
      * The executor of what someone is waiting on, a message being opened:
      * never queued behind a step of the background fill or of the body
      * download, which run on {@link #io} and can hold it for seconds. What
-     * it writes to the store it writes under {@link PimdirEngine#STORE},
+     * it writes to the store it writes under {@link Locks#store},
      * the store keeping one writer.
      */
     public final ExecutorService interactive = Executors.newSingleThreadExecutor();
@@ -1442,7 +1442,7 @@ public class MainActivity extends Host {
      * while a background run holds it, whose dock already says so.
      */
     private boolean startSync() {
-        if (!SyncLock.take()) {
+        if (!pimdir.locks().takeSync()) {
             return false;
         }
         resetSyncPlan();
@@ -1452,7 +1452,7 @@ public class MainActivity extends Host {
 
     private void setSyncing(boolean value) {
         if (syncing && !value) {
-            SyncLock.release();
+            pimdir.locks().releaseSync();
         }
         syncing = value;
         for (java.util.function.Consumer<Boolean> observer : syncObservers) {
@@ -2329,7 +2329,7 @@ public class MainActivity extends Host {
      * ({@link MailBodies.Run#plan}). Walked on the io thread.
      */
     private MailBodies.Run planBodies() {
-        MailBodies.Run run = new MailBodies.Run();
+        MailBodies.Run run = new MailBodies.Run(MailState.of(this));
         int planned = 0;
         // NOTE: read afresh from what was kept, off the main thread.
         MergedFilter shown = MergedFilter.of(this, PimDomain.MAIL);
@@ -2832,7 +2832,7 @@ public class MainActivity extends Host {
      * {@code failed} when it names nothing itself.
      */
     public void underSyncLock(int failed, Runnable write) {
-        if (!SyncLock.take()) {
+        if (!pimdir.locks().takeSync()) {
             postAlive(() -> toast(getString(R.string.sync_busy)));
             return;
         }
@@ -2842,7 +2842,7 @@ public class MainActivity extends Host {
             Log.w("pimalaya", "store write failed", error);
             postAlive(() -> showError(error, failed));
         } finally {
-            SyncLock.release();
+            pimdir.locks().releaseSync();
         }
     }
 

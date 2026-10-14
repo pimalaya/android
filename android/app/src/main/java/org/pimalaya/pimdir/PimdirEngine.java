@@ -36,16 +36,8 @@ public abstract class PimdirEngine implements OfflineDriver {
 
     protected final PimalayaClient client;
 
-    /**
-     * The store's one writer: every storage yield of every driver (a load,
-     * a lookup, a write) is answered holding it.
-     *
-     * <p>A pass runs an account's mailboxes side by side ({@link MailPool}),
-     * each on its own engine and session, and only their network is meant
-     * to overlap: one SQLite writer, a page's write landing whole before the
-     * next one starts, as when the mailboxes ran one after another.
-     */
-    public static final Object STORE = new Object();
+    /** The store's locks ({@link PimdirDb#locks}): its one writer guards every storage yield. */
+    public final Locks locks;
 
     /**
      * Observes a pass's coarse steps for a progress display; steps fire on
@@ -114,6 +106,7 @@ public abstract class PimdirEngine implements OfflineDriver {
     protected PimdirEngine(PimdirDb pimdir, PimalayaClient client) {
         this.offline = new PimdirStorage(pimdir);
         this.client = client;
+        this.locks = pimdir.locks();
     }
 
     /**
@@ -242,7 +235,7 @@ public abstract class PimdirEngine implements OfflineDriver {
             switch (op) {
                 case "load": {
                     JSONObject loaded;
-                    synchronized (STORE) {
+                    synchronized (locks.store) {
                         long began = System.nanoTime();
                         loaded =
                                 offline.loadCollection(
@@ -256,12 +249,12 @@ public abstract class PimdirEngine implements OfflineDriver {
                     break;
                 }
                 case "lookup":
-                    synchronized (STORE) {
+                    synchronized (locks.store) {
                         reply = lookup(yielded.getJSONArray("links")).toString();
                     }
                     break;
                 case "write":
-                    synchronized (STORE) {
+                    synchronized (locks.store) {
                         long began = System.nanoTime();
                         applied(offline.applyWrites(yielded.getJSONArray("writes")));
                         page.store += System.nanoTime() - began;
@@ -358,7 +351,7 @@ public abstract class PimdirEngine implements OfflineDriver {
             handles.add(items.getJSONObject(index).getString("handle"));
         }
         java.util.Map<String, String[]> bound;
-        synchronized (STORE) {
+        synchronized (locks.store) {
             bound = offline.bound(collection, handles);
         }
 
@@ -405,7 +398,7 @@ public abstract class PimdirEngine implements OfflineDriver {
             handles.add(items.getJSONObject(index).getString("handle"));
         }
         java.util.Map<String, String[]> bound;
-        synchronized (STORE) {
+        synchronized (locks.store) {
             bound = offline.bound(collection, handles);
         }
 

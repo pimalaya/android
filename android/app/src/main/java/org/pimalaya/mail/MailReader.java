@@ -7,7 +7,6 @@ import org.pimalaya.client.MessageBody;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.PimdirAccount;
-import org.pimalaya.pimdir.PimdirEngine;
 
 import java.io.File;
 import java.util.List;
@@ -83,7 +82,7 @@ public final class MailReader {
             MailPoison.end(engine.context(), key);
         }
         if (!message.pending) {
-            synchronized (PimdirEngine.STORE) {
+            synchronized (engine.locks.store) {
                 files.recordAttachments(
                         mail.accountIdOf(message.accountEmail), message.id, read.body.attachments);
             }
@@ -122,7 +121,7 @@ public final class MailReader {
             // NOTE: the listing read the summary without the body; the body
             // just stored restates it. One writer: a fill or body step may be
             // writing beside this open.
-            synchronized (PimdirEngine.STORE) {
+            synchronized (engine.locks.store) {
                 mail.saveSource(message.collection, message.id, described.optString("hash"), file);
                 mail.restateFromBody(
                         message.collection, message.id, described.optJSONObject("summary"));
@@ -145,7 +144,7 @@ public final class MailReader {
      */
     private String[] addressOf(MailStore.StoredMessage message) {
         String[] source = null;
-        synchronized (PimdirEngine.STORE) {
+        synchronized (engine.locks.store) {
             if (engine.offline.isPendingCreate(message.collection, message.id)) {
                 source = engine.offline.moveSourceOf(message.collection, message.id);
             }

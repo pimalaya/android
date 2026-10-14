@@ -3,7 +3,6 @@ package org.pimalaya.mail;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.pimdir.PimdirEngine;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -146,7 +145,7 @@ final class GraphStep implements MailStep {
             handles.add(member.optString("handle"));
         }
         Map<String, String[]> bound;
-        synchronized (PimdirEngine.STORE) {
+        synchronized (engine.locks.store) {
             bound = engine.offline.bound(collection, handles);
         }
         List<MailBodies.Row> rows = new ArrayList<>(members.size());

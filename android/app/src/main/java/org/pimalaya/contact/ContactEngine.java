@@ -8,7 +8,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -28,6 +27,7 @@ import org.pimalaya.client.Transport;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.PimdirEngine;
 
 /**
@@ -48,17 +48,6 @@ import org.pimalaya.pimdir.PimdirEngine;
  * blocks; callers run it off the main thread.
  */
 public final class ContactEngine extends PimdirEngine {
-    /**
-     * One lock per book URL, process-wide: the in-app sync, the
-     * background worker and the OS-scheduled sync service can each
-     * run an engine pass over the same book, and a pass spans many
-     * store transactions, so interleaved passes could double-push
-     * staged creates or clobber the sync checkpoint. Reentrant, so
-     * syncBook's own phone passes nest freely under its hold.
-     */
-    private static final ConcurrentHashMap<String, ReentrantLock> SYNC_LOCKS =
-            new ConcurrentHashMap<>();
-
     private final CardStore base;
 
     private final Account account;
@@ -295,8 +284,8 @@ public final class ContactEngine extends PimdirEngine {
     }
 
     /** The book's process-wide sync lock, keyed by its collection URL. */
-    private static ReentrantLock syncLock(String url) {
-        return SYNC_LOCKS.computeIfAbsent(url, key -> new ReentrantLock());
+    private ReentrantLock syncLock(String url) {
+        return locks.collection(PimdirSummary.CONTACT, url);
     }
 
     /**

@@ -4,11 +4,9 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.WeakHashMap;
 
 /**
  * One list's filter: which accounts and which of their collections it
@@ -38,10 +36,13 @@ public final class MergedFilter implements SyncScope {
         OFF
     }
 
-    private static final String PREFS = "merged-filter";
+    /** The process holding the filters, which the app is. */
+    public interface Owner {
+        /** The process's filters, by list. */
+        Map<String, MergedFilter> filters();
+    }
 
-    /** The process's filters, by application and list. */
-    private static final Map<Context, Map<String, MergedFilter>> SHARED = new WeakHashMap<>();
+    private static final String PREFS = "merged-filter";
 
     private final Context context;
     private final String accountsKey;
@@ -114,9 +115,9 @@ public final class MergedFilter implements SyncScope {
 
     private static MergedFilter shared(Context context, String list) {
         Context application = context.getApplicationContext();
-        synchronized (SHARED) {
-            return SHARED.computeIfAbsent(application, key -> new HashMap<>())
-                    .computeIfAbsent(list, key -> new MergedFilter(application, key));
+        Map<String, MergedFilter> filters = ((Owner) application).filters();
+        synchronized (filters) {
+            return filters.computeIfAbsent(list, key -> new MergedFilter(application, key));
         }
     }
 

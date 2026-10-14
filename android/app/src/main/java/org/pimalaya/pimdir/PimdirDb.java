@@ -20,6 +20,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -53,6 +54,18 @@ public final class PimdirDb extends SQLiteOpenHelper {
 
     /** The application context, for what a driver keeps beside the store. */
     private final Context context;
+
+    /** The objects deleted in a transaction whose blobs wait for it to commit. */
+    final Set<String> collected = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Bodies filed in the blob store ahead of the write naming them, by how
+     * many such writes are under way ({@link PimdirItems#pin}).
+     */
+    final Map<String, Integer> pinned = new HashMap<>();
+
+    /** The store's locks, which every engine and reader over it takes. */
+    private final Locks locks = new Locks();
 
     /**
      * The per-domain databases this store replaced.
@@ -92,6 +105,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
      */
     public Context context() {
         return context;
+    }
+
+    /** The store's locks: its one writer, its collections' and its one sync. */
+    public Locks locks() {
+        return locks;
     }
 
     /** The content-addressed blob directory beside the database. */

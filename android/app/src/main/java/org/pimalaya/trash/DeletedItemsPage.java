@@ -330,7 +330,7 @@ public final class DeletedItemsPage {
                 () -> {
                     Exception failure = null;
                     try {
-                        synchronized (PimdirEngine.STORE) {
+                        synchronized (host.pimdir.locks().store) {
                             store().purgeBefore(cutoff);
                         }
                     } catch (Exception error) {

@@ -380,12 +380,12 @@ public final class DeletedItems {
                 }
             }
             exec(db, "DELETE_GARBAGE_OBJECTS", new HashMap<>());
-            PimdirItems.deferUnlink(garbage);
+            PimdirItems.deferUnlink(store, garbage);
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();
         }
-        PimdirItems.unlinkCollected(db, blobs);
+        PimdirItems.unlinkCollected(store, db, blobs);
     }
 
     // ---- canonical statements ---------------------------------------------

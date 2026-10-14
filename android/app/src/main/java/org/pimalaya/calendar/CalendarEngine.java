@@ -18,10 +18,10 @@ import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
 import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.pimdir.PimdirEngine;
 
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -49,16 +49,6 @@ import java.util.concurrent.locks.ReentrantLock;
  * cost too.
  */
 public final class CalendarEngine extends PimdirEngine {
-    /**
-     * One lock per calendar, process-wide, as {@link ContactEngine} holds one
-     * per book: the in-app sync, the background run, Android's upload sync
-     * and the pass after a write can each reconcile the same calendar with
-     * the phone, and a pass spans many store transactions. Reentrant, so a
-     * calendar pass's own phone passes nest under its hold.
-     */
-    private static final ConcurrentHashMap<String, ReentrantLock> SYNC_LOCKS =
-            new ConcurrentHashMap<>();
-
     private final Account account;
 
     /** The pass's sockets; null on a driver that only stages. */
@@ -174,7 +164,7 @@ public final class CalendarEngine extends PimdirEngine {
      */
     int triage(String collection) {
         List<EventStore.StoredConflict> conflicts;
-        synchronized (STORE) {
+        synchronized (locks.store) {
             conflicts = EventStore.conflictsOf(offline, collection);
         }
         if (conflicts.isEmpty()) {
@@ -246,8 +236,8 @@ public final class CalendarEngine extends PimdirEngine {
     }
 
     /** The calendar's process-wide sync lock, keyed by its collection id. */
-    private static ReentrantLock lock(String collection) {
-        return SYNC_LOCKS.computeIfAbsent(collection, key -> new ReentrantLock());
+    private ReentrantLock lock(String collection) {
+        return locks.collection(PimdirSummary.CALENDAR, collection);
     }
 
     /** Not the phone spoke's: projecting a calendar onto the device downloads nothing. */

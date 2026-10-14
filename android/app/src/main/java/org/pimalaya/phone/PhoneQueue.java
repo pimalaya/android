@@ -18,7 +18,7 @@ import java.util.function.Consumer;
  * <p>Process-wide, on a thread of its own rather than the activity's, so a
  * pass queued just before the app is left still runs. No network and no
  * report; each pass takes its collection's lock ({@link ContactEngine},
- * {@link CalendarEngine}) and never the process's {@link SyncLock}, so the
+ * {@link CalendarEngine}) and never the process's sync lock ({@link Locks#takeSync}), so the
  * mirror keeps up while a background sync runs. A collection the phone does
  * not mirror has no Android account or calendar row, and its pass returns at
  * once.

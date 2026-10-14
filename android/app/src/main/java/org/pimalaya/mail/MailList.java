@@ -271,7 +271,7 @@ public final class MailList {
 
         // NOTE: a first pass lands its pages one write at a time, and the
         // top of the list is what has to show while the rest fills in.
-        MailEngine.onWrite =
+        MailState.of(host).onWrite =
                 () ->
                         host.main.post(
                                 () -> {
@@ -1059,7 +1059,7 @@ public final class MailList {
      * message whose body failed every attempt of a run says so; one from its
      * mailbox's frontier on (outside the junk and the trash), or one owed
      * ({@link MailOwed}), is on its way; any other is not downloaded, one
-     * the server answered gone ({@link MailBodies#GONE}) included.
+     * the server answered gone ({@link MailState#gone}) included.
      */
     private int notOnPhone(MailStore.StoredMessage message) {
         if (message.bodied) {
@@ -1072,10 +1072,10 @@ public final class MailList {
                         layout.roles.get(message.collection),
                         MailOffline.whole(host, message.collection));
         String key = MailOwed.key(message.collection, message.id);
-        if (MailBodies.FAILED.contains(key) || MailPoison.poisoned(host, key)) {
+        if (MailState.of(host).failed.contains(key) || MailPoison.poisoned(host, key)) {
             return R.string.mail_row_failed;
         }
-        if (MailBodies.GONE.contains(key)) {
+        if (MailState.of(host).gone.contains(key)) {
             return R.string.mail_row_not_downloaded;
         }
         boolean owed = MailOwed.owed(host, message.collection, message.id);

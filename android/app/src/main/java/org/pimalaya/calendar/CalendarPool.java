@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * depends on another's, so an account's calendars run concurrently, in the
  * order the account lists them, each worker on its own transport (a
  * transport holds sockets and is used from one thread at a time). The store
- * stays one writer ({@link PimdirEngine#STORE}): only the network overlaps.
+ * stays one writer ({@link Locks#store}): only the network overlaps.
  *
  * <p>Three workers on every backend: an account rarely has more calendars
  * than that worth waiting on, a CalDAV worker is a connection of its own,

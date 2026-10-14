@@ -6,11 +6,15 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.Executors;
+import org.pimalaya.account.MergedFilter;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.ContactEngine;
+import org.pimalaya.mail.MailState;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.sync.BackgroundCheck;
@@ -19,7 +23,8 @@ import org.pimalaya.sync.BackgroundCheck;
  * The process: the one holder of what every screen, service and job of the
  * app shares. Nothing runs at creation; each part opens when first asked for.
  */
-public final class App extends Application implements PhoneQueue.Owner, BackgroundCheck.Owner {
+public final class App extends Application
+        implements PhoneQueue.Owner, BackgroundCheck.Owner, MergedFilter.Owner, MailState.Owner {
     /** The stamps the activity, the background check and the sync adapters share. */
     final AppState state = new AppState();
 
@@ -28,6 +33,12 @@ public final class App extends Application implements PhoneQueue.Owner, Backgrou
 
     /** The process's one card store, null until first asked for ({@link #cards}). */
     private CardStore cards;
+
+    /** The process's list filters, by list. */
+    private final Map<String, MergedFilter> filters = new HashMap<>();
+
+    /** What the process keeps of mail between screens and runs. */
+    private final MailState mailState = new MailState();
 
     /** The process's queue, once the app started it. */
     private volatile PhoneQueue phoneQueue;
@@ -64,6 +75,16 @@ public final class App extends Application implements PhoneQueue.Owner, Backgrou
     @Override
     public Class<? extends JobService> backgroundJob() {
         return BackgroundJob.class;
+    }
+
+    @Override
+    public Map<String, MergedFilter> filters() {
+        return filters;
+    }
+
+    @Override
+    public MailState mailState() {
+        return mailState;
     }
 
     @Override

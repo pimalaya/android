@@ -33,7 +33,6 @@ import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
 import org.pimalaya.sync.RemotePass;
-import org.pimalaya.sync.SyncLock;
 import org.pimalaya.sync.SyncRunner;
 
 /**
@@ -78,7 +77,7 @@ public class BackgroundJob extends JobService {
         AppState state = App.of(this).state;
         // NOTE: the app on screen syncs on the user's word, and its lists
         // would not know what a run wrote under them.
-        if (state.onScreen || !SyncLock.take()) {
+        if (state.onScreen || !App.of(this).pimdir().locks().takeSync()) {
             return;
         }
         state.backgroundRunning = true;
@@ -87,7 +86,7 @@ public class BackgroundJob extends JobService {
             state.backgroundRan = System.currentTimeMillis();
         } finally {
             state.backgroundRunning = false;
-            SyncLock.release();
+            App.of(this).pimdir().locks().releaseSync();
             Runnable ended = state.onBackgroundEnd;
             if (ended != null) {
                 ended.run();

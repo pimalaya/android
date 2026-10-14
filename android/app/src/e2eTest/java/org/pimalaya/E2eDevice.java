@@ -12,6 +12,7 @@ import android.net.NetworkInfo;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.account.SyncScope;
@@ -25,6 +26,7 @@ import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.mail.MailEngine;
 import org.pimalaya.mail.MailReader;
+import org.pimalaya.mail.MailState;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailSubmit;
 import org.pimalaya.phone.Accounts;
@@ -39,6 +41,7 @@ import org.robolectric.shadows.ShadowNetworkInfo;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -428,9 +431,15 @@ final class E2eDevice {
         throw new AssertionError("no account " + email);
     }
 
-    /** A context whose files and preferences are this device's alone. */
-    private static final class Isolated extends ContextWrapper {
+    /**
+     * A context whose files, preferences and list filters are this device's
+     * alone; the mail state is the process's, which the devices share.
+     */
+    private static final class Isolated extends ContextWrapper
+            implements MergedFilter.Owner, MailState.Owner {
         private final String name;
+
+        private final Map<String, MergedFilter> filters = new HashMap<>();
 
         Isolated(Context base, String name) {
             super(base);
@@ -440,6 +449,16 @@ final class E2eDevice {
         @Override
         public Context getApplicationContext() {
             return this;
+        }
+
+        @Override
+        public Map<String, MergedFilter> filters() {
+            return filters;
+        }
+
+        @Override
+        public MailState mailState() {
+            return MailState.of(getBaseContext());
         }
 
         @Override

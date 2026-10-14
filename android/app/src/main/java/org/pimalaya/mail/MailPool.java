@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * first, {@link MailEngine#ordered}), each worker on a session of its own:
  * a session's handle is a pointer into the bridge, used from one thread at a
  * time, so no two workers ever share one. The store stays one writer
- * ({@link PimdirEngine#STORE}): only the network overlaps.
+ * ({@link Locks#store}): only the network overlaps.
  *
  * <p>The size is the backend's: four for Graph and JMAP, which are HTTP
  * requests and nothing else; three for IMAP, each worker its own connection

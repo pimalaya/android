@@ -122,7 +122,7 @@ public class CalendarPoolTest {
         }
 
         private void request(Transport transport) {
-            if (Thread.holdsLock(PimdirEngine.STORE)) {
+            if (Thread.holdsLock(pimdir.locks().store)) {
                 networkUnderLock.set(true);
             }
             AtomicBoolean using = busy.computeIfAbsent(transport, key -> new AtomicBoolean());
@@ -212,7 +212,7 @@ public class CalendarPoolTest {
 
         @Override
         protected void applied(JSONArray effects) {
-            if (!Thread.holdsLock(PimdirEngine.STORE)) {
+            if (!Thread.holdsLock(pimdir.locks().store)) {
                 writeOutsideLock.set(true);
             }
             int now = writing.incrementAndGet();
