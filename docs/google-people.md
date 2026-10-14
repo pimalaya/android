@@ -1,10 +1,10 @@
 # Google People API backend
 
-The fourth backend behind PimalayaClient: accounts whose base URL carries the `google://<email>` sentinel route every operation through io-gpeople's coroutines, with io-gpeople's `vcard` feature projecting People person resources to and from the vCard document of record. The account exposes one Contacts addressbook (the People API has no folders; contact groups are m:n labels), and contacts list through `people.connections.list` paging.
+The fourth contacts backend behind ContactClient: accounts whose base URL carries the `google://<email>` sentinel route every operation through io-gpeople's coroutines, with io-gpeople's `vcard` feature projecting People person resources to and from the vCard document of record. The account exposes one Contacts addressbook (the People API has no folders; contact groups are m:n labels), and contacts list through `people.connections.list` paging.
 
 Two People mechanics shape the projection:
 
-- **Update mask.** `people.updateContact` fully replaces every field named in `updatePersonFields`, and a masked field absent from the body is cleared. The projection therefore keeps a fixed set of managed fields (`google::MANAGED_FIELDS`) and sends full-state bodies: absent vCard properties clear their People field, while everything outside the mask (memberships, photos, events, ...) survives untouched on the server. With a base vCard the mask shrinks further to the fields the edit changed.
+- **Update mask.** `people.updateContact` fully replaces every field named in `updatePersonFields`, and a masked field absent from the body is cleared. The projection therefore keeps a fixed set of managed fields (`contact::gpeople::MANAGED_FIELDS`) and sends full-state bodies: absent vCard properties clear their People field, while everything outside the mask (memberships, photos, events, ...) survives untouched on the server. With a base vCard the mask shrinks further to the fields the edit changed.
 - **Etag guard.** People requires the person's current `etag` in every update body and rejects stale ones, so unlike the Graph and JMAP backends updates are not last-write-wins. The person etag is the card's ETag in the store; when unknown, the bridge fetches it before patching.
 
 ## vCard 4.0 to People mapping

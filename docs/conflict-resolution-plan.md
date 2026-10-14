@@ -1,5 +1,7 @@
 # Conflict resolution plan: prompt, don't auto-merge
 
+> Historical: landed. Its names predate cairn changes rust-domain-layout and java-domain-layout (OfflineEngine is ContactEngine, project.rs is rust/src/contact/); the current layout is in android/app/src/main/java/org/pimalaya/package-info.java.
+
 Today a same-field sync conflict is auto-resolved during sync, silently, local-wins. This plan makes it conservative: a genuine conflict (both sides edited the same field to different values) is left unresolved and surfaced to the user, who resolves it by hand in the conflict edit form the app already has (`editingConflict` mode: only the diverging fields show, each with a chip per candidate value, a warning marker, and the validate FAB gated until every field is reviewed). REV picks the default pre-filled value per field; both values stay available as chips, so nothing is ever lost silently.
 
 ## Where the policy lives (and why io-offline does not move)

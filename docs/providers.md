@@ -12,14 +12,14 @@ Cross-provider notes:
 
 - Status: untested since the io-offline migration (was the main test account before it).
 - Auth: password (Basic).
-- Known quirk: some resources carry no internal ETag, so their If-Match always fails even though the listing serves one; the push retries unguarded when the last enumerate proves the remote unchanged (OfflineEngine.listingUnchanged).
+- Known quirk: some resources carry no internal ETag, so their If-Match always fails even though the listing serves one; the push retries unguarded when the last enumerate proves the remote unchanged (ContactEngine.listingUnchanged).
 - To verify: RFC 6578 sync-collection support (SabreDAV has it; the sync-token delta path is new), and the quirk retry still firing on the engine path.
 
 ## fastmail (CardDAV + JMAP)
 
 - Status: partial (2026-07-08, discovery step only).
 - Auth: password/app password on CardDAV; JMAP is Bearer-token only server-side. Its discovered OAuth method is not drivable by the app and is no longer listed.
-- Known quirk: the server 404s every request outside /dav/*, so a bare origin probes .well-known/carddav for the real context root first (client.rs list_addressbooks).
+- Known quirk: the server 404s every request outside /dav/*, so a bare origin probes .well-known/carddav for the real context root first (rust/src/contact/carddav.rs list_addressbooks).
 - Finding (discovery, FIXED in pimconf 2026-07-08): the config list showed two CardDAV entries, carddav.fastmail.com and a dNNNNNN.carddav.fastmail.com shard. Root cause (reproduced with the pimconf CLI): fastmail's PACC document advertises the canonical host while its SRV records answer with a rotated shard (a different one per resolve), and the collector only merged byte-identical URLs. The search now merges a subdomain endpoint into its parent host, and compares HTTP endpoints as normalized URLs; one canonical entry remains.
 - Finding (discovery, FIXED in pimconf 2026-07-08): the "JMAP, password" variant came from fastmail's own PACC document, whose account-level authentication block claims password support (true for CardDAV app passwords, not for JMAP). Per PACC §5.4.2, pimconf's search now probes every collected HTTP endpoint's unauthenticated 401 and refines each config from its WWW-Authenticate schemes: fastmail's session endpoint advertises Bearer only (plus an RFC 9728 resource_metadata pointer), its CardDAV root Basic and Bearer, so the JMAP config lost its password variant and the CardDAV one gained the API-token variant. Verified live with the pimconf CLI.
 - Finding (OAuth, verified live 2026-07-08): fastmail implements the full draft-ietf-mailmaint-oauth-public chain: RFC 9728 resource metadata behind the 401's resource_metadata pointer, RFC 8414 server metadata with an RFC 7591 registration_endpoint (public clients, S256 PKCE, mail/contacts/calendars scopes).

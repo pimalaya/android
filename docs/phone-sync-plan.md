@@ -1,5 +1,7 @@
 # Phone sync plan: ContactsContract as a second io-offline spoke
 
+> Historical: landed. Cairn change java-domain-layout made OfflineEngine ContactEngine, its phone half ContactPhonePass over pimdir.PhoneSpoke; the current layout is in android/app/src/main/java/org/pimalaya/package-info.java.
+
 The store is the hub with two spokes: the remote server (CardDAV, Graph, JMAP, People) and the phone's ContactsContract. Today only the server spoke is a real sync (io-offline engine); the phone spoke is a one-way projection, so edits made in the phone's contacts app on Pimalaya's raw contacts (which set the provider's DIRTY flag, bump VERSION, and set DELETED on removal) are never read back and get clobbered by the next projection. This plan makes the phone a second io-offline spoke: same engine, same Rust semantics, Java limited to interfacing ContactsContract.
 
 ## Design

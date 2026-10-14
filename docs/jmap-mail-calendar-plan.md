@@ -1,5 +1,7 @@
 # JMAP mail and calendars in the app: the missing layers
 
+> Historical: landed. Cairn change java-domain-layout replaced PimalayaClient with five domain clients; the current layout is in android/app/src/main/java/org/pimalaya/package-info.java.
+
 Status: done. See [Landed](#5-landed).
 
 A JMAP account can be connected for contacts and nothing else. Connecting one for mail or calendars produced an account that saved correctly and was then never read, because `syncMail` speaks IMAP and `syncCalendars` speaks CalDAV and neither looks at what the account actually is. `PimDomain.servedBy("jmap")` now advertises contacts alone, which is honest but is not the answer; this is the answer.

@@ -74,7 +74,7 @@ unless it turns out to want the merge model.
 What the calendar slice actually contains:
 
 ```
-rust/src/client/caldav.rs      the RFC 4791 walk and the two reports
+rust/src/calendar/caldav.rs    the RFC 4791 walk and the two reports
 rust/src/calendar.rs           VEVENT -> occurrences in a civil window, 5 tests
 rust/src/ffi/calendar.rs       listCalendars, listEvents, expandEvent
 android/client/.../Calendar.java, Event.java, Occurrence.java
@@ -89,7 +89,7 @@ and `RDATE`/`EXDATE`/`RECURRENCE-ID` still uncomposed, so an excepted occurrence
 What the mail slice contains:
 
 ```
-rust/src/client/imap.rs        the session, LIST, EXAMINE and the envelope FETCH
+rust/src/mail/imap.rs          the session, LIST, EXAMINE and the envelope FETCH
 rust/src/ffi/mail.rs           syncMail, one call per account
 android/client/.../Message.java, Transport.java (imap/imaps schemes)
 android/app/.../MailStore.java     envelope spines, its own database
@@ -304,7 +304,7 @@ Diffing `ical-rs/src/` against `vcard/src/`, three things are missing:
 | JSCalendar (RFC 8984) | `jscontact.rs`, `jscontact` feature | No, defer |
 
 **P0-7. Port the three-way merge.** The only true blocker. The contacts conflict model
-rests on it: `rust/src/project/merge.rs` calls vcard's `merge(base, local, remote)` and
+rests on it: `rust/src/contact/merge.rs` calls vcard's `merge(base, local, remote)` and
 reads back merged content plus a collision count, with the rules "the local side wins
 same-field collisions, every other remote change flows in, an update beats a removal".
 The same merge powers merging two documents against an *empty* base for the divergence
@@ -695,13 +695,13 @@ Four things worth carrying forward:
 - **`sources.checkpoint` is BLOB and the tables are STRICT**, so a TEXT bind is
   refused rather than coerced. Checkpoints are opaque bytes on both sides.
 
-Not done at that point: the cutover. `OfflineEngine` still routed to
+Not done at that point: the cutover. `OfflineEngine` (now `ContactEngine`) still routed to
 `OfflineStore` over `CardStore`, and `PimdirStorage` was not wired in. §12 and
 §13 are that cutover.
 
 ## 12. The engine cutover, 2026-08-08 (late)
 
-The sync engine now runs entirely on the pimdir store. `OfflineEngine` holds a
+The sync engine now runs entirely on the pimdir store. `OfflineEngine` (now `ContactEngine`) holds a
 `PimdirStorage` instead of an `OfflineStore`, and `PhoneRemote` reads its patch
 base through the same seam. Nothing in the sync path touches the `card` and
 `membership` tables any more.
@@ -798,7 +798,7 @@ The translation, in the order it caused trouble:
   SPEC.md §13 convention (`v`, `uid`, `fn`, `emails`, `size`) plus `phone`,
   `info` and `hash`, because the alternative is parsing a vCard per row at
   render time, which is the cost a summary exists to remove. `index` in
-  `rust/src/project.rs` gained `emails` so the spec fields can be complete
+  `rust/src/project.rs` (now rust/src/contact/fields.rs) gained `emails` so the spec fields can be complete
   rather than truncated to the first address.
 - **The calendar subscription switch is gone.** It defaulted to true and nothing
   ever wrote it, so it decided nothing; when a calendar picker exists it belongs
@@ -814,7 +814,7 @@ Deleted: `OfflineStore`, `OfflinePhoneStore`, and the placement-codec half of
 `rust/src/store.rs` (`placement`, `phone_placement`, `upsert_plan`,
 `phone_upsert_plan`, `phone_drop_plan`) with its five JNI entries and its Java
 wrappers. What they encoded, the membership-versus-card decision, is what the
-pimdir schema expresses natively. `store.rs` keeps only what no table can be
+pimdir schema expresses natively. `store.rs` (now rust/src/contact/sync.rs) keeps only what no table can be
 read for: `push_plan`, `account_snapshot`, `retry_unguarded`. `byte_hash` went
 with them, since every hash the app computes is now Java's `PimdirHash`.
 
@@ -830,9 +830,9 @@ build proves least.
 
 Every contact rendered as its id. **There are three writers of a contact
 summary, and only one of them had been moved to the new convention**: the app's
-own `PimdirContacts.save`, but not `OfflineEngine.fetchedItem` (the sync path)
+own `PimdirContacts.save`, but not `OfflineEngine.fetchedItem` (the sync path, now `ContactEngine`)
 nor `mutateEdit` (the staged edit), both of which still wrote the raw
-`Cards.indexCard` output, whose display name is `name` where the convention says
+`Cards.indexCard` (now `ContactClient.indexCard`) output, whose display name is `name` where the convention says
 `fn`. Every synced card therefore had an empty `fn`, an empty `uid` and an empty
 `hash`, so the list fell back to the id, the A-to-Z ordering was absent, and
 UID-based grouping across accounts silently stopped matching. All three now go
