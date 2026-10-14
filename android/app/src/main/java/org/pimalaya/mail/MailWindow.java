@@ -281,12 +281,12 @@ public final class MailWindow {
      * Keeps the anchors a step over {@code mailbox} (null for the account)
      * answered, once its messages landed; none answered keeps those held.
      */
-    static void anchor(Context context, String accountId, String mailbox, JSONArray anchors) {
-        if (anchors == null || anchors.length() == 0) {
+    static void anchor(Context context, String accountId, String mailbox, List<String> anchors) {
+        if (anchors == null || anchors.isEmpty()) {
             return;
         }
         String key = accountId + ANCHORS + (mailbox == null ? "" : ":" + mailbox);
-        prefs(context).edit().putString(key, anchors.toString()).apply();
+        prefs(context).edit().putString(key, new JSONArray(anchors).toString()).apply();
     }
 
     /** Forgets an account's frontier, its reach and its anchors, with the account. */

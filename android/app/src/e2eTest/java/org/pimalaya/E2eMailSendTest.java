@@ -5,8 +5,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-import org.json.JSONObject;
 import org.junit.Test;
+import org.pimalaya.client.ComposeDraft;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailSubmit;
 import org.pimalaya.sync.SyncPasses;
@@ -147,19 +147,19 @@ public class E2eMailSendTest extends E2eCase {
     }
 
     /** A draft in the composer's shape, from the account. */
-    private JSONObject draft(String subject, String to, String bcc) throws Exception {
-        return new JSONObject()
-                .put("from", address)
-                .put("fromName", "Pimalaya e2e")
-                .put("to", to)
-                .put("cc", "")
-                .put("bcc", bcc)
-                .put("subject", subject)
-                .put("body", "Sent by the Pimalaya Android end-to-end suite, " + tag + ".")
-                .put("date", MailSubmit.now())
-                .put("messageId", MailSubmit.messageId(address))
-                .put("inReplyTo", "")
-                .put("references", "");
+    private ComposeDraft draft(String subject, String to, String bcc) {
+        return new ComposeDraft(
+                address,
+                "Pimalaya e2e",
+                to,
+                "",
+                bcc,
+                subject,
+                "Sent by the Pimalaya Android end-to-end suite, " + tag + ".",
+                MailSubmit.now(),
+                MailSubmit.messageId(address),
+                "",
+                "");
     }
 
     /** A message's header section, a line feed before the first. */

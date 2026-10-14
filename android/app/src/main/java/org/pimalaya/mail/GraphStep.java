@@ -1,8 +1,8 @@
 package org.pimalaya.mail;
 
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import org.pimalaya.client.GraphStepItem;
+import org.pimalaya.client.GraphStepReply;
+import org.pimalaya.client.StepRequest;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -35,17 +35,16 @@ final class GraphStep implements MailStep {
             String accountEmail,
             List<String> collections,
             String only,
-            boolean first)
-            throws JSONException {
+            boolean first) {
         Map<String, String> roles = engine.mail().roles();
         List<String> stepped = new ArrayList<>();
-        JSONArray names = new JSONArray();
+        List<String> names = new ArrayList<>();
         for (String collection : collections) {
             if ((only == null || only.equals(collection))
                     && !MailOffline.whole(engine.context(), collection)
                     && MailBodies.downloads(roles.get(collection), false)) {
                 stepped.add(collection);
-                names.put(engine.mailboxOf(collection));
+                names.add(engine.mailboxOf(collection));
             }
         }
         if (stepped.isEmpty()) {
@@ -53,37 +52,33 @@ final class GraphStep implements MailStep {
         }
 
         // NOTE: a frontier of all mail leaves nothing older to step.
-        JSONObject request = engine.stepRequest(only);
-        if (MailWindow.held(engine.context(), engine.accountId()) && request.isNull("frontier")) {
+        StepRequest request = engine.stepRequest(only, names);
+        if (MailWindow.held(engine.context(), engine.accountId()) && request.frontier() == null) {
             return new Outcome(null, true, 0);
         }
-        request.put("mailboxes", names);
 
         File dir = engine.scratch();
         try {
-            JSONObject step =
-                    engine.stepRead(
-                            only == null ? null : engine.mailboxOf(only), stepped, request, dir);
-            JSONArray items = step.getJSONArray("items");
-            boolean exhausted = step.optBoolean("exhausted");
+            GraphStepReply step = engine.graphStepRead(stepped, request, dir);
+            List<GraphStepItem> items = step.items();
+            boolean exhausted = step.exhausted();
 
-            Map<String, List<JSONObject>> members = new LinkedHashMap<>();
+            Map<String, List<GraphStepItem>> members = new LinkedHashMap<>();
             Map<String, File> files = new HashMap<>();
             List<Brought> brought = new ArrayList<>();
             String oldest = null;
-            for (int index = 0; index < items.length(); index++) {
-                JSONObject item = items.getJSONObject(index);
-                String sortKey = item.optString("sortKey");
-                Long received = item.isNull("received") ? null : item.optLong("received");
+            for (GraphStepItem item : items) {
+                String sortKey = item.sortKey();
+                Long received = item.received();
                 brought.add(new Brought(sortKey, received));
                 if (!sortKey.isEmpty() && (oldest == null || sortKey.compareTo(oldest) < 0)) {
                     oldest = sortKey;
                 }
-                if (item.has("path")) {
-                    files.put(item.getString("handle"), new File(item.getString("path")));
+                if (item.path() != null) {
+                    files.put(item.handle(), new File(item.path()));
                 }
-                JSONArray mailboxes = item.optJSONArray("mailboxes");
-                String mailbox = mailboxes == null ? null : mailboxes.optString(0, null);
+                List<String> mailboxes = item.mailboxes();
+                String mailbox = mailboxes.isEmpty() ? null : mailboxes.get(0);
                 if (mailbox != null) {
                     members.computeIfAbsent(engine.collectionOf(mailbox), key -> new ArrayList<>())
                             .add(item);
@@ -111,7 +106,7 @@ final class GraphStep implements MailStep {
 
             engine.fetched(files);
             try {
-                for (Map.Entry<String, List<JSONObject>> mailbox : members.entrySet()) {
+                for (Map.Entry<String, List<GraphStepItem>> mailbox : members.entrySet()) {
                     List<MailBodies.Row> rows = rows(engine, mailbox.getKey(), mailbox.getValue());
                     if (rows.isEmpty()) {
                         continue;
@@ -127,7 +122,7 @@ final class GraphStep implements MailStep {
             } finally {
                 engine.fetched(Map.of());
             }
-            return new Outcome(MailWindow.frontier(brought, false), exhausted, items.length());
+            return new Outcome(MailWindow.frontier(brought, false), exhausted, items.size());
         } finally {
             MailEngine.discard(dir);
         }
@@ -139,18 +134,18 @@ final class GraphStep implements MailStep {
      * did not land (dated below the band) left out.
      */
     private static List<MailBodies.Row> rows(
-            MailEngine engine, String collection, List<JSONObject> members) {
+            MailEngine engine, String collection, List<GraphStepItem> members) {
         List<String> handles = new ArrayList<>(members.size());
-        for (JSONObject member : members) {
-            handles.add(member.optString("handle"));
+        for (GraphStepItem member : members) {
+            handles.add(member.handle());
         }
         Map<String, String[]> bound;
         synchronized (engine.locks.store) {
             bound = engine.offline.bound(collection, handles);
         }
         List<MailBodies.Row> rows = new ArrayList<>(members.size());
-        for (JSONObject member : members) {
-            String[] link = bound.get(member.optString("handle"));
+        for (GraphStepItem member : members) {
+            String[] link = bound.get(member.handle());
             if (link == null) {
                 continue;
             }
@@ -158,9 +153,9 @@ final class GraphStep implements MailStep {
                     new MailBodies.Row(
                             collection,
                             link[0],
-                            member.optString("sortKey"),
+                            member.sortKey(),
                             false,
-                            member.isNull("size") ? null : member.optLong("size"),
+                            member.size(),
                             null,
                             true));
         }

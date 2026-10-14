@@ -1,5 +1,6 @@
 package org.pimalaya.mail;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -11,6 +12,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.ComposeDraft;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.pimdir.PimdirDb;
@@ -64,6 +66,31 @@ public class MailSubmitTest {
         assertTrue(
                 "minted under the sender's domain",
                 waiting.get(0).messageId.endsWith("@example.com"));
+    }
+
+    @Test
+    public void aDraftQueuesTheBytesItComposesTo() throws Exception {
+        // NOTE: literal stamps in place of the minted date and Message-ID;
+        // MailClientTest pins these bytes to the ones the JSON draft gave.
+        ComposeDraft draft =
+                new ComposeDraft(
+                        EMAIL,
+                        "",
+                        "bob@example.org, carol@example.org",
+                        "dan@example.org",
+                        "eve@example.org",
+                        "Re: Hi",
+                        "line one\nline two\n",
+                        "Wed, 14 Oct 2026 10:00:00 +0200",
+                        "<fixed-16@example.com>",
+                        "<a@example.org>",
+                        "<root@example.org> <a@example.org>");
+        submit.queue(draft);
+
+        List<MailStore.Outgoing> waiting = store.outgoing(EMAIL);
+        assertEquals(1, waiting.size());
+        assertEquals("fixed-16@example.com", waiting.get(0).messageId);
+        assertArrayEquals(new MailClient().compose(draft), waiting.get(0).source);
     }
 
     @Test

@@ -18,7 +18,9 @@ import org.pimalaya.client.Clients;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.NamedStep;
 import org.pimalaya.client.PimdirSql;
+import org.pimalaya.client.StepRequest;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.DeletedItems;
 import org.pimalaya.pimdir.PimdirDb;
@@ -29,6 +31,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -393,8 +396,11 @@ public class StorePerformanceTest {
         JSONObject[] answered = new JSONObject[1];
         new MailEngine(pimdir, Clients.real(), null, store.accountIdOf(EMAIL)) {
             @Override
-            protected JSONObject stepped(String mailbox, JSONObject request, java.io.File dir) {
-                assertFalse("no held list rides the request", request.has("held"));
+            protected NamedStep stepped(StepRequest request, java.io.File dir) {
+                assertFalse(
+                        "no held list rides the request",
+                        Arrays.stream(StepRequest.class.getRecordComponents())
+                                .anyMatch(component -> component.getName().equals("held")));
                 try {
                     answered[0] =
                             new JSONObject(
@@ -405,12 +411,15 @@ public class StorePerformanceTest {
                                                             new JSONArray().put("i2").put("a0")
                                                                     .put("gone"))
                                                     .toString()));
-                    return new JSONObject().put("items", new JSONArray());
+                    return new NamedStep(null, false, false, null, List.of());
                 } catch (Exception failure) {
                     throw new AssertionError(failure);
                 }
             }
-        }.stepRead(null, List.of(inbox), new JSONObject().put("count", 50), context.getCacheDir());
+        }.stepRead(
+                List.of(inbox),
+                new StepRequest(null, 50, null, null, List.of(), null),
+                context.getCacheDir());
         JSONArray held = answered[0].getJSONArray("held");
         assertEquals("the step's mailboxes alone", 1, held.length());
         assertEquals("i2", held.getString(0));

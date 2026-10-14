@@ -20,6 +20,9 @@ import org.pimalaya.client.Account;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.NamedStep;
+import org.pimalaya.client.NamedStepItem;
+import org.pimalaya.client.StepRequest;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -99,10 +102,10 @@ public class MailStepTest {
     /** A Gmail account whose next step serves {@code next}. */
     private final class Server extends MailEngine {
         List<Mail> next = List.of();
-        JSONArray anchors;
+        List<String> anchors;
         final List<Set<String>> held = new ArrayList<>();
         final List<String> listing = new ArrayList<>();
-        final List<JSONObject> asked = new ArrayList<>();
+        final List<StepRequest> asked = new ArrayList<>();
 
         /** The messages whose file the bridge fails to write. */
         Set<String> missing = Set.of();
@@ -112,7 +115,7 @@ public class MailStepTest {
         }
 
         @Override
-        protected JSONObject stepped(String mailbox, JSONObject request, File dir) {
+        protected NamedStep stepped(StepRequest request, File dir) {
             try {
                 // NOTE: the bridge asks which of what it lists the store
                 // holds; this account lists every message it served.
@@ -123,34 +126,28 @@ public class MailStepTest {
                 }
                 this.held.add(held(listing));
                 asked.add(request);
-                JSONArray items = new JSONArray();
+                List<NamedStepItem> items = new ArrayList<>();
                 for (Mail mail : next) {
                     File file = new File(dir, mail.id + ".eml");
                     if (!missing.contains(mail.id)) {
                         Files.write(file.toPath(), mail.source());
                     }
-                    items.put(
-                            new JSONObject()
-                                    .put("handle", mail.id)
-                                    .put("flags", new JSONArray().put(Flags.Marker.SEEN.wire()))
-                                    .put("linkId", mail.id)
-                                    .put(
-                                            "summary",
-                                            PimdirSummary.mail(
-                                                    null, "Mail " + mail.id, "", "a@example.org",
-                                                    null, mail.date, 0, false))
-                                    .put("sortKey", PimdirSummary.mailSortKey(mail.date))
-                                    .put("mailboxes", new JSONArray(mail.mailboxes))
-                                    .put("path", file.getAbsolutePath())
-                                    .put("size", mail.source().length)
-                                    .put("received", mail.received.toEpochMilli()));
+                    items.add(
+                            new NamedStepItem(
+                                    List.of(Flags.Marker.SEEN.wire()),
+                                    mail.id,
+                                    mail.id,
+                                    mail.mailboxes,
+                                    file.getAbsolutePath(),
+                                    mail.received.toEpochMilli(),
+                                    mail.source().length,
+                                    PimdirSummary.mailSortKey(mail.date),
+                                    PimdirSummary.mail(
+                                            null, "Mail " + mail.id, "", "a@example.org",
+                                            null, mail.date, 0, false)));
                 }
-                return new JSONObject()
-                        .put("historyId", "h1")
-                        .put("exhausted", false)
-                        .put("anchors", anchors)
-                        .put("items", items);
-            } catch (JSONException | IOException failure) {
+                return new NamedStep(anchors, false, false, "h1", items);
+            } catch (IOException failure) {
                 throw new AssertionError(failure);
             }
         }
@@ -289,17 +286,17 @@ public class MailStepTest {
                 List.of(
                         new Mail("m1", "2026-10-09T11:00:00Z", now, "INBOX", "Clients"),
                         new Mail("m2", "2026-10-09T10:00:00Z", now, "INBOX"));
-        server.anchors = new JSONArray().put("m2").put("m1");
+        server.anchors = List.of("m2", "m1");
         new GmailStep().run(server, EMAIL, mailboxes(), null, true);
         assertEquals(List.of("m2", "m1"), MailWindow.anchors(context, accountId, null));
 
         server.next = List.of(new Mail("c1", "2026-10-08T10:00:00Z", now, "Clients"));
-        server.anchors = new JSONArray().put("c1");
+        server.anchors = List.of("c1");
         new GmailStep().run(server, EMAIL, mailboxes(), clients, false);
         assertEquals(
                 "a view with none starts after the account's",
                 List.of("m2", "m1"),
-                strings(server.asked.get(1).getJSONArray("anchors")));
+                server.asked.get(1).anchors());
         assertEquals(List.of("c1"), MailWindow.anchors(context, accountId, "Clients"));
         assertEquals(
                 "a view's step leaves the account's anchors",
@@ -351,13 +348,5 @@ public class MailStepTest {
     @Config(qualifiers = "fr")
     public void inFrenchTheFooterSaysItIsLoading() {
         assertEquals("Chargement en cours", context.getString(R.string.mail_more_loading));
-    }
-
-    private static List<String> strings(JSONArray array) throws JSONException {
-        List<String> strings = new ArrayList<>();
-        for (int index = 0; index < array.length(); index++) {
-            strings.add(array.getString(index));
-        }
-        return strings;
     }
 }

@@ -1,9 +1,9 @@
 package org.pimalaya.mail;
 
 import org.json.JSONException;
-import org.json.JSONObject;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.ComposeDraft;
 import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.TimeZone;
 import java.util.UUID;
 
@@ -56,7 +57,7 @@ public final class MailSubmit {
             String references) {}
 
     /**
-     * Queues a draft ({@link #queue(JSONObject)}), stamped now and under a
+     * Queues a draft ({@link #queue(ComposeDraft)}), stamped now and under a
      * fresh `Message-ID`.
      *
      * <p>The two stamps are minted here rather than in the bridge, which
@@ -67,18 +68,18 @@ public final class MailSubmit {
      */
     public void queue(Draft draft) throws JSONException {
         queue(
-                new JSONObject()
-                        .put("from", draft.from())
-                        .put("fromName", draft.fromName())
-                        .put("to", draft.to())
-                        .put("cc", draft.cc())
-                        .put("bcc", draft.bcc())
-                        .put("subject", draft.subject())
-                        .put("body", draft.body())
-                        .put("date", now())
-                        .put("messageId", messageId(draft.from()))
-                        .put("inReplyTo", draft.inReplyTo())
-                        .put("references", draft.references()));
+                new ComposeDraft(
+                        draft.from(),
+                        draft.fromName(),
+                        draft.to(),
+                        draft.cc(),
+                        draft.bcc(),
+                        draft.subject(),
+                        draft.body(),
+                        now(),
+                        messageId(draft.from()),
+                        draft.inReplyTo(),
+                        draft.references()));
     }
 
     /**
@@ -91,20 +92,21 @@ public final class MailSubmit {
      * by: it is minted before and stamped on the message, so the copy the
      * sync files in the sent mailbox comes back under the same name.
      */
-    public void queue(JSONObject draft) throws JSONException {
-        String sender = draft.getString("from");
-        String messageId = draft.getString("messageId");
-        String subject = draft.optString("subject");
-        String date = draft.getString("date");
+    public void queue(ComposeDraft draft) throws JSONException {
+        String sender = draft.from();
+        String messageId = draft.messageId();
+        String subject = Objects.requireNonNullElse(draft.subject(), "");
+        String date = draft.date();
 
-        byte[] source = client.composeMessage(draft.toString());
+        byte[] source = client.compose(draft);
         mail.queueSubmission(
                 sender,
                 PimdirSummary.bare(messageId),
                 subject,
                 PimdirSummary.mailSortKey(date),
                 source);
-        stageSentCopy(sender, messageId, subject, draft.optString("to"), date, source);
+        stageSentCopy(
+                sender, messageId, subject, Objects.requireNonNullElse(draft.to(), ""), date, source);
     }
 
     /**

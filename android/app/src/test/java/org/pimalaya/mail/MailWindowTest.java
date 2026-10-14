@@ -7,7 +7,6 @@ import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
 
-import org.json.JSONArray;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -248,9 +247,9 @@ public class MailWindowTest {
     public void aJmapStepsAnchorsAreKeptPerViewAndForgottenWithTheAccount() {
         assertTrue(MailWindow.anchors(context, ACCOUNT, null).isEmpty());
 
-        MailWindow.anchor(context, ACCOUNT, null, new JSONArray().put("e49").put("e48"));
-        MailWindow.anchor(context, ACCOUNT, "Clients", new JSONArray().put("c9"));
-        MailWindow.anchor(context, ACCOUNT, null, new JSONArray());
+        MailWindow.anchor(context, ACCOUNT, null, List.of("e49", "e48"));
+        MailWindow.anchor(context, ACCOUNT, "Clients", List.of("c9"));
+        MailWindow.anchor(context, ACCOUNT, null, List.of());
 
         assertEquals(List.of("e49", "e48"), MailWindow.anchors(context, ACCOUNT, null));
         assertEquals(List.of("c9"), MailWindow.anchors(context, ACCOUNT, "Clients"));

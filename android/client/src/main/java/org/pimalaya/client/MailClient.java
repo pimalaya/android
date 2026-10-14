@@ -82,31 +82,45 @@ public class MailClient {
     }
 
     /**
-     * One step of an account's mail, read whole into files of {@code dir};
-     * {@code mailbox} the one mailbox a view filtered to it steps, null for
-     * the account. {@code request} is {@code {count, frontier, bound,
-     * anchors, mailboxes}}, each backend reading what it needs, and asking
-     * {@code store} which of each page it lists the store holds ({@link
-     * Native#mailStep}); the reply as the bridge wrote it.
+     * One step of a Gmail or JMAP account's mail ({@link #stepped}), each
+     * message with the mailboxes it is a member of.
      */
-    public JSONObject mailStep(
-            MailSession session,
-            String mailbox,
-            JSONObject request,
-            File dir,
-            OfflineDriver store) {
-        String asked = request.toString();
-        return Replies.object(
-                on(
-                        session,
-                        open ->
-                                Native.mailStep(
-                                        open.transport(),
-                                        open.handle(),
-                                        mailbox == null ? "" : mailbox,
-                                        asked,
-                                        dir.getAbsolutePath(),
-                                        store)));
+    public NamedStep step(
+            MailSession session, StepRequest request, File dir, OfflineDriver store) {
+        return NamedStep.from(Replies.object(stepped(session, request, dir, store)));
+    }
+
+    /**
+     * One step of a Microsoft Graph account's mail ({@link #stepped}), each
+     * message with the mailbox it was stepped in.
+     */
+    public GraphStepReply graphStep(
+            MailSession session, StepRequest request, File dir, OfflineDriver store) {
+        return GraphStepReply.from(Replies.object(stepped(session, request, dir, store)));
+    }
+
+    /**
+     * One step of an account's mail, read whole into files of {@code dir};
+     * the request's mailbox the one mailbox a view filtered to it steps,
+     * null for the account. Each backend reads what it needs of
+     * {@code request}, asking {@code store} which of each page it lists the
+     * store holds ({@link Native#mailStep}); the reply as the bridge wrote
+     * it, its shape the backend's.
+     */
+    private static String stepped(
+            MailSession session, StepRequest request, File dir, OfflineDriver store) {
+        String mailbox = request.mailbox();
+        String asked = request.toJson().toString();
+        return on(
+                session,
+                open ->
+                        Native.mailStep(
+                                open.transport(),
+                                open.handle(),
+                                mailbox == null ? "" : mailbox,
+                                asked,
+                                dir.getAbsolutePath(),
+                                store));
     }
 
     /**
@@ -178,8 +192,8 @@ public class MailClient {
      * Adds or removes one marker on one message, named the IMAP way
      * whichever backend answers.
      */
-    public void setMessageFlag(
-            MailSession session, String mailbox, String id, Flags.Marker flag, boolean add) {
+    public void setFlag(
+            MailSession session, MessageRef message, Flags.Marker flag, boolean add) {
         Replies.object(
                 on(
                         session,
@@ -187,8 +201,8 @@ public class MailClient {
                                 Native.setMessageFlag(
                                         open.transport(),
                                         open.handle(),
-                                        mailbox,
-                                        id,
+                                        message.mailbox(),
+                                        message.id(),
                                         flag.wire(),
                                         add)));
     }
@@ -196,19 +210,17 @@ public class MailClient {
     /**
      * Composes one draft into the RFC 5322 message an outbox holds.
      *
-     * <p>{@code draft} is a JSON object of {@code from}, {@code fromName},
-     * {@code to}, {@code cc}, {@code bcc}, {@code subject}, {@code body},
-     * {@code date} and {@code messageId}: the composer's fields plus the
-     * two stamps, which are the caller's so the bridge stays a pure
-     * function of what it is handed.
+     * <p>{@code draft} is the composer's fields plus the two stamps, which
+     * are the caller's so the bridge stays a pure function of what it is
+     * handed.
      *
      * <p>No network, which is the point: a message is written and queued
-     * with the radio off, and {@link #submitMessage} is what needs one.
+     * with the radio off, and {@link #submit} is what needs one.
      * The bytes carry a {@code Bcc} header, as RFC 5322 §3.6.3 provides
      * for a message prepared for sending; the submission takes it out.
      */
-    public byte[] composeMessage(String draft) {
-        JSONObject reply = Replies.object(Native.composeMessage(draft));
+    public byte[] compose(ComposeDraft draft) {
+        JSONObject reply = Replies.object(Native.composeMessage(draft.toJson().toString()));
         return Base64.getDecoder().decode(reply.optString("source"));
     }
 
@@ -226,7 +238,7 @@ public class MailClient {
      * @throws SubmissionUncertain when the whole message went over and no
      *     verdict came back, which parks it for the user to confirm.
      */
-    public String submitMessage(MailSession session, byte[] source) {
+    public String submit(MailSession session, byte[] source) {
         String submitUrl = session.account().submitUrl;
         // NOTE: run once, never retried, unlike every other verb on a
         // session. Sending is the one thing here that is not idempotent:
@@ -254,36 +266,48 @@ public class MailClient {
         return reply.isNull("messageId") ? null : reply.optString("messageId", null);
     }
 
-    /** Moves one message from {@code mailbox} into {@code target}. */
-    public void relocateMessage(MailSession session, String mailbox, String id, String target) {
+    /** Moves one message into {@code target} on the server. */
+    public void relocate(MailSession session, MessageRef message, String target) {
         Replies.object(
                 on(
                         session,
                         open ->
                                 Native.relocateMessage(
-                                        open.transport(), open.handle(), mailbox, id, target)));
+                                        open.transport(),
+                                        open.handle(),
+                                        message.mailbox(),
+                                        message.id(),
+                                        target)));
     }
 
     /**
-     * Copies one message from {@code mailbox} into {@code target} on the
-     * server. Run once: a copy that lost its answer and ran again would
-     * file a second one.
+     * Copies one message into {@code target} on the server. Run once: a
+     * copy that lost its answer and ran again would file a second one.
      */
-    public void copyMessage(MailSession session, String mailbox, String id, String target) {
+    public void copy(MailSession session, MessageRef message, String target) {
         Replies.object(
                 Native.copyMessage(
-                        session.transport(), session.handle(), mailbox, id, target));
+                        session.transport(),
+                        session.handle(),
+                        message.mailbox(),
+                        message.id(),
+                        target));
     }
 
     /**
      * Deletes one message for good: on IMAP {@code \Deleted} then
      * {@code UID EXPUNGE} with UIDPLUS, the marker alone otherwise.
      */
-    public void destroyMessage(MailSession session, String mailbox, String id) {
+    public void destroy(MailSession session, MessageRef message) {
         Replies.object(
                 on(
                         session,
-                        open -> Native.destroyMessage(open.transport(), open.handle(), mailbox, id)));
+                        open ->
+                                Native.destroyMessage(
+                                        open.transport(),
+                                        open.handle(),
+                                        message.mailbox(),
+                                        message.id())));
     }
 
     /**

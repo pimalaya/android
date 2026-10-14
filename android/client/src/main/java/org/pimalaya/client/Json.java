@@ -30,6 +30,14 @@ final class Json {
         }
     }
 
+    static JSONArray array(JSONObject object, String key) {
+        try {
+            return object.getJSONArray(key);
+        } catch (JSONException error) {
+            throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
+        }
+    }
+
     static String string(JSONObject object, String key) {
         try {
             return object.getString(key);

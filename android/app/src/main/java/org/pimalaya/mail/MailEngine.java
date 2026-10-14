@@ -12,12 +12,17 @@ import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.Description;
 import org.pimalaya.client.Flags;
+import org.pimalaya.client.GraphStepReply;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageBody;
+import org.pimalaya.client.MessageRef;
 import org.pimalaya.client.MessageSource;
 import org.pimalaya.client.MessageSources;
+import org.pimalaya.client.NamedStep;
+import org.pimalaya.client.NamedStepItem;
+import org.pimalaya.client.StepRequest;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirBlobs;
@@ -36,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * The mail half of the engine: one driver per session, servicing the
@@ -1172,9 +1178,10 @@ public class MailEngine extends PimdirEngine {
      * own over it alone, else the account's; null for all mail or until
      * the account holds one), within the account's {@code bound}, after
      * the {@code anchors} the last JMAP step left ({@link
-     * MailWindow#anchors}).
+     * MailWindow#anchors}), over the {@code mailboxes} named (null for
+     * none).
      */
-    JSONObject stepRequest(String only) throws JSONException {
+    StepRequest stepRequest(String only, List<String> mailboxes) {
         Context context = pimdir.context();
         String frontier = null;
         if (MailWindow.held(context, accountId)) {
@@ -1185,28 +1192,41 @@ public class MailEngine extends PimdirEngine {
         }
         String bound = MailScope.sinceOf(context, accountId);
         String mailbox = only == null ? null : mailboxOf(only);
-        return new JSONObject()
-                .put("count", MailStep.COUNT)
-                .put("frontier", frontier == null ? JSONObject.NULL : frontier)
-                .put("bound", bound == null ? JSONObject.NULL : bound)
-                .put("anchors", new JSONArray(MailWindow.anchors(context, accountId, mailbox)));
+        return new StepRequest(
+                mailbox,
+                MailStep.COUNT,
+                frontier,
+                bound,
+                MailWindow.anchors(context, accountId, mailbox),
+                mailboxes);
+    }
+
+    /** {@link #stepped} as {@link #counted} reads it. */
+    NamedStep stepRead(List<String> holding, StepRequest request, File dir) {
+        return counted(holding, request, dir, () -> stepped(request, dir));
+    }
+
+    /** {@link #graphStepped} as {@link #counted} reads it. */
+    GraphStepReply graphStepRead(List<String> holding, StepRequest request, File dir) {
+        return counted(holding, request, dir, () -> graphStepped(request, dir));
     }
 
     /**
-     * {@link #stepped}, its bodies counted as their files land ({@link
+     * {@code step}, its bodies counted as their files land ({@link
      * #tally}): the step's count planned before it reads, closed on what
      * it brought once it answers. {@code holding} the mailboxes whose
      * messages the step leaves out ({@link #held}).
      */
-    JSONObject stepRead(String mailbox, List<String> holding, JSONObject request, File dir) {
+    private <T> T counted(
+            List<String> holding, StepRequest request, File dir, Supplier<T> step) {
         this.holding = holding;
         try {
             if (tally == null) {
-                return stepped(mailbox, request, dir);
+                return step.get();
             }
-            tally.expect(request.optInt("count", MailStep.COUNT));
+            tally.expect(request.count());
             try (MailTally.Watch counting = tally.watch(dir)) {
-                return stepped(mailbox, request, dir);
+                return step.get();
             } finally {
                 tally.expect(0);
             }
@@ -1216,14 +1236,37 @@ public class MailEngine extends PimdirEngine {
     }
 
     /**
-     * One step of the account read by the bridge ({@link MailStep}), as
-     * {@code request} asks ({@link #stepRequest}), of {@code mailbox} or of
-     * the account for null, each message read into a file of {@code dir}.
-     * The bridge asks this driver which of each page it lists the store
-     * holds ({@link #held}).
+     * One step of a Gmail or JMAP account read by the bridge ({@link
+     * MailStep}), as {@code request} asks ({@link #stepRequest}), of its
+     * mailbox or of the account for none, each message read into a file of
+     * {@code dir}. The bridge asks this driver which of each page it lists
+     * the store holds ({@link #held}).
      */
-    protected JSONObject stepped(String mailbox, JSONObject request, File dir) {
-        return clients.mail().mailStep(session, mailbox, request, dir, this);
+    protected NamedStep stepped(StepRequest request, File dir) {
+        return clients.mail().step(session, request, dir, this);
+    }
+
+    /** {@link #stepped} of a Microsoft Graph account. */
+    protected GraphStepReply graphStepped(StepRequest request, File dir) {
+        return clients.mail().graphStep(session, request, dir, this);
+    }
+
+    /**
+     * A Gmail or JMAP step's item as a listing names it (the engine's
+     * wire), its file and labels left out.
+     */
+    static JSONObject wireItem(NamedStepItem item) throws JSONException {
+        JSONObject named = new JSONObject();
+        named.put("handle", item.handle());
+        named.put("flags", new JSONArray(item.flags()));
+        named.put("linkId", item.linkId());
+        if (item.summary() != null) {
+            named.put("summary", item.summary());
+        }
+        if (!item.sortKey().isEmpty()) {
+            named.put("sortKey", item.sortKey());
+        }
+        return named;
     }
 
     /**
@@ -1398,17 +1441,17 @@ public class MailEngine extends PimdirEngine {
 
     /** Moves one message from {@code mailbox} into {@code target} on the server. */
     protected void relocate(String mailbox, String handle, String target) {
-        clients.mail().relocateMessage(session, mailbox, handle, target);
+        clients.mail().relocate(session, new MessageRef(mailbox, handle), target);
     }
 
     /** Copies one message from {@code mailbox} into {@code target} on the server. */
     protected void copy(String mailbox, String handle, String target) {
-        clients.mail().copyMessage(session, mailbox, handle, target);
+        clients.mail().copy(session, new MessageRef(mailbox, handle), target);
     }
 
     /** Deletes one message for good on the server. */
     protected void destroy(String mailbox, String handle) {
-        clients.mail().destroyMessage(session, mailbox, handle);
+        clients.mail().destroy(session, new MessageRef(mailbox, handle));
     }
 
     /** Appends one message to {@code mailbox} on the server. */
@@ -1437,7 +1480,7 @@ public class MailEngine extends PimdirEngine {
                 continue;
             }
             try {
-                clients.mail().setMessageFlag(session, mailbox, handle, flag, wanted);
+                clients.mail().setFlag(session, new MessageRef(mailbox, handle), flag, wanted);
             } catch (RuntimeException failure) {
                 gone(mailbox, handle, failure);
                 break;

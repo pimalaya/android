@@ -555,7 +555,7 @@ public final class SyncPasses {
         for (MailStore.Outgoing waiting : mail.outgoing(account.email)) {
             String filed;
             try {
-                filed = clients.mail().submitMessage(session, waiting.source);
+                filed = clients.mail().submit(session, waiting.source);
             } catch (SubmissionRefused refused) {
                 Log.w("pimalaya", "submission refused: " + AccountEntry.redacted(account.email), refused);
                 mail.parkOutgoing(waiting.id, refused.getMessage());

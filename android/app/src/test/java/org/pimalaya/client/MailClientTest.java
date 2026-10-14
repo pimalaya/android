@@ -504,4 +504,275 @@ public class MailClientTest {
                 new Opened(true, 1),
                 Opened.from(Replies.object("{\"expungesOne\":true,\"handle\":1}")));
     }
+
+    /**
+     * Drafts as the composer hands them, stamped with literal values
+     * standing for the minted date and Message-ID: plain, a reply with
+     * every address field, non-ASCII words to encode, absent reply headers
+     * (null) and a long line.
+     */
+    private static final List<ComposeDraft> DRAFTS =
+            Arrays.asList(
+                    new ComposeDraft(
+                            "jane@example.com",
+                            "Jane",
+                            "bob@example.org",
+                            "",
+                            "",
+                            "Hi",
+                            "the body",
+                            "Wed, 14 Oct 2026 10:00:00 +0200",
+                            "<fixed-16@example.com>",
+                            "",
+                            ""),
+                    new ComposeDraft(
+                            "jane@example.com",
+                            "",
+                            "bob@example.org, carol@example.org",
+                            "dan@example.org",
+                            "eve@example.org",
+                            "Re: Hi",
+                            "line one\nline two\n",
+                            "Wed, 14 Oct 2026 10:00:00 +0200",
+                            "<fixed-16@example.com>",
+                            "<a@example.org>",
+                            "<root@example.org> <a@example.org>"),
+                    new ComposeDraft(
+                            "zoe@example.fr",
+                            "Zoé Dupré",
+                            "Élodie <elodie@example.fr>",
+                            "",
+                            "",
+                            "Réunion de l’équipe — ordre du jour très long qui doit être"
+                                    + " replié sur plusieurs lignes",
+                            "Bonjour à tous,\n\nvoici l’ordre du jour : café ☕.\n",
+                            "Wed, 14 Oct 2026 10:00:00 +0200",
+                            "<fixed-14@example.com>",
+                            "",
+                            ""),
+                    new ComposeDraft(
+                            "jane@example.com",
+                            "Jane",
+                            "bob@example.org",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "Wed, 14 Oct 2026 10:00:00 +0200",
+                            "<fixed-16@example.com>",
+                            null,
+                            null),
+                    new ComposeDraft(
+                            "jane@example.com",
+                            "Doe, Jane",
+                            "\"Smith, Bob\" <bob@example.org>",
+                            "",
+                            "hidden@example.org",
+                            "Fwd: report",
+                            "a very long line " + "x".repeat(200) + "\n",
+                            "Wed, 14 Oct 2026 10:00:00 +0200",
+                            "<fixed-16@example.com>",
+                            "",
+                            ""));
+
+    /** What MailSubmit wrote for each of {@link #DRAFTS}, captured on the code that built it. */
+    private static final List<String> DRAFT_JSON =
+            List.of(
+                    "{\"from\":\"jane@example.com\",\"fromName\":\"Jane\",\"to\":\"bob@examp"
+                        + "le.org\",\"cc\":\"\",\"bcc\":\"\",\"subject\":\"Hi\",\"body\":\"the body\",\"d"
+                        + "ate\":\"Wed, 14 Oct 2026 10:00:00 +0200\",\"messageId\":\"<fixed-1"
+                        + "6@example.com>\",\"inReplyTo\":\"\",\"references\":\"\"}",
+                    "{\"from\":\"jane@example.com\",\"fromName\":\"\",\"to\":\"bob@example.o"
+                        + "rg, carol@example.org\",\"cc\":\"dan@example.org\",\"bcc\":\"eve@exa"
+                        + "mple.org\",\"subject\":\"Re: Hi\",\"body\":\"line one\\nline two\\n\",\""
+                        + "date\":\"Wed, 14 Oct 2026 10:00:00 +0200\",\"messageId\":\"<fixed-"
+                        + "16@example.com>\",\"inReplyTo\":\"<a@example.org>\",\"references\":"
+                        + "\"<root@example.org> <a@example.org>\"}",
+                    "{\"from\":\"zoe@example.fr\",\"fromName\":\"Zoé Dupré\",\"to\":\"Élodie"
+                        + " <elodie@example.fr>\",\"cc\":\"\",\"bcc\":\"\",\"subject\":\"Réunion de"
+                        + " l’équipe — ordre du jour très long qui doit être replié sur"
+                        + " plusieurs lignes\",\"body\":\"Bonjour à tous,\\n\\nvoici l’ordre "
+                        + "du jour : café ☕.\\n\",\"date\":\"Wed, 14 Oct 2026 10:00:00 +0200"
+                        + "\",\"messageId\":\"<fixed-14@example.com>\",\"inReplyTo\":\"\",\"refer"
+                        + "ences\":\"\"}",
+                    "{\"from\":\"jane@example.com\",\"fromName\":\"Jane\",\"to\":\"bob@examp"
+                        + "le.org\",\"cc\":\"\",\"bcc\":\"\",\"subject\":\"\",\"body\":\"\",\"date\":\"Wed,"
+                        + " 14 Oct 2026 10:00:00 +0200\",\"messageId\":\"<fixed-16@example."
+                        + "com>\"}",
+                    "{\"from\":\"jane@example.com\",\"fromName\":\"Doe, Jane\",\"to\":\"\\\"Sm"
+                        + "ith, Bob\\\" <bob@example.org>\",\"cc\":\"\",\"bcc\":\"hidden@example."
+                        + "org\",\"subject\":\"Fwd: report\",\"body\":\"a very long line xxxxxx"
+                        + "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                        + "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                        + "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                        + "xxxxxxxxxxxxxx\\n\",\"date\":\"Wed, 14 Oct 2026 10:00:00 +0200\",\""
+                        + "messageId\":\"<fixed-16@example.com>\",\"inReplyTo\":\"\",\"referenc"
+                        + "es\":\"\"}");
+
+    /** What the bridge composed of each of {@link #DRAFTS}, base64, captured on that code. */
+    private static final List<String> COMPOSED =
+            List.of(
+                    "RGF0ZTogV2VkLCAxNCBPY3QgMjAyNiAxMDowMDowMCArMDIwMA0KTWVzc2Fn"
+                        + "ZS1JRDogPGZpeGVkLTE2QGV4YW1wbGUuY29tPg0KRnJvbTogSmFuZSA8amFu"
+                        + "ZUBleGFtcGxlLmNvbT4NClRvOiBib2JAZXhhbXBsZS5vcmcNClN1YmplY3Q6"
+                        + "IEhpDQpNSU1FLVZlcnNpb246IDEuMA0KQ29udGVudC1UeXBlOiB0ZXh0L3Bs"
+                        + "YWluOyBjaGFyc2V0PXV0Zi04DQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5n"
+                        + "OiBxdW90ZWQtcHJpbnRhYmxlDQoNCnRoZSBib2R5DQo=",
+                    "RGF0ZTogV2VkLCAxNCBPY3QgMjAyNiAxMDowMDowMCArMDIwMA0KTWVzc2Fn"
+                        + "ZS1JRDogPGZpeGVkLTE2QGV4YW1wbGUuY29tPg0KSW4tUmVwbHktVG86IDxh"
+                        + "QGV4YW1wbGUub3JnPg0KUmVmZXJlbmNlczogPHJvb3RAZXhhbXBsZS5vcmc+"
+                        + "DQogPGFAZXhhbXBsZS5vcmc+DQpGcm9tOiBqYW5lQGV4YW1wbGUuY29tDQpU"
+                        + "bzogYm9iQGV4YW1wbGUub3JnLCBjYXJvbEBleGFtcGxlLm9yZw0KQ2M6IGRh"
+                        + "bkBleGFtcGxlLm9yZw0KQmNjOiBldmVAZXhhbXBsZS5vcmcNClN1YmplY3Q6"
+                        + "IFJlOiBIaQ0KTUlNRS1WZXJzaW9uOiAxLjANCkNvbnRlbnQtVHlwZTogdGV4"
+                        + "dC9wbGFpbjsgY2hhcnNldD11dGYtOA0KQ29udGVudC1UcmFuc2Zlci1FbmNv"
+                        + "ZGluZzogcXVvdGVkLXByaW50YWJsZQ0KDQpsaW5lIG9uZQ0KbGluZSB0d28N"
+                        + "Cg0K",
+                    "RGF0ZTogV2VkLCAxNCBPY3QgMjAyNiAxMDowMDowMCArMDIwMA0KTWVzc2Fn"
+                        + "ZS1JRDogPGZpeGVkLTE0QGV4YW1wbGUuY29tPg0KRnJvbTogPT9VVEYtOD9C"
+                        + "P1dtL0RxU0JFZFhCeXc2az0/PSA8em9lQGV4YW1wbGUuZnI+DQpUbzogPT9V"
+                        + "VEYtOD9CP3c0bHNiMlJwWlE9PT89IDxlbG9kaWVAZXhhbXBsZS5mcj4NClN1"
+                        + "YmplY3Q6ID0/VVRGLTg/Qj9Vc09wZFc1cGIyND0/PSBkZSA9P1VURi04P0I/"
+                        + "Yk9LQW1jT3BjWFZwY0dVZzRvQ1U/PSBvcmRyZSBkdQ0KIGpvdXIgPT9VVEYt"
+                        + "OD9CP2RITERxSE09Pz0gbG9uZyBxdWkgZG9pdCA9P1VURi04P0I/dzZwMGNt"
+                        + "VWdjbVZ3YkduRHFRPT0/PSBzdXINCiBwbHVzaWV1cnMgbGlnbmVzDQpNSU1F"
+                        + "LVZlcnNpb246IDEuMA0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluOyBjaGFy"
+                        + "c2V0PXV0Zi04DQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiBxdW90ZWQt"
+                        + "cHJpbnRhYmxlDQoNCkJvbmpvdXIgPUMzPUEwIHRvdXMsDQoNCnZvaWNpIGw9"
+                        + "RTI9ODA9OTlvcmRyZSBkdSBqb3VyIDogY2FmPUMzPUE5ID1FMj05OD05NS4N"
+                        + "Cg0K",
+                    "RGF0ZTogV2VkLCAxNCBPY3QgMjAyNiAxMDowMDowMCArMDIwMA0KTWVzc2Fn"
+                        + "ZS1JRDogPGZpeGVkLTE2QGV4YW1wbGUuY29tPg0KRnJvbTogSmFuZSA8amFu"
+                        + "ZUBleGFtcGxlLmNvbT4NClRvOiBib2JAZXhhbXBsZS5vcmcNClN1YmplY3Q6"
+                        + "DQpNSU1FLVZlcnNpb246IDEuMA0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWlu"
+                        + "OyBjaGFyc2V0PXV0Zi04DQpDb250ZW50LVRyYW5zZmVyLUVuY29kaW5nOiBx"
+                        + "dW90ZWQtcHJpbnRhYmxlDQoNCg0K",
+                    "RGF0ZTogV2VkLCAxNCBPY3QgMjAyNiAxMDowMDowMCArMDIwMA0KTWVzc2Fn"
+                        + "ZS1JRDogPGZpeGVkLTE2QGV4YW1wbGUuY29tPg0KRnJvbTogRG9lLCBKYW5l"
+                        + "IDxqYW5lQGV4YW1wbGUuY29tPg0KVG86ICJTbWl0aCwgQm9iIiA8Ym9iQGV4"
+                        + "YW1wbGUub3JnPg0KQmNjOiBoaWRkZW5AZXhhbXBsZS5vcmcNClN1YmplY3Q6"
+                        + "IEZ3ZDogcmVwb3J0DQpNSU1FLVZlcnNpb246IDEuMA0KQ29udGVudC1UeXBl"
+                        + "OiB0ZXh0L3BsYWluOyBjaGFyc2V0PXV0Zi04DQpDb250ZW50LVRyYW5zZmVy"
+                        + "LUVuY29kaW5nOiBxdW90ZWQtcHJpbnRhYmxlDQoNCmEgdmVyeSBsb25nIGxp"
+                        + "bmUgeHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4"
+                        + "eHh4eHh4eHh4eHh4eHh4eD0NCnh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4"
+                        + "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4"
+                        + "eHh4eD0NCnh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4"
+                        + "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHgNCg0K");
+
+    @Test
+    public void aDraftIsWrittenAsBefore() throws Exception {
+        for (int index = 0; index < DRAFTS.size(); index++) {
+            assertSameJson(DRAFT_JSON.get(index), DRAFTS.get(index).toJson().toString());
+        }
+    }
+
+    @Test
+    public void aDraftComposesToTheSameBytes() {
+        for (int index = 0; index < DRAFTS.size(); index++) {
+            assertArrayEquals(
+                    "draft " + index,
+                    Base64.getDecoder().decode(COMPOSED.get(index)),
+                    client.compose(DRAFTS.get(index)));
+        }
+    }
+
+    @Test
+    public void aStepRequestIsWrittenAsTheBridgeReadsIt() throws Exception {
+        assertSameJson(
+                "{\"count\":50,\"frontier\":null,\"bound\":null,\"anchors\":[]}",
+                new StepRequest("Clients", 50, null, null, List.of(), null).toJson().toString());
+        assertSameJson(
+                "{\"count\":50,\"frontier\":\"2099-01-01T00:00:00Z\",\"bound\":\"2026-06-30T22:00:00Z\","
+                        + "\"anchors\":[\"a2\",\"a1\"],\"mailboxes\":[\"INBOX\",\"Sent\"]}",
+                new StepRequest(
+                                null,
+                                50,
+                                "2099-01-01T00:00:00Z",
+                                "2026-06-30T22:00:00Z",
+                                List.of("a2", "a1"),
+                                List.of("INBOX", "Sent"))
+                        .toJson()
+                        .toString());
+        assertSameJson(
+                "{\"count\":50,\"frontier\":null,\"bound\":null,\"anchors\":[],\"mailboxes\":[]}",
+                new StepRequest(null, 50, null, null, List.of(), List.of()).toJson().toString());
+    }
+
+    @Test
+    public void aGmailOrJmapStepReadsAsBefore() throws Exception {
+        String jmap =
+                "{\"anchors\":[\"e2\",\"e1\"],\"byReception\":false,\"exhausted\":true,"
+                        + "\"historyId\":\"s42\",\"items\":[{\"flags\":[\"\\\\Seen\"],"
+                        + "\"handle\":\"e1\",\"linkId\":\"e1\",\"mailboxes\":[\"INBOX\",\"Clients\"],"
+                        + "\"path\":\"/d/e1\",\"received\":1767690000000,\"size\":120,"
+                        + "\"sortKey\":\"2026-01-06T08:30:00Z\",\"summary\":{\"subject\":\"Lunch\"}},"
+                        + "{\"flags\":[],\"handle\":\"e2\",\"linkId\":\"e2\",\"mailboxes\":[],"
+                        + "\"path\":\"/d/e2\",\"received\":null,\"size\":0}]}";
+        assertMirrors(NamedStep.class, jmap);
+        assertMirrors(NamedStepItem.class, elements(field(jmap, "items")).get(0));
+        NamedStep step = NamedStep.from(Replies.object(jmap));
+        assertEquals(List.of("e2", "e1"), step.anchors());
+        assertEquals(false, step.byReception());
+        assertEquals(true, step.exhausted());
+        assertEquals("s42", step.historyId());
+        assertEquals(2, step.items().size());
+        NamedStepItem first = step.items().get(0);
+        assertEquals(List.of("\\Seen"), first.flags());
+        assertEquals("e1", first.handle());
+        assertEquals("e1", first.linkId());
+        assertEquals(List.of("INBOX", "Clients"), first.mailboxes());
+        assertEquals("/d/e1", first.path());
+        assertEquals(Long.valueOf(1767690000000L), first.received());
+        assertEquals(120, first.size());
+        assertEquals("2026-01-06T08:30:00Z", first.sortKey());
+        assertSameJson("{\"subject\":\"Lunch\"}", first.summary().toString());
+        NamedStepItem second = step.items().get(1);
+        assertEquals(List.of(), second.flags());
+        assertEquals(List.of(), second.mailboxes());
+        assertEquals(null, second.received());
+        assertEquals(0, second.size());
+        assertEquals("absent reads empty, as optString did", "", second.sortKey());
+        assertEquals(null, second.summary());
+
+        String gmail =
+                "{\"byReception\":true,\"exhausted\":false,\"historyId\":\"981\",\"items\":[]}";
+        NamedStep labelled = NamedStep.from(Replies.object(gmail));
+        assertEquals("Gmail answers no anchors", null, labelled.anchors());
+        assertEquals(true, labelled.byReception());
+        assertEquals(false, labelled.exhausted());
+        assertEquals("981", labelled.historyId());
+        assertEquals(List.of(), labelled.items());
+    }
+
+    @Test
+    public void aGraphStepReadsAsBefore() throws Exception {
+        String raw =
+                "{\"exhausted\":false,\"items\":[{\"handle\":\"AAM1\",\"mailboxes\":[\"Inbox\"],"
+                        + "\"path\":\"/d/AAM1\",\"received\":1767690000000,\"size\":2048,"
+                        + "\"sortKey\":\"2026-01-06T08:30:00Z\"},{\"handle\":\"AAM2\","
+                        + "\"mailboxes\":[null],\"received\":null,\"size\":null,"
+                        + "\"sortKey\":\"2026-01-05T08:30:00Z\"}]}";
+        assertMirrors(GraphStepReply.class, raw);
+        assertMirrors(GraphStepItem.class, elements(field(raw, "items")).get(0));
+        assertEquals(
+                new GraphStepReply(
+                        false,
+                        List.of(
+                                new GraphStepItem(
+                                        "AAM1",
+                                        List.of("Inbox"),
+                                        "/d/AAM1",
+                                        1767690000000L,
+                                        2048L,
+                                        "2026-01-06T08:30:00Z"),
+                                new GraphStepItem(
+                                        "AAM2",
+                                        Arrays.asList((String) null),
+                                        null,
+                                        null,
+                                        null,
+                                        "2026-01-05T08:30:00Z"))),
+                GraphStepReply.from(Replies.object(raw)));
+    }
 }

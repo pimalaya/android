@@ -17,7 +17,10 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.GraphStepItem;
+import org.pimalaya.client.GraphStepReply;
 import org.pimalaya.client.Mailbox;
+import org.pimalaya.client.StepRequest;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -98,7 +101,7 @@ public class GraphStepTest {
         final List<Mail> mail = new ArrayList<>();
         List<Mail> next = List.of();
         boolean exhausted;
-        final List<JSONObject> asked = new ArrayList<>();
+        final List<StepRequest> asked = new ArrayList<>();
         final List<String> banded = new ArrayList<>();
         final List<Set<String>> heldOf = new ArrayList<>();
 
@@ -107,7 +110,7 @@ public class GraphStepTest {
         }
 
         @Override
-        protected JSONObject stepped(String mailbox, JSONObject request, File dir) {
+        protected GraphStepReply graphStepped(StepRequest request, File dir) {
             asked.add(request);
             try {
                 List<String> listing = new ArrayList<>();
@@ -116,24 +119,27 @@ public class GraphStepTest {
                 }
                 Set<String> held = held(listing);
                 heldOf.add(held);
-                JSONArray items = new JSONArray();
+                List<GraphStepItem> items = new ArrayList<>();
                 for (Mail mail : next) {
-                    JSONObject item =
-                            new JSONObject()
-                                    .put("handle", mail.id)
-                                    .put("mailboxes", new JSONArray().put(mail.mailbox))
-                                    .put("sortKey", mail.date)
-                                    .put("received", mail.received.toEpochMilli())
-                                    .put("size", 99);
+                    String path = null;
+                    long size = 99;
                     if (!held.contains(mail.id)) {
                         File file = new File(dir, mail.id + ".eml");
                         Files.write(file.toPath(), mail.source());
-                        item.put("path", file.getAbsolutePath()).put("size", mail.source().length);
+                        path = file.getAbsolutePath();
+                        size = mail.source().length;
                     }
-                    items.put(item);
+                    items.add(
+                            new GraphStepItem(
+                                    mail.id,
+                                    List.of(mail.mailbox),
+                                    path,
+                                    mail.received.toEpochMilli(),
+                                    size,
+                                    mail.date));
                 }
-                return new JSONObject().put("exhausted", exhausted).put("items", items);
-            } catch (JSONException | IOException failure) {
+                return new GraphStepReply(exhausted, items);
+            } catch (IOException failure) {
                 throw new AssertionError(failure);
             }
         }
@@ -225,12 +231,12 @@ public class GraphStepTest {
 
         MailStep.Outcome first = new GraphStep().run(server, EMAIL, mailboxes(), null, true);
 
-        JSONObject request = server.asked.get(0);
-        assertTrue(request.isNull("frontier"));
+        StepRequest request = server.asked.get(0);
+        assertNull(request.frontier());
         assertEquals(
                 "the trash takes no part",
                 List.of("Inbox", "Sent Items", "Projets"),
-                strings(request.getJSONArray("mailboxes")));
+                request.mailboxes());
         assertEquals(
                 "the step's folders first, then the rest",
                 List.of("Inbox", "Sent Items", "Projets"),
@@ -265,8 +271,8 @@ public class GraphStepTest {
         server.banded.clear();
         MailStep.Outcome second = new GraphStep().run(server, EMAIL, mailboxes(), null, false);
 
-        JSONObject request = server.asked.get(1);
-        assertEquals(newest.date, request.getString("frontier"));
+        StepRequest request = server.asked.get(1);
+        assertEquals(newest.date, request.frontier());
         assertEquals(Set.of("i0"), server.heldOf.get(1));
         assertEquals(2, held(inbox));
         assertEquals(1, held(sent));
@@ -310,9 +316,9 @@ public class GraphStepTest {
         server.next = List.of(last);
         new GraphStep().run(server, EMAIL, mailboxes(), inbox, false);
 
-        assertEquals(List.of("Inbox"), strings(server.asked.get(0).getJSONArray("mailboxes")));
-        assertEquals(newest.date, server.asked.get(0).getString("frontier"));
-        assertEquals("below the folder's own", next.date, server.asked.get(1).getString("frontier"));
+        assertEquals(List.of("Inbox"), server.asked.get(0).mailboxes());
+        assertEquals(newest.date, server.asked.get(0).frontier());
+        assertEquals("below the folder's own", next.date, server.asked.get(1).frontier());
         assertEquals("the account's stays", newest.date, MailWindow.since(context, accountId));
     }
 
@@ -321,13 +327,5 @@ public class GraphStepTest {
         assertTrue(
                 MailStep.of(new Account("msgraph://example", EMAIL, "token"))
                         instanceof GraphStep);
-    }
-
-    private static List<String> strings(JSONArray array) throws JSONException {
-        List<String> strings = new ArrayList<>();
-        for (int index = 0; index < array.length(); index++) {
-            strings.add(array.getString(index));
-        }
-        return strings;
     }
 }
