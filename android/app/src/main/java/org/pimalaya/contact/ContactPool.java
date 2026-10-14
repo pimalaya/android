@@ -4,14 +4,14 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.ContactGroup;
+import org.pimalaya.client.PoolReplica;
+import org.pimalaya.client.ReplicaPool;
 
 /**
  * The merged contacts pool behind the list (docs/merged-view.md): the
@@ -54,34 +54,21 @@ public final class ContactPool {
      * touching the live cache off the main thread.
      */
     List<Group> group(List<Entry> entries, List<AccountEntry> accounts) {
-        JSONObject pool;
-        try {
-            JSONArray replicas = new JSONArray();
-            for (Entry entry : entries) {
-                replicas.put(
-                        new JSONObject()
-                                .put("ref", replicaRef(entry, accounts))
-                                .put("uid", entry.uid)
-                                .put("name", entry.name)
-                                .put("id", entry.card.id()));
-            }
-            pool =
-                    new JSONObject()
-                            .put("replicas", replicas)
-                            .put("links", new JSONObject(base.loadLinks()))
-                            .put("detached", new JSONArray(base.loadDetached()));
-        } catch (JSONException error) {
-            throw new IllegalStateException(error);
+        List<PoolReplica> replicas = new ArrayList<>();
+        for (Entry entry : entries) {
+            replicas.add(
+                    new PoolReplica(
+                            replicaRef(entry, accounts), entry.uid, entry.name, entry.card.id()));
         }
-        JSONArray grouped = ContactClient.groupContacts(pool).optJSONArray("groups");
+        ReplicaPool pool =
+                new ReplicaPool(
+                        replicas, base.loadLinks(), new ArrayList<>(base.loadDetached()));
 
         List<Group> groups = new ArrayList<>();
-        for (int at = 0; grouped != null && at < grouped.length(); at++) {
-            JSONObject row = grouped.optJSONObject(at);
-            Group group = new Group(row.optString("key"));
-            JSONArray members = row.optJSONArray("replicas");
-            for (int index = 0; members != null && index < members.length(); index++) {
-                group.replicas.add(entries.get(members.optInt(index)));
+        for (ContactGroup row : ContactClient.groupContacts(pool)) {
+            Group group = new Group(row.key());
+            for (int index : row.replicas()) {
+                group.replicas.add(entries.get(index));
             }
             groups.add(group);
         }

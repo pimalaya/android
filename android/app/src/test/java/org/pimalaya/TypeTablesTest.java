@@ -5,10 +5,10 @@ import static org.junit.Assert.assertEquals;
 import android.content.res.Resources;
 import java.util.ArrayList;
 import java.util.List;
-import org.json.JSONArray;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.TypeKind;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -33,7 +33,7 @@ public class TypeTablesTest {
     public void phoneSpinnerIsAligned() {
         assertAligned(
                 R.array.phone_types,
-                "phone",
+                TypeKind.PHONE,
                 pair("Mobile", "cell"),
                 pair("Home", "home"),
                 pair("Work", "work"),
@@ -47,14 +47,14 @@ public class TypeTablesTest {
     @Test
     public void emailSpinnerIsAligned() {
         assertAligned(
-                R.array.email_types, "email", pair("Home", "home"), pair("Work", "work"), pair("Other"));
+                R.array.email_types, TypeKind.EMAIL, pair("Home", "home"), pair("Work", "work"), pair("Other"));
     }
 
     @Test
     public void addressSpinnerIsAligned() {
         assertAligned(
                 R.array.address_types,
-                "address",
+                TypeKind.ADDRESS,
                 pair("Home", "home"),
                 pair("Work", "work"),
                 pair("Other"));
@@ -64,7 +64,7 @@ public class TypeTablesTest {
     public void relationSpinnerIsAligned() {
         assertAligned(
                 R.array.relation_types,
-                "relation",
+                TypeKind.RELATION,
                 pair("Spouse", "spouse"),
                 pair("Child", "child"),
                 pair("Parent", "parent"),
@@ -81,7 +81,7 @@ public class TypeTablesTest {
         // list; an empty code is the unset first row.
         assertAligned(
                 R.array.gender_types,
-                "gender",
+                TypeKind.GENDER,
                 pair("Not set", ""),
                 pair("Male", "M"),
                 pair("Female", "F"),
@@ -94,21 +94,21 @@ public class TypeTablesTest {
      * Checks the array's labels and the Rust ordering both match the
      * expected pairings, position for position and in count.
      */
-    private static void assertAligned(int arrayId, String kind, Pair... expected) {
+    private static void assertAligned(int arrayId, TypeKind kind, Pair... expected) {
         Resources resources = RuntimeEnvironment.getApplication().getResources();
         String[] labels = resources.getStringArray(arrayId);
-        JSONArray order = ContactClient.cardTypeOrder(kind);
+        List<List<String>> order = ContactClient.cardTypeOrder(kind);
 
-        assertEquals(kind + " label count", expected.length, labels.length);
-        assertEquals(kind + " Rust order length", expected.length, order.length());
+        assertEquals(kind.wire() + " label count", expected.length, labels.length);
+        assertEquals(kind.wire() + " Rust order length", expected.length, order.size());
 
         for (int position = 0; position < expected.length; position++) {
             assertEquals(
-                    kind + " label " + position, expected[position].label, labels[position]);
+                    kind.wire() + " label " + position, expected[position].label, labels[position]);
             assertEquals(
-                    kind + " types " + position,
+                    kind.wire() + " types " + position,
                     expected[position].types,
-                    types(order.optJSONArray(position)));
+                    order.get(position));
         }
     }
 
@@ -121,14 +121,6 @@ public class TypeTablesTest {
             list.add(type);
         }
         return new Pair(label, list);
-    }
-
-    private static List<String> types(JSONArray array) {
-        List<String> values = new ArrayList<>();
-        for (int index = 0; array != null && index < array.length(); index++) {
-            values.add(array.optString(index));
-        }
-        return values;
     }
 
     /** One expected spinner row: its base-locale label and TYPE set. */

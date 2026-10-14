@@ -5,8 +5,8 @@ import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONException;
-import org.json.JSONObject;
 import org.pimalaya.client.Card;
+import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Flags;
@@ -93,14 +93,14 @@ public final class PimdirContacts {
          *  so the divergence is the user's to settle. */
         final boolean conflicted;
 
-        Indexed(Card card, JSONObject index, boolean conflicted) {
+        Indexed(Card card, CardIndex index, boolean conflicted) {
             this.card = card;
-            this.name = index.optString("name");
-            this.email = index.optString("email");
-            this.phone = index.optString("phone");
-            this.info = index.optString("info");
-            this.uid = index.optString("uid");
-            this.hash = index.optString("hash");
+            this.name = index.name();
+            this.email = index.email();
+            this.phone = index.phone();
+            this.info = index.info();
+            this.uid = index.uid();
+            this.hash = index.hash();
             this.conflicted = conflicted;
         }
     }
@@ -161,23 +161,23 @@ public final class PimdirContacts {
      * card is a create.
      */
     public void save(String collection, Card card) {
-        JSONObject index = indexOf(card.vcard());
+        CardIndex index = indexOf(card.vcard());
         try {
             if (held(collection, card.id())) {
                 stager.mutateEdit(
                         collection,
                         stager.offline.handleFor(collection, card.id()),
                         card.vcard(),
-                        index.optJSONObject("summary"),
-                        index.optString("sortKey"));
+                        index.summary(),
+                        index.sortKey());
             } else {
                 stager.mutateAdd(
                         collection,
                         card.id(),
                         card.vcard(),
                         Flags.none(),
-                        index.optJSONObject("summary"),
-                        index.optString("sortKey"));
+                        index.summary(),
+                        index.sortKey());
             }
         } catch (JSONException error) {
             throw new IllegalStateException(error);
@@ -273,11 +273,11 @@ public final class PimdirContacts {
                 if (body.isEmpty()) {
                     continue;
                 }
-                JSONObject index = indexOf(body);
-                PimdirSummary.write(db, row[0], row[1], index.optJSONObject("summary"));
+                CardIndex index = indexOf(body);
+                PimdirSummary.write(db, row[0], row[1], index.summary());
                 db.execSQL(
                         "UPDATE items SET sort_key = ? WHERE collection = ? AND link_id = ?",
-                        new Object[] {index.optString("sortKey"), row[0], row[1]});
+                        new Object[] {index.sortKey(), row[0], row[1]});
             }
             db.setTransactionSuccessful();
         } finally {
@@ -400,15 +400,15 @@ public final class PimdirContacts {
             flags = cursor.isNull(1) ? "[]" : cursor.getString(1);
         }
 
-        JSONObject index = indexOf(items.body(object));
+        CardIndex index = indexOf(items.body(object));
         db.execSQL(
                 "INSERT INTO items(collection, link_id, seq, flags, object_hash,"
                         + " sort_key, level) VALUES(?, ?, ?, ?, ?, ?, ?)",
                 new Object[] {
                     target, linkId, items.seqFor(db, linkId), flags, object,
-                    index.optString("sortKey"), PimdirItems.FULL
+                    index.sortKey(), PimdirItems.FULL
                 });
-        PimdirSummary.write(db, target, linkId, index.optJSONObject("summary"));
+        PimdirSummary.write(db, target, linkId, index.summary());
         items.adjustRefcount(db, null, object);
     }
 
@@ -425,12 +425,12 @@ public final class PimdirContacts {
     }
 
     /** The card index, empty on a parse failure rather than a lost save. */
-    private static JSONObject indexOf(String vcard) {
+    private static CardIndex indexOf(String vcard) {
         try {
             return ContactClient.indexCard(vcard);
         } catch (Exception error) {
             Log.w("pimalaya", "card index failed", error);
-            return new JSONObject();
+            return new CardIndex("", List.of(), "", "", "", "", "", null, "");
         }
     }
 

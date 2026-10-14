@@ -1,7 +1,7 @@
 package org.pimalaya.contact;
 
 import org.json.JSONException;
-import org.json.JSONObject;
+import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.phone.PhoneQueue;
@@ -32,13 +32,13 @@ public final class ContactStager extends Stager {
 
     /** {@link #edit} on any driver: a pass stages its own conflict resolutions. */
     static void edit(Stager on, String url, String handle, String vcard) throws JSONException {
-        JSONObject index = ContactClient.indexCard(vcard);
+        CardIndex index = ContactClient.indexCard(vcard);
         on.mutateEdit(
                 url,
                 handle,
                 vcard,
-                index.optJSONObject("summary"),
-                index.optString("sortKey"));
+                index.summary(),
+                index.sortKey());
     }
 
     @Override

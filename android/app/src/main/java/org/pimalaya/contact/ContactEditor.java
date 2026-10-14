@@ -14,6 +14,7 @@ import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Card;
+import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.CardsMerge;
 import org.pimalaya.client.ConflictForm;
 import org.pimalaya.client.ContactClient;
@@ -411,12 +412,12 @@ public final class ContactEditor {
      * the hot paths read the same index from the store's columns
      * instead. Empty on a parse failure.
      */
-    JSONObject cardIndex(String vcard) {
+    CardIndex cardIndex(String vcard) {
         try {
             return ContactClient.indexCard(vcard);
         } catch (Exception error) {
             Log.w("pimalaya", "card index failed", error);
-            return new JSONObject();
+            return new CardIndex("", List.of(), "", "", "", "", "", null, "");
         }
     }
 }

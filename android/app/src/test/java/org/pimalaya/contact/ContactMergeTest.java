@@ -7,11 +7,11 @@ import static org.junit.Assert.assertTrue;
 
 import java.util.List;
 import java.util.Map;
-import org.json.JSONObject;
 import org.junit.Test;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Card;
+import org.pimalaya.client.CardIndex;
 
 /** Pins the merge flow's and the addressbooks dialog's decisions. */
 public class ContactMergeTest {
@@ -104,7 +104,7 @@ public class ContactMergeTest {
 
     private static Entry entry(Addressbook book, String id, String hash) throws Exception {
         Card card = new Card(id, null, null, vcard(id));
-        JSONObject index = new JSONObject().put("hash", hash);
+        CardIndex index = new CardIndex("", List.of(), hash, "", "", "", "", null, "");
         return new Entry(book, "jane@example.org", new PimdirContacts.Indexed(card, index, false));
     }
 

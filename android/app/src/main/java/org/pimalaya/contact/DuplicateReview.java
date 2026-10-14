@@ -11,12 +11,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.DuplicateGroup;
+import org.pimalaya.client.DuplicateMember;
+import org.pimalaya.client.DuplicateSet;
+import org.pimalaya.client.RefCard;
 import org.pimalaya.ui.Host;
 
 /**
@@ -49,16 +50,12 @@ final class DuplicateReview {
      */
     void find(List<Entry> replicas) {
         Map<String, Entry> byRef = new HashMap<>();
-        JSONArray cards = new JSONArray();
-        try {
-            for (Entry entry : replicas) {
-                String ref = parts.pool().replicaRef(entry);
-                if (byRef.putIfAbsent(ref, entry) == null) {
-                    cards.put(new JSONObject().put("ref", ref).put("vcard", entry.card.vcard()));
-                }
+        List<RefCard> cards = new ArrayList<>();
+        for (Entry entry : replicas) {
+            String ref = parts.pool().replicaRef(entry);
+            if (byRef.putIfAbsent(ref, entry) == null) {
+                cards.add(new RefCard(ref, entry.card.vcard()));
             }
-        } catch (JSONException error) {
-            throw new IllegalStateException(error);
         }
 
         host.io.execute(
@@ -66,19 +63,17 @@ final class DuplicateReview {
                     List<Entry> first = null;
                     Exception failure = null;
                     try {
-                        JSONArray found = ContactClient.findDuplicates(cards);
-                        for (int index = 0; found != null && index < found.length(); index++) {
-                            JSONArray refs = found.optJSONObject(index).optJSONArray("refs");
+                        for (DuplicateSet found : ContactClient.findDuplicates(cards)) {
                             List<Entry> members = new ArrayList<>();
-                            for (int at = 0; refs != null && at < refs.length(); at++) {
-                                Entry entry = byRef.get(refs.optString(at));
+                            for (String ref : found.refs()) {
+                                Entry entry = byRef.get(ref);
                                 if (entry != null) {
                                     members.add(entry);
                                 }
                             }
                             if (members.size() >= 2
                                     && !parts.cards().isDuplicateDismissed(
-                                            group(members).optString("key"))) {
+                                            group(members).key())) {
                                 first = members;
                                 break;
                             }
@@ -112,7 +107,7 @@ final class DuplicateReview {
      * Each card is a tappable row leaving the review for its editor.
      */
     private void review(List<Entry> members) {
-        JSONObject dup = group(members);
+        DuplicateGroup dup = group(members);
 
         LinearLayout content = new LinearLayout(host);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -158,7 +153,7 @@ final class DuplicateReview {
 
         // NOTE: Link rides as a content action; the three dialog buttons
         // are taken by Merge, Ignore and Cancel.
-        if (dup.optBoolean("linkable")) {
+        if (dup.linkable()) {
             TextView link = new TextView(host);
             link.setText(R.string.dup_link);
             link.setTextSize(14);
@@ -184,7 +179,7 @@ final class DuplicateReview {
                         .setNeutralButton(
                                 R.string.dup_ignore,
                                 (dialog, which) ->
-                                        parts.cards().dismissDuplicate(dup.optString("key")))
+                                        parts.cards().dismissDuplicate(dup.key()))
                         .setNegativeButton(android.R.string.cancel, null)
                         .show();
     }
@@ -193,17 +188,10 @@ final class DuplicateReview {
      * The group's duplicate-review facts from the bridge: its
      * dismissal key and whether Link may be offered.
      */
-    private JSONObject group(List<Entry> members) {
-        JSONArray refs = new JSONArray();
-        try {
-            for (Entry entry : members) {
-                refs.put(
-                        new JSONObject()
-                                .put("ref", parts.pool().replicaRef(entry))
-                                .put("book", entry.book.url()));
-            }
-        } catch (JSONException error) {
-            throw new IllegalStateException(error);
+    private DuplicateGroup group(List<Entry> members) {
+        List<DuplicateMember> refs = new ArrayList<>();
+        for (Entry entry : members) {
+            refs.add(new DuplicateMember(parts.pool().replicaRef(entry), entry.book.url()));
         }
         return ContactClient.duplicateGroup(refs);
     }

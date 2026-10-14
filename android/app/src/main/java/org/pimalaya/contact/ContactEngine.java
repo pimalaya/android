@@ -26,6 +26,7 @@ import org.pimalaya.client.BookCard;
 import org.pimalaya.client.BooksUpdate;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardDelta;
+import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ConflictForm;
 import org.pimalaya.client.ContactClient;
@@ -613,8 +614,8 @@ public final class ContactEngine extends PimdirEngine {
      * refresh next sync and then converges.
      */
     private JSONObject fetchedItem(String url, String handle, Card card) throws JSONException {
-        JSONObject index = ContactClient.indexCard(card.vcard());
-        String uid = index.optString("uid");
+        CardIndex index = ContactClient.indexCard(card.vcard());
+        String uid = index.uid();
 
         Map<String, String> listed = listedEtags.get(url);
         String listedEtag = listed == null ? null : listed.get(handle);
@@ -627,8 +628,8 @@ public final class ContactEngine extends PimdirEngine {
         // index is this app's projection and the summary is what any reader of
         // the store understands. Both come back from one derivation, so the
         // fetch path and the edit path cannot write different shapes.
-        item.put("summary", index.optJSONObject("summary"));
-        item.put("sortKey", index.optString("sortKey"));
+        item.put("summary", index.summary());
+        item.put("sortKey", index.sortKey());
         item.put("hash", CardStore.byteHash(card.vcard()));
         item.put("body", card.vcard());
         if (revision != null) {

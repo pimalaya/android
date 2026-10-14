@@ -68,7 +68,7 @@ final class ContactWriter {
                     return;
                 }
                 String vcard = ContactClient.applyCard(editor.edit().vcard, model);
-                String uid = editor.cardIndex(vcard).optString("uid");
+                String uid = editor.cardIndex(vcard).uid();
                 String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
                 parts.contacts().save(editor.edit().book.url(), new Card(id, null, null, vcard));
             } else if (editor.edit().resolvingConflict) {
@@ -108,7 +108,7 @@ final class ContactWriter {
             }
 
             String vcard = ContactClient.applyCard(entry.card.vcard(), model);
-            if (editor.cardIndex(vcard).optString("hash").equals(entry.hash)) {
+            if (editor.cardIndex(vcard).hash().equals(entry.hash)) {
                 continue;
             }
             engine.edit(
@@ -144,7 +144,7 @@ final class ContactWriter {
         editor.edit().mergeSurvivor = null;
 
         String vcard = ContactClient.applyCard(survivor.card.vcard(), model);
-        if (!editor.cardIndex(vcard).optString("hash").equals(survivor.hash)) {
+        if (!editor.cardIndex(vcard).hash().equals(survivor.hash)) {
             new ContactStager(parts.pimdir(), parts.clients())
                     .edit(
                             survivor.book.url(),
@@ -219,7 +219,7 @@ final class ContactWriter {
             }
         }
 
-        String uid = editor.cardIndex(vcard).optString("uid");
+        String uid = editor.cardIndex(vcard).uid();
         String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
         editor.createCopy(target, account, id, vcard);
     }

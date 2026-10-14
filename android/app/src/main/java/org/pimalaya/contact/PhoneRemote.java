@@ -25,6 +25,7 @@ import java.util.function.IntConsumer;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.client.CardIndex;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.ContactFields;
 import org.pimalaya.phone.Accounts;
@@ -301,13 +302,12 @@ final class PhoneRemote implements PhoneSpoke {
             revision = revisionOf(heldToken, dirty, version);
         }
 
-        JSONObject index = ContactClient.indexCard(body);
-        String uid = index.optString("uid");
+        CardIndex index = ContactClient.indexCard(body);
+        String uid = index.uid();
 
         JSONObject item = new JSONObject();
         item.put("handle", handle);
         item.put("linkId", uid.isEmpty() ? handle : uid);
-        item.put("meta", index.toString());
         item.put("hash", token);
         item.put("body", body);
         item.put("revision", revision);

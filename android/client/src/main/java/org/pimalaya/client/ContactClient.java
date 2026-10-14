@@ -5,7 +5,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import org.json.JSONArray;
-import org.json.JSONObject;
 
 /**
  * The contact verbs of the bridge (rs/ffi/contact.rs): the addressbook and
@@ -292,8 +291,8 @@ public class ContactClient {
      * list renders (name, first email and phone, UID) and a normalized
      * content hash for the divergence flag of linked replicas.
      */
-    public static JSONObject indexCard(String vcard) {
-        return Replies.object(Native.indexCard(vcard));
+    public static CardIndex indexCard(String vcard) {
+        return CardIndex.from(Replies.object(Native.indexCard(vcard)));
     }
 
     /**
@@ -354,21 +353,36 @@ public class ContactClient {
      * vcard}} pairs: exact normalized email, phone or full-name
      * matches, conservative on purpose.
      */
-    public static JSONArray findDuplicates(JSONArray cards) {
-        return Replies.object(Native.findDuplicates(cards.toString()))
-                .optJSONArray("groups");
+    public static List<DuplicateSet> findDuplicates(List<RefCard> cards) {
+        JSONArray input = new JSONArray();
+        for (RefCard card : cards) {
+            input.put(card.toJson());
+        }
+        JSONArray groups =
+                Replies.object(Native.findDuplicates(input.toString())).optJSONArray("groups");
+
+        List<DuplicateSet> sets = new ArrayList<>(groups == null ? 0 : groups.length());
+        for (int index = 0; groups != null && index < groups.length(); index++) {
+            sets.add(DuplicateSet.from(Json.object(groups, index)));
+        }
+        return sets;
     }
 
     /**
      * The ordered type-set vocabulary the edit form's spinners address
-     * for the kind ({@code phone}, {@code email}, {@code address},
-     * {@code relation}, {@code gender}): each position's vCard TYPE set
-     * (a one-element list of the sex code for {@code gender}), in the
+     * for the kind: each position's vCard TYPE set
+     * (a one-element list of the sex code for {@link TypeKind#GENDER}), in the
      * order the Android string-arrays mirror. The Rust side owns the
      * order; a test pins the arrays to it.
      */
-    public static JSONArray cardTypeOrder(String kind) {
-        return Replies.object(Native.cardTypeOrder(kind)).optJSONArray("order");
+    public static List<List<String>> cardTypeOrder(TypeKind kind) {
+        JSONArray order = Replies.object(Native.cardTypeOrder(kind.wire())).optJSONArray("order");
+
+        List<List<String>> sets = new ArrayList<>(order == null ? 0 : order.length());
+        for (int index = 0; order != null && index < order.length(); index++) {
+            sets.add(List.copyOf(Json.strings(order.optJSONArray(index))));
+        }
+        return sets;
     }
 
     /**
@@ -434,18 +448,27 @@ public class ContactClient {
     }
 
     /**
-     * Groups the replica pool ({@code {replicas, links, detached}})
-     * into merged contacts, the groups sorted by primary display name.
+     * Groups the replica pool into merged contacts, the groups sorted by
+     * primary display name.
      */
-    public static JSONObject groupContacts(JSONObject input) {
-        return Replies.object(Native.groupContacts(input.toString()));
+    public static List<ContactGroup> groupContacts(ReplicaPool pool) {
+        JSONArray groups =
+                Replies.object(Native.groupContacts(pool.toJson().toString()))
+                        .optJSONArray("groups");
+
+        List<ContactGroup> grouped = new ArrayList<>(groups == null ? 0 : groups.length());
+        for (int index = 0; groups != null && index < groups.length(); index++) {
+            grouped.add(ContactGroup.from(Json.object(groups, index)));
+        }
+        return grouped;
     }
 
-    /**
-     * The duplicate review's group facts ({@code {key, linkable}})
-     * from its {@code {ref, book}} members.
-     */
-    public static JSONObject duplicateGroup(JSONArray members) {
-        return Replies.object(Native.duplicateGroup(members.toString()));
+    /** The duplicate review's group facts from its members. */
+    public static DuplicateGroup duplicateGroup(List<DuplicateMember> members) {
+        JSONArray input = new JSONArray();
+        for (DuplicateMember member : members) {
+            input.put(member.toJson());
+        }
+        return DuplicateGroup.from(Replies.object(Native.duplicateGroup(input.toString())));
     }
 }
