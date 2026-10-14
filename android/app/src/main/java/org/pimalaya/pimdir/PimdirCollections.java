@@ -4,10 +4,10 @@ import android.content.Context;
 import android.database.Cursor;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
-import org.pimalaya.MailStore;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.PimdirSql;
+import org.pimalaya.mail.MailStore;
 
 import java.util.ArrayList;
 import java.util.Comparator;

@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
 import org.pimalaya.contact.Group;
+import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirSummary;
 
@@ -102,7 +103,7 @@ public final class LinkedSection {
     }
 
     /** {@link #dialog(ItemLinks.Endpoint, String)}, running {@code closed} once it goes. */
-    void dialog(ItemLinks.Endpoint self, String title, Runnable closed) {
+    public void dialog(ItemLinks.Endpoint self, String title, Runnable closed) {
         if (self == null) {
             return;
         }

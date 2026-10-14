@@ -5,8 +5,8 @@ import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONObject;
-import org.pimalaya.MailStore;
 import org.pimalaya.client.PimdirSql;
+import org.pimalaya.mail.MailStore;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

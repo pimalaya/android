@@ -6,6 +6,9 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
+import org.pimalaya.mail.MailStep;
+import org.pimalaya.mail.MailStore;
+import org.pimalaya.mail.MailWindow;
 import org.pimalaya.pimdir.PimdirSummary;
 
 import java.time.ZonedDateTime;

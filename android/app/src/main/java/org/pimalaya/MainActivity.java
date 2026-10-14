@@ -67,6 +67,18 @@ import org.pimalaya.contact.VcfTransfer;
 import org.pimalaya.file.FileActions;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.file.FilesList;
+import org.pimalaya.mail.MailBodies;
+import org.pimalaya.mail.MailEngine;
+import org.pimalaya.mail.MailFill;
+import org.pimalaya.mail.MailList;
+import org.pimalaya.mail.MailOffline;
+import org.pimalaya.mail.MailOwed;
+import org.pimalaya.mail.MailPool;
+import org.pimalaya.mail.MailStore;
+import org.pimalaya.mail.MailTally;
+import org.pimalaya.mail.MailWindow;
+import org.pimalaya.mail.MessageCompose;
+import org.pimalaya.mail.MessageView;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.CacheSweep;
@@ -113,10 +125,10 @@ public class MainActivity extends Activity {
     public static final int PANEL_CONTACT = 1;
     public static final int PANEL_ADVANCED = 2;
     public static final int PANEL_SOURCE = 3;
-    static final int PANEL_MAIL = 4;
+    public static final int PANEL_MAIL = 4;
     public static final int PANEL_CALENDAR = 5;
-    static final int PANEL_COMPOSE = 6;
-    static final int PANEL_MESSAGE = 7;
+    public static final int PANEL_COMPOSE = 6;
+    public static final int PANEL_MESSAGE = 7;
     public static final int PANEL_EVENT_VIEW = 8;
     public static final int PANEL_FILES = 9;
     private static final int PANEL_AUTH = 20;
@@ -173,7 +185,7 @@ public class MainActivity extends Activity {
      * it writes to the store it writes under {@link PimdirEngine#STORE},
      * the store keeping one writer.
      */
-    final ExecutorService interactive = Executors.newSingleThreadExecutor();
+    public final ExecutorService interactive = Executors.newSingleThreadExecutor();
 
     public final Handler main = new Handler(Looper.getMainLooper());
     public final Ui ui = new Ui(this);
@@ -229,7 +241,7 @@ public class MainActivity extends Activity {
     /** The mail side of the store, and the merged list over it. */
     public MailStore mail;
 
-    MailList mailList;
+    public MailList mailList;
 
     /** The file side of the store: attachments and the folders they are saved into. */
     public FileStore files;
@@ -240,7 +252,7 @@ public class MainActivity extends Activity {
     public FileActions fileActions;
 
     /** References between items, and the Linked card every item page shows. */
-    ItemLinks links;
+    public ItemLinks links;
 
     public LinkedSection linked;
 
@@ -251,7 +263,7 @@ public class MainActivity extends Activity {
     public MessageView messageView;
 
     /** The composer the mail add button opens. */
-    MessageCompose compose;
+    public MessageCompose compose;
 
     /** The connection wizard and its OAuth grants (see onCreate wiring). */
     private OnboardingFlow onboarding;
@@ -1840,7 +1852,7 @@ public class MainActivity extends Activity {
      * Whether the sync is held, by a pass of the app's or a background run:
      * a step asked for now would do nothing.
      */
-    boolean syncHeld() {
+    public boolean syncHeld() {
         return syncing || BackgroundJob.running;
     }
 
@@ -1910,7 +1922,7 @@ public class MainActivity extends Activity {
      * role's mailboxes of the shown accounts alone, ticked or not, as the
      * list shows them ({@link MailList#narrowed}).
      */
-    void syncMail(String role) {
+    public void syncMail(String role) {
         if (syncing) {
             return;
         }
@@ -1974,12 +1986,12 @@ public class MainActivity extends Activity {
     }
 
     /** Opens one account's mail connection ({@link RemotePass#openMail}). */
-    MailSession openMail(AccountEntry account) {
+    public MailSession openMail(AccountEntry account) {
         return remote.openMail(account);
     }
 
     /** The stored accounts connected for one domain. */
-    List<AccountEntry> accountsFor(PimDomain domain) {
+    public List<AccountEntry> accountsFor(PimDomain domain) {
         return remote.accountsFor(domain);
     }
 
@@ -1995,7 +2007,7 @@ public class MainActivity extends Activity {
      * <p>Which is what every action in the reader and the composer needs.
      * Staging is a disk write, and the push it derives is the next sync's.
      */
-    MailEngine mailEngine(String email) {
+    public MailEngine mailEngine(String email) {
         return new MailEngine(pimdir, client, null, accountIdOf(email));
     }
 
@@ -2627,7 +2639,7 @@ public class MainActivity extends Activity {
     }
 
     /** Whether a network is there at all. */
-    boolean online() {
+    public boolean online() {
         android.net.ConnectivityManager connectivity =
                 getSystemService(android.net.ConnectivityManager.class);
         return connectivity != null && connectivity.getActiveNetwork() != null;
@@ -2638,7 +2650,7 @@ public class MainActivity extends Activity {
      * mail pass, step, fill or body download runs on. Opening one message
      * is an explicit act and fetches on any network ({@link #online}).
      */
-    boolean wifi() {
+    public boolean wifi() {
         return wifi(this);
     }
 
@@ -2724,7 +2736,7 @@ public class MainActivity extends Activity {
      * alone, any other account's mailbox by mailbox. Then the list is read
      * again and the bodies the steps leave to download are planned.
      */
-    void loadMore(List<MailList.Step> steps) {
+    public void loadMore(List<MailList.Step> steps) {
         if (syncing || !wifi()) {
             return;
         }
@@ -2786,7 +2798,7 @@ public class MainActivity extends Activity {
      * down while a background run holds the sync lock. The list is read
      * again and {@code done} runs on the main thread.
      */
-    void releaseWindow(List<String> emails, String date, Runnable done) {
+    public void releaseWindow(List<String> emails, String date, Runnable done) {
         io.execute(
                 () -> {
                     replanBodies = true;
@@ -3862,7 +3874,7 @@ public class MainActivity extends Activity {
     }
 
     /** The mail item's unread count, hidden at zero. */
-    void showMailBadge(int unread) {
+    public void showMailBadge(int unread) {
         TextView badge = findViewById(R.id.nav_mail_badge);
         badge.setText(unread > 99 ? "99+" : String.valueOf(unread));
         badge.setVisibility(unread > 0 ? View.VISIBLE : View.GONE);
@@ -3876,7 +3888,7 @@ public class MainActivity extends Activity {
     }
 
     /** The composer's send button, inert while the message is written out. */
-    void setSending(boolean sending) {
+    public void setSending(boolean sending) {
         View send = findViewById(R.id.bar_send);
         send.setEnabled(!sending);
         send.setAlpha(sending ? 0.4f : 1f);
@@ -4623,7 +4635,7 @@ public class MainActivity extends Activity {
     }
 
     /** Resolves a theme colour attribute to an ARGB int. */
-    int resolveColor(int attr) {
+    public int resolveColor(int attr) {
         return ui.resolveColor(attr);
     }
 

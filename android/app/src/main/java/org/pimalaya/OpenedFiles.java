@@ -141,7 +141,7 @@ public final class OpenedFiles extends ContentProvider {
     }
 
     /** Where the bridge writes one attachment out of its message. */
-    static File partFile(Context context, long seq) {
+    public static File partFile(Context context, long seq) {
         File parts = new File(new File(context.getCacheDir(), DIRECTORY), "parts");
         if (!parts.isDirectory()) {
             parts.mkdirs();

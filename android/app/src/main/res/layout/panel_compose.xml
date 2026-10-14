@@ -65,7 +65,7 @@
                     style="@style/ComposeLabel"
                     android:text="@string/compose_to" />
 
-                <org.pimalaya.RecipientField
+                <org.pimalaya.mail.RecipientField
                     android:id="@+id/compose_to"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -98,7 +98,7 @@
                     style="@style/ComposeLabel"
                     android:text="@string/compose_cc" />
 
-                <org.pimalaya.RecipientField
+                <org.pimalaya.mail.RecipientField
                     android:id="@+id/compose_cc"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
@@ -119,7 +119,7 @@
                     style="@style/ComposeLabel"
                     android:text="@string/compose_bcc" />
 
-                <org.pimalaya.RecipientField
+                <org.pimalaya.mail.RecipientField
                     android:id="@+id/compose_bcc"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"

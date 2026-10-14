@@ -14,9 +14,9 @@ import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.pimalaya.MailStore;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.contact.CardStore;
+import org.pimalaya.mail.MailStore;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 

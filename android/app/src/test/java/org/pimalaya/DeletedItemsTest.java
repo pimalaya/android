@@ -23,6 +23,8 @@ import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.OfflineEngine;
 import org.pimalaya.contact.PimdirContacts;
+import org.pimalaya.mail.MailEngine;
+import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.DeletedItems;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirBlobs;

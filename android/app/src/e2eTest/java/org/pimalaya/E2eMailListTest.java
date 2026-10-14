@@ -7,6 +7,8 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 import org.pimalaya.client.MessageBody;
+import org.pimalaya.mail.MailEngine;
+import org.pimalaya.mail.MailStore;
 
 import java.nio.charset.StandardCharsets;
 import java.time.ZonedDateTime;

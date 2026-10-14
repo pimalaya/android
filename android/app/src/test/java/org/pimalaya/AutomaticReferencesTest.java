@@ -17,6 +17,7 @@ import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.file.FileStore;
+import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;

@@ -36,7 +36,7 @@ public final class Dates {
      * Yesterday at 08:00 the next morning, and one from 00:30 reads
      * Today however close to midnight it landed.
      */
-    static String day(Context context, long stamp) {
+    public static String day(Context context, long stamp) {
         if (stamp <= 0) {
             return "";
         }

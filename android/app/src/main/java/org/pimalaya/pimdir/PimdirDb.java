@@ -7,9 +7,9 @@ import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import io.requery.android.database.sqlite.SQLiteOpenHelper;
-import org.pimalaya.MailStore;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.file.FileStore;
+import org.pimalaya.mail.MailStore;
 
 import java.io.File;
 import java.util.ArrayList;

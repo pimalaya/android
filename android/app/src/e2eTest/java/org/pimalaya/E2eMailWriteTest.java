@@ -7,6 +7,8 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
+import org.pimalaya.mail.MailEngine;
+import org.pimalaya.mail.MailStore;
 
 import java.util.List;
 

@@ -8,9 +8,9 @@ import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.MailEngine;
-import org.pimalaya.MailStore;
 import org.pimalaya.client.PimdirSql;
+import org.pimalaya.mail.MailEngine;
+import org.pimalaya.mail.MailStore;
 import org.pimalaya.sync.PimdirEngine;
 
 import java.util.ArrayList;

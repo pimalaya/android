@@ -10,6 +10,7 @@ import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.pimalaya.mail.MailOffline;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;

@@ -20,6 +20,7 @@ import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.OfflineEngine;
+import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;

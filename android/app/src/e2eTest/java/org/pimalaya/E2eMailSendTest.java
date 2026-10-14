@@ -7,6 +7,8 @@ import static org.junit.Assert.assertTrue;
 
 import org.json.JSONObject;
 import org.junit.Test;
+import org.pimalaya.mail.MailStore;
+import org.pimalaya.mail.MailSubmit;
 import org.pimalaya.sync.RemotePass;
 import org.robolectric.RuntimeEnvironment;
 
