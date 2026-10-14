@@ -8,15 +8,11 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * The neutral field model of one card, both ways across the bridge
- * (rs/contact/fields.rs {@code ContactFields} 52): what a vCard projects
- * to, what the phone rows and the edit form map, and what applies back
- * onto a vCard.
+ * The neutral field model of one card, both ways across the bridge.
  *
- * <p>A null single-valued field is absent (Rust {@code None}); an empty
- * string is present and empty ({@code Some("")}), which the phone mapping
- * writes on purpose. The lists are never null, empty when the card has
- * none.
+ * <p>Mirrors rs/contact/fields.rs {@code ContactFields} 52. A null field is
+ * absent ({@code None}), an empty string present ({@code Some("")}, which
+ * the phone mapping writes on purpose). Lists are never null.
  *
  * @param addresses the ADR entries
  * @param anniversary the first full ANNIVERSARY, as {@code yyyy-mm-dd}
@@ -59,28 +55,46 @@ public record ContactFields(
         String uid,
         List<String> websites) {
     /**
-     * A field model under construction, its lists mutable: what the phone
-     * mapping fills, field by field, and the edit form's working copy.
+     * A mutable field model: the phone mapping's and the edit form's copy.
      */
     public static final class Builder {
+        /** The ADR entries. */
         public List<ContactAddress> addresses = new ArrayList<>();
+        /** The first full ANNIVERSARY, as {@code yyyy-mm-dd}. */
         public String anniversary;
+        /** The first full BDAY, as {@code yyyy-mm-dd}. */
         public String birthday;
+        /** The CATEGORIES values, projected but never applied. */
         public List<String> categories = new ArrayList<>();
+        /** The first FN. */
         public String displayName;
+        /** The EMAIL entries. */
         public List<ContactEmail> emails = new ArrayList<>();
+        /** The first GENDER. */
         public ContactGender gender;
+        /** The IMPP URIs. */
         public List<String> impps = new ArrayList<>();
+        /** The LANG tags. */
         public List<String> languages = new ArrayList<>();
+        /** The first N. */
         public ContactName name;
+        /** The NICKNAME values, flattened. */
         public List<String> nicknames = new ArrayList<>();
+        /** The NOTE values. */
         public List<String> notes = new ArrayList<>();
+        /** The first ORG. */
         public ContactOrganization organization;
+        /** The TEL entries. */
         public List<ContactPhone> phones = new ArrayList<>();
+        /** The RELATED entries. */
         public List<ContactRelation> relations = new ArrayList<>();
+        /** The first ROLE. */
         public String role;
+        /** The first TITLE. */
         public String title;
+        /** The first UID, projected but never applied. */
         public String uid;
+        /** The URL values. */
         public List<String> websites = new ArrayList<>();
 
         /** An empty model: every field absent, every list empty. */
@@ -109,6 +123,7 @@ public record ContactFields(
             websites = new ArrayList<>(fields.websites);
         }
 
+        /** The immutable model, its lists copied. */
         public ContactFields build() {
             return new ContactFields(
                     List.copyOf(addresses),
@@ -134,8 +149,9 @@ public record ContactFields(
     }
 
     /**
-     * Parses a field model the bridge answered: a projection, or a merge's
-     * prefill. A key left out reads as absent, a list left out as empty.
+     * Parses a field model the bridge answered: a projection or a prefill.
+     *
+     * <p>A key left out reads as absent, a list left out as empty.
      */
     static ContactFields from(JSONObject model) {
         JSONObject gender = model.optJSONObject("gender");
@@ -163,7 +179,7 @@ public record ContactFields(
                 List.copyOf(Json.strings(model.optJSONArray("websites"))));
     }
 
-    /** The model on the wire: an absent field is an absent key, every list written. */
+    /** The model on the wire: absent field, absent key; every list written. */
     JSONObject toJson() {
         try {
             JSONArray addresses = new JSONArray();

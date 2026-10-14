@@ -14,9 +14,10 @@ public final class Background {
     }
 
     /**
-     * Runs work on the executor; done or failed run on the main thread
-     * through postAlive, dropped once destroyed. The executor is the
-     * caller's: this owns none.
+     * Runs work on the caller's executor; outcomes land through postAlive.
+     *
+     * <p>Done or failed run on the main thread, dropped once destroyed. This
+     * owns no executor.
      */
     static <T> void run(
             Host host,

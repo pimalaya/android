@@ -26,23 +26,9 @@ import java.util.regex.Pattern;
 /**
  * The pimdir store's database, on the SQLite the app bundles.
  *
- * <p>The schema is not written here: it comes from io-pimdir over JNI
- * ({@link PimdirSql}), so the app runs the specification's bytes rather than a
- * transcription that would drift from it. What this class owns is the Android
- * side of the contract, which the crate deliberately does not: where the file
- * lives, when it is created, and the {@code objects/} directory beside it.
- *
- * <p>The SQLite is bundled ({@code io.requery.android.database.sqlite}, the
- * platform's binding over a newer engine): the schema needs 3.37 (STRICT
- * tables), which the platform ships only from Android 14. io-pimdir is taken
- * without its {@code client} feature on purpose: compiling rusqlite in as well
- * would put a second engine in every ABI of a binary whose first design goal
- * is to be small.
- *
- * <p>One store holds every account and every domain: {@code collections.kind}
- * carries the media type ({@code message/rfc822}, {@code text/vcard},
- * {@code text/calendar}) and {@code collections.account} groups by account, so
- * the merged view's two filter axes are columns rather than three databases.
+ * <p>Schema from io-pimdir over JNI ({@link PimdirSql}), never transcribed.
+ * Bundled SQLite for STRICT tables (3.37, platform only from Android 14). One
+ * store for every account and kind.
  */
 public final class PimdirDb extends SQLiteOpenHelper {
     /** The store directory under the app's private files. */
@@ -55,12 +41,13 @@ public final class PimdirDb extends SQLiteOpenHelper {
     /** The application context, for what a driver keeps beside the store. */
     private final Context context;
 
-    /** The objects deleted in a transaction whose blobs wait for it to commit. */
+    /** Objects deleted in a transaction, their blobs awaiting its commit. */
     final Set<String> collected = ConcurrentHashMap.newKeySet();
 
     /**
-     * Bodies filed in the blob store ahead of the write naming them, by how
-     * many such writes are under way ({@link PimdirItems#pin}).
+     * Bodies filed ahead of the write naming them, by writes under way.
+     *
+     * <p>See {@link PimdirItems#pin}.
      */
     final Map<String, Integer> pinned = new HashMap<>();
 
@@ -68,16 +55,14 @@ public final class PimdirDb extends SQLiteOpenHelper {
     private final Locks locks = new Locks();
 
     /**
-     * The per-domain databases this store replaced.
+     * The per-domain databases this store replaced, deleted on open.
      *
-     * <p>They are deleted rather than left alone because they are pure caches of
-     * a read-only sync: nothing in them is unrecoverable, and an install that
-     * has been through the migration would otherwise carry a mail spine and a
-     * calendar mirror that no code opens again. The contacts database survives,
-     * since it still holds the app's own state about its books.
+     * <p>Pure caches of a read-only sync, opened by no code any more. The
+     * contacts database survives: it holds the app's own book state.
      */
     private static final String[] SUPERSEDED = {"events.db", "mail.db"};
 
+    /** Opens the app's store, creating or migrating it as needed. */
     public PimdirDb(Context context) {
         super(context, new File(storeDir(context), DATABASE).getAbsolutePath(), null,
                 PimdirSql.version());
@@ -90,7 +75,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
         }
     }
 
-    /** The store root: {@code <files>/pimdir/}, holding the db and the blobs. */
+    /** The store root, {@code <files>/pimdir/}: the db and the blobs. */
     static File storeDir(Context context) {
         File dir = new File(context.getFilesDir(), DIRECTORY);
         if (!dir.exists() && !dir.mkdirs()) {
@@ -100,8 +85,10 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * The application context the store was opened in, for the settings a
-     * driver reads beside it (an account's mail bound, {@link MailScope}).
+     * The application context the store was opened in.
+     *
+     * <p>For the settings a driver reads beside it (an account's mail bound,
+     * {@code MailScope}).
      */
     public Context context() {
         return context;
@@ -128,13 +115,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * Runs every canonical migration above version {@code from}, in order,
-     * stamping {@code store_meta} with each version reached (STORAGE §6), the
-     * way io-pimdir's own runner does. The helper wraps the whole run in one
-     * transaction and sets {@code user_version} once it commits.
+     * Runs every canonical migration above {@code from}, in order.
      *
-     * <p>Migrated rather than recreated: the store holds what only it holds,
-     * staged edits and the outbox, which a recreate would lose.
+     * <p>Stamps {@code store_meta} per version (STORAGE §6), as io-pimdir does;
+     * the helper sets {@code user_version} on commit. Migrated, never
+     * recreated: staged edits and the outbox live only here.
      */
     private static void migrate(SQLiteDatabase db, int from) {
         String[] migrations = PimdirSql.migrations();
@@ -167,8 +152,8 @@ public final class PimdirDb extends SQLiteOpenHelper {
 
     @Override
     public void onConfigure(SQLiteDatabase db) {
-        // Foreign keys are off by default in SQLite and the schema leans on
-        // them: bindings cascade with their item, items with their collection.
+        // NOTE: SQLite leaves foreign keys off and the schema's cascades
+        // (bindings with items, items with collections) rely on them.
         db.setForeignKeyConstraintsEnabled(true);
         db.enableWriteAheadLogging();
         // NOTE: a page of mail runs a dozen statements per message, the
@@ -183,22 +168,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * Reconciles the store's shape with the canonical schema's, for a store
-     * already created at version 1 (SPEC.md §6, the draft allowance).
+     * Reconciles a version-1 store's shape with the canonical schema's.
      *
-     * <p>While the spec is a draft, version 1 is not frozen: a schema change may
-     * be folded into the initial migration rather than added as version 2. Such
-     * a store is not detectably out of date, its {@code user_version} already
-     * matching, so {@link #onUpgrade} never fires and the drift would surface
-     * later as a query error. §6 asks an implementation to reconcile the shape
-     * on open or refuse the store; this reconciles, which is what io-pimdir's
-     * own client does.
-     *
-     * <p>Read from the canonical DDL rather than from a transcribed list of
-     * folded columns, which is the whole reason the schema crosses the JNI
-     * boundary ({@link PimdirSql}): the crate's list lives behind its
-     * {@code client} feature, and a copy of it here goes stale the first time
-     * a draft folds a column in or back out, with nothing to notice.
+     * <p>A draft folds changes into version 1 (SPEC.md §6) unseen by {@link
+     * #onUpgrade}; reconciled as io-pimdir's client does, from the canonical
+     * DDL.
      */
     private static void reconcileDraftShape(SQLiteDatabase db, File blobs) {
         rebuildCollections(db);
@@ -206,10 +180,8 @@ public final class PimdirDb extends SQLiteOpenHelper {
         Set<String> mail = columnsOf(db, "mail_summary");
         boolean invitations = !mail.isEmpty() && !mail.contains("invitation");
 
-        // The tables first, columns and all: an index and a trigger name the
-        // columns they read, so creating one over a table that has not been
-        // widened yet fails on a column the schema declares and the store does
-        // not hold yet.
+        // NOTE: tables are widened first: an index or trigger over a column
+        // the store does not hold yet fails to create.
         for (String statement : PimdirSql.schema()) {
             if (statement.trim().toUpperCase().startsWith("CREATE TABLE")
                     && !existing.containsKey(declaredName(statement))) {
@@ -217,10 +189,8 @@ public final class PimdirDb extends SQLiteOpenHelper {
             }
         }
 
-        // A table a later draft folded out (the probes of SYNC §3, before
-        // every member arrived named) goes, its rows being what the next
-        // listing restates. The platform's own tables are not the schema's
-        // to judge.
+        // NOTE: a table a later draft folded out (SYNC §3's probes) goes, the
+        // next listing restating its rows; platform tables are left alone.
         Map<String, Map<String, String>> canonical = canonicalColumns();
         for (Map.Entry<String, String> held : existing.entrySet()) {
             String name = held.getKey();
@@ -255,10 +225,8 @@ public final class PimdirDb extends SQLiteOpenHelper {
             }
         }
 
-        // Then what reads them. An index and a trigger hold no rows, so one
-        // whose text has moved is rebuilt rather than patched: CREATE ... IF
-        // NOT EXISTS keys on the name and would leave the old plan, or the old
-        // trigger body, in place.
+        // NOTE: a moved index or trigger is rebuilt: CREATE ... IF NOT EXISTS
+        // keys on the name and would keep the old plan or body.
         for (String statement : PimdirSql.schema()) {
             String name = declaredName(statement);
             if (name == null || statement.trim().toUpperCase().startsWith("CREATE TABLE")) {
@@ -279,9 +247,10 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * Gives the role to the attachments collections a store written before
-     * the role holds, found by the id this class files them under; once, on
-     * open, after the role's constraint takes it.
+     * Gives the attachments role to an older store's attachments collections.
+     *
+     * <p>Found by the id {@code FileStore} files them under; once, on open,
+     * after the role's constraint takes it.
      */
     private static void reconcileRoles(SQLiteDatabase db) {
         List<String> missing = new ArrayList<>();
@@ -300,6 +269,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
         }
     }
 
+    /** Gives {@code collection} the attachments role. */
     public static void setRole(SQLiteDatabase db, String collection) {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
@@ -309,13 +279,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * Rebuilds {@code collections} when the constraint its role is checked
-     * by predates the canonical one (the {@code attachments} role, §14.3),
-     * which no {@code ALTER TABLE} changes: §6's procedure, foreign keys off
-     * so the drop cascades nothing, {@code legacy_alter_table} on so the
-     * rename leaves the other tables' triggers alone, the rows copied, the
-     * keys checked before the commit. Its indexes and triggers go with the
-     * old table and come back with the reconcile's second pass.
+     * Rebuilds {@code collections} whose role check predates §14.3's.
+     *
+     * <p>§6's procedure: foreign keys off (no cascade), {@code
+     * legacy_alter_table} on (other triggers stay), rows copied, keys checked
+     * before commit.
      */
     private static void rebuildCollections(SQLiteDatabase db) {
         String create = null;
@@ -361,11 +329,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * The references a store written before automatic references owes, once:
-     * every held message's invitation derived from its body (Annex A.1),
-     * then every rule over the whole store (§14.2), the invitation's among
-     * them. Read on {@code list_mail_page_filtered}'s keyset over every
-     * mailbox; a body the blob directory lacks leaves its row as it is.
+     * Backfills the automatic references an older store owes, once.
+     *
+     * <p>Each held message's invitation from its body (Annex A.1), then every
+     * rule store-wide (§14.2), over {@code list_mail_page_filtered}'s keyset. A
+     * body missing from the blobs leaves its row.
      */
     private static void backfillReferences(SQLiteDatabase db, File blobs) {
         List<String> mailboxes = new ArrayList<>();
@@ -414,7 +382,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
         }
     }
 
-    /** Writes one held message's summary from its body when it names an invitation. */
+    /** Restates a held message's summary from a body naming an invitation. */
     private static void restateInvitation(
             SQLiteDatabase db, PimdirBlobs blobs, String collection, String linkId, String hash) {
         try {
@@ -433,12 +401,10 @@ public final class PimdirDb extends SQLiteOpenHelper {
         }
     }
     /**
-     * Every table, index and trigger the store holds, mapping its name to the
-     * text it was created with, which is what {@code sqlite_master} keeps.
+     * Every table, index and trigger held, by name, with its creating text.
      *
-     * <p>Comparing that text against the canonical statement is what tells an
-     * index or a trigger whose shape has moved from one that has not, without
-     * a transcribed list of either.
+     * <p>Compared against the canonical statement, it tells a moved index or
+     * trigger from an unchanged one.
      */
     private static Map<String, String> heldObjects(SQLiteDatabase db) {
         Map<String, String> objects = new LinkedHashMap<>();
@@ -451,14 +417,14 @@ public final class PimdirDb extends SQLiteOpenHelper {
         return objects;
     }
 
-    /** The name a {@code CREATE} statement declares, or null for anything else. */
+    /** The name a {@code CREATE} statement declares, or null otherwise. */
     private static String declaredName(String statement) {
         String[] tokens = statement.trim().split("\\s+|\\(");
         if (tokens.length < 3 || !tokens[0].equalsIgnoreCase("CREATE")) {
             return null;
         }
 
-        // A UNIQUE index names itself one token later than the others do.
+            // NOTE: a UNIQUE index names itself one token later.
         int kind = tokens[1].equalsIgnoreCase("UNIQUE") ? 2 : 1;
         if (tokens.length <= kind + 1) {
             return null;
@@ -479,20 +445,16 @@ public final class PimdirDb extends SQLiteOpenHelper {
         return statement.trim().toUpperCase().startsWith("CREATE TRIGGER") ? "TRIGGER" : "INDEX";
     }
 
-    /** A statement with its whitespace collapsed, for comparing two spellings. */
+    /** A statement with whitespace collapsed, to compare two spellings. */
     private static String normalized(String statement) {
         return statement.replaceAll("\\s+", " ").trim();
     }
 
     /**
-     * Every table the canonical schema declares, each mapping its column names
-     * to their declarations, in declaration order.
+     * Every canonical table's columns, name to declaration, in order.
      *
-     * <p>The parse is deliberately shallow: split the {@code CREATE TABLE}
-     * body on its top-level commas, take the first token of each part as the
-     * name and the rest as the declaration, and skip a part opening on a table
-     * constraint keyword. That is enough for a comparison against
-     * {@code PRAGMA table_info}, and stops well short of understanding SQL.
+     * <p>A shallow parse (top-level commas, first token the name, constraint
+     * parts skipped): enough to compare with {@code PRAGMA table_info}.
      */
     private static Map<String, Map<String, String>> canonicalColumns() {
         Map<String, Map<String, String>> tables = new LinkedHashMap<>();
@@ -517,7 +479,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
         return tables;
     }
 
-    /** The keywords a {@code CREATE TABLE} part opens on when it names no column. */
+    /** Keywords a {@code CREATE TABLE} part opens on when naming no column. */
     private static final Set<String> CONSTRAINTS =
             Set.of("PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "CONSTRAINT");
 
@@ -543,13 +505,10 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * Whether a column carrying this declaration can be added to a populated
-     * table: SQLite refuses one that is {@code NOT NULL} with no default,
-     * having no value to write into the rows already there.
+     * Whether a column so declared can be added to a populated table.
      *
-     * <p>Read before any {@code CHECK}: a check is an expression, and one
-     * saying {@code covered_at IS NOT NULL OR ...} constrains nothing the
-     * rows already there do not satisfy.
+     * <p>SQLite refuses {@code NOT NULL} without a default. Read before any
+     * {@code CHECK}, which may well hold for every existing row.
      */
     private static boolean addable(String declaration) {
         String upper = declaration.toUpperCase();
@@ -561,11 +520,8 @@ public final class PimdirDb extends SQLiteOpenHelper {
     /**
      * Drops a column the canonical schema no longer declares, best-effort.
      *
-     * <p>SQLite refuses to drop a column an index, a constraint or a trigger
-     * still names, so such a column is kept. That is why it is a log and not a
-     * failure: a column nothing reads and nothing writes decides nothing, and
-     * refusing to open a store over one would be a worse answer than carrying
-     * it.
+     * <p>One still named by an index, constraint or trigger is kept and logged:
+     * an unused column decides nothing, refusing the store would be worse.
      */
     private static void dropColumn(SQLiteDatabase db, String table, String column) {
         try {
@@ -576,14 +532,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * The column names the store's table actually holds; empty when there is
-     * none.
+     * The column names the store's table holds; empty when there is none.
      *
-     * <p>Read through a {@code SELECT}, not a bare {@code PRAGMA}: the reconcile
-     * runs outside a transaction, so a read may land on another of the pool's
-     * WAL connections, and only a statement that opens a read transaction
-     * notices the schema the primary connection has just changed. A bare
-     * pragma answers from the connection's cached schema.
+     * <p>Through a {@code SELECT}, not a bare {@code PRAGMA}: outside a
+     * transaction a read may hit another WAL connection, which sees the new
+     * schema only in a read transaction.
      */
     private static Set<String> columnsOf(SQLiteDatabase db, String table) {
         Set<String> columns = new LinkedHashSet<>();
@@ -620,10 +573,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * The {@code LIKE} pattern {@code search_mail} matches: the words as
-     * typed, {@code %} around them, a literal {@code %}, {@code _} or
-     * {@code \} escaped with {@code \}, as io-pimdir's own reader builds it
-     * ({@code reader::like_pattern}).
+     * The {@code LIKE} pattern {@code search_mail} matches.
+     *
+     * <p>The words with {@code %} around them, a literal {@code %}, {@code _}
+     * or {@code \} escaped with {@code \}, as io-pimdir's {@code
+     * reader::like_pattern}.
      */
     public static String likePattern(String words) {
         StringBuilder pattern = new StringBuilder("%");
@@ -639,10 +593,9 @@ public final class PimdirDb extends SQLiteOpenHelper {
     /**
      * Runs a read binding each value as its own type.
      *
-     * <p>{@code rawQuery} binds every argument as text, and the readers
-     * compare a chip against an expression with no column affinity
-     * ({@code :seen = EXISTS (...)}), where the text {@code '1'} is never the
-     * integer {@code 1}: the unread chip would match nothing.
+     * <p>{@code rawQuery} binds text, and {@code :seen = EXISTS (...)} has no
+     * affinity: {@code '1'} never equals {@code 1}, so the unread chip would
+     * match nothing.
      */
     public static Cursor typed(SQLiteDatabase db, String sql, Object[] args) {
         return db.rawQueryWithFactory(
@@ -656,14 +609,11 @@ public final class PimdirDb extends SQLiteOpenHelper {
     }
 
     /**
-     * Runs a canonical write for its effect alone, answering how many rows
-     * it changed ({@code changes()}), its {@code RETURNING} clause dropped.
+     * Runs a canonical write, {@code RETURNING} dropped; answers rows changed.
      *
-     * <p>Never read a write through a cursor: a cursor runs its statement
-     * again each time it refills its window (2 MB), skipping the rows it
-     * already handed out, so a {@code DELETE ... RETURNING} past one window
-     * deletes again from the top and its rows past the first window come
-     * back as none, or never end.
+     * <p>Never through a cursor: a refill of its 2 MB window reruns the
+     * statement, so a {@code DELETE ... RETURNING} deletes again, its later
+     * rows lost.
      */
     public static int changed(SQLiteDatabase db, PimdirSql.Bound bound) {
         String sql = RETURNING.matcher(bound.sql).replaceFirst("");

@@ -4,13 +4,13 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * The ORG of the field model (rs/contact/fields.rs
- * {@code ContactOrganization} 192). A key the model leaves out reads as
- * empty.
+ * The ORG of the field model.
+ *
+ * <p>Mirrors rs/contact/fields.rs {@code ContactOrganization} 192. A key the
+ * model leaves out reads as empty.
  *
  * @param company the organization name, the first component
- * @param department the organizational units, the other components
- *     space-joined
+ * @param department the organizational units, the other components joined
  */
 public record ContactOrganization(String company, String department) {
     static ContactOrganization from(JSONObject organization) {

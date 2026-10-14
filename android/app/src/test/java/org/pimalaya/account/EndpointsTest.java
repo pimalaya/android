@@ -14,9 +14,9 @@ import org.pimalaya.client.ServiceConfig;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Where the connection flow lets a credential go: encrypted endpoints only,
- * whatever was typed or discovered, and the user shown where it goes.
- * Robolectric because a discovered provider API names its base through the
+ * Where a credential may go: encrypted endpoints only, and shown to the user.
+ *
+ * <p>Robolectric because a discovered provider API names its base through the
  * bridge, whose library loads into the sandbox's class loader.
  */
 @RunWith(RobolectricTestRunner.class)

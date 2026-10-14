@@ -10,18 +10,11 @@ import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
 /**
- * The store's writes reaching the phone's contacts and calendars without a
- * sync: a write to a book or a calendar queues its phone pass a second
- * later, so a burst (an import, a merge, a series split) coalesces into one
- * pass per collection.
+ * The store's writes reaching the phone a second later, without a sync.
  *
- * <p>Process-wide, on a thread of its own rather than the activity's, so a
- * pass queued just before the app is left still runs. No network and no
- * report; each pass takes its collection's lock ({@link ContactEngine},
- * {@link CalendarEngine}) and never the process's sync lock ({@link Locks#takeSync}), so the
- * mirror keeps up while a background sync runs. A collection the phone does
- * not mirror has no Android account or calendar row, and its pass returns at
- * once.
+ * <p>A burst (import, merge, split) coalesces into one pass per collection, on
+ * a thread outliving the activity. A pass takes its collection's lock, never
+ * the sync lock ({@code Locks.takeSync}), so it runs during a sync.
  */
 public final class PhoneQueue {
     /** The process holding the queue, which the app starts. */
@@ -44,6 +37,11 @@ public final class PhoneQueue {
 
     private final Runnable flush = this::flush;
 
+    /**
+     * A queue posting on {@code main} and running passes on {@code runner}.
+     *
+     * <p>{@code book} and {@code calendar} run one collection's phone pass.
+     */
     public PhoneQueue(
             Handler main, Executor runner, Consumer<String> book, Consumer<String> calendar) {
         this.main = main;
@@ -69,8 +67,7 @@ public final class PhoneQueue {
     }
 
     /**
-     * The process's queue, null until the app started it, or in a context
-     * whose application holds none (an isolated test device's).
+     * The process's queue; null until started, or for an isolated test device.
      */
     private static PhoneQueue of(Context context) {
         Context app = context.getApplicationContext();
@@ -98,10 +95,7 @@ public final class PhoneQueue {
         main.postDelayed(flush, DELAY);
     }
 
-    /**
-     * Runs the pending passes. The sets drain when the runner gets to them,
-     * so a write landing while the task waits joins this round.
-     */
+    /** Runs the pending passes; a write landing meanwhile joins this round. */
     private void flush() {
         runner.execute(
                 () -> {

@@ -9,9 +9,10 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 /**
- * Which domains share one browser grant: one per API for Microsoft, whose
- * tokens name one audience, and one for all of Google, whose tokens serve
- * every API they were granted.
+ * Which domains share one browser grant.
+ *
+ * <p>One per API for Microsoft, whose tokens name one audience; one for all of
+ * Google, whose tokens serve every API granted.
  */
 public class OauthTest {
     private static final String GMAIL = "https://mail.google.com/";
@@ -70,9 +71,10 @@ public class OauthTest {
     }
 
     /**
-     * The app's own clients sign in only to their provider's hosts: a
-     * configuration naming Google's sign-in beside another IMAP host gets a
-     * generic grant, so the token the user consents to never reaches it.
+     * The app's own clients sign in only to their provider's hosts.
+     *
+     * <p>A configuration naming Google's sign-in beside another IMAP host gets
+     * a generic grant, so the consented token never reaches it.
      */
     @Test
     public void theShippedClientSignsInToItsProviderOnly() {
@@ -101,7 +103,9 @@ public class OauthTest {
                         java.util.List.of("imaps://imap.gmail.com:993")));
     }
 
-    /** A shipped client asks for its provider's scopes, nothing a configuration adds. */
+    /**
+     * A shipped client asks for its provider's scopes, nothing a config adds.
+     */
     @Test
     public void theShippedClientAsksForFixedScopes() {
         assertEquals(

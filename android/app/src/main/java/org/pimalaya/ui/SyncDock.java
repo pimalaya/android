@@ -26,31 +26,29 @@ import java.util.List;
 import org.pimalaya.R;
 
 /**
- * The sync dock, on top of the bottom navigation (activity_main.xml): what
- * a pass is on, or the mail downloading in the background, whichever list
- * is shown and however far it is scrolled, the way a music app docks its
- * player.
+ * The sync dock over the bottom navigation: the pass, or the mail fill.
  *
- * <p>It shows on the lists only, while something runs: one bar along its
- * top edge, the account over a line naming the domain and the engine's
- * step, the count of the pass's accounts. The content ends above it, so
- * the large title and the rows never move; the extended add button rises
- * by its height while it shows. A tap opens the pass's sheet: its
- * progress, a row per account and the pass's last lines, kept in memory
- * for the pass under way only.
+ * <p>Shown on lists while something runs: a bar, the account over the domain's
+ * step, the pass's account count; the add button rises over it. A tap opens the
+ * sheet (progress, a row per account, last lines, in memory for this pass).
  */
 public final class SyncDock {
     /** One account of the pass, as the sheet lists it. */
     public static final class Row {
+        /** The account's pass runs. */
         public static final int RUNNING = 0;
+        /** The account waits its turn. */
         public static final int NEXT = 1;
+        /** The account's pass is done. */
         public static final int DONE = 2;
 
+        /** The account's address. */
         public String account;
 
         /** What it is on while running; the domain or nothing otherwise. */
         public String line;
 
+        /** {@link #RUNNING}, {@link #NEXT} or {@link #DONE}. */
         public int state;
     }
 
@@ -63,19 +61,24 @@ public final class SyncDock {
         public String line;
 
         /**
-         * The bar at {@code done} of {@code total}, a total of zero running
-         * it indeterminate and one below zero hiding it.
+         * The bar at {@code done} of {@code total}.
+         *
+         * <p>A total of zero runs it indeterminate, one below zero hides it.
          */
         public int done;
 
+        /** The bar's total, beside {@link #done}. */
         public int total;
 
-        /** How far the pass is through its accounts (*1 of 2*); null for one. */
+        /**
+         * How far the pass is through its accounts (*1 of 2*); null for one.
+         */
         public String count;
 
-        /** Whether the pass downloads older mail, the glyph then standing for the spinner. */
+        /** Whether the pass downloads older mail (a glyph for the spinner). */
         public boolean download;
 
+        /** The sheet's rows, one per account. */
         public List<Row> rows = List.of();
     }
 
@@ -119,13 +122,16 @@ public final class SyncDock {
     /** The download glyph's pulse while the background download shows. */
     private ObjectAnimator pulse;
 
+    /** The dock of {@code host}'s main layout. */
     public SyncDock(Host host) {
         this.host = host;
         dock = host.findViewById(R.id.sync_dock);
         dock.setOnClickListener(view -> open());
     }
 
-    /** Says whether a list is the screen, where the dock shows (main thread). */
+    /**
+     * Says whether a list is the screen, where the dock shows (main thread).
+     */
     public void onList(boolean shown) {
         onList = shown;
         render();
@@ -144,8 +150,9 @@ public final class SyncDock {
     }
 
     /**
-     * Ends the pass, the dock then saying what downloads in the background,
-     * if anything; the sheet closes.
+     * Ends the pass; the dock then shows any background download.
+     *
+     * <p>The sheet closes.
      */
     public void synced() {
         pass = null;
@@ -156,8 +163,9 @@ public final class SyncDock {
     }
 
     /**
-     * Keeps a line of the pass for the sheet, at its time, the last
-     * {@link #LOG} only; a line repeating the last one is dropped.
+     * Keeps a line for the sheet with its time, the last {@link #LOG} only.
+     *
+     * <p>A line repeating the last one is dropped.
      */
     public void log(String line) {
         if (!log.isEmpty() && log.peekFirst()[1].equals(line)) {
@@ -188,8 +196,9 @@ public final class SyncDock {
     }
 
     /**
-     * How many bodies the background download landed of those it planned,
-     * the dock's bar while it shows, none for a plan of none.
+     * How many planned bodies the background download landed (the bar).
+     *
+     * <p>None for a plan of none.
      */
     public void filled(int landed, int planned) {
         fillLanded = landed;
@@ -199,7 +208,9 @@ public final class SyncDock {
         }
     }
 
-    /** What the dock shows now: the pass, else the background download, else null. */
+    /**
+     * What the dock shows: the pass, else the background download, else null.
+     */
     private Pass shown() {
         if (pass != null) {
             return pass;
@@ -278,9 +289,9 @@ public final class SyncDock {
     }
 
     /**
-     * Keeps the end of a list scrolled to it in sight as the dock takes its
-     * bottom: *Load more* stays just above the dock. A list at its top, or
-     * not scrolled, does not move.
+     * Keeps a list's end in sight as the dock appears: Load more stays above.
+     *
+     * <p>A list at its top, or not scrolled, does not move.
      */
     private void keepEnd() {
         ListHeader header = host.headerOf(host.screen);
@@ -312,7 +323,7 @@ public final class SyncDock {
                 });
     }
 
-    /** Raises the extended add button by the dock's height, or brings it back. */
+    /** Raises the extended add button by the dock's height, or lowers it. */
     private void rise(boolean shown) {
         View fab = host.findViewById(R.id.fab_extended);
         int by =
@@ -322,10 +333,7 @@ public final class SyncDock {
         fab.animate().translationY(shown ? -by : 0).setDuration(200);
     }
 
-    /**
-     * Pulses the download glyph while the background download shows,
-     * holding it still when the system removes animations.
-     */
+    /** Pulses the download glyph, still when the system removes animations. */
     private void pulse(boolean on) {
         ImageView glyph = dock.findViewById(R.id.sync_dock_glyph);
         boolean wanted = on && glyph.getVisibility() == View.VISIBLE;
@@ -369,10 +377,7 @@ public final class SyncDock {
         dialog.show();
     }
 
-    /**
-     * Holds the sheet's lower part to half the screen, scrolling past it,
-     * so the scrim above stays to tap.
-     */
+    /** Caps the sheet's lower half to scroll, so the scrim stays tappable. */
     private void capScroll(View scroll) {
         int most = host.getResources().getDisplayMetrics().heightPixels / 2;
         View content = ((ViewGroup) scroll).getChildAt(0);

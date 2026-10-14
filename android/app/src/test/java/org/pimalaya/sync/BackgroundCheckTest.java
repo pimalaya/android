@@ -17,9 +17,10 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * New mail notifies only once turned on, which turns background sync on
- * when it was off since the background run is what notifies; the permission
- * is asked from Android 13 on, while it is not held.
+ * New mail notifies only once turned on, turning background sync on.
+ *
+ * <p>The background run is what notifies; the permission is asked from Android
+ * 13 on, while it is not held.
  */
 @RunWith(RobolectricTestRunner.class)
 public class BackgroundCheckTest {

@@ -9,10 +9,9 @@ import java.util.Set;
 /**
  * Which accounts take part, as the drawer's account settings say.
  *
- * <p>A deactivated account syncs nothing, by any sync, and the lists and their
- * filters leave it out: it stays connected, its data stays stored, and turning
- * it back on brings both back. Kept as the deactivated set, so an account
- * connected later takes part without having to be enrolled.
+ * <p>A deactivated account syncs nothing and the lists leave it out, its data
+ * kept for when it comes back. Kept as the deactivated set, so an account
+ * connected later takes part without being enrolled.
  */
 public final class AccountActivation {
     private static final String PREFS = "accounts-deactivated";

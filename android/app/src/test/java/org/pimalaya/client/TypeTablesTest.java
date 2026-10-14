@@ -12,19 +12,11 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * Pins the edit form's type spinners to the Rust-owned ordering: each
- * Android string-array (the localized labels the user sees) must line
- * up position for position with the vCard TYPE sets project.rs maps
- * those positions to. Reordering or resizing either side without the
- * other used to mismap every type silently (a phone saved as Home when
- * the label said Work); here it fails loudly instead.
+ * Pins the edit form's type spinners to the Rust-owned ordering.
  *
- * <p>The expected label-to-type pairings below ARE the cross-language
- * contract: the base-locale label at each position and the TYPE set it
- * must mean. The test checks that the Rust ordering agrees with them
- * (a reorder or rename on the Rust side breaks it) and that the
- * {@code arrays.xml} array carries exactly those labels in that order
- * (a reorder or resize on the Android side breaks it).
+ * <p>Each string-array matches project.rs's TYPE sets by position (a mismatch
+ * saved Work as Home). The pairings below are the cross-language contract,
+ * checked against Rust and {@code arrays.xml}.
  */
 @RunWith(RobolectricTestRunner.class)
 public class TypeTablesTest {
@@ -76,7 +68,7 @@ public class TypeTablesTest {
 
     @Test
     public void genderSpinnerIsAligned() {
-        // The gender spinner carries a sex code per position, not a TYPE
+        // NOTE: the gender spinner carries a sex code per position, not a TYPE
         // list; an empty code is the unset first row.
         assertAligned(
                 R.array.gender_types,
@@ -89,10 +81,7 @@ public class TypeTablesTest {
                 pair("Unknown", "U"));
     }
 
-    /**
-     * Checks the array's labels and the Rust ordering both match the
-     * expected pairings, position for position and in count.
-     */
+    /** Checks the array's labels and the Rust ordering against the pairings. */
     private static void assertAligned(int arrayId, TypeKind kind, Pair... expected) {
         Resources resources = RuntimeEnvironment.getApplication().getResources();
         String[] labels = resources.getStringArray(arrayId);
@@ -112,9 +101,8 @@ public class TypeTablesTest {
     }
 
     private static Pair pair(String label, String... types) {
-        // The list kinds' "Other" row is the empty TYPE set (no types
-        // passed); the gender rows carry their sex code, the unset row
-        // an explicit empty code.
+        // NOTE: a list kind's "Other" row is the empty TYPE set; the gender
+        // rows carry their sex code, the unset row an empty one.
         List<String> list = new ArrayList<>();
         for (String type : types) {
             list.add(type);

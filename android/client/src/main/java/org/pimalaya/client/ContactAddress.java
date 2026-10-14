@@ -6,8 +6,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One ADR entry of the field model (rs/contact/fields.rs
- * {@code ContactAddress} 115). A key the model leaves out reads as empty.
+ * One ADR entry of the field model.
+ *
+ * <p>Mirrors rs/contact/fields.rs {@code ContactAddress} 115. A key the model
+ * leaves out reads as empty.
  *
  * @param city the locality
  * @param country the country name

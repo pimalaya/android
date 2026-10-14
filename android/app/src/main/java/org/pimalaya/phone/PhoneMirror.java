@@ -13,8 +13,8 @@ import org.pimalaya.account.PimDomain;
 /**
  * A phone app the store's items show in, and the permissions it takes.
  *
- * <p>Asked as a mirror's switch is turned on ({@link MainActivity#askMirrors}),
- * its pair in one prompt.
+ * <p>Asked, its pair in one prompt, as a mirror's switch is turned on
+ * ({@code SetupShell.askMirrors}).
  */
 public enum PhoneMirror {
     CONTACTS(
@@ -63,7 +63,7 @@ public enum PhoneMirror {
         return true;
     }
 
-    /** The permissions to ask for the wanted mirrors, those already granted left out. */
+    /** The permissions the wanted mirrors still lack. */
     public static String[] missing(Set<PhoneMirror> wanted, Predicate<String> has) {
         List<String> missing = new ArrayList<>();
         for (PhoneMirror mirror : wanted) {

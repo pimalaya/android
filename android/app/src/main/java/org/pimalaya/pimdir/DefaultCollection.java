@@ -13,12 +13,9 @@ import org.pimalaya.account.AccountActivation;
 /**
  * Which calendar or address book of an account a new event or contact goes to.
  *
- * <p>The one its source names (pimdir's {@code default} role, which the bridge
- * sets from JMAP {@code isDefault}, Graph's default calendar and contacts
- * folder, Google's primary calendar and {@code myContacts}); else the account's
- * only writable one of the kind; else the one the user set as default on the
- * filter page. The last is kept here, never written to pimdir: the store's role
- * is what a source states.
+ * <p>The source's {@code default} role, else the only writable one, else the
+ * user's choice from the filter page, kept here and never written to pimdir
+ * (the store's role is what a source states).
  */
 public final class DefaultCollection {
     private static final String PREFS = "default-collections";
@@ -34,8 +31,9 @@ public final class DefaultCollection {
     }
 
     /**
-     * The default among one account's collections of one kind, null when
-     * none is: {@code chosen} is the user's choice, null for none.
+     * The default among one account's collections of a kind, or null.
+     *
+     * <p>{@code chosen} is the user's choice, null for none.
      */
     public static PimdirCollections.Stored of(List<PimdirCollections.Stored> collections, String chosen) {
         List<PimdirCollections.Stored> writable = writable(collections);
@@ -55,7 +53,7 @@ public final class DefaultCollection {
         return null;
     }
 
-    /** The default among one account's collections of one kind, null when none is. */
+    /** The default among one account's collections of a kind, or null. */
     public static PimdirCollections.Stored of(
             Context context, String account, String kind, List<PimdirCollections.Stored> all) {
         List<PimdirCollections.Stored> own = new ArrayList<>();
@@ -68,8 +66,10 @@ public final class DefaultCollection {
     }
 
     /**
-     * Whether the user may set the collection as default: writable, among
-     * several writable ones, and of an account whose source names none.
+     * Whether the user may set the collection as default.
+     *
+     * <p>Writable, among several writable ones, of an account whose source
+     * names none.
      */
     public static boolean choosable(
             PimdirCollections.Stored collection, List<PimdirCollections.Stored> own) {
@@ -100,9 +100,10 @@ public final class DefaultCollection {
     }
 
     /**
-     * Where a new item of a kind goes: straight to the default when the list
-     * shows one account and it has one, else a pick among the writable
-     * collections of the accounts shown, the first default preselected.
+     * Where a new item of a kind goes.
+     *
+     * <p>Straight to the default when one account is shown and has one, else a
+     * pick among the shown accounts' writable collections, first default set.
      */
     public static final class Choice {
         /** Where it goes without asking, null when the user is asked. */
@@ -125,10 +126,10 @@ public final class DefaultCollection {
     }
 
     /**
-     * The choice for a new item among {@code collections}, every account's of
-     * one kind: the accounts in view are those of which {@code shown} lets a
-     * collection through, else, when it lets none, every account that is on.
-     * A single writable collection on offer is taken without asking.
+     * The choice for a new item among every account's {@code collections}.
+     *
+     * <p>Accounts in view: those {@code shown} lets a collection of through,
+     * else every account that is on. A lone writable offer is taken directly.
      */
     public static Choice choice(
             Context context,
@@ -171,10 +172,7 @@ public final class DefaultCollection {
         return new Choice(null, offered, offered.indexOf(preselected));
     }
 
-    /**
-     * The default collection of every account a domain's filter shows: what
-     * the Default chip narrows a list to ({@link DefaultCollection}).
-     */
+    /** Each shown account's default collection, kept by the Default chip. */
     public static java.util.Set<String> shown(
             Context context, String kind, List<PimdirCollections.Stored> collections) {
         java.util.Set<String> emails = new java.util.LinkedHashSet<>();

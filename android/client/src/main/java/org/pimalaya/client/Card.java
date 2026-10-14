@@ -7,22 +7,20 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * One vCard of an addressbook, as stored on the server (rs/contact.rs
- * {@code Card} 68).
+ * One vCard of an addressbook, as stored on the server.
+ *
+ * <p>Mirrors rs/contact.rs {@code Card} 68.
  *
  * @param id display identifier (resource name with any .vcf stripped)
- * @param uri resource name exactly as the server returned it, the
- *     addressing key of updates and deletes (servers need not suffix
- *     .vcf); null until the card has been fetched from the server
+ * @param uri resource name as the server returned it, the key of updates and
+ *     deletes (no .vcf suffix assumed); null until fetched from the server
  * @param etag entity tag guarding concurrent updates, or null when unknown
  * @param vcard raw vCard text
- * @param books ids of the addressbooks the card is a member of, on the
- *     backends whose cards are account-level with m:n memberships (JMAP
- *     AddressBook ids, Google contact group ids); empty on the backends
- *     whose cards live in the one collection they were listed from
- *     (CardDAV, Graph)
+ * @param books the card's addressbook ids on account-level backends (JMAP
+ *     AddressBook, Google contact group); empty on CardDAV and Graph
  */
 public record Card(String id, String uri, String etag, String vcard, List<String> books) {
+    /** A card in no account-level book. */
     public Card(String id, String uri, String etag, String vcard) {
         this(id, uri, etag, vcard, Collections.emptyList());
     }

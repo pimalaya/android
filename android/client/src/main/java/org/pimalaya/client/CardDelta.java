@@ -6,16 +6,16 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * Incremental changes of one collection since a sync cursor: the cards
- * changed (spine-only or full, per backend), the resource names
- * removed, the next cursor to checkpoint, and whether the round listed
- * the complete member set (an initial round, or an expired cursor the
- * bridge re-ran as one) (rs/contact.rs {@code CardDelta} 89).
+ * Incremental changes of one collection since a sync cursor.
  *
- * @param changed cards created or updated since the cursor
+ * <p>Mirrors rs/contact.rs {@code CardDelta} 89.
+ *
+ * @param changed cards created or updated since the cursor, spine-only or
+ *     full per backend
  * @param vanished resource names removed since the cursor
  * @param token the next checkpoint cursor, null when the server sent none
- * @param complete true when the round listed the complete member set
+ * @param complete true when the round listed the whole member set: an
+ *     initial round, or an expired cursor the bridge re-ran as one
  */
 public record CardDelta(
         List<Card> changed, List<String> vanished, String token, boolean complete) {

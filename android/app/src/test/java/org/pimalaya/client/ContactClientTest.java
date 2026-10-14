@@ -16,18 +16,11 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Pins the contact network records: each reply parsed to the values the
- * hand parsers the records replaced produced (literals captured on that
- * code), every record mirroring its reply, and the push changes written as
- * the JSON the engine used to build.
+ * Pins the contact network records against literals captured on old code.
  *
- * <p>The network verbs cannot run here: the bridge refuses to send
- * credentials over the plain {@code http} a loopback server speaks, and the
- * transport takes TLS from the platform trust store. Their records are
- * pinned on literal replies shaped as the Rust structs serialize them
- * (rs/contact.rs 45, 68, 89; rs/contact/push.rs 13, 37), and the push
- * inputs on a CardDAV account, which the bridge reads and then refuses
- * before any request.
+ * <p>Replies parsed and mirrored, push changes as the engine's old JSON.
+ * Network verbs refuse plain http: literals (rs/contact.rs 45, 68, 89;
+ * rs/contact/push.rs 13, 37), push inputs on a CardDAV account.
  */
 @RunWith(RobolectricTestRunner.class)
 public class ContactClientTest {

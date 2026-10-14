@@ -9,25 +9,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * The three kinds of data the app manages, and which discovered services
- * serve them.
+ * The three kinds of data the app manages, and the services serving them.
  *
- * <p>A domain is an axis of an account, not an account. One address is one
- * identity that covers some of these, each with its own server
- * ({@link AccountConnection}) and signing in with one of the account's
- * credentials ({@link AccountCredential}); the connection flow runs once per
- * domain, and all of them land in the one account. Splitting instead would
- * fragment an identity at the front door: every cross-domain question
- * afterwards has to put it back together, an expired token becomes three
- * repairs, and connecting calendars later means a second account rather than a
- * step.
- *
- * <p>JMAP is what settles it. RFC 8620 has one session resource behind one
- * authentication, and each account in it advertises which domains it serves
- * through capability URNs. Three accounts there would be three sessions to the
- * same URL with the same token, so it is offered under every domain it has a
- * capability for, and once signed in the session's capabilities decide which of
- * the ticked domains the one account syncs ({@link #servedByJmap}).
+ * <p>A domain is an axis of one account, not an account: splitting would make
+ * an expired token three repairs. JMAP (RFC 8620) is one session serving the
+ * domains its capabilities name ({@link #servedByJmap}).
  */
 public enum PimDomain {
     MAIL("mail", R.string.domain_mail, R.drawable.ic_domain_mail, "urn:ietf:params:jmap:mail"),
@@ -128,10 +114,10 @@ public enum PimDomain {
     }
 
     /**
-     * The domains a JMAP session serves, by the capability URNs it advertises
-     * with an account to use them in: mail only with submission beside it,
-     * since a mail account that cannot answer is not what connecting mail
-     * asks for.
+     * The domains a JMAP session serves, by its advertised capability URNs.
+     *
+     * <p>Mail only with submission beside it: a mail account that cannot answer
+     * is not what connecting mail asks for.
      */
     public static Set<PimDomain> servedByJmap(Set<String> capabilities) {
         Set<PimDomain> served = new LinkedHashSet<>();
@@ -145,12 +131,11 @@ public enum PimDomain {
     }
 
     /**
-     * Where a discovered service ranks for this domain, lower first, by what
-     * the app can do over it here: JMAP first for mail, which it reads and
-     * sends, and for contacts; CalDAV over JMAP for calendars, since whether a
-     * JMAP session serves calendars is known only once signed in, and the
-     * probe then drops the domain rather than falling back to CalDAV; the DAVs
-     * over the rest.
+     * Where a discovered service ranks for this domain, lower first.
+     *
+     * <p>JMAP first for mail and contacts; CalDAV over JMAP for calendars,
+     * whose JMAP support is known only once signed in (the probe then drops the
+     * domain, no fallback); the DAVs over the rest.
      */
     public int rank(String service) {
         if (service == null) {
@@ -167,7 +152,9 @@ public enum PimDomain {
         }
     }
 
-    /** The discovered configs that can serve this domain, in discovery order. */
+    /**
+     * The discovered configs that can serve this domain, in discovery order.
+     */
     public static List<ServiceConfig> configsFor(PimDomain domain, List<ServiceConfig> configs) {
         List<ServiceConfig> serving = new ArrayList<>();
         for (ServiceConfig config : configs) {
@@ -179,8 +166,7 @@ public enum PimDomain {
     }
 
     /**
-     * The domains a discovery run turned up anything for, in the order this
-     * enum declares them so the picker never reorders itself between runs.
+     * The domains a discovery run found, in declaration order (stable picker).
      */
     static List<PimDomain> found(List<ServiceConfig> configs) {
         List<PimDomain> found = new ArrayList<>();

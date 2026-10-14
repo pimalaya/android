@@ -8,10 +8,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * The calendar verbs of the bridge (rs/ffi/calendar.rs): the calendar and
- * event operations over a transport, and the pure iCalendar computations,
- * static, that never open a socket. Every call that takes a transport
- * blocks, so callers must run it off the main thread.
+ * The calendar verbs of the bridge (rs/ffi/calendar.rs).
+ *
+ * <p>Operations over a transport block: run them off the main thread. The
+ * static iCalendar computations are pure and never open a socket.
  */
 public class CalendarClient {
     /** Lists the account's calendars: the CalDAV discovery walk. */
@@ -29,14 +29,11 @@ public class CalendarClient {
     }
 
     /**
-     * Enumerates a calendar collection from the cursor the last pass
-     * stored: which events moved and which went, and no bodies.
+     * Enumerates a calendar from the last pass's cursor: events moved and gone.
      *
-     * <p>The bodies are {@link #multigetEvents}, for the events the merge
-     * asks about. A round that carried them would be re-reading a whole
-     * calendar to find out that nothing in it changed, which is what this
-     * replaced; only a round that lists every event whole anyway (Google,
-     * JMAP) hands them over, in {@link EventDelta#bodies}.
+     * <p>No bodies, so an unchanged calendar is not re-read: the merge asks
+     * {@link #multigetEvents}. Rounds listing events whole anyway (Google,
+     * JMAP) hand them over in {@link EventDelta#bodies}.
      */
     public EventDelta syncEvents(
             Transport transport, Account account, String calendarUrl, String cursor) {
@@ -69,11 +66,11 @@ public class CalendarClient {
     }
 
     /**
-     * Expands one calendar object into the occurrences starting inside
-     * {@code [windowStart, windowEnd)}, both civil stamps compared with
-     * each start as written. Its recurrence set is RFC 5545 complete
-     * (ical-rs): exceptions out, overrides in their instance's place. A
-     * non-recurring event yields at most one occurrence.
+     * Expands one object into the occurrences starting in the window.
+     *
+     * <p>{@code [windowStart, windowEnd)} are civil stamps compared with each
+     * start as written. The RFC 5545 set is complete (ical-rs): exceptions
+     * out, overrides in place; a non-recurring event yields at most one.
      */
     public static List<Occurrence> expandEvent(String ical, String windowStart, String windowEnd) {
         JSONArray reply = Replies.array(Native.expandEvent(ical, windowStart, windowEnd));
@@ -86,11 +83,10 @@ public class CalendarClient {
     }
 
     /**
-     * Reads one calendar object whole, for the page that shows it: the
-     * series, or the override of the occurrence {@code recurrenceId}
-     * names when the object holds one (null or empty for the series).
-     * Pure computation, like the expansion beside it: no transport, no
-     * account.
+     * Reads one calendar object whole, for the page that shows it.
+     *
+     * <p>The series, or the override {@code recurrenceId} names when the
+     * object holds one (null or empty for the series). Pure computation.
      */
     public static EventDetail readEvent(String ical, String recurrenceId) {
         return EventDetail.from(
@@ -98,13 +94,11 @@ public class CalendarClient {
     }
 
     /**
-     * Applies one edit to a calendar object, returning the new
-     * iCalendar text. A patch through the object's concrete syntax
-     * tree, so everything the edit does not name survives untouched.
+     * Applies one edit to a calendar object, returning the new iCalendar text.
      *
-     * <p>{@code edit} names the properties to set; a null one is left
-     * alone and a present empty one removes its property. Pure
-     * computation, no transport.
+     * <p>A patch through the object's syntax tree: what the edit does not name
+     * survives untouched; a null property is left alone, an empty one
+     * removed. Pure computation.
      */
     public static String writeEvent(String ical, EventEdit edit) {
         String written = Native.writeEvent(ical, edit.toJson().toString()).trim();
@@ -120,9 +114,10 @@ public class CalendarClient {
     }
 
     /**
-     * Three-way merges a conflicted calendar object: the body staged here
-     * and the one its source holds, against their base (null or empty
-     * when none was agreed). Pure computation, no transport.
+     * Three-way merges a conflicted object's local and remote bodies.
+     *
+     * <p>Against their base, null or empty when none was agreed. Pure
+     * computation.
      */
     public static EventMerge mergeEvent(String base, String local, String remote) {
         return EventMerge.from(
@@ -130,9 +125,10 @@ public class CalendarClient {
     }
 
     /**
-     * The resolution of a conflicted calendar object: its merge, each
-     * conflict {@code picks} names by its id taking that side, every other
-     * the side it was pre-filled with. Pure computation, no transport.
+     * The resolution of a conflicted calendar object: its merge, sides picked.
+     *
+     * <p>Each conflict {@code picks} names by id takes that side, every other
+     * its pre-filled one. Pure computation.
      */
     public static String resolveEvent(EventSides bodies, Map<Integer, EventSide> picks) {
         JSONObject sides = new JSONObject();
@@ -160,20 +156,20 @@ public class CalendarClient {
     }
 
     /**
-     * Splits a series at the occurrence {@code edit} names, its scope
-     * {@code following}: the series ended before it, and a new one under
-     * the edit's {@code uid} carrying the edit from it on. Pure
-     * computation, no transport.
+     * Splits a series at the occurrence {@code edit} names, scope following.
+     *
+     * <p>The series ends before it; a new one under the edit's {@code uid}
+     * carries the edit from it on. Pure computation.
      */
     public static EventSplit splitEvent(String ical, EventEdit edit) {
         return EventSplit.from(Replies.object(Native.splitEvent(ical, edit.toJson().toString())));
     }
 
     /**
-     * Removes the occurrences {@code edit}'s scope names from a series:
-     * one becomes an {@code EXDATE}, this and following ends the series
-     * before it. Returns the object left, or null when nothing is and the
-     * entry itself goes. Pure computation, no transport.
+     * Removes the occurrences {@code edit}'s scope names; null if none is left.
+     *
+     * <p>One becomes an {@code EXDATE}, this and following ends the series
+     * before it; null means the entry itself goes. Pure computation.
      */
     public static String removeEvent(String ical, EventEdit edit) {
         String left = Native.removeEvent(ical, edit.toJson().toString()).trim();
@@ -188,15 +184,11 @@ public class CalendarClient {
     }
 
     /**
-     * Pushes an edited object back to the calendar it came from,
-     * guarded by the ETag it was read with, and returns the new one.
+     * Pushes an edited object back, guarded by its ETag; returns the new ETag.
      *
-     * <p>Guarded on purpose: a calendar is shared, and an unguarded PUT
-     * is how one client silently overwrites another's edit.
-     *
-     * <p>The target's {@code address} is the account's: a backend that
-     * announces a write to the attendees only when asked (Google, JMAP)
-     * asks for a meeting it names the organizer of.
+     * <p>Guarded: an unguarded PUT silently overwrites another client's edit.
+     * The target's {@code address} makes Google and JMAP announce a meeting
+     * it organizes to the attendees.
      */
     public String updateEvent(
             Transport transport, Account account, EventTarget target, String ical) {
@@ -216,11 +208,11 @@ public class CalendarClient {
     }
 
     /**
-     * The object a new calendar entry starts from: one component
-     * carrying the identity, the composition stamp and its start, in the
-     * zone {@code tzid} names with that zone's {@code vtimezone} (both
-     * empty for a date or a floating start). Pure computation, no
-     * transport.
+     * The object a new calendar entry starts from, one component.
+     *
+     * <p>Carries the draft's identity, stamp and start, in {@code tzid} with
+     * its {@code vtimezone} (both empty for a date or a floating start). Pure
+     * computation.
      */
     public static String newEvent(EventDraft draft) {
         String created =
@@ -243,11 +235,11 @@ public class CalendarClient {
     }
 
     /**
-     * Files a new object in a calendar, guarded on the resource not
-     * existing, and returns where it landed: the name asked for, or the
-     * one a backend that names its own resources (Graph) gave it, with
-     * its ETag. The target's {@code address} is the account's, as
-     * {@link #updateEvent} takes it; its ETag is not read.
+     * Files a new object, guarded on its absence; returns where it landed.
+     *
+     * <p>The name asked for, or the one Graph gave it, with its ETag. The
+     * target's {@code address} is as {@link #updateEvent} takes it; its ETag
+     * is not read.
      */
     public EventRef createEvent(
             Transport transport, Account account, EventTarget target, String ical) {
@@ -272,9 +264,9 @@ public class CalendarClient {
     }
 
     /**
-     * Removes one object from its calendar, guarded by the ETag it was
-     * read with, for the same reason the update is. The target's
-     * {@code address} is the account's, as {@link #updateEvent} takes it.
+     * Removes one object from its calendar, guarded by its ETag.
+     *
+     * <p>Guarded and addressed as {@link #updateEvent} is.
      */
     public void deleteEvent(Transport transport, Account account, EventTarget target) {
         Replies.object(
@@ -290,19 +282,21 @@ public class CalendarClient {
     }
 
     /**
-     * The view of a calendar object, {@code now} a UTC
-     * {@code YYYYMMDDTHHMMSSZ} stamp: {@code {uid, master, overrides,
-     * listed}}, each time a {@code {time, kind, tzid, offset}}.
+     * The phone view of an object, {@code now} a UTC {@code YYYYMMDDTHHMMSSZ}.
+     *
+     * <p>JSON (recorded exception): {@code {uid, master, overrides, listed}},
+     * each time a {@code {time, kind, tzid, offset}}.
      */
     public static JSONObject projectEvent(String ical, String now) {
         return Replies.object(Native.projectEvent(ical, now));
     }
 
     /**
-     * The object with an edited view patched onto it: {@code edit} is
-     * {@code {event, stamp, addresses, vtimezones}}, and the fields its
-     * event carries that differ from what the object projects are all
-     * that change. An empty object becomes a new one.
+     * The object with an edited phone view patched onto it.
+     *
+     * <p>{@code edit} is {@code {event, stamp, addresses, vtimezones}}; only
+     * its event's fields differing from the projection change. An empty
+     * object becomes a new one.
      */
     public static String applyEvent(String ical, JSONObject edit) {
         String written = Native.applyEvent(ical, edit.toString());

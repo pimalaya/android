@@ -9,15 +9,11 @@ import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.ServiceConfig;
 
 /**
- * Where the connection flow lets a credential go, and how it names that place
- * to the user.
+ * Where the connection flow lets a credential go, and how it names it.
  *
- * <p>One rule: a credential goes out only over TLS. An endpoint is
- * {@code https}, {@code imaps} or {@code smtps}, or {@code smtp}, which the
- * bridge always upgrades with STARTTLS before signing in; plain {@code http}
- * and {@code imap} are refused here, before the bridge refuses them again.
- * The internal account markers ({@code google://}, {@code msgraph://},
- * {@code jmap://}) stand for https endpoints the bridge builds itself.
+ * <p>Only over TLS: https, imaps, smtps, or smtp always upgraded by STARTTLS;
+ * http and imap are refused. {@code google://}, {@code msgraph://},
+ * {@code jmap://} mark https endpoints the bridge builds.
  */
 public final class Endpoints {
     private static final Set<String> TLS = Set.of("https", "imaps", "smtps", "smtp");
@@ -33,10 +29,11 @@ public final class Endpoints {
     }
 
     /**
-     * What was typed, as the URL the domain's client connects to: implicit-TLS
-     * IMAP on its default port for mail, https for a DAV collection; null when
-     * the typed URL names a scheme the domain cannot sign in over safely
-     * ({@code imap://}, {@code http://}, anything else).
+     * What was typed, as the URL the domain's client connects to.
+     *
+     * <p>Implicit-TLS IMAP on its default port for mail, https for a DAV
+     * collection; null for a scheme the domain cannot sign in over safely
+     * ({@code imap://}, {@code http://}, any other).
      */
     public static String manualUrl(PimDomain domain, String entered) {
         entered = entered.trim();
@@ -51,10 +48,7 @@ public final class Endpoints {
         return host(url) != null ? url : null;
     }
 
-    /**
-     * What was typed for a submission server, as the endpoint it opens, or
-     * null when it names neither {@code smtps} nor {@code smtp}.
-     */
+    /** A typed submission server as its endpoint; null unless smtps or smtp. */
     public static String submitUrl(String entered) {
         String url = AccountClient.submitUrl(entered.trim());
         String scheme = scheme(url);
@@ -63,10 +57,10 @@ public final class Endpoints {
     }
 
     /**
-     * The endpoint one discovered SMTP config submits through, or null when it
-     * is no SMTP config or names a security this client does not drive: an
-     * implicit-TLS one behind {@code smtps://}, a STARTTLS one behind
-     * {@code smtp://}.
+     * The endpoint one discovered SMTP config submits through, or null.
+     *
+     * <p>{@code smtps://} for implicit TLS, {@code smtp://} for STARTTLS; null
+     * for a non-SMTP config or a security this client does not drive.
      */
     public static String submissionUrl(ServiceConfig config) {
         if (!"smtp".equals(config.service()) || config.host() == null) {
@@ -83,11 +77,11 @@ public final class Endpoints {
     }
 
     /**
-     * A mail endpoint signed in to with a token, naming {@code email} as its
-     * user: a token signs in to IMAP and SMTP with SASL XOAUTH2, which names
-     * its user beside the token, and the URL is where that user lives (RFC
-     * 5092 section 3.2), the credential staying the bare token every other
-     * protocol sends. Any other endpoint is returned as it is.
+     * A token-signed mail endpoint naming {@code email} as its user.
+     *
+     * <p>SASL XOAUTH2 names the user beside the token, and the URL carries it
+     * (RFC 5092 section 3.2) while the credential stays the bare token. Any
+     * other endpoint is returned as it is.
      */
     public static String asUser(String url, String email) {
         return url.startsWith("imap") || url.startsWith("smtp")
@@ -96,14 +90,11 @@ public final class Endpoints {
     }
 
     /**
-     * The URL an account for {@code email} connects to for one discovered
-     * config, or null when this app cannot drive it.
+     * The URL an account for {@code email} connects to for one config.
      *
-     * <p>An HTTP endpoint arrives ready to use, when it is https. A TCP one does not: discovery
-     * reports a host, a port and a security mode, and the scheme is the client's
-     * to choose. Only implicit TLS is offered, because the IMAP client has no
-     * STARTTLS step, and a {@code starttls} endpoint driven as if it were
-     * implicit would connect in the clear rather than fail.
+     * <p>Null when this app cannot drive it: HTTP must be https; TCP gets
+     * implicit TLS only, the IMAP client having no STARTTLS step (it would
+     * connect in the clear).
      */
     public static String endpointUrl(ServiceConfig config, String email) {
         if ("msgraph".equals(config.service()) || "msgraphCalendar".equals(config.service())) {
@@ -147,10 +138,11 @@ public final class Endpoints {
     }
 
     /**
-     * The host an endpoint connects to, lowercased: the session host of a
-     * {@code jmap://} marker, null for the {@code google://} and
-     * {@code msgraph://} ones (the bridge's own fixed hosts) and for a URL
-     * naming none.
+     * The lowercased host an endpoint connects to.
+     *
+     * <p>The session host of a {@code jmap://} marker; null for
+     * {@code google://}, {@code msgraph://} (the bridge's fixed hosts) and a
+     * URL naming none.
      */
     static String host(String url) {
         String scheme = scheme(url);
@@ -172,9 +164,10 @@ public final class Endpoints {
     }
 
     /**
-     * An endpoint as the user is shown it before signing in: its scheme, host
-     * and any port, without userinfo or path; null for the {@code google://}
-     * and {@code msgraph://} markers, which no password signs in to.
+     * An endpoint as shown before signing in: scheme, host and any port.
+     *
+     * <p>No userinfo or path; null for the {@code google://} and
+     * {@code msgraph://} markers, which no password signs in to.
      */
     public static String destination(String url) {
         String host = host(url);
@@ -196,9 +189,10 @@ public final class Endpoints {
     }
 
     /**
-     * Whether an endpoint's host sits outside the address's domain: the user
-     * is shown it before a password goes there, a host the address does not
-     * name being the one a forged configuration would point at.
+     * Whether an endpoint's host sits outside the address's domain.
+     *
+     * <p>The user is shown it before a password goes there: such a host is what
+     * a forged configuration would point at.
      */
     public static boolean otherDomain(String url, String email) {
         String host = host(url);
@@ -211,10 +205,10 @@ public final class Endpoints {
     }
 
     /**
-     * Whether every endpoint is one of the provider's own: its marker scheme,
-     * or a TLS scheme on one of its hosts. The app's own OAuth client signs
-     * in only to those, so a configuration pairing the provider's sign-in
-     * with another server's host gets a generic grant instead.
+     * Whether every endpoint is one of the provider's own.
+     *
+     * <p>Its marker scheme, or a TLS scheme on one of its hosts. The app's own
+     * OAuth client signs in only to those; anything else gets a generic grant.
      */
     static boolean allOn(Collection<String> urls, String marker, Set<String> hosts) {
         if (urls.isEmpty()) {

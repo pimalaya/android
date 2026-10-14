@@ -13,11 +13,11 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * The pool's own rules, apart from any engine: a lone worker stays on the
- * caller's thread, a joiner numbers a worker's session for the length of a
- * run, and keys no worker could take carry the error that kept them.
+ * The pool's own rules, apart from any engine.
  *
- * <p>Robolectric only for {@code android.util.Log}, which the pool logs on.
+ * <p>A lone worker stays on the caller's thread, a joiner numbers a session for
+ * a run, keys no worker took carry the error. Robolectric only for {@code
+ * android.util.Log}.
  */
 @RunWith(RobolectricTestRunner.class)
 public class WorkerPoolTest {

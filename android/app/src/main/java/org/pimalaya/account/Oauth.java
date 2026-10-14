@@ -1,20 +1,14 @@
 package org.pimalaya.account;
 
 /**
- * OAuth 2.0 provider defaults for the connection flow: the app's
- * client registrations, their redirect URIs (mirrored by the manifest
- * intent-filters) and the provider endpoints and scopes. The account
- * base URLs derived from these choices come from the bridge (the
- * {@code *Base} helpers on
- * {@link org.pimalaya.client.AccountClient}).
+ * OAuth 2.0 provider defaults: the app's clients, redirects, endpoints, scopes.
  *
- * <p>The endpoints and scopes belong in pimconf eventually (so every
- * Pimalaya app shares one set of provider rules). The Google client is
- * an Android OAuth client: no secret (PKCE only), and a redirect on
- * the reversed-client-id custom scheme the OS routes back via the
- * manifest intent-filter.
+ * <p>Redirects mirror the manifest intent-filters; base URLs come from
+ * {@link org.pimalaya.client.AccountClient}. Google's is an Android client: no
+ * secret (PKCE only), on the reversed-client-id scheme.
  */
 public final class Oauth {
+    /** The app's Google Android client, which has no secret. */
     public static final String GOOGLE_CLIENT_ID =
             "991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1.apps.googleusercontent.com";
 
@@ -22,7 +16,9 @@ public final class Oauth {
     public static final String GOOGLE_REDIRECT_URI =
             "com.googleusercontent.apps.991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1:/oauth2redirect";
 
+    /** Google's authorization endpoint. */
     public static final String GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
+    /** Google's token endpoint. */
     public static final String GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
     /** CardDAV scope (the one DAVx5 uses); reuses the WebDAV transport. */
@@ -31,23 +27,18 @@ public final class Oauth {
     /** People API scope, for the Google Contacts API backend. */
     public static final String GOOGLE_PEOPLE_SCOPE = "https://www.googleapis.com/auth/contacts";
 
-    /**
-     * The Pimalaya Entra app registration (a public client: no secret,
-     * PKCE only, like the Google one).
-     */
+    /** The Pimalaya Entra app registration (public client: PKCE, no secret). */
     public static final String MICROSOFT_CLIENT_ID = "ba9b19e1-973e-4d7c-aed9-848bd2fee385";
 
     /** Custom scheme, mirrored by the manifest intent-filter. */
     public static final String MICROSOFT_REDIRECT_URI = "pimalaya://oauth2redirect";
 
     /**
-     * The redirect of the dynamic-registration issuer flow: a
-     * reverse-DNS private-use scheme (RFC 8252 §7.1), mirrored by the
-     * manifest intent-filter. Fastmail's registration rejects a
-     * loopback http redirect and a bare (dot-less) scheme alike, and
-     * accepts this reverse-DNS form; Stalwart accepts it too. Single
-     * slash per RFC 8252 §7.1: a private-use scheme has no naming
-     * authority, so no {@code //} component.
+     * The dynamic-registration issuer flow's redirect, in the manifest too.
+     *
+     * <p>A reverse-DNS private-use scheme (RFC 8252 §7.1) with one slash,
+     * having no naming authority. Fastmail rejects a loopback http redirect and
+     * a dot-less scheme alike; Stalwart accepts this too.
      */
     public static final String REDIRECT_URI = "org.pimalaya:/oauth2redirect";
 
@@ -55,10 +46,13 @@ public final class Oauth {
     public static final String MICROSOFT_AUTH_ENDPOINT =
             "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 
+    /** Entra's token endpoint, on the {@code common} tenant too. */
     public static final String MICROSOFT_TOKEN_ENDPOINT =
             "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 
-    /** Graph contacts scope; offline_access makes Entra issue a refresh token. */
+    /**
+     * Graph contacts scope; offline_access makes Entra issue a refresh token.
+     */
     public static final String MICROSOFT_SCOPE =
             "https://graph.microsoft.com/Contacts.ReadWrite offline_access";
 
@@ -66,7 +60,9 @@ public final class Oauth {
     private static final java.util.Set<String> OIDC_SCOPES =
             java.util.Set.of("offline_access", "openid", "profile", "email");
 
-    /** The hosts Google's own client signs in to: Gmail's IMAP and SMTP, its APIs and DAV. */
+    /**
+     * The hosts Google's client signs in to: Gmail IMAP/SMTP, its APIs and DAV.
+     */
     static final java.util.Set<String> GOOGLE_HOSTS =
             java.util.Set.of(
                     "imap.gmail.com",
@@ -76,7 +72,9 @@ public final class Oauth {
                     "people.googleapis.com",
                     "apidata.googleusercontent.com");
 
-    /** The scopes Google's own client asks for: mail, calendars and contacts. */
+    /**
+     * The scopes Google's own client asks for: mail, calendars and contacts.
+     */
     private static final java.util.Set<String> GOOGLE_SCOPES =
             java.util.Set.of(
                     "https://mail.google.com/",
@@ -84,7 +82,9 @@ public final class Oauth {
                     "https://www.googleapis.com/auth/carddav",
                     GOOGLE_PEOPLE_SCOPE);
 
-    /** The hosts Microsoft's own client signs in to: Outlook's IMAP and SMTP, and Graph. */
+    /**
+     * The hosts Microsoft's client signs in to: Outlook IMAP/SMTP and Graph.
+     */
     static final java.util.Set<String> MICROSOFT_HOSTS =
             java.util.Set.of(
                     "outlook.office365.com",
@@ -124,11 +124,9 @@ public final class Oauth {
     /**
      * The app's own client a grant may run with, or null for a generic one.
      *
-     * <p>The authorization endpoint alone is not enough: a discovered
-     * configuration is free to name Google's sign-in beside its own IMAP
-     * host, and the token the user consents to would then go to that host.
-     * So the shipped client signs in only when every endpoint the token will
-     * be presented to is the provider's own ({@link Endpoints#allOn}).
+     * <p>A discovered config may pair Google's sign-in with its own IMAP host,
+     * so it signs in only when every endpoint the token goes to is the
+     * provider's ({@link Endpoints#allOn}).
      */
     public static Shipped shipped(String authorizationEndpoint, java.util.Collection<String> endpoints) {
         if (isGoogle(authorizationEndpoint)
@@ -143,8 +141,7 @@ public final class Oauth {
     }
 
     /**
-     * The scope a shipped client asks for: the requested one kept to the
-     * provider's fixed set, whatever else a discovered configuration added.
+     * A shipped client's scope: the requested one kept to the provider's set.
      */
     public static String fixedScope(Shipped client, String scope) {
         java.util.Set<String> allowed =
@@ -159,18 +156,11 @@ public final class Oauth {
     }
 
     /**
-     * What one grant's token is for: Google's whole set of APIs, else the
-     * RFC 8707 resource it names, else the APIs its scopes address.
+     * What one grant's token is for; options sharing it share one grant.
      *
-     * <p>Two options of one authorization server share a grant only when
-     * this agrees. Entra refuses one token for two APIs, so Microsoft mail
-     * over IMAP (Outlook scopes) and calendars (Graph scopes) are two
-     * consents, a bare Graph scope ({@code Calendars.ReadWrite}) being
-     * Graph's, while Graph mail and Graph calendars are one. Google issues
-     * one token for every API it serves, Gmail's restricted
-     * {@code https://mail.google.com/} included, so every Google scope is
-     * one audience and an address ticking mail, calendars and contacts is
-     * one consent.
+     * <p>Google's API set, else the RFC 8707 resource, else the scopes' APIs.
+     * Entra refuses one token for two APIs (Outlook IMAP and Graph are two
+     * consents); any Google scopes, Gmail's included, are one.
      */
     public static String audience(String authorizationEndpoint, String resource, String scope) {
         if (isGoogle(authorizationEndpoint)) {
@@ -223,9 +213,9 @@ public final class Oauth {
     }
 
     /**
-     * Whether a grant of the {@code granted} scopes covers every one of
-     * the {@code wanted} ones. An unknown list on either side covers
-     * nothing: a grant whose reach was never recorded is not assumed.
+     * Whether a grant of {@code granted} scopes covers all {@code wanted} ones.
+     *
+     * <p>An unknown list on either side covers nothing.
      */
     static boolean covers(String granted, String wanted) {
         java.util.Set<String> want = scopes(wanted);

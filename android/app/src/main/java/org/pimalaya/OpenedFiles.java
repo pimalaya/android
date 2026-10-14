@@ -14,13 +14,11 @@ import org.pimalaya.file.OpenedCopies;
 import org.pimalaya.pimdir.PimdirSummary;
 
 /**
- * Hands a file the app opens to the app that shows it: the bytes are copied
- * into the cache under the file's name, and read back through a
- * {@code content://} URI the opener is granted, read-only.
+ * Hands a file the app opens to the app that shows it, read-only.
  *
- * <p>A provider of its own rather than AndroidX's {@code FileProvider}, which
- * would bring a library for one directory. The cache is the platform's to
- * clear, and each open writes its copy afresh.
+ * <p>The bytes are copied into the cache under the file's name and read back
+ * through a granted {@code content://} URI. Its own provider, not AndroidX's
+ * {@code FileProvider}: no library for one directory; each open copies afresh.
  */
 public final class OpenedFiles extends ContentProvider {
     @Override

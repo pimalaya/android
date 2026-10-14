@@ -83,31 +83,21 @@ import org.pimalaya.ui.SyncDock;
 import org.pimalaya.ui.SyncPill;
 
 /**
- * Single-activity host walking the app's screens through a ViewFlipper.
+ * The single activity, building every screen and walking them in a flipper.
  *
- * <p>First launch is the connection flow: email, provider detection and
- * discovery, proposed configurations, the credentials and a connection
- * check, then the addressbook selection. Every subsequent launch lands
- * on the app's root, the merged mail list, with the switcher in the bar
- * flipping to the two other domains over the same merged view.
- *
- * <p>The contacts list behind that switcher is contact-first per
- * docs/merged-view.md (replicas sharing a vCard UID collapse into one
- * row; storage and sync stay strictly per-replica). A merged row opens
- * one edit form for the whole contact and saving fans the form out onto
- * every replica. Accounts live behind the drawer the bar's logo opens;
- * syncs are manual, from there or from the pull-down.
+ * <p>A fresh install opens the connection flow; every launch after lands on
+ * the merged mail list, the bottom navigation switching tabs. Accounts live
+ * behind the drawer; syncs run from there or from a list's pull-down.
  */
 public class MainActivity extends Host
         implements SyncCoordinator.Screens, SetupShell, LinkShell {
     private static final int PANEL_AUTH = 20;
 
     /**
-     * The domain the app opens on, and the one every flow that finishes
-     * without a domain of its own lands back on. Mail, because it is the
-     * one people check rather than consult: an agenda and an address
-     * book are looked up when something is wanted from them, while an
-     * inbox is the reason the app was opened at all.
+     * The domain the app opens on, and flows without one of their own land on.
+     *
+     * <p>Mail, the one people check rather than consult: an agenda or an
+     * address book is looked up, an inbox is why the app was opened.
      */
     private static final int PANEL_ROOT = Panels.MAIL;
 
@@ -163,7 +153,7 @@ public class MainActivity extends Host
 
     MailList mailList;
 
-    /** The file side of the store: attachments and the folders they are saved into. */
+    /** The file side of the store: attachments and their folders. */
     FileStore files;
 
     /** The Files list, and what a file offers wherever it shows. */
@@ -187,7 +177,7 @@ public class MainActivity extends Host
 
     private OauthFlow oauth;
 
-    /** The full-screen account settings controller over the drawer (built in onCreate). */
+    /** The full-screen account settings over the drawer (built in onCreate). */
     private AccountSettings accountSettings;
 
     /** The accounts drawer, opened by the contacts burger. */
@@ -202,7 +192,7 @@ public class MainActivity extends Host
     /** The contacts screen: list, adapter, search and selection. */
     private ContactsList contactsList;
 
-    /** The phone mirrors a permission prompt is up for, and who takes the answer. */
+    /** The phone mirrors a prompt is up for, and who takes the answer. */
     private Set<PhoneMirror> askedMirrors;
 
     private Consumer<Set<PhoneMirror>> afterMirrors;
@@ -321,8 +311,6 @@ public class MainActivity extends Host
         filterPage.setUp();
         deletedPage.setUp();
 
-        // The selection's close and select-all buttons serve whichever
-        // list is selecting.
         findViewById(R.id.selection_close)
                 .setOnClickListener(
                         view -> {
@@ -360,8 +348,6 @@ public class MainActivity extends Host
         ((TextView) findViewById(R.id.nav_mail_badge)).setTextColor(accentContrast());
         findViewById(R.id.bar_filter).setOnClickListener(view -> openFilter());
 
-        // The sync dock binds once here and covers every sync entry
-        // point through the shared syncing flag.
         dock = new SyncDock(this);
         observeSync(sync::showSyncDock);
 
@@ -431,18 +417,14 @@ public class MainActivity extends Host
         // redirect recreates the activity from scratch).
         oauth.handleRedirect(getIntent());
 
-        // A fresh start with no real account opens the connection flow
-        // right away, skipped while an OAuth redirect is processing.
+        // NOTE: an intent carrying data is an OAuth redirect being
+        // processed, not a fresh start to open the connection flow on.
         if (savedInstanceState == null && getIntent().getData() == null && !hasRealAccount()) {
             startAuth();
         }
     }
 
-    /**
-     * Enters the connection flow: the auth sheet fades in over the
-     * current screen while the drawer it came from slides shut.
-     * Cancelling lands on the contacts root, finishing too.
-     */
+    /** Enters the connection flow over the screen, closing the drawer. */
     private void startAuth() {
         openAuthFlow();
         if (drawer.isDrawerOpen(android.view.Gravity.START)) {
@@ -467,10 +449,10 @@ public class MainActivity extends Host
     }
 
     /**
-     * Shows an auth step under the persistent bar: only the inner step
-     * view transitions. Entering the flow from outside jumps the inner
-     * flipper without animation (the outer panel fade is the
-     * transition).
+     * Shows an auth step under the persistent bar, sliding the step alone.
+     *
+     * <p>Entering from outside jumps without animation: the panel's fade is
+     * the transition.
      */
     private void showAuth(int step, boolean back) {
         boolean inside = screen == PANEL_AUTH;
@@ -492,13 +474,7 @@ public class MainActivity extends Host
         }
     }
 
-    /**
-     * The auth bar per step: the step's title (the first step greets
-     * with Welcome on a fresh install and reads Add account once an
-     * account already exists), no back arrow on the welcome step when
-     * no account is stored (nothing to go back to), and the cross only
-     * when one is (the flow is escape-free otherwise).
-     */
+    /** The auth bar per step: hidden on a bare step, titled otherwise. */
     private void applyAuthChrome() {
         int step = authFlipper.getDisplayedChild();
         // NOTE: a first run opens on the address alone, with nothing to
@@ -546,10 +522,7 @@ public class MainActivity extends Host
         }
     }
 
-    /**
-     * Leaves the auth flow without finishing: the sheet slides out onto
-     * the root (the drawer stays closed).
-     */
+    /** Leaves the auth flow unfinished, onto the root, the drawer closed. */
     private void cancelAuth() {
         oauth.cancel();
         closeOverlay(PANEL_AUTH);
@@ -557,10 +530,7 @@ public class MainActivity extends Host
         applyChrome(PANEL_ROOT);
     }
 
-    /**
-     * Closes the auth sheet onto one of the domain screens, for a connection
-     * that finishes somewhere other than the root.
-     */
+    /** Closes the auth sheet onto a domain screen other than the root. */
     void leaveOnboarding(int panel) {
         closeOverlay(PANEL_AUTH);
         screen = panel;
@@ -581,20 +551,14 @@ public class MainActivity extends Host
         return false;
     }
 
-    /**
-     * Gates the editor's validate FAB: always live in a plain edit, live
-     * in a merge only once every diverging field has been reviewed.
-     */
+    /** Gates the contact save FAB until every diverging field is reviewed. */
     private void updateSaveEnabled() {
         if (screen == Panels.CONTACT) {
             gateSave(form.conflictResolved(), R.drawable.ic_check, R.string.contact_save);
         }
     }
 
-    /**
-     * Gates a conflict form's save FAB, a contact's or a calendar entry's:
-     * the save itself once nothing awaits review, else the error disc.
-     */
+    /** Gates a conflict form's save FAB: the save once ready, else an error. */
     @Override
     public void gateSave(boolean ready, int icon, int description) {
         android.widget.ImageButton fab = findViewById(R.id.fab);
@@ -607,8 +571,8 @@ public class MainActivity extends Host
             return;
         }
 
-        // Diverging rows await review: the disc turns the error tone at
-        // full strength, so the state reads as a signal not a dimmed save.
+        // NOTE: the error tone at full strength, so rows awaiting review
+        // read as a signal, not as a dimmed save.
         fab.setBackgroundTintList(
                 android.content.res.ColorStateList.valueOf(
                         resolveColor(android.R.attr.colorError)));
@@ -649,7 +613,7 @@ public class MainActivity extends Host
 
     @Override
     public void onBackPressed() {
-        // The account settings overlay sits above the open drawer, so
+        // NOTE: the account settings overlay sits above the open drawer, so
         // back peels it off first.
         if (screen == Panels.ACCOUNT) {
             accountSettings.leave();
@@ -690,9 +654,10 @@ public class MainActivity extends Host
     }
 
     /**
-     * Lands on one domain's list with everything behind it settled: any
-     * contacts search or selection dropped, the contacts rebuilt (they
-     * back the merged view whichever list shows), the drawer shut.
+     * Lands on one domain's list, search, selection and drawer settled.
+     *
+     * <p>The contacts are rebuilt whichever list shows: they back the merged
+     * view.
      */
     private void goDomain(int panel) {
         contactsList.closeSearch();
@@ -700,8 +665,6 @@ public class MainActivity extends Host
 
         reloadContacts();
 
-        // Landing on a list is always a return: the auth sheet slides
-        // back out onto the list left underneath.
         if (screen == PANEL_AUTH) {
             // NOTE: the list swapped in under the sheet first: the one left
             // there (say the agenda) is not the one the account lands on.
@@ -721,10 +684,7 @@ public class MainActivity extends Host
         reloadHome();
     }
 
-    /**
-     * Refreshes the drawer and slides it over the list (which stays
-     * put). Reached from the bar's burger.
-     */
+    /** Refreshes the drawer and slides it over the list, from the burger. */
     void openAccountsDrawer() {
         reloadHome();
         drawer.openDrawer(android.view.Gravity.START);
@@ -741,8 +701,6 @@ public class MainActivity extends Host
 
         onboarding.bind();
 
-        // Continue stays disabled until the field holds something
-        // plausible (an email, a server, or a connection URI).
         email.addTextChangedListener(
                 new android.text.TextWatcher() {
                     @Override
@@ -761,10 +719,7 @@ public class MainActivity extends Host
                 });
     }
 
-    /**
-     * Toggles an auth continue FAB between its arrow and an on-disc
-     * loader, the button disabled while loading.
-     */
+    /** Toggles an auth continue button's loader, disabled while loading. */
     @Override
     public void setAuthLoading(int buttonId, int progressId, boolean loading) {
         View button = findViewById(buttonId);
@@ -827,10 +782,7 @@ public class MainActivity extends Host
         fab.setAlpha(enabled ? 1f : 0.4f);
     }
 
-    /**
-     * Styles a floating action button: its icon tinted to contrast the
-     * accent disc's luminance.
-     */
+    /** Tints a floating action button's icon to contrast the accent disc. */
     private void setUpFab(int id) {
         android.widget.ImageButton fab = findViewById(id);
         fab.setImageTintList(android.content.res.ColorStateList.valueOf(accentContrast()));
@@ -839,9 +791,9 @@ public class MainActivity extends Host
     @Override
     protected void onResume() {
         super.onResume();
-        // Returning from the browser without a redirect (a cancelled
-        // grant) must not leave the config Continue stuck on its loader;
-        // a real redirect re-enters loading right after.
+        // NOTE: back from the browser without a redirect (a cancelled
+        // grant) must not leave Continue on its loader; a real redirect
+        // re-enters loading right after.
         if (flipper != null
                 && screen == PANEL_AUTH
                 && authFlipper.getDisplayedChild() != OnboardingFlow.STEP_EMAIL) {
@@ -869,9 +821,10 @@ public class MainActivity extends Host
     }
 
     /**
-     * Catches up with the background check on return: a run may have
-     * renewed a token and written every list, and its notifications are
-     * for an app that was not open.
+     * Catches up with the background check on return.
+     *
+     * <p>A run may have renewed a token and written every list, and its
+     * notifications are for an app that was not open.
      */
     private void afterBackgroundRun() {
         if (store == null) {
@@ -893,9 +846,9 @@ public class MainActivity extends Host
     }
 
     /**
-     * Shows that a background run is syncing, on the dock the app's own
-     * passes use: a pull meanwhile is turned down, and this says why
-     * before it is tried.
+     * Shows a background run syncing, on the dock the app's own passes use.
+     *
+     * <p>A pull meanwhile is turned down; this says why before it is tried.
      */
     private void showBackgroundDock() {
         mailList.redrawFooter();
@@ -905,9 +858,10 @@ public class MainActivity extends Host
     }
 
     /**
-     * A background run ended (main thread): on screen, the dock goes, the
-     * lists catch up and a first sync the run held back starts; off screen,
-     * the next return does it.
+     * A background run ended, on the main thread.
+     *
+     * <p>On screen, the dock goes, the lists catch up and a first sync the
+     * run held back starts; off screen, the next return does it.
      */
     private void backgroundEnded() {
         if (!App.of(this).state.onScreen || isDestroyed()) {
@@ -922,7 +876,7 @@ public class MainActivity extends Host
     }
 
     private void setUpHomePanel() {
-        // Sync slides the drawer shut on its way in, so the sync dock
+        // NOTE: sync slides the drawer shut on its way in, so the sync dock
         // shows over the list it refreshes.
         findViewById(R.id.drawer_close)
                 .setOnClickListener(view -> drawer.closeDrawer(Gravity.START));
@@ -938,8 +892,6 @@ public class MainActivity extends Host
 
         accountSettings.bind();
 
-        // While a sync runs the row goes inert; the lists' dock carries
-        // the progress.
         observeSync(
                 active -> {
                     View row = findViewById(R.id.drawer_sync);
@@ -980,20 +932,13 @@ public class MainActivity extends Host
     }
 
     /**
-     * Rebuilds the drawer: one card per connected account (the local book
-     * stays hidden), saying what it covers, and whether it takes part and
-     * when it last synced. Tapping a card opens its
-     * settings screen: activation, cadence, the per-addressbook advanced
-     * switches and deletion, so the drawer itself stays a plain list.
+     * Rebuilds the drawer: one card per real account, opening its settings.
      *
-     * <p>No mailboxes: the lists are one merged view over every
-     * collection, which the filter narrows, so a drawer entry opening
-     * one collection would be a second way of looking at the same thing.
+     * <p>No mailboxes: the lists are one merged view the filter narrows, so a
+     * drawer entry per collection would be a second view of the same thing.
      */
     @Override
     public void reloadHome() {
-        // With no real account the drawer shows an empty state, and its
-        // sync row is hidden.
         boolean hasAccount = hasRealAccount();
         findViewById(R.id.drawer_sync).setVisibility(hasAccount ? View.VISIBLE : View.GONE);
         findViewById(R.id.drawer_empty).setVisibility(hasAccount ? View.GONE : View.VISIBLE);
@@ -1007,10 +952,7 @@ public class MainActivity extends Host
         }
     }
 
-    /**
-     * One drawer account card: the disc, the address, what it covers,
-     * and the pill saying whether it takes part and when it last synced.
-     */
+    /** One drawer account card: disc, address, domains and sync pill. */
     private View accountCard(AccountEntry account) {
         String email = account.email;
 
@@ -1083,22 +1025,16 @@ public class MainActivity extends Host
         return card;
     }
 
-    /**
-     * Opens one account's settings screen (delegated to
-     * {@link AccountSettings}): the staged switches load from the store,
-     * the screen fades in over the drawer it came from, which stays open
-     * underneath for the return. The simple pair (activate, cadence) fans
-     * out onto every addressbook; Advanced unfolds the per-book sections.
-     */
+    /** Opens an account's {@link AccountSettings} over the open drawer. */
     private void openAccountSettings(String email) {
         accountSettings.open(email);
     }
 
     /**
-     * Asks, in one prompt, the permissions of the phone mirrors wanted, then
-     * hands {@code done} the ones granted (main thread). Asks nothing when
-     * they all are. Called only as a mirror's switch is turned on, in a
-     * setup or in an account's settings.
+     * Asks the wanted phone mirrors' permissions in one prompt.
+     *
+     * <p>Hands {@code done} the granted ones on the main thread, at once when
+     * all are. Called only as a mirror's switch turns on.
      */
     @Override
     public void askMirrors(Set<PhoneMirror> wanted, Consumer<Set<PhoneMirror>> done) {
@@ -1113,9 +1049,10 @@ public class MainActivity extends Host
     }
 
     /**
-     * Asks the notifications permission where Android takes one, then hands
-     * {@code done} whether the app may notify (main thread). Called only as
-     * a notifications switch is turned on.
+     * Asks the notifications permission where Android takes one.
+     *
+     * <p>Hands {@code done} whether the app may notify, on the main thread.
+     * Called only as a notifications switch turns on.
      */
     @Override
     public void askNotifications(Consumer<Boolean> done) {
@@ -1129,8 +1066,10 @@ public class MainActivity extends Host
     }
 
     /**
-     * Hands a prompt its answer. A denial Android will not prompt for again
-     * leaves the switch off and says where it can still be allowed.
+     * Hands a prompt its answer.
+     *
+     * <p>A denial Android will not prompt for again leaves the switch off and
+     * says where it can still be allowed.
      */
     @Override
     public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
@@ -1163,7 +1102,7 @@ public class MainActivity extends Host
         }
     }
 
-    /** Says a permission is now only allowed in Android's settings, opening them on demand. */
+    /** Says only the settings can allow a permission now, offering them. */
     private void showBlocked(Intent settings) {
         new AlertDialog.Builder(this)
                 .setMessage(R.string.permission_blocked)
@@ -1228,10 +1167,7 @@ public class MainActivity extends Host
         }
     }
 
-    /**
-     * The in-memory account cache a token refresh must keep current
-     * (mutated on the main thread the drawer reads it from).
-     */
+    /** Keeps the account cache current after a renewal, on the main thread. */
     @Override
     public void renewed(AccountEntry updated) {
         main.post(
@@ -1255,7 +1191,7 @@ public class MainActivity extends Host
         sync.observe(observer);
     }
 
-    /** The contacts pass over every book ({@link SyncCoordinator#syncRemote}). */
+    /** Syncs every address book ({@link SyncCoordinator#syncRemote}). */
     void syncRemote() {
         sync.syncRemote();
     }
@@ -1297,12 +1233,12 @@ public class MainActivity extends Host
         sync.syncContacts();
     }
 
-    /** The drawer's sync over every domain ({@link SyncCoordinator#syncAll}). */
+    /** The drawer's sync of every domain ({@link SyncCoordinator#syncAll}). */
     void syncAll() {
         sync.syncAll();
     }
 
-    /** The phone's accounts and calendars in line ({@link SyncCoordinator#reconcilePhone}). */
+    /** Aligns the phone's accounts ({@link SyncCoordinator#reconcilePhone}). */
     void reconcilePhone() {
         sync.reconcilePhone();
     }
@@ -1323,10 +1259,7 @@ public class MainActivity extends Host
         messageView.open(message);
     }
 
-    /**
-     * Opens the merged contact row holding a card of this key in the editor
-     * ({@link ContactEditor#openGroup}); false when no row holds one.
-     */
+    /** Opens the merged row holding this card key; false when none does. */
     @Override
     public boolean openContact(String linkId) {
         Group group = contactsList.groupOf(linkId);
@@ -1337,7 +1270,7 @@ public class MainActivity extends Host
         return true;
     }
 
-    /** Opens one calendar resource on its page ({@link EventView#openStored}). */
+    /** Opens a calendar resource on its page ({@link EventView#openStored}). */
     @Override
     public void openEvent(String collection, String linkId, Runnable gone) {
         eventView.openStored(collection, linkId, gone);
@@ -1390,11 +1323,10 @@ public class MainActivity extends Host
     }
 
     /**
-     * The list chrome for one domain: the burger onto the drawer, the
-     * domain's name (once its large title scrolls away), the filter
-     * every list shares, its sync dock, and the bottom navigation with
-     * this domain on its indicator. The domain's own actions come after,
-     * from its screen.
+     * The list chrome for one domain: burger, title, filter, dock and nav.
+     *
+     * <p>The title shows once the large title scrolls away; the domain's own
+     * actions come after, from its screen.
      */
     private void showDomainBar(int panel) {
         for (int target : Domains.PANELS) {
@@ -1433,10 +1365,7 @@ public class MainActivity extends Host
         ((TextView) findViewById(R.id.bar_title)).setText(title);
     }
 
-    /**
-     * Titles the bar with a list domain's name, shown only once the
-     * list's own large title has scrolled away.
-     */
+    /** The bar's title for a list, shown once its large title scrolls away. */
     @Override
     public void showDomainTitle(int panel) {
         TextView title = findViewById(R.id.bar_title);
@@ -1503,9 +1432,10 @@ public class MainActivity extends Host
     private android.animation.ValueAnimator fabFold;
 
     /**
-     * Folds the extended FAB to its square glyph, or unfolds its label:
-     * the width animates between the two while the label fades, so the
-     * button itself shrinks rather than only losing its text.
+     * Folds the extended FAB to its glyph, or unfolds its label.
+     *
+     * <p>The width animates while the label fades: the button shrinks rather
+     * than only losing its text.
      */
     @Override
     public void foldFab(boolean folded) {
@@ -1571,7 +1501,7 @@ public class MainActivity extends Host
         badge.setVisibility(unread > 0 ? View.VISIBLE : View.GONE);
     }
 
-    /** A list's add button, inert while the list works (an import, an export). */
+    /** A list's add button, inert while the list imports or exports. */
     @Override
     public void setListBusy(boolean busy) {
         View add = findViewById(R.id.fab_extended);
@@ -1601,10 +1531,7 @@ public class MainActivity extends Host
                                 : ui.resolveColor(android.R.attr.textColorPrimary)));
     }
 
-    /**
-     * Switches to another domain. A lateral move from the bottom
-     * navigation, so it has no direction to slide in and swaps in place.
-     */
+    /** Switches domain from the bottom navigation: a lateral move, no slide. */
     private void switchDomain(int target) {
         if (target != screen) {
             showInstant(target);
@@ -1668,11 +1595,7 @@ public class MainActivity extends Host
         applyChrome(panel);
     }
 
-    /**
-     * Raises a whole-frame overlay (its own bar included) over the
-     * current screen with a fade and a slight zoom. What is underneath
-     * stays put.
-     */
+    /** Raises a whole-frame overlay, its own bar included, over the screen. */
     @Override
     public void openOverlay(int panel) {
         hideKeyboard();
@@ -1726,11 +1649,9 @@ public class MainActivity extends Host
     }
 
     /**
-     * One screen's share of the persistent chrome: whether it carries
-     * its own bar (the overlays do), how the shared bar and FAB
-     * configure, what the FAB does, and what the two backs do. One
-     * table entry per screen ({@link #setUpScreens}) replaces the four
-     * parallel switches that each used to carry every screen.
+     * One screen's share of the persistent chrome: bars, FAB and backs.
+     *
+     * <p>One table entry per screen ({@link #setUpScreens}).
      */
     private static final class Screen {
         /** True when the screen brings its own bar (the overlays). */
@@ -1749,8 +1670,7 @@ public class MainActivity extends Host
         Runnable systemBack;
     }
 
-    /** The screens by panel id (flipper children 0-3, overlays 5-6,
-     *  matching the include order in activity_main.xml). */
+    /** The screens by panel id, as activity_main.xml includes them. */
     private final Map<Integer, Screen> screens = new HashMap<>();
 
     /** Raises the shared FAB as a list screen's add button. */
@@ -1762,10 +1682,10 @@ public class MainActivity extends Host
     }
 
     /**
-     * An editor that is still a frame: a titled screen with a back arrow
-     * and no FAB, leaving onto the list that opened it. It is a screen
-     * rather than nothing so the navigation around it can be built and
-     * used before what goes inside it exists.
+     * An editor that is still a frame: titled, a back arrow, no FAB.
+     *
+     * <p>A screen rather than nothing, so the navigation around it works
+     * before what goes inside it exists.
      */
     private Screen frame(int title, int list) {
         Screen frame = new Screen();
@@ -1781,12 +1701,10 @@ public class MainActivity extends Host
     }
 
     /**
-     * A reader: one item shown whole, with a back arrow onto the list it
-     * was opened from and a bar titled by the item itself.
+     * A reader: one item whole, titled by it, a back arrow onto its list.
      *
-     * <p>The title is a supplier rather than a string, because what is
-     * open changes with every row and the chrome is applied after the
-     * reader has been handed its item.
+     * <p>The title is a supplier: the chrome is applied after the reader is
+     * handed its item.
      */
     private Screen reader(Supplier<String> title, int list) {
         Screen reader = new Screen();
@@ -1823,9 +1741,6 @@ public class MainActivity extends Host
                 };
         screens.put(Panels.CONTACTS, contacts);
 
-        // Mail and calendar share the contacts list's chrome shape: the
-        // burger, the bottom navigation and an extended add button
-        // opening the domain's editor.
         Screen mailScreen = new Screen();
         mailScreen.chrome =
                 () -> {
@@ -1843,8 +1758,8 @@ public class MainActivity extends Host
                 () -> {
                     listFab(R.string.event_new, R.drawable.ic_add);
                     showDomainBar(Panels.CALENDAR);
-                    // The window the agenda covers starts at today, so it
-                    // is rebuilt on arrival rather than cached across days.
+                    // NOTE: the agenda's window starts at today, so it is
+                    // rebuilt on arrival rather than cached across days.
                     calendarList.reload();
                 };
         calendar.fab = eventView::composeNew;
@@ -1860,8 +1775,6 @@ public class MainActivity extends Host
         filesScreen.fab = () -> filesList.newFolder();
         screens.put(Panels.FILES, filesScreen);
 
-        // The composer is a frame with a send button in the bar and a
-        // back arrow that asks before losing what was typed.
         Screen composer = new Screen();
         composer.chrome =
                 () -> {
@@ -1874,8 +1787,8 @@ public class MainActivity extends Host
         composer.systemBack = () -> compose.close();
         screens.put(Panels.COMPOSE, composer);
 
-        // The message reader: a back arrow and the message's actions,
-        // untitled since the page leads with the subject itself.
+        // NOTE: the message reader is untitled: the page leads with the
+        // subject itself.
         Screen message = reader(() -> "", Panels.MAIL);
         Runnable readerChrome = message.chrome;
         message.chrome =
@@ -1885,9 +1798,6 @@ public class MainActivity extends Host
                 };
         screens.put(Panels.MESSAGE, message);
 
-        // A calendar entry's page is its form, the way a contact's is:
-        // the same rows read and edited, the add-field button beside the
-        // title, and the FAB to save.
         Screen entry = new Screen();
         entry.chrome =
                 () -> {
@@ -1897,7 +1807,6 @@ public class MainActivity extends Host
                         findViewById(R.id.contact_add_field).setVisibility(View.VISIBLE);
                         findViewById(R.id.bar_delete).setVisibility(View.VISIBLE);
                         addFab(R.drawable.ic_save, R.string.event_save);
-                        // A conflict in it awaits review behind the error disc.
                         eventView.gate();
                     } else {
                         findViewById(R.id.fab).setVisibility(View.GONE);
@@ -1913,8 +1822,9 @@ public class MainActivity extends Host
                 () -> {
                     ((TextView) findViewById(R.id.bar_title)).setText(editor.edit().title);
                     findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
-                    // Placing needs a real account to target, so with only
-                    // the local book or while resolving a conflict it hides.
+                    // NOTE: placing needs a real account to target, so with
+                    // only the local book or while resolving a conflict it
+                    // hides.
                     findViewById(R.id.contact_books)
                             .setVisibility(
                                     editor.edit().card != null
@@ -1923,8 +1833,6 @@ public class MainActivity extends Host
                                             ? View.VISIBLE
                                             : View.GONE);
                     findViewById(R.id.contact_add_field).setVisibility(View.VISIBLE);
-                    // The FAB validates (check); updateSaveEnabled turns it
-                    // into the error disc while diverging rows await review.
                     android.widget.ImageButton fab = findViewById(R.id.fab);
                     fab.setImageResource(R.drawable.ic_check);
                     fab.setContentDescription(getString(R.string.contact_save));
@@ -1965,11 +1873,7 @@ public class MainActivity extends Host
         screens.put(Panels.DELETED, deleted);
     }
 
-    /**
-     * Configures the persistent app bar and FAB for the screen: every
-     * chrome element goes off, then the screen's own set comes back
-     * (the contacts screen delegates to its selection/search state).
-     */
+    /** Configures the bar and FAB for a screen: all off, then its own set. */
     @Override
     public void applyChrome(int panel) {
         // NOTE: posted, so the tab is drawn before its first sync's dialog
@@ -1978,9 +1882,6 @@ public class MainActivity extends Host
 
         android.widget.ImageButton fab = findViewById(R.id.fab);
 
-        // Every screen change resets the shared FAB to its plain enabled
-        // disc, clearing any lingering loader, dim or conflict error tone;
-        // the screen's own chrome re-applies its state after.
         fab.setImageAlpha(255);
         fab.setBackgroundTintList(null);
         fab.setVisibility(View.GONE);
@@ -1994,7 +1895,7 @@ public class MainActivity extends Host
             return;
         }
 
-        // The overlays carry their own bars, so only the FAB is shared.
+        // NOTE: the overlays carry their own bars, so only the FAB is shared.
         if (!entry.ownBar) {
             for (int id :
                     new int[] {
@@ -2063,10 +1964,10 @@ public class MainActivity extends Host
     }
 
     /**
-     * The stored accounts. None when the Keystore cannot open them right
-     * now, said in a toast, so a launch never fails on them; when they
-     * were dropped for good (copied from another phone without its key),
-     * the user is asked once to add them again.
+     * The stored accounts; none, said in a toast, when the Keystore fails.
+     *
+     * <p>A launch never fails on them. When they were dropped for good (copied
+     * from another phone without its key), the user is asked once to re-add.
      */
     private List<AccountEntry> storedAccounts() {
         List<AccountEntry> stored;
@@ -2093,15 +1994,11 @@ public class MainActivity extends Host
     }
 
     /**
-     * Draws under the system bars (edge-to-edge is enforced for apps
-     * targeting API 35) and pushes the chrome back in with the bar
-     * insets: the top inset pads the surface app bars, so the status
-     * bar area takes their colour as one bar; the bottom inset lifts the
-     * FAB and adds to each list's FAB clearance, so nothing hides under
-     * the navigation bar or the keyboard; the side insets pad the window
-     * for landscape bars and cutouts. Older devices keep the platform's
-     * opaque bars and automatic content inset, so this only runs on API 35
-     * and up.
+     * Draws under the system bars from API 35, where edge-to-edge is enforced.
+     *
+     * <p>The insets push the chrome back in: the top pads the app bars, the
+     * bottom lifts the FAB and list clearances above navigation and keyboard,
+     * the sides pad for landscape bars and cutouts.
      */
     private void applyEdgeToEdge() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
@@ -2159,16 +2056,16 @@ public class MainActivity extends Host
         // bottom folds in the keyboard so the FAB rides above it.
         padBottom(R.id.fab_frame, 0, bottom);
         padBottom(R.id.account_page, 24, bottom);
-        // The bottom navigation takes the system bar's inset, never the
-        // keyboard's, and the extended FAB rides above it.
+        // NOTE: the bottom navigation takes the system bar's inset, never
+        // the keyboard's, and the extended FAB rides above it.
         padBottom(R.id.bottom_nav, 0, bars.bottom);
         android.view.ViewGroup.MarginLayoutParams extended =
                 (android.view.ViewGroup.MarginLayoutParams)
                         findViewById(R.id.fab_extended).getLayoutParams();
         extended.bottomMargin = dimen(R.dimen.fab_above_nav) + bars.bottom;
         findViewById(R.id.fab_extended).setLayoutParams(extended);
-        // The drawer's fixed bottom band takes the inset; the list above
-        // it needs none.
+        // NOTE: the drawer's fixed bottom band takes the inset; the list
+        // above it needs none.
         padBottom(R.id.drawer_actions, 8, bottom);
         padBottom(R.id.config_container, 88, bottom);
         padBottom(R.id.filter_actions, 16, bottom);

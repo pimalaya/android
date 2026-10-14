@@ -13,33 +13,11 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * One account's sessions, and its mailboxes or calendars run on them side
- * by side.
+ * One account's sessions, its mailboxes or calendars run on them side by side.
  *
- * <p>A pass is network-bound, mailbox after mailbox: on the owner's device a
- * first sync of twelve mailboxes spent 6.8 s waiting on Graph against a
- * quarter of a second in the bridge and the store. So the collections of
- * one account run concurrently, in the order the pass takes them (the inbox
- * first, {@code MailEngine.ordered}; the calendars as the account lists
- * them), each worker on a session of its own: a mail session's handle is a
- * pointer into the bridge and a transport holds sockets, each used from one
- * thread at a time, so no two workers ever share one. The store stays one
- * writer ({@code Locks.store}): only the network overlaps.
- *
- * <p>The size is the caller's, the domain's number for the backend
- * ({@code MailEngine.sessionsOf}, {@code CalendarEngine.WORKERS}).
- *
- * <p>The sessions are opened as the workers need them, the first worker
- * taking the caller's own session when it gives one, and kept between runs
- * until the pool is closed: the background fill runs a step at a time and
- * keeps its connections between steps.
- *
- * <p>Each run is numbered, and every session a worker runs it on joins that
- * number ({@link Joiner}) for its length: a Gmail account is one listing,
- * which the run's sessions then read once between them.
- *
- * @param <S> the session, a {@code MailSession} or a {@code Transport} in
- *     the app; anything closeable in a test.
+ * <p>Each worker takes keys in order on its own session ({@code S}, used from
+ * one thread at a time, never shared); only the network overlaps, the store
+ * staying one writer. Sessions open as needed and live until {@link #close}.
  */
 public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable {
     /** The number the last run took; 0 is no run. */
@@ -60,22 +38,29 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
     }
 
     /**
-     * What a run does to one key on a worker's session (a pass, a widening
-     * by a chunk), adding the nanoseconds its engines spent on the network
-     * to {@code remote}.
+     * What a run does to one key on a worker's session (a pass, a widening).
+     *
+     * <p>Adds the nanoseconds its engines spent on the network to {@code
+     * remote}.
      */
     public interface Step<S> {
         void run(S session, String key, AtomicLong remote) throws Exception;
     }
 
-    /** Has a worker's session join the run numbered {@code run}, or leave it on 0. */
+    /**
+     * Has a worker's session join run number {@code run}, or leave it on 0.
+     *
+     * <p>A Gmail account's sessions so read its one listing once per run.
+     */
     public interface Joiner<S> {
         void join(S session, long run);
     }
 
     /** One key a run could not take through. */
     public static final class Failure {
+        /** The key, empty for a run that failed as a whole. */
         public final String key;
+        /** Why it failed. */
         public final Exception error;
 
         Failure(String key, Exception error) {
@@ -125,10 +110,11 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
     private final boolean borrowed;
 
     /**
-     * A pool of up to {@code size} sessions, the first one the caller's when
-     * {@code first} is given (not closed with the pool), the others opened
-     * by {@code opener} as workers need them; {@code joiner}, when given,
-     * numbers each worker's session for the length of a run.
+     * A pool of up to {@code size} sessions, opened by {@code opener}.
+     *
+     * <p>{@code first}, when given, is the caller's session in slot 0, never
+     * closed by the pool; {@code joiner}, when given, numbers each session per
+     * run.
      */
     public WorkerPool(int size, S first, Opener<S> opener, Joiner<S> joiner) {
         this.size = Math.max(1, size);
@@ -146,12 +132,11 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
     }
 
     /**
-     * Runs {@code step} over every key of {@code keys}, taken in that order
-     * by up to {@link #size} workers, each on its own session, and blocks
-     * until all of them are done. A key that fails leaves the others
-     * running; every failure is answered, in the order taken.
+     * Runs {@code step} over {@code keys}, in order, on {@link #size} workers.
      *
-     * <p>One run at a time per pool, so a session never serves two runs.
+     * <p>Blocks until all are done. A failing key leaves the others running;
+     * every failure is answered, in the order taken. One run at a time, so a
+     * session never serves two.
      */
     public synchronized Outcome run(String label, List<String> keys, Step<S> step) {
         Outcome outcome = new Outcome();
@@ -205,8 +190,8 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
                             }
                         }
                     };
-            // NOTE: a run of one key stays on the calling thread, as the
-            // pass did before there was a pool.
+            // NOTE: a lone worker stays on the calling thread, so an
+            // interrupt of the caller reaches its work.
             if (workers == 1) {
                 work.run();
             } else {
@@ -235,9 +220,10 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
     }
 
     /**
-     * Runs several pools' runs at once, one per account, and answers their
-     * outcomes in the order given; a run that threw as a whole answers that
-     * failure alone. One run goes on the calling thread.
+     * Runs several pools' runs at once, one per account, outcomes in order.
+     *
+     * <p>A run that threw as a whole answers that failure alone. One run goes
+     * on the calling thread.
      */
     public static List<Outcome> together(List<Callable<Outcome>> runs) {
         List<Outcome> outcomes = new ArrayList<>(runs.size());
@@ -270,7 +256,7 @@ public final class WorkerPool<S extends AutoCloseable> implements AutoCloseable 
         return outcome;
     }
 
-    /** The session of one worker slot, opened the first time it is asked for. */
+    /** The session of a worker slot, opened the first time it is asked for. */
     private S sessionAt(int slot) throws Exception {
         synchronized (sessions) {
             S session = sessions.get(slot);

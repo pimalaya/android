@@ -9,34 +9,19 @@ import java.nio.charset.StandardCharsets;
 /**
  * The content-addressed blob directory: item bodies, one file per hash.
  *
- * <p>Bodies live beside the database rather than in it (pimdir SPEC.md §5), so
- * a large card or message never travels through a SQLite row, and an identical
- * body reaching two collections or two accounts is stored once. The name is the
- * content hash, so a blob is immutable: editing a card writes a new one and
- * repoints the item at it.
- *
- * <p><strong>Nothing here computes a hash.</strong> A body arrives with its
- * name already decided, by the engine on a fetch or by {@link PimdirHash} on a
- * locally captured document, so this class only has to file the bytes under it.
- * Deriving one here too would be a third implementation to keep byte-identical
- * with the other two, and being wrong would not fail loudly: it would write
- * blobs no reader could find.
- *
- * <p>Writes are atomic in the way the spec requires: temp file, flush, rename.
- * A crash therefore leaves at worst an orphan blob, never a row pointing at a
- * body that is not fully written.
+ * <p>Beside the database (pimdir SPEC.md §5), immutable, named by a hash the
+ * caller decided (engine or {@link PimdirHash}): never hashed here. Writes are
+ * temp file, flush, rename: a crash leaves at worst an orphan blob.
  */
 public final class PimdirBlobs {
     private final File root;
 
+    /** The blob directory under {@code root}. */
     public PimdirBlobs(File root) {
         this.root = root;
     }
 
-    /**
-     * The blob path of a hash, sharded two levels so no directory grows
-     * unbounded: {@code objects/ab/cd/abcd...}.
-     */
+    /** The blob path of a hash, sharded two levels: {@code objects/ab/cd/…}. */
     File pathOf(String hash) {
         if (hash == null || hash.length() < 4) {
             throw new IllegalArgumentException("Not a content hash: " + hash);
@@ -82,8 +67,9 @@ public final class PimdirBlobs {
     }
 
     /**
-     * Files a file's bytes under their hash, copied a buffer at a time, on
-     * {@link #put(String, byte[])}'s terms; the source stays where it is.
+     * Files a file's bytes under their hash; the source stays where it is.
+     *
+     * <p>On {@link #put(String, byte[])}'s terms.
      */
     void put(String hash, File source) throws IOException {
         File target = pathOf(hash);
@@ -111,11 +97,10 @@ public final class PimdirBlobs {
     }
 
     /**
-     * Files a file under its hash by moving it there, on {@link
-     * #put(String, byte[])}'s terms: synced, then renamed into its shard, so
-     * a body the bridge wrote is never read again to be stored. Where the
-     * rename cannot (another file system), it is copied ({@link
-     * #put(String, File)}). The source is gone either way.
+     * Files a file under its hash by moving it; the source is gone after.
+     *
+     * <p>On {@link #put(String, byte[])}'s terms: synced then renamed into its
+     * shard, copied where the rename cannot (another file system).
      */
     public void adopt(String hash, File source) throws IOException {
         try {

@@ -21,10 +21,10 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
- * A software stand-in for the "AndroidKeyStore" JCA provider, which the
- * JVM Robolectric runs on does not have: AES keys generated under an alias
- * land in a map the keystore reads back, so the production sealing code
- * runs unchanged.
+ * A software stand-in for the "AndroidKeyStore" JCA provider the JVM lacks.
+ *
+ * <p>AES keys generated under an alias land in a map the keystore reads back,
+ * so the production sealing code runs unchanged.
  */
 public final class FakeAndroidKeyStore extends Provider {
     public static final Map<String, SecretKey> KEYS = new ConcurrentHashMap<>();
@@ -36,8 +36,9 @@ public final class FakeAndroidKeyStore extends Provider {
     }
 
     /**
-     * Registers the provider, replacing one a previous Robolectric sandbox
-     * registered: JCA is JVM-wide, but each sandbox loads its own classes.
+     * Registers the provider, replacing one a previous sandbox registered.
+     *
+     * <p>JCA is JVM-wide, but each Robolectric sandbox loads its own classes.
      */
     public static synchronized void install() {
         Security.removeProvider("AndroidKeyStore");

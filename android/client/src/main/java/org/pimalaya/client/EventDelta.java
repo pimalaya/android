@@ -6,24 +6,18 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * One calendar enumerated from a cursor: which events moved, which went,
- * and where the next round resumes (rs/calendar.rs {@code EventDelta}
- * 117).
+ * One calendar enumerated from a cursor: events moved, gone, next cursor.
  *
- * <p>The calendar twin of {@link CardDelta}, and no bodies, for the same
- * reason: a pass asks which members changed and reads the ones it has to.
- * Except where the round had to read them anyway: Google's and JMAP's
- * complete rounds list every event whole and hand the bodies over in
- * {@link #bodies}, rather than have each one read a second time.
+ * <p>Mirrors rs/calendar.rs {@code EventDelta} 117. Like {@link CardDelta}
+ * it carries no bodies, except the ones Google's and JMAP's complete rounds
+ * read anyway ({@link #bodies}), spared a second read.
  *
- * @param changed resource names created or updated since the cursor, with
- *     ETags
- * @param bodies the bodies the round already held, under the same names
- *     and at the same revisions as {@link #changed}; empty where it listed
- *     names alone (CalDAV, Graph)
+ * @param changed resource names created or updated since the cursor, with ETags
+ * @param bodies bodies already held, keyed and revised as {@link #changed};
+ *     empty where the round listed names alone (CalDAV, Graph)
  * @param vanished resource names removed since the cursor
  * @param token the next cursor, or null when the backend issued none
- * @param complete true when the round listed the complete member set: an
+ * @param complete true when the round listed the whole member set: an
  *     initial round, or an expired cursor re-run as one
  */
 public record EventDelta(

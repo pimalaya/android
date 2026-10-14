@@ -4,16 +4,15 @@ import java.util.List;
 import org.json.JSONObject;
 
 /**
- * One message read whole into a file (rs/mail/session.rs
- * {@code MessageSource} 368): a Gmail one {@code Labelled}, any other
- * backend's {@code Plain}, which carries neither labels nor a reception
- * time.
+ * One message read whole into a file.
+ *
+ * <p>Mirrors rs/mail/session.rs {@code MessageSource} 368: Gmail's
+ * {@code Labelled}, any other backend's {@code Plain} (no labels, no time).
  *
  * @param id the message's id on its backend
  * @param labels its Gmail label ids, null for any other backend
  * @param path the file it was written to
- * @param received when Gmail received it, in milliseconds since the epoch;
- *     null when unknown or for any other backend
+ * @param received Gmail's reception time in epoch milliseconds; else null
  * @param size the file's size in octets
  */
 public record MessageSource(

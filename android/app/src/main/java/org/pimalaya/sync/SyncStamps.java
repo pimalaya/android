@@ -6,10 +6,9 @@ import android.content.SharedPreferences;
 /**
  * When each account last synced, which the drawer's account cards say.
  *
- * <p>Per account rather than per domain: the card is the account's,
- * and a pass over any of its domains that came through is a moment the
- * phone and the server agreed. A failed pass leaves the stamp where it
- * was, so the card keeps telling how stale the account has grown.
+ * <p>Per account, not per domain: any pass that came through is a moment the
+ * phone and the server agreed. A failed pass leaves the stamp, so the card
+ * keeps showing how stale the account is.
  */
 public final class SyncStamps {
     private SyncStamps() {}

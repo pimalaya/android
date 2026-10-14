@@ -10,7 +10,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-/** Field readers over a parsed bridge reply, a missing field thrown as unreadable. */
+/** Field readers over a parsed bridge reply; a missing field is unreadable. */
 final class Json {
     private Json() {}
 
@@ -75,7 +75,7 @@ final class Json {
         return strings;
     }
 
-    /** The string lists of a JSON object by key, in key order, empty when there is none. */
+    /** The string lists of a JSON object, in key order; empty if none. */
     static Map<String, List<String>> stringLists(JSONObject object) {
         Map<String, List<String>> lists = new TreeMap<>();
         if (object != null) {

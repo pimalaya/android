@@ -4,10 +4,11 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One draft to compose (rs/mail/compose.rs {@code Draft} 37): the
- * composer's fields plus the two stamps, which are the caller's so the
- * bridge stays a pure function of what it is handed. A null component is
- * an absent key.
+ * One draft to compose: the composer's fields plus the caller's two stamps.
+ *
+ * <p>Mirrors rs/mail/compose.rs {@code Draft} 37. The stamps are the
+ * caller's so the bridge stays a pure function. A null component is an
+ * absent key.
  *
  * @param from the sender, as the address alone
  * @param fromName the sender's display name, empty when there is none
@@ -17,8 +18,7 @@ import org.json.JSONObject;
  * @param subject the subject, as typed
  * @param body the text, as typed
  * @param date now, as an RFC 5322 date
- * @param messageId the {@code Message-ID} to stamp it with, angle brackets
- *     included
+ * @param messageId the {@code Message-ID} to stamp, angle brackets included
  * @param inReplyTo the {@code Message-ID} replied to, or empty
  * @param references the thread a reply continues, oldest first, space
  *     separated; empty outside a reply

@@ -10,47 +10,30 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * The account verbs of the bridge (rs/ffi/account.rs): config search, OAuth
- * 2.0 token refresh, server metadata and client registration (the code
- * exchange lives on {@link OauthSession}), and what an account URL tells
- * about its backend. Every call that takes a transport blocks, so callers
- * must run it off the main thread.
+ * The account verbs of the bridge (rs/ffi/account.rs).
+ *
+ * <p>Config search, OAuth 2.0 refresh, metadata and registration (the code
+ * exchange is {@link OauthSession}'s), and what a URL tells of its backend.
+ * Calls taking a transport block: run them off the main thread.
  */
 public class AccountClient {
     /**
-     * Runs the MX provider probe: one DNS lookup matching the mail
-     * exchanges against the fixed provider rules, catching every
-     * domain whose mail lives at Google or Microsoft (gmail.com and
-     * outlook.com included, their own exchanges match too). Meant to
-     * run in parallel with {@link #searchAll} so the caller decides
-     * what to take. Returns the raw provider configs (their source
-     * naming the provider), empty when no rule matched. The resolver
-     * is a DNS resolver, null for the default DNS-over-HTTPS one.
+     * Runs the MX provider probe: the provider configs, empty when none match.
+     *
+     * <p>One DNS lookup matching the MX against the provider rules (Google,
+     * Microsoft, custom domains included), beside {@link #searchAll}. A null
+     * {@code resolver} is the default DNS-over-HTTPS one.
      */
     public List<ServiceConfig> searchProvider(Transport transport, String email, String resolver) {
         return configs(Native.searchProvider(transport, email, resolver));
     }
 
     /**
-     * Searches every discovery mechanism for service configs of every
-     * domain the app covers: the fixed provider rules, PACC, RFC 6764
-     * CardDAV and CalDAV resolve, Mozilla autoconfig (IMAP and SMTP)
-     * and RFC 8620 JMAP resolve, each carrying its endpoint and
-     * authentication methods, so the connection screen can list what
-     * the address actually offers. The input is an email address or a
-     * bare domain (every mechanism is domain-driven; a domain just
-     * skips the username hints). The mechanisms run in parallel, each
-     * on its own transport; a failing mechanism is skipped. Their
-     * outputs merge in mechanism-priority order, and the merged
-     * configs' endpoints are probed in parallel for the authentication
-     * schemes they actually advertise, a provider rule's excepted: what
-     * it says is the provider's own word. The resolver is a DNS
-     * resolver, null for the default DNS-over-HTTPS one.
+     * Searches every discovery mechanism for an address's or domain's configs.
      *
-     * <p>The provider rules rank first, as io-pim-discovery's own sweep
-     * ranks them: they name Google's and Microsoft's endpoints and sign-ins
-     * for a custom domain as much as for their own, which nothing the
-     * domain publishes does.
+     * <p>Provider rules first, then PACC, RFC 6764, autoconfig, RFC 8620, run
+     * in parallel, failures skipped; endpoints but a rule's are probed for auth
+     * schemes. A null {@code resolver} is the default DNS-over-HTTPS one.
      */
     public List<ServiceConfig> searchAll(String email, String resolver) {
         String[] outputs = new String[6];
@@ -135,11 +118,7 @@ public class AccountClient {
         }
     }
 
-    /**
-     * Parses one mechanism's output into a config array; a failed
-     * mechanism (error reply, or none at all) is skipped as an empty
-     * list, like the serial search chain did.
-     */
+    /** Parses one mechanism's output into configs; a failed one is empty. */
     private static JSONArray configLists(String output) {
         if (output == null) {
             return new JSONArray();
@@ -166,11 +145,10 @@ public class AccountClient {
     }
 
     /**
-     * Refreshes OAuth 2.0 tokens; the grant's {@code scope} is the
-     * space-separated scope list of the original grant (null keeps the
-     * server default) and its {@code clientSecret} rides along when the
-     * registration issued one (null for none). The code-exchange side
-     * lives on {@link OauthSession}.
+     * Refreshes OAuth 2.0 tokens over the grant.
+     *
+     * <p>A null grant scope keeps the server default; its client secret rides
+     * along when one was issued.
      */
     public OauthTokens refresh(Transport transport, OauthGrant grant, String refreshToken) {
         JSONObject reply =
@@ -185,21 +163,15 @@ public class AccountClient {
         return OauthTokens.from(reply);
     }
 
-    /**
-     * Fetches an authorization server's RFC 8414 metadata from its
-     * issuer, so onboarding can drive the code grant and tell whether
-     * the server lets a public client register itself (RFC 7591).
-     */
+    /** Fetches an authorization server's RFC 8414 metadata from its issuer. */
     public ServerMetadata serverMetadata(Transport transport, String issuer) {
         return ServerMetadata.from(Replies.object(Native.oauthServerMetadata(transport, issuer)));
     }
 
     /**
-     * Registers a public client at the given RFC 7591 registration
-     * endpoint (no secret, the loopback redirect URI, code + refresh
-     * grants), returning the server-issued client id. The client
-     * secret rides in {@link OauthTokens}-style JSON but a public
-     * client gets none.
+     * Registers a public client (RFC 7591), returning its issued client id.
+     *
+     * <p>No secret, the loopback redirect URI, code and refresh grants.
      */
     public String registerClient(Transport transport, ClientRegistration registration) {
         JSONObject reply =
@@ -213,15 +185,12 @@ public class AccountClient {
         return Json.string(reply, "client_id");
     }
 
-    /**
-     * Google's CardDAV principal root for the email; the standard
-     * PROPFIND discovery runs from there.
-     */
+    /** Google's CardDAV principal root for the email, PROPFIND's start. */
     public static String googleCarddavBase(String email) {
         return base("googleCarddav", email);
     }
 
-    /** A Google API account's base URL for the email: People, Gmail or Calendar. */
+    /** A Google API account's base URL: People, Gmail or Calendar. */
     public static String googleBase(String email) {
         return base("google", email);
     }
@@ -232,18 +201,19 @@ public class AccountClient {
     }
 
     /**
-     * A JMAP account's base URL wrapping the HTTPS session URL (a bare
-     * host triggers {@code /.well-known/jmap} discovery).
+     * A JMAP account's base URL wrapping the HTTPS session URL.
+     *
+     * <p>A bare host triggers {@code /.well-known/jmap} discovery.
      */
     public static String jmapBase(String sessionUrl) {
         return base("jmap", sessionUrl);
     }
 
     /**
-     * What was typed for a submission server, as the endpoint it opens:
-     * STARTTLS on the submission port (587, RFC 6409) and on 25, implicit
-     * TLS on any other, 465 (RFC 8314 section 3.3) when none was typed. A
-     * URL passes through.
+     * What was typed for a submission server, as the endpoint it opens.
+     *
+     * <p>STARTTLS on 587 (RFC 6409) and 25, implicit TLS on any other port,
+     * 465 (RFC 8314 3.3) when none was typed. A URL passes through.
      */
     public static String submitUrl(String entered) {
         if (entered.contains("://")) {
@@ -257,9 +227,9 @@ public class AccountClient {
     }
 
     /**
-     * The endpoint with a user in its userinfo, the way RFC 5092 section
-     * 3.2 names who an IMAP URL signs in as: what SASL XOAUTH2 presents
-     * beside a token, which carries no login of its own.
+     * The endpoint with a user in its userinfo (RFC 5092 3.2).
+     *
+     * <p>What SASL XOAUTH2 presents beside a token, which carries no login.
      */
     public static String withUser(String url, String user) {
         try {
@@ -284,50 +254,44 @@ public class AccountClient {
     }
 
     /**
-     * True when the account's cards are account-level resources with
-     * m:n addressbook memberships (JMAP, Google): they list once per
-     * account through {@link Native#listAccountCards}, not per addressbook.
-     * CardDAV and Graph cards live in the one collection they were
-     * listed from and go through {@link ContactClient#listCards}.
+     * True when the account's cards are account-level (JMAP, Google).
+     *
+     * <p>m:n book memberships, listed once per account; CardDAV and Graph
+     * cards live in one collection each ({@link ContactClient#listCards}).
      */
     public static boolean isAccountLevel(Account account) {
         return account != null && isAccountLevel(account.baseUrl);
     }
 
-    /**
-     * True when the URL (an account base URL, or a collection URL
-     * derived from one) belongs to an account-level backend.
-     */
+    /** True when the URL (account base or collection) is account-level. */
     public static boolean isAccountLevel(String url) {
         return info(url).accountLevel();
     }
 
     /**
-     * True when a write to the calendar behind the URL carries an override
-     * of one occurrence to the server: CalDAV's in the object, Graph's and
-     * Google's through the occurrence's instance, JMAP's inside the event's
-     * {@code recurrenceOverrides}.
+     * True when a calendar write behind the URL carries occurrence overrides.
+     *
+     * <p>CalDAV's in the object, Graph's and Google's through the instance,
+     * JMAP's in {@code recurrenceOverrides}.
      */
     public static boolean writesOverrides(String url) {
         return info(url).writesOverrides();
     }
 
-    /** True when a write to the calendar behind the URL carries an {@code EXDATE}. */
+    /** True when a calendar write behind the URL carries an {@code EXDATE}. */
     public static boolean writesExdates(String url) {
         return info(url).writesExdates();
     }
 
-    /**
-     * True when the calendar behind the URL takes event writes at all: every backend's does, the
-     * local account's none.
-     */
+    /** True when the calendar behind the URL takes writes: all but local. */
     public static boolean writesEvents(String url) {
         return info(url).writesEvents();
     }
 
     /**
-     * True when the account's mail submits through the session it reads from (JMAP, Graph,
-     * Gmail), needing no submit endpoint of its own.
+     * True when mail submits over the session it reads from.
+     *
+     * <p>JMAP, Graph and Gmail need no submit endpoint of their own.
      */
     public static boolean submitsOverSession(Account account) {
         return account != null && info(account.baseUrl).submitsOverSession();
@@ -356,7 +320,7 @@ public class AccountClient {
     /** Parsed backend info by URL, cached (pure computation). */
     private static final Map<String, BackendInfo> infos = new ConcurrentHashMap<>();
 
-    /** What the URL tells about its backend; a null URL reads as an empty one. */
+    /** What the URL tells about its backend; a null URL reads as empty. */
     public static BackendInfo info(String url) {
         return infos.computeIfAbsent(
                 url == null ? "" : url,

@@ -3,21 +3,14 @@ package org.pimalaya.account;
 import org.pimalaya.client.Account;
 
 /**
- * The built-in, undeletable "On this device" account and its single
- * addressbook. Its cards live only in the app's store: the remote sync
- * skips it (no server), and the phone projection stays opt-in, so a user
- * can add, edit and import contacts without ever connecting an account.
+ * The built-in, undeletable "On this device" account and its one addressbook.
  *
- * <p>It is synthesized in memory (never persisted to the credential
- * store) and seeded into the card store's addressbook table on launch,
- * so a fresh install or a schema rebuild always finds it present and
- * subscribed. The {@code local://} base URL keeps it out of every
- * backend transport (see Native.accountInfo): it reports as a
- * transport-less {@code local} backend, non-account-level, so its cards
- * key per collection like CardDAV.
+ * <p>In memory only, seeded into the card store on launch, skipped by remote
+ * sync. Its {@code local://} URL makes the bridge report a transport-less,
+ * non-account-level {@code local} backend, keyed per collection like CardDAV.
  */
 public final class LocalBook {
-    /** Base URL and account-email key of the local account (never a real email). */
+    /** Base URL and account-email key of the local account (never an email). */
     public static final String ACCOUNT = "local://on-this-device";
 
     /** Collection URL of the local account's single addressbook. */
@@ -33,7 +26,7 @@ public final class LocalBook {
         return emailOrUrl != null && emailOrUrl.startsWith("local://");
     }
 
-    /** The synthesized account, its login and password unused (no transport). */
+    /** The synthesized account; login and password unused (no transport). */
     public static AccountEntry account() {
         return AccountEntry.of(
                 ACCOUNT, PimDomain.CONTACTS, ACCOUNT, AccountCredential.password("", ""));

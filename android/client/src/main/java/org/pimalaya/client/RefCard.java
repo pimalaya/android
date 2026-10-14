@@ -4,8 +4,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One card offered to the duplicate scan (rs/contact/dedup.rs
- * {@code DuplicateCard} 14). A null component is an absent key.
+ * One card offered to the duplicate scan.
+ *
+ * <p>Mirrors rs/contact/dedup.rs {@code DuplicateCard} 14. A null component
+ * is an absent key.
  *
  * @param ref the card's replica reference, echoed back in its group
  * @param vcard the card's vCard

@@ -6,17 +6,16 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * One message of a Gmail or JMAP step (rs/mail/session.rs
- * {@code NamedStepItem} 311): named as a listed one is, with the
- * mailboxes it is a member of, by name, and its file.
+ * One message of a Gmail or JMAP step, named as a listed one, with its file.
+ *
+ * <p>Mirrors rs/mail/session.rs {@code NamedStepItem} 311.
  *
  * @param flags its IMAP markers
  * @param handle its provider id
  * @param linkId what the store files it under, the handle
  * @param mailboxes the mailboxes it is a member of, by name
  * @param path the file its body was written to
- * @param received when it was received, in milliseconds since the epoch;
- *     null when unknown
+ * @param received reception time in epoch milliseconds; null when unknown
  * @param size the file's size in octets
  * @param sortKey its summary's sort key, empty when it has none
  * @param summary its summary, opaque (the pimdir persistence format),

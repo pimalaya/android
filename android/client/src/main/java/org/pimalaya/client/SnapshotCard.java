@@ -6,8 +6,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One changed card of an {@link AccountSnapshotFacts} delta
- * (rs/contact/sync.rs {@code AccountSnapshotCard} 99).
+ * One changed card of an {@link AccountSnapshotFacts} delta.
+ *
+ * <p>Mirrors rs/contact/sync.rs {@code AccountSnapshotCard} 99.
  *
  * @param handle the card's handle, null (absent) until it was fetched
  * @param books the ids of the books listing the card

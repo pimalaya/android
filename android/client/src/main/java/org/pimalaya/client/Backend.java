@@ -1,8 +1,10 @@
 package org.pimalaya.client;
 
 /**
- * The backend behind an account base URL (rs/account.rs {@code Backend}
- * 119, plus the on-device account rs/ffi/account.rs 640).
+ * The backend behind an account base URL.
+ *
+ * <p>Mirrors rs/account.rs {@code Backend} 119, plus the on-device account
+ * (rs/ffi/account.rs 640).
  */
 public enum Backend {
     /** A plain CardDAV (or CalDAV, IMAP) server: the default. */

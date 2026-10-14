@@ -16,25 +16,9 @@ import java.util.Map;
 /**
  * The item summaries and sort keys this app writes into a pimdir store.
  *
- * <p>pimdir fixes both (STORAGE.md Annex A, §9.3): a summary is one typed row
- * in its kind's table with the people the item names in {@code item_address},
- * and a sort key is written, never derived. The store defines the columns, the
- * ordering rule and the paging statements; producing the values and writing
- * them is the writer's, which is what this class is.
- *
- * <p>The derivations are io-pimdir's wherever the body is on hand: a card's
- * summary and sort key come back from {@code indexCard} beside the app's own
- * index, so two writers of one store cannot disagree about a property or a
- * spelling. The one summary built here is a message's, which the mail mirror
- * writes from an IMAP envelope with no body to read, exactly as Annex A allows.
- *
- * <p>The keys are TEXT compared with SQLite's {@code BINARY} collation, so
- * <strong>byte order has to be the intended order</strong>. That is why a
- * timestamp is RFC 3339 in UTC at a fixed width rather than anything friendlier:
- * a local offset would sort {@code +02:00} apart from {@code Z} while naming the
- * same instant. Empty means unknown, which sorts to the end of a newest-first
- * mail listing and to the head of an A-to-Z contact listing, in both cases where
- * an unsummarised item belongs.
+ * <p>STORAGE.md Annex A, §9.3; only a mail's summary is built here. Keys
+ * compare as BINARY TEXT: times are fixed-width RFC 3339 UTC, empty (unknown)
+ * sorts last in mail, first in contacts.
  */
 public final class PimdirSummary {
     /** Media type of a mail item. */
@@ -46,32 +30,25 @@ public final class PimdirSummary {
     /** Media type of a calendar item. */
     public static final String CALENDAR = "text/calendar";
 
-    /** Media type of a file item: bytes, its own type in its summary (Annex A.7). */
+    /** Media type of a file item; its own type is in its summary (A.7). */
     public static final String FILE = "application/octet-stream";
-
-    // ---- writing ----------------------------------------------------------
 
     /**
      * Writes one item's summary row and the addresses beside it.
      *
-     * <p>A null summary keeps what is stored, on the same terms as the sort key
-     * (SPEC.md §9.3): a write that does not restate a summary is not a write
-     * that blanks it, or a flag change would strip the row it touched of
-     * everything a listing renders.
-     *
-     * <p>The statements are the canonical ones, bound by name: the summary
-     * object <em>is</em> the row, its keys the columns, so nothing here holds a
-     * column list that the next spec revision could leave stale.
+     * <p>A null summary keeps what is stored (SPEC.md §9.3), or a flag change
+     * would blank the row. The summary object is the row, bound by name to the
+     * canonical statements.
      */
     public static void write(SQLiteDatabase db, String collection, String linkId, JSONObject summary) {
         write(db, collection, linkId, summary, false);
     }
 
     /**
-     * The summary of an item the same write just created when {@code fresh}:
-     * it has no addresses to replace, and its insert drew the change stamp
-     * already, so the two statements that exist for a moved summary are left
-     * out. A page of new mail runs this once per message.
+     * Writes a summary; {@code fresh} for an item this write just created.
+     *
+     * <p>A fresh item has no addresses to replace and its insert drew the
+     * change stamp, so those two statements are skipped.
      */
     public static void write(
             SQLiteDatabase db, String collection, String linkId, JSONObject summary,
@@ -109,10 +86,9 @@ public final class PimdirSummary {
             return;
         }
 
-        // The change stamp is drawn by triggers on the item row, which cannot
-        // see these tables (§4.5), so a summary that moved on its own asks for
-        // one: otherwise a reader following the feed never learns the item is
-        // no longer listed the way it was.
+        // NOTE: item-row triggers draw the change stamp and cannot see these
+        // tables (§4.5): a summary moved alone asks for one, or a feed reader
+        // never learns the item is listed differently.
         Map<String, Object> scope = new LinkedHashMap<>();
         scope.put("collection", collection);
         scope.put("link_id", linkId);
@@ -120,11 +96,11 @@ public final class PimdirSummary {
     }
 
     /**
-     * The automatic-reference rule (STORAGE section 14.2) a summary of this
-     * kind runs once written: a mail refers to its sender's card, a card
-     * gathers the mail from its addresses, a calendar item the mail inviting
-     * to it. The invitation from the mail's side runs when its body is stored
-     * ({@link MailStore#restateFromBody}), the summary holding none before.
+     * The automatic-reference rule (STORAGE §14.2) a summary of this kind runs.
+     *
+     * <p>A mail refers to its sender's card, a card gathers its addresses'
+     * mail, a calendar item the mail inviting to it (from the mail's side once
+     * its body is stored, {@code MailStore.restateFromBody}).
      */
     private static String ruleOf(String kind) {
         switch (kind) {
@@ -147,10 +123,7 @@ public final class PimdirSummary {
         exec(db, rule, values);
     }
 
-    /**
-     * Runs every rule over the whole store, once, for a store written before
-     * automatic references.
-     */
+    /** Runs every rule over the whole store, once, for an older store. */
     static void linkAll(SQLiteDatabase db) {
         for (String rule :
                 new String[] {
@@ -197,8 +170,10 @@ public final class PimdirSummary {
     }
 
     /**
-     * One JSON value as SQLite takes it: an absent one is NULL, and a list is
-     * the JSON text the column holds ({@code in_reply_to}).
+     * One JSON value as SQLite takes it.
+     *
+     * <p>Absent is NULL; a list is the JSON text the column holds ({@code
+     * in_reply_to}).
      */
     private static Object value(Object value) {
         if (value == null || value == JSONObject.NULL) {
@@ -207,21 +182,11 @@ public final class PimdirSummary {
         return value instanceof JSONArray ? value.toString() : value;
     }
 
-    // ---- message/rfc822 ---------------------------------------------------
-
     /**
      * The summary of one message (Annex A.1), built from an envelope.
      *
-     * <p>The mail mirror lists a mailbox without fetching it, so this is the
-     * `Meta` tier of the same derivation io-pimdir performs on a body, and the
-     * two have to agree: a message whose summary differs between tiers reads as
-     * two different rows to anything paging the store.
-     *
-     * <p>{@code sender} is the first From addr-spec and {@code sender_name} its
-     * display name; the two are separate because a row shows the name while the
-     * avatar beside it is derived from the address, which is the half that
-     * survives a rename. Flags are deliberately absent: they are the item's own
-     * mutable state, not part of its summary.
+     * <p>Must match io-pimdir's body-derived one, or the tiers page as two
+     * rows. {@code sender} is the first From addr-spec; flags are not summary.
      */
     public static JSONObject mail(
             String messageId,
@@ -235,9 +200,8 @@ public final class PimdirSummary {
         try {
             JSONObject row = new JSONObject();
             putIfSet(row, "message_id", bare(messageId));
-            // Stated rather than left out: the column is NOT NULL and an
-            // envelope this app reads carries no reference chain, so the
-            // honest value is the empty list rather than a missing one.
+            // NOTE: the column is NOT NULL and an envelope carries no
+            // reference chain, so the value is the empty list.
             row.put("in_reply_to", new JSONArray());
             row.put("subject", subject == null ? "" : subject);
             putIfSet(row, "sender", canonical(fromAddress));
@@ -260,10 +224,7 @@ public final class PimdirSummary {
         }
     }
 
-    /**
-     * The sort key of a message: its date, so a mailbox reads newest first by
-     * paging the key descending.
-     */
+    /** A message's sort key, its date: newest first pages it descending. */
     public static String mailSortKey(String date) {
         return rfc3339(date);
     }
@@ -284,8 +245,10 @@ public final class PimdirSummary {
     }
 
     /**
-     * The canonical form of an address (Annex A.6): the addr-spec alone,
-     * lowercased whole, without display name, angle brackets or {@code mailto:}.
+     * The canonical form of an address (Annex A.6).
+     *
+     * <p>The addr-spec alone, lowercased, without display name, angle brackets
+     * or {@code mailto:}.
      */
     static String canonical(String raw) {
         if (raw == null) {
@@ -304,16 +267,11 @@ public final class PimdirSummary {
         return inner.trim().toLowerCase(Locale.ROOT);
     }
 
-    // ---- text/calendar ----------------------------------------------------
-
     /**
-     * The sort key of a calendar entry: its {@code DTSTART}, normalised like
-     * mail's date, which is what lets a date-range read page a calendar through
-     * the same statements as a mailbox.
+     * A calendar entry's sort key: its {@code DTSTART}, normalised like mail's.
      *
-     * <p>Takes the civil {@code YYYYMMDDTHHMMSS} stamp the expander yields
-     * (recurrence is expanded on wall-clock time, so an occurrence carries no
-     * offset) and widens it to the fixed-width RFC 3339 shape the column wants.
+     * <p>Takes the expander's civil {@code YYYYMMDDTHHMMSS} stamp (wall-clock,
+     * no offset) and widens it to the column's fixed-width RFC 3339 shape.
      */
     public static String calendarSortKey(String civilStamp) {
         if (civilStamp == null || civilStamp.length() < 8) {
@@ -337,16 +295,11 @@ public final class PimdirSummary {
         return date + 'T' + time + 'Z';
     }
 
-    // ---- shared -----------------------------------------------------------
-
     /**
-     * An RFC 5322 date as the fixed-width RFC 3339 UTC stamp the column orders
-     * on, or empty when it cannot be read.
+     * An RFC 5322 date as the column's fixed-width RFC 3339 UTC stamp.
      *
-     * <p>Empty rather than a guess: the spec gives unknown a defined position
-     * (the end of a newest-first listing), and inventing an epoch date would put
-     * an unreadable message at the start of 1970 instead, which reads as data
-     * rather than as absence.
+     * <p>Empty when unreadable, never a guess: unknown has a defined position,
+     * an epoch date would read as data.
      */
     static String rfc3339(String date) {
         long stamp = MailDate.toStamp(date);
@@ -362,10 +315,8 @@ public final class PimdirSummary {
     /**
      * The instant behind a stored key, or 0 when it carries none.
      *
-     * <p>The inverse of {@link #rfc3339}, and here beside it for that reason: a
-     * reader that formatted the key differently from the writer would render the
-     * wrong date on every row, and the two are easiest to keep honest when they
-     * are the same fixed shape in the same place.
+     * <p>The inverse of {@link #rfc3339}, kept beside it so reader and writer
+     * share one shape.
      */
     public static long stampOf(String key) {
         if (key == null || key.isEmpty()) {

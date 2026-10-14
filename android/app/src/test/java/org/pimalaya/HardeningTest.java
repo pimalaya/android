@@ -23,10 +23,11 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * The app's surface against what another app or a server hands it: the
- * exported sync adapters, accounts copied without their key, and what a
- * killed run leaves in the cache. A hostile message's are the mail
- * package's ({@link org.pimalaya.mail.HardeningTest}).
+ * The app's surface against what another app or a server hands it.
+ *
+ * <p>The exported sync adapters, accounts copied without their key, a killed
+ * run's cache leftovers. Hostile messages are the mail package's
+ * ({@link org.pimalaya.mail.HardeningTest}).
  */
 @RunWith(RobolectricTestRunner.class)
 public class HardeningTest {

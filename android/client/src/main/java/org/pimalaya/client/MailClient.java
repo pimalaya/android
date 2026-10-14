@@ -7,16 +7,13 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * The mail verbs of the bridge (rs/ffi/mail.rs), each run on a held
- * {@link MailSession} but for the reads of a message the store already
- * holds. Every call on a session blocks, so callers must run it off the
- * main thread.
+ * The mail verbs of the bridge (rs/ffi/mail.rs).
+ *
+ * <p>Each runs on a held {@link MailSession}, but for the reads of a message
+ * the store holds. Calls on a session block: run them off the main thread.
  */
 public class MailClient {
-    /**
-     * The account's mailboxes with the roles their RFC 6154 attributes
-     * mark, in one round.
-     */
+    /** The account's mailboxes with their RFC 6154 roles, in one round. */
     public List<Mailbox> listMailboxes(MailSession session) {
         return Mailbox.list(
                 Replies.array(
@@ -24,14 +21,11 @@ public class MailClient {
     }
 
     /**
-     * One page of a mailbox's listing, the engine's {@code enumerate}
-     * yield answered: the reply as the engine reads it, every member
-     * named by the summary the listing read (pimdir SYNC section 4).
+     * One page of a mailbox's listing, answering the engine's enumerate yield.
      *
-     * <p>Passed through rather than parsed into a model of its own: the
-     * shape is the engine's wire, the driver hands it straight back, and
-     * a Java copy of it would be the duplicated schema the boundary
-     * notes warn about.
+     * <p>Members named by their listed summary (pimdir SYNC 4). JSON (recorded
+     * exception): the engine's wire, handed straight back; a Java model of it
+     * would duplicate the schema.
      */
     public JSONObject enumerateMailbox(MailSession session, String mailbox, JSONObject request) {
         String asked = request.toString();
@@ -44,9 +38,10 @@ public class MailClient {
     }
 
     /**
-     * The messages a listing named by id and markers alone (a Graph delta),
-     * each read with its summary: the items as a listing names them, a
-     * message gone since it was listed left out.
+     * The messages a Graph delta named by id and markers alone, with summaries.
+     *
+     * <p>Items as a listing names them (JSON, recorded exception); a message
+     * gone since it was listed is left out.
      */
     public JSONArray nameMessages(MailSession session, String mailbox, List<String> handles) {
         String asked = new JSONArray(handles).toString();
@@ -62,10 +57,10 @@ public class MailClient {
     }
 
     /**
-     * The floor of a mailbox's next chunk (a number of messages, never a
-     * span of time) and the {@code Date}s of its {@code count} newest
-     * messages by {@code Date} dated before {@code before}, null for no
-     * ceiling ({@link FloorReply}).
+     * The floor of a mailbox's next chunk ({@link FloorReply}).
+     *
+     * <p>The {@code Date}s of its {@code count} newest messages dated before
+     * {@code before}, null for no ceiling.
      */
     public FloorReply floor(MailSession session, String mailbox, String before, int count) {
         return FloorReply.from(
@@ -81,31 +76,23 @@ public class MailClient {
                                                 count))));
     }
 
-    /**
-     * One step of a Gmail or JMAP account's mail ({@link #stepped}), each
-     * message with the mailboxes it is a member of.
-     */
+    /** One step of a Gmail or JMAP account's mail ({@link #stepped}). */
     public NamedStep step(
             MailSession session, StepRequest request, File dir, OfflineDriver store) {
         return NamedStep.from(Replies.object(stepped(session, request, dir, store)));
     }
 
-    /**
-     * One step of a Microsoft Graph account's mail ({@link #stepped}), each
-     * message with the mailbox it was stepped in.
-     */
+    /** One step of a Microsoft Graph account's mail ({@link #stepped}). */
     public GraphStepReply graphStep(
             MailSession session, StepRequest request, File dir, OfflineDriver store) {
         return GraphStepReply.from(Replies.object(stepped(session, request, dir, store)));
     }
 
     /**
-     * One step of an account's mail, read whole into files of {@code dir};
-     * the request's mailbox the one mailbox a view filtered to it steps,
-     * null for the account. Each backend reads what it needs of
-     * {@code request}, asking {@code store} which of each page it lists the
-     * store holds ({@link Native#mailStep}); the reply as the bridge wrote
-     * it, its shape the backend's.
+     * One step of an account's mail, read whole into files of {@code dir}.
+     *
+     * <p>The bridge asks {@code store} which listed messages it holds
+     * ({@link Native#mailStep}); the reply is raw, its shape the backend's.
      */
     private static String stepped(
             MailSession session, StepRequest request, File dir, OfflineDriver store) {
@@ -124,12 +111,11 @@ public class MailClient {
     }
 
     /**
-     * Reads some messages of a mailbox whole into files of {@code dir}, one
-     * per message, as the bytes the server holds ({@link MessageSources}),
-     * a message gone (deleted since it was listed) left out of the items
-     * and named by its id in {@code gone}, one not handed over left out of
-     * both. Gmail, Graph and IMAP read them in batches, JMAP names their
-     * blobs in one {@code Email/get} and downloads them one after another.
+     * Reads some messages whole into files of {@code dir}, one per message.
+     *
+     * <p>A message deleted since listed goes to {@code gone}, one not handed
+     * over to neither. Gmail, Graph and IMAP read in batches, JMAP names
+     * blobs in one {@code Email/get} then downloads each.
      */
     public MessageSources fetchSources(
             MailSession session, String mailbox, List<String> ids, File dir) {
@@ -148,10 +134,10 @@ public class MailClient {
     }
 
     /**
-     * Writes the decoded bytes of one attachment of the message stored at
-     * {@code source}, by the section {@link MessageBody.Attachment#part}
-     * names, to {@code target}, answering its size. Files on both sides, so
-     * a large part never sits on the heap twice. No network.
+     * Writes one attachment's decoded bytes to {@code target}, answering size.
+     *
+     * <p>By {@link MessageBody.Attachment#part}, file to file so a large part
+     * never sits on the heap. No network.
      */
     public long messagePart(File source, String part, File target) {
         return Replies.object(
@@ -161,37 +147,25 @@ public class MailClient {
     }
 
     /**
-     * Resolves one message's MIME tree into what a reader draws: the
-     * headers, the one body it shows, and what it carries beside it.
+     * Resolves one message's MIME tree into what a reader draws.
      *
-     * <p>No network, whatever the message: this is the whole read path
-     * of a message the store already holds.
+     * <p>No network: the whole read path of a message the store holds.
      */
     public MessageBody parseMessage(byte[] source) {
         return MessageBody.from(Replies.object(Native.parseMessage(source)));
     }
 
-    /**
-     * {@link #parseMessage(byte[])} of the message stored in {@code source},
-     * read by the bridge: the message never crosses onto the Java heap.
-     */
+    /** {@link #parseMessage(byte[])} of a file, never on the Java heap. */
     public MessageBody parseMessage(File source) {
         return MessageBody.from(Replies.object(Native.parseMessageFile(source.getAbsolutePath())));
     }
 
-    /**
-     * What the store files of one message read into {@code source}, read
-     * once by the bridge ({@link Description}). No body crosses the
-     * boundary.
-     */
+    /** What the store files of the message in {@code source}, body-free. */
     public Description describeMessage(File source) {
         return Description.from(Replies.object(Native.describeMessage(source.getAbsolutePath())));
     }
 
-    /**
-     * Adds or removes one marker on one message, named the IMAP way
-     * whichever backend answers.
-     */
+    /** Adds or removes one marker, named the IMAP way, on one message. */
     public void setFlag(
             MailSession session, MessageRef message, Flags.Marker flag, boolean add) {
         Replies.object(
@@ -210,14 +184,9 @@ public class MailClient {
     /**
      * Composes one draft into the RFC 5322 message an outbox holds.
      *
-     * <p>{@code draft} is the composer's fields plus the two stamps, which
-     * are the caller's so the bridge stays a pure function of what it is
-     * handed.
-     *
-     * <p>No network, which is the point: a message is written and queued
-     * with the radio off, and {@link #submit} is what needs one.
-     * The bytes carry a {@code Bcc} header, as RFC 5322 §3.6.3 provides
-     * for a message prepared for sending; the submission takes it out.
+     * <p>No network: queued with the radio off, only {@link #submit} needs
+     * one. The bytes keep a {@code Bcc} header (RFC 5322 §3.6.3), which the
+     * submission takes out.
      */
     public byte[] compose(ComposeDraft draft) {
         JSONObject reply = Replies.object(Native.composeMessage(draft.toJson().toString()));
@@ -225,27 +194,19 @@ public class MailClient {
     }
 
     /**
-     * Hands one stored message over, answering the {@code Message-ID} the
-     * provider filed its sent copy under when it stamped one of its own
-     * (Gmail), else null.
+     * Hands one stored message over; answers Gmail's own sent-copy Message-ID.
      *
-     * <p>The submission alone: the copy the sender keeps is a create staged
-     * in the sent mailbox when the message was queued, and the sync carries
-     * it out.
+     * <p>Null when the provider stamped none. The sent copy is a create staged
+     * when queued, which the sync carries out.
      *
-     * @throws SubmissionRefused when the server refused the message for
-     *     good, which is what parks it rather than queueing it again.
-     * @throws SubmissionUncertain when the whole message went over and no
-     *     verdict came back, which parks it for the user to confirm.
+     * @throws SubmissionRefused when refused for good: parked, not requeued
+     * @throws SubmissionUncertain when sent whole with no verdict: parked
      */
     public String submit(MailSession session, byte[] source) {
         String submitUrl = session.account().submitUrl;
-        // NOTE: run once, never retried, unlike every other verb on a
-        // session. Sending is the one thing here that is not idempotent:
-        // a submission that was accepted and then lost its answer looks
-        // exactly like one that never went, and running it again would
-        // send the message twice. A failure leaves it queued instead,
-        // which is what the outbox is for.
+        // NOTE: run once, never retried: sending is not idempotent, and an
+        // accepted submission that lost its answer would go twice. A failure
+        // leaves it queued for the outbox instead.
         String json =
                 Native.submitMessage(
                         session.transport(),
@@ -281,8 +242,9 @@ public class MailClient {
     }
 
     /**
-     * Copies one message into {@code target} on the server. Run once: a
-     * copy that lost its answer and ran again would file a second one.
+     * Copies one message into {@code target} on the server, run once.
+     *
+     * <p>A copy that lost its answer and ran again would file a second one.
      */
     public void copy(MailSession session, MessageRef message, String target) {
         Replies.object(
@@ -295,8 +257,10 @@ public class MailClient {
     }
 
     /**
-     * Deletes one message for good: on IMAP {@code \Deleted} then
-     * {@code UID EXPUNGE} with UIDPLUS, the marker alone otherwise.
+     * Deletes one message for good.
+     *
+     * <p>On IMAP {@code \Deleted} then {@code UID EXPUNGE} with UIDPLUS, the
+     * marker alone otherwise.
      */
     public void destroy(MailSession session, MessageRef message) {
         Replies.object(
@@ -310,10 +274,7 @@ public class MailClient {
                                         message.id())));
     }
 
-    /**
-     * Appends one message to {@code mailbox} with {@code flags}. Run once,
-     * as a copy is. IMAP only.
-     */
+    /** Appends one message to {@code mailbox}; IMAP only, run once. */
     public void append(MailSession session, String mailbox, byte[] source, Flags flags) {
         Replies.object(
                 Native.appendMessage(
@@ -325,12 +286,10 @@ public class MailClient {
     }
 
     /**
-     * Opens one account's mail connection, greeted and authenticated, for
-     * a caller that will run several verbs on it and close it.
+     * Opens one account's mail connection, greeted and authenticated.
      *
-     * <p>The unit is the account and not the mailbox, which is what both
-     * backends are shaped for: IMAP is one session over every mailbox and
-     * JMAP one session resource over the whole account.
+     * <p>Per account, not mailbox: one IMAP session spans every mailbox, one
+     * JMAP session resource the account. The caller closes it.
      */
     public static MailSession openMail(Account account) {
         Transport transport = new Transport();
@@ -356,25 +315,11 @@ public class MailClient {
     }
 
     /**
-     * Runs one idempotent verb on a held session, reopening it once if it
-     * has died.
+     * Runs one idempotent verb on a held session, reopening it once if dead.
      *
-     * <p>A held connection is a hint and never a promise: a server's idle
-     * timeout (Graph's is about two minutes), a rebound NAT and a walk from
-     * wifi to cellular all end one under the app, and none of them announce
-     * it. The bridge answers a failure as an error reply rather than
-     * throwing, so a failure is read as the connection's when the transport
-     * lost one since a verb last answered ({@link Transport#losses}), in this
-     * call or in one run once outside it (a copy, an append): the verb is
-     * then given one honest attempt on a fresh session, an IMAP one greeted
-     * and authenticated again, before its failure is reported as its own. A
-     * refusal from a live server is reported at once.
-     *
-     * <p>Idempotent is the condition and not a description: a verb that
-     * lost its connection may have been carried out before it did.
-     * Re-reading a message, re-storing a marker and re-moving a message that
-     * has already moved all cost a round trip and change nothing. Submitting
-     * a message does not, which is why it does not come through here.
+     * <p>Idle timeouts, NAT and network changes end connections silently: a
+     * failure after a loss ({@link Transport#losses}) gets one retry on a fresh
+     * session; a live server's refusal is reported at once. Never submission.
      */
     private static String on(MailSession session, OnSession verb) {
         String reply;

@@ -17,10 +17,10 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Pins the duplicate review's and the merged view's bridge verbs on the
- * real bridge: the inputs written as the JSON the review and the pool used
- * to build (literals captured on that code, answered alike by the bridge),
- * and the replies read to the values the hand parsers read.
+ * Pins the duplicate review's and merged view's verbs on the real bridge.
+ *
+ * <p>Inputs written as the JSON the review and pool built (captured literals),
+ * replies read to the values the hand parsers read.
  */
 @RunWith(RobolectricTestRunner.class)
 public class ContactGroupsTest {

@@ -6,15 +6,15 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * One change's outcome of a batched push round (rs/contact/push.rs
- * {@code PushOutcome} 37).
+ * One change's outcome of a batched push round.
+ *
+ * <p>Mirrors rs/contact/push.rs {@code PushOutcome} 37.
  *
  * @param ref the correlation key of the change this outcome answers
- * @param accepted whether the server took the change; a rejected change is
+ * @param accepted whether the server took the change; a rejected one is
  *     reconciled by the next sync instead of failing the round
  * @param id the server-assigned id of an accepted create, or null
- * @param etag the revision of the accepted write, or null where the backend
- *     has none
+ * @param etag the accepted write's revision, null where the backend has none
  * @param error what the server objected, on a rejected change, or null
  */
 public record PushOutcome(String ref, boolean accepted, String id, String etag, String error) {

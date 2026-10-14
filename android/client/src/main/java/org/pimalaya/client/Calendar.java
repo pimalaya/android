@@ -10,12 +10,9 @@ import org.json.JSONObject;
  * @param url absolute collection URL, the target of every event operation
  * @param description free-form description, or null
  * @param color display colour, or null
- * @param role what the source says the calendar is for, in pimdir's role
- *     vocabulary: {@link #DEFAULT} for its default calendar (JMAP
- *     {@code isDefault}, Graph's default calendar, Google's primary one),
- *     empty otherwise
- * @param writable whether the user may write events into it; true where
- *     the source says nothing
+ * @param role pimdir's role: {@link #DEFAULT} for the default calendar (JMAP
+ *     {@code isDefault}, Graph's default, Google's primary), else empty
+ * @param writable whether events may be written; true where the source is mute
  */
 public record Calendar(
         String id,

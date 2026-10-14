@@ -9,13 +9,15 @@ import android.widget.LinearLayout;
 import org.pimalaya.R;
 
 /**
- * A round text field with its name as the placeholder: a pill 56dp
- * high, ringed in the accent while focused, a secret one ending in the
- * show/hide toggle. On a card it takes the page tone, on a page the
- * surface tone, so it always reads against what is around it.
+ * A round text field with its name as placeholder, ringed while focused.
+ *
+ * <p>A pill 56dp high; a secret one ends in the show/hide toggle. On a card it
+ * takes the page tone, on a page the surface tone.
  */
 public final class PillField {
+    /** The pill, to add to a layout. */
     public final LinearLayout view;
+    /** The text input inside the pill. */
     public final EditText input;
 
     private PillField(LinearLayout view, EditText input) {
@@ -23,6 +25,7 @@ public final class PillField {
         this.input = input;
     }
 
+    /** A pill named {@code hint} holding {@code value}, on a card or a page. */
     public static PillField of(Host host, int hint, String value, boolean secret, boolean onCard) {
         LinearLayout pill = new LinearLayout(host);
         pill.setOrientation(LinearLayout.HORIZONTAL);
@@ -80,6 +83,7 @@ public final class PillField {
         return new PillField(pill, input);
     }
 
+    /** The text typed, trimmed. */
     public String text() {
         return input.getText().toString().trim();
     }

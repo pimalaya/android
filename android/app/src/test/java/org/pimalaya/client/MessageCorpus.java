@@ -4,9 +4,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * Crafted RFC 5322 messages the mail read pins run through the real
- * bridge: plain text, alternatives, attachments, inline images, encoded
- * headers, an invitation, a forwarded message and broken ones.
+ * Crafted RFC 5322 messages the mail read pins run through the real bridge.
+ *
+ * <p>0 plain, 1 alternative, 2 attachments (base64, RFC 2231, unnamed), 3
+ * inline image, 4 encoded headers, 5 invitation, 6 forwarded, 7 headerless, 8
+ * broken multipart (bad date, no From), 9 empty, 10 binary noise.
  */
 public final class MessageCorpus {
     private MessageCorpus() {}
@@ -22,7 +24,6 @@ public final class MessageCorpus {
     /** The messages, as bytes, the last ones broken. */
     public static final List<byte[]> MESSAGES =
             List.of(
-                    // 0: plain text
                     lines(
                                     "From: Alice Martin <alice@example.org>",
                                     "To: bob@example.org",
@@ -33,7 +34,6 @@ public final class MessageCorpus {
                                     "",
                                     "See you at noon.")
                             .getBytes(StandardCharsets.UTF_8),
-                    // 1: multipart/alternative
                     lines(
                                     "From: \"Doe, Jane\" <jane@example.org>",
                                     "To: Bob <bob@example.org>, carol@example.org",
@@ -53,7 +53,6 @@ public final class MessageCorpus {
                                     "<p>HTML <b>agenda</b></p>",
                                     "--alt--")
                             .getBytes(StandardCharsets.UTF_8),
-                    // 2: attachments, one base64, one RFC 2231 name, one unnamed
                     lines(
                                     "From: billing@example.org",
                                     "To: bob@example.org",
@@ -83,7 +82,6 @@ public final class MessageCorpus {
                                     "raw",
                                     "--mix--")
                             .getBytes(StandardCharsets.UTF_8),
-                    // 3: related HTML with an inline image
                     lines(
                                     "From: news@example.org",
                                     "To: bob@example.org",
@@ -104,7 +102,6 @@ public final class MessageCorpus {
                                     "iVBORw0KGgo=",
                                     "--rel--")
                             .getBytes(StandardCharsets.UTF_8),
-                    // 4: encoded headers, Latin-1 body
                     (lines(
                                             "From: =?ISO-8859-1?Q?Ren=E9_Dupr=E9?= <rene@example.fr>",
                                             "To: =?UTF-8?B?w4lsb2RpZQ==?= <elodie@example.fr>, x@example.fr",
@@ -116,7 +113,6 @@ public final class MessageCorpus {
                                             "",
                                             "Caf=E9 cr=E8me")
                                     .getBytes(StandardCharsets.UTF_8)),
-                    // 5: invitation
                     lines(
                                     "From: Alice <alice@example.org>",
                                     "To: bob@example.org",
@@ -152,7 +148,6 @@ public final class MessageCorpus {
                                     "END:VCALENDAR",
                                     "--sep--")
                             .getBytes(StandardCharsets.UTF_8),
-                    // 6: a forwarded message
                     lines(
                                     "From: bob@example.org",
                                     "To: carol@example.org",
@@ -174,9 +169,7 @@ public final class MessageCorpus {
                                     "See you at noon.",
                                     "--fwd--")
                             .getBytes(StandardCharsets.UTF_8),
-                    // 7: no headers at all
                     lines("", "just a body").getBytes(StandardCharsets.UTF_8),
-                    // 8: an unterminated multipart, a bad date, no From
                     lines(
                                     "Subject: Broken",
                                     "Date: yesterday-ish",
@@ -187,8 +180,6 @@ public final class MessageCorpus {
                                     "",
                                     "cut off")
                             .getBytes(StandardCharsets.UTF_8),
-                    // 9: empty
                     new byte[0],
-                    // 10: binary noise
                     new byte[] {(byte) 0xff, (byte) 0xfe, 0, 1, 2, '\r', '\n', (byte) 0x80});
 }

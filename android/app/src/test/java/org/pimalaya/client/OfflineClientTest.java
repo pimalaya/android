@@ -16,10 +16,10 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Pins the offline records on the real bridge: the facts each plan verb
- * is sent equal, as JSON values, to what the engine built before they
- * were records (literals captured on that code), every reply parsed to
- * the values its text carries, and every record mirroring its reply.
+ * Pins the offline records on the real bridge.
+ *
+ * <p>Plan facts equal, as JSON, what the engine built before (captured
+ * literals); every reply parsed to its text's values and mirroring its record.
  */
 @RunWith(RobolectricTestRunner.class)
 public class OfflineClientTest {

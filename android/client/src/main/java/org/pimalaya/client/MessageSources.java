@@ -6,8 +6,9 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * Some messages read whole into files, and the ids gone (rs/mail/session.rs
- * {@code MessageSources} 358).
+ * Some messages read whole into files, and the ids gone.
+ *
+ * <p>Mirrors rs/mail/session.rs {@code MessageSources} 358.
  *
  * @param gone the ids of messages deleted since they were listed
  * @param items the messages read, one file each

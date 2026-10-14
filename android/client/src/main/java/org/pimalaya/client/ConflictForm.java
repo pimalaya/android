@@ -5,13 +5,14 @@ import java.util.Map;
 import org.json.JSONObject;
 
 /**
- * The conflict form's inputs for a both-sides-edited row, shaped as
- * {@link CardsMerge} (rs/contact/merge.rs {@code ConflictForm} 87).
+ * The conflict form's inputs for a both-sides-edited row.
  *
- * @param alternatives the two candidates of every conflicted single field,
- *     by dot path in key order, the winner's first
- * @param changed the changed list sections, always empty: it turns the
- *     form's conflict mode on
+ * <p>Mirrors rs/contact/merge.rs {@code ConflictForm} 87, shaped as
+ * {@link CardsMerge}.
+ *
+ * @param alternatives the two candidates of each conflicted single field, by
+ *     dot path in key order, the winner's first
+ * @param changed the changed list sections, always empty: conflict mode on
  * @param model the merged card's field model, the form prefill
  * @param resolved whether nothing needs the user
  * @param vcard the merged card

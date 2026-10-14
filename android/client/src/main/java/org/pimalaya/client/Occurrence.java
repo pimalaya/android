@@ -3,23 +3,18 @@ package org.pimalaya.client;
 import org.json.JSONObject;
 
 /**
- * One rendered instance of a calendar component: what a row in the
- * agenda is (rs/calendar/expand.rs {@code Occurrence} 50).
+ * One rendered instance of a calendar component: one agenda row.
  *
- * <p>Its times are civil, with what they are relative to beside them
- * ({@link EventTime}), because RFC 5545 expands recurrence on wall-clock
- * time: an event at 09:00 recurs at 09:00 in its zone, whatever that
- * makes it in the reader's.
+ * <p>Mirrors rs/calendar/expand.rs {@code Occurrence} 50. Times are civil
+ * ({@link EventTime}): RFC 5545 expands on wall-clock time, so 09:00 recurs
+ * at 09:00 in its zone.
  *
- * @param component the component this came out of, as its wire name:
- *     {@code VEVENT}, {@code VTODO} or {@code VJOURNAL}. An agenda row
- *     shows all three the same way apart from its glyph.
- * @param start when it starts: where its series placed it, or an override
- *     moved it
+ * @param component its wire name: {@code VEVENT}, {@code VTODO} or
+ *     {@code VJOURNAL}
+ * @param start when it starts, as its series placed it or an override moved it
  * @param end when it ends
- * @param recurrenceId which instance of its series it is, the value a
- *     {@code RECURRENCE-ID} naming it carries; null for an entry that does
- *     not recur
+ * @param recurrenceId the {@code RECURRENCE-ID} naming this instance; null for
+ *     an entry that does not recur
  * @param summary its {@code SUMMARY}
  * @param location its {@code LOCATION}
  * @param allDay whether the start is a DATE rather than a DATE-TIME

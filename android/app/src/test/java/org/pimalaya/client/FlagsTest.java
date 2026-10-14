@@ -11,10 +11,10 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * The marker set writes the bytes the JSON arrays it replaced wrote: the
- * literals below were captured on Stager's has/withFlag and the
- * JSONArray each flag set crossed as, for the same inputs, under the
- * device's org.json (same flags, same order, same spellings).
+ * The marker set writes the bytes the JSON arrays it replaced wrote.
+ *
+ * <p>Literals captured on Stager's has/withFlag under the device's org.json:
+ * same flags, order and spellings.
  */
 @RunWith(RobolectricTestRunner.class)
 public class FlagsTest {

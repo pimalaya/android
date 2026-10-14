@@ -11,16 +11,22 @@ import org.pimalaya.client.Mutation;
 import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.PimalayaException;
 
-/** The storage half of a driver: load/lookup/write yields and staged mutations. */
+/** A driver's storage half: load, lookup and write yields, staged edits. */
 public abstract class Stager implements OfflineDriver {
     /** The pimdir store's engine seam (placements, writes, conflicts). */
     public final PimdirStorage offline;
 
+    /** The bridge's domain clients. */
     protected final Clients clients;
 
-    /** The store's locks ({@link PimdirDb#locks}): its one writer guards every storage yield. */
+    /**
+     * The store's locks ({@link PimdirDb#locks()}).
+     *
+     * <p>Its one writer guards every storage yield.
+     */
     public final Locks locks;
 
+    /** A stager over {@code pimdir}, the bridge through {@code clients}. */
     protected Stager(PimdirDb pimdir, Clients clients) {
         this.offline = new PimdirStorage(pimdir);
         this.clients = clients;
@@ -28,27 +34,30 @@ public abstract class Stager implements OfflineDriver {
     }
 
     /**
-     * The bodies the store holds under some link ids, as the reply to the
-     * lookup an upgrade asks before fetching ({@link
-     * PimdirStorage#lookupObjects}): a driver whose link ids name nothing
-     * outside its own collection answers fewer.
+     * The bodies the store holds under some link ids, replying to a lookup.
+     *
+     * <p>Asked by an upgrade before fetching ({@link
+     * PimdirStorage#lookupObjects}); a driver whose link ids name nothing
+     * outside its collection answers fewer.
      */
     protected JSONObject lookup(JSONArray links) throws JSONException {
         return offline.lookupObjects(links);
     }
 
     /**
-     * Where a pass's time goes: the debug log's numbers, page by page, and
-     * what a test reads to tell the bridge's share from the store's.
+     * Where a pass's time goes, page by page.
+     *
+     * <p>The debug log's numbers, and what tests read to split bridge from
+     * store.
      */
     public static final class Clock {
-        /** Nanoseconds in the remote's own call: the network and the connector. */
+        /** Nanoseconds in the remote's own call: network and connector. */
         long remote;
 
-        /** Nanoseconds turning yields and replies into and out of JSON on this side. */
+        /** Nanoseconds turning yields and replies into and out of JSON. */
         long json;
 
-        /** Nanoseconds in the engine between a reply and its next yield, its parse included. */
+        /** Nanoseconds in the engine from a reply to its next yield. */
         long engine;
 
         /** Nanoseconds the store spent on loads and writes. */
@@ -80,21 +89,18 @@ public abstract class Stager implements OfflineDriver {
     /** The pass's clock, every page landed so far folded in. */
     public final Clock clock = new Clock();
 
-    /** The page under way, logged and folded into {@link #clock} at its write. */
+    /** The page under way, folded into {@link #clock} at its write. */
     Clock page = new Clock();
 
     /** When the last reply went back to the engine; 0 before the first. */
     private long returned;
 
-    /**
-     * Counts a remote call toward the page under way, for a driver timing
-     * its network apart from reading what came back.
-     */
+    /** Counts a remote call's nanoseconds toward the page under way. */
     protected void remote(long nanos) {
         page.remote += nanos;
     }
 
-    /** Nanoseconds this driver has spent on the network so far, the page under way included. */
+    /** Nanoseconds spent on the network so far, the page under way included. */
     public long remoteSoFar() {
         return clock.remote + page.remote;
     }
@@ -163,40 +169,41 @@ public abstract class Stager implements OfflineDriver {
         }
     }
 
-    /** Any yield but load/lookup/write; a stager answers "Unsupported engine yield". */
+    /** Any other yield; a stager answers "Unsupported engine yield". */
     protected String remote(String op, JSONObject yielded, long parsed) throws JSONException {
         return error("Unsupported engine yield " + op);
     }
 
     /**
-     * What a batch of storage writes turned out to be, one entry per
-     * placement it touched. Ignored here: only a driver reporting a sync
-     * to a user has anything to count.
+     * What a batch of storage writes did, one entry per placement touched.
+     *
+     * <p>Ignored here: only a driver reporting to a user counts them.
      */
     protected void applied(JSONArray effects) throws JSONException {}
 
-    // ---- staged mutations -------------------------------------------------
-
     /**
-     * Stages a flag set on one placement; the next sync pushes the
-     * difference between it and the set the source last agreed on.
+     * Stages a flag set on one placement.
+     *
+     * <p>The next sync pushes its difference from the set the source agreed.
      */
     public void mutateFlags(String collection, String handle, Flags flags) throws JSONException {
         mutate(collection, Mutation.setFlags(handle, flags));
     }
 
     /**
-     * Stages a removal: the placement becomes a tombstone the next sync
-     * pushes, and a create that was never pushed is withdrawn instead.
+     * Stages a removal: a tombstone the next sync pushes.
+     *
+     * <p>A create never pushed is withdrawn instead.
      */
     public void mutateRemove(String collection, String handle) throws JSONException {
         mutate(collection, Mutation.remove(handle));
     }
 
     /**
-     * Stages a move into {@code target}: a pending create there and a
-     * tombstone here, both visible at once (SYNC §3). The next sync of
-     * either collection carries it out as a server move.
+     * Stages a move into {@code target}, carried out as a server move.
+     *
+     * <p>A pending create there and a tombstone here, visible at once (SYNC
+     * §3); the next sync of either collection carries it.
      */
     public void mutateMove(String collection, String handle, String target) throws JSONException {
         mutate(collection, Mutation.move(handle, target));
@@ -204,27 +211,22 @@ public abstract class Stager implements OfflineDriver {
     }
 
     /**
-     * Stages a copy into {@code target}, the placement kept: a pending
-     * create there the next sync pushes as a server-side copy.
+     * Stages a copy into {@code target}, the placement kept.
+     *
+     * <p>A pending create there, pushed as a server-side copy.
      */
     public void mutateCopy(String collection, String handle, String target) throws JSONException {
         mutate(collection, Mutation.copy(handle, target));
         staged(target);
     }
 
-    /**
-     * Stages a content edit on one placement; editing a conflicted
-     * placement resolves it.
-     */
+    /** Stages a content edit; editing a conflicted placement resolves it. */
     public void mutateEdit(String collection, String handle, String body, JSONObject summary,
             String sortKey) throws JSONException {
         mutate(collection, Mutation.edit(handle, PimdirHash.of(body), body, summary, sortKey));
     }
 
-    /**
-     * Stages a locally authored item the remote has never seen; the next
-     * sync pushes it as an append.
-     */
+    /** Stages a local item the remote never saw; the next sync appends it. */
     public void mutateAdd(String collection, String linkId, String body, Flags flags,
             JSONObject summary, String sortKey) throws JSONException {
         mutate(
@@ -233,9 +235,11 @@ public abstract class Stager implements OfflineDriver {
     }
 
     /**
-     * {@link #mutateAdd(String, String, String, Flags, JSONObject, String)}
-     * for a body that may not be UTF-8 text (a message's 8-bit parts), which
-     * crosses in base64 so it is stored as the bytes it is.
+     * Stages a local item whose body may not be UTF-8 text.
+     *
+     * <p>As {@link #mutateAdd(String, String, String, Flags, JSONObject,
+     * String)}; a message's 8-bit parts cross in base64, stored as the bytes
+     * they are.
      */
     public void mutateAdd(String collection, String linkId, byte[] body, Flags flags,
             JSONObject summary, String sortKey) throws JSONException {
@@ -250,11 +254,10 @@ public abstract class Stager implements OfflineDriver {
         staged(collection);
     }
 
-    /** A mutation was staged on the collection, for a driver that follows writes. */
+    /** A mutation was staged there, for a driver that follows writes. */
     protected void staged(String collection) {}
 
-    // ---- the wire shapes --------------------------------------------------
-
+    /** A driver error reply carrying {@code message}. */
     protected static String error(String message) {
         JSONObject reply = new JSONObject();
         try {
@@ -266,9 +269,10 @@ public abstract class Stager implements OfflineDriver {
     }
 
     /**
-     * A failure as the driver error reply, keeping the HTTP status a
-     * bridge failure carries so it survives the round trip through the
-     * engine (the sync entry points branch on it for the token refresh).
+     * A failure as the driver error reply, keeping a bridge HTTP status.
+     *
+     * <p>The status survives the engine round trip: the sync entry points
+     * branch on it for the token refresh.
      */
     protected static String error(Exception failure) {
         String message = failure.getMessage();
@@ -285,6 +289,7 @@ public abstract class Stager implements OfflineDriver {
         return reply.toString();
     }
 
+    /** The HTTP status a bridge failure carries, or null. */
     protected static Integer status(Exception failure) {
         return failure instanceof PimalayaException
                 ? ((PimalayaException) failure).status

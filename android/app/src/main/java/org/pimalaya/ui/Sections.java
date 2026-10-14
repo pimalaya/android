@@ -14,16 +14,11 @@ import java.util.List;
 import org.pimalaya.R;
 
 /**
- * The page the app shows one item on: a scroll of sections, each one
- * rounded card holding its small label and its rows, a title over a
- * diminished subtitle.
+ * The page one item shows on: a scroll of section cards under a title.
  *
- * <p>One builder rather than one per screen, because a contact, an
- * event and a to-do are the same page with different sections: what
- * differs between them is which sections they draw and what fills the
- * rows, and neither of those is layout. The contact editor adds an
- * action to each header and a warning to a diverged row, which is what
- * the two extra parameters are for; a reader passes null for both.
+ * <p>One builder: a contact, an event and a to-do differ only in sections and
+ * rows. The contact editor adds a header action and a diverged-row warning; a
+ * reader passes null for both.
  */
 public final class Sections {
     private final Activity activity;
@@ -36,6 +31,7 @@ public final class Sections {
     private final int labelColor;
     private final int dividerColor;
 
+    /** A page builder adding its sections to {@code container}. */
     public Sections(Activity activity, LinearLayout container) {
         this.activity = activity;
         this.container = container;
@@ -51,10 +47,10 @@ public final class Sections {
     }
 
     /**
-     * Adds a section as one card: its icon and label, an optional
-     * right-aligned action on the label's line, then its items. An empty
-     * section vanishes unless the caller keeps it, as a card of its
-     * label alone. A title of 0 draws the card without a header.
+     * Adds a section as one card: icon and label, optional action, items.
+     *
+     * <p>An empty section vanishes unless kept, as a card of its label alone. A
+     * title of 0 draws the card without a header.
      */
     public void section(int title, int icon, List<View> items, View action, boolean keepEmpty) {
         if (items.isEmpty() && !keepEmpty) {
@@ -125,10 +121,10 @@ public final class Sections {
     }
 
     /**
-     * A row: title over a diminished subtitle, with an optional trailing
-     * view. A null action leaves the row unpressable, which is what a
-     * reader's page wants; a non-null one makes it a tappable item with
-     * the platform's own ripple.
+     * A row: title over a diminished subtitle, with an optional trailing view.
+     *
+     * <p>A null action leaves it unpressable, as a reader's page wants;
+     * otherwise it is tappable with the platform's ripple.
      */
     public View row(CharSequence title, CharSequence subtitle, View trailing, Runnable onClick) {
         TextView titleView = new TextView(activity);
@@ -169,11 +165,7 @@ public final class Sections {
         return row;
     }
 
-    /**
-     * A row whose subtitle labels its value rather than the other way
-     * round: the value reads first and the property names itself under
-     * it, which is how a read-only page is scanned.
-     */
+    /** A row whose value reads first, its property named under it. */
     public View value(CharSequence value, int label) {
         return row(value, activity.getString(label), null, null);
     }

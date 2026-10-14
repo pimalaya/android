@@ -6,14 +6,11 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One local mutation the io-offline engine stages (rs/offline/wire.rs
- * {@code MutationJson} 584), built by the factory of its op. A null
- * component is an absent key; the components are in the order the keys
- * are written.
+ * One local mutation the io-pimdir engine stages, built by its op's factory.
  *
- * <p>The hash is the caller's: the content hash naming the body in the
- * object store ({@code sha256-128}, pimdir SPEC.md §4.3), which the app's
- * store computes.
+ * <p>Mirrors rs/offline/wire.rs {@code MutationJson} 584, components in key
+ * order, a null one an absent key. The hash is the caller's: the store's
+ * content hash ({@code sha256-128}, pimdir SPEC.md §4.3).
  *
  * @param op the operation, the wire's {@code op} tag
  * @param handle the placement's handle; null for an add
@@ -42,13 +39,17 @@ public record Mutation(
         String sortKey) {
     /** The operation of a mutation, as the wire tags it. */
     public enum Op {
+        /** A flag set replacing the placement's markers. */
         SET_FLAGS("setFlags"),
+        /** A removal of the placement. */
         REMOVE("remove"),
-        /** A move into {@code target}: a create there, a tombstone here (SYNC §3). */
+        /** A move to {@code target}: create there, tombstone here (SYNC §3). */
         MOVE("move"),
         /** A copy into {@code target}, the source kept. */
         COPY("copy"),
+        /** A content edit of the placement's body. */
         EDIT("edit"),
+        /** A locally authored item. */
         ADD("add");
 
         private final String wire;
@@ -87,10 +88,7 @@ public record Mutation(
                 null);
     }
 
-    /**
-     * A content edit on one placement. A null {@code sortKey} leaves the
-     * stored key alone.
-     */
+    /** A content edit on one placement; a null {@code sortKey} keeps it. */
     public static Mutation edit(
             String handle, String hash, String body, JSONObject summary, String sortKey) {
         return new Mutation(
@@ -125,9 +123,9 @@ public record Mutation(
     }
 
     /**
-     * A locally authored item whose body may not be UTF-8 text (a
-     * message's 8-bit parts), which crosses in base64 so it is stored as
-     * the bytes it is.
+     * A locally authored item whose body may not be UTF-8 (8-bit mail parts).
+     *
+     * <p>It crosses in base64 so it is stored as the bytes it is.
      */
     public static Mutation add(String linkId, Flags flags, String hash, byte[] body,
             JSONObject summary, String sortKey) {
@@ -158,8 +156,8 @@ public record Mutation(
             mutation.put("body", body);
             mutation.put("bodyBase64", bodyBase64);
             mutation.put("summary", summary);
-            // NOTE: an edit that changes what the key is derived from has to say
-            // so, or the item keeps the position its old one gave it.
+            // NOTE: an edit changing what the key derives from has to say so,
+            // or the item keeps the position its old key gave it.
             mutation.put("sortKey", sortKey);
             return mutation;
         } catch (JSONException error) {

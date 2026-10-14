@@ -22,10 +22,11 @@ import org.junit.Before;
 import org.junit.Test;
 
 /**
- * The transport drops a connection that died under it: a server that
- * answers once and closes, one that resets, an answer the bridge never
- * settled. A local server stands in for one, each connection it accepts
- * answering one request and then doing what the test asks.
+ * The transport drops a connection that died under it.
+ *
+ * <p>A server answering once and closing, one resetting, an answer never
+ * settled. A local server answers one request per connection, then does what
+ * the test asks.
  */
 public class TransportTest {
     private static final byte[] REQUEST =
@@ -152,7 +153,6 @@ public class TransportTest {
         exchange();
         accepted(1);
 
-        // The server is gone: the next read ends, and the connection with it.
         assertEquals(0, transport.read(url).length);
         assertEquals(1, transport.losses());
 
@@ -191,8 +191,6 @@ public class TransportTest {
         accepted(1);
         assertTrue("its answer was read whole", transport.begin(url));
 
-        // An answer left unread: the next request goes on a new connection,
-        // and the old one is closed, never read again.
         script.add(Then.STAY);
         transport.write(url, REQUEST);
         assertFalse(transport.begin(url));
@@ -217,9 +215,10 @@ public class TransportTest {
     }
 
     /**
-     * A credential never goes out on a plain socket, whatever asked for it:
-     * the bytes are refused before they leave, and a request carrying none
-     * goes out as before.
+     * A credential never goes out on a plain socket, whatever asked for it.
+     *
+     * <p>The bytes are refused before they leave; a request carrying none goes
+     * out.
      */
     @Test
     public void aCredentialIsRefusedAPlainSocket() throws Exception {

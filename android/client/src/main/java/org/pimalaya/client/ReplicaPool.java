@@ -7,12 +7,13 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * The replica pool the merged view groups (rs/contact/group.rs
- * {@code ReplicaPool} 14).
+ * The replica pool the merged view groups.
+ *
+ * <p>Mirrors rs/contact/group.rs {@code ReplicaPool} 14.
  *
  * @param replicas the replicas, in pool order
- * @param links the link rows: a natural key to the cluster the user linked
- *     it into, a null cluster leaving the key unbound
+ * @param links natural key to the cluster the user linked it into; a null
+ *     cluster leaves the key unbound
  * @param detached the refs of the replicas the user detached
  */
 public record ReplicaPool(

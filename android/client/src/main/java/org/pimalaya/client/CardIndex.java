@@ -4,9 +4,10 @@ import java.util.List;
 import org.json.JSONObject;
 
 /**
- * What the app's store indexes a card under (rs/contact/fields.rs
- * {@code CardIndex} 812): the display fields the contacts list renders and
- * the normalized content hash linked replicas diverge by.
+ * What the app's store indexes a card under.
+ *
+ * <p>Mirrors rs/contact/fields.rs {@code CardIndex} 812: the display fields
+ * the contacts list renders and the content hash linked replicas diverge by.
  *
  * @param email the first email address, empty when the card has none
  * @param emails every non-empty email address, in document order

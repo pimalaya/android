@@ -10,17 +10,17 @@ import org.pimalaya.client.AccountClient;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * The account traits the bridge reports and the composer, the account settings
- * and the entry page decide by, read through the real bridge so the wire's key
- * names cannot drift from what Java asks for. Under Robolectric, as every test
- * loading the bridge is: the library loads into one class loader only.
+ * The account traits the bridge reports and the screens decide by.
+ *
+ * <p>Read through the real bridge, so the wire's key names cannot drift; under
+ * Robolectric, as the library loads into one class loader only.
  */
 @RunWith(RobolectricTestRunner.class)
 public class AccountTraitsTest {
     @Test
     public void aJmapAccountSavedWithNoSubmitEndpointSendsOverItsSession() {
-        // Saved by a build that could not send over JMAP, so with no submit
-        // endpoint: after the upgrade it sends with nothing to set up.
+        // NOTE: saved by a build that could not send over JMAP, so with no
+        // submit endpoint: after the upgrade it sends with nothing to set up.
         Account jmap = new Account("jmap://api.fastmail.com/jmap/session", "", "token", null);
         Account imap = new Account("imaps://imap.example.com:993", "jane", "secret", null);
 

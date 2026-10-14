@@ -12,9 +12,9 @@ import org.robolectric.RuntimeEnvironment;
 @RunWith(RobolectricTestRunner.class)
 public class AppTest {
     /**
-     * Every caller of the process shares one store, so a sync adapter run
-     * opens no connection pool of its own to leak: the same helper, the
-     * same database, whichever context asks.
+     * Every caller shares one store: a sync adapter run opens no pool to leak.
+     *
+     * <p>The same helper, the same database, whichever context asks.
      */
     @Test
     public void theProcessSharesOneStore() {

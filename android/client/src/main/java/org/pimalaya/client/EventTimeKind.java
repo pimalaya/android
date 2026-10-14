@@ -1,8 +1,9 @@
 package org.pimalaya.client;
 
 /**
- * What one date or date-time is relative to (RFC 5545 3.3.4, 3.3.5;
- * rs/calendar/zone.rs {@code EventTimeKind} 30).
+ * What one date or date-time is relative to (RFC 5545 3.3.4, 3.3.5).
+ *
+ * <p>Mirrors rs/calendar/zone.rs {@code EventTimeKind} 30.
  */
 public enum EventTimeKind {
     /** A {@code DATE}: a day, in no zone at all. */
@@ -26,8 +27,9 @@ public enum EventTimeKind {
     }
 
     /**
-     * The kind the bridge spelled {@code wire}; public for the phone view,
-     * which carries times as JSON until phase 8.
+     * The kind the bridge spelled {@code wire}.
+     *
+     * <p>Public for the phone view, which carries times as JSON until phase 8.
      */
     public static EventTimeKind of(String wire) {
         for (EventTimeKind kind : values()) {

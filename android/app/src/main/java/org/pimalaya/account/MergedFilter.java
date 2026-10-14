@@ -9,24 +9,11 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * One list's filter: which accounts and which of their collections it
- * shows, keyed by collection id and kept across restarts (the filter page,
- * {@link FilterPage}).
+ * One list's filter: the accounts and collections it shows, kept by id.
  *
- * <p>One per domain, since the collections are the domain's own, and one for
- * the Files tab, shared by the process so the lists and a background run
- * read the same one. State is kept as the <em>hidden</em> sets rather than
- * the shown ones, so a collection listed later shows up without having to be
- * enrolled. The junk and the trash are the exception: each is hidden once,
- * the first time its roster lists it ({@link #quiet}), and showing it again
- * is the user's choice to make; a Reset goes back to that.
- *
- * <p>An account is hidden apart from its collections, so hiding it keeps
- * which of them were hidden for when it comes back, the page folding them
- * away meanwhile. An account that is off
- * ({@link AccountActivation}) is never shown, whatever the filter says.
- *
- * <p>It is also the scope of the domain's syncs: what it hides is not synced.
+ * <p>One per domain plus Files, process-wide, also the domain's sync scope.
+ * Hidden sets, so new collections show; junk and trash hide once, when first
+ * listed ({@link #quiet}). A hidden account keeps its collections' choices.
  */
 public final class MergedFilter implements SyncScope {
     /** What an account's checkbox reads. */
@@ -55,7 +42,9 @@ public final class MergedFilter implements SyncScope {
     /** Collection ids whose items are kept out of the list. */
     private final Set<String> hiddenCollections;
 
-    /** The collections hidden by default (junk, trash), once each was listed. */
+    /**
+     * The collections hidden by default (junk, trash), once each was listed.
+     */
     private final Set<String> quietCollections;
 
     private MergedFilter(Context context, String list) {
@@ -77,8 +66,7 @@ public final class MergedFilter implements SyncScope {
     private boolean drafting;
 
     /**
-     * A copy of this filter for the filter page to edit, kept nowhere: the
-     * page applies it ({@link #apply}) or drops it.
+     * A copy for the filter page to edit, kept nowhere until {@link #apply}.
      */
     public synchronized MergedFilter draft() {
         MergedFilter draft = new MergedFilter(context, accountsKey, collectionsKey, quietKey);
@@ -142,18 +130,18 @@ public final class MergedFilter implements SyncScope {
     }
 
     /**
-     * Whether anything is hidden beyond what is hidden by default, which the
-     * bar icon reflects.
+     * Whether more than the defaults is hidden, which the bar icon reflects.
      */
     public synchronized boolean isActive() {
         return !hiddenAccounts.isEmpty() || !quietCollections.containsAll(hiddenCollections);
     }
 
     /**
-     * What an account's checkbox reads over its collections: unticked when
-     * the account is hidden and only then, a blank box meaning its
-     * collections are folded away; otherwise ticked when they all show,
-     * partly ticked when some or none do.
+     * What an account's checkbox reads over its collections.
+     *
+     * <p>Unticked only when the account is hidden (its collections folded
+     * away); otherwise ticked when they all show, partly ticked when some or
+     * none do.
      */
     public synchronized Tick tick(String account, Collection<String> collections) {
         if (hiddenAccounts.contains(account)) {
@@ -172,14 +160,15 @@ public final class MergedFilter implements SyncScope {
         return !hiddenAccounts.contains(account) && chosen(collection);
     }
 
-    /** Whether a collection's own checkbox reads ticked, whatever its account. */
+    /**
+     * Whether a collection's own checkbox reads ticked, whatever its account.
+     */
     public synchronized boolean chosen(String collection) {
         return !hiddenCollections.contains(collection);
     }
 
     /**
-     * Flips an account's checkbox: a shown account is hidden, a hidden one
-     * comes back, its collections keeping their own choices either way.
+     * Flips an account's checkbox, its collections keeping their own choices.
      */
     public synchronized void toggleAccount(String account) {
         if (!hiddenAccounts.remove(account)) {
@@ -197,9 +186,9 @@ public final class MergedFilter implements SyncScope {
     }
 
     /**
-     * Hides the collections hidden by default (an account's junk and trash)
-     * that were never listed before, and only those: one the user showed
-     * since stays shown.
+     * Hides the default-hidden collections (junk, trash) never listed before.
+     *
+     * <p>One the user showed since stays shown.
      */
     public synchronized void quiet(Collection<String> collections) {
         boolean changed = false;

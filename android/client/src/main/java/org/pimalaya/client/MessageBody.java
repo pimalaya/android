@@ -6,13 +6,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * One message read whole: the headers a reader sees and the one body
- * they read (rs/mail.rs {@code MessageBody} 175).
+ * One message read whole: the headers a reader sees and the one body.
  *
- * <p>The MIME tree is resolved on the bridge side, so nothing here is a
- * tree: picking the part to show is a decision about the message (the
- * richest alternative wins, HTML over text) rather than about the screen
- * showing it.
+ * <p>Mirrors rs/mail.rs {@code MessageBody} 175. The bridge resolves the MIME
+ * tree: the part shown is the richest alternative, HTML over text.
  *
  * @param subject the decoded {@code Subject}, empty when there is none
  * @param from the sender's display name, empty when they sent none
@@ -20,13 +17,11 @@ import org.json.JSONObject;
  * @param to every {@code To} address, comma separated, as the header reads
  * @param cc every {@code Cc} address, comma separated
  * @param date when the message was sent, RFC 3339; empty when unreadable
- * @param kind which of {@link #HTML} and {@link #PLAIN} the body is, or
- *     empty
+ * @param kind {@link #HTML}, {@link #PLAIN} or empty
  * @param body the body itself, decoded to text
  * @param attachments what the message carries beside its body
- * @param attachmentMark the attachment mark the walk of the parts gives
- *     (pimdir STORAGE Annex A.1), which replaces the one a listing read off
- *     the top-level {@code Content-Type} once the body is in
+ * @param attachmentMark the parts walk's attachment mark (pimdir STORAGE
+ *     Annex A.1), replacing the listing's top-level {@code Content-Type} one
  */
 public record MessageBody(
         String subject,
@@ -64,22 +59,18 @@ public record MessageBody(
     }
 
     /**
-     * One attachment, named and measured but not carried: its bytes stay
-     * in the message, read by section ({@link MailClient#messagePart})
-     * (rs/mail.rs {@code MessageAttachment} 208).
+     * One attachment, named and measured but not carried.
+     *
+     * <p>Mirrors rs/mail.rs {@code MessageAttachment} 208. Its bytes stay in
+     * the message, read by section ({@link MailClient#messagePart}).
      *
      * @param name the file name, empty when the part names none
-     * @param mime the media type, lowercased; empty when the part states
-     *     none
+     * @param mime the media type, lowercased; empty when the part states none
      * @param size the decoded size in octets
-     * @param part the IMAP section of the part (RFC 3501 section 6.4.5):
-     *     {@code 2}, {@code 1.2}
+     * @param part the part's IMAP section (RFC 3501 6.4.5), e.g. {@code 1.2}
      */
     public record Attachment(String name, String mime, long size, String part) {
-        /**
-         * The attachments a parse or a description lists, each
-         * {@code {name, mime, size, part}}.
-         */
+        /** The attachments a parse or a description lists. */
         static List<Attachment> list(JSONArray listed) {
             List<Attachment> attachments = new ArrayList<>(listed == null ? 0 : listed.length());
             for (int index = 0; listed != null && index < listed.length(); index++) {

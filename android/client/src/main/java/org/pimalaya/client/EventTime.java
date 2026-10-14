@@ -3,22 +3,17 @@ package org.pimalaya.client;
 import org.json.JSONObject;
 
 /**
- * One date or date-time of a calendar component, as its property spells
- * it: civil, plus what it is civil in (rs/calendar/zone.rs
- * {@code EventTime} 48).
+ * One date or date-time of a component, civil, plus what it is civil in.
  *
- * <p>Civil because RFC 5545 recurs on the wall clock of a start, so that
- * is what the expansion produces; what it is relative to rides along so
- * the app can make it an instant with the platform's time-zone database,
- * which the native library does not carry.
+ * <p>Mirrors rs/calendar/zone.rs {@code EventTime} 48. Civil because RFC 5545
+ * recurs on a start's wall clock; the app makes it an instant with the
+ * platform's time-zone database, which the native library does not carry.
  *
- * @param time {@code YYYYMMDD} for a date, {@code YYYYMMDDTHHMMSS}
- *     otherwise, never {@code Z}
+ * @param time {@code YYYYMMDD} or {@code YYYYMMDDTHHMMSS}, never {@code Z}
  * @param kind what the time is relative to
  * @param tzid the {@code TZID}, verbatim; empty unless zoned
- * @param offset seconds east of UTC, as the object's own {@code VTIMEZONE}
- *     puts them in force at this time; null when the object does not
- *     define the zone
+ * @param offset seconds east of UTC per the object's own {@code VTIMEZONE}
+ *     at this time; null when the object does not define the zone
  */
 public record EventTime(String time, EventTimeKind kind, String tzid, Integer offset) {
     /** Whether this is a day rather than a moment. */

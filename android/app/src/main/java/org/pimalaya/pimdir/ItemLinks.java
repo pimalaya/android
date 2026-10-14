@@ -14,21 +14,17 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * References between items (pimdir STORAGE section 14.2), as the item pages
- * read and write them: what an item links to and is linked from, a person's
- * link added or any link removed, and a search across contacts, calendars
- * and files for an item to link to (messages are the mail store's).
+ * References between items (pimdir STORAGE §14.2), as item pages use them.
  *
- * <p>Which key may stand for an endpoint is decided here and nowhere else
- * ({@link #of}, which the stores' {@code endpointOf} call), so a rule about
- * which keys may be referenced (none under a writer-derived key) is one
- * change.
+ * <p>Links to and from an item, add and remove, and a search across contacts,
+ * calendars and files. Which key may be an endpoint is decided in {@link #of}
+ * alone (none under a writer-derived key).
  */
 public final class ItemLinks {
     /** The role a person's link takes. */
     static final String RELATED = "related";
 
-    /** The origin of a link a person made, as opposed to a rule's {@code auto}. */
+    /** The origin of a person's link, as opposed to a rule's {@code auto}. */
     static final String USER = "user";
 
     /** How many results each kind gives a search. */
@@ -37,6 +33,7 @@ public final class ItemLinks {
     private final PimdirDb store;
     private final PimdirCollections collections;
 
+    /** Links over {@code store}'s items and collections. */
     public ItemLinks(Context context, PimdirDb store) {
         this.store = store;
         this.collections = new PimdirCollections(store, context);
@@ -44,7 +41,9 @@ public final class ItemLinks {
 
     /** One end of a reference: a kind and a key, never a collection. */
     public static final class Endpoint {
+        /** The endpoint's media type. */
         public final String kind;
+        /** The endpoint's identity. */
         public final String linkId;
 
         Endpoint(String kind, String linkId) {
@@ -52,21 +51,26 @@ public final class ItemLinks {
             this.linkId = linkId;
         }
 
+        /** Whether both name the same item. */
         public boolean same(Endpoint other) {
             return kind.equals(other.kind) && linkId.equals(other.linkId);
         }
     }
 
-    /** One live placement of an endpoint: where it opens, and what it is called. */
+    /** One live placement of an endpoint: where it opens, what it is called. */
     public static final class Placement {
+        /** The item placed. */
         public final Endpoint endpoint;
+        /** The collection it is placed in. */
         public final String collection;
         final long seq;
+        /** Its title as a list shows it. */
         public final String title;
 
         /** A second line: a message's sender; empty for the rest. */
         public final String detail;
 
+        /** A placement as a search lists it. */
         public Placement(
                 Endpoint endpoint, String collection, long seq, String title, String detail) {
             this.endpoint = endpoint;
@@ -79,8 +83,11 @@ public final class ItemLinks {
 
     /** One reference as an item's page shows it, from that item's side. */
     public static final class Link {
+        /** The referring item. */
         public final Endpoint from;
+        /** The referred item. */
         public final Endpoint to;
+        /** The reference's role (STORAGE §14.2). */
         public final String role;
         final String origin;
 
@@ -95,6 +102,7 @@ public final class ItemLinks {
             this.other = other;
         }
 
+        /** Whether a rule made it rather than a person. */
         public boolean automatic() {
             return !USER.equals(origin);
         }
@@ -106,8 +114,9 @@ public final class ItemLinks {
     }
 
     /**
-     * An endpoint, or null when its key may not be referenced: a
-     * writer-derived key names no identity (STORAGE sections 9.1, 14.2).
+     * An endpoint, or null when its key may not be referenced.
+     *
+     * <p>A writer-derived key names no identity (STORAGE §9.1, §14.2).
      */
     public static Endpoint of(String kind, String linkId) {
         return linkId == null || linkId.isEmpty() || derived(linkId)
@@ -116,9 +125,10 @@ public final class ItemLinks {
     }
 
     /**
-     * Whether a key is one a writer derived (an {@code alt:}, {@code dup:}
-     * or {@code hash:} key, or a part of a message under one), which pimdir
-     * neither references nor keys a stand-in on.
+     * Whether a key is writer-derived, which pimdir never references.
+     *
+     * <p>An {@code alt:}, {@code dup:} or {@code hash:} key, or a part of a
+     * message under one.
      */
     public static boolean derived(String linkId) {
         String key = linkId.startsWith("part:") ? linkId.substring(5) : linkId;
@@ -126,9 +136,10 @@ public final class ItemLinks {
     }
 
     /**
-     * The references an item makes and receives, each with the other item's
-     * placement, sorted by the other item's kind (messages, contacts,
-     * events, files) then title.
+     * The references an item makes and receives, with the other's placement.
+     *
+     * <p>Sorted by the other item's kind (messages, contacts, events, files)
+     * then title.
      */
     public List<Link> links(Endpoint self) {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -182,11 +193,10 @@ public final class ItemLinks {
     }
 
     /**
-     * Records a person's link from one item to another, role {@code related};
-     * false when it records nothing (an endpoint the store does not hold, or
-     * one under a derived key). Linking again changes nothing, save that a
-     * rule's link becomes the person's: the statement answers the reference
-     * standing either way.
+     * Records a person's {@code related} link; false when it records nothing.
+     *
+     * <p>Nothing for an endpoint not held or under a derived key. Linking again
+     * only turns a rule's link into the person's.
      */
     public boolean add(Endpoint from, Endpoint to) {
         if (from.same(to)) {
@@ -202,7 +212,7 @@ public final class ItemLinks {
         return query(store.getWritableDatabase(), "ADD_REFERENCE", values);
     }
 
-    /** Removes one reference, whatever its origin; a rule may record it anew. */
+    /** Removes one reference, whatever its origin; a rule may add it anew. */
     public void remove(Link link) {
         Map<String, Object> values = new HashMap<>();
         values.put("from_kind", link.from.kind);
@@ -214,8 +224,9 @@ public final class ItemLinks {
     }
 
     /**
-     * Runs a statement answering rows (Android refuses one to execSQL),
-     * answering whether it answered any.
+     * Runs a statement answering rows, and answers whether it had any.
+     *
+     * <p>Android refuses such a statement to execSQL.
      */
     private static boolean query(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);
@@ -223,8 +234,8 @@ public final class ItemLinks {
             return cursor.moveToFirst();
         }
     }
-
-    /** The first live placement of an endpoint in a collection of its kind, null for none. */
+    /** An endpoint's first live placement in its kind, or null for none. */
+    /** An endpoint's first live placement in a collection of its kind. */
     Placement placement(Endpoint endpoint) {
         return placement(store.getReadableDatabase(), endpoint);
     }
@@ -242,9 +253,10 @@ public final class ItemLinks {
     }
 
     /**
-     * Items whose title holds {@code words}, a few of each kind: contacts by
-     * name or address, calendar resources by summary, files by name.
-     * Messages come from the mail search ({@code MailStore.linkPlacements}).
+     * Items whose title holds {@code words}, a few of each kind.
+     *
+     * <p>Contacts by name or address, events by summary, files by name;
+     * messages come from the mail search ({@code MailStore.linkPlacements}).
      */
     public List<Placement> search(String words) {
         Map<String, Placement> found = new LinkedHashMap<>();
@@ -259,13 +271,10 @@ public final class ItemLinks {
         return new ArrayList<>(found.values());
     }
 
-    /**
-     * One kind's search: its summary kind, the canonical statement searching
-     * it, and the column that statement answers the title in.
-     */
+    /** One kind's search: its kind, its statement, the title's column there. */
     private record KindSearch(String kind, String statement, int titleColumn) {}
 
-    /** One kind's search statement over every collection of the kind, a page of a few. */
+    /** One kind's search over all its collections, a page of a few. */
     private void search(
             SQLiteDatabase db, KindSearch search, String pattern, Map<String, Placement> found) {
         String kind = search.kind();

@@ -4,19 +4,14 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * The subset of an authorization server's RFC 8414 metadata the
- * onboarding needs: the endpoints to drive the code grant, and the
- * RFC 7591 registration endpoint when the server lets a public client
- * register itself (null otherwise, meaning a pre-registered client id
- * is required).
+ * The subset of an authorization server's RFC 8414 metadata onboarding needs.
  *
  * @param issuer the issuer, or null
  * @param authorizationEndpoint the authorization endpoint, or null
  * @param tokenEndpoint the token endpoint, or null
- * @param registrationEndpoint RFC 7591 registration endpoint, or null when
- *     unsupported
- * @param scopesSupported space-separated supported scopes, empty when
- *     unadvertised
+ * @param registrationEndpoint RFC 7591 registration endpoint; null when a
+ *     public client cannot register, so a pre-registered client id is needed
+ * @param scopesSupported the advertised scopes, space-separated; empty if none
  */
 public record ServerMetadata(
         String issuer,
@@ -50,19 +45,11 @@ public record ServerMetadata(
     }
 
     /**
-     * The scope a contacts client should request here, negotiated by
-     * the bridge against {@link #scopesSupported} (the standard
-     * contacts scope plus {@code offline_access}, each kept only when
-     * advertised).
-     */
-    /**
-     * The scope to request for the domains one grant covers, negotiated
-     * against what this server advertises.
+     * The scope for the domains one grant covers, negotiated by the bridge.
      *
-     * <p>Space-separated domain ids ({@code mail}, {@code contacts},
-     * {@code calendars}): a grant shared by several asks for all of theirs, and
-     * asking for the wrong one does not fail loudly, it just puts the wrong
-     * thing on the consent screen.
+     * <p>{@code domains}: space-separated ids ({@code mail}, {@code contacts},
+     * {@code calendars}). A wrong one does not fail, it shows the wrong thing
+     * on the consent screen.
      */
     public String domainScope(String domains) {
         return Json.string(

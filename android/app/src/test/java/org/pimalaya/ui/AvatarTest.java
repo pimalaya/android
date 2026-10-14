@@ -24,10 +24,8 @@ public class AvatarTest {
     public void aDeclaredColourWinsAndAnUnreadableOneFallsBack() {
         assertEquals(Color.RED, Avatar.colorOf("#ff0000", "Work"));
 
-        // Servers send colours the platform cannot parse (named CSS
-        // colours, `#rgb`, an empty element). The derived hue is a better
-        // answer than a crash, and the same one the calendar would have
-        // had with no colour at all.
+        // NOTE: servers send colours the platform cannot parse (named CSS
+        // colours, #rgb, empty); the derived hue beats a crash.
         assertEquals(Avatar.colorOf(null, "Work"), Avatar.colorOf("chartreuse", "Work"));
         assertEquals(Avatar.colorOf(null, "Work"), Avatar.colorOf("", "Work"));
         assertNotEquals(Avatar.colorOf(null, "Work"), Avatar.colorOf(null, "Personal"));

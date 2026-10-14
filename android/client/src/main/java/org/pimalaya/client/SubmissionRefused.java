@@ -3,13 +3,12 @@ package org.pimalaya.client;
 /**
  * Raised when a server refuses one message for good.
  *
- * <p>Its own type because the outbox has two answers for a failed send
- * and no way to tell them apart from prose. A refusal is the server's
- * final word on this message (a 5yz reply, RFC 5321 section 4.2.1), so
- * the message is parked carrying what it said; every other failure is
- * the environment's, and leaves the message queued for the next drain.
+ * <p>A refusal is the server's final word (a 5yz reply, RFC 5321 4.2.1): the
+ * outbox parks the message with what it said, while any other failure leaves
+ * it queued for the next drain. Its own type so no prose is matched.
  */
 public final class SubmissionRefused extends PimalayaException {
+    /** A refusal carrying what the server said. */
     public SubmissionRefused(String message) {
         super(message);
     }

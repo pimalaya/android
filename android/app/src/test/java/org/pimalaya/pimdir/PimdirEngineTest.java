@@ -23,15 +23,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The half of a driver every domain shares, over a remote that answers
- * from a fixture instead of a server.
+ * The half of a driver every domain shares, over a fixture remote.
  *
- * <p>What it pins is the pass, not the protocol: a sync that finds the
- * remote content changed drops the body on purpose and leaves the
- * placement below full, and something has to put it back. Nothing else
- * does, so a domain whose listing reads by body empties itself on the
- * first remote edit if this is missing. It was, for calendars, and the
- * agenda went blank.
+ * <p>It pins the pass, not the protocol: a sync finding the remote content
+ * changed drops the body and leaves the placement below full; the hydrate must
+ * put it back, or a domain listing by body empties on the first remote edit.
  */
 @RunWith(RobolectricTestRunner.class)
 public class PimdirEngineTest {
@@ -163,7 +159,7 @@ public class PimdirEngineTest {
         engine.members.put("ev-1.ics", new String[] {"etag-2", EDITED});
         engine.sync(COLLECTION);
 
-        // The merge drops the body when the revision moves, on purpose;
+        // NOTE: the merge drops the body when the revision moves, on purpose;
         // the hydrate beside it is the only thing that puts one back.
         assertEquals(Map.of("ev-1.ics", EDITED), stored());
         assertEquals(List.of("ev-1.ics"), engine.fetched);
@@ -174,7 +170,7 @@ public class PimdirEngineTest {
         engine.fetched.clear();
         engine.sync(COLLECTION);
 
-        // Nothing moved, so nothing is read: the whole point of asking
+        // NOTE: nothing moved, so nothing is read: the whole point of asking
         // what changed rather than asking for everything.
         assertTrue(engine.fetched.isEmpty());
         assertEquals(Map.of("ev-1.ics", BODY), stored());

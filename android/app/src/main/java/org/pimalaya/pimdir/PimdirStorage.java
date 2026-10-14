@@ -26,30 +26,9 @@ import java.util.Set;
 /**
  * io-pimdir's storage seam over a pimdir store.
  *
- * <p>The engine runs in Rust and is I/O-free, so every storage yield arrives
- * here as a JSON envelope and is serviced against the bundled SQLite. What
- * changes from the previous {@code OfflineStore} is only the schema underneath:
- * pimdir's generic {@code items} and {@code bindings} instead of a
- * contacts-shaped {@code card} and {@code membership}, with bodies moved out to
- * content-addressed blobs.
- *
- * <p>The mapping is the whole of it:
- *
- * <ul>
- *   <li>a placement is one {@code items} row keyed {@code (collection, link_id)}
- *       plus one {@code bindings} row per source, carrying that source's handle
- *       and the three-way-merge base
- *   <li>a body is an object: written to the blob directory under the hash the
- *       engine computed, referenced by {@code object_hash}, refcounted
- *   <li>the vCard index columns become the typed summary row STORAGE Annex A
- *       fixes ({@link PimdirSummary}), with the addresses beside it in
- *       {@code item_address}, and the ordering they never had becomes
- *       {@code sort_key}
- * </ul>
- *
- * <p>Writes are one transaction, applied in the batch's order (SYNC §10): a
- * batch naming one handle twice means what its order says, a tombstone then
- * its withdrawal, or a drop then the upsert that restores it.
+ * <p>Yields arrive as JSON, served on SQLite: a placement is an {@code items}
+ * row plus a {@code bindings} row per source (handle, merge base). Writes are
+ * one transaction in batch order (SYNC §10).
  */
 public final class PimdirStorage {
     /** The source name this app syncs a server under. */
@@ -62,14 +41,11 @@ public final class PimdirStorage {
     private static final String PHONE_PREFIX = "phone:";
 
     /**
-     * The namespace a staged create's handle sits under until a push assigns
-     * one (SYNC.md §2): {@code U+0001} followed by the link id.
+     * The prefix of a staged create's handle until a push assigns one.
      *
-     * <p>A name no protocol hands out, so it collides with no member the next
-     * enumeration lists and both sides of the bridge derive one create's change
-     * key alike. It is the engine's spelling, so the store hands out the same
-     * one for a placement no source binds yet, and strips it back off wherever
-     * a handle is resolved or a resource is named.
+     * <p>{@code U+0001} then the link id (SYNC.md §2): no protocol hands it
+     * out, and it is the engine's spelling, stripped wherever a handle resolves
+     * or a resource is named.
      */
     private static final String PROVISIONAL = String.valueOf((char) 0x01);
 
@@ -77,13 +53,12 @@ public final class PimdirStorage {
     private final PimdirBlobs blobs;
     private final PimdirItems items;
 
+    /** The seam over {@code store}. */
     public PimdirStorage(PimdirDb store) {
         this.store = store;
         this.blobs = new PimdirBlobs(store.blobs());
         this.items = new PimdirItems(store);
     }
-
-    // ---- the two spokes ---------------------------------------------------
 
     /** The phone collection id of an addressbook (the second engine spoke). */
     public static String phoneCollection(String collection) {
@@ -98,13 +73,9 @@ public final class PimdirStorage {
     /**
      * The stored collection behind an engine collection id.
      *
-     * <p>The engine reconciles a book against two remotes, the server and the
-     * phone, and names them as two collections. The store holds <strong>one</strong>
-     * collection with two bindings per item instead, which is what pimdir's
-     * {@code bindings} table is for: one shared truth, one row per source that
-     * syncs it. That is also what makes cross-spoke propagation free, since a
-     * phone-won write leaves the item diverging from the server's base by
-     * construction rather than by a second write.
+     * <p>The engine names the server and phone spokes as two collections; the
+     * store holds one, with a binding per source, so a phone-won write diverges
+     * from the server's base by construction.
      */
     public static String collectionOf(String collection) {
         return isPhoneCollection(collection)
@@ -117,58 +88,38 @@ public final class PimdirStorage {
         return isPhoneCollection(collection) ? PHONE : SERVER;
     }
 
-    // ---- provisional handles ----------------------------------------------
-
     /** The handle a create of this identity is staged under (SYNC.md §2). */
     public static String provisionalOf(String linkId) {
         return PROVISIONAL + linkId;
     }
 
     /**
-     * A row's engine handle: the resource name its source binds it under,
-     * else the provisional handle a staged create waits under (SYNC §2).
+     * A row's engine handle: its source's resource name, else provisional.
      *
-     * <p>Never a guess at the name the server will hand out: the handle is how
-     * the engine addresses the placement, and a create has no server name yet
-     * by definition. What it will be pushed as is
-     * {@link #resourceName(String, String)}, and what the binding ends up
-     * holding is whatever the push assigns.
+     * <p>A staged create waits under its provisional handle (SYNC §2), never a
+     * guess at the server's name: it is pushed as {@code
+     * CardStore.resourceName}, and the binding takes what the push assigns.
      */
     public static String rowHandle(String uri, String id) {
         return uri != null && !uri.isEmpty() ? uri : PimdirStorage.provisionalOf(id);
     }
 
     /**
-     * The name behind an engine handle: the identity for a staged create, the
-     * handle itself for a member a source already binds.
+     * The name behind a handle: a staged create's identity, else the handle.
      *
-     * <p>What a create is pushed as: a server is offered the item's own name,
-     * never the provisional one, which is a spelling of this side's bookkeeping
-     * and would land as a resource no reader could open.
+     * <p>What a create is pushed as: a provisional name would land as a
+     * resource no reader could open.
      */
     public static String nameOf(String handle) {
         return handle.startsWith(PROVISIONAL) ? handle.substring(PROVISIONAL.length()) : handle;
     }
 
-    // ---- load -------------------------------------------------------------
-
     /**
-     * The collection's placements and its sync cursor, as the reply to a load
-     * yield.
+     * The collection's placements and sync cursor, replying to a load yield.
      *
-     * <p>Retained rows are excluded: a retained item is the store's memory of a
-     * removal that has finished propagating (SPEC.md §11), and the merge
-     * reconciles only what load returns, so returning one would re-derive it.
-     * A staged removal is not one of those and <strong>is</strong> returned, as
-     * the tombstone it is: the merge derives its remove push from the placement,
-     * so hiding it would leave the delete local forever and let the next
-     * enumerate read the member the server still holds as one to add back.
-     *
-     * <p>{@code scope} narrows the read to the rows the engine is about to
-     * touch, so a flag change on one message costs one row rather than the size
-     * of the mailbox and a listing's page of 1000 costs its 1000 rows, however
-     * long the list ({@link #scopeClause}). It is a floor and not a ceiling:
-     * answering more than it asks for stays correct.
+     * <p>Retained rows are left out (SPEC.md §11), staged tombstones kept or
+     * the remove never pushes. {@code scope} narrows to the rows touched
+     * ({@link #scopeClause}): a floor, more stays correct.
      */
     public JSONObject loadCollection(String collection, JSONObject scope) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -233,13 +184,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * The source's sync state of a collection, written into a load reply:
-     * its checkpoint, the coverage the last closed round left (SYNC §5,
-     * STORAGE §4.3) and the round under way. Answers whether a round is
-     * open.
+     * Writes the source's sync state into a load reply; answers if one is open.
      *
-     * <p>Read through the canonical {@code load_checkpoint} and
-     * {@code load_round}, so the columns stay the crate's.
+     * <p>Checkpoint, last coverage (SYNC §5, STORAGE §4.3) and the open round,
+     * read by the canonical {@code load_checkpoint} and {@code load_round}.
      */
     private static boolean syncState(
             SQLiteDatabase db, String collection, String source, JSONObject reply)
@@ -287,10 +235,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * The based bindings of the source the open round has not stamped and
-     * whose item's date is in its scope, or unknown on a round over its
-     * whole scope: what the round's last page finds absent unless it lists
-     * them (SYNC §5). A band round leaves an undated member be.
+     * The open round's unstamped based bindings in its scope (SYNC §5).
+     *
+     * <p>What its last page finds absent unless listed; undated members count
+     * only on a whole-scope round, a band round leaves them be.
      */
     private static JSONArray unstamped(SQLiteDatabase db, String collection, String source) {
         Map<String, Object> key = new HashMap<>();
@@ -308,11 +256,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * An opaque token column (a checkpoint, a resume cursor) as the text
-     * every connector here writes it as, or null when empty or unset.
+     * An opaque token column as text, or null when empty or unset.
      *
-     * <p>BLOB in the schema, which is what the tables being STRICT makes
-     * the store hold, and text on the wire.
+     * <p>A checkpoint or resume cursor: BLOB in the STRICT schema, text on the
+     * wire.
      */
     private static String textOf(Cursor cursor, int column) {
         if (cursor.isNull(column)) {
@@ -334,15 +281,11 @@ public final class PimdirStorage {
     }
 
     /**
-     * The extra {@code WHERE} the load scope asks for, appending its binds to
-     * {@code args}, or the empty string for a whole-collection read.
+     * The load scope's extra {@code WHERE}, its binds appended to {@code args}.
      *
-     * <p>The list binds once, as a JSON array read through {@code json_each},
-     * so no length widens it back to the whole collection: SQLite's variable
-     * limit never applies, and a listing's page of 1000 reads its 1000 rows. A
-     * link scope seeks the items' key; a handle scope seeks the source's
-     * bindings by handle ({@code bindings_by_handle}), never walking the
-     * collection.
+     * <p>Empty for a whole collection. The list binds once as JSON through
+     * {@code json_each} (no variable limit); links seek the items' key, handles
+     * {@code bindings_by_handle}.
      */
     private static String scopeClause(
             JSONObject scope, String collection, String source, List<String> args)
@@ -386,12 +329,8 @@ public final class PimdirStorage {
     /**
      * One item-plus-binding row as the engine's placement shape.
      *
-     * <p>The summary is deliberately not read back. A write that carries none
-     * keeps the stored row (SPEC.md §9.3's rule for the sort key, which the
-     * summary follows), and the engine only ever sets one from a derivation:
-     * a fetch's or an edit's. So the row a load omits is the row the next
-     * write preserves, and reading five typed tables back into a placement
-     * would buy the engine nothing it does with it.
+     * <p>The summary is not read back: a write carrying none keeps the stored
+     * row (SPEC.md §9.3), and the engine only sets one from a derivation.
      */
     private JSONObject placementOf(String collection, Cursor cursor) throws JSONException {
         String linkId = cursor.getString(0);
@@ -471,24 +410,14 @@ public final class PimdirStorage {
     }
 
     /**
-     * What a placement owes, derived from the row (SYNC §3), first rule that
-     * applies.
+     * What a placement owes, derived from the row (SYNC §3), first rule first.
      *
-     * <p>Derived and never stored, which is the standard's rule and not this
-     * app's convenience: a status column would be a second copy of what the
-     * bindings already say, and the two would part company the first time a
-     * crash landed between them.
-     *
-     * <p>The two the store used to leave out were the two that carry a push.
-     * Without {@code dirty} a staged edit is loaded back as agreed and the
-     * merge finds nothing to send; without {@code created} an item no source
-     * binds reads as a member the remote no longer has, and a complete round
-     * retires it. Both are silent: the write lands, the sync reports success,
-     * and the change is gone.
+     * <p>Never stored, per the standard. Without {@code dirty} a staged edit
+     * loads as agreed; without {@code created} an unbound item reads as gone
+     * and is retired: both silently lose the change.
      */
     private static String statusOf(Cursor cursor) {
-        // 1. A divergence, per source or across them, and neither is
-        // downgraded by anything below.
+        // NOTE: a divergence wins over every rule below.
         boolean conflicted =
                 (!cursor.isNull(10) && cursor.getInt(10) == 1)
                         || (!cursor.isNull(14) && cursor.getInt(14) == 1);
@@ -496,24 +425,20 @@ public final class PimdirStorage {
             return "conflict";
         }
 
-        // 2. A staged removal, while the source still binds the item: the
-        // content is kept, so an edit after it still beats the delete.
+        // NOTE: a bound tombstone keeps its content, so a later edit still
+        // beats the delete.
         boolean bound = !cursor.isNull(5);
         if (cursor.getInt(13) == 1 && bound) {
             return "tombstone";
         }
 
-        // 3. A create: nothing has agreed on this item here yet, either
-        // because the source binds it with no base or because it does not
-        // bind it at all, the load projecting one only where the store holds
-        // a body to offer.
+        // NOTE: a create is an item nothing agreed on here: bound without base,
+        // or unbound (load projects one only where the store holds a body).
         if (!bound || !hasBase(cursor)) {
             return "created";
         }
 
-        // 4. A pending push: markers both sides know and disagree on, or a
-        // body that has moved past the one the base holds. A placement
-        // holding no body owes no body, whatever its base names.
+        // NOTE: a placement holding no body owes no body, whatever its base.
         boolean flagsMoved =
                 !cursor.isNull(1)
                         && !cursor.isNull(6)
@@ -541,8 +466,8 @@ public final class PimdirStorage {
             Set<String> right = new HashSet<>(stringsOf(arrayOf(other)));
             return left.equals(right);
         } catch (JSONException error) {
-            // An unreadable set says nothing, so it cannot disagree with
-            // anything: the alternative is a push nobody asked for.
+            // NOTE: an unreadable set cannot disagree, or a push nobody asked
+            // for would follow.
             return true;
         }
     }
@@ -562,13 +487,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * Where else this source already holds the same item, as the placement's
-     * origin, or null when it holds it nowhere else.
+     * Where else this source holds the item, as its origin, or null.
      *
-     * <p>This is what makes "add this contact to a second address book" a
-     * membership patch on the account-level backends: the body is already on the
-     * account, so uploading it again would mint a second card rather than place
-     * the one that exists.
+     * <p>Adding a contact to a second book is then a membership patch on
+     * account-level backends, not a second card.
      */
     private JSONObject originOf(String collection, String linkId) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -592,25 +514,22 @@ public final class PimdirStorage {
         }
     }
 
-    // ---- lookup -----------------------------------------------------------
-
     /**
-     * Which link ids already have a stored body, as the reply to a lookup yield.
+     * Which link ids already have a stored body, replying to a lookup yield.
      *
-     * <p>Deliberately empty for contacts and answered for the rest. The engine's
-     * cross-collection dedup assumes a link id names immutable bytes, which
-     * holds for a message and does not for a card: two replicas sharing a vCard
-     * UID diverge legitimately, so one body must never stand in for another's.
-     * Mail and calendar bodies are immutable under their link id, so they dedup.
+     * <p>Always empty for contacts: the engine's dedup assumes a link id names
+     * immutable bytes, true of mail and calendar bodies, false of cards
+     * (replicas sharing a UID diverge).
      */
     public JSONObject lookupObjects(JSONArray links) throws JSONException {
         return lookupObjects(links, null);
     }
 
     /**
-     * {@link #lookupObjects(JSONArray)} within one account's collections
-     * (STORAGE §14 binds the caller's account), every account's for a null
-     * one: across accounts a link id is not a fact.
+     * {@link #lookupObjects(JSONArray)} within one account's collections.
+     *
+     * <p>STORAGE §14 binds the caller's account: across accounts a link id is
+     * not a fact. A null account means every account's.
      */
     public JSONObject lookupObjects(JSONArray links, String account) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -630,8 +549,8 @@ public final class PimdirStorage {
                                     ? new String[] {linkId, PimdirSummary.CONTACT}
                                     : new String[] {linkId, PimdirSummary.CONTACT, account})) {
                 if (cursor.moveToFirst() && blobs.has(cursor.getString(0))) {
-                    // The size is the witness an immutable link needs (SYNC §6):
-                    // the engine records the object without ever reading it.
+                    // NOTE: the size is the witness an immutable link needs
+                    // (SYNC §6): the engine records the object unread.
                     JSONObject object = new JSONObject();
                     object.put("hash", cursor.getString(0));
                     object.put("size", cursor.getLong(1));
@@ -645,12 +564,7 @@ public final class PimdirStorage {
         return reply;
     }
 
-    // ---- write ------------------------------------------------------------
-
-    /**
-     * Applies one batch of engine writes atomically, returning what it did to
-     * the items for the sync report.
-     */
+    /** Applies a batch of engine writes atomically; returns what it did. */
     public JSONArray applyWrites(JSONArray writes) throws JSONException {
         SQLiteDatabase db = store.getWritableDatabase();
         db.beginTransaction();
@@ -746,13 +660,11 @@ public final class PimdirStorage {
     }
 
     /**
-     * The handles this batch supersedes, keyed by stored collection and source.
+     * The handles this batch supersedes, by stored collection and source.
      *
-     * <p>Read ahead of the upserts because they are what licenses a rebind: a
-     * binding pins one handle, so an upsert moving it is a source holding one
-     * identity twice unless the same batch says that handle is being replaced.
-     * Both non-deleting reasons license it: an accepted add reconciles its
-     * provisional handle, and a rebuild renumbers the whole spine.
+     * <p>Read ahead: they license a rebind (an accepted add's provisional
+     * handle, a rebuilt spine), which otherwise is one source holding an
+     * identity twice.
      */
     private static Set<String> supersededHandles(JSONArray writes) throws JSONException {
         Set<String> superseded = new HashSet<>();
@@ -770,11 +682,11 @@ public final class PimdirStorage {
     }
 
     /**
-     * Applies one drop of a batch where it stands, recording what the rest of
-     * the batch reads of it: the link id its handle was bound to, which an
-     * unnamed upsert of the same handle later in the batch continues (as
-     * io-pimdir resolves it against the store the batch started from), and
-     * the staged mail create it superseded.
+     * Applies one drop in place, recording what the rest of the batch reads.
+     *
+     * <p>The link id its handle was bound to, continued by a later unnamed
+     * upsert of that handle (as io-pimdir resolves it), and the staged mail
+     * create it superseded.
      */
     private void applyBatchDrop(SQLiteDatabase db, JSONObject drop, Set<String> staged,
             Map<String, String> released, JSONArray effects) throws JSONException {
@@ -855,11 +767,11 @@ public final class PimdirStorage {
     }
 
     /**
-     * Writes one placement, returning what changed for the sync report:
-     * {@code created}, {@code changed} when the body differs, or null for a
-     * bookkeeping-only upsert (flags, bases). {@code released} is what the
-     * batch's earlier drops unbound, by handle, and {@code fresh} collects the
-     * items this upsert creates.
+     * Writes one placement; returns {@code created}, {@code changed} or null.
+     *
+     * <p>Null for bookkeeping only (flags, bases). {@code released} is what
+     * earlier drops unbound, by handle; {@code fresh} collects the items
+     * created.
      */
     private String applyUpsert(SQLiteDatabase db, JSONObject placement, Set<String> superseded,
             Set<String> links, Map<String, String> released, Set<String> fresh)
@@ -868,11 +780,9 @@ public final class PimdirStorage {
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
         String handle = placement.getString("handle");
-        // The identity the placement names, else the one its handle is already
-        // bound to (STORAGE §10), or was when the batch began. Never the handle
-        // itself: an item is keyed by its link id, so filing an unnamed handle
-        // as one mints an item the next fetch has to un-mint, leaving two
-        // bindings on one handle.
+        // NOTE: never file an unnamed handle as its own identity: that mints
+        // an item the next fetch un-mints, two bindings on one handle. Use the
+        // handle's bound identity (STORAGE §10), now or at the batch's start.
         String bound = linkOf(db, collection, source, handle);
         String known =
                 bound != null ? bound : released.get(collection + "\n" + source + "\n" + handle);
@@ -897,9 +807,8 @@ public final class PimdirStorage {
         String flags = placement.optJSONArray("flags") == null
                 ? null
                 : placement.getJSONArray("flags").toString();
-        // A staged removal, which is a write like any other until a push has
-        // carried it: the row stays, marked, so the merge keeps deriving the
-        // remove and an edit after it still beats the delete.
+        // NOTE: a tombstone stays as a marked row until pushed, so the merge
+        // keeps deriving the remove and a later edit beats it.
         boolean tombstone = "tombstone".equals(placement.optString("status", "clean"));
 
         // NOTE: nothing reaches the store unnamed (SYNC §10): a listing names
@@ -911,10 +820,9 @@ public final class PimdirStorage {
                     "Unnamed placement " + collection + "/" + handle + " on " + source);
         }
 
-        // The handle named another identity until now: a resource replaced in
-        // place, or a spine whose fetch resolved what its enumeration could
-        // not. Its binding is retired first, as a delete of that handle would
-        // (STORAGE §10), since a handle names one item per source.
+        // NOTE: a handle that named another identity (replaced in place, or
+        // resolved by fetch) has that binding retired first, as a delete would
+        // (STORAGE §10): a handle names one item per source.
         if (bound != null && !bound.equals(linkId)) {
             applyDrop(db, engineCollection, handle, true);
         }
@@ -969,9 +877,8 @@ public final class PimdirStorage {
                         tombstone ? 1 : 0
                     });
         } else {
-            // A write that does not restate the key must preserve it (SPEC.md
-            // §9.3): the reference write is a replace-all, so blanking it here
-            // would reset the ordering of every item a sync touched.
+            // NOTE: a write not restating the key keeps it (SPEC.md §9.3); the
+            // reference write replaces all, so blanking would reset ordering.
             db.execSQL(
                     "UPDATE items SET flags = ?, object_hash = ?, level = ?,"
                             + " sort_key = CASE WHEN ? = '' THEN sort_key ELSE ? END,"
@@ -989,11 +896,9 @@ public final class PimdirStorage {
                     });
         }
 
-        // On the same terms as the sort key: a write carrying no summary keeps
-        // the stored row, which is what a flag push and a pulled deletion do.
-        // NOTE: a message created from another one (a landed create, a
-        // copy, a move's target) is that message: it takes the summary the
-        // store holds of it, the engine having carried none.
+        // NOTE: a write without summary keeps the stored row (flag pushes,
+        // pulled deletions). A message created from another (a landed create,
+        // a copy, a move's target) takes that one's stored summary.
         boolean carried =
                 mail
                         && !exists
@@ -1016,19 +921,11 @@ public final class PimdirStorage {
     }
 
     /**
-     * The source's binding of the item: its handle there, its merge base, and
-     * the divergence it is waiting on.
+     * Writes the source's binding: handle, merge base, pending divergence.
      *
-     * <p>A source holding one identity twice (a double delivery, a retried
-     * append, a restore, a migration) never reaches here as one binding: the
-     * engine mints a second link id for the second copy, so the two are two
-     * items and each binds its own handle. What does move a handle is the one
-     * licensed rebind, a placeholder reconciled to its assigned handle or a
-     * spine rebuilt onto a new handle space, and the batch says so by
-     * superseding the old handle in the same write.
-     *
-     * <p>{@code kept} is the body {@link #applyUpsert} kept against a
-     * placement carrying none, null when it kept nothing.
+     * <p>A duplicated identity is two link ids, never one binding; a handle
+     * moves only on a rebind the batch supersedes. {@code kept} is what {@link
+     * #applyUpsert} kept, or null.
      */
     private void writeBinding(SQLiteDatabase db, String collection, String source, String linkId,
             String handle, JSONObject placement, Set<String> superseded, boolean fresh,
@@ -1061,12 +958,9 @@ public final class PimdirStorage {
                             + " is bound to " + bound + " and cannot be repointed to " + handle);
         }
 
-        // NOTE: a base body and a captured conflicting body are references like
-        // any other (SPEC.md §5), so the refcount has to move with them.
-        // Counting only the current object would collect a body the merge base
-        // still names, which is not a leak but a dangling reference: the foreign
-        // key refuses it, and a store that got past it would have lost what the
-        // next three-way merge diffs against.
+        // NOTE: a base and a captured conflict body are references (SPEC.md
+        // §5): counting only the current object would collect a body the next
+        // three-way merge diffs against.
         String previousBase = fresh ? null : baseObjectOf(db, collection, linkId, source);
         String previousConflict =
                 fresh ? null : conflictObjectOf(db, collection, linkId, source);
@@ -1099,13 +993,9 @@ public final class PimdirStorage {
     /**
      * Retires the placement the source no longer holds.
      *
-     * <p>Retained, never deleted (SPEC.md §11): the store is the only holder of
-     * a body a remote has expunged, so the row keeps its {@code object_hash},
-     * the blob stays pinned, and only an explicit purge removes it.
-     *
-     * <p>{@code deleted} is what separates the item going from only this row
-     * going: a superseded row drops its binding and leaves the item alone, so a
-     * rebuilt spine is renumbered rather than retired.
+     * <p>Retained, never deleted (SPEC.md §11): the body stays pinned until a
+     * purge. Without {@code deleted} only the binding goes (a superseded row),
+     * so a rebuilt spine is renumbered, not retired.
      */
     private void applyDrop(
             SQLiteDatabase db, String engineCollection, String handle, boolean deleted) {
@@ -1148,11 +1038,11 @@ public final class PimdirStorage {
     }
 
     /**
-     * One round op of SYNC §5 through its canonical statement: the source's
-     * round opened, its cursor landed, closed with its coverage, or the
-     * coverage restated. {@code scope} is the op's scope or coverage, its
-     * absent bounds open; the cursor and the checkpoint are bound as the
-     * BLOBs the schema keeps them as.
+     * One SYNC §5 round op by its canonical statement.
+     *
+     * <p>Round opened, cursor landed, closed with coverage, or coverage
+     * restated. {@code scope}'s absent bounds are open; cursor and checkpoint
+     * bind as BLOBs.
      */
     private static void roundOp(SQLiteDatabase db, String statement, JSONObject op,
             JSONObject scope) throws JSONException {
@@ -1194,7 +1084,7 @@ public final class PimdirStorage {
         return op.optString(field, "").getBytes(StandardCharsets.UTF_8);
     }
 
-    /** The collection row a source's sync state hangs off, created when missing. */
+    /** The collection row a source's sync state hangs off, made if missing. */
     private static void ensureCollection(SQLiteDatabase db, String collection) {
         db.execSQL(PimdirSql.of("ENSURE_COLLECTION").replace(":collection", "?")
                         .replace(":account", "NULL"),
@@ -1205,10 +1095,9 @@ public final class PimdirStorage {
         String collection = collectionOf(op.getString("collection"));
         String source = sourceOf(op.getString("collection"));
         ensureCollection(db, collection);
-        // NOTE: the column is BLOB and the tables are STRICT, so a TEXT bind is
-        // refused outright rather than coerced. A checkpoint is opaque to the
-        // store anyway (a QRESYNC state, a JMAP state string, a DAV sync-token),
-        // which is exactly why the schema types it as bytes.
+        // NOTE: the column is BLOB in a STRICT table, so a TEXT bind is
+        // refused; a checkpoint (QRESYNC state, JMAP state, sync-token) is
+        // opaque bytes to the store.
         byte[] checkpoint =
                 op.optString("checkpoint", "").getBytes(StandardCharsets.UTF_8);
         db.execSQL(
@@ -1218,17 +1107,12 @@ public final class PimdirStorage {
                 new Object[] {collection, source, checkpoint});
     }
 
-    // ---- the driver's own reads -------------------------------------------
-
     /**
-     * The flag set this source last agreed on, or null when it agreed on
-     * none (a placement it has never reconciled, or a backend that reports
-     * no flags at all).
+     * The flag set this source last agreed on, or null for none.
      *
-     * <p>What a marker push diffs against. A backend whose write verb adds
-     * and removes one marker at a time must never be handed a whole set:
-     * replacing it would strip every keyword this app does not model, and
-     * the base is what says which of them the user actually moved.
+     * <p>What a marker push diffs against: a one-marker-at-a-time backend must
+     * never get a whole set, which would strip keywords this app does not
+     * model.
      */
     public Flags baseFlags(String engineCollection, String handle) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1252,12 +1136,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * The item behind an engine handle, for the push adapter: what a change
-     * addresses and what it is conditioned on. Null when the handle is unknown.
+     * The item behind a handle for the push adapter, or null when unknown.
      *
-     * <p>{@code id} is the link id (the identity a backend addresses an item by)
-     * and {@code uri} the handle this source holds it under; on CardDAV they
-     * differ, elsewhere they are the same string.
+     * <p>{@code id} is the link id a backend addresses, {@code uri} the
+     * source's handle; they differ only on CardDAV.
      */
     public JSONObject loadRow(String engineCollection, String handle) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1296,13 +1178,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * The three documents a manual conflict resolution needs: the staged local
-     * body, the base both sides diverged from, and the captured remote one.
-     * Null while no remote body has been captured, so the row is not resolvable.
+     * A manual resolution's local, base and captured remote bodies.
      *
-     * <p>The base falls back to the local body, which is what a create collision
-     * leaves: with nothing previously agreed, the local side reads unchanged and
-     * every remote change merges in cleanly.
+     * <p>Null until the remote body is captured. The base falls back to the
+     * local body (a create collision), so remote changes merge in cleanly.
      */
     public JSONObject loadConflict(String engineCollection, String handle) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1334,15 +1213,11 @@ public final class PimdirStorage {
     }
 
     /**
-     * The handles of one collection the hydrate pass upgrades: those still
-     * below the full detail level, plus the conflicted ones whose diverging
-     * remote body has not landed yet.
+     * The handles the hydrate pass upgrades: below full, or conflicted unfed.
      *
-     * <p>A conflicted row reads as full and holds a body, just not the one it
-     * lacks: the engine marks the divergence and fetches nothing, so a
-     * conflict holding no {@code conflict_object} is the request for it, and
-     * the upgrade pass is what answers. Leaving it out is what would make a
-     * conflict unresolvable offline.
+     * <p>A conflict without {@code conflict_object} is the request for the
+     * remote body, which the engine never fetches itself; left out, the
+     * conflict could not resolve offline.
      */
     public List<String> handlesBelowFull(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1368,7 +1243,7 @@ public final class PimdirStorage {
         }
     }
 
-    /** Whether this source binds anything in a collection: one indexed probe. */
+    /** Whether this source binds anything in a collection (one probe). */
     public boolean bindsAny(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
@@ -1383,10 +1258,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * Which of some handles the source binds in some collections: what a
-     * step leaves out of the page it lists, the messages the store already
-     * holds. One seek per handle on {@code bindings_by_handle}, however many
-     * the collections hold.
+     * Which of some handles the source binds in some collections.
+     *
+     * <p>What a step leaves out of its page; one seek per handle on {@code
+     * bindings_by_handle}.
      */
     public Set<String> heldOf(List<String> engineCollections, List<String> handles) {
         Set<String> held = new HashSet<>();
@@ -1416,13 +1291,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * What this source holds of some handles: for each one it binds, the
-     * link id it is filed under and the revision last agreed on (null for
-     * an immutable member). A handle it binds nothing under is absent.
+     * Each bound handle's link id and agreed revision (null if immutable).
      *
-     * <p>What naming a listing takes (SYNC §4): a bound member whose
-     * revision has not moved is named by what the store already holds, and
-     * only a new or changed one needs its body read to be named.
+     * <p>Unbound handles are absent. Naming a listing (SYNC §4) reads bodies
+     * only for new or changed members.
      */
     public Map<String, String[]> bound(String engineCollection, List<String> handles) {
         Map<String, String[]> bound = new HashMap<>();
@@ -1452,14 +1324,11 @@ public final class PimdirStorage {
     }
 
     /**
-     * One collection's unresolved conflicts, each with the three documents the
-     * resolution merge needs (the staged local body, the base both sides
-     * diverged from, and the diverging remote one) plus the remote revision
-     * observed when the binding was marked conflicted.
+     * One collection's unresolved conflicts, with their merge inputs.
      *
-     * <p>A row whose remote body has not landed yet is left out rather than
-     * offered half-resolvable: the hydrate pass asks for it
-     * ({@link #handlesBelowFull}) and the next run sees it whole.
+     * <p>Local, base and remote bodies plus the remote revision marked. A row
+     * awaiting its remote body is left out until hydrate ({@link
+     * #handlesBelowFull}) lands it.
      */
     public List<JSONObject> loadConflicts(String engineCollection) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1501,9 +1370,9 @@ public final class PimdirStorage {
     }
 
     /**
-     * Refreshes the remote revision a conflicted binding was marked against, so
-     * the resolving push is conditioned on the state the merge reconciled with
-     * rather than the one the conflict was first noticed at.
+     * Refreshes the remote revision a conflicted binding was marked against.
+     *
+     * <p>So the resolving push is conditioned on the state the merge used.
      */
     public void setConflictRevision(String engineCollection, String handle, String revision) {
         SQLiteDatabase db = store.getWritableDatabase();
@@ -1519,19 +1388,12 @@ public final class PimdirStorage {
                 new Object[] {revision, collection, linkId, source});
     }
 
-    // ---- the quiet path ---------------------------------------------------
-
     /**
-     * Whether the source has anything to reconcile: an unresolved conflict,
-     * an item it still holds that
-     * the store has retired, or one whose body has moved past the base it last
-     * agreed on.
+     * Whether the source has anything to reconcile.
      *
-     * <p>This exists because ContactsContract has no per-account change token,
-     * so the phone pass cannot ask "did anything happen". A few cheap queries
-     * stand in for one, and this is the store's share of them: skipping a pass
-     * that would reconcile nothing is the difference between a sync that costs
-     * nothing and one that walks every contact on the device.
+     * <p>A conflict, a held item the store retired, or a body moved past its
+     * base. ContactsContract has no change token, so this stands in and skips
+     * walking every phone contact.
      */
     public boolean pending(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1556,13 +1418,11 @@ public final class PimdirStorage {
     }
 
     /**
-     * Forgets what one source holds of a collection: every binding it has
-     * dropped as superseded, never as a removal, so the items stay and the
-     * next pass of that source hands each one over again as a create.
+     * Forgets one source's bindings in a collection, as superseded.
      *
-     * <p>For a source whose members went with something other than a sync:
-     * the phone's calendar provider deletes a calendar's events with its row,
-     * and a binding left behind would read them as still there.
+     * <p>The items stay and the next pass recreates them. For members gone
+     * outside a sync (the calendar provider deletes events with their
+     * calendar).
      */
     public void forget(String engineCollection) throws JSONException {
         JSONArray placements = loadCollection(engineCollection, null).optJSONArray("placements");
@@ -1595,11 +1455,10 @@ public final class PimdirStorage {
         }
     }
 
-    // ---- staged moves and creates -----------------------------------------
-
     /**
-     * The handle the engine addresses an item by on this source: the one it
-     * binds, else the provisional handle its create waits under (SYNC §2).
+     * The handle this source addresses an item by.
+     *
+     * <p>The bound one, else its create's provisional handle (SYNC §2).
      */
     public String handleFor(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1615,18 +1474,15 @@ public final class PimdirStorage {
     }
 
     /**
-     * The key a staged copy or move of {@code linkId} takes in a collection
-     * already holding that identity: {@code dup:}, the key, {@code #}, the
-     * provisional handle it would have taken (STORAGE §9).
+     * The key a staged copy or move takes where the identity is already held.
+     *
+     * <p>{@code dup:}, the key, {@code #}, the provisional handle (STORAGE §9).
      */
     static String mintedOf(String linkId) {
         return "dup:" + linkId + "#" + provisionalOf(linkId);
     }
 
-    /**
-     * The identities a pending create keyed {@code linkId} may be the copy
-     * of: its own key, and the key it was minted from when it is one.
-     */
+    /** The identities a pending create may copy: its key, and its mint's. */
     private static List<String> identitiesOf(String linkId) {
         List<String> identities = new ArrayList<>(List.of(linkId));
         int length = linkId.length() - "dup:#".length() - PROVISIONAL.length();
@@ -1640,10 +1496,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * Where a tombstone of {@code linkId} moves to, as the tombstone's origin
-     * (SYNC §3): another collection this source holds a pending create of
-     * that identity in, under its own key or the one minted from it, with
-     * that create's handle, or null.
+     * Where a tombstone moves to (SYNC §3), as its origin, or null.
+     *
+     * <p>Another collection holding a pending create of that identity (own or
+     * minted key), with that create's handle.
      */
     private JSONObject destinationOf(String engineCollection, String linkId)
             throws JSONException {
@@ -1665,10 +1521,7 @@ public final class PimdirStorage {
         }
     }
 
-    /**
-     * The key of the pending create a move of {@code linkId} staged in
-     * {@code engineCollection}, its own or a minted one, or null.
-     */
+    /** The pending create a move staged here, own or minted key, or null. */
     public String pendingCreateOf(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
@@ -1689,10 +1542,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * The staged move a pending create keyed {@code linkId} is the target
-     * of, as the source's {@code [collection, handle]}: a tombstone of the
-     * same identity this source still binds in another collection. Null
-     * when the create is no move's.
+     * The staged move a pending create targets, or null.
+     *
+     * <p>As {@code [collection, handle]}: a still-bound tombstone of that
+     * identity in another collection.
      */
     public String[] moveSourceOf(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1719,10 +1572,7 @@ public final class PimdirStorage {
         }
     }
 
-    /**
-     * Whether {@code linkId} is still a pending create in the collection: a
-     * live item no base of this source has agreed on.
-     */
+    /** Whether {@code linkId} is a pending create here: live, never agreed. */
     public boolean isPendingCreate(String engineCollection, String linkId) {
         SQLiteDatabase db = store.getReadableDatabase();
         try (Cursor cursor =
@@ -1741,11 +1591,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * Withdraws a pending create outright, its row and body reference
-     * gone, as if it had never been staged: what a move's target holds once
-     * the source's relocation delivered it, the arrival coming under its
-     * own handle with the target's next listing. A row that is no pending
-     * create any more is left alone.
+     * Withdraws a pending create outright, as if never staged.
+     *
+     * <p>For a move's target once delivered: the arrival comes with the next
+     * listing. A row no longer a pending create is left alone.
      */
     public void withdrawCreate(String engineCollection, String linkId) {
         if (!isPendingCreate(engineCollection, linkId)) {
@@ -1764,13 +1613,11 @@ public final class PimdirStorage {
     }
 
     /**
-     * The pending mail creates of a collection by the bare {@code Message-ID}
-     * they carry, the ones carrying none left out: what lands a staged copy
-     * on the arrival the provider filed itself (a sent message).
+     * A collection's pending mail creates by bare {@code Message-ID}.
      *
-     * <p>Read off the provisional handles alone, a range of the handle
-     * index, so a page of a large mailbox pays for its few creates rather
-     * than for the mailbox.
+     * <p>Lands a staged copy on the provider's own arrival (a sent message).
+     * Read off the provisional handle range, so cost follows the creates, not
+     * the mailbox.
      */
     public Map<String, String> pendingCreatesByMessageId(String engineCollection) {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -1806,9 +1653,10 @@ public final class PimdirStorage {
     }
 
     /**
-     * Gives a fresh message the summary the store holds of the one it was
-     * created from: the item its create was staged as ({@code staged}),
-     * else its origin's. Answers whether one was there to take.
+     * Gives a fresh message its source message's stored summary.
+     *
+     * <p>From the item staged as its create ({@code staged}), else its origin;
+     * answers whether one was there.
      */
     private boolean carrySummary(
             SQLiteDatabase db,
@@ -1883,16 +1731,11 @@ public final class PimdirStorage {
         return !rows.isEmpty();
     }
 
-    // ---- helpers ----------------------------------------------------------
-
     /**
-     * The link id an engine handle names: the source's binding when it has one,
-     * the identity the provisional handle spells otherwise.
+     * The link id a handle names: the bound one, else the provisional's.
      *
-     * <p>The fallback is what covers a placement this source has never bound,
-     * which is the ordinary state of every item on the phone spoke before it has
-     * been projected once, and mirrors the load path handing that placement out
-     * under its provisional handle in exactly that case.
+     * <p>The fallback covers placements never bound, as every phone item before
+     * its first projection, mirroring the load path.
      */
     private String linkFor(
             SQLiteDatabase db, String collection, String source, String handle) {
@@ -1951,8 +1794,9 @@ public final class PimdirStorage {
 
 
     /**
-     * The public id of a link, shared by every placement of it (SPEC.md §9.1),
-     * drawn from the store-wide counter the first time one is inserted.
+     * A link's public id, shared by its placements (SPEC.md §9.1).
+     *
+     * <p>Drawn from the store-wide counter the first time one is inserted.
      */
     private long nextSeq(SQLiteDatabase db, String linkId) {
         String held = one(db, "SELECT seq FROM items WHERE link_id = ? LIMIT 1", linkId);
@@ -1981,19 +1825,14 @@ public final class PimdirStorage {
                 collection, source, handle);
     }
 
-    /**
-     * The compiled single-value reads of the write batch under way, by
-     * statement; null outside one.
-     */
+    /** The write batch's compiled single-value reads; null outside one. */
     private Map<String, SQLiteStatement> compiled;
 
     /**
-     * The first column of the first row a read answers, null for no row or a
-     * NULL value.
+     * The first column of a read's first row, null for none or NULL.
      *
-     * <p>A compiled statement rather than a cursor: a page of mail runs half a
-     * dozen of these per message, and a cursor fills a window for each one.
-     * Within a write batch each statement is compiled once and rebound.
+     * <p>Compiled, not a cursor (a mail page runs several per message);
+     * compiled once per write batch and rebound.
      */
     private String one(SQLiteDatabase db, String sql, String... args) {
         SQLiteStatement statement = compiled == null ? null : compiled.get(sql);
@@ -2024,7 +1863,7 @@ public final class PimdirStorage {
         }
     }
 
-    /** Moves the refcount by the difference this placement made, never globally. */
+    /** Moves the refcount by the difference this placement made. */
     private void adjustRefcount(SQLiteDatabase db, String before, String after) {
         if (sameObject(before, after)) {
             return;
@@ -2039,7 +1878,7 @@ public final class PimdirStorage {
         }
     }
 
-    /** Drops unreferenced objects, their blobs unlinked once the batch commits. */
+    /** Drops unreferenced objects, blobs unlinked after the batch commits. */
     private void collectGarbage(SQLiteDatabase db) {
         List<String> orphans = new ArrayList<>();
         try (Cursor cursor =
@@ -2059,7 +1898,7 @@ public final class PimdirStorage {
         return left == null ? right == null : left.equals(right);
     }
 
-    /** A stored JSON array column (markers, handles) as an array, empty when NULL. */
+    /** A stored JSON array column (markers, handles), empty when NULL. */
     private static JSONArray arrayOf(String json) throws JSONException {
         return json == null || json.isEmpty() ? new JSONArray() : new JSONArray(json);
     }
@@ -2067,12 +1906,9 @@ public final class PimdirStorage {
     /**
      * Whether the binding row records an agreed base.
      *
-     * <p>Either witness: {@code base_present} is the fact, since a base of no
-     * revision, no body and markers nobody has read is a real agreement its
-     * three value columns cannot express, and reading presence off them alone
-     * has such a placement come back as never-agreed so the sync re-derives the
-     * same push every run. The value columns stay a witness for a row written
-     * before the column existed.
+     * <p>{@code base_present} is the fact (an empty base is an agreement, or
+     * the same push re-derives every run); the value columns witness rows
+     * predating it.
      */
     private static boolean hasBase(Cursor cursor) {
         return (!cursor.isNull(9) && cursor.getInt(9) != 0)
@@ -2091,9 +1927,9 @@ public final class PimdirStorage {
     }
 
     /**
-     * The detail ladder as the schema stores it: 1 meta, 2 full. 0 is what an
-     * earlier draft wrote for a probed row; nothing writes it now and it reads
-     * as meta (STORAGE §13).
+     * The detail ladder as stored: 1 meta, 2 full (STORAGE §13).
+     *
+     * <p>An older draft's 0 (probed) reads as meta.
      */
     private static int levelValue(String name) {
         return "full".equals(name) ? 2 : 1;

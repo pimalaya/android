@@ -18,14 +18,11 @@ import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirDb;
 
 /**
- * Calendar sync adapter: the phone pass of an address's shown calendars
- * through Android's sync scheduler, so a calendar-app edit reaches the store
- * without opening Pimalaya (the next remote sync pushes it upstream).
- * Registering it also associates Pimalaya's account type with the calendar
- * authority, which the provider wants of the accounts its sync-adapter
- * writes name. Serves only the syncs the OS schedules itself: the upload
- * sync after an edit in our calendars (the accounts sync automatically), and
- * the per-account "sync now".
+ * Calendar sync adapter: the phone pass of an address's shown calendars.
+ *
+ * <p>A calendar-app edit reaches the store without opening the app; it also
+ * ties the account type to the calendar authority, as the provider wants of
+ * sync-adapter writes. Serves only OS syncs: upload after an edit, "sync now".
  */
 public class CalendarSyncService extends Service {
     private static final Object LOCK = new Object();
@@ -46,11 +43,11 @@ public class CalendarSyncService extends Service {
     }
 
     /**
-     * Whether a sync asked of the adapter is one it runs: a calendar sync
-     * of one of the app's own accounts. The service is exported for the
-     * system to bind, and on Android before the 2022 security patch any
-     * app could ask it for a sync of any account and authority, which
-     * would have turned another authority's sync off for a book.
+     * Whether the adapter runs a sync: a calendar sync of one of our accounts.
+     *
+     * <p>The service is exported, and before the 2022 security patch any app
+     * could ask it for any account and authority, which would have turned
+     * another authority's sync off for a book.
      */
     static boolean serves(Account account, String authority) {
         return account != null

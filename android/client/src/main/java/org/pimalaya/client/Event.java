@@ -6,12 +6,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * One calendar object as the server stores it, iCalendar text and all
- * (rs/calendar.rs {@code Event} 101).
+ * One calendar object as the server stores it, iCalendar text and all.
  *
- * <p>Deliberately unparsed: what a recurring event renders as depends on
- * the window being shown, so decoding happens at
- * {@link CalendarClient#expandEvent} where that window is known.
+ * <p>Mirrors rs/calendar.rs {@code Event} 101. Unparsed: a recurring event
+ * renders per window, so {@link CalendarClient#expandEvent} decodes it.
  *
  * @param id resource name with any {@code .ics} stripped
  * @param etag entity tag guarding concurrent updates, or null

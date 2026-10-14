@@ -3,8 +3,9 @@ package org.pimalaya.client;
 import org.json.JSONObject;
 
 /**
- * What one upgrade to the full detail tier did, counted
- * (rs/offline/wire.rs {@code UpgradeReportJson} 1026).
+ * What one upgrade to the full detail tier did, counted.
+ *
+ * <p>Mirrors rs/offline/wire.rs {@code UpgradeReportJson} 1026.
  *
  * @param deduped bodies the store already held under the same link id
  * @param fetched bodies fetched from the remote

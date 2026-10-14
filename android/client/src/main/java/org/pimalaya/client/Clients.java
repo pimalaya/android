@@ -7,7 +7,7 @@ package org.pimalaya.client;
  * @param contact addressbooks, cards and the vCard computations
  * @param calendar calendars, events and the iCalendar computations
  * @param mail the verbs on a held mail session
- * @param offline the io-offline engine and its plan verbs
+ * @param offline the io-pimdir engine and its plan verbs
  */
 public record Clients(
         AccountClient account,

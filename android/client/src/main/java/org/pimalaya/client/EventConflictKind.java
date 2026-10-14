@@ -1,10 +1,14 @@
 package org.pimalaya.client;
 
-/** What a calendar conflict is (rs/calendar/conflict.rs {@code EventConflictKind} 87). */
+/**
+ * What a calendar conflict is.
+ *
+ * <p>Mirrors rs/calendar/conflict.rs {@code EventConflictKind} 87.
+ */
 public enum EventConflictKind {
     /** A conflict of one field both sides changed differently. */
     FIELD("field"),
-    /** A conflict of a series one side changed and an occurrence the other did. */
+    /** A series one side changed against an occurrence the other changed. */
     RECURRENCE("recurrence");
 
     private final String wire;

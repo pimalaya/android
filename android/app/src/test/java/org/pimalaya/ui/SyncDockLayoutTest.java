@@ -15,8 +15,9 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * The sync dock sits on top of the bottom navigation: showing it, with its
- * lines and its bar, moves neither the app bar's title nor the content's
+ * The sync dock sits on top of the bottom navigation.
+ *
+ * <p>Showing it, lines and bar, moves neither the bar's title nor the content's
  * top, the content ending above it.
  */
 @RunWith(RobolectricTestRunner.class)

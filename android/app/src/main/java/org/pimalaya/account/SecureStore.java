@@ -27,19 +27,18 @@ import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.OauthGrant;
 
 /**
- * Caches the connected accounts locally, encrypted with an AES-GCM key held in
- * the Android Keystore. Passwords and OAuth tokens never touch disk in clear,
- * and no Jetpack Security / Tink dependency is pulled in (smallest APK). The
- * whole account list is one encrypted blob, keyed by the address; what each
- * account is connected for lives inside it, one block per domain.
+ * The connected accounts, cached encrypted under an Android Keystore key.
+ *
+ * <p>One AES-GCM blob keyed by address, each account's domains inside; no
+ * secret touches disk in clear, and no Jetpack Security or Tink dependency.
  */
 public class SecureStore {
     /**
-     * Serializes every read-modify-write across the process: the blob
-     * is rewritten whole, and instances are built ad-hoc (activity,
-     * worker, sync service), so two concurrent token refreshes could
-     * interleave last-writer-wins and persist a stale rotated refresh
-     * token, permanently logging the account out.
+     * Serializes every read-modify-write across the process.
+     *
+     * <p>The blob is rewritten whole by ad-hoc instances: two token refreshes
+     * could otherwise persist a stale rotated refresh token, logging the
+     * account out.
      */
     private static final Object LOCK = new Object();
 
@@ -54,6 +53,7 @@ public class SecureStore {
 
     private final SharedPreferences prefs;
 
+    /** A store over the app's encrypted accounts preferences. */
     public SecureStore(Context context) {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
@@ -92,10 +92,7 @@ public class SecureStore {
         }
     }
 
-    /**
-     * Whether the accounts were dropped because this phone could not open
-     * them, and the user was not told yet: true once, the flag cleared.
-     */
+    /** Whether accounts were dropped unopenable: true once, then cleared. */
     public boolean takeLost() {
         synchronized (LOCK) {
             if (!prefs.getBoolean(KEY_LOST, false)) {
@@ -107,9 +104,10 @@ public class SecureStore {
     }
 
     /**
-     * Whether opening the sealed accounts failed for good: the key is not
-     * the one that sealed them, or the Keystore can no longer use it. A
-     * Keystore failing for now (locked, busy) is not.
+     * Whether opening the sealed accounts failed for good.
+     *
+     * <p>The key is not the one that sealed them, or the Keystore can no longer
+     * use it; a Keystore failing for now (locked, busy) is not.
      */
     static boolean keyLost(Throwable error) {
         for (Throwable cause = error; cause != null; cause = cause.getCause()) {
@@ -144,9 +142,10 @@ public class SecureStore {
     }
 
     /**
-     * Renews the credential one domain of a stored account signs in with, on
-     * the account as stored rather than on a caller's copy, then persists;
-     * returns the renewed account, or null when the address is gone.
+     * Renews one domain's credential on the stored account, then persists.
+     *
+     * <p>Works on the account as stored, not a caller's copy; returns it
+     * renewed, or null when the address is gone.
      */
     AccountEntry renew(String email, PimDomain domain, String accessToken, String refreshToken) {
         synchronized (LOCK) {
@@ -175,14 +174,10 @@ public class SecureStore {
     }
 
     /**
-     * Connects one domain of an address, keeping every domain it already
-     * covers, then persists.
+     * Connects one domain of an address, keeping its other domains; persists.
      *
-     * <p>This is what makes "set up calendar for this account" a step rather
-     * than a second account: the entry is merged into the one that is already
-     * there, and only appears as a new account when the address is new.
-     *
-     * <p>The submission endpoint rides along, null for every domain but mail.
+     * <p>Merged into an existing entry, so adding calendars is no second
+     * account. The submission endpoint is null but for mail.
      */
     public AccountEntry connect(
             String email,
@@ -210,13 +205,10 @@ public class SecureStore {
     }
 
     /**
-     * Points one account's mail at a submission endpoint, or at none,
-     * then persists.
+     * Points one account's mail at a submission endpoint, or none; persists.
      *
-     * <p>The endpoint alone: the credential and the server mail is read
-     * from are left exactly as they were, this being a repair of one
-     * setting and not a reconnection. An account covering no mail is
-     * left alone, there being nothing to point.
+     * <p>Credential and read server stay; an account without mail is left
+     * alone.
      */
     public AccountEntry submitThrough(String email, String submitUrl) {
         synchronized (LOCK) {
@@ -271,9 +263,9 @@ public class SecureStore {
     }
 
     /**
-     * Encrypts a text under the Keystore key, as its Base64 ciphertext
-     * then its Base64 IV. Shared with the other secrets kept on disk, so
-     * the app holds one key and one scheme.
+     * Encrypts under the Keystore key: Base64 ciphertext, then Base64 IV.
+     *
+     * <p>Shared with the other secrets on disk: one key, one scheme.
      */
     public static String[] seal(String plaintext) throws Exception {
         Cipher cipher = Cipher.getInstance(TRANSFORMATION);
@@ -320,11 +312,10 @@ public class SecureStore {
     }
 
     /**
-     * The stored shape: per address, where each domain lives and which
-     * credential signs in to it, then the credentials themselves once
-     * each. Credentials sit beside the connections rather than inside
-     * them because one of them routinely covers several domains, and a
-     * file that stored copies is a file whose copies drift apart.
+     * The stored shape: per address its connections, then each credential once.
+     *
+     * <p>Credentials sit beside the connections because one routinely covers
+     * several domains, and stored copies drift apart.
      */
     private static String encode(List<AccountEntry> entries) {
         try {
@@ -400,11 +391,9 @@ public class SecureStore {
     /**
      * One stored account, or null when it cannot be read.
      *
-     * <p>Null rather than a throw, because what cannot be read here is
-     * an account written by a version that stored credentials per
-     * domain: dropping it costs one re-sign-in, while failing the whole
-     * decode would take the readable accounts down with it and leave
-     * the app with nothing to open.
+     * <p>What cannot be read is an account stored per domain by an older
+     * version: dropping it costs one re-sign-in, failing the decode would lose
+     * every account.
      */
     private static AccountEntry decodeEntry(JSONObject object) throws JSONException {
         String email = object.getString("email");

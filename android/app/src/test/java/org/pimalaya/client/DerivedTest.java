@@ -11,7 +11,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.robolectric.RobolectricTestRunner;
 
-/** Pins {@link Derived} on the real bridge: same values as the reply's own fields. */
+/** Pins {@link Derived} on the real bridge: the reply's own field values. */
 @RunWith(RobolectricTestRunner.class)
 public class DerivedTest {
     private static final byte[] VCARD =

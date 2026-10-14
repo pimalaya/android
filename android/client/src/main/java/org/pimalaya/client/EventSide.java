@@ -1,6 +1,10 @@
 package org.pimalaya.client;
 
-/** A side of a calendar conflict (rs/calendar/conflict.rs {@code EventSide} 77). */
+/**
+ * A side of a calendar conflict.
+ *
+ * <p>Mirrors rs/calendar/conflict.rs {@code EventSide} 77.
+ */
 public enum EventSide {
     /** The body staged here. */
     LOCAL("local"),

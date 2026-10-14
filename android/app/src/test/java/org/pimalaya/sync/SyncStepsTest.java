@@ -13,8 +13,10 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
 /**
- * The sync strip names the domain being synced, over one bar filled by an
- * account's collections and the counted steps within each.
+ * The sync strip names the domain, over one bar an account's steps fill.
+ *
+ * <p>The bar fills by the account's collections and the counted steps within
+ * each.
  */
 @RunWith(RobolectricTestRunner.class)
 public class SyncStepsTest {

@@ -19,34 +19,17 @@ import java.util.Set;
 /**
  * The collection roster inside the pimdir store.
  *
- * <p>A collection has to exist before an item can point at it: every foreign
- * key onto {@code collections(id)} is enforced, so a sync writing into a
- * collection the store has never heard of fails outright rather than inventing
- * one. This class is what puts them there, from the rosters the app already
- * discovers: an account's address books, its mailboxes, its calendars.
- *
- * <p>The three columns that matter are the merged view's axes.
- * {@code account} groups (a stable id from {@link PimdirAccount}, never the
- * email), {@code kind} carries the media type the collection holds, and the id
- * is the collection's own address on its backend. Presentation ({@code name},
- * {@code description}, {@code color}) rides along so a listing needs no second
- * table.
- *
- * <p>The switches an address book also carries (subscribed, and the two sync
- * spokes) are deliberately <strong>not</strong> here: they are this app's
- * policy about a collection, not a property of it, and pimdir has no column for
- * them for exactly that reason.
+ * <p>Items need their collection first (enforced foreign key). Rows group by
+ * {@link PimdirAccount} id and media type kind; the app's book switches are
+ * policy, not collection properties, and pimdir has no column for them.
  */
 public final class PimdirCollections {
     /**
-     * The name of the collection a Gmail account files every message its
-     * account-wide step brings in, beside the mailboxes its labels name.
+     * The hidden collection a Gmail account files every stepped message in.
      *
-     * <p>Gmail's All Mail, kept under the hood: a message filed under no
-     * mailbox label (archived) is stored in it alone, so the store holds
-     * every message a step read and no step reads one twice. It is never
-     * shown ({@link PimdirCollections#list}), and a control character, like
-     * the outbox, so no mailbox a server lists can collide with it.
+     * <p>All Mail: an archived message lives there alone, so no step reads one
+     * twice. Never listed ({@link #list}); a control character, like the
+     * outbox, so no server mailbox collides with it.
      */
     public static final String ALL_MAIL = "\u0001all";
 
@@ -65,6 +48,7 @@ public final class PimdirCollections {
     private final PimdirAccount accounts;
     private final Context context;
 
+    /** The roster of {@code store}. */
     public PimdirCollections(PimdirDb store, Context context) {
         this.store = store;
         this.context = context;
@@ -72,15 +56,11 @@ public final class PimdirCollections {
     }
 
     /**
-     * Replaces one account's collections of a kind with the discovered set:
-     * every listed collection is created or refreshed, and one the account no
-     * longer has is removed.
+     * Replaces one account's collections of a kind with the discovered set.
      *
-     * <p>Removal is a real delete, cascading the items and bindings it held,
-     * because a collection absent from a complete listing is gone from the
-     * backend: keeping its contents would leave a book the user cannot see and
-     * no sync will ever touch again. It is scoped to the account and the kind,
-     * so an account's calendars survive a contacts round.
+     * <p>One absent from the complete listing is gone from the backend: really
+     * deleted, cascading its items and bindings. Scoped to account and kind,
+     * so calendars survive a contacts round.
      */
     public void replace(String accountEmail, String kind, List<Stored> collections) {
         String account = accounts.idOf(accountEmail);
@@ -112,12 +92,10 @@ public final class PimdirCollections {
     }
 
     /**
-     * Creates one collection if the store does not know it yet, refreshing only
-     * its display name otherwise.
+     * Creates one collection if unknown, else refreshes its name only.
      *
-     * <p>The name alone, because everything else about an existing collection
-     * belongs to whatever wrote it: this is how the built-in on-device book is
-     * seeded on every start without resetting anything each time.
+     * <p>The rest belongs to whatever wrote it: the on-device book is seeded
+     * on every start this way without resetting anything.
      */
     public void ensure(String id, String accountEmail, String kind, String name) {
         String account = accounts.idOf(accountEmail);
@@ -135,28 +113,33 @@ public final class PimdirCollections {
     /**
      * One collection as the store holds it, with the account it belongs to.
      *
-     * <p>Also the shape a roster is handed over in, which is why it is one type
-     * rather than three: an address book, a calendar and a mailbox differ in
-     * what they contain, not in how they are listed, and giving each its own
-     * roster type would fork this class three ways for nothing.
+     * <p>Also the shape rosters are handed over in, one type for books,
+     * calendars and mailboxes alike.
      */
     public static final class Stored {
+        /** The collection's store id, namespaced by its account. */
         public final String id;
+        /** The account it belongs to. */
         public final String accountEmail;
+        /** Its display name. */
         public final String name;
+        /** Its description, or null. */
         public final String description;
+        /** Its colour, or null. */
         public final String color;
 
-        /** What the source says the collection is for (pimdir's role), or null. */
+        /** What the source says the collection is for (its role), or null. */
         public final String role;
 
         /** Whether the user may write into it, as its source last said. */
         public final boolean writable;
 
+        /** A writable collection with no role. */
         public Stored(String id, String accountEmail, String name, String description, String color) {
             this(id, accountEmail, name, description, color, null, true);
         }
 
+        /** A collection with its role and writability. */
         public Stored(
                 String id,
                 String accountEmail,
@@ -181,15 +164,11 @@ public final class PimdirCollections {
     }
 
     /**
-     * Every collection of one kind, ordered by account then name: the roster a
-     * listing or a subscription editor renders.
+     * Every collection of one kind, ordered by account then name.
      *
-     * <p>A collection whose account this device no longer knows keeps its store
-     * id as its address, so it stays visible rather than silently dropping out
-     * of a listing that is meant to show everything. A Gmail account's All
-     * Mail ({@link #ALL_MAIL}) is never listed: it is the store's
-     * own, for what a step already read, and no list, filter or chip shows
-     * it ({@link #listAll}).
+     * <p>An unknown account's collection keeps its store id as address rather
+     * than drop out. Gmail's All Mail ({@link #ALL_MAIL}) is never listed, see
+     * {@link #listAll}.
      */
     public List<Stored> list(String kind) {
         List<Stored> shown = listAll(kind);
@@ -244,12 +223,10 @@ public final class PimdirCollections {
     }
 
     /**
-     * Restates what the source says of collections the store already holds:
-     * the role (pimdir's, null where it says none) and whether the user may
-     * write into them (the app's, pimdir keeping no such column).
+     * Restates the source's role and writability of known collections.
      *
-     * <p>Apart from {@link #replace} so a sync can refresh what an account's
-     * books are for without replacing the roster the switches hang off.
+     * <p>The role is pimdir's, writability the app's (no pimdir column). Apart
+     * from {@link #replace} so the switches' roster stays.
      */
     public void restate(List<Stored> collections) {
         SQLiteDatabase db = store.getWritableDatabase();

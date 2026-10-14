@@ -3,8 +3,7 @@ package org.pimalaya.client;
 import java.util.List;
 
 /**
- * A card's addressbook memberships to add and remove, by book id, on an
- * account-level backend.
+ * A card's book memberships to add and remove, on an account-level backend.
  *
  * @param cardId the card's id
  * @param add the book ids the card joins

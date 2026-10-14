@@ -3,8 +3,9 @@ package org.pimalaya.client;
 import org.json.JSONObject;
 
 /**
- * What one sync of a collection did, counted (rs/offline/wire.rs
- * {@code SyncReportJson} 1002).
+ * What one sync of a collection did, counted.
+ *
+ * <p>Mirrors rs/offline/wire.rs {@code SyncReportJson} 1002.
  *
  * @param conflicts placements left conflicted
  * @param pulled remote changes applied to the store

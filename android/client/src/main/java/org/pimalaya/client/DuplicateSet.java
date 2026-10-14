@@ -4,11 +4,12 @@ import java.util.List;
 import org.json.JSONObject;
 
 /**
- * One group of likely-duplicate cards (rs/contact/dedup.rs
- * {@code DuplicateSet} 32).
+ * One group of likely-duplicate cards.
  *
- * @param reasons the distinct match kinds that joined the group
- *     ({@code email}, {@code phone}, {@code name})
+ * <p>Mirrors rs/contact/dedup.rs {@code DuplicateSet} 32.
+ *
+ * @param reasons the match kinds joining it: {@code email}, {@code phone},
+ *     {@code name}
  * @param refs the members' replica references, in input order
  */
 public record DuplicateSet(List<String> reasons, List<String> refs) {

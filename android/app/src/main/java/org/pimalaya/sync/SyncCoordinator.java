@@ -37,8 +37,10 @@ import org.pimalaya.ui.Host;
 import org.pimalaya.ui.SyncDock;
 
 /**
- * The app's foreground sync: one pass at a time, run on the host's io
- * thread, its progress on the sync dock.
+ * The app's foreground sync: one pass at a time on {@link Host}'s io thread.
+ *
+ * <p>Its progress shows on the sync dock; its posts go through {@code
+ * postAlive}.
  */
 public final class SyncCoordinator implements MailSync {
     /** What only the activity does for a sync. */
@@ -49,22 +51,28 @@ public final class SyncCoordinator implements MailSync {
         /** The sync dock, built after the coordinator. */
         SyncDock dock();
 
-        /** Keeps the screen on while a pass runs, the mail list's footer redrawn (main thread). */
+        /**
+         * Keeps the screen on while a pass runs, mail footer redrawn (main).
+         */
         void syncing(boolean active);
 
-        /** Lands on a domain's list, a freshly connected account's (main thread). */
+        /**
+         * Lands on a domain's list, a newly connected account's (main thread).
+         */
         void land(PimDomain domain);
 
         /** Reads a domain's list again after a pass (main thread). */
         void reload(PimDomain domain);
 
-        /** Keeps the account cache current after a token refresh (any thread). */
+        /**
+         * Keeps the account cache current after a token refresh (any thread).
+         */
         void renewed(AccountEntry updated);
 
         /** Whether a background run holds the sync. */
         boolean backgroundRunning();
 
-        /** Redraws what shows the bodies left to download, the drawer's pills (main thread). */
+        /** Redraws what shows bodies left to download, drawer pills (main). */
         void bodiesChanged();
 
         /** When a pass last brought a Contacts-app edit in (any thread). */
@@ -91,48 +99,53 @@ public final class SyncCoordinator implements MailSync {
     private final SyncPasses passes;
 
     /**
-     * The shared sync state: true while a sync runs. Every UI element
-     * that reflects it (the lists' sync dock, the drawer's sync row)
-     * subscribes through {@link #observe}, and {@link #setSyncing}
-     * pushes the flag to all of them at once.
+     * The shared sync state: true while a sync runs.
+     *
+     * <p>Every element reflecting it (the dock, the drawer's sync row)
+     * subscribes through {@link #observe}; {@link #setSyncing} pushes to all at
+     * once.
      */
     private volatile boolean syncing;
 
     private final List<Consumer<Boolean>> syncObservers = new ArrayList<>();
 
-    /** Whether the activity is in the foreground: the background fill runs only then. */
+    /** Whether the activity is in the foreground: the fill runs only then. */
     private volatile boolean foreground;
 
     /** Whether a step of the background fill is queued or running. */
     private volatile boolean filling;
 
-    /** The fill's and the body step's session pools, by account; touched on the io thread only. */
+    /**
+     * The fill's and the body step's session pools by account; io thread only.
+     */
     private final Map<String, WorkerPool<MailSession>> fillPools = new HashMap<>();
 
-    /** Whether the fill is done or failed for the loop under way; on the io thread. */
+    /** Whether the fill is done or failed for the loop under way; io thread. */
     private boolean fillStopped;
 
-    /** The body step's plan for the loop under way, null outside one; on the io thread. */
+    /** The body step's plan for the loop under way, else null; io thread. */
     private MailBodies.Run bodies;
 
-    /** Whether the body step plans again at its next step: a pass landed, a setting changed. */
+    /** Whether the body step replans at its next step (a pass, a setting). */
     private volatile boolean replanBodies;
 
-    /** Bodies left to download, by account, while the body step runs: the drawer pill's. */
+    /** Bodies left to download by account while the body step runs (pills). */
     private final Map<String, Integer> bodiesLeft = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
-     * The body step's count over the loop under way, every account's
-     * summed: the sync dock's bar while older mail downloads.
+     * The body step's count over the loop, all accounts summed.
+     *
+     * <p>The sync dock's bar while older mail downloads.
      */
     private final MailTally bodiesTally;
 
-    /** The Contacts-app edit {@link SyncService} brought in that the list last reloaded after. */
+    /** The Contacts-app edit last reloaded after ({@code SyncService}'s). */
     private volatile long reloadedIngest;
 
-    /** The calendar-app edit {@link CalendarSyncService} brought in, the agenda reloaded after. */
+    /** The calendar-app edit last reloaded after. */
     private volatile long reloadedCalendarIngest;
 
+    /** The coordinator over {@code parts}, drawing through {@code screens}. */
     public SyncCoordinator(Host host, SyncPasses.Parts parts, Screens screens) {
         this.host = host;
         this.screens = screens;
@@ -172,11 +185,10 @@ public final class SyncCoordinator implements MailSync {
         return MergedFilter.of(host, domain);
     }
 
-    /** Pushes the sync flag to every subscribed element (the lists'
-     *  sync dock, the drawer's inert sync row). */
     /**
-     * Starts a pass: takes the process's sync lock, turning the pass down
-     * while a background run holds it, whose dock already says so.
+     * Starts a pass: takes the process's sync lock, false while one holds it.
+     *
+     * <p>A background run holding it says so on its own dock.
      */
     private boolean startSync() {
         if (!pimdir.locks().takeSync()) {
@@ -187,6 +199,7 @@ public final class SyncCoordinator implements MailSync {
         return true;
     }
 
+    /** Pushes the sync flag to every subscriber; ending frees the lock. */
     private void setSyncing(boolean value) {
         if (syncing && !value) {
             pimdir.locks().releaseSync();
@@ -203,8 +216,9 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Whether the sync is held, by a pass of the app's or a background run:
-     * a step asked for now would do nothing.
+     * Whether a pass of the app's or a background run holds the sync.
+     *
+     * <p>A step asked for now would do nothing.
      */
     @Override
     public boolean syncHeld() {
@@ -212,20 +226,14 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Subscribes an element to the sync state and hands it the current
-     * value straight away, so it starts consistent.
+     * Subscribes an element to the sync state, handing it the current value.
      */
     public void observe(Consumer<Boolean> observer) {
         syncObservers.add(observer);
         observer.accept(syncing);
     }
 
-    /**
-     * Store-to-remote spoke: per addressbook, fetches the remote into
-     * the store, pushes the staged local changes, and re-fetches the
-     * pushed state. The phone is not touched; that is the local sync.
-     * The shared syncing state drives the dock in the lists' app bar.
-     */
+    /** The contacts remote pass over every subscribed book, under the dock. */
     public void syncRemote() {
         // NOTE: one pass at a time; the lists stay usable while it runs,
         // so a pull or the drawer can ask for another meanwhile.
@@ -251,9 +259,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Surfaces a failed sync in an error dialog. A pass that went through
-     * says nothing: the lists show what it brought, and a conflict marks
-     * its own row.
+     * Surfaces a failed sync in an error dialog.
+     *
+     * <p>A pass that went through says nothing: the lists show what it brought,
+     * and a conflict marks its own row.
      */
     private void reportSync(SyncPasses.Outcome outcome) {
         if (outcome.failure != null) {
@@ -263,19 +272,11 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * The mail list's pull: the mail of the accounts and mailboxes the
-     * filter shows, into the merged list.
+     * The mail list's pull: the accounts and mailboxes the filter shows.
      *
-     * <p>The endpoint is the one the account was connected with, which is what
-     * the mail domain of the connection flow exists to establish. It used to be
-     * re-discovered on every refresh from a contacts account's address, because
-     * there was no way to connect a mail account at all; that guessed at both
-     * the server and the credentials, and worked only where the two domains
-     * happened to share them.
-     *
-     * <p>Under a role chip ({@code role}, null for none) the pull syncs that
-     * role's mailboxes of the shown accounts alone, ticked or not, as the
-     * list shows them ({@link MailList#narrowed}).
+     * <p>On the endpoint each account was connected with. Under a role chip
+     * ({@code role}, null for none) only that role's mailboxes of the shown
+     * accounts, ticked or not ({@code MailList.narrowed}).
      */
     @Override
     public void syncMail(String role) {
@@ -313,10 +314,8 @@ public final class SyncCoordinator implements MailSync {
     /**
      * The agenda's pull: the calendars the filter shows, and their events.
      *
-     * <p>Read-only and whole-collection: CalDAV's ctag and sync-token
-     * rounds are what an incremental pass would use, and neither is
-     * wired yet, so a refresh relists. One report carries a whole
-     * calendar's objects, so this is one round trip per calendar.
+     * <p>Whole-collection: incremental listing (ctag, sync-token) is not wired,
+     * so a refresh relists, one report round trip per calendar.
      */
     public void syncCalendars() {
         if (syncing) {
@@ -342,9 +341,9 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Runs a store-wide write on the io thread while no sync runs: the
-     * process's sync lock taken around it, so a background run (on a
-     * thread of its own) never writes the same rows meanwhile. Turned down,
+     * Runs a store-wide write under the process's sync lock (io thread).
+     *
+     * <p>So a background run never writes the same rows meanwhile. Turned down,
      * saying so, while one holds it; a failure is said in a dialog, under
      * {@code failed} when it names nothing itself.
      */
@@ -364,10 +363,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * The contacts list's pull: the addressbooks the filter shows,
-     * reconciled with their servers, each book's phone passes around its
-     * server one. The drawer's sync is the one that takes every domain and
-     * everything.
+     * The contacts list's pull: the books the filter shows, synced.
+     *
+     * <p>Each book's phone passes around its server one. The drawer's sync
+     * takes every domain.
      */
     public void syncContacts() {
         if (syncing) {
@@ -392,10 +391,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Syncs every domain in turn, contacts then mail then calendars, the
-     * dialog naming each as it goes: the drawer's sync, which takes every
-     * collection of every account that is on whatever the filters hide,
-     * where a list's pull takes its own domain within its filter.
+     * The drawer's sync: every domain in turn, contacts, mail, calendars.
+     *
+     * <p>Every collection of every account that is on, whatever the filters
+     * hide; a list's pull takes its domain within its filter.
      */
     public void syncAll() {
         if (syncing) {
@@ -427,7 +426,8 @@ public final class SyncCoordinator implements MailSync {
                                     waitForWifi(() -> syncMail(null));
                                 }
                                 fillMail();
-                                // NOTE: one error dialog, the contacts one first.
+                                // NOTE: one error dialog, the contacts
+                                // one first.
                                 if (other != null && outcome.failure == null) {
                                     host.showError(other, R.string.sync_failed);
                                 }
@@ -436,10 +436,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Shows or hides the sync dock over the lists' bottom navigation: whose
-     * account and which domain and step the pass is on, over one thin bar.
-     * The lists stay usable behind it, and the screen stays on for the
-     * duration. A pass starting drops the last one's lines.
+     * Shows or hides the sync dock over the lists' bottom navigation.
+     *
+     * <p>The account, domain and step over one thin bar; the lists stay usable
+     * and the screen stays on. A pass starting drops the last one's lines.
      */
     public void showSyncDock(boolean active) {
         screens.syncing(active);
@@ -463,17 +463,11 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * A freshly connected account: each domain it covers owes its first sync,
-     * and the flow lands on the first of them, whose tab runs it.
+     * A newly connected account: each domain it covers owes its first sync.
      *
-     * <p>One domain at a time, each the first time its tab is reached, rather
-     * than all of them behind one dialog: a first sync of every mailbox's
-     * whole metadata, then every book, then every calendar, kept the user
-     * waiting on what they had not asked to see yet. The landing tab, mail
-     * when the account has it, syncs the newest chunk of every mailbox, the
-     * inbox first; the rest of the mail fills in behind it
-     * ({@link #fillMail}), and contacts and calendars sync when their tab is
-     * opened ({@link #firstSyncIfOwed}).
+     * <p>Lands on the first (mail when covered), whose tab syncs each mailbox's
+     * newest chunk, the rest filling behind ({@link #fillMail}); other domains
+     * sync when their tab opens ({@link #firstSyncIfOwed}).
      */
     public void syncConnected(AccountEntry account) {
         for (PimDomain domain : PimDomain.values()) {
@@ -493,9 +487,9 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Runs the first sync a domain's tab owes, the first time it is reached
-     * after an account was connected: that domain alone, under the
-     * list's sync dock. Nothing when no account owes it, or while a sync runs.
+     * Runs the first sync a domain's tab owes, that domain alone.
+     *
+     * <p>Under the dock; nothing when no account owes it, or while a sync runs.
      */
     public void firstSyncIfOwed(PimDomain domain) {
         // NOTE: a background run holds the lock; its end calls back here.
@@ -533,9 +527,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * The mail tab's first sync: one step of every owing account
-     * ({@link MailStep}), on its one session, on Wi-Fi only; the dock says
-     * it waits for Wi-Fi otherwise, and it runs once Wi-Fi is back.
+     * The mail tab's first sync: a {@link org.pimalaya.mail.MailStep} each.
+     *
+     * <p>On each owing account's one session, on Wi-Fi only; otherwise the dock
+     * says it waits, and it runs once Wi-Fi is back.
      */
     private void firstMail(List<AccountEntry> owing) {
         if (!wifi()) {
@@ -578,8 +573,9 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * The contacts tab's first sync: the remote pass over every subscribed
-     * book, the books the owing accounts just subscribed among them.
+     * The contacts tab's first sync: the remote pass over every book.
+     *
+     * <p>The owing accounts' newly subscribed books among them.
      */
     private void firstContacts(List<AccountEntry> owing) {
         progress.syncAccount(null);
@@ -636,9 +632,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * The first step of each mailbox of {@code taken} (by account) never
-     * listed, under the sync dock, on Wi-Fi only (once it is back otherwise):
-     * about 50 of its newest messages, their bodies downloaded after.
+     * The first step of each never-listed mailbox of {@code taken}.
+     *
+     * <p>By account, about 50 newest messages each, under the dock, on Wi-Fi
+     * only (once back otherwise); their bodies download after.
      */
     public void firstOfMailboxes(Map<String, List<String>> taken) {
         if (!wifi()) {
@@ -712,26 +709,11 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Starts the background fill when it is allowed and not running: every
-     * mailbox widened a chunk of {@link MailEngine#FILL_CHUNK} messages at a
-     * time toward its account's bound, the inbox and the sent mail first, no
-     * dialog, each page landing in the list as a pass's do.
+     * Starts the background fill when allowed and not running.
      *
-     * <p>One chunk per task on the io thread, so a pull or a widening the
-     * user asks for waits one chunk at most. It stops when the app leaves the
-     * foreground, Wi-Fi goes, another sync runs, or a chunk fails, and
-     * nothing is kept but the floors the store covers: the next start, on
-     * return, after a pass or when Wi-Fi is back, resumes from them. An
-     * account stepped through account-wide (Gmail) is not filled: its steps
-     * bring what it holds.
-     *
-     * <p>Each step first downloads the bodies from the frontiers on, of the
-     * mailboxes kept whole and those owed ({@link MailBodies}), and
-     * widens only once none is left that may download now, so what the
-     * list shows is readable before older headers list: never periodic
-     * work, and nothing once the app leaves the foreground. A start while
-     * the loop runs replans them, which is how a pass or a step
-     * reaches a loop under way.
+     * <p>An io task per {@link MailEngine#FILL_CHUNK} chunk, bodies first
+     * ({@link MailBodies}). Stops off the foreground or Wi-Fi, on a sync or
+     * failure, resuming from the store's floors; Gmail is not filled.
      */
     public void fillMail() {
         replanBodies = true;
@@ -747,7 +729,7 @@ public final class SyncCoordinator implements MailSync {
         replanBodies = true;
     }
 
-    /** One step of the body step or the background fill, on the io thread, and the next queued. */
+    /** One step of the body step or the fill (io thread), the next queued. */
     private void fillStep() {
         if (bodies == null || replanBodies) {
             replanBodies = false;
@@ -884,20 +866,20 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Whether an account's bodies may download now: the app in the
-     * foreground, no other sync, the account on, and Wi-Fi.
+     * Whether an account's bodies may download now.
+     *
+     * <p>The app in the foreground, no other sync, the account on, and Wi-Fi.
      */
     private boolean bodiesAllowed(String accountEmail) {
         return foreground && !isSyncing() && AccountActivation.enabled(host, accountEmail) && wifi();
     }
 
     /**
-     * Downloads some of an account's bodies on its fill pool, a mailbox's
-     * rows split across the pool's sessions, blocking until all are in, and
-     * answers the rows whose body did not land, a job that failed giving
-     * back all of its own. Any failure closes the pool, so what is tried
-     * again runs on fresh sessions (and renews an expired token on the way);
-     * every job failing is the download failing as a whole.
+     * Downloads some of an account's bodies on its fill pool, blocking.
+     *
+     * <p>Rows split across the pool's sessions; answers those not landed. A
+     * failure closes the pool, so a retry runs on fresh sessions (renewing a
+     * token); every job failing throws.
      */
     private List<MailBodies.Row> downloadBodies(String accountEmail, List<MailBodies.Row> rows)
             throws Exception {
@@ -952,11 +934,11 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Runs {@code step} over mailboxes, on the io thread: each account's on
-     * its pool ({@link WorkerPool}), side by side and in the order given,
-     * every account at once, on connections the fill keeps open between its
-     * steps. Answers the first failure, every one logged under
-     * {@code failed}; one mailbox failing leaves the others going.
+     * Runs {@code step} over mailboxes on the io thread, every account at once.
+     *
+     * <p>Each account's on its kept {@link WorkerPool}, in the order given.
+     * Answers the first failure, each logged under {@code failed}; a failing
+     * mailbox leaves the others going.
      */
     private Exception listAll(List<MailStore.Edge> edges, MailboxStep step, String failed) {
         Map<String, List<String>> byAccount = new java.util.LinkedHashMap<>();
@@ -1021,7 +1003,7 @@ public final class SyncCoordinator implements MailSync {
         return pool;
     }
 
-    /** Closes the connections the fill and the body step kept; on the io thread. */
+    /** Closes the connections the fill and body step kept; io thread. */
     private void closeFillPools() {
         for (WorkerPool<MailSession> pool : fillPools.values()) {
             pool.close();
@@ -1029,10 +1011,7 @@ public final class SyncCoordinator implements MailSync {
         fillPools.clear();
     }
 
-    /**
-     * Whether the background fill may run now: the app in the foreground, no
-     * other sync, and Wi-Fi.
-     */
+    /** Whether the fill may run now: foreground, no other sync, and Wi-Fi. */
     private boolean fillAllowed() {
         return foreground && !isSyncing() && wifi();
     }
@@ -1046,9 +1025,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Whether the network there is not metered: Wi-Fi or alike, the one a
-     * mail pass, step, fill or body download runs on. Opening one message
-     * is an explicit act and fetches on any network ({@link #online}).
+     * Whether the network is not metered, the one mail passes and fills run on.
+     *
+     * <p>Opening one message is an explicit act and fetches on any network
+     * ({@link #online}).
      */
     @Override
     public boolean wifi() {
@@ -1064,12 +1044,15 @@ public final class SyncCoordinator implements MailSync {
                 && !connectivity.isActiveNetworkMetered();
     }
 
-    /** What runs once Wi-Fi is back, a mail sync asked for on mobile data; null for none. */
+    /**
+     * What runs once Wi-Fi is back (a mail sync asked on mobile data), or null.
+     */
     private Runnable owedOnWifi;
 
     /**
-     * Says in the sync dock that the mail sync waits for Wi-Fi, and
-     * runs {@code then} once it is back ({@link #wifiBack}).
+     * Says on the dock that the mail sync waits for Wi-Fi.
+     *
+     * <p>Runs {@code then} once it is back ({@link #wifiBack}).
      */
     void waitForWifi(Runnable then) {
         owedOnWifi = then;
@@ -1084,16 +1067,18 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Whether {@link #wifiWatch} last heard an unmetered network, false
-     * until it hears one after it is registered.
+     * Whether {@link #wifiWatch} last heard an unmetered network.
+     *
+     * <p>False until it hears one after it is registered.
      */
     private volatile boolean unmetered;
 
     /**
-     * Hears Wi-Fi come back while the app is open: once per network
-     * becoming unmetered, never on the capability changes Wi-Fi reports
-     * every few seconds while it stays up (its signal, its bandwidth), each
-     * of which would start the body step and the fill again for nothing.
+     * Hears Wi-Fi come back while the app is open, once per network.
+     *
+     * <p>Never on the capability changes Wi-Fi reports every few seconds while
+     * up (signal, bandwidth), each of which would restart the body step and
+     * fill.
      */
     private final android.net.ConnectivityManager.NetworkCallback wifiWatch =
             new android.net.ConnectivityManager.NetworkCallback() {
@@ -1116,7 +1101,9 @@ public final class SyncCoordinator implements MailSync {
                 }
             };
 
-    /** Runs what waited for Wi-Fi, and the fill and the bodies after it (main thread). */
+    /**
+     * Runs what waited for Wi-Fi, then the fill and the bodies (main thread).
+     */
     private void wifiBack() {
         if (!foreground || !wifi()) {
             return;
@@ -1131,11 +1118,11 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Takes the footer's {@code steps} ({@link MailList.Step}), one after
-     * another under the sync dock, on Wi-Fi only, each account's on its one
-     * session: a Gmail account's over All Mail or the one label it shows
-     * alone, any other account's mailbox by mailbox. Then the list is read
-     * again and the bodies the steps leave to download are planned.
+     * Takes the footer's {@code steps} under the dock, on Wi-Fi only.
+     *
+     * <p>One after another, each account's on its one session: Gmail over All
+     * Mail or its one shown label, others by mailbox. Then the list reloads and
+     * the bodies left are planned.
      */
     @Override
     public void loadMore(List<MailList.Step> steps) {
@@ -1189,13 +1176,11 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Moves the windows of {@code emails} later to {@code date}, on the io
-     * thread, freeing the bodies of their mail below it, headers and search
-     * kept ({@link MailStore#release}): the body step replanned first, so no
-     * step of an older plan fetches a body back, and a window moved only
-     * once its release went through, a failure said in a dialog. Turned
-     * down while a background run holds the sync lock. The list is read
-     * again and {@code done} runs on the main thread.
+     * Moves the windows of {@code emails} later to {@code date} (io thread).
+     *
+     * <p>Frees bodies below it, headers kept ({@link MailStore#release}); the
+     * body step replans first, a window moving only once released. Under the
+     * sync lock; {@code done} runs on the main thread.
      */
     @Override
     public void releaseWindow(List<String> emails, String date, Runnable done) {
@@ -1227,8 +1212,7 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * The activity in the foreground: the fill and the body step resume,
-     * Wi-Fi coming back heard.
+     * The activity in the foreground: fill and body step resume, Wi-Fi heard.
      */
     public void resumed() {
         // NOTE: the background fill stops when the app leaves the
@@ -1243,7 +1227,7 @@ public final class SyncCoordinator implements MailSync {
         fillMail();
     }
 
-    /** The activity leaving the foreground: the fill stops, Wi-Fi no more heard. */
+    /** The activity leaving the foreground: the fill stops, Wi-Fi unheard. */
     public void paused() {
         foreground = false;
         android.net.ConnectivityManager connectivity =
@@ -1263,10 +1247,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Brings the books' Android accounts in line with the books the phone
-     * mirrors, creating the missing ones and removing the rest, then the
-     * calendars' ({@link #reconcileCalendars}), off the main thread: at
-     * startup and once a setup committed its books.
+     * Brings the books' Android accounts in line with the mirrored books.
+     *
+     * <p>Creating the missing ones, removing the rest, then the calendars'
+     * ({@link #reconcileCalendars}), off main: at startup and after a setup.
      */
     public void reconcilePhone() {
         host.io.execute(
@@ -1281,9 +1265,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Brings the phone's calendars in line with those it shows
-     * ({@link CalendarRows}), off the main thread: with the books, and when a
-     * calendar's switch or the account roster changes.
+     * Brings the phone's calendars in line with those it shows, off main.
+     *
+     * <p>With the books, and when a calendar's switch or the account roster
+     * changes ({@link CalendarRows}).
      */
     public void reconcileCalendars() {
         host.io.execute(
@@ -1297,12 +1282,11 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * The app back in the foreground: the phone pass of every mirrored book
-     * and calendar whose rows changed meanwhile, so a Contacts-app or a
-     * calendar-app edit shows at once whatever Android's own batching does,
-     * then a reload when that pass or Android's upload sync ({@link
-     * SyncService}, {@link CalendarSyncService}) brought one in. Silent, and
-     * not a sync: the process's lock is not taken.
+     * The app back in the foreground: the phone pass of every mirrored book.
+     *
+     * <p>And calendar, so a phone edit shows at once; reloads when it or
+     * Android's upload sync ({@code SyncService}, {@code CalendarSyncService})
+     * brought one in. Silent: the sync lock is not taken.
      */
     public void phoneReturn() {
         host.io.execute(
@@ -1332,10 +1316,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * A book's phone switch turned on, its permission granted: its Android
-     * account, then its first projection, under the lists' dock, its bar
-     * filling as the contacts are written, unless a sync holds the dock. The
-     * process's lock is not taken, the book's own lock being the pass's.
+     * A book's phone switch on, permission granted: its first projection.
+     *
+     * <p>Its Android account, then the projection, filling the dock unless a
+     * sync holds it. The book's own lock is the pass's, not the process's.
      */
     public void showOnPhone(String url) {
         host.io.execute(
@@ -1365,8 +1349,9 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * Sets the dock from a first projection's stage (any thread), its bar
-     * filled to {@code done} of the projection's {@code count}.
+     * Sets the dock from a first projection's stage (any thread).
+     *
+     * <p>Its bar filled to {@code done} of {@code count}.
      */
     private void phoneStep(PimDomain domain, int stage, int count, int done) {
         String text = host.getString(SyncSteps.lineOf(domain));
@@ -1391,10 +1376,10 @@ public final class SyncCoordinator implements MailSync {
     }
 
     /**
-     * A book's phone switch turned off: one last phone pass, so a
-     * Contacts-app edit not yet brought in is not lost, then its Android
-     * account goes, which takes its raw contacts with it. The contacts stay
-     * in the store.
+     * A book's phone switch off: one last phone pass, then its account goes.
+     *
+     * <p>The pass keeps a Contacts-app edit not yet in; the account takes its
+     * raw contacts with it. The contacts stay in the store.
      */
     public void hideFromPhone(String url) {
         host.io.execute(

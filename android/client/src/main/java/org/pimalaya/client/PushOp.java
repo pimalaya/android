@@ -1,6 +1,10 @@
 package org.pimalaya.client;
 
-/** What one {@link PushChange} does (rs/contact/push.rs {@code PushChange.op} 20). */
+/**
+ * What one {@link PushChange} does.
+ *
+ * <p>Mirrors rs/contact/push.rs {@code PushChange.op} 20.
+ */
 public enum PushOp {
     /** A genuine create, carrying the vCard. */
     CREATE("create"),

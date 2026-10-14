@@ -1,15 +1,13 @@
 package org.pimalaya.client;
 
 /**
- * Raised when a submission failed after the whole message was handed over
- * and before any verdict came back: the server may have taken it.
+ * Raised when a submission failed after the handover: the server may have it.
  *
- * <p>Its own type because sending such a message again on its own could
- * deliver it twice, and leaving it queued would do exactly that: the
- * outbox parks it instead, for the user to send again once they find it
- * did not go.
+ * <p>Resending could deliver twice, so the outbox parks the message instead
+ * of leaving it queued; the user sends it again once they find it did not go.
  */
 public final class SubmissionUncertain extends PimalayaException {
+    /** An uncertain submission, carrying the failure. */
     public SubmissionUncertain(String message) {
         super(message);
     }

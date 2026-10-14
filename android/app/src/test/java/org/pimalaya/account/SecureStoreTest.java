@@ -18,10 +18,10 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * The encrypted account store's plaintext, which an installed app already
- * holds: the same accounts write the same bytes, and a store the previous
- * release wrote reads back to the same accounts. The text was captured on
- * that release.
+ * The encrypted account store's plaintext, which installed apps already hold.
+ *
+ * <p>The same accounts write the same bytes, and a store the previous release
+ * wrote (text captured on it) reads back to the same accounts.
  */
 @RunWith(RobolectricTestRunner.class)
 public class SecureStoreTest {

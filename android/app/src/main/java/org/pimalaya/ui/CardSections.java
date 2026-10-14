@@ -11,18 +11,11 @@ import java.util.function.Function;
 import org.pimalaya.R;
 
 /**
- * A grouped list's layout: rows split into titled sections, each drawn
- * as one rounded card.
+ * A grouped list's layout: rows split into titled sections, each one card.
  *
- * <p>The three domains share it, so a day of mail, a letter of contacts
- * and a day of the agenda are the same object. It flattens the rows into
- * the positions an adapter serves, a header opening each section, and
- * knows which corners each row rounds: a card is its rows' backgrounds
- * put end to end, the first rounding its top and the last its bottom,
- * since a ListView has no container to round around them.
- *
- * <p>Rows keep the order they are handed in, and a section opens wherever
- * the label changes, so the caller sorts.
+ * <p>It flattens rows into adapter positions, a header opening each section,
+ * and says which corners each row rounds (a ListView has no container to
+ * round). Sections open where the label changes, so the caller sorts.
  */
 public final class CardSections<T> {
     /** A header's label at its position, null at a row's. */
@@ -73,14 +66,17 @@ public final class CardSections<T> {
         return last ? R.drawable.row_card_bottom : R.drawable.row_card_middle;
     }
 
+    /** The number of positions, headers included. */
     public int size() {
         return rows.size();
     }
 
+    /** Whether a position is a section's header. */
     public boolean isHeader(int position) {
         return headers.get(position) != null;
     }
 
+    /** The header label at a position, null for a row. */
     public String header(int position) {
         return headers.get(position);
     }

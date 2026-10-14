@@ -18,11 +18,10 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Every edit the entry page builds, as a record, equals as a JSON value
- * the edit object it built before edits were records, and the bridge
- * writes, splits and removes the same iCalendar from it: the literals
- * below were captured on that code (EventView's builder, for the same
- * page states), on the real bridge.
+ * Every edit the entry page builds equals the JSON object it built before.
+ *
+ * <p>The bridge writes, splits and removes the same iCalendar from it; literals
+ * captured on EventView's old builder for the same page states.
  */
 @RunWith(RobolectricTestRunner.class)
 public class EventEditTest {

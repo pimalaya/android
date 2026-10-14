@@ -29,10 +29,8 @@ public class DatesTest {
 
     @Test
     public void theDayBoundaryIsMidnightAndNotElapsedHours() {
-        // The whole reason this is not a duration formatter: a message
-        // that arrived at 23:00 last night is Yesterday whatever the
-        // hour is now, and one from 00:30 is Today however close to
-        // midnight it landed.
+        // NOTE: calendar days, not a duration: 23:00 last night is Yesterday
+        // whatever the hour now, 00:30 is Today.
         assertEquals("Yesterday", Dates.day(context, at(-1, 23)));
         assertEquals("Today", Dates.day(context, at(0, 0)));
         assertEquals("Today", Dates.day(context, at(0, 23)));
@@ -48,8 +46,8 @@ public class DatesTest {
 
     @Test
     public void aDayStillToComeSaysSoRatherThanCountingBackwards() {
-        // Clock skew puts messages in the future; a negative "days ago"
-        // would be worse than saying nothing precise.
+        // NOTE: clock skew puts messages in the future; a negative "days ago"
+        // would be worse.
         assertEquals("Later", Dates.day(context, at(2, 12)));
     }
 
@@ -68,8 +66,7 @@ public class DatesTest {
 
     @Test
     public void anAllDayDistanceCountsWholeDaysFromToday() {
-        // A birthday is on a day: reading it as five hours ago because
-        // the day started this morning would be nonsense.
+        // NOTE: a birthday is on a day, not five hours ago.
         assertEquals("Today", Dates.relativeDays(context, at(0, 8)));
         assertEquals("in 1 day", Dates.relativeDays(context, at(1, 0)));
         assertEquals("2 days ago", Dates.relativeDays(context, at(-2, 0)));

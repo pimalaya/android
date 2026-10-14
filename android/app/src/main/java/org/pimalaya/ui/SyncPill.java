@@ -12,10 +12,11 @@ public final class SyncPill {
     private SyncPill() {}
 
     /**
-     * The pill saying where an account stands: deactivated in the plain
-     * tone, else how many bodies its window still downloads
-     * ({@code left}, null outside the body step) or when it last synced on an
-     * accent tint, or that it never has in the plain tone.
+     * The pill saying where an account stands.
+     *
+     * <p>Plain tone when deactivated or never synced; on an accent tint the
+     * bodies its window still downloads ({@code left}, null outside the body
+     * step) or when it last synced.
      */
     public static View of(Host host, boolean enabled, long stamp, Integer left) {
         boolean downloading = enabled && left != null && left > 0;

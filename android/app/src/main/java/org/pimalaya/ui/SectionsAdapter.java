@@ -5,12 +5,10 @@ import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 
 /**
- * A recycling adapter over a {@link CardSections} layout: the headers
- * and their view type are the layout's, the rows the subclass's.
+ * A recycling adapter over {@link CardSections}: its headers, our rows.
  *
- * <p>Whether a header takes taps stays with each list, so it keeps
- * BaseAdapter's default (every position enabled) unless it overrides
- * {@link #isEnabled}.
+ * <p>Header taps stay each list's choice: BaseAdapter's default (all enabled)
+ * unless it overrides {@link #isEnabled}.
  */
 public abstract class SectionsAdapter<T> extends BaseAdapter {
     private final CardSections<T> sections;

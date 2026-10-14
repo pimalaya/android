@@ -3,8 +3,9 @@ package org.pimalaya.client;
 import org.json.JSONObject;
 
 /**
- * One member of an enumerated calendar: its resource name and ETag
- * (rs/calendar.rs {@code EventRef} 138).
+ * One member of an enumerated calendar: its resource name and ETag.
+ *
+ * <p>Mirrors rs/calendar.rs {@code EventRef} 138.
  *
  * @param id the resource name
  * @param etag entity tag guarding concurrent updates, or null

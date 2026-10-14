@@ -14,20 +14,16 @@ import java.util.function.Consumer;
 import org.pimalaya.R;
 
 /**
- * A list's large title: the domain's name over a supporting line,
- * scrolling with the rows, with whatever the domain filters with under
- * it (list_header.xml).
+ * A list's large title: the domain's name over a line, scrolling with rows.
  *
- * <p>It owns its list's scroll, which drives two things in the shared
- * chrome. The bar's own title stays blank while this one is on screen
- * and fades in once it scrolls away, so the name is never shown twice
- * and never lost. The extended add button folds to its glyph while the
- * list scrolls down and unfolds when it comes back up, the way a
- * reader's attention moves.
+ * <p>Filters sit under it (list_header.xml). It owns the list's scroll: the
+ * bar's title fades in once this one scrolls away, and the extended add button
+ * folds while scrolling down.
  */
 public final class ListHeader {
     private final Host host;
     private final int panel;
+    /** The header view, the list's first row. */
     public final View view;
     final ListView list;
 
@@ -42,6 +38,7 @@ public final class ListHeader {
     /** Debounced search, so typing does not re-render per keystroke. */
     private Runnable pendingSearch;
 
+    /** The header of {@code list}, the list shown on {@code panel}. */
     public ListHeader(Host host, ListView list, int panel) {
         this.host = host;
         this.panel = panel;
@@ -62,10 +59,7 @@ public final class ListHeader {
                 });
     }
 
-    /**
-     * Keeps a list's empty state centred in what this header leaves below
-     * it, rather than in the whole screen where the header would cover it.
-     */
+    /** Centres a list's empty state in what this header leaves below it. */
     public void empty(View empty) {
         view.addOnLayoutChangeListener(
                 (v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> {
@@ -93,13 +87,15 @@ public final class ListHeader {
         ((TextView) view.findViewById(R.id.header_title)).setText(title);
     }
 
+    /** Sets the supporting line under the title. */
     public void meta(String meta) {
         ((TextView) view.findViewById(R.id.header_meta)).setText(meta);
     }
 
     /**
-     * Whether the list stands scrolled to its very end, which the sync dock
-     * showing under it would cover. A list not scrolled is not.
+     * Whether the list stands scrolled to its end, which the dock would cover.
+     *
+     * <p>A list not scrolled is not.
      */
     boolean atEnd() {
         return list.canScrollVertically(-1) && !list.canScrollVertically(1);
@@ -115,10 +111,7 @@ public final class ListHeader {
         return scrolled;
     }
 
-    /**
-     * Shows the search field, handing each settled query (trimmed, lower
-     * cased) to {@code onQuery}.
-     */
+    /** Shows the search field, each settled query trimmed and lower-cased. */
     public void search(int hint, Consumer<String> onQuery) {
         view.findViewById(R.id.header_search).setVisibility(View.VISIBLE);
         EditText input = view.findViewById(R.id.header_search_input);
@@ -158,8 +151,9 @@ public final class ListHeader {
     }
 
     /**
-     * The week's card, shown under its month line and its number, for the
-     * caller to fill; the arrows and the number are the caller's to wire.
+     * The week's card under its month and number, for the caller to fill.
+     *
+     * <p>The arrows and the number are the caller's to wire.
      */
     public LinearLayout week(CharSequence month, CharSequence number) {
         view.findViewById(R.id.header_week).setVisibility(View.VISIBLE);

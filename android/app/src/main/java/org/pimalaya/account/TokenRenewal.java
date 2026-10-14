@@ -7,22 +7,19 @@ import java.util.Objects;
 /**
  * One OAuth credential renewed at a time, process-wide.
  *
- * <p>A sync pass fans out (the mail pool runs several workers), and each
- * worker holds the account as it was when the pass began. Two of them
- * answered 401 would each refresh with that same refresh token; a provider
- * that rotates it (Fastmail, Stalwart) retires the token on its first use,
- * and one detecting reuse revokes the whole family, signing the account out.
- * So a renewal holds the credential's lock, reads the stored credential
- * first, and when another worker renewed it meanwhile reuses that renewal
- * instead of spending the retired token. The renewed tokens are written onto
- * the stored account ({@link SecureStore#renew}), never a stale snapshot.
+ * <p>Workers hitting 401 at once would spend one refresh token twice, which
+ * rotating providers (Fastmail, Stalwart) revoke. So it locks the credential,
+ * reuses a renewal stored meanwhile ({@link SecureStore#renew}).
  */
 public final class TokenRenewal {
-    /** The tokens a refresh returned; a null refresh token keeps the old one. */
+    /**
+     * The tokens a refresh returned; a null refresh token keeps the old one.
+     */
     public static final class Renewed {
         final String accessToken;
         final String refreshToken;
 
+        /** The tokens a refresh returned. */
         public Renewed(String accessToken, String refreshToken) {
             this.accessToken = accessToken;
             this.refreshToken = refreshToken;
@@ -39,8 +36,9 @@ public final class TokenRenewal {
     private TokenRenewal() {}
 
     /**
-     * Renews the credential {@code domain} signs in with, or reuses the
-     * renewal another caller stored meanwhile, and returns the stored account.
+     * Renews {@code domain}'s credential, or reuses one stored meanwhile.
+     *
+     * <p>Returns the stored account.
      */
     public static AccountEntry renew(
             SecureStore store, AccountEntry entry, PimDomain domain, Refresh refresh) {

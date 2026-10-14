@@ -8,19 +8,17 @@ import org.pimalaya.pimdir.PimdirEngine;
 /**
  * What the sync dock says and how full its bar is.
  *
- * <p>The line names the domain being synced, then the engine's step in
- * that domain's own words: a calendar pass downloads events and a mail
- * pass messages. The bar is one progress over an account's collections,
- * each counted step filling its share of the collection it runs in: the
- * download first, then the projection onto the phone for the domains that
- * have one.
+ * <p>The line names the domain, then the engine's step in its own words. The
+ * bar is one progress over an account's collections, each counted step filling
+ * its share: the download, then the phone projection where there is one.
  */
 public final class SyncSteps {
     private SyncSteps() {}
 
     /**
-     * The share of a collection its download fills in a domain mirrored on
-     * the phone, the projection filling the rest.
+     * A collection's share its download fills in a phone-mirrored domain.
+     *
+     * <p>The projection onto the phone fills the rest.
      */
     static final double DOWNLOAD_SHARE = 0.6;
 
@@ -37,10 +35,10 @@ public final class SyncSteps {
     }
 
     /**
-     * The words of {@code stage} in {@code domain}, after the domain on the
-     * dock's line: a plural for a counted stage, a string otherwise, 0 when
-     * the domain has no such stage. The phone steps are the two mirrors',
-     * contacts and calendars, so mail has no words for them.
+     * The words of {@code stage} in {@code domain}, 0 for no such stage.
+     *
+     * <p>A plural for a counted stage, a string otherwise. The phone steps are
+     * the contact and calendar mirrors', so mail has no words for them.
      */
     static int textOf(PimDomain domain, int stage) {
         switch (stage) {
@@ -99,10 +97,7 @@ public final class SyncSteps {
                 : resources.getString(text);
     }
 
-    /**
-     * The step counting an account's collections as they land: its
-     * mailboxes, address books or calendars.
-     */
+    /** The step counting an account's collections as they land. */
     public static int collectionsOf(PimDomain domain) {
         switch (domain) {
             case MAIL:
@@ -114,10 +109,7 @@ public final class SyncSteps {
         }
     }
 
-    /**
-     * How much of its collection a counted step has filled at {@code done}
-     * of {@code total}, from 0 to 1.
-     */
+    /** How much of its collection a counted step filled, from 0 to 1. */
     public static double shareOf(PimDomain domain, int stage, int done, int total) {
         if (total <= 0) {
             return 0;
@@ -133,9 +125,10 @@ public final class SyncSteps {
     }
 
     /**
-     * The bar in thousandths: {@code landed} of {@code of} collections plus
-     * the {@code share} of the one under way, or that share alone when no
-     * collection is counted.
+     * The bar in thousandths: {@code landed} of {@code of} plus {@code share}.
+     *
+     * <p>{@code share} is the collection under way's; alone when none is
+     * counted.
      */
     public static int permille(int landed, int of, double share) {
         double current = Math.min(Math.max(share, 0), 1);
@@ -146,10 +139,11 @@ public final class SyncSteps {
     }
 
     /**
-     * The bar over a whole pass, in thousandths: the sections passed, whose
-     * weights come to {@code passed}, and the {@code section} thousandths
-     * of the one under way weighing {@code weight}, out of the {@code
-     * planned} whole; the section alone when nothing was planned.
+     * The bar over a whole pass, in thousandths.
+     *
+     * <p>The sections passed (weights summing to {@code passed}) plus {@code
+     * section} thousandths of the current one weighing {@code weight}, out of
+     * {@code planned}; {@code section} alone when nothing was planned.
      */
     public static int across(int passed, int weight, int planned, int section) {
         if (planned <= 0) {

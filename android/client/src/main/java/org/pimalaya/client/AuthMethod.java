@@ -4,14 +4,15 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One way a {@link ServiceConfig} accepts authentication
- * (io-pim-discovery {@code DiscoveryAuthMethod}). Only the fields
+ * One way a {@link ServiceConfig} accepts authentication.
+ *
+ * <p>Mirrors io-pim-discovery {@code DiscoveryAuthMethod}. Only the fields
  * relevant to the {@link #type} are non-null.
  *
  * @param type the kind of method
  * @param authorizationEndpoint authorization endpoint (code grant only)
- * @param deviceAuthorizationEndpoint device authorization endpoint
- *     (device grant only)
+ * @param deviceAuthorizationEndpoint device authorization endpoint (device
+ *     grant only)
  * @param tokenEndpoint token endpoint (both OAuth grants)
  * @param scope space-separated scopes to request (both OAuth grants)
  * @param issuer issuer URL ({@link Type#OAUTH_ISSUER} only)
@@ -23,6 +24,7 @@ public record AuthMethod(
         String tokenEndpoint,
         String scope,
         String issuer) {
+    /** The kind of an authentication method. */
     public enum Type {
         /** Username and password login (possibly an app password). */
         PASSWORD,
@@ -32,7 +34,7 @@ public record AuthMethod(
         OAUTH_AUTHORIZATION_CODE_GRANT,
         /** OAuth 2.0 device authorization grant (RFC 8628). */
         OAUTH_DEVICE_AUTHORIZATION_GRANT,
-        /** OAuth 2.0 with grants to resolve from the issuer's RFC 8414 metadata. */
+        /** OAuth 2.0, grants resolved from the issuer's RFC 8414 metadata. */
         OAUTH_ISSUER,
     }
 
@@ -47,8 +49,7 @@ public record AuthMethod(
     }
 
     /**
-     * An authorization code grant the caller already knows the endpoints of,
-     * for the providers that publish no discoverable configuration.
+     * A code grant whose endpoints the caller knows, for undiscoverable ones.
      */
     public static AuthMethod codeGrant(
             String authorizationEndpoint, String tokenEndpoint, String scope) {
@@ -79,9 +80,10 @@ public record AuthMethod(
     }
 
     /**
-     * Parses one method from the bridge's JSON shape: {@code "password"}
-     * and {@code "bearer"} as plain strings, the OAuth variants as
-     * single-key objects.
+     * Parses one method from the bridge's JSON shape.
+     *
+     * <p>{@code "password"} and {@code "bearer"} are plain strings, the OAuth
+     * variants single-key objects.
      */
     static AuthMethod from(Object json) {
         if ("bearer".equals(json)) {

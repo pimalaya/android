@@ -6,8 +6,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One RELATED entry of the field model (rs/contact/fields.rs
- * {@code ContactRelation} 217). A key the model leaves out reads as empty.
+ * One RELATED entry of the field model.
+ *
+ * <p>Mirrors rs/contact/fields.rs {@code ContactRelation} 217. A key the
+ * model leaves out reads as empty.
  *
  * @param pref whether the entry is preferred
  * @param types the lowercase TYPE values, pref excluded

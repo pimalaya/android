@@ -8,18 +8,11 @@ import java.util.List;
 import org.pimalaya.account.PimDomain;
 
 /**
- * The first sync each domain of a freshly connected account owes, run the
- * first time its tab is reached rather than all three behind one dialog.
+ * The first sync each domain of a freshly connected account owes.
  *
- * <p>The connection flow lands on the account's first domain, mail when it
- * has it, and that tab's dialog syncs that domain alone: the newest chunk
- * of every mailbox, the inbox first. Contacts and calendars wait until
- * their tab is opened, each behind its own dialog then. A domain's debt is
- * paid once its first pass went through; one that failed is owed still, and
- * the next visit tries again.
- *
- * <p>Kept beside the account rather than in its record, as its mail bound
- * is: it is app state, not a secret, and only the connection flow sets it.
+ * <p>Paid the first time the domain's tab is reached (mail's on landing), not
+ * all behind one dialog; a failed first pass stays owed. Kept in prefs, not the
+ * account record: app state, not a secret.
  */
 public final class FirstSync {
     private static final String PREFS = "first-sync";
@@ -34,7 +27,7 @@ public final class FirstSync {
         return domain.id + "\n" + email;
     }
 
-    /** Records that a freshly connected account owes a domain its first sync. */
+    /** Records that a newly connected account owes a domain its first sync. */
     public static void owe(Context context, String email, PimDomain domain) {
         prefs(context).edit().putBoolean(key(email, domain), true).apply();
     }

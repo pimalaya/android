@@ -6,18 +6,16 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * One message of a Microsoft Graph step (rs/mail/session.rs
- * {@code GraphStepItem} 338): the mailbox it was stepped in and, where its
- * body was read, its file.
+ * One message of a Microsoft Graph step, its mailbox and body file.
+ *
+ * <p>Mirrors rs/mail/session.rs {@code GraphStepItem} 338.
  *
  * @param handle its Graph id
- * @param mailboxes the one mailbox it was stepped in, by name; an element
- *     is null for a folder the step does not name
+ * @param mailboxes the one mailbox it was stepped in, by name; an element is
+ *     null for a folder the step does not name
  * @param path the file its body was written to, null for a held message
- * @param received when it was received, in milliseconds since the epoch;
- *     null when unknown
- * @param size its size in octets, the file's where its body was read; null
- *     when unknown
+ * @param received reception time in epoch milliseconds; null when unknown
+ * @param size its size in octets (the file's when read); null when unknown
  * @param sortKey its sort key, the {@code sentDateTime} it was stepped by
  */
 public record GraphStepItem(

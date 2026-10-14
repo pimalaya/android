@@ -18,9 +18,10 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * A credential is renewed once however many workers find it expired: a
- * rotating provider retires the refresh token on its first use, so the
- * others reuse that renewal instead of spending the retired token.
+ * A credential is renewed once however many workers find it expired.
+ *
+ * <p>A rotating provider retires the refresh token on first use, so the others
+ * reuse that renewal.
  */
 @RunWith(RobolectricTestRunner.class)
 public class TokenRenewalTest {

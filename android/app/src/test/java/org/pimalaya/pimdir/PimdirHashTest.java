@@ -8,11 +8,9 @@ import org.junit.Test;
 /**
  * The content address naming a body in the object store.
  *
- * <p>The values are pinned rather than recomputed: the Rust bridge hashes the
- * bodies it fetches and this class hashes the ones the app edits, so the two
- * implementations have to agree byte for byte forever. The same three vectors
- * are asserted in rust/src/store.rs, and a disagreement between them is what
- * these tests exist to catch.
+ * <p>Pinned, not recomputed: the bridge hashes fetched bodies and this class
+ * edited ones, so both must agree byte for byte. rust/src/store.rs asserts the
+ * same three vectors.
  */
 public class PimdirHashTest {
     @Test
@@ -23,9 +21,9 @@ public class PimdirHashTest {
 
     @Test
     public void theNameIsAValidBlobPathComponent() {
-        // pimdir SPEC.md 5: the hash is a path component, sharded two levels,
-        // so it has to be single-case and filesystem-safe. 128 bits of base32
-        // is 26 characters with the padding dropped.
+        // NOTE: pimdir SPEC.md 5: the hash is a path component, sharded two
+        // levels, so it has to be single-case and filesystem-safe. 128 bits of
+        // base32 is 26 characters with the padding dropped.
         String hash = PimdirHash.of("BEGIN:VCARD\r\nEND:VCARD\r\n");
 
         assertEquals(26, hash.length());

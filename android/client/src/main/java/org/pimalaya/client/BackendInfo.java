@@ -3,19 +3,20 @@ package org.pimalaya.client;
 import org.json.JSONObject;
 
 /**
- * What an account base URL tells about its backend (rs/ffi/account.rs
- * {@code AccountInfoReply} 727). A flag the reply leaves out reads false.
+ * What an account base URL tells about its backend.
  *
- * @param accountLevel whether cards are account-level resources with m:n
- *     addressbook memberships (JMAP, Google)
+ * <p>Mirrors rs/ffi/account.rs {@code AccountInfoReply} 727. A flag the reply
+ * leaves out reads false.
+ *
+ * @param accountLevel whether cards are account-level with m:n book
+ *     memberships (JMAP, Google)
  * @param backend the backend behind the URL
- * @param submitsOverSession whether mail submits through the session it
- *     reads from (JMAP, Graph, Gmail)
- * @param writesEvents whether the calendar behind the URL takes event
- *     writes at all
+ * @param submitsOverSession whether mail submits over the session it reads
+ *     from (JMAP, Graph, Gmail)
+ * @param writesEvents whether the calendar takes event writes at all
  * @param writesExdates whether a calendar write carries an {@code EXDATE}
- * @param writesOverrides whether a calendar write carries an override of
- *     one occurrence
+ * @param writesOverrides whether a calendar write carries an occurrence
+ *     override
  */
 public record BackendInfo(
         boolean accountLevel,

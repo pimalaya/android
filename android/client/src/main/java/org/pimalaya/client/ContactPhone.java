@@ -6,8 +6,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One TEL entry of the field model (rs/contact/fields.rs
- * {@code ContactPhone} 203). A key the model leaves out reads as empty.
+ * One TEL entry of the field model.
+ *
+ * <p>Mirrors rs/contact/fields.rs {@code ContactPhone} 203. A key the model
+ * leaves out reads as empty.
  *
  * @param number the phone number, as entered
  * @param pref whether the entry is preferred

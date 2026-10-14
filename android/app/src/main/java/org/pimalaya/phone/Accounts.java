@@ -22,21 +22,11 @@ import org.pimalaya.account.LocalBook;
 import org.pimalaya.client.Addressbook;
 
 /**
- * AccountManager plumbing, for the two kinds of Android account Pimalaya
- * keeps, both of its own type.
+ * AccountManager plumbing for the two kinds of Android account the app keeps.
  *
- * <p>One per synced addressbook (Android has accounts, not addressbooks):
- * the addressbook collection URL lives in the account's user data and is
- * the matching key; the visible name is the addressbook name plus the
- * login. Removing an account makes ContactsProvider purge its raw
- * contacts, so deselecting an addressbook cleans the phone up by itself.
- *
- * <p>One per address whose calendars the phone shows, named by the address,
- * which is how calendar apps group them, the address in its user data:
- * calendars, unlike raw contacts, have a collection of their own
- * ({@code Calendars} rows, {@link CalendarRows}). Each kind is syncable for
- * its own authority alone, and each kind's reconcile leaves the other's
- * accounts alone.
+ * <p>One per synced book, keyed by its URL (removing it purges its contacts);
+ * one per address whose calendars the phone shows ({@code CalendarRows}). Each
+ * kind's reconcile leaves the other's alone.
  */
 public final class Accounts {
     /** Matches android:accountType in res/xml/authenticator.xml. */
@@ -47,16 +37,16 @@ public final class Accounts {
     /** A calendar account's address; never set on a book's account. */
     private static final String DATA_CALENDARS = "calendars";
 
-    /** Set once the account's content trigger was turned on; the user's choice stands after. */
+    /** Set once the content trigger was on; the user's choice stands after. */
     private static final String DATA_AUTO = "auto";
 
     private Accounts() {}
 
     /**
-     * Creates one Android account per subscribed addressbook (named after
-     * its own mail account) and removes any that are no longer subscribed.
-     * The full subscribed set must be passed at once: accounts absent from
-     * it are purged. Calendar accounts are left alone.
+     * Creates an Android account per subscribed book, removes the others.
+     *
+     * <p>Pass the full subscribed set at once: accounts absent from it are
+     * purged. Calendar accounts are left alone.
      */
     public static void reconcile(Context context, Map<Addressbook, String> accountByBook) {
         AccountManager manager = AccountManager.get(context);
@@ -106,10 +96,10 @@ public final class Accounts {
     }
 
     /**
-     * Creates one Android account per address whose calendars the phone
-     * shows and removes the other calendar accounts, which takes their
-     * calendars off the phone: the caller runs their phone pass first. Book
-     * accounts are left alone.
+     * Creates an account per address with mirrored calendars, removing others.
+     *
+     * <p>Removing one takes its calendars off the phone: the caller runs their
+     * phone pass first. Book accounts are left alone.
      */
     public static void reconcileCalendars(Context context, Set<String> addresses) {
         AccountManager manager = AccountManager.get(context);
@@ -152,13 +142,11 @@ public final class Accounts {
     }
 
     /**
-     * Whether the phone's contacts already hold raw contacts of the address
-     * under another app's account type (Google's own sync, DAVx5), so that
-     * mirroring its books would show everyone twice. One provider query;
-     * false without the contacts permission.
+     * Whether another app's account (Google sync, DAVx5) holds the address.
      *
-     * <p>Our own accounts never match: they are named by the book, not by
-     * the address.
+     * <p>Then mirroring its books would show everyone twice. One provider
+     * query; false without the contacts permission. Our accounts never match:
+     * they are named by the book.
      */
     public static boolean elsewhere(Context context, String address) {
         if (!PhoneMirror.CONTACTS.granted(context)) {
@@ -184,11 +172,10 @@ public final class Accounts {
     }
 
     /**
-     * Whether the phone's calendars already hold the address under another
-     * app's account type (Google's own sync, DAVx5), so that mirroring its
-     * calendars would show every event twice. One provider query over the
-     * calendars of other types, a handful on any phone; false without the
-     * calendar permission.
+     * Whether another app's calendars (Google sync, DAVx5) hold the address.
+     *
+     * <p>Then mirroring would show every event twice. One query over other
+     * types' calendars; false without the calendar permission.
      */
     public static boolean calendarsElsewhere(Context context, String address) {
         if (!PhoneMirror.CALENDAR.granted(context)) {
@@ -210,10 +197,7 @@ public final class Accounts {
         return names(address, names);
     }
 
-    /**
-     * Whether one of the account names is the address, compared
-     * case-insensitively: each app spells it its own way.
-     */
+    /** Whether one account name is the address, case-insensitively. */
     static boolean names(String address, Collection<String> names) {
         for (String name : names) {
             if (address.equalsIgnoreCase(name)) {
@@ -228,12 +212,14 @@ public final class Accounts {
         return AccountManager.get(context).getUserData(account, DATA_URL);
     }
 
-    /** The address whose calendars the account holds, null for a book's account. */
+    /** The address whose calendars it holds; null for a book's account. */
     public static String calendarAddress(Context context, Account account) {
         return AccountManager.get(context).getUserData(account, DATA_CALENDARS);
     }
 
-    /** The account holding the address's calendars, or null before reconcile. */
+    /**
+     * The account holding the address's calendars, or null before reconcile.
+     */
     public static Account findCalendars(Context context, String address) {
         AccountManager manager = AccountManager.get(context);
         for (Account account : manager.getAccountsByType(TYPE)) {
@@ -262,8 +248,7 @@ public final class Accounts {
     }
 
     /**
-     * Removes the Android account backing the addressbook URL, when one
-     * exists; ContactsProvider purges its raw contacts with it.
+     * Removes the book URL's Android account; the provider purges its contacts.
      */
     public static void remove(Context context, String url) {
         Account account = findByUrl(context, url);

@@ -5,14 +5,11 @@ import android.text.InputType;
 import android.util.TypedValue;
 import android.widget.EditText;
 
-/**
- * Theme and density helpers every hand-built view needs, shared by the
- * screens (MainActivity, ContactForm, the extracted flows) so the
- * resolution logic exists once.
- */
+/** Theme and density helpers every hand-built view needs, resolved once. */
 public final class Ui {
     private final Context context;
 
+    /** Helpers resolving against {@code context}'s theme. */
     public Ui(Context context) {
         this.context = context;
     }
@@ -40,10 +37,9 @@ public final class Ui {
     }
 
     /**
-     * A two-line addressbook label: the name at full size over the
-     * account email, diminished and secondary (same styling as the
-     * auth config options), so long names and emails never wrap into
-     * one unreadable line.
+     * A two-line addressbook label: the name over the diminished account email.
+     *
+     * <p>Long names and emails never wrap into one unreadable line.
      */
     public CharSequence twoLine(String name, String email) {
         android.text.SpannableString label = new android.text.SpannableString(name + "\n" + email);

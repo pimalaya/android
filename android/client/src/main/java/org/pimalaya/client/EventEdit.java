@@ -5,10 +5,11 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * What one edit changes on a calendar component (rs/calendar/edit.rs
- * {@code EventEdit} 43). A null component is an absent key, left alone;
- * an empty text is present and removes its property, which is how the
- * entry page clears a value.
+ * What one edit changes on a calendar component.
+ *
+ * <p>Mirrors rs/calendar/edit.rs {@code EventEdit} 43. A null component is
+ * an absent key, left alone; an empty text removes its property, which is
+ * how the entry page clears a value.
  *
  * @param summary the {@code SUMMARY}
  * @param description the {@code DESCRIPTION}
@@ -51,15 +52,23 @@ public record EventEdit(
         String recurrenceInstant,
         String uid,
         String vtimezone) {
-    /** A text property an edit sets, by the key the bridge's edit object uses. */
+    /** A text property an edit sets, by the bridge's edit object key. */
     public enum Field {
+        /** The {@code SUMMARY} property. */
         SUMMARY("summary"),
+        /** The {@code DESCRIPTION} property. */
         DESCRIPTION("description"),
+        /** The {@code LOCATION} property. */
         LOCATION("location"),
+        /** The {@code URL} property. */
         URL("url"),
+        /** The {@code STATUS} property. */
         STATUS("status"),
+        /** The {@code CATEGORIES} property. */
         CATEGORIES("categories"),
+        /** The {@code PRIORITY} property. */
         PRIORITY("priority"),
+        /** The {@code PERCENT-COMPLETE} property. */
         PERCENT_COMPLETE("percentComplete");
 
         private final String wire;
@@ -76,9 +85,13 @@ public record EventEdit(
 
     /** A date an edit writes, by the key the bridge's edit object uses. */
     public enum DateField {
+        /** The {@code DTSTART} property. */
         START("start"),
+        /** The {@code DTEND} property. */
         END("end"),
+        /** The {@code DUE} property. */
         DUE("due"),
+        /** The {@code COMPLETED} property. */
         COMPLETED("completed");
 
         private final String wire;
@@ -94,8 +107,9 @@ public record EventEdit(
     }
 
     /**
-     * The edit of the whole series setting {@code texts} and
-     * {@code dates}, an absent one left alone, stamped at {@code stamp}.
+     * The whole-series edit setting {@code texts} and {@code dates}.
+     *
+     * <p>An absent one is left alone; the edit is stamped at {@code stamp}.
      */
     public static EventEdit of(
             Map<Field, String> texts,
@@ -124,9 +138,10 @@ public record EventEdit(
     }
 
     /**
-     * This edit for the occurrences {@code scope} names, from the
-     * occurrence {@code recurrenceId} at {@code recurrenceInstant}, a split
-     * starting its series under {@code uid}.
+     * This edit for the occurrences {@code scope} names.
+     *
+     * <p>From the occurrence {@code recurrenceId} at {@code recurrenceInstant},
+     * a split starting its series under {@code uid}.
      */
     public EventEdit scoped(
             EventScope scope, String recurrenceId, String recurrenceInstant, String uid) {

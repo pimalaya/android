@@ -14,10 +14,10 @@ import org.robolectric.RuntimeEnvironment;
 import java.util.List;
 
 /**
- * Each domain of a freshly connected account owes its first sync to the
- * first visit of its tab, and only that domain's: the mail tab the flow
- * lands on pays the mail, and contacts and calendars stay owed until their
- * tabs are opened.
+ * Each domain of a new account owes its first sync to its tab's first visit.
+ *
+ * <p>Only that domain's: the mail tab the flow lands on pays the mail, contacts
+ * and calendars staying owed until their tabs open.
  */
 @RunWith(RobolectricTestRunner.class)
 public class FirstSyncTest {

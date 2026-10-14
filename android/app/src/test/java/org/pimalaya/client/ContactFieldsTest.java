@@ -15,9 +15,9 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Pins the field model on the real bridge: every corpus projection read
- * into the record and written back as the same JSON value (so the record
- * holds exactly what the bridge said, absent apart from present-empty),
+ * Pins the field model on the real bridge.
+ *
+ * <p>Every corpus projection read and written back as the same JSON value,
  * every record mirroring its Rust struct, and the conflicted-push merge.
  * Mapping corpus outcomes are pinned by MappingCorpusTest.
  */

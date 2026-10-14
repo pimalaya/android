@@ -26,13 +26,11 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * A mirrored book's Android account syncs automatically, so a Contacts-app
- * edit makes Android run the phone pass: turned on once per account, the
- * accounts of earlier builds (created with it off) included, after which a
- * choice made in the system's settings stands. A calendar account, one per
- * address, syncs calendars alone and a book's contacts alone, and neither
- * kind's reconcile touches the other's accounts. The phone holds an address
- * elsewhere when another app's account is named by it, in any case.
+ * A mirrored book's account syncs automatically, so Contacts edits come back.
+ *
+ * <p>Turned on once per account (earlier builds' too), then the system setting
+ * stands. Calendar and book accounts each sync their own authority alone. An
+ * address named by another app's account is elsewhere.
  */
 @RunWith(RobolectricTestRunner.class)
 public class AccountsTest {

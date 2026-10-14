@@ -11,12 +11,10 @@ import org.pimalaya.client.AuthMethod;
 import org.pimalaya.client.ServiceConfig;
 
 /**
- * Which discovered services serve which domain, which is what the connection
- * flow's second step is built from.
+ * Which discovered services serve which domain, as the connection flow offers.
  *
- * <p>The mapping decides what a user is offered, so getting it wrong is not a
- * rendering bug: a missing domain is a provider the app silently cannot
- * connect, and a spurious one is an option that leads to an empty screen.
+ * <p>A wrong mapping is no rendering bug: a missing domain is a provider the
+ * app silently cannot connect, a spurious one leads to an empty screen.
  */
 public class PimDomainTest {
     private static final String MAIL_URN = "urn:ietf:params:jmap:mail";
@@ -33,12 +31,9 @@ public class PimDomainTest {
 
     @Test
     public void jmapIsOfferedOnlyWhereThereIsSomethingToReadItWith() {
-        // Every domain JMAP has a capability for and the app reads, offered
-        // before sign-in since only the session says which it serves. It was
-        // not always so: offering a domain with no reader made an account that
-        // connected and was then never read. The assertion stays exhaustive
-        // rather than becoming a contains-check, so a fourth domain cannot be
-        // mapped here without someone stating that its reader exists.
+        // NOTE: offered before sign-in since only the session says which it
+        // serves; kept exhaustive so no fourth domain is mapped without stating
+        // that its reader exists.
         assertEquals(
                 Set.of(PimDomain.MAIL, PimDomain.CONTACTS, PimDomain.CALENDAR),
                 PimDomain.servedBy("jmap"));
@@ -46,8 +41,8 @@ public class PimDomainTest {
 
     @Test
     public void aJmapSessionServesTheDomainsItAdvertises() {
-        // A session a mail-scoped token reads: contacts and calendars are left
-        // out alone rather than failing the sign-in.
+        // NOTE: a mail-scoped token's session leaves contacts and calendars out
+        // rather than failing the sign-in.
         assertEquals(
                 Set.of(PimDomain.MAIL),
                 PimDomain.servedByJmap(Set.of(MAIL_URN, SUBMISSION_URN)));
@@ -60,8 +55,8 @@ public class PimDomainTest {
 
     @Test
     public void jmapMailIsServedOnlyWithSendingBesideIt() {
-        // An account that reads and cannot answer is not what connecting mail
-        // asks for, and its compose button would refuse every message.
+        // NOTE: an account that cannot answer would refuse every message from
+        // compose.
         assertEquals(
                 Set.of(PimDomain.CONTACTS),
                 PimDomain.servedByJmap(Set.of(MAIL_URN, CONTACTS_URN)));
@@ -69,21 +64,18 @@ public class PimDomainTest {
 
     @Test
     public void eachDomainRanksWhatTheAppCanDoOverIt() {
-        // JMAP mail sends now and JMAP contacts write, so JMAP leads both.
         assertTrue(PimDomain.MAIL.rank("jmap") < PimDomain.MAIL.rank("imap"));
         assertTrue(PimDomain.CONTACTS.rank("jmap") < PimDomain.CONTACTS.rank("carddav"));
-        // Whether a JMAP session serves calendars is known only once signed in,
-        // and the probe drops what it does not serve, so CalDAV leads.
+        // NOTE: JMAP calendars are known only once signed in, and the probe
+        // drops what is not served, so CalDAV leads.
         assertTrue(PimDomain.CALENDAR.rank("caldav") < PimDomain.CALENDAR.rank("jmap"));
-        // The rest come last, a provider sign-in naming no service among them.
         assertTrue(PimDomain.CALENDAR.rank("jmap") < PimDomain.CALENDAR.rank(null));
     }
 
     @Test
     public void aServiceWithNoReaderIsNeverOffered() {
-        // Discovery reports more than this app can drive. Offering SMTP would
-        // put an option on the screen that connects to nothing, and generic
-        // WebDAV is not a domain at all.
+        // NOTE: offering SMTP would connect to nothing, and generic WebDAV is
+        // not a domain.
         assertTrue(PimDomain.servedBy("smtp").isEmpty());
         assertTrue(PimDomain.servedBy("webdav").isEmpty());
         assertTrue(PimDomain.servedBy("pop3").isEmpty());
@@ -92,12 +84,11 @@ public class PimDomainTest {
 
     @Test
     public void anAccountStoredBeforeDomainsExistedIsAContactsAccount() {
-        // Contacts is all the app could connect then, so defaulting keeps those
-        // accounts working instead of dropping them off the roster.
+        // NOTE: contacts was all the app could connect then; defaulting keeps
+        // those accounts.
         assertEquals(PimDomain.CONTACTS, PimDomain.byId(""));
         assertEquals(PimDomain.CONTACTS, PimDomain.byId("nonsense"));
 
-        // And a stored domain round-trips through the id it was written under.
         for (PimDomain domain : PimDomain.values()) {
             assertEquals(domain, PimDomain.byId(domain.id));
         }
@@ -105,8 +96,8 @@ public class PimDomainTest {
 
     @Test
     public void theIdsAreStableAndDistinct() {
-        // They are persisted in the encrypted account blob, so renaming one
-        // silently re-domains every account stored under it.
+        // NOTE: persisted in the encrypted account blob: renaming one
+        // re-domains every account stored under it.
         assertEquals(List.of("mail", "contacts", "calendar"),
                 List.of(PimDomain.MAIL.id, PimDomain.CONTACTS.id, PimDomain.CALENDAR.id));
     }

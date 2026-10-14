@@ -20,12 +20,10 @@ import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.SyncPasses;
 
 /**
- * The background check ({@link BackgroundCheck}): syncs every account
- * taking part, headless, and notifies the new mail the run brought.
+ * The background check: syncs every account taking part, notifies new mail.
  *
- * <p>New is what this run added: the unread inbox messages present after
- * its mail pass and not before. A notification keyed on anything wider,
- * such as the messages not seen at the previous run, would fire for every
+ * <p>New is the unread inbox messages present after this run's mail pass and
+ * not before ({@link BackgroundCheck}): anything wider would fire for every
  * older message a fill or a widened bound listed in between.
  */
 public class BackgroundJob extends JobService {
@@ -95,10 +93,7 @@ public class BackgroundJob extends JobService {
                 context, passes, () -> stopped, (email, arrived) -> notify(context, email, arrived));
     }
 
-    /**
-     * One notification per arrived message, the newest {@link #BURST},
-     * grouped under the account's summary, on the account's own channel.
-     */
+    /** Notifies the newest {@link #BURST} arrivals under an account summary. */
     private static void notify(
             Context context, String email, List<MailStore.StoredMessage> arrived) {
         if (arrived.isEmpty() || !BackgroundCheck.permitted(context)) {

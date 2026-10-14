@@ -3,10 +3,10 @@ package org.pimalaya.client;
 import java.util.Map;
 
 /**
- * Crafted calendar objects the calendar pins run through the real bridge,
- * one per shape a reply can take: each time kind, a zone the object
- * defines and one it does not, a series with an override, a to-do, a
- * journal entry, and the edits two sides of a conflict make.
+ * Crafted calendar objects the calendar pins run, one per reply shape.
+ *
+ * <p>Each time kind, a defined zone and an undefined one, a series with an
+ * override, a to-do, a journal entry, and a conflict's two sides.
  */
 final class CalendarFixtures {
     private CalendarFixtures() {}
@@ -58,8 +58,7 @@ final class CalendarFixtures {
     }
 
     /**
-     * A zoned series in a zone the object defines (an offset), three
-     * occurrences, the second moved, with everything the page reads.
+     * A zoned series in a defined zone, three occurrences, the second moved.
      */
     static final String ZONED =
             object(

@@ -34,9 +34,10 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * Deleted items: what the store retains after a deletion, restored as a local
- * creation or purged, through io-pimdir's canonical statements and the real
- * bridge and engine.
+ * Deleted items: what the store retains, restored or purged.
+ *
+ * <p>Restored as a local creation, through io-pimdir's canonical statements and
+ * the real bridge and engine.
  */
 @RunWith(RobolectricTestRunner.class)
 public class DeletedItemsTest {
@@ -140,8 +141,8 @@ public class DeletedItemsTest {
 
         deleted.restore(engine(), only(), BOOK);
 
-        // The retained row comes back, its public id kept (STORAGE §11.1),
-        // as a create the next sync uploads.
+        // NOTE: the retained row comes back, its public id kept (STORAGE
+        // §11.1), as a create the next sync uploads.
         assertEquals(1, scalar("SELECT count(*) FROM items WHERE link_id = 'u1'"));
         assertEquals(seq, scalar("SELECT seq FROM items WHERE link_id = 'u1'"));
         assertEquals(0, scalar("SELECT count(*) FROM items WHERE link_id = 'u1'"
@@ -183,7 +184,7 @@ public class DeletedItemsTest {
 
     @Test
     public void aWaitingRowIsUntouchedByThePurge() throws Exception {
-        // Bound by its server, deleted locally: a tombstone the next sync
+        // NOTE: bound by its server, deleted locally: a tombstone the next sync
         // pushes, still bound, so waiting.
         contacts.save(BOOK, new Card("u4", null, null, vcard("u4", "Dan")));
         bind(BOOK, "u4", "c4.vcf");
@@ -215,8 +216,6 @@ public class DeletedItemsTest {
         assertEquals(0, deleted.retainedBytes());
         assertTrue(only().waiting());
     }
-
-    // ---- mail -------------------------------------------------------------
 
     /** One mailbox account; returns its INBOX collection. */
     private String inbox() {
@@ -304,7 +303,7 @@ public class DeletedItemsTest {
 
         deleted.restore(mailEngine(), only(), inbox);
 
-        // Its link id is the handle its mailbox gave it, which a restore
+        // NOTE: its link id is the handle its mailbox gave it, which a restore
         // into the same mailbox names again: the row revives, its public id
         // kept, as a create the next sync appends. The append's arrival is
         // listed under a new handle, so that is where it settles.

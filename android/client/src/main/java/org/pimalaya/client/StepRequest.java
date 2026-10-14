@@ -6,15 +6,16 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * What one mail step is asked (rs/mail/session.rs {@code MailStepRequest}
- * 244), each backend reading what it needs, and the mailbox it steps.
+ * What one mail step is asked, each backend reading what it needs.
  *
- * @param mailbox the one mailbox a view filtered to it steps, by name; null
- *     for the account. Handed to the bridge beside the request, not in it
+ * <p>Mirrors rs/mail/session.rs {@code MailStepRequest} 244.
+ *
+ * @param mailbox the one mailbox a filtered view steps, null for the account;
+ *     handed to the bridge beside the request, not in it
  * @param count how many messages the step brings
- * @param frontier the instant (RFC 3339) the step starts below, null for
- *     none (written as JSON null)
- * @param bound the account's bound, null for none (written as JSON null)
+ * @param frontier the RFC 3339 instant the step starts below, null (JSON
+ *     null) for none
+ * @param bound the account's bound, null (JSON null) for none
  * @param anchors the anchors the last JMAP step left, oldest first
  * @param mailboxes the mailboxes stepped, by name; null for an absent key
  */

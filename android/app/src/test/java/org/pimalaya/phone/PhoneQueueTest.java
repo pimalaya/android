@@ -18,10 +18,10 @@ import java.util.List;
 import java.util.concurrent.Executor;
 
 /**
- * A write to a book or a calendar reaches the phone a second later, in one
- * pass per collection however many writes the second saw, and a write
- * landing while the pass waits for its thread joins it rather than queueing
- * another.
+ * A write reaches the phone a second later, one pass per collection.
+ *
+ * <p>However many writes the second saw; one landing while the pass waits for
+ * its thread joins it.
  */
 @RunWith(RobolectricTestRunner.class)
 public class PhoneQueueTest {

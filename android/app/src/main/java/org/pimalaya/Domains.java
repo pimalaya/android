@@ -3,12 +3,10 @@ package org.pimalaya;
 import org.pimalaya.ui.Panels;
 
 /**
- * The four list tabs: the order the bottom navigation offers them in, and
- * what each one is called and drawn with.
+ * The four list tabs: their bottom navigation order, names and glyphs.
  *
- * <p>The app's top-level navigation is four bottom bar items, and this is
- * the one place that says which four and in what order. Files is a tab and
- * not a {@link PimDomain}: no account connects it.
+ * <p>The one place saying which four and in what order. Files is a tab and
+ * not a {@link org.pimalaya.account.PimDomain}: no account connects it.
  */
 public final class Domains {
     /** The list screens, in the order the bottom navigation offers them. */

@@ -4,14 +4,15 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * The push change a {@link PushPlan} is planned for (rs/contact/sync.rs
- * {@code PushPlanFacts} 153). A null component is an absent key.
+ * The push change a {@link PushPlan} is planned for.
+ *
+ * <p>Mirrors rs/contact/sync.rs {@code PushPlanFacts} 153. A null component
+ * is an absent key.
  *
  * @param op what the change does
  * @param collection the collection URL the change targets
  * @param bookId the book id behind the collection, null when unknown
- * @param origin whether a pending create carries an origin (its body lives
- *     on the account already)
+ * @param origin whether a pending create carries an origin (body on account)
  * @param deleted whether a staged removal deletes the card itself
  */
 public record PushPlanFacts(

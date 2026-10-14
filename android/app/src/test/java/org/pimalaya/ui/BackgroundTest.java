@@ -17,10 +17,7 @@ import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.android.controller.ActivityController;
 
-/**
- * Background work: run on the executor it is given, its outcome handed to
- * the main thread while the activity lives.
- */
+/** Background work: run on its executor, outcome handed back while alive. */
 @RunWith(RobolectricTestRunner.class)
 public class BackgroundTest {
     private ActivityController<StubHost> controller;

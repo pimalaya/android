@@ -5,27 +5,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
 /**
- * The content hash naming a body in the pimdir object store.
+ * The content hash naming a body in the store: pimdir's {@code sha256-128}.
  *
- * <p>pimdir records the algorithm in {@code store_meta.hash_algo} and admits two
- * (SPEC.md §4.3): {@code blake3}, recommended, or {@code sha256-128}. This app
- * takes the second, because {@link MessageDigest} ships SHA-256 on every Android
- * release while blake3 would mean bundling an implementation in Java, a second
- * one in Rust, and keeping them byte-identical forever.
- *
- * <p>The encoding is not incidental either: SPEC.md §5 requires lowercase base32
- * (RFC 4648, no padding), because the hash is also a path component
- * ({@code objects/ab/cd/abcd...}) and a single-case, filesystem-safe alphabet is
- * what makes that path valid on every target filesystem. Hex would work on Linux
- * and collide on a case-insensitive one.
- *
- * <p>Truncation to 128 bits is what {@code sha256-128} means: the store needs
- * collision resistance for content addressing, not signature strength, and a
- * 26-character name keeps the blob paths short.
- *
- * <p>The Rust bridge computes the same value for the bodies it hashes, and its
- * own test pins the two together. A disagreement would not fail loudly: it would
- * write blobs no reader could find.
+ * <p>SHA-256 truncated to 128 bits (SPEC.md §4.3; blake3 would need a Java
+ * implementation), lowercase base32 without padding since it is a path
+ * component (§5). The bridge hashes the same and its test pins the two.
  */
 public final class PimdirHash {
     /** The value {@code store_meta.hash_algo} carries for this app's stores. */
@@ -66,11 +50,10 @@ public final class PimdirHash {
     }
 
     /**
-     * The first {@link #BYTES} bytes of a digest as lowercase base32, no padding.
+     * The first {@link #BYTES} bytes of a digest as unpadded lowercase base32.
      *
-     * <p>128 bits is not a multiple of five, so the last character carries the
-     * three leftover bits padded with zeroes, which is what RFC 4648 prescribes
-     * once the padding characters are dropped.
+     * <p>The last character carries the three leftover bits zero-padded, as RFC
+     * 4648 prescribes once the padding characters are dropped.
      */
     private static String base32(byte[] digest) {
         StringBuilder name = new StringBuilder(26);

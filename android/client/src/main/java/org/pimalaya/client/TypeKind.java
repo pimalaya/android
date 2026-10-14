@@ -1,8 +1,9 @@
 package org.pimalaya.client;
 
 /**
- * The edit form's type spinners (rs/contact/form.rs {@code card_type_order}
- * 224), each addressing its own ordered type-set vocabulary.
+ * The edit form's type spinners, each with its own ordered type vocabulary.
+ *
+ * <p>Mirrors rs/contact/form.rs {@code card_type_order} 224.
  */
 enum TypeKind {
     /** The phone TYPE sets. */

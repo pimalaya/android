@@ -10,22 +10,14 @@ import java.util.Set;
 import org.pimalaya.client.Account;
 
 /**
- * One address, and everything the app holds for it: where each domain
- * it covers lives ({@link AccountConnection}), and the credentials
- * those domains sign in with ({@link AccountCredential}).
+ * One address, with every domain's connection and the credentials they use.
  *
- * <p>One entry per address and not one per domain, because the person
- * has one account: an expired token is one repair, and a contact card
- * has to be relatable to the sender of a message without reassembling
- * an identity that onboarding took apart.
- *
- * <p>The two maps are the important part. Endpoints are per domain,
- * credentials are per consent, and one consent routinely covers several
- * domains, so a credential is stored once and named by each connection
- * that uses it. Renewing it is one write, and no two domains can end up
- * holding different halves of the same sign-in.
+ * <p>Per address, not per domain: an expired token is one repair, a card
+ * relates to a sender. A credential is stored once and named by each connection
+ * using it, so renewing it is one write.
  */
 public final class AccountEntry {
+    /** The address, which keys the account. */
     public final String email;
 
     private final Map<PimDomain, AccountConnection> connections;
@@ -65,10 +57,7 @@ public final class AccountEntry {
         return null;
     }
 
-    /**
-     * An address as a release log may name it: its domain alone, which
-     * tells the provider without telling the person.
-     */
+    /** An address as a release log may name it: its domain alone. */
     public static String redacted(String address) {
         if (address == null) {
             return "?";
@@ -99,9 +88,9 @@ public final class AccountEntry {
     }
 
     /**
-     * The server one domain talks to, credential included, or null when
-     * the account does not cover it: the shorthand for the many callers
-     * that want somewhere to send a request.
+     * The server one domain talks to, credential included.
+     *
+     * <p>Null when the account does not cover the domain.
      */
     public Account server(PimDomain domain) {
         AccountConnection connection = connections.get(domain);
@@ -119,9 +108,10 @@ public final class AccountEntry {
     }
 
     /**
-     * Every scope this account's grants from one OAuth client hold, as one
-     * space-separated list, or null when none is recorded: what a new grant
-     * from that client asks for beside its own, so it can replace them.
+     * Every scope this account's grants from one OAuth client hold, or null.
+     *
+     * <p>One space-separated list: what a new grant from that client asks for
+     * beside its own, so it can replace them.
      */
     public String grantedScope(String clientId) {
         java.util.List<String> scopes = new java.util.ArrayList<>();
@@ -135,10 +125,11 @@ public final class AccountEntry {
     }
 
     /**
-     * The domains a new grant can take over: those signed in with another
-     * grant of the same client at the same token endpoint, every scope of
-     * which the new one holds. A domain whose grant's scopes were never
-     * recorded stays on it, since nothing says the new one covers it.
+     * The domains a new grant can take over.
+     *
+     * <p>Those signed in with another grant of the same client and token
+     * endpoint, every scope of which the new one holds. A grant whose scopes
+     * were never recorded is kept.
      */
     public java.util.List<PimDomain> regrantable(AccountCredential granted) {
         java.util.List<PimDomain> domains = new java.util.ArrayList<>();
@@ -162,23 +153,20 @@ public final class AccountEntry {
     }
 
     /**
-     * The same account with one domain connected or reconnected, on the
-     * given endpoint and credential. Naming a credential another domain
-     * already uses is how one grant comes to cover several.
+     * The same account with one domain (re)connected.
      *
-     * <p>Returns a new entry rather than mutating: the roster is read on
-     * the main thread and written from sync threads, and an account that
-     * gains a domain half-way through a read would be worse than one
-     * that gains it late.
+     * <p>A credential another domain uses makes one grant cover both. Returns a
+     * new entry: the roster is read on the main thread, written from sync
+     * threads.
      */
     AccountEntry with(PimDomain domain, String baseUrl, AccountCredential credential) {
         return with(domain, baseUrl, null, credential);
     }
 
     /**
-     * The same account with one domain connected on two endpoints: where
-     * it is read and where it is written. Only mail has a second, and
-     * only over SMTP.
+     * The same account with one domain connected on read and write endpoints.
+     *
+     * <p>Only mail has a second, and only over SMTP.
      */
     public AccountEntry with(
             PimDomain domain, String baseUrl, String submitUrl, AccountCredential credential) {
@@ -217,9 +205,9 @@ public final class AccountEntry {
     }
 
     /**
-     * The same account with one domain disconnected, and its credential
-     * dropped when that domain was the last to use it: a secret nothing
-     * can present is one the app has no business keeping.
+     * The same account with one domain disconnected.
+     *
+     * <p>Its credential is dropped when that domain was the last to use it.
      */
     AccountEntry without(PimDomain domain) {
         Map<PimDomain, AccountConnection> remaining = new EnumMap<>(connections);

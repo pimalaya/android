@@ -19,8 +19,9 @@ import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * The sync dock's model of a pass: its bar over the planned sections, the
- * counts it keeps and the rows its sheet lists, as drawn on the dock.
+ * The sync dock's model of a pass: its bar, counts and sheet rows.
+ *
+ * <p>Over the planned sections, as drawn on the dock.
  */
 @RunWith(RobolectricTestRunner.class)
 public class SyncProgressTest {

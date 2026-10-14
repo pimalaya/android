@@ -15,8 +15,7 @@ import org.robolectric.RuntimeEnvironment;
 import java.util.List;
 
 /**
- * A domain's filter: kept across restarts by collection id, an account's
- * checkbox over its collections, and the scope a domain's pull syncs.
+ * A domain's filter: kept by collection id, account ticks, the pull's scope.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MergedFilterTest {
@@ -31,7 +30,9 @@ public class MergedFilterTest {
         context = RuntimeEnvironment.getApplication();
     }
 
-    /** A build that kept the filter in memory left nothing: everything shows. */
+    /**
+     * A build that kept the filter in memory left nothing: everything shows.
+     */
     @Test
     public void aFirstStartShowsEverything() {
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
@@ -42,7 +43,7 @@ public class MergedFilterTest {
         assertEquals(MergedFilter.Tick.ON, filter.tick(JANE, HERS));
     }
 
-    /** What is hidden is still hidden after a restart, and in its domain alone. */
+    /** What is hidden stays hidden after a restart, in its domain alone. */
     @Test
     public void theFilterIsKeptPerDomain() {
         MergedFilter.of(context, PimDomain.MAIL).toggleCollection("jane-archive");
@@ -60,8 +61,9 @@ public class MergedFilterTest {
     }
 
     /**
-     * A shown account reads partly ticked while any of its collections is
-     * unticked, none ticked included: a blank box is a hidden account alone.
+     * A shown account reads partly ticked while any collection is unticked.
+     *
+     * <p>None ticked included: a blank box is a hidden account alone.
      */
     @Test
     public void aShownAccountReadsWhatItsCollectionsSay() {
@@ -83,8 +85,10 @@ public class MergedFilterTest {
     }
 
     /**
-     * Unticking an account hides it and nothing more: its collections keep
-     * their own boxes while it is folded away, and come back as they were.
+     * Unticking an account hides it and nothing more.
+     *
+     * <p>Its collections keep their own boxes while folded away, and come back
+     * as they were.
      */
     @Test
     public void anAccountComesBackWithItsChoices() {
@@ -108,7 +112,9 @@ public class MergedFilterTest {
         assertFalse(filter.accepts(JANE, "jane-archive"));
     }
 
-    /** An account with every collection unticked comes back with none ticked. */
+    /**
+     * An account with every collection unticked comes back with none ticked.
+     */
     @Test
     public void anAccountWithNothingTickedComesBackSo() {
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
@@ -126,7 +132,9 @@ public class MergedFilterTest {
         }
     }
 
-    /** A collection flipped under a hidden account stays hidden until it is back. */
+    /**
+     * A collection flipped under a hidden account stays hidden till it returns.
+     */
     @Test
     public void aCollectionFlippedUnderAHiddenAccountWaitsForIt() {
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);
@@ -157,9 +165,10 @@ public class MergedFilterTest {
     }
 
     /**
-     * A domain's pull syncs what its filter shows; "Sync all" syncs every
-     * collection of every account that is on; an account that is off syncs
-     * nothing and shows nothing.
+     * A domain's pull syncs what its filter shows.
+     *
+     * <p>"Sync all" syncs every collection of every account that is on; an
+     * account that is off syncs and shows nothing.
      */
     @Test
     public void thePullSyncsWhatTheFilterShows() {
@@ -187,9 +196,10 @@ public class MergedFilterTest {
     }
 
     /**
-     * The junk and the trash are hidden the first time a roster lists them,
-     * and only then: ticked back, they stay shown; a Reset hides them again,
-     * and hiding nothing else reads as no filter at all.
+     * Junk and trash are hidden the first time a roster lists them, only then.
+     *
+     * <p>Ticked back, they stay shown; a Reset hides them again, and hiding
+     * nothing else reads as no filter at all.
      */
     @Test
     public void theJunkAndTheTrashStartHidden() {
@@ -211,10 +221,7 @@ public class MergedFilterTest {
         assertTrue(filter.accepts(JANE, "jane-inbox"));
     }
 
-    /**
-     * The drawer's mail syncs every account that is on, of its mailboxes
-     * those the filter ticks.
-     */
+    /** The drawer's mail syncs every account on, with the mailboxes ticked. */
     @Test
     public void theDrawersMailSyncsWhatIsTicked() {
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);

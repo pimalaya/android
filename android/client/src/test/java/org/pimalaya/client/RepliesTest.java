@@ -7,10 +7,10 @@ import static org.junit.Assert.fail;
 import org.junit.Test;
 
 /**
- * Pins the bridge reply parsing: an error reply raises a
- * PimalayaException carrying the message and, when the failure was an
- * HTTP round, the status the callers branch on (412 retries unguarded,
- * 404 converges a removal, 401 refreshes the token).
+ * Pins the bridge reply parsing: an error reply raises PimalayaException.
+ *
+ * <p>It carries the message and, for an HTTP round, the status callers branch
+ * on (412 retries unguarded, 404 converges a removal, 401 refreshes).
  */
 public class RepliesTest {
     @Test
@@ -35,7 +35,9 @@ public class RepliesTest {
         }
     }
 
-    /** What a held session reopens on: a failure, told without parsing a page. */
+    /**
+     * What a held session reopens on: a failure, told without parsing a page.
+     */
     @Test
     public void aFailedReplyIsToldByItsErrorField() {
         assertEquals(true, Replies.failed(" {\"error\":\"Transport read failed\"}"));
@@ -44,8 +46,10 @@ public class RepliesTest {
     }
 
     /**
-     * An update's ETag is the string the reply encodes: Google's own quotes
-     * kept, unescaped, so the next listing names the same revision.
+     * An update's ETag is the string the reply encodes.
+     *
+     * <p>Google's own quotes kept, unescaped, so the next listing names the
+     * same revision.
      */
     @Test
     public void anUpdatedEtagIsReadAsTheStringTheReplyEncodes() {

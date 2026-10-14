@@ -8,12 +8,11 @@ import org.pimalaya.file.FilesList;
 import org.pimalaya.mail.MailEngine;
 
 /**
- * Removes what a run killed midway left in the cache: the folders a body
- * download writes messages into ({@link MailEngine#scratch}) and the copy
- * an import from the phone's storage stages, each the plaintext of a
- * message or a document, which nothing else would ever delete. On every
- * start, only what is older than any run could be ({@link #AGE}), so a
- * background run writing beside the app keeps its own.
+ * Removes the plaintext a run killed midway left in the cache.
+ *
+ * <p>Body download folders ({@link MailEngine#SCRATCH}) and staged imports,
+ * which nothing else deletes. Only what is older than any run ({@link #AGE}),
+ * so a background run writing beside the app keeps its own.
  */
 final class CacheSweep {
     private CacheSweep() {}

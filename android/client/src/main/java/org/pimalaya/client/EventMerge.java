@@ -6,14 +6,13 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * A calendar object both sides edited since their base, merged: the
- * object the merge holds, and the collisions left for a person to settle
- * (rs/calendar/conflict.rs {@code EventMerge} 136).
+ * A calendar object both sides edited, merged, with the collisions left.
+ *
+ * <p>Mirrors rs/calendar/conflict.rs {@code EventMerge} 136.
  *
  * @param ical the merged object, each conflict holding its pre-filled side
- * @param resolved whether nothing is left to ask, so {@link #ical} is the
- *     resolution
- * @param conflicts the collisions left
+ * @param resolved whether nothing is left to ask: {@link #ical} resolves it
+ * @param conflicts the collisions left for a person to settle
  */
 public record EventMerge(String ical, boolean resolved, List<Conflict> conflicts) {
     static EventMerge from(JSONObject reply) {
@@ -27,8 +26,11 @@ public record EventMerge(String ical, boolean resolved, List<Conflict> conflicts
     }
 
     /**
-     * One collision, as the entry page asks it (rs/calendar/conflict.rs
-     * {@code EventConflict} 98).
+     * One collision, as the entry page asks it.
+     *
+     * <p>Mirrors rs/calendar/conflict.rs {@code EventConflict} 98. A field is
+     * the edit key ({@code summary}, {@code start}, {@code recurrence}),
+     * {@code when}, {@code occurrence}, {@code entry} or the property name.
      *
      * @param id what a resolution names it by
      * @param kind what the collision is
@@ -36,12 +38,8 @@ public record EventMerge(String ical, boolean resolved, List<Conflict> conflicts
      *     object's own properties
      * @param recurrenceId the occurrence it is on; null on a series or an
      *     entry that does not recur
-     * @param field what it is: the edit object's key for a field the page
-     *     edits ({@code summary}, {@code start}, {@code recurrence} for the
-     *     rule), {@code when} for a start and an end that only together
-     *     collide, {@code occurrence} for one occurrence whole,
-     *     {@code entry} for the component whole, else the property's name as
-     *     written
+     * @param field what collides: {@code when} is a start and an end that only
+     *     together collide, {@code occurrence} and {@code entry} a whole one
      * @param series the side that changed the series, on a recurrence
      *     conflict; else null
      * @param choices what each side holds, the pre-filled one first
@@ -73,14 +71,13 @@ public record EventMerge(String ical, boolean resolved, List<Conflict> conflicts
     }
 
     /**
-     * One side's value of a conflicted field (rs/calendar/conflict.rs
-     * {@code EventChoice} 123).
+     * One side's value of a conflicted field.
+     *
+     * <p>Mirrors rs/calendar/conflict.rs {@code EventChoice} 123.
      *
      * @param side whose value it is
-     * @param value the value as a reader sees it, empty where the side holds
-     *     none
-     * @param time the value of a date, with its zone, the start on a span;
-     *     null otherwise
+     * @param value the value as a reader sees it, empty where the side has none
+     * @param time a date's value with its zone, a span's start; else null
      * @param end the end a span runs to; null on anything else
      */
     public record Choice(EventSide side, String value, EventTime time, EventTime end) {

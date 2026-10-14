@@ -23,9 +23,9 @@ import org.pimalaya.ui.Host;
 import org.pimalaya.ui.SyncDock;
 
 /**
- * The sync dock's model of a pass: the account, domain and step it is on,
- * its plan and its bar. The passes report into it from any thread; it
- * draws on the dock on the main thread.
+ * The sync dock's model of a pass: its account, domain, step, plan and bar.
+ *
+ * <p>The passes report into it from any thread; it draws on the main thread.
  */
 final class SyncProgress implements SyncPasses.Progress {
     private final Host host;
@@ -95,7 +95,9 @@ final class SyncProgress implements SyncPasses.Progress {
         renderSyncDock();
     }
 
-    /** The pass downloads older mail (Load more), said straight away (main thread). */
+    /**
+     * The pass downloads older mail (Load more), said at once (main thread).
+     */
     void fill() {
         synchronized (passState) {
             syncFill = true;
@@ -104,10 +106,10 @@ final class SyncProgress implements SyncPasses.Progress {
     }
 
     /**
-     * Draws the pass on the dock (main thread): the account, or that the
-     * pass is starting before it reaches one, then the domain and the step,
-     * how far it is through its accounts, and a row per account for the
-     * sheet.
+     * Draws the pass on the dock (main thread).
+     *
+     * <p>The account (or that the pass is starting), the domain and step, how
+     * far through its accounts, and a row per account for the sheet.
      */
     private void renderSyncDock() {
         if (!syncing.getAsBoolean()) {
@@ -147,9 +149,10 @@ final class SyncProgress implements SyncPasses.Progress {
     }
 
     /**
-     * The pass's sections as the sheet lists them (holding the pass's
-     * state): those passed, done, the one under way saying {@code running},
-     * then those to come. A pass over several domains names each row's.
+     * The pass's sections as the sheet lists them (holding the pass's state).
+     *
+     * <p>Those passed done, the one under way saying {@code running}, then
+     * those to come; a pass over several domains names each row's.
      */
     private List<SyncDock.Row> syncRows(String running) {
         Set<String> domains = new HashSet<>();
@@ -195,8 +198,9 @@ final class SyncProgress implements SyncPasses.Progress {
     }
 
     /**
-     * Keeps the step a pass stands at for the dock's sheet, after the
-     * account it is on (holding the pass's state).
+     * Logs the pass's step for the dock's sheet, after its account.
+     *
+     * <p>Called holding the pass's state.
      */
     private void syncLog(String detail) {
         String line =
@@ -215,7 +219,9 @@ final class SyncProgress implements SyncPasses.Progress {
     /** The domain the pass is on, said in the dock's line. */
     private String syncLine = "";
 
-    /** The engine's step the pass is on, after the domain; null for none yet. */
+    /**
+     * The engine's step the pass is on, after the domain; null for none yet.
+     */
     private String syncDetail;
 
     /** Whether the pass downloads older mail (Load more). */
@@ -225,10 +231,11 @@ final class SyncProgress implements SyncPasses.Progress {
     private boolean syncStepping;
 
     /**
-     * The pass's sections, one per domain and account it runs, each weighing
-     * the collections stored for it, one at least: the bar's whole is their
-     * sum, so it fills once over the pass rather than once per account. In
-     * the order they were planned, the sheet's order for those to come.
+     * The pass's sections, one per domain and account, weighed in collections.
+     *
+     * <p>Each weighs one at least; the bar's whole is their sum, so it fills
+     * once over the pass, not per account. Planned order, the sheet's for those
+     * to come.
      */
     private final Map<String, Integer> syncPlan = new LinkedHashMap<>();
 
@@ -243,10 +250,7 @@ final class SyncProgress implements SyncPasses.Progress {
     /** The section under way, null before the first. */
     private String syncSection;
 
-    /**
-     * How many of the section's collections have landed, 0 of 0 until the
-     * pass knows how many there are.
-     */
+    /** How many of the section's collections landed, 0 of 0 until known. */
     private int syncLanded;
 
     private int syncLandedOf;
@@ -255,8 +259,10 @@ final class SyncProgress implements SyncPasses.Progress {
     private double syncShare;
 
     /**
-     * The bar in thousandths, which only ever grows over a pass: a step or a
-     * section starting at nothing holds it rather than emptying it.
+     * The bar in thousandths, which only ever grows over a pass.
+     *
+     * <p>A step or section starting at nothing holds it rather than emptying
+     * it.
      */
     private int syncShown;
 
@@ -279,9 +285,10 @@ final class SyncProgress implements SyncPasses.Progress {
     }
 
     /**
-     * Sizes a domain's part of the pass before it runs (any thread): one
-     * section per account the pass takes, {@code only} narrowing them, each
-     * weighing the collections stored for it within the scope.
+     * Sizes a domain's part of the pass before it runs (any thread).
+     *
+     * <p>One section per account the pass takes, {@code only} narrowing them,
+     * each weighing its stored collections within the scope.
      */
     void planSync(PimDomain domain, SyncScope scope, Collection<String> only) {
         Map<String, Integer> weights = new LinkedHashMap<>();
@@ -314,9 +321,10 @@ final class SyncProgress implements SyncPasses.Progress {
     }
 
     /**
-     * Sizes a pass of mail steps before it runs (any thread): one section
-     * per account of {@code emails}, each weighing one, since every step
-     * brings about as many bodies whatever the account holds.
+     * Sizes a pass of mail steps before it runs (any thread).
+     *
+     * <p>One section per account of {@code emails}, each weighing one: every
+     * step brings about as many bodies whatever the account holds.
      */
     void planSteps(List<String> emails) {
         synchronized (passState) {
@@ -334,8 +342,9 @@ final class SyncProgress implements SyncPasses.Progress {
     }
 
     /**
-     * A section's weight, a section the plan missed weighing one and
-     * growing the whole (holding the pass's state).
+     * A section's weight; one the plan missed weighs one and grows the whole.
+     *
+     * <p>Called holding the pass's state.
      */
     private int weightOf(String section) {
         Integer weight = syncPlan.get(section);
@@ -347,7 +356,9 @@ final class SyncProgress implements SyncPasses.Progress {
         return weight;
     }
 
-    /** Moves the bar to where the pass stands, never back (holding the pass's state). */
+    /**
+     * Moves the bar to where the pass stands, never back (holding its state).
+     */
     private void syncShow() {
         int section = SyncSteps.permille(syncLanded, syncLandedOf, syncShare);
         int whole =
@@ -358,9 +369,10 @@ final class SyncProgress implements SyncPasses.Progress {
     }
 
     /**
-     * Names the account a pass moved on to, null between accounts (callable
-     * off the main thread), so a pass over several says whose it is on. The
-     * counts start over, the bar holding what the pass came to.
+     * Names the account a pass moved on to, null between accounts (any thread).
+     *
+     * <p>So a pass over several says whose it is on. The counts start over, the
+     * bar holding what the pass came to.
      */
     void syncAccount(String accountEmail) {
         synchronized (passState) {
@@ -374,9 +386,10 @@ final class SyncProgress implements SyncPasses.Progress {
     }
 
     /**
-     * Sets the dock's line from the domain an engine step runs in and the
-     * step itself (any thread), keeping the step for the sheet. A step the
-     * domain has no words for leaves the last one.
+     * Sets the dock's line from an engine step and its domain (any thread).
+     *
+     * <p>Keeps the step for the sheet; a step the domain has no words for
+     * leaves the last one.
      */
     private void syncStep(PimDomain domain, int stage, int count) {
         String line = host.getString(SyncSteps.lineOf(domain));
@@ -392,9 +405,10 @@ final class SyncProgress implements SyncPasses.Progress {
     }
 
     /**
-     * Fills the bar with how far a counted step is (any thread): the
-     * contacts or events read so far, or written to the phone. A mail step
-     * tells its download only so, its step then naming the bodies it brings.
+     * Fills the bar with how far a counted step is (any thread).
+     *
+     * <p>The contacts or events read, or written to the phone. A mail step
+     * tells only its download so, its step then naming the bodies it brings.
      */
     private void syncAdvance(PimDomain domain, int stage, int done, int total) {
         String detail =
@@ -413,11 +427,11 @@ final class SyncProgress implements SyncPasses.Progress {
     }
 
     /**
-     * Fills the bar with how many of the account's collections have landed
-     * (any thread): its mailboxes, address books or calendars. The first
-     * count of a domain and account opens its section, the one before it
-     * passed. A count overtaken by a worker beside it is dropped. The count
-     * is the dock's step, but in a mail step, whose one count is the step.
+     * Fills the bar with the account's collections landed so far (any thread).
+     *
+     * <p>A domain and account's first count opens its section, closing the
+     * last; a count overtaken by a worker beside it is dropped. The count is
+     * the dock's step, except in a mail step, whose one count is the step.
      */
     private void syncCollections(PimDomain domain, int done, int total) {
         String line = host.getString(SyncSteps.lineOf(domain));

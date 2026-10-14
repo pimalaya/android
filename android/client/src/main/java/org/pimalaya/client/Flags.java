@@ -6,12 +6,11 @@ import org.json.JSONArray;
 import org.json.JSONException;
 
 /**
- * The marker set of one message, in the order the store holds it: the
- * IMAP system flags this app writes ({@link Marker}) and any keyword the
- * server set, kept verbatim.
+ * The marker set of one message, in the order the store holds it.
  *
- * <p>The bridge speaks it (a flag set staged, a marker set or appended)
- * and the store's {@code flags} column holds it, a JSON array of strings.
+ * <p>The IMAP flags this app writes ({@link Marker}) and any server keyword,
+ * verbatim. The bridge speaks it and the store's {@code flags} column holds
+ * it, a JSON array of strings.
  *
  * @param markers the markers, as the store's JSON array spells them
  */
@@ -25,9 +24,9 @@ public record Flags(List<String> markers) {
         /** The IMAP {@code \Flagged} flag: the message was marked important. */
         FLAGGED("\\Flagged"),
         /**
-         * The IMAP {@code \Deleted} flag: the message is marked for removal by
-         * a later expunge, which is what deleting means on an account naming
-         * no trash to move it into.
+         * The IMAP {@code \Deleted} flag: removed by a later expunge.
+         *
+         * <p>What deleting means on an account naming no trash to move into.
          */
         DELETED("\\Deleted");
 
@@ -43,6 +42,7 @@ public record Flags(List<String> markers) {
         }
     }
 
+    /** Copies the markers, immutable. */
     public Flags {
         markers = List.copyOf(markers);
     }
@@ -62,8 +62,7 @@ public record Flags(List<String> markers) {
     }
 
     /**
-     * The marker set the store's {@code flags} column holds; none for a
-     * null or empty column.
+     * The marker set the store's {@code flags} column holds; none if empty.
      *
      * @throws JSONException when the column is not a JSON array
      */
@@ -72,8 +71,9 @@ public record Flags(List<String> markers) {
     }
 
     /**
-     * The marker set an offline-driver yield carries, none when it carries
-     * none. The wire stays JSON until the engine names its own pages.
+     * The marker set an offline-driver yield carries; none if it carries none.
+     *
+     * <p>The wire stays JSON until the engine names its own pages.
      */
     public static Flags read(JSONArray markers) {
         return new Flags(Json.strings(markers));

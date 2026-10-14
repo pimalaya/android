@@ -8,11 +8,11 @@ import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirDb;
 
 /**
- * The device's zone changed: the phone pass of every calendar the phone
- * shows, so its events with a floating time are projected again at the new
- * wall clock. A sync-adapter write, never an edit; the pass's quiet path
- * finds the rows projected for the old zone (docs/calendar-mapping.md,
- * zones).
+ * The device's zone changed: reprojects floating events on the phone.
+ *
+ * <p>Runs the phone pass of every shown calendar, a sync-adapter write, never
+ * an edit; its quiet path finds the rows projected for the old zone
+ * (docs/calendar-mapping.md, zones).
  */
 public class ZoneChange extends BroadcastReceiver {
     @Override

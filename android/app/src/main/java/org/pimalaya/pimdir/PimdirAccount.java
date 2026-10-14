@@ -7,34 +7,11 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * The stable id an account is grouped under in the pimdir store, and the
- * namespacing of its collection ids.
+ * An account's stable store id, and the namespacing of its collection ids.
  *
- * <p>Two rules from pimdir SPEC.md §9.2 shape this, and the app would break
- * both if it used the obvious thing:
- *
- * <ul>
- *   <li><strong>The id must not change.</strong> The account id becomes part of
- *       every collection id it namespaces, so naming it after something the
- *       user can rename turns a rename into an id change for every collection.
- *       An email address looks stable and is not: people change providers and
- *       correct typos. So the id is a UUID generated once, kept beside the
- *       account's configuration, and never derived from anything the user can
- *       edit.
- *   <li><strong>The separator must not appear in the id.</strong> A collection
- *       name is routinely hierarchical ({@code [Gmail]/All Mail}) and has to
- *       survive, so the prefix is stripped by removing the known account id and
- *       one separator. That only works if the id itself contains no separator:
- *       account {@code a} holding {@code b/c} and account {@code a/b} holding
- *       {@code c} would otherwise spell the same string, and nothing could tell
- *       them apart afterwards. A UUID has no slash, so the rule holds by
- *       construction rather than by validation.
- * </ul>
- *
- * <p>The store holds no account row: it learns an account only through its
- * collections. The roster, the credentials and the display name stay where they
- * already are, in {@link SecureStore}, and this class is only the bridge between
- * that roster and the store's grouping key.
+ * <p>A UUID minted once, never the editable email, and free of the separator
+ * so a prefix strips unambiguously (pimdir SPEC.md §9.2). The store has no
+ * account row: the roster stays in {@link org.pimalaya.account.SecureStore}.
  */
 public final class PimdirAccount {
     /** The separator between the account id and the collection name. */
@@ -44,17 +21,16 @@ public final class PimdirAccount {
 
     private final SharedPreferences prefs;
 
+    /** The id mapping kept in the app's preferences. */
     public PimdirAccount(Context context) {
         this.prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     /**
-     * The store id of the account identified by {@code email}, minting and
-     * remembering one the first time it is asked for.
+     * The store id of the account {@code email}, minted on first ask.
      *
-     * <p>The email is the lookup key here and nowhere else: it maps to the id,
-     * and the id is what reaches the store, so changing the email later is a
-     * remap in these preferences rather than a rewrite of every collection.
+     * <p>The email is the lookup key here only, so changing it later remaps
+     * these preferences instead of rewriting every collection.
      */
     public synchronized String idOf(String email) {
         String id = prefs.getString(email, null);
@@ -65,14 +41,7 @@ public final class PimdirAccount {
         return id;
     }
 
-    /**
-     * The address behind a store id, or null when no account claims it.
-     *
-     * <p>The reverse of {@link #idOf}, by scanning: the mapping is one entry per
-     * connected account, so a scan is cheaper than the second index that would
-     * keep it sorted, and this runs when a collection roster is rendered rather
-     * than per item.
-     */
+    /** The address behind a store id ({@link #idOf} reversed), or null. */
     synchronized String emailOf(String id) {
         for (Map.Entry<String, ?> entry : prefs.getAll().entrySet()) {
             if (id.equals(entry.getValue())) {
@@ -88,12 +57,12 @@ public final class PimdirAccount {
         prefs.edit().remove(oldEmail).putString(newEmail, id).apply();
     }
 
-    /** Forgets an account, so removing and re-adding it starts a fresh store id. */
+    /** Forgets an account: re-adding it mints a fresh store id. */
     synchronized void forget(String email) {
         prefs.edit().remove(email).apply();
     }
 
-    /** The account id a collection id is namespaced under: what precedes its first separator. */
+    /** The account id a collection id is namespaced under. */
     public static String accountIdOf(String collectionId) {
         int at = collectionId.indexOf(SEPARATOR);
         return at < 0 ? collectionId : collectionId.substring(0, at);
@@ -105,11 +74,10 @@ public final class PimdirAccount {
     }
 
     /**
-     * The collection name inside a namespaced id, or the id itself when it does
-     * not belong to the account.
+     * The collection name inside a namespaced id, else the id itself.
      *
      * <p>Strips the account id and exactly one separator, so a hierarchical
-     * name keeps every separator of its own.
+     * name keeps its own.
      */
     public static String nameOf(String accountId, String collectionId) {
         String prefix = accountId + SEPARATOR;

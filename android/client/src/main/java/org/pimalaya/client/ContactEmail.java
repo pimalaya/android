@@ -6,8 +6,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One EMAIL entry of the field model (rs/contact/fields.rs
- * {@code ContactEmail} 147). A key the model leaves out reads as empty.
+ * One EMAIL entry of the field model.
+ *
+ * <p>Mirrors rs/contact/fields.rs {@code ContactEmail} 147. A key the model
+ * leaves out reads as empty.
  *
  * @param address the email address
  * @param pref whether the entry is preferred

@@ -4,8 +4,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * The GENDER of the field model (rs/contact/fields.rs {@code ContactGender}
- * 161). A key the model leaves out reads as empty.
+ * The GENDER of the field model.
+ *
+ * <p>Mirrors rs/contact/fields.rs {@code ContactGender} 161. A key the model
+ * leaves out reads as empty.
  *
  * @param identity the free-text gender identity
  * @param sex the sex code (RFC 6350 6.2.7)

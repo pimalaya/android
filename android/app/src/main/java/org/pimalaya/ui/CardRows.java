@@ -21,8 +21,7 @@ public final class CardRows {
     }
 
     /**
-     * One domain's row inside a card: its glyph on a tile, its name over an
-     * optional status line, and a trailing view.
+     * One domain's row in a card: glyph tile, name over status, trailing view.
      *
      * <p>The same row under a name of its own, for a card covering several.
      */
@@ -85,7 +84,7 @@ public final class CardRows {
         return row;
     }
 
-    /** An option's row under a hairline: its title over its line, then its tick. */
+    /** An option's row under a hairline: title over its line, then its tick. */
     public static View tickRow(Host host, int titleText, int lineText, CheckBox toggle) {
         LinearLayout item = new LinearLayout(host);
         item.setOrientation(LinearLayout.VERTICAL);

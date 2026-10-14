@@ -7,10 +7,10 @@ import java.util.Map;
 import org.json.JSONObject;
 
 /**
- * Crafted vCards, phone row sets and edit-form models the contact field
- * pins run through the real bridge: both versions, every property the
- * field model reads, present-empty values, first-wins duplicates, groups,
- * escapes and an unreadable document.
+ * Crafted vCards, phone row sets and form models the field pins run.
+ *
+ * <p>Both versions, every property read, present-empty values, first-wins
+ * duplicates, groups, escapes and an unreadable document.
  */
 public final class CardCorpus {
     private CardCorpus() {}
@@ -151,8 +151,7 @@ public final class CardCorpus {
     }
 
     /**
-     * Phone-authored row sets, read back as the provider answers them
-     * (every column a string, null columns absent).
+     * Phone row sets as the provider answers (strings, null columns absent).
      */
     public static List<List<Map<String, Object>>> phoneRows() {
         List<List<Map<String, Object>>> sets = new ArrayList<>();
@@ -255,8 +254,10 @@ public final class CardCorpus {
     }
 
     /**
-     * Edit-form models as the form leaves them: partial objects, removed
-     * parts, present-empty values, keys it never applies.
+     * Edit-form models as the form leaves them.
+     *
+     * <p>Partial objects, removed parts, present-empty values, keys it never
+     * applies.
      */
     public static final List<String> FORM_MODELS =
             List.of(

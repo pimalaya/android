@@ -21,10 +21,11 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Pins the edit form's bridge replies on the real bridge: the view support
- * of every corpus projection, the typed dialog entries, and the merge and
- * conflict forms, each record mirroring its Rust struct. The form driven
- * end to end is pinned by ContactFormTest.
+ * Pins the edit form's bridge replies on the real bridge.
+ *
+ * <p>View support of every projection, typed dialog entries, merge and conflict
+ * forms, each record mirroring its struct. The form end to end is
+ * ContactFormTest's.
  */
 @RunWith(RobolectricTestRunner.class)
 public class FormViewTest {

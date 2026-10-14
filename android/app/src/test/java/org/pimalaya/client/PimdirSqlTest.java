@@ -18,14 +18,9 @@ import java.util.Map;
 /**
  * The canonical pimdir schema, applied to the bundled SQLite.
  *
- * <p>The point of this suite is the seam itself: the app compiles io-pimdir
- * without its {@code client} feature, so the statements come from the crate
- * over JNI while the execution stays on the Java binding. That only works if
- * the SQL the spec writes for rusqlite is accepted verbatim by that driver,
- * which is an assumption worth testing rather than hoping for: {@code STRICT}
- * tables, partial indexes and {@code RETURNING} are all recent SQLite
- * features, which is why the app bundles its SQLite rather than take the
- * device's.
+ * <p>The seam itself: io-pimdir's statements over JNI, run by the Java binding,
+ * so the driver must take its SQL verbatim. STRICT tables, partial indexes and
+ * RETURNING are recent, which is why the app bundles SQLite.
  */
 @RunWith(RobolectricTestRunner.class)
 public class PimdirSqlTest {
@@ -42,24 +37,23 @@ public class PimdirSqlTest {
     public void theBridgeCarriesEveryStatement() {
         Map<String, String> all = PimdirSql.all();
 
-        // The crate indexes sixty; an exact count would break on every spec
-        // addition, so assert the shape and the ones this app relies on.
+        // NOTE: the crate indexes sixty; an exact count would break on every
+        // spec addition.
         assertTrue("expected the full statement set, got " + all.size(), all.size() >= 50);
         assertNotNull(all.get("LIST_COLLECTIONS_BY_ACCOUNT"));
         assertNotNull(all.get("LIST_LINK_PLACEMENTS"));
         assertNotNull(all.get("UPSERT_CONTACT_SUMMARY"));
-        // The migrations are indexed apart from the statements the profiles
-        // run: one is the schema, the others are what a store is queried with.
+        // NOTE: migrations are indexed apart from the statements the profiles
+        // run.
         assertTrue(PimdirSql.migrations().length >= 1);
         assertEquals(1, PimdirSql.version());
     }
 
     @Test
     public void theSchemaSplitSurvivesSemicolonsInComments() {
-        // The canonical schema documents itself, and one of its comments reads
-        // "handing out the next item `seq`; only ever increases". Splitting on
-        // ';' alone cuts there and truncates the CREATE TABLE, which SQLite
-        // rejects as incomplete input. Every fragment must be a whole statement.
+        // NOTE: a schema comment contains ';' ("only ever increases"), so
+        // splitting on ';' alone truncates a CREATE TABLE. Every fragment must
+        // be whole.
         String[] statements = PimdirSql.schema();
 
         assertTrue("expected the whole schema, got " + statements.length, statements.length >= 10);
@@ -85,9 +79,8 @@ public class PimdirSqlTest {
     public void androidSqliteAcceptsTheCanonicalSchema() {
         SQLiteDatabase db = pimdir();
 
-        // STRICT tables and the partial indexes are the parts most likely to be
-        // refused by an older SQLite, so check they really exist rather than
-        // trusting that execSQL did not throw.
+        // NOTE: STRICT tables and partial indexes are what an older SQLite
+        // refuses, so check they exist rather than trust execSQL.
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name", null)) {
@@ -121,7 +114,6 @@ public class PimdirSqlTest {
                 "INSERT INTO store_meta(id, version, hash_algo, created_at)"
                         + " VALUES(1, 1, 'blake3', '2026-08-08T00:00:00Z')");
 
-        // Two accounts, one mailbox each, both holding the same message.
         db.execSQL(bind(PimdirSql.of("ENSURE_COLLECTION"), "work/INBOX", "work"));
         db.execSQL(bind(PimdirSql.of("ENSURE_COLLECTION"), "home/INBOX", "home"));
         db.execSQL(
@@ -131,7 +123,6 @@ public class PimdirSqlTest {
                 "INSERT INTO items(collection, link_id, seq, level)"
                         + " VALUES('home/INBOX', '<n@x>', 1, 2)");
 
-        // The merged view's filter axis, run as the spec writes it.
         String byAccount = PimdirSql.of("LIST_COLLECTIONS_BY_ACCOUNT").replace(":account", "'work'");
         try (Cursor cursor = db.rawQuery(byAccount, null)) {
             assertTrue(cursor.moveToFirst());
@@ -139,7 +130,6 @@ public class PimdirSqlTest {
             assertFalse("work owns one collection", cursor.moveToNext());
         }
 
-        // The multiplicity read: one identity, two accounts, one shared seq.
         String placements = PimdirSql.of("LIST_LINK_PLACEMENTS").replace(":link_id", "'<n@x>'");
         try (Cursor cursor = db.rawQuery(placements, null)) {
             assertTrue(cursor.moveToFirst());
@@ -152,9 +142,9 @@ public class PimdirSqlTest {
     }
 
     /**
-     * Substitutes a collection and account into a statement, for the reads that
-     * take no bind arguments through {@code rawQuery}. Test-only: the store
-     * binds parameters properly.
+     * Substitutes a collection and account into a statement for rawQuery.
+     *
+     * <p>Test-only: the store binds parameters properly.
      */
     private static String bind(String sql, String collection, String account) {
         return sql.replace(":collection", "'" + collection + "'")

@@ -14,13 +14,11 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Documents which org.json the JVM tests see, since it is not the one the
- * device runs: a plain JUnit test loads the {@code org.json:json} artifact
- * (build.gradle.kts), whose JSONObject is backed by a HashMap and so loses
- * insertion order, while a Robolectric test loads Android's own (from the
- * android-all jar), backed by a LinkedHashMap as on a device. An assertion
- * on key order is therefore only sound on a raw string, or under
- * Robolectric, never on a re-printed JSONObject in a plain JUnit test.
+ * Documents which org.json the JVM tests see, which is not the device's.
+ *
+ * <p>Plain JUnit loads {@code org.json:json} (HashMap-backed, loses order);
+ * Robolectric loads Android's (LinkedHashMap, as on a device). Assert key order
+ * only on a raw string or under Robolectric.
  */
 @RunWith(Enclosed.class)
 public class OrgJsonProbeTest {
@@ -53,7 +51,7 @@ public class OrgJsonProbeTest {
         }
     }
 
-    /** A Robolectric test: Android's org.json, LinkedHashMap-backed as on a device. */
+    /** A Robolectric test: Android's org.json, LinkedHashMap-backed. */
     @RunWith(RobolectricTestRunner.class)
     public static class Android {
         @Test

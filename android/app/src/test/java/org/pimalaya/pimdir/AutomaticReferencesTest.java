@@ -25,10 +25,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * The automatic references (pimdir STORAGE section 14.2) as the app records
- * them: a mail and its sender's card whichever lands first, an invitation and
- * its calendar item whichever lands first, none for a writer-derived key, and
- * a store written before them reconciled on open.
+ * The automatic references (pimdir STORAGE section 14.2) the app records.
+ *
+ * <p>A mail and its sender's card, an invitation and its calendar item, each
+ * whichever lands first; none for a writer-derived key; an older store
+ * reconciled on open.
  */
 @RunWith(RobolectricTestRunner.class)
 public class AutomaticReferencesTest {

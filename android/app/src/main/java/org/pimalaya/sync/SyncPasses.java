@@ -53,24 +53,25 @@ import org.pimalaya.pimdir.PimdirEngine;
 import org.pimalaya.pimdir.PimdirSummary;
 
 /**
- * Every remote and phone pass, headless and blocking: the contacts, mail
- * and calendar halves of a sync and the phone spokes. The account lookup,
- * the addressbook self-heal and the refresh-once-and-retry dance exist
- * exactly once. The caller keeps what is its alone: MainActivity the sync
- * dock and its in-memory account cache (fed by the progress), the
- * background check nothing ({@link #HEADLESS}). Everything blocks; callers
- * run it off the main thread.
+ * Every remote and phone pass, headless and blocking: run it off main.
+ *
+ * <p>Account lookup, book self-heal and refresh-and-retry live here once. A
+ * caller keeps its own state: {@link SyncCoordinator} the dock and account
+ * cache, the background check nothing ({@link #HEADLESS}).
  */
 public final class SyncPasses {
     /**
-     * What a pass reports as it goes, for the sync dock and the account
-     * cache; every hook fires on the sync thread.
+     * What a pass reports as it goes, every hook on the sync thread.
+     *
+     * <p>For the sync dock and the account cache.
      */
     public interface Progress extends PimdirEngine.Progress {
         /** The pass moved on to one account, null between accounts. */
         void account(String email);
 
-        /** How many of an account's address books, mailboxes or calendars have landed. */
+        /**
+         * How many of an account's books, mailboxes or calendars have landed.
+         */
         void collections(PimDomain domain, int done, int total);
 
         /** A token refresh re-persisted the account's credentials. */
@@ -100,10 +101,10 @@ public final class SyncPasses {
             Clients clients) {}
 
     /**
-     * Outcome of a remote run: what was pulled from the server, pushed
-     * to it, and left conflicted awaiting the user's manual resolution,
-     * plus the first failure. The phone passes it ran are not reported:
-     * the phone is a view of the store, not a sync.
+     * Outcome of a remote run: pulled, pushed, conflicted, first failure.
+     *
+     * <p>Conflicts await manual resolution. Phone passes are not reported: the
+     * phone is a view of the store, not a sync.
      */
     public static final class Outcome {
         final Set<String> remoteIn = new HashSet<>();
@@ -111,6 +112,7 @@ public final class SyncPasses {
         final Set<String> remoteChanged = new HashSet<>();
         int conflicts;
 
+        /** The first failure, null when every account went through. */
         public Exception failure;
 
         /** Folds one book's report in; the sets dedupe across passes. */
@@ -124,7 +126,9 @@ public final class SyncPasses {
 
     /** What one mail pass over every account came to. */
     public static final class MailPass {
+        /** The first failure, null when every account went through. */
         public Exception failure;
+        /** How many outbox messages went out. */
         public int sent;
     }
 
@@ -140,6 +144,7 @@ public final class SyncPasses {
     /** What the passes read and write, the background check reading it too. */
     final Parts parts;
 
+    /** Passes over {@code parts}, reporting to {@code progress}. */
     public SyncPasses(Context context, Parts parts, Progress progress) {
         this.parts = parts;
         this.context = context;
@@ -153,23 +158,17 @@ public final class SyncPasses {
     }
 
     /**
-     * The full remote run, the in-app sync's unit: self-heals accounts
-     * whose addressbooks a schema rebuild dropped, then reconciles
-     * every subscribed book account by account, one engine per account
-     * so the account-level backends (JMAP, Google) list their cards
-     * once per pass. An expired OAuth access token refreshes and
-     * retries its account once; one account failing (revoked token,
-     * server down) never blocks the others, the first failure riding
-     * the outcome instead.
+     * The full remote run, the in-app sync's unit.
+     *
+     * <p>Re-fetches books a schema rebuild dropped, then syncs each account's
+     * books on one engine. A 401 refreshes and retries once; a failing account
+     * never blocks the others, its error riding the outcome.
      */
     public Outcome syncRemote() {
         return syncRemote(SyncScope.all(context));
     }
 
-    /**
-     * The remote run narrowed to a scope: the books of the accounts and
-     * collections it takes.
-     */
+    /** The remote run narrowed to what {@code scope} takes. */
     public Outcome syncRemote(SyncScope scope) {
         Outcome outcome = new Outcome();
 
@@ -255,11 +254,10 @@ public final class SyncPasses {
     }
 
     /**
-     * The phone spoke alone, offline and silent (no progress steps): the
-     * two-way phone pass of every mirrored book, tallying into the report,
-     * each skipping on its quiet path when neither side changed. Returns a
-     * failure, or null. A book with no Android account or no contacts
-     * permission is skipped.
+     * The phone spoke alone, offline and silent: every mirrored book's pass.
+     *
+     * <p>Tallies into {@code report}; a book with no Android account or
+     * permission is skipped. Answers the failure, or null.
      */
     public Exception syncPhone(ContactEngine.Report report) {
         try {
@@ -274,10 +272,10 @@ public final class SyncPasses {
     }
 
     /**
-     * The calendars' phone spoke alone, offline and silent: the phone pass of
-     * every calendar the phone shows, each skipping on its quiet path.
-     * Answers whether any brought a calendar-app edit in. Nothing without the
-     * calendar permission.
+     * The calendars' phone spoke alone, offline and silent.
+     *
+     * <p>Answers whether a shown calendar brought a calendar-app edit in;
+     * nothing without the calendar permission.
      */
     public boolean syncPhoneCalendars() {
         if (!PhoneMirror.CALENDAR.granted(context)) {
@@ -302,14 +300,11 @@ public final class SyncPasses {
     }
 
     /**
-     * One account's engine pass: every one of its subscribed books
-     * reconciles through io-offline (spine sync, body hydration,
-     * conflict resolution), sharing one driver so the account-level
-     * backends list their cards once per pass.
+     * One account's engine pass over its subscribed books, sharing one driver.
      *
-     * <p>The books are listed first, for what the source says of each:
-     * which one is the default and which ones are read only. The roster
-     * itself is left as it is, the switches hanging off it.
+     * <p>io-pimdir's engine reconciles each, and the account-level backends
+     * list their cards once per pass. The books are listed first for their
+     * roles (default, read only); the roster itself is left as it is.
      */
     private void syncAccount(
             String email, Account account, List<BookEntry> books, Outcome outcome)
@@ -362,15 +357,11 @@ public final class SyncPasses {
     }
 
     /**
-     * Renews one domain's credential and re-persists the account,
-     * returning the updated entry.
+     * Renews one domain's credential, re-persists the account, answers it.
      *
-     * <p>Whichever domain asks, the credential is renewed once and
-     * every domain that signs in with it follows, because a credential
-     * is stored once per consent rather than copied per domain
-     * ({@link AccountCredential}). A provider that issues a fresh
-     * refresh token on every use retires the old one immediately, so
-     * copies were exactly what could not be kept in step.
+     * <p>Once for every domain signing in with it: stored once per consent
+     * ({@link AccountCredential}), since a provider rotating refresh tokens
+     * retires the old one on use.
      */
     AccountEntry refreshed(AccountEntry entry, PimDomain domain) {
         // NOTE: one renewal per credential at a time, across the workers of a
@@ -408,16 +399,11 @@ public final class SyncPasses {
     }
 
     /**
-     * One account's calls in one domain, with its access token kept
-     * fresh: a call answered 401 refreshes the token once and runs
-     * again, and every later call in the scope uses the refreshed
-     * connection.
+     * One account's calls in one domain, its access token kept fresh.
      *
-     * <p>The read-only domains need this exactly as much as contacts
-     * does. An access token lives about an hour, so without it the
-     * second sync of any OAuth mail or calendar account of a session
-     * fails and keeps failing, with a stored refresh token sitting
-     * unused beside it.
+     * <p>A 401 refreshes the token once and runs again, later calls on the new
+     * one. A token lives about an hour: without this a session's second OAuth
+     * sync keeps failing.
      */
     final class Session {
         private AccountEntry account;
@@ -429,11 +415,10 @@ public final class SyncPasses {
         }
 
         /**
-         * Runs {@code call}, refreshing once on a 401. Callable from several
-         * threads at once (an account's calendars run side by side): the
-         * refresh is made once, by whichever call saw the token it replaces,
-         * and the others retry on the token it made, since a provider
-         * issuing a fresh refresh token on every use retires the old one.
+         * Runs {@code call}, refreshing once on a 401; any thread may call.
+         *
+         * <p>The call that saw the old token refreshes, the others retry on the
+         * new one: a provider rotating refresh tokens retires the old one.
          */
         <T> T call(Call<T> call) throws Exception {
             AccountEntry used = current();
@@ -451,7 +436,7 @@ public final class SyncPasses {
             return account;
         }
 
-        /** The account renewed past {@code used}, renewing it unless another call has. */
+        /** The account renewed past {@code used}, unless a call already did. */
         private synchronized AccountEntry renewedSince(AccountEntry used) {
             if (account == used) {
                 account = refreshed(account, domain);
@@ -473,9 +458,9 @@ public final class SyncPasses {
     /**
      * The stored contacts account for an address, or null.
      *
-     * <p>Scoped to the domain because one address can be connected for several,
-     * and this runner syncs address books: matching on the address alone could
-     * hand back a mail account and sync a mailbox as a book.
+     * <p>Scoped to contacts, the domain this pass syncs: one address can be
+     * connected for several, and the address alone could hand back a mail
+     * account and sync a mailbox as a book.
      */
     private AccountEntry entryFor(String email) {
         for (AccountEntry entry : store.loadAll()) {
@@ -487,10 +472,10 @@ public final class SyncPasses {
     }
 
     /**
-     * Every mail account's outbox drained and, with {@code listing}, its
-     * mailboxes synced, on the calling thread: those the scope takes. A
-     * pass lists nothing on a metered network, where the outbox goes out
-     * all the same.
+     * Every mail account's outbox drained and, with {@code listing}, synced.
+     *
+     * <p>On the calling thread, over the accounts the scope takes. A metered
+     * network lists nothing, the outbox going out all the same.
      */
     public MailPass mailPass(SyncScope scope, boolean listing) {
         progress.account(null);
@@ -504,9 +489,8 @@ public final class SyncPasses {
                 continue;
             }
             progress.account(account.email);
-            // One connection for the account's whole pass: the drain, the
-            // walk and every marker the reader moved go out on it rather
-            // than on one apiece.
+            // NOTE: one connection for the drain, the walk and every marker
+            // the reader moved, not one apiece.
             try (MailSession session = openMail(account)) {
                 // NOTE: the outbox first, so a message sent a moment ago is
                 // already in the sent mailbox by the time the walk beside it
@@ -537,26 +521,11 @@ public final class SyncPasses {
     }
 
     /**
-     * Hands over everything waiting in one account's outbox, on the
-     * calling thread, answering how many went out.
+     * Hands over one account's outbox, calling thread; answers how many went.
      *
-     * <p>One at a time, in the append order the queue owes them, and the
-     * row goes only once the submission has been accepted: the message
-     * has left, so acknowledging it is what finishes the action (STORAGE
-     * section 15.5). A submission is therefore at-least-once, and a drain
-     * that dies between the handover and the acknowledgement sends the
-     * message twice, which is the trade against losing it.
-     *
-     * <p>A failure has three answers. A message the server refused for good
-     * is parked carrying what it said, and the drain carries on to the
-     * ones behind it: nothing will ever make that message acceptable, and
-     * leaving it queued would offer it again on every sync for ever. A
-     * message handed over whole with no verdict back may have gone, so it
-     * is parked as uncertain rather than sent again on its own, for the
-     * user to send again once they find it did not go.
-     * Anything else counts an attempt and stops the drain where it is,
-     * since the usual cause is that there is no network and the next
-     * message would fail too.
+     * <p>In order, acknowledged once accepted (STORAGE 15.5): at-least-once. A
+     * refusal parks it and goes on; no verdict parks it uncertain and stops;
+     * any other failure counts an attempt and stops.
      */
     private int drainOutbox(AccountEntry account, MailSession session) throws Exception {
         int sent = 0;
@@ -589,13 +558,10 @@ public final class SyncPasses {
     }
 
     /**
-     * Opens one account's mail connection, renewing its access token once
-     * if the server refuses the sign-in.
+     * Opens one account's mail session, renewing its token once if refused.
      *
-     * <p>The refresh belongs here rather than around each verb, because
-     * the session <em>is</em> the sign-in: a token that expired is a
-     * connection that cannot be opened, and one already open outlives the
-     * token that opened it.
+     * <p>The refresh is here, not around each verb: the session is the sign-in,
+     * and one already open outlives the token that opened it.
      */
     public MailSession openMail(AccountEntry account) {
         try {
@@ -612,22 +578,19 @@ public final class SyncPasses {
         }
     }
 
-    /** The stored accounts connected for one domain ({@link SecureStore#accountsFor}). */
+    /** The stored accounts connected for {@code domain}. */
     public List<AccountEntry> accountsFor(PimDomain domain) {
         return store.accountsFor(domain);
     }
 
     /**
-     * Every calendar account synced, on the calling thread: those the
-     * scope takes. Answers the first failure.
+     * Every calendar account the scope takes synced, on the calling thread.
+     *
+     * <p>Answers the first failure.
      */
     public Exception calendarPass(SyncScope scope) {
         progress.account(null);
         Exception failure = null;
-        // NOTE: the calendar accounts, rather than the contacts accounts that
-        // happened to be CalDAV-shaped. That filter was the closest thing to a
-        // calendar account the app had before the connection flow could make
-        // one, and it walked a CardDAV home looking for calendars.
         for (AccountEntry account : accountsFor(PimDomain.CALENDAR)) {
             if (!scope.account(account.email)) {
                 continue;
@@ -641,21 +604,11 @@ public final class SyncPasses {
     }
 
     /**
-     * One account's mail reconciled with its server, on the calling
-     * thread. Answers what went wrong, or null.
+     * One account's mail reconciled with its server, on the calling thread.
      *
-     * <p>One walk, then one engine pass per mailbox off it: the walk is
-     * what authenticates and what says which mailboxes there are, and
-     * what a pass does instead of replacing is reconcile, which is what
-     * lets a staged marker or a staged delete survive it.
-     *
-     * <p>The mailboxes then run side by side on the account's pool
-     * ({@link WorkerPool}), in the pass's order, the inbox first: the wait is
-     * the network's, mailbox after mailbox, and a few sessions wait on a few
-     * mailboxes at once. The caller's session is the pool's first, so the
-     * walk, the drain before it and the first worker share one connection.
-     * One mailbox failing leaves the others running; the first failure is
-     * what the pass reports.
+     * <p>A walk lists the mailboxes, then one pass each, inbox first, on the
+     * account's {@link WorkerPool} (the caller's session first). A failing one
+     * leaves the others; answers the first failure, or null.
      */
     Exception fetchMail(AccountEntry account, MailSession session, SyncScope scope) {
         progress.account(account.email);
@@ -740,11 +693,10 @@ public final class SyncPasses {
     }
 
     /**
-     * The first sync of one mailbox the filter newly ticks, never listed,
-     * on the calling thread: its first chunk of about 50 newest headers
-     * ({@link MailEngine#widen}), the floor of what it reached its own
-     * frontier, so the body step downloads their bodies and *Load more*
-     * steps it from there. Answers what went wrong, or null.
+     * The first sync of a mailbox the filter newly ticks, calling thread.
+     *
+     * <p>Its first chunk of about 50 newest headers ({@link MailEngine#widen}),
+     * its frontier at what it reached. Answers the failure, or null.
      */
     public Exception firstOf(AccountEntry account, MailSession session, String collection) {
         progress.account(account.email);
@@ -763,12 +715,11 @@ public final class SyncPasses {
     }
 
     /**
-     * What *Load more* brings one account, on the calling thread: a step
-     * ({@link #stepMail}) of the account or of the one mailbox {@code only}
-     * names. The junk or the trash, which no step of its account brings, is
-     * stepped by its label on Gmail and elsewhere widened by its next chunk
-     * of headers ({@link MailEngine#widen}), its bodies left to opening.
-     * Answers what went wrong, or null.
+     * What Load more brings one account, on the calling thread.
+     *
+     * <p>A {@link #stepMail} of the account or of {@code only}; junk and trash,
+     * no account step's, are stepped by label on Gmail, else widened ({@link
+     * MailEngine#widen}). Answers the failure, or null.
      */
     public Exception loadMore(AccountEntry account, MailSession session, String only) {
         if (only == null
@@ -791,14 +742,11 @@ public final class SyncPasses {
     }
 
     /**
-     * One step of one account's mail ({@link MailStep}) on its session, on
-     * the calling thread: for the first sync ({@code first}) after its
-     * mailboxes are read and stored, which opens every one of them; else
-     * over the mailboxes stored, of the account or the one {@code only}
-     * names. The account's frontier moves back to what it brought, all
-     * mail once nothing older is left ({@link MailWindow}), or the one
-     * mailbox's own when it stepped that alone. Answers what went wrong, or
-     * null.
+     * One {@link MailStep} of an account's mail, on the calling thread.
+     *
+     * <p>A {@code first} one reads and stores the mailboxes; else the stored
+     * ones or {@code only}. The frontier moves back to what it brought ({@link
+     * MailWindow}). Answers the failure, or null.
      */
     public Exception stepMail(AccountEntry account, MailSession session, String only, boolean first) {
         progress.account(account.email);
@@ -874,9 +822,10 @@ public final class SyncPasses {
     }
 
     /**
-     * One account's calendars reconciled with its server, on the calling
-     * thread. Answers what went wrong, or null; a calendar whose pass
-     * fails leaves the ones beside it alone.
+     * One account's calendars reconciled with its server, calling thread.
+     *
+     * <p>A failing calendar leaves the others. Answers the first failure, or
+     * null.
      */
     public Exception fetchCalendars(AccountEntry account, SyncScope scope) {
         progress.account(account.email);
@@ -975,9 +924,10 @@ public final class SyncPasses {
     }
 
     /**
-     * The pass's progress for one account's calendar engines: every step,
-     * but a step's count only while its calendar is the one {@code running},
-     * so the bar never jumps between three downloads.
+     * The pass's progress for one account's calendar engines.
+     *
+     * <p>Every step, but a step's count only while one calendar is {@code
+     * running}, so the bar never jumps between downloads.
      */
     private PimdirEngine.Progress alone(AtomicInteger running) {
         return new PimdirEngine.Progress() {
@@ -1007,8 +957,9 @@ public final class SyncPasses {
     private PimdirAccount accountIds;
 
     /**
-     * One domain's collections as the store holds them, every account's:
-     * the mailboxes, the calendars, or the subscribed address books (the
+     * One domain's collections in the store, every account's.
+     *
+     * <p>The mailboxes, the calendars, or the subscribed address books (the
      * on-device one among them).
      */
     public List<PimdirCollections.Stored> collectionsOf(PimDomain domain) {

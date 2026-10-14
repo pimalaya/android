@@ -5,42 +5,26 @@ import org.pimalaya.client.OauthGrant;
 import org.pimalaya.client.OauthTokens;
 
 /**
- * What one sign-in produced: the secret an account presents, and
- * everything needed to renew it.
+ * What one sign-in produced: the secret presented, and what renews it.
  *
- * <p>Stored once per <em>consent</em> and named by every domain it
- * covers, which is the whole point of it being its own object. A
- * browser grant covers whichever domains chose the same authorization
- * server, and the tokens it returns belong to all of them; keeping a
- * copy per domain meant a provider that issues a fresh refresh token on
- * every use (Fastmail, among others) retired the other copies the
- * moment one was spent, and the domains still holding them could never
- * sign in again. One object, one refresh, and there is nothing left to
- * keep in step.
- *
- * <p>Per consent and not per account, because one account can hold
- * several: Microsoft issues Outlook's scopes through a separate grant
- * from Graph's, so those are two credentials of one identity, and
- * renewing either must leave the other alone. Google issues one token
- * for all of its APIs, so a Google account holds one: a domain added
- * later asks for the union and its grant replaces the earlier one.
+ * <p>Stored once per consent, named by every domain it covers: a rotating
+ * refresh token (Fastmail) retires other copies on first use. Outlook and Graph
+ * grants are two credentials; Google's one token covers every API.
  */
 public final class AccountCredential {
     /**
      * What renews an OAuth credential without asking the user.
      *
-     * @param refreshToken the refresh token; null when the server issued
-     *     none
-     * @param grant where and for which client the refresh runs, and the
-     *     scopes the grant holds, as the token response named them (null
-     *     for a grant stored before the scopes were kept)
+     * @param refreshToken the refresh token; null when the server issued none
+     * @param grant endpoint, client and granted scopes (null on old grants)
      */
     public record Renewal(String refreshToken, OauthGrant grant) {}
 
     /**
-     * What names this credential inside its account. Opaque and minted
-     * per grant: two sign-ins are two credentials even against one
-     * provider, since the second cannot renew the first.
+     * What names this credential inside its account.
+     *
+     * <p>Opaque and minted per grant: two sign-ins are two credentials even
+     * against one provider, since the second cannot renew the first.
      */
     public final String id;
 

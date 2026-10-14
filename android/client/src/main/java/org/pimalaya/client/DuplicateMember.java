@@ -4,8 +4,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One member of a duplicate review group (rs/contact/group.rs
- * {@code DuplicateMember} 118). A null component is an absent key.
+ * One member of a duplicate review group.
+ *
+ * <p>Mirrors rs/contact/group.rs {@code DuplicateMember} 118. A null
+ * component is an absent key.
  *
  * @param ref the replica reference
  * @param book the addressbook URL

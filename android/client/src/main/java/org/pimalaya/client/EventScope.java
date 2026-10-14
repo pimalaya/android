@@ -1,8 +1,9 @@
 package org.pimalaya.client;
 
 /**
- * Which occurrences of a series an edit applies to (rs/calendar/edit.rs
- * {@code EventScope} 97).
+ * Which occurrences of a series an edit applies to.
+ *
+ * <p>Mirrors rs/calendar/edit.rs {@code EventScope} 97.
  */
 public enum EventScope {
     /** The series itself, which is all an entry that does not recur has. */

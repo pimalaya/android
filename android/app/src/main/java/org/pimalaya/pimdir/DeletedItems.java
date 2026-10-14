@@ -22,19 +22,11 @@ import java.util.Map;
 import java.util.TimeZone;
 
 /**
- * What the store keeps of deleted items (pimdir STORAGE §11): the rows a
- * reader lists, a restore staging one back, and the purge freeing the space.
+ * The store's deleted items (pimdir STORAGE §11): listing, restore and purge.
  *
- * <p>The app runs io-pimdir without its {@code client} feature, so the store's
- * {@code list_retained}, {@code retained_bytes}, {@code purge_retained_before}
- * and {@code collect_garbage} are not callable here: this is the same reads
- * and deletes through their canonical statements ({@link PimdirSql}), on the
- * terms io-pimdir runs them.
- *
- * <p>A deleted row is one of two: retained, its last binding gone and its body
- * kept until a purge, or still bound by a source the delete has not reached
- * yet (no {@code retained_at}), which waits for the server and is neither
- * restored nor purged.
+ * <p>io-pimdir's {@code client} feature is off, so its retention calls run
+ * here through their canonical statements ({@link PimdirSql}). A row still
+ * bound by a source (no {@code retained_at}) is neither restored nor purged.
  */
 public final class DeletedItems {
     /** Rows one keyset read takes of a collection. */
@@ -42,16 +34,19 @@ public final class DeletedItems {
 
     /** One deleted item, as the page lists it. */
     public static final class Row {
+        /** The collection it was deleted from. */
         public final PimdirCollections.Stored collection;
+        /** Its media type. */
         public final String kind;
         final long seq;
+        /** Its identity. */
         public final String linkId;
         final String flags;
         final String object;
         final String sortKey;
         final boolean full;
 
-        /** When the store retained it (RFC 3339), null while a source binds it. */
+        /** When the store retained it (RFC 3339), null while bound. */
         public final String retainedAt;
 
         /** What its body weighs, 0 for none. */
@@ -63,7 +58,7 @@ public final class DeletedItems {
         /** The summary's second fact: sender, organization, empty for none. */
         public String who = "";
 
-        /** The summary's date: a mail's (RFC 3339) or an event's start, empty for none. */
+        /** The summary's date (mail RFC 3339, event start), or empty. */
         public String when = "";
 
         Row(
@@ -89,7 +84,7 @@ public final class DeletedItems {
             this.size = size;
         }
 
-        /** Whether a source still binds it: the server delete is not carried out yet. */
+        /** Whether a source still binds it, its delete not pushed yet. */
         public boolean waiting() {
             return retainedAt == null;
         }
@@ -111,21 +106,18 @@ public final class DeletedItems {
     private final Context context;
     private final PimdirItems items;
 
+    /** Reads and purges the deleted items of {@code store}. */
     public DeletedItems(PimdirDb store, Context context) {
         this.store = store;
         this.context = context;
         this.items = new PimdirItems(store);
     }
 
-    // ---- reads ------------------------------------------------------------
-
     /**
-     * Every deleted item of every mailbox, address book and calendar, newest
-     * deletion first.
+     * Every deleted item of every collection, newest deletion first.
      *
-     * <p>io-pimdir lists the trash per collection in {@code seq} order, so the
-     * walk reads each collection a keyset page at a time and orders the whole
-     * at the end: a deletion's time is not what the store's index serves.
+     * <p>io-pimdir pages each collection's trash in {@code seq} order, so the
+     * whole is sorted at the end: the index does not serve deletion time.
      */
     public List<Row> list() {
         SQLiteDatabase db = store.getReadableDatabase();
@@ -150,7 +142,7 @@ public final class DeletedItems {
         return rows;
     }
 
-    /** pimdir's {@code list_retained}: one keyset page of a collection's trash. */
+    /** pimdir's {@code list_retained}: one keyset page of a trash. */
     private static List<Row> page(
             SQLiteDatabase db, PimdirCollections.Stored collection, String kind, long after) {
         Map<String, Object> values = new HashMap<>();
@@ -185,10 +177,7 @@ public final class DeletedItems {
         return page;
     }
 
-    /**
-     * Attaches what each row's summary says, read through the kind's own
-     * canonical statement for the page's link ids.
-     */
+    /** Attaches each row's summary, read by its kind's canonical statement. */
     private static void summarise(
             SQLiteDatabase db, String collection, String kind, List<Row> page) {
         if (page.isEmpty()) {
@@ -242,15 +231,13 @@ public final class DeletedItems {
         }
     }
 
-    /** pimdir's {@code retained_bytes}: what retention holds store-wide, each body once. */
+    /** pimdir's {@code retained_bytes}: retention store-wide, bodies once. */
     public long retainedBytes() {
         try (Cursor cursor =
                 query(store.getReadableDatabase(), "RETAINED_BYTES", new HashMap<>())) {
             return cursor.moveToFirst() ? Math.max(0, cursor.getLong(0)) : 0;
         }
     }
-
-    // ---- restore ----------------------------------------------------------
 
     /** Why a row cannot be restored. */
     public enum Refusal {
@@ -264,6 +251,7 @@ public final class DeletedItems {
 
     /** Refused restore. */
     public static final class RefusedException extends Exception {
+        /** Why the restore was refused. */
         public final Refusal refusal;
 
         RefusedException(Refusal refusal) {
@@ -273,15 +261,11 @@ public final class DeletedItems {
     }
 
     /**
-     * Stages the row's stored body back into {@code target}, a collection of
-     * its kind, as a local creation the next sync uploads.
+     * Stages the row's body into {@code target} as a local creation.
      *
-     * <p>Back into its last collection the create names the identity the row
-     * holds, so the store revives the retained row and its public id
-     * (STORAGE §11.1). Elsewhere it is a new item: a contact or an event keeps
-     * its UID, one identity with one more placement; a mail is named from its
-     * body, its link id being the handle its last mailbox gave it, which names
-     * nothing in another one.
+     * <p>Into its last collection, the store revives the row and its public id
+     * (STORAGE §11.1). Elsewhere: a contact or event keeps its UID, a mail is
+     * named from its body (its handle names nothing in another mailbox).
      */
     public void restore(Stager engine, Row row, String target)
             throws RefusedException, JSONException {
@@ -312,7 +296,7 @@ public final class DeletedItems {
                 sortKey.isEmpty() ? row.sortKey : sortKey);
     }
 
-    /** pimdir's {@code live_item_for_link}: whether the collection holds the identity live. */
+    /** pimdir's {@code live_item_for_link}: the identity is live there. */
     private boolean live(String collection, String linkId) {
         Map<String, Object> values = new HashMap<>();
         values.put("collection", collection);
@@ -331,9 +315,7 @@ public final class DeletedItems {
         }
     }
 
-    // ---- free space -------------------------------------------------------
-
-    /** An instant as the store stamps a retention (RFC 3339, UTC, milliseconds). */
+    /** An instant as the store stamps retention (RFC 3339, UTC, millis). */
     public static String stamp(Date date) {
         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
         format.setTimeZone(TimeZone.getTimeZone("UTC"));
@@ -341,15 +323,11 @@ public final class DeletedItems {
     }
 
     /**
-     * pimdir's {@code purge_retained_before}, then {@code collect_garbage}:
-     * every item retained strictly before {@code cutoff} (RFC 3339) goes with
-     * the pins it held, and the bodies nothing references any more are
-     * reclaimed. A row a source still binds is never reached. Returns how
-     * many items went.
+     * Purges items retained before {@code cutoff} (RFC 3339); returns how many.
      *
-     * <p>The pins are recounted by the collector rather than read back off
-     * the statement's {@code RETURNING} ({@link PimdirDb#changed}): a purge
-     * of more rows than a cursor window holds would run again on its refill.
+     * <p>pimdir's {@code purge_retained_before} then {@code collect_garbage}.
+     * Pins are recounted, not read off {@code RETURNING}: a cursor refill
+     * would rerun the purge. A row a source still binds is never reached.
      */
     public int purgeBefore(String cutoff) {
         SQLiteDatabase db = store.getWritableDatabase();
@@ -368,13 +346,10 @@ public final class DeletedItems {
     }
 
     /**
-     * pimdir's {@code collect_garbage}: the counts recomputed from the
-     * pointers, then the objects at zero and their bodies reclaimed.
+     * pimdir's {@code collect_garbage}: counts recomputed, zeros reclaimed.
      *
-     * <p>The blobs go once the rows have committed, as the app's other
-     * collectors do ({@link PimdirItems#unlinkCollected}), each only while
-     * its row is still gone, so a rollback or a body filed again meanwhile
-     * keeps its file.
+     * <p>Blobs go after the commit, each only while its row is still gone (as
+     * {@link PimdirItems#unlinkCollected}), so a rollback keeps its file.
      */
     void collectGarbage() {
         SQLiteDatabase db = store.getWritableDatabase();
@@ -396,8 +371,6 @@ public final class DeletedItems {
         }
         PimdirItems.unlinkCollected(store, db, blobs);
     }
-
-    // ---- canonical statements ---------------------------------------------
 
     private static Cursor query(SQLiteDatabase db, String name, Map<String, Object> values) {
         PimdirSql.Bound bound = PimdirSql.bind(name, values);

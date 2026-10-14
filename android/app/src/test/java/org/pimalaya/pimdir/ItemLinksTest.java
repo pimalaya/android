@@ -24,8 +24,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * Links between items (pimdir STORAGE section 14.2) as the item pages read and
- * write them: both sides of a person's link, the reason a rule's link carries,
+ * Links between items (pimdir STORAGE section 14.2) as item pages use them.
+ *
+ * <p>Both sides of a person's link, the reason a rule's link carries,
  * unlinking, and the search a link is picked from.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -159,7 +160,7 @@ public class ItemLinksTest {
         assertTrue(search("  ").isEmpty());
     }
 
-    /** The link search as the add dialog runs it: messages, then the other kinds. */
+    /** The link search as the add dialog runs it, messages first. */
     private List<ItemLinks.Placement> search(String words) {
         List<ItemLinks.Placement> found = mail.linkPlacements(words, ItemLinks.FOUND);
         found.addAll(links.search(words));

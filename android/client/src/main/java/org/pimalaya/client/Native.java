@@ -1,14 +1,11 @@
 package org.pimalaya.client;
 
 /**
- * The libpimalaya.so boundary. Every method blocks, drives the given
- * {@link Transport} for all socket I/O, and returns JSON: the documented
- * success shape, or {@code {"error": ".."}}. ETag parameters are plain
- * strings where empty means unknown (no If-Match guard). Every account
- * operation takes the account's base URL and dispatches on the backend
- * behind it in Rust; the base URL is opaque to Java. An empty login
- * means the password parameter carries an OAuth 2.0 access token, sent
- * as Bearer instead of Basic.
+ * The libpimalaya.so boundary: blocking calls answering JSON or an error.
+ *
+ * <p>A reply is the documented shape or {@code {"error": ".."}}; a method
+ * taking no {@link Transport} is pure. Base URLs are opaque, dispatched in
+ * Rust; an empty ETag means no If-Match, an empty login a Bearer token.
  */
 final class Native {
     static {
@@ -21,94 +18,91 @@ final class Native {
     private Native() {}
 
     /**
-     * RFC 6764 discovery: email to CardDAV context root, as
-     * {@code {"url": ".."}}. The resolver is a {@code tcp://host:port}
-     * DNS server or an RFC 8484 {@code https://…/dns-query} URL; empty
-     * or null falls back to a public DNS-over-HTTPS one, which works on
-     * mobile networks that block outbound DNS over TCP.
+     * RFC 6764 discovery: email to CardDAV context root, {@code {"url": ".."}}.
+     *
+     * <p>The resolver is a {@code tcp://host:port} or RFC 8484 URL; empty or
+     * null is a public DNS-over-HTTPS one, which mobile networks blocking
+     * DNS over TCP still reach.
      */
     static native String discover(Transport transport, String email, String resolver);
 
     /**
-     * Fixed provider rules: email to the provider's service configs,
-     * matched by MX records (any domain whose mail lives at Google or
-     * Microsoft, gmail.com and outlook.com included). Returns a JSON
-     * array, empty when no rule matched. Resolver as in
-     * {@link #discover}.
+     * Fixed provider rules: the configs of the provider the MX names.
+     *
+     * <p>Google or Microsoft, custom domains included. Returns a JSON array,
+     * empty when no rule matched. Resolver as in {@link #discover}.
      */
     static native String searchProvider(Transport transport, String email, String resolver);
 
     /**
-     * PACC discovery: the email domain's PACC document flattened into
-     * service configs. Returns a JSON array. Resolver as in
-     * {@link #discover}.
+     * PACC discovery: the domain's PACC document as configs, a JSON array.
+     *
+     * <p>Resolver as in {@link #discover}.
      */
     static native String searchPacc(Transport transport, String email, String resolver);
 
     /**
-     * RFC 6764 resolve: the email domain's CardDAV context root as a
-     * service config. Returns a JSON array. Resolver as in
-     * {@link #discover}.
+     * RFC 6764 resolve: the domain's CardDAV root as configs, a JSON array.
+     *
+     * <p>Resolver as in {@link #discover}.
      */
     static native String searchCarddav(Transport transport, String email, String resolver);
 
     /**
-     * RFC 6764 resolve: the email domain's CalDAV context root as a
-     * service config. Returns a JSON array. Resolver as in
-     * {@link #discover}.
+     * RFC 6764 resolve: the domain's CalDAV root as configs, a JSON array.
+     *
+     * <p>Resolver as in {@link #discover}.
      */
     static native String searchCaldav(Transport transport, String email, String resolver);
 
     /**
-     * Mozilla autoconfig: the email domain's IMAP and SMTP endpoints as
-     * service configs, from the ISP URLs, the ISPDB or the mailconf TXT
-     * redirect. Returns a JSON array. Resolver as in {@link #discover}.
+     * Mozilla autoconfig: the domain's IMAP and SMTP configs, a JSON array.
+     *
+     * <p>From the ISP URLs, the ISPDB or the mailconf TXT redirect. Resolver
+     * as in {@link #discover}.
      */
     static native String searchAutoconfig(Transport transport, String email, String resolver);
 
     /**
-     * RFC 8620 resolve: the email domain's JMAP session URL as a
-     * service config. Returns a JSON array. Resolver as in
-     * {@link #discover}.
+     * RFC 8620 resolve: the domain's JMAP session URL as configs, a JSON array.
+     *
+     * <p>Resolver as in {@link #discover}.
      */
     static native String searchJmap(Transport transport, String email, String resolver);
 
     /**
-     * Pure merge of per-mechanism config lists (a JSON array of
-     * arrays, in mechanism-priority order) into one deduplicated list
-     * restricted to the services the app drives (CardDAV, JMAP); no
-     * transport. Returns a JSON array.
+     * Merges per-mechanism config arrays, in priority order, into one array.
+     *
+     * <p>Deduplicated and restricted to the services the app drives.
      */
     static native String searchMerge(String lists);
 
     /**
-     * Probes one config's endpoints for the authentication schemes
-     * they advertise on their unauthenticated 401 and refines the
-     * config's password and bearer methods. Takes and returns one
-     * config as JSON.
+     * Probes one JSON config's endpoints for their 401 auth schemes.
+     *
+     * <p>Returns the config, its password and bearer methods refined.
      */
     static native String searchProbe(Transport transport, String config);
 
     /**
-     * Generates one authorization session's CSRF state and PKCE
-     * verifier; pure computation, no transport. Returns
-     * {@code {"state": "..", "verifier": ".."}}.
+     * Generates a session's CSRF state and PKCE verifier.
+     *
+     * <p>Returns {@code {"state": "..", "verifier": ".."}}.
      */
     static native String oauthSessionParams();
 
     /**
-     * The scope a contacts client should request of an authorization
-     * server, negotiated against its space-separated advertised scopes
-     * (empty for none); pure computation, no transport. Returns
-     * {@code {"scope": ".."}}.
+     * The scope to request for {@code domains}, against the advertised ones.
+     *
+     * <p>Space-separated, empty for none. Returns {@code {"scope": ".."}}.
      */
     static native String oauthDomainScope(String scopesSupported, String domains);
 
     /**
-     * Builds the OAuth 2.0 authorization URL with PKCE (S256) and CSRF
-     * state; pure computation, no transport. {@code extras} is a JSON
-     * object of provider-specific query parameters (empty for none).
-     * Returns {@code {"url": ".."}}.
+     * Builds the OAuth 2.0 authorization URL with PKCE (S256) and CSRF state.
+     *
+     * <p>{@code extras} is a JSON object of provider query parameters, empty
+     * for none. Returns {@code {"url": ".."}}.
      */
     static native String oauthAuthorizeUrl(
             String authorizationEndpoint,
@@ -120,20 +114,18 @@ final class Native {
             String extras);
 
     /**
-     * Validates the authorization redirect against the expected CSRF
-     * state and, when {@code issuer} is not empty, its RFC 9207
-     * {@code iss}, and extracts the authorization code; pure computation,
-     * no transport. Returns {@code {"code": ".."}}.
+     * Checks a redirect's CSRF state and extracts its code.
+     *
+     * <p>Also its RFC 9207 {@code iss} when {@code issuer} is not empty.
+     * Returns {@code {"code": ".."}}.
      */
     static native String oauthValidateRedirect(String redirectUrl, String state, String issuer);
 
     /**
-     * Exchanges an authorization code for tokens against the token
-     * endpoint, with the PKCE verifier of the authorization request
-     * and the client secret when the registration issued one (empty
-     * means none). Returns the RFC 6749 success params as JSON
-     * ({@code access_token}, {@code token_type}, {@code expires_in},
-     * {@code refresh_token}, {@code scope}, {@code issued_at}).
+     * Exchanges a code for tokens, with the PKCE verifier and any secret.
+     *
+     * <p>An empty secret is none. Returns RFC 6749's params: access_token,
+     * token_type, expires_in, refresh_token, scope, issued_at.
      */
     static native String oauthRequestAccessToken(
             Transport transport,
@@ -145,19 +137,17 @@ final class Native {
             String pkceVerifier);
 
     /**
-     * Fetches an authorization server's RFC 8414 metadata from its
-     * issuer (the {@code oauth-authorization-server} well-known,
-     * falling back to the OpenID Connect Discovery document). Returns
-     * the metadata JSON (issuer, endpoints, {@code registration_endpoint}
-     * when the server supports RFC 7591, grants, scopes).
+     * Fetches an issuer's RFC 8414 metadata, else its OpenID Connect one.
+     *
+     * <p>Returns issuer, endpoints, {@code registration_endpoint} where RFC
+     * 7591 is supported, grants and scopes.
      */
     static native String oauthServerMetadata(Transport transport, String issuer);
 
     /**
-     * Registers a public client at an RFC 7591 registration endpoint
-     * ({@code token_endpoint_auth_method: none}, the given loopback
-     * redirect URI, code + refresh grants, client name and scope).
-     * Returns {@code {"client_id": "..", "client_secret": ".." | null}}.
+     * Registers a public client (RFC 7591), no auth method, code and refresh.
+     *
+     * <p>Returns {@code {"client_id": "..", "client_secret": ".." | null}}.
      */
     static native String oauthRegisterClient(
             Transport transport,
@@ -167,11 +157,10 @@ final class Native {
             String scope);
 
     /**
-     * Refreshes tokens against the token endpoint; {@code scope} is
-     * the space-separated scope list of the original grant (empty
-     * keeps the server default) and the client secret rides along when
-     * the registration issued one (empty means none). Same JSON shape
-     * as {@link #oauthRequestAccessToken}.
+     * Refreshes tokens, replying as {@link #oauthRequestAccessToken} does.
+     *
+     * <p>An empty {@code scope} keeps the server default, an empty secret is
+     * none.
      */
     static native String oauthRefreshAccessToken(
             Transport transport,
@@ -182,123 +171,103 @@ final class Native {
             String scope);
 
     /**
-     * The backend behind an account base URL ({@code carddav},
-     * {@code graph}, {@code jmap} or {@code google}) and whether its
-     * cards are account-level resources with m:n addressbook
-     * memberships, with the calendar and mail traits beside it; pure
-     * computation, no transport. Returns {@code {"backend": "..",
-     * "accountLevel": bool, "writesOverrides": bool, "writesExdates": bool,
-     * "writesEvents": bool, "submitsOverSession": bool}}.
+     * The backend behind an account base URL and its traits.
+     *
+     * <p>Returns {@code {backend, accountLevel, writesOverrides,
+     * writesExdates, writesEvents, submitsOverSession}}, the rest booleans.
      */
     static native String accountInfo(String baseUrl);
 
     /**
-     * Builds an account base URL of the given kind
-     * ({@code googleCarddav}, {@code google}, {@code msgraph} from an
-     * email, {@code jmap} from an HTTPS session URL or bare host);
-     * pure computation, no transport. Returns {@code {"url": ".."}}.
+     * Builds an account base URL of a kind, returning {@code {"url": ".."}}.
+     *
+     * <p>{@code googleCarddav}, {@code google}, {@code msgraph} from an email,
+     * {@code jmap} from an HTTPS session URL or bare host.
      */
     static native String accountBase(String kind, String value);
 
     /**
-     * The capability URNs a JMAP account's session serves an account
-     * for, among mail, submission, contacts and calendars, from a fresh
-     * session fetch. Returns a JSON array of URNs.
+     * The capability URNs a fresh JMAP session serves, a JSON array.
+     *
+     * <p>Among mail, submission, contacts and calendars.
      */
     static native String jmapCapabilities(
             Transport transport, String baseUrl, String login, String password);
 
-    /**
-     * Lists the account's addressbooks, the backend dispatched from
-     * the base URL. Returns a JSON array of addressbooks carrying
-     * absolute collection URLs.
-     */
+    /** Lists the account's addressbooks, absolute URLs, as a JSON array. */
     static native String listAddressbooks(
             Transport transport, String baseUrl, String login, String password);
 
     /**
-     * The canonical pimdir SQL: every statement keyed by its constant name, as
-     * a JSON object. Pure computation over compiled-in constants, so no
-     * transport argument. See {@link PimdirSql} for why the statements come
-     * from the crate rather than from Java.
+     * The canonical pimdir SQL, statements keyed by constant, a JSON object.
+     *
+     * <p>{@link PimdirSql} says why they come from the crate.
      */
     static native String pimdirSql();
 
     /** The schema version the compiled-in pimdir SQL is. */
     static native int pimdirVersion();
 
-    /**
-     * Turns the bridge's debug logs on or off: warnings and above only
-     * until then, which is what a release app keeps.
-     */
+    /** Turns the bridge's debug logs on or off; off keeps warnings and up. */
     static native void debugLogs(boolean on);
 
     /**
-     * Every canonical migration in order, as a JSON array of scripts, applied
-     * above the store's {@code user_version} (STORAGE §6).
+     * Every canonical migration in order, a JSON array of scripts.
+     *
+     * <p>Applied above the store's {@code user_version} (STORAGE §6).
      */
     static native String pimdirMigrations();
 
     /**
-     * What STORAGE Annex A derives from one body of a kind (its collection's
-     * media type): {@code {linkId, summary, sortKey}}, the summary null where
-     * the body yields none. Pure computation.
+     * What STORAGE Annex A derives from one body of a kind (its media type).
+     *
+     * <p>Returns {@code {linkId, summary, sortKey}}, the summary null where
+     * the body yields none.
      */
     static native String pimdirDerive(String kind, byte[] body);
 
     /**
-     * The account's mailboxes and the RFC 6154 role of each. Returns a
-     * JSON array of {@code {name, role}} objects.
+     * The account's mailboxes, a JSON array of {@code {name, role}}.
      *
-     * <p>The role is {@code trash} where the server marks the mailbox with
-     * the attribute of that name, and empty where it marks it another or
-     * none. It rides along because a delete has to decide between a move
-     * and a marker with no network to ask.
+     * <p>The role is {@code trash} for the RFC 6154 attribute, else empty: an
+     * offline delete decides by it between a move and a marker.
      */
     static native String listMailboxes(Transport transport, long session);
 
     /**
-     * One page of a mailbox's listing, the engine's {@code enumerate}
-     * yield answered (pimdir SYNC sections 4 and 5). {@code request} is
-     * the yield's {@code {listing, scope}} as the engine wrote it, and
-     * {@code covered} when the store's coverage holds the scope. Returns the
-     * reply the engine reads: {@code {items, vanished, complete, last,
-     * cursor?, checkpoint?}}, every item {@code {handle, flags, linkId,
-     * summary, sortKey}} named by its meta but a Graph delta's, listed by
-     * {@code {handle, flags, linkId}} alone for the caller to name where the
-     * store binds it not ({@link #nameMessages}), or {@code
-     * {cursorRejected: true}} when the source refused the resume cursor.
+     * One page of a mailbox's listing, the engine's enumerate (SYNC 4, 5).
+     *
+     * <p>Takes {@code {listing, scope, covered?}}; returns {@code {items,
+     * vanished, complete, last, cursor?, checkpoint?}} or a cursorRejected.
+     * Graph delta items lack summary and sort key ({@link #nameMessages}).
      */
     static native String enumerateMailbox(
             Transport transport, long session, String mailbox, String request);
 
     /**
-     * The messages a listing named by id and markers alone (a Graph delta),
-     * each read with its summary. {@code handles} is a JSON array of ids;
-     * returns {@code {items}}, every item named as a listed one is, a
-     * message gone since it was listed left out.
+     * Names the messages a Graph delta listed by id and markers alone.
+     *
+     * <p>{@code handles}: a JSON array of ids. Returns {@code {items}}, each
+     * named as a listed one is; a message gone since listed left out.
      */
     static native String nameMessages(
             Transport transport, long session, String mailbox, String handles);
 
     /**
-     * The floor of a mailbox's next chunk: the {@code Date} of its
-     * {@code count}th newest message by {@code Date} dated before
-     * {@code before} (RFC 3339 {@code Z}, empty for no ceiling). Returns
-     * {@code {floor, dated, dates}}, {@code floor} null when fewer than
-     * {@code count} dated messages lie below the ceiling, {@code dates}
-     * the dates of those taken, newest first.
+     * The floor of a mailbox's next chunk: the count-th newest {@code Date}.
+     *
+     * <p>Below {@code before} (RFC 3339 {@code Z}, empty for none). Returns
+     * {@code {floor, dated, dates}}: floor null when fewer lie below, dates
+     * newest first.
      */
     static native String mailFloor(
             Transport transport, long session, String mailbox, String before, int count);
 
     /**
-     * Connects to the account's mail server and authenticates, answering
-     * {@code {handle}}, the bridge session the other mail verbs run on.
+     * Connects and authenticates to the mail server, replying {@code {handle}}.
      *
-     * <p>The handle is a pointer: one owner, one thread at a time, freed
-     * once with {@link #closeMailSession}. {@link MailSession} is that
-     * owner.
+     * <p>The handle is a pointer: one owner ({@link MailSession}), one thread
+     * at a time, freed once with {@link #closeMailSession}.
      */
     static native String openMailSession(
             Transport transport, String url, String login, String password);
@@ -307,35 +276,19 @@ final class Native {
     static native void closeMailSession(long session);
 
     /**
-     * Has a session work for the pool run numbered {@code run}, sharing with
-     * the run's other sessions what it reads of a Gmail account (its listing,
-     * envelopes and history), dropped with the run; 0 leaves the run.
+     * Has a session work for the pool run numbered {@code run}; 0 leaves it.
+     *
+     * <p>The run's sessions share a Gmail account's listing, envelopes and
+     * history, dropped with the run.
      */
     static native void joinMailRun(long session, long run);
 
     /**
-     * One step of the account's mail: about {@code count} messages the
-     * store does not hold, each read whole into a file of {@code dir}.
-     * {@code mailbox} names the one mailbox a view filtered to it steps,
-     * empty for the account. {@code request} is {@code {count, frontier,
-     * bound, anchors, mailboxes}}, each backend reading what it needs:
-     * {@code frontier} the RFC 3339 date the step starts
-     * below and {@code bound} the account's (Graph, JMAP paging from the
-     * frontier once no anchor is left); {@code anchors} the ids the last
-     * step answered (JMAP); {@code mailboxes} the ones stepped, by name
-     * (Graph). Returns {@code {exhausted, items}}, each item with its
-     * {@code handle}, {@code sortKey}, the {@code mailboxes} it is a member
-     * of, when it was {@code received}, its {@code size} and its file's
-     * {@code path}: Gmail and JMAP add {@code historyId} (on JMAP the
-     * account's {@code Email} state) and name each item as a listed one is
-     * ({@code flags, linkId, summary}), JMAP adds the {@code anchors} the
-     * next step starts from; a Graph item holds no {@code path} where its
-     * body was not read (held).
+     * One step: about count messages the store lacks, read into {@code dir}.
      *
-     * <p>Which of the messages it lists the store holds, each backend asks
-     * {@code store} a page at a time ({@code {op: "held", handles}}
-     * answered {@code {held}}), so no step carries the account's every
-     * handle across the boundary.
+     * <p>{@code mailbox} empty for the account, {@code request} a
+     * {@link StepRequest}; {@code store} answers {@code {op: "held", handles}}
+     * a page at a time. Returns {@link NamedStep} or {@link GraphStepReply}.
      */
     static native String mailStep(
             Transport transport,
@@ -346,56 +299,45 @@ final class Native {
             OfflineDriver store);
 
     /**
-     * Reads some messages of {@code mailbox} whole, one file per message
-     * in {@code dir}, as the bytes the server holds. {@code ids} is a JSON
-     * array; returns {@code {items, gone}}, each item {@code {id, path,
-     * size}} (with {@code labels} and {@code received} on Gmail), a message
-     * gone left out of the items and named in {@code gone}, one not handed
-     * over left out of both. Files, so no message crosses as a string.
+     * Reads some messages whole, one file each in {@code dir}.
+     *
+     * <p>{@code ids}: a JSON array. Returns {@code {items, gone}} as
+     * {@link MessageSources}; files, so no message crosses as a string.
      */
     static native String fetchMessageSources(
             Transport transport, long session, String mailbox, String ids, String dir);
 
     /**
-     * Resolves one message's MIME tree into what a reader draws. Returns
-     * a JSON object of {@code {subject, from, fromAddress, to, cc, date,
-     * kind, body, attachments}}.
+     * Resolves one message's MIME tree into what a reader draws, offline.
      *
-     * <p>No transport: the bytes are the argument, so a message the
-     * store already holds is read with no network at all.
+     * <p>Returns {@code {subject, from, fromAddress, to, cc, date, kind, body,
+     * attachments, attachmentMark}} as {@link MessageBody}.
      */
     static native String parseMessage(byte[] source);
 
-    /**
-     * {@link #parseMessage} of the message stored in the file at
-     * {@code source}, read on the native side: no copy of the message on
-     * the Java heap, none across the boundary.
-     */
+    /** {@link #parseMessage} of a file, read natively: never on the heap. */
     static native String parseMessageFile(String source);
 
     /**
-     * What the store files of the message in the file at {@code source},
-     * read once: a JSON object of {@code {hash, size, summary,
-     * attachments}}, the content hash under the store's algorithm
-     * ({@code sha256-128}), the summary io-pimdir derives from it (null
-     * where it yields none) and its attachments as {@link #parseMessage}
-     * lists them (null when the parser cannot read it).
+     * What the store files of the message in the file {@code source}.
+     *
+     * <p>Returns {@code {hash, size, summary, attachments}} as
+     * {@link Description}: {@code sha256-128}, nulls where underivable.
      */
     static native String describeMessage(String source);
 
     /**
-     * Writes the decoded bytes of one part of the message stored at
-     * {@code source}, by its IMAP section, to the file {@code target}.
-     * Returns a JSON object of {@code {size}}, or an error when the message
-     * holds no such part. No transport, as {@link #parseMessage}.
+     * Writes one part's decoded bytes, by IMAP section, to {@code target}.
+     *
+     * <p>Returns {@code {size}}, an error when the message has no such part.
      */
     static native String messagePart(String source, String part, String target);
 
     /**
-     * Adds or removes one marker on one message, named the IMAP way
-     * ({@code \Seen}, {@code \Answered}, {@code \Flagged}) whichever
-     * backend answers: JMAP's keywords map onto the same three (RFC 8621
-     * §4.1.1). Returns an empty JSON object.
+     * Adds or removes one marker, named the IMAP way, on one message.
+     *
+     * <p>{@code \Seen}, {@code \Answered}, {@code \Flagged} on any backend
+     * (JMAP keywords, RFC 8621 §4.1.1). Returns {@code {}}.
      */
     static native String setMessageFlag(
             Transport transport,
@@ -406,83 +348,66 @@ final class Native {
             boolean add);
 
     /**
-     * Composes one draft into the RFC 5322 message an outbox holds.
-     * Returns a JSON object of {@code {source}}, the message
-     * base64-encoded.
+     * Composes one draft, offline, into the RFC 5322 message an outbox holds.
      *
-     * <p>No transport: composing reaches for nothing, which is what lets
-     * a message be written and queued with the radio off. The bytes
-     * carry a {@code Bcc} header, which RFC 5322 §3.6.3 provides for a
-     * message prepared for sending; {@link #submitMessage} takes it back
-     * out.
+     * <p>Returns {@code {source}}, base64. The bytes keep {@code Bcc} (RFC
+     * 5322 §3.6.3), which {@link #submitMessage} takes back out.
      */
     static native String composeMessage(String draft);
 
     /**
-     * Hands one stored message over: the submit URL is where it goes, on a
-     * connection of its own, or the session's own API on Graph and Gmail.
-     * The envelope comes off the message's own address headers, the
-     * {@code Bcc} among them, and that header leaves the bytes on the way
-     * out. Returns an empty JSON object, or the error and whether it is
-     * permanent.
+     * Hands one stored message over, to the submit URL or the session's API.
+     *
+     * <p>The envelope comes off the address headers, {@code Bcc} stripped on
+     * the way. Returns {@code {messageId?}}, or an error flagged
+     * {@code permanent} or {@code uncertain}.
      */
     static native String submitMessage(
             Transport transport, long session, String submitUrl, byte[] source);
 
     /**
-     * Moves one message from {@code mailbox} into {@code target}, the push
-     * of a removal naming a destination (pimdir SYNC §4). Returns an empty
-     * JSON object.
+     * Moves one message into {@code target}, returning {@code {}}.
+     *
+     * <p>The push of a removal naming a destination (pimdir SYNC §4).
      */
     static native String relocateMessage(
             Transport transport, long session, String mailbox, String id, String target);
 
     /**
-     * Copies one message from {@code mailbox} into {@code target} on the
-     * server, the push of a create naming an origin. Returns an empty JSON
-     * object.
+     * Copies one message into {@code target}, returning {@code {}}.
+     *
+     * <p>The push of a create naming an origin.
      */
     static native String copyMessage(
             Transport transport, long session, String mailbox, String id, String target);
 
     /**
-     * Deletes one message for good, the push of a removal naming no
-     * destination: on IMAP {@code \Deleted} then {@code UID EXPUNGE} with
-     * UIDPLUS (RFC 4315), the marker alone otherwise. Returns an empty JSON
-     * object.
+     * Deletes one message for good, returning {@code {}}.
+     *
+     * <p>The push of a removal naming no destination: on IMAP {@code \Deleted}
+     * then {@code UID EXPUNGE} with UIDPLUS (RFC 4315), else the marker.
      */
     static native String destroyMessage(
             Transport transport, long session, String mailbox, String id);
 
     /**
-     * Appends one message to {@code mailbox} with {@code flags} (a JSON
-     * array of markers), the push of a create naming no origin. IMAP only.
-     * Returns an empty JSON object.
+     * Appends one message with {@code flags} (JSON markers); IMAP only.
+     *
+     * <p>The push of a create naming no origin. Returns {@code {}}.
      */
     static native String appendMessage(
             Transport transport, long session, String mailbox, byte[] source, String flags);
 
-    /**
-     * Lists the account's calendars off its base URL, CalDAV or JMAP.
-     * Returns a JSON array of calendars carrying the collection URL
-     * every event listing addresses.
-     */
+    /** Lists the account's calendars with their URLs, a JSON array. */
     static native String listCalendars(
             Transport transport, String baseUrl, String login, String password);
 
     /**
-     * Enumerates a calendar collection from the cursor the last pass
-     * stored, answering which events moved and no bodies. Returns
-     * {@code {changed, vanished, token, complete}}, each change
-     * {@code {id, etag}}.
+     * Enumerates a calendar from a cursor, as {@link EventDelta}.
      *
-     * <p>An empty cursor is an initial round. A cursor the server
-     * rejects is re-run as one, and {@code complete} says so, so a
-     * rejected round is never read as an emptied calendar.
-     *
-     * <p>Takes the account's base URL beside the collection's: it is
-     * what names the backend, and a JMAP calendar's URL is an id behind
-     * the account marker rather than something addressable on its own.
+     * <p>An empty or rejected cursor runs an initial round, flagged
+     * {@code complete}, never read as an emptied calendar. The base URL names
+     * the backend (a JMAP calendar URL is an id, not an address).
      */
     static native String syncEvents(
             Transport transport,
@@ -493,9 +418,9 @@ final class Native {
             String cursor);
 
     /**
-     * The iCalendar text of the named events, in one round. {@code ids}
-     * is a JSON array of strings. Returns a JSON array of
-     * {@code {id, etag, ical}}.
+     * The iCalendar text of the named events, in one round.
+     *
+     * <p>{@code ids}: a JSON array. Returns {@code [{id, etag, ical}]}.
      */
     static native String multigetEvents(
             Transport transport,
@@ -506,83 +431,78 @@ final class Native {
             String ids);
 
     /**
-     * The occurrences one calendar object denotes inside a civil
-     * window, its recurrence set composed. Pure computation, no
-     * transport, so no {@link Transport} argument. Returns a JSON array
-     * of {@code {component, start, end, recurrenceId, summary, location,
-     * allDay}}, each time a {@code {time, kind, tzid, offset}}.
+     * The occurrences one calendar object has in a civil window.
+     *
+     * <p>Returns an array of {@link Occurrence}, each time a
+     * {@code {time, kind, tzid, offset}}.
      */
     static native String expandEvent(String ical, String windowStart, String windowEnd);
 
     /**
-     * One calendar object read whole, for the page that shows it: the
-     * series, or the override of the occurrence a non-empty
-     * {@code recurrenceId} names. Pure computation, no transport, like
-     * the expansion beside it. Returns a JSON object of the component's
-     * properties.
+     * One calendar object read whole, as {@link EventDetail}.
+     *
+     * <p>The series, or the override a non-empty {@code recurrenceId} names.
      */
     static native String readEvent(String ical, String recurrenceId);
 
     /**
-     * Applies one edit to a calendar object and returns the new
-     * iCalendar text, patched through its concrete syntax tree so
-     * everything the edit does not name survives. Pure computation, no
-     * transport. Returns the object itself, or a JSON error object.
+     * Applies one edit to a calendar object through its syntax tree.
+     *
+     * <p>Returns the object itself, or a JSON error object.
      */
     static native String writeEvent(String ical, String edit);
 
     /**
-     * Splits a series at the occurrence an edit names. Pure computation,
-     * no transport. Returns {@code {master, series}}, {@code series}
-     * null when the occurrence was the first, or a JSON error object.
+     * Splits a series at the occurrence an edit names.
+     *
+     * <p>Returns {@code {master, series}}, series null when the occurrence
+     * was the first.
      */
     static native String splitEvent(String ical, String edit);
 
     /**
-     * Removes the occurrences an edit's scope names from a series. Pure
-     * computation, no transport. Returns the object left, an empty
-     * string when nothing is, or a JSON error object.
+     * Removes the occurrences an edit's scope names from a series.
+     *
+     * <p>Returns the object left, empty when none, or a JSON error object.
      */
     static native String removeEvent(String ical, String edit);
 
     /**
-     * Three-way merges a conflicted calendar object, the body staged here
-     * and the one its source holds against their base (empty when none
-     * was agreed). Pure computation, no transport. Returns
-     * {@code {ical, resolved, conflicts}}, or a JSON error object.
+     * Three-way merges a conflicted calendar object, an empty base for none.
+     *
+     * <p>Returns {@code {ical, resolved, conflicts}}.
      */
     static native String mergeEvent(String base, String local, String remote);
 
     /**
-     * The resolution of a conflicted calendar object: its merge, each
-     * conflict {@code picks} names (a JSON object of side by conflict id)
-     * taking that side. Pure computation, no transport. Returns the
-     * object itself, or a JSON error object.
+     * Resolves a conflicted calendar object with {@code picks}' sides.
+     *
+     * <p>{@code picks}: side by conflict id. Returns the object itself, or a
+     * JSON error object.
      */
     static native String resolveEvent(String base, String local, String remote, String picks);
 
     /**
-     * One calendar object as the phone's calendar provider carries it
-     * (docs/calendar-mapping.md), {@code now} a UTC stamp placing the
-     * window a series the provider cannot show is listed over. Pure
-     * computation, no transport. Returns {@code {uid, master, overrides,
-     * listed}}, or a JSON error object.
+     * One calendar object as the phone's provider carries it.
+     *
+     * <p>docs/calendar-mapping.md; {@code now} places the window an unshowable
+     * series is listed over. Returns {@code {uid, master, overrides, listed}}.
      */
     static native String projectEvent(String ical, String now);
 
     /**
-     * Patches a view the phone edited onto a calendar object, the fields
-     * it changed alone; an empty object becomes a new one. Pure
-     * computation, no transport. Returns the object itself, or a JSON
-     * error object.
+     * Patches the phone's edited view onto a calendar object, changes only.
+     *
+     * <p>An empty object becomes a new one. Returns the object itself, or a
+     * JSON error object.
      */
     static native String applyEvent(String ical, String edit);
 
     /**
-     * Pushes an edited object back to its calendar, guarded by
-     * {@code etag} when one is known, {@code address} the account's, which
-     * Google and JMAP announce a meeting the user organizes by. Returns the
-     * new ETag as a JSON string (or null), or a JSON error object.
+     * Pushes an edited object back to its calendar, guarded by any ETag.
+     *
+     * <p>{@code address} is the account's (Google and JMAP announce a meeting
+     * it organizes). Returns the new ETag as a JSON string, or null.
      */
     static native String updateEvent(
             Transport transport,
@@ -596,11 +516,10 @@ final class Native {
             String address);
 
     /**
-     * The object a new calendar entry starts from, carrying the three
-     * properties RFC 5545 requires of its component, its start in the
-     * zone {@code tzid} names (none for a date or a floating time) with
-     * that zone's {@code vtimezone}. Pure computation, no transport.
-     * Returns the object itself, or a JSON error object.
+     * The object a new entry starts from, with RFC 5545's required properties.
+     *
+     * <p>Its start in {@code tzid} with {@code vtimezone} (none for a date or
+     * floating). Returns the object itself, or a JSON error object.
      */
     static native String newEvent(
             String component,
@@ -611,9 +530,10 @@ final class Native {
             String vtimezone);
 
     /**
-     * Files a new object in a calendar, guarded on the resource not
-     * existing, {@code address} as {@link #updateEvent} takes it. Returns
-     * the new ETag as a JSON string (or null), or a JSON error object.
+     * Files a new object in a calendar, guarded on its absence.
+     *
+     * <p>{@code address} as {@link #updateEvent} takes it. Returns
+     * {@code {id, etag}}.
      */
     static native String createEvent(
             Transport transport,
@@ -626,9 +546,9 @@ final class Native {
             String address);
 
     /**
-     * Removes one object from its calendar, guarded by {@code etag} when
-     * one is known, {@code address} as {@link #updateEvent} takes it.
-     * Returns an empty JSON object, or a JSON error one.
+     * Removes one object from its calendar, guarded by any ETag.
+     *
+     * <p>{@code address} as {@link #updateEvent} takes it. Returns {@code {}}.
      */
     static native String deleteEvent(
             Transport transport,
@@ -641,17 +561,17 @@ final class Native {
             String address);
 
     /**
-     * Lists every card of an account-level backend (JMAP, Google) in
-     * one pass, each carrying its addressbook memberships as book ids.
-     * Returns a JSON array of {@code {id, uri, etag, vcard, books}}.
+     * Lists every card of an account-level backend (JMAP, Google) at once.
+     *
+     * <p>Returns an array of {@code {id, uri, etag, vcard, books}}.
      */
     static native String listAccountCards(
             Transport transport, String baseUrl, String login, String password);
 
     /**
-     * Lists the cards of the addressbook collection (CardDAV, Graph),
-     * the backend dispatched from the base URL. Returns a JSON array
-     * of {@code {id, uri, etag, vcard}}.
+     * Lists an addressbook's cards (CardDAV, Graph).
+     *
+     * <p>Returns an array of {@code {id, uri, etag, vcard}}.
      */
     static native String listCards(
             Transport transport,
@@ -661,10 +581,10 @@ final class Native {
             String password);
 
     /**
-     * Creates the card in the addressbook collection, the backend
-     * dispatched from the base URL. Returns the created
-     * {@code {id, uri, etag, vcard}} (the server-assigned id on the
-     * backends naming the resource themselves).
+     * Creates the card in the addressbook.
+     *
+     * <p>Returns {@code {id, uri, etag, vcard}}, the id the server's where it
+     * names its own resources.
      */
     static native String createCard(
             Transport transport,
@@ -676,9 +596,9 @@ final class Native {
             String vcard);
 
     /**
-     * Reads the card at the given resource name (as the server
-     * returned it), the backend dispatched from the base URL; returns
-     * {@code {id, uri, etag, vcard}}.
+     * Reads the card at a resource name as the server returned it.
+     *
+     * <p>Returns {@code {id, uri, etag, vcard}}.
      */
     static native String readCard(
             Transport transport,
@@ -689,11 +609,10 @@ final class Native {
             String uri);
 
     /**
-     * Updates the card at the given resource name (empty falls back to
-     * the id), the backend dispatched from the base URL. The base
-     * vCard trims the patching backends' updates to the fields the
-     * edit changed and the ETag guards the guarding backends' writes;
-     * returns the updated {@code {id, uri, etag, vcard}}.
+     * Updates the card at a resource name, empty for the id.
+     *
+     * <p>The base vCard trims patching backends' updates, the ETag guards
+     * guarding ones. Returns {@code {id, uri, etag, vcard}}.
      */
     static native String updateCard(
             Transport transport,
@@ -708,9 +627,9 @@ final class Native {
             String etag);
 
     /**
-     * Deletes the card at the given resource name (empty falls back to
-     * the id), the backend dispatched from the base URL and the ETag
-     * guarding the guarding backends' deletion; returns {@code {}}.
+     * Deletes the card at a resource name, empty for the id.
+     *
+     * <p>The ETag guards guarding backends. Returns {@code {}}.
      */
     static native String deleteCard(
             Transport transport,
@@ -723,28 +642,22 @@ final class Native {
             String etag);
 
     /**
-     * Creates a batch of cards (a JSON array of vCard documents) in
-     * the addressbook collection, Google-only (the one backend with a
-     * batch create verb); returns a JSON array of the created
-     * {@code {id, uri, etag, vcard}} in input order.
+     * Creates a batch of cards (a JSON array of vCards); Google only.
+     *
+     * <p>Returns an array of {@code {id, uri, etag, vcard}} in input order.
      */
     static native String createCards(
             Transport transport, String baseUrl, String login, String password, String vcards);
 
-    /**
-     * Deletes a batch of cards (a JSON array of card ids) from the
-     * addressbook collection, Google-only (the one backend with a
-     * batch delete verb); returns {@code {}}.
-     */
+    /** Deletes a batch of cards (a JSON array of ids); Google only. */
     static native String deleteCards(
             Transport transport, String baseUrl, String login, String password, String ids);
 
     /**
-     * Pushes a round of changes (a JSON array of {@code {ref, op, id?,
-     * vcard?, baseVcard?, add?, remove?}}) to the addressbook
-     * collection as batch calls, JMAP (ContactCard/set) and Graph
-     * ($batch) only; returns a JSON array of {@code {ref, accepted,
-     * id?, etag?, error?}}, one outcome per change.
+     * Pushes a round of {@link PushChange}s as batch calls; JMAP, Graph only.
+     *
+     * <p>Returns an array of {@code {ref, accepted, id?, etag?, error?}}, one
+     * per change.
      */
     static native String pushCards(
             Transport transport,
@@ -755,14 +668,11 @@ final class Native {
             String changes);
 
     /**
-     * Lists the collection's changes since the given cursor (empty
-     * runs the initial round: the complete member set plus the cursor
-     * to delta from next time), the backend dispatched from the base
-     * URL. An expired cursor re-runs an initial round and an initial
-     * CardDAV sync a server rejects falls back to the plain
-     * enumeration, both bridge-side. Returns {@code {"changed": [{id,
-     * uri, etag, vcard?, books?}], "vanished": [uri], "token": "..",
-     * "complete": bool}}.
+     * Lists a collection's changes since a cursor, as {@link CardDelta}.
+     *
+     * <p>Empty or expired runs an initial round; a refused initial CardDAV
+     * sync falls back to plain enumeration. Items {@code {id, uri, etag,
+     * vcard?, books?}}.
      */
     static native String syncCards(
             Transport transport,
@@ -773,9 +683,9 @@ final class Native {
             String syncToken);
 
     /**
-     * Batch-fetches the cards at the given resource names (a JSON
-     * string array) via REPORT addressbook-multiget; CardDAV only.
-     * Returns a JSON array of {@code {id, uri, etag, vcard}}.
+     * Multigets cards by resource name (a JSON array); CardDAV only.
+     *
+     * <p>Returns an array of {@code {id, uri, etag, vcard}}.
      */
     static native String multigetCards(
             Transport transport,
@@ -785,26 +695,25 @@ final class Native {
             String uris);
 
     /**
-     * Reads the Graph contacts named by id (a JSON string array), 20 to
-     * a {@code $batch}, the request line of {@link #readCard}; a request
-     * the batch could not serve is sent again on its own and a contact
-     * Graph no longer holds is left out. Graph only. Returns a JSON array
-     * of {@code {id, uri, etag, vcard}}.
+     * Reads Graph contacts by id (a JSON array), 20 to a {@code $batch}.
+     *
+     * <p>An unserved request is resent alone, a gone contact left out.
+     * Returns an array of {@code {id, uri, etag, vcard}}.
      */
     static native String readGraphCards(Transport transport, String token, String ids);
 
     /**
-     * Reads the People contacts named by id (a JSON string array), 200 to
-     * a {@code people:batchGet}, the read of {@link #readCard}; a contact
-     * Google no longer holds is left out. Google only. Returns a JSON
-     * array of {@code {id, uri, etag, vcard, books}}.
+     * Reads People contacts by id (a JSON array), 200 to a batchGet.
+     *
+     * <p>A gone contact is left out. Returns an array of
+     * {@code {id, uri, etag, vcard, books}}.
      */
     static native String readGoogleCards(Transport transport, String token, String ids);
 
     /**
-     * Adds and removes the card's addressbook memberships on an
-     * account-level backend (JSON string arrays of book ids), the
-     * backend dispatched from the base URL; returns {@code {}}.
+     * Adds and removes book memberships (JSON id arrays), account-level only.
+     *
+     * <p>Returns {@code {}}.
      */
     static native String updateCardBooks(
             Transport transport,
@@ -816,15 +725,11 @@ final class Native {
             String remove);
 
     /**
-     * Reconciles the collection with its remote through the io-offline
-     * engine, servicing every engine yield via the driver; with
-     * {@code full} the checkpoint is ignored and the whole remote is
-     * enumerated; without {@code content} no body is pushed. {@code since}
-     * bounds a mail collection's scope on the {@code Date} header (RFC
-     * 3339 {@code Z}, empty for none), and {@code scopeBound} says whether
-     * the connector's checkpoint is bound to the scope it was made under.
-     * Returns the sync report
-     * {@code {pulled, pushed, conflicts, rejected, refreshed, waiting}}.
+     * Syncs a collection through the io-pimdir engine, as {@link SyncReport}.
+     *
+     * <p>{@code full} ignores the checkpoint; no {@code content}, no body
+     * pushed. {@code since} bounds mail by {@code Date} (empty for none);
+     * {@code scopeBound}: the checkpoint is bound to its scope.
      */
     static native String offlineSync(
             OfflineDriver driver,
@@ -835,191 +740,171 @@ final class Native {
             boolean scopeBound);
 
     /**
-     * Raises the given handles (a JSON string array) to the full
-     * detail tier, or to the meta one without {@code full}, through the
-     * io-offline engine, servicing every engine yield via the driver.
-     * Returns the upgrade report {@code {upgraded, fetched, deduped}}.
+     * Raises handles (a JSON array) to the full tier, or meta without full.
+     *
+     * <p>Returns {@code {upgraded, fetched, deduped}}.
      */
     static native String offlineUpgrade(
             OfflineDriver driver, String collection, String handles, boolean full);
 
     /**
-     * Stages a local mutation (a JSON object, e.g. {@code {"op":
-     * "edit", handle, hash, size, body, meta}}) through the io-offline
-     * engine, servicing the storage yields via the driver; the remote
-     * is never touched. Returns {@code {}}.
+     * Stages a local {@link Mutation}; the remote is never touched.
+     *
+     * <p>Returns {@code {}}.
      */
     static native String offlineMutate(OfflineDriver driver, String collection, String mutation);
 
     /**
-     * Whether a 412-rejected push may retry unguarded, the last
-     * enumerate proving the handle unchanged (the CardDAV If-Match
-     * quirk); pure computation, no transport. Takes {@code {listed:
-     * {handle: etag}?, complete, handle, ifMatch?}}, returns
-     * {@code {"retry": bool}}.
+     * Whether a 412-rejected push may retry unguarded (CardDAV If-Match).
+     *
+     * <p>Takes {@link RetryFacts}, returns {@code {"retry": bool}}.
      */
     static native String offlineRetryUnguarded(String facts);
 
     /**
-     * Projects an account-wide delta (JMAP, Google) onto one book's
-     * enumerate; pure computation, no transport. Takes {@code {bookId?,
-     * complete, changed: [{handle, books, known}], vanished}}, returns
+     * Projects an account-wide delta (JMAP, Google) onto one book.
+     *
+     * <p>Takes {@link AccountSnapshotFacts}, returns
      * {@code {"members": [index], "vanished": [handle]}}.
      */
     static native String offlineAccountSnapshot(String facts);
 
     /**
-     * Plans one push change (membership patch vs create or delete,
-     * plus the Google post-create membership); pure computation, no
-     * transport. Takes {@code {op, collection, bookId?, origin,
-     * deleted}}, returns {@code {action, postCreateBooks?}}.
+     * Plans one push change: membership patch, create or delete.
+     *
+     * <p>Takes {@link PushPlanFacts}, returns
+     * {@code {action, postCreateBooks?}} (Google's post-create membership).
      */
     static native String offlinePushPlan(String facts);
 
     /**
-     * Indexes a vCard for the store (display name, first email and
-     * phone, every email, UID, normalized content hash); pure
-     * computation, no transport. Returns
-     * {@code {name, email, emails, phone, info, uid, hash}}.
+     * Indexes a vCard for the store, as {@link CardIndex}.
+     *
+     * <p>Returns {@code {name, email, emails, phone, info, uid, hash}}, plus
+     * sortKey and summary.
      */
     static native String indexCard(String vcard);
 
     /**
-     * Merges several vCards (a JSON string array) into one union
-     * document with its field model and per-field alternatives; pure
-     * computation, no transport. Returns
-     * {@code {vcard, model, alternatives}}.
+     * Merges several vCards (a JSON array) into one union.
+     *
+     * <p>Returns {@code {vcard, model, alternatives, changed}}.
      */
     static native String mergeCards(String cards);
 
     /**
-     * Three-way merges a conflicted push: the staged local edit and
-     * the fetched remote card against their common base, the local
-     * side winning same-field collisions; pure computation, no
-     * transport. Returns {@code {vcard, conflicts}}.
+     * Three-way merges a conflicted push, local winning collisions.
+     *
+     * <p>Returns {@code {vcard, conflicts}}.
      */
     static native String mergeCardChanges(String base, String local, String remote);
 
     /**
-     * Builds the conflict form's inputs for a both-sides-edited row: the
-     * three-way merge with the newer side (by REV) winning collisions as
-     * the pre-filled default, and the two candidates per genuinely
-     * conflicted field; pure computation, no transport. Returns
-     * {@code {vcard, model, alternatives, changed}}.
+     * Builds the conflict form's inputs, the newer side by REV prefilled.
+     *
+     * <p>Returns {@code {vcard, model, alternatives, changed}}.
      */
     static native String mergeConflictForm(String base, String local, String remote);
 
-    /**
-     * Rewrites the card's UID (a plain copy is a new identity); pure
-     * computation, no transport. Returns {@code {"vcard": ".."}}.
-     */
+    /** Rewrites the card's UID, returning {@code {"vcard": ".."}}. */
     static native String setCardUid(String vcard, String uid);
 
     /**
-     * Finds groups of likely-duplicate cards (exact normalized email,
-     * phone or name matches); pure computation, no transport. Takes a
-     * JSON array of {@code {ref, vcard}} pairs, returns
-     * {@code {"groups": [{"refs": [...], "reasons": [...]}]}}.
+     * Finds groups of likely-duplicate cards among {@code {ref, vcard}} pairs.
+     *
+     * <p>Returns {@code {"groups": [{"refs": [...], "reasons": [...]}]}}.
      */
     static native String findDuplicates(String cards);
 
     /**
-     * Lists the card's raw property lines for the advanced editor;
-     * pure computation, no transport. Returns
-     * {@code {"props": ["VERSION:4.0", ...]}}.
+     * Lists the card's raw property lines; no caller left.
+     *
+     * <p>Returns {@code {"props": ["VERSION:4.0", ...]}}.
      */
     static native String cardProps(String vcard);
 
     /**
-     * Rewrites one raw property line for the advanced editor (a blank
-     * line removes, index -1 appends); pure computation, no transport.
-     * Returns {@code {"vcard": ".."}}.
+     * Rewrites one raw property line; no caller left.
+     *
+     * <p>A blank line removes, index -1 appends. Returns {@code {vcard}}.
      */
     static native String cardSetProp(String vcard, int index, String line);
 
     /**
-     * Recomposes one property from its structured parts
-     * ({@code {name, params: [{name, values}], value}}) and rewrites
-     * it (index -1 appends); pure computation, no transport. Returns
-     * {@code {"vcard": ".."}}.
+     * Rewrites one property from its parts; no caller left.
+     *
+     * <p>{@code {name, params: [{name, values}], value}}, index -1 appending.
+     * Returns {@code {"vcard": ".."}}.
      */
     static native String cardSetPropParts(String vcard, int index, String prop);
 
     /**
-     * The component labels of a structured property name (N, ADR,
-     * GENDER; empty for plain values), shaping the advanced editor's
-     * value form; pure computation, no transport. Returns
+     * The component labels of a structured property; no caller left.
+     *
+     * <p>N, ADR, GENDER; empty for plain values. Returns
      * {@code {"labels": [...]}}.
      */
     static native String cardPropLabels(String name);
 
     /**
-     * The ordered type-set vocabulary the edit form's spinners address
-     * for the kind ({@code phone}, {@code email}, {@code address},
-     * {@code relation}, {@code gender}), each position's vCard TYPE set
-     * in the order the Android string-arrays must mirror; pure
-     * computation, no transport. Returns {@code {"order": [[..], ..]}}.
+     * The ordered TYPE sets the edit form's spinners address for a kind.
+     *
+     * <p>The order the Android string-arrays mirror. Returns
+     * {@code {"order": [[..], ..]}}.
      */
     static native String cardTypeOrder(String kind);
 
     /**
-     * Validates a hand-edited vCard source (it must reparse) and
-     * returns it re-serialized; pure computation, no transport.
-     * Returns {@code {"vcard": ".."}}.
+     * Reparses a hand-edited vCard, re-serialized; no caller left.
+     *
+     * <p>Returns {@code {"vcard": ".."}}.
      */
     static native String cardSource(String vcard);
 
-    /**
-     * Projects a vCard onto the neutral field model the app maps to
-     * ContactsContract rows; pure computation, no transport.
-     */
+    /** Projects a vCard onto the neutral {@link ContactFields} model. */
     static native String projectCard(String vcard);
 
     /**
-     * Patches an edited field model back onto the vCard, preserving
-     * every unmanaged property; pure computation, no transport. Returns
-     * {@code {"vcard": ".."}}.
+     * Patches an edited field model onto the vCard, other properties kept.
+     *
+     * <p>Returns {@code {"vcard": ".."}}.
      */
     static native String applyCard(String vcard, String model);
 
     /**
-     * The edit form's view support computed from the field model
-     * (summaries, type spinner positions, picker dates); pure
-     * computation, no transport. Returns {@code {name, organization,
-     * gender?, birthday?, anniversary?, phones, emails, relations,
-     * addresses}}.
+     * The edit form's view support of a field model, as {@link FormView}.
+     *
+     * <p>Returns {@code {name, organization, gender?, birthday?, anniversary?,
+     * phones, emails, relations, addresses}}.
      */
     static native String formView(String model);
 
     /**
-     * One typed entry saved from an edit dialog, its TYPE set drawn
-     * from the spinner position ({@code phone}, {@code email} and
-     * {@code relation} return the full entry, {@code address} the TYPE
-     * set alone, {@code gender} the GENDER object, empty when unset);
-     * pure computation, no transport.
+     * One typed entry saved from an edit dialog, TYPE set from the spinner.
+     *
+     * <p>{@code phone}, {@code email}, {@code relation}: the full entry;
+     * {@code address}: the TYPE set; {@code gender}: the GENDER, empty unset.
      */
     static native String formEntry(String kind, int index, String value, boolean pref);
 
     /**
-     * One picked date on the model wire (the vCard {@code yyyy-mm-dd}
-     * form, 1-based month); pure computation, no transport. Returns
-     * {@code {"value": ".."}}.
+     * One picked date on the model wire, {@code yyyy-mm-dd}, 1-based month.
+     *
+     * <p>Returns {@code {"value": ".."}}.
      */
     static native String formDate(int year, int month, int day);
 
     /**
-     * Groups the replica pool into merged contacts, the groups sorted
-     * by primary display name; pure computation, no transport. Takes
-     * {@code {replicas: [{ref, uid, name, id}], links: {member:
-     * cluster}, detached: [ref]}}, returns {@code {"groups": [{key,
-     * replicas: [index]}]}}.
+     * Groups a {@link ReplicaPool} into merged contacts, by display name.
+     *
+     * <p>Returns {@code {"groups": [{key, replicas: [index]}]}}.
      */
     static native String groupContacts(String input);
 
     /**
-     * The duplicate review's group facts, the dismissal key and the
-     * Link eligibility; pure computation, no transport. Takes
-     * {@code [{ref, book}]}, returns {@code {key, linkable}}.
+     * The duplicate review's group facts for {@code [{ref, book}]}.
+     *
+     * <p>Returns {@code {key, linkable}}, the dismissal key and Link's offer.
      */
     static native String duplicateGroup(String members);
 }

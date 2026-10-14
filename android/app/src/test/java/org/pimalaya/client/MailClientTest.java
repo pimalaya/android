@@ -22,19 +22,11 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Pins the mail read records on the real bridge: a corpus of crafted
- * messages parsed, described and cut into parts, each reply parsed to the
- * values the hand parsers the records replaced produced (literals
- * captured on that code), and every record mirroring its reply.
+ * Pins the mail read records on the real bridge, against captured literals.
  *
- * <p>The session verbs (openMail, listMailboxes, floor, fetchSources)
- * cannot run here: the bridge refuses to sign in over the plain
- * {@code imap} a loopback server speaks (rs/client/trust.rs
- * {@code require_tls}), and the transport takes TLS from the platform
- * trust store. Their records are pinned on literal replies shaped as the
- * Rust structs serialize them (rs/ffi/mail.rs 725, rs/mail.rs 157,
- * rs/mail/listing.rs 257 and its test at 535, rs/mail/session.rs 358),
- * parsed to the values the replaced parsers read off the same literals.
+ * <p>Session verbs refuse a loopback's plain imap (rs/client/trust.rs):
+ * literals instead (rs/ffi/mail.rs 725, rs/mail.rs 157, rs/mail/listing.rs 257
+ * and 535, rs/mail/session.rs 358).
  */
 @RunWith(RobolectricTestRunner.class)
 public class MailClientTest {
@@ -42,7 +34,7 @@ public class MailClientTest {
 
     private final MailClient client = new MailClient();
 
-    /** What each message of the corpus parses to, null where it cannot be read. */
+    /** What each corpus message parses to, null where it cannot be read. */
     private static final List<MessageBody> PARSED =
             Arrays.asList(
                     new MessageBody(
@@ -506,10 +498,10 @@ public class MailClientTest {
     }
 
     /**
-     * Drafts as the composer hands them, stamped with literal values
-     * standing for the minted date and Message-ID: plain, a reply with
-     * every address field, non-ASCII words to encode, absent reply headers
-     * (null) and a long line.
+     * Drafts as the composer hands them, minted date and Message-ID literal.
+     *
+     * <p>Plain, a reply with every address field, non-ASCII words, absent reply
+     * headers (null) and a long line.
      */
     private static final List<ComposeDraft> DRAFTS =
             Arrays.asList(
@@ -575,7 +567,7 @@ public class MailClientTest {
                             "",
                             ""));
 
-    /** What MailSubmit wrote for each of {@link #DRAFTS}, captured on the code that built it. */
+    /** What MailSubmit wrote for each of {@link #DRAFTS}, captured. */
     private static final List<String> DRAFT_JSON =
             List.of(
                     "{\"from\":\"jane@example.com\",\"fromName\":\"Jane\",\"to\":\"bob@examp"
@@ -609,7 +601,9 @@ public class MailClientTest {
                         + "messageId\":\"<fixed-16@example.com>\",\"inReplyTo\":\"\",\"referenc"
                         + "es\":\"\"}");
 
-    /** What the bridge composed of each of {@link #DRAFTS}, base64, captured on that code. */
+    /**
+     * What the bridge composed of each of {@link #DRAFTS}, base64, captured.
+     */
     private static final List<String> COMPOSED =
             List.of(
                     "RGF0ZTogV2VkLCAxNCBPY3QgMjAyNiAxMDowMDowMCArMDIwMA0KTWVzc2Fn"

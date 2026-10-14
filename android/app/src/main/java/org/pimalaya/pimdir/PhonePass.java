@@ -10,32 +10,30 @@ import org.pimalaya.client.Clients;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * One collection's phone pass: the store reconciled with its spoke, the
- * server pass's shape. The store reconciled with the provider's rows, the
- * bodies the round brought hydrated, the conflicts the merge can settle
- * settled ({@link #settle}) and pushed in a second exchange. Skipped when
- * the spoke is unavailable, and on the quiet path.
+ * One collection's phone pass: the store reconciled with its spoke.
+ *
+ * <p>The server pass's shape: bodies the round brought hydrated, settleable
+ * conflicts settled ({@link #settle}) and pushed in a second exchange.
+ * Skipped when the spoke is unavailable, and on the quiet path.
  */
 public abstract class PhonePass extends PimdirEngine {
     /** The phone provider this pass reconciles with. */
     private final PhoneSpoke spoke;
 
-    /** The hub's kind ({@link PimdirSummary}), which its collection lock is keyed by. */
+    /** The hub's kind ({@link PimdirSummary}), keying its collection lock. */
     private final String kind;
 
     /** Whether a phone pass of this driver wrote anything into the store. */
     private boolean ingested;
 
+    /** A phone pass of {@code kind} (the hub media type) over {@code spoke}. */
     protected PhonePass(PimdirDb pimdir, Clients clients, PhoneSpoke spoke, String kind) {
         super(pimdir, clients);
         this.spoke = spoke;
         this.kind = kind;
     }
 
-    /**
-     * Runs the pass under the hub's collection lock; answers whether it
-     * wrote into the store.
-     */
+    /** Runs the pass under the hub's collection lock; answers if it wrote. */
     public boolean sync(String hub) throws JSONException {
         String collection = PimdirStorage.phoneCollection(hub);
         if (!spoke.available(collection)) {
@@ -92,7 +90,7 @@ public abstract class PhonePass extends PimdirEngine {
         return false;
     }
 
-    /** A write to the phone collection is a phone pass's own, pushed by that pass. */
+    /** A write to the phone collection is this pass's own, pushed by it. */
     @Override
     protected final void staged(String collection) {}
 

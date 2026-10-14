@@ -21,18 +21,19 @@ import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.sync.BackgroundCheck;
 
 /**
- * The process: the one holder of what every screen, service and job of the
- * app shares. Nothing runs at creation; each part opens when first asked for.
+ * The process: the one holder of what every screen, service and job shares.
+ *
+ * <p>Nothing runs at creation; each part opens when first asked for.
  */
 public final class App extends Application
         implements PhoneQueue.Owner, BackgroundCheck.Owner, MergedFilter.Owner, MailState.Owner {
-    /** The stamps the activity, the background check and the sync adapters share. */
+    /** The stamps the activity, the background check and the adapters share. */
     final AppState state = new AppState();
 
-    /** The process's one store, null until first asked for ({@link #pimdir}). */
+    /** The process's one store, null until asked for ({@link #pimdir}). */
     private PimdirDb pimdir;
 
-    /** The process's one card store, null until first asked for ({@link #cards}). */
+    /** The process's one card store, null until asked for ({@link #cards}). */
     private CardStore cards;
 
     /** The process's list filters, by list. */
@@ -50,9 +51,10 @@ public final class App extends Application
     }
 
     /**
-     * The process's one store, opened once: every screen, service and job
-     * shares it, so the store is one connection pool rather than one per
-     * caller, each holding the file open until the collector finds it.
+     * The process's one store, opened once and shared by every caller.
+     *
+     * <p>One connection pool rather than one per caller, each holding the
+     * file open until the collector finds it.
      */
     synchronized PimdirDb pimdir() {
         if (pimdir == null) {
@@ -62,9 +64,10 @@ public final class App extends Application
     }
 
     /**
-     * The process's one card store, over the shared pimdir store
-     * ({@link #pimdir}): one connection pool for every caller, a
-     * sync adapter's included, rather than one left open per call.
+     * The process's one card store, over the shared store ({@link #pimdir}).
+     *
+     * <p>One connection pool for every caller, a sync adapter's included,
+     * rather than one left open per call.
      */
     synchronized CardStore cards() {
         if (cards == null) {

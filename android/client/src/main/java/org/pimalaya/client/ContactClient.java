@@ -7,27 +7,18 @@ import java.util.Set;
 import org.json.JSONArray;
 
 /**
- * The contact verbs of the bridge (rs/ffi/contact.rs): the addressbook and
- * card operations over a transport, and the pure vCard computations, static,
- * that never open a socket. Every call that takes a transport blocks, so
- * callers must run it off the main thread.
+ * The contact verbs of the bridge (rs/ffi/contact.rs) over four backends.
  *
- * <p>Four backends hide behind the same operations: CardDAV, Microsoft
- * Graph, JMAP for Contacts (RFC 9610) and the Google People API. The
- * Rust bridge tells them apart by the account's base URL (the
- * non-CardDAV backends carry a sentinel scheme there) and dispatches
- * every operation; the base URL is opaque here, built by the
- * {@code *Base} helpers and threaded back verbatim. Graph and Google
- * accounts authenticate with their OAuth access token in
- * {@link Account#password}. Graph and JMAP updates carry no If-Match
- * guard (last-write-wins); CardDAV and Google updates are guarded by
- * the ETag.
+ * <p>CardDAV, Graph, JMAP (RFC 9610) and People, told apart bridge-side by
+ * the opaque base URL. Calls taking a transport block (off the main thread);
+ * Graph and JMAP updates are unguarded, CardDAV and Google ETag-guarded.
  */
 public class ContactClient {
     /**
-     * Lists the account's addressbooks: the CardDAV discovery walk,
-     * the Graph contact folders (default Contacts folder first), the
-     * JMAP AddressBooks, or the Google contact groups.
+     * Lists the account's addressbooks, the backend's own way.
+     *
+     * <p>CardDAV discovery, Graph folders (default first), JMAP AddressBooks
+     * or Google contact groups.
      */
     public List<Addressbook> listAddressbooks(Transport transport, Account account) {
         JSONArray reply =
@@ -43,8 +34,9 @@ public class ContactClient {
     }
 
     /**
-     * The capability URNs a JMAP account's session serves an account for, read afresh: what
-     * the connection flow connects a domain over JMAP by.
+     * The capability URNs a JMAP session serves the account, read afresh.
+     *
+     * <p>The connection flow connects a domain over JMAP by them.
      */
     public Set<String> jmapCapabilities(Transport transport, Account account) {
         JSONArray reply =
@@ -71,14 +63,10 @@ public class ContactClient {
     }
 
     /**
-     * Lists a collection's changes since the given cursor, on every
-     * backend: a CardDAV sync-collection REPORT (RFC 6578), a Graph
-     * contacts delta round (id and changeKey only), a JMAP
-     * ContactCard/changes round (changed cards in full), or a People
-     * connections sync (changed contacts in full, account-wide with
-     * memberships). A null cursor runs the initial round: the complete
-     * member set plus the cursor to delta from next time. A cursor the
-     * server no longer accepts re-runs an initial round bridge-side,
+     * Lists a collection's changes since the cursor; null runs a full round.
+     *
+     * <p>RFC 6578 REPORT, Graph delta (ids only), JMAP changes or People sync
+     * (cards in full). An expired cursor re-runs a full round bridge-side,
      * flagged {@link CardDelta#complete}.
      */
     public CardDelta syncCards(Transport transport, Account account, String addressbookUrl, String syncToken) {
@@ -94,10 +82,7 @@ public class ContactClient {
         return CardDelta.from(Replies.object(reply));
     }
 
-    /**
-     * Batch-fetches the cards at the given resource names inside a
-     * CardDAV addressbook via REPORT addressbook-multiget.
-     */
+    /** Batch-fetches named cards of a CardDAV book (addressbook-multiget). */
     public List<Card> multigetCards(Transport transport, Account account, String addressbookUrl, List<String> uris) {
         return cards(
                 Native.multigetCards(
@@ -109,10 +94,9 @@ public class ContactClient {
     }
 
     /**
-     * Reads the named Graph contacts, 20 to a {@code $batch}: one request
-     * where {@link #readCard} sent one a contact. A contact Graph no
-     * longer holds is left out of the list, as a multiget leaves out a
-     * resource it no longer finds. Graph only.
+     * Reads the named Graph contacts, 20 to a {@code $batch}; Graph only.
+     *
+     * <p>A contact Graph no longer holds is left out, as a multiget does.
      */
     public List<Card> readGraphCards(Transport transport, Account account, List<String> ids) {
         return cards(
@@ -120,10 +104,9 @@ public class ContactClient {
     }
 
     /**
-     * Reads the named People contacts, 200 to a {@code people:batchGet}:
-     * one request where {@link #readCard} sent one a contact. A contact
-     * Google no longer holds is left out of the list, as a multiget
-     * leaves out a resource it no longer finds. Google only.
+     * Reads the named People contacts, 200 to a batchGet; Google only.
+     *
+     * <p>A contact Google no longer holds is left out, as a multiget does.
      */
     public List<Card> readGoogleCards(Transport transport, Account account, List<String> ids) {
         return cards(
@@ -132,9 +115,9 @@ public class ContactClient {
     }
 
     /**
-     * Adds and removes the card's addressbook memberships on an
-     * account-level backend, by book id: JMAP patches addressBookIds,
-     * Google modifies group members.
+     * Adds and removes a card's book memberships on an account-level backend.
+     *
+     * <p>JMAP patches addressBookIds, Google modifies group members.
      */
     public void updateCardBooks(Transport transport, Account account, BooksUpdate update) {
         Replies.object(
@@ -149,9 +132,9 @@ public class ContactClient {
     }
 
     /**
-     * Creates the card in the addressbook collection, returning it
-     * with its ETag. The backends naming the resource themselves
-     * return the server-assigned id instead of the given one.
+     * Creates the card in the addressbook, returning it with its ETag.
+     *
+     * <p>Backends naming their own resources return their id, not the given.
      */
     public Card createCard(Transport transport, Account account, String addressbookUrl, NewCard card) {
         return Card.from(
@@ -166,7 +149,7 @@ public class ContactClient {
                                 card.vcard())));
     }
 
-    /** Reads the card at the given resource name from the addressbook collection. */
+    /** Reads the card at a resource name from the addressbook. */
     public Card readCard(Transport transport, Account account, String addressbookUrl, String uri) {
         return Card.from(
                 Replies.object(
@@ -180,11 +163,10 @@ public class ContactClient {
     }
 
     /**
-     * Updates the card in the addressbook collection, returning it with
-     * its new ETag. The base vCard (the state last synced with the
-     * server, null when unknown) trims the Graph, JMAP and Google
-     * patches to the fields the edit changed; CardDAV PUTs the full
-     * vCard and ignores it.
+     * Updates the card in the addressbook, returning it with its new ETag.
+     *
+     * <p>{@code baseVcard} (last synced state, null if unknown) trims Graph,
+     * JMAP and Google patches to the changed fields; CardDAV PUTs it whole.
      */
     public Card updateCard(Transport transport, Account account, BookCard card, String baseVcard) {
         return Card.from(
@@ -217,9 +199,9 @@ public class ContactClient {
     }
 
     /**
-     * Creates a batch of cards (Google-only: the one backend with a
-     * batch create verb), returning the created cards in input order
-     * with their server-assigned ids.
+     * Creates a batch of cards, Google only, returned in input order.
+     *
+     * <p>Each carries its server-assigned id.
      */
     public List<Card> createCards(Transport transport, Account account, List<String> vcards) {
         return cards(
@@ -243,10 +225,10 @@ public class ContactClient {
     }
 
     /**
-     * Pushes a round of changes as batch calls (JMAP ContactCard/set,
-     * Graph $batch), returning one {@code {ref, accepted, id?, etag?,
-     * error?}} outcome per change: a rejected change reports rejected
-     * instead of failing the round.
+     * Pushes a round of changes as batch calls (JMAP set, Graph $batch).
+     *
+     * <p>One {@link PushOutcome} per change: a rejected change is reported,
+     * not a failed round.
      */
     public List<PushOutcome> pushCards(
             Transport transport,
@@ -279,36 +261,31 @@ public class ContactClient {
     }
 
     /**
-     * Projects a vCard onto the neutral field model the app maps to
-     * ContactsContract rows (docs/contacts-mapping.md).
+     * Projects a vCard onto the neutral field model.
+     *
+     * <p>The model the app maps to ContactsContract rows
+     * (docs/contacts-mapping.md).
      */
     public static ContactFields projectCard(String vcard) {
         return ContactFields.from(Replies.object(Native.projectCard(vcard)));
     }
 
     /**
-     * Indexes a vCard for the store: the display fields the contacts
-     * list renders (name, first email and phone, UID) and a normalized
-     * content hash for the divergence flag of linked replicas.
+     * Indexes a vCard for the store: display fields and content hash.
+     *
+     * <p>The hash flags linked replicas that diverge.
      */
     public static CardIndex indexCard(String vcard) {
         return CardIndex.from(Replies.object(Native.indexCard(vcard)));
     }
 
-    /**
-     * Patches an edited field model back onto the vCard, preserving
-     * every property the model does not manage.
-     */
+    /** Patches an edited field model onto the vCard, other properties kept. */
     public static String applyCard(String vcard, ContactFields model) {
         return Json.string(
                 Replies.object(Native.applyCard(vcard, model.toJson().toString())), "vcard");
     }
 
-    /**
-     * Merges several vCard documents into one union: the merged
-     * document, its field model (the merge form prefill) and the
-     * per-field alternative values.
-     */
+    /** Merges several vCards into one union, with its form inputs. */
     public static CardsMerge mergeCards(List<String> vcards) {
         JSONArray cards = new JSONArray();
         for (String vcard : vcards) {
@@ -318,9 +295,9 @@ public class ContactClient {
     }
 
     /**
-     * Three-way merges a conflicted push: the staged local edit and
-     * the fetched remote card against their common base (empty means
-     * unknown; the local side stands in). The local side wins
+     * Three-way merges a conflicted push: local edit and remote card.
+     *
+     * <p>An empty base is unknown, the local side standing in. Local wins
      * same-field collisions; every other remote change flows in.
      */
     public static ConflictMerge mergeCardChanges(String base, String local, String remote) {
@@ -328,30 +305,26 @@ public class ContactClient {
     }
 
     /**
-     * Builds the conflict form's inputs for a both-sides-edited row: the
-     * merged document with the newer side (by REV) winning collisions as
-     * the pre-filled default, its field model, the two candidate values of
-     * every genuinely conflicted field, and an (always empty, non-null)
-     * changed list. An empty {@code alternatives} means nothing needs the
-     * user.
+     * Builds the conflict form's inputs for a both-sides-edited row.
+     *
+     * <p>The newer side by REV wins collisions as prefill. Empty
+     * {@code alternatives} means nothing needs the user.
      */
     public static ConflictForm mergeConflictForm(String base, String local, String remote) {
         return ConflictForm.from(Replies.object(Native.mergeConflictForm(base, local, remote)));
     }
 
-    /**
-     * Rewrites the card's UID, preserving every other byte (a plain
-     * copy is a new identity).
-     */
+    /** Rewrites the card's UID, every other byte kept: a copy's identity. */
     public static String setCardUid(String vcard, String uid) {
         return Json.string(
                 Replies.object(Native.setCardUid(vcard, uid)), "vcard");
     }
 
     /**
-     * Finds groups of likely-duplicate cards among {@code {ref,
-     * vcard}} pairs: exact normalized email, phone or full-name
-     * matches, conservative on purpose.
+     * Finds groups of likely-duplicate cards.
+     *
+     * <p>Exact normalized email, phone or full-name matches, conservative on
+     * purpose.
      */
     public static List<DuplicateSet> findDuplicates(List<RefCard> cards) {
         JSONArray input = new JSONArray();
@@ -369,11 +342,10 @@ public class ContactClient {
     }
 
     /**
-     * The ordered type-set vocabulary the edit form's spinners address
-     * for the kind: each position's vCard TYPE set
-     * (a one-element list of the sex code for {@link TypeKind#GENDER}), in the
-     * order the Android string-arrays mirror. The Rust side owns the
-     * order; a test pins the arrays to it.
+     * The ordered TYPE sets the edit form's spinners address for the kind.
+     *
+     * <p>The sex code alone for {@link TypeKind#GENDER}. Rust owns the order;
+     * a test pins the Android string-arrays to it.
      */
     static List<List<String>> cardTypeOrder(TypeKind kind) {
         JSONArray order = Replies.object(Native.cardTypeOrder(kind.wire())).optJSONArray("order");
@@ -385,43 +357,28 @@ public class ContactClient {
         return sets;
     }
 
-    /**
-     * The edit form's view support computed from the field model:
-     * summaries, type spinner positions and picker dates.
-     */
+    /** The edit form's view support computed from the field model. */
     public static FormView formView(ContactFields model) {
         return FormView.from(Replies.object(Native.formView(model.toJson().toString())));
     }
 
-    /**
-     * One phone entry saved from an edit dialog, its TYPE set drawn
-     * from the spinner position.
-     */
+    /** One phone entry saved from an edit dialog, TYPE set from the spinner. */
     public static ContactPhone formPhone(int index, String number, boolean pref) {
         return ContactPhone.from(Replies.object(Native.formEntry("phone", index, number, pref)));
     }
 
-    /**
-     * One email entry saved from an edit dialog, its TYPE set drawn
-     * from the spinner position.
-     */
+    /** One email entry saved from an edit dialog, TYPE set from the spinner. */
     public static ContactEmail formEmail(int index, String address, boolean pref) {
         return ContactEmail.from(Replies.object(Native.formEntry("email", index, address, pref)));
     }
 
-    /**
-     * One relation entry saved from an edit dialog, its TYPE set drawn
-     * from the spinner position.
-     */
+    /** One relation saved from an edit dialog, TYPE set from the spinner. */
     public static ContactRelation formRelation(int index, String value, boolean pref) {
         return ContactRelation.from(
                 Replies.object(Native.formEntry("relation", index, value, pref)));
     }
 
-    /**
-     * An address's TYPE set saved from an edit dialog, drawn from the
-     * radio position; the dialog owns the other components.
-     */
+    /** An address's TYPE set from an edit dialog's radio position. */
     public static List<String> formAddressTypes(int index) {
         return List.copyOf(
                 Json.strings(
@@ -430,27 +387,22 @@ public class ContactClient {
     }
 
     /**
-     * One GENDER saved from an edit dialog, its sex code drawn from the
-     * choice position; both parts empty when sex and identity are unset.
+     * One GENDER saved from an edit dialog, sex code from the choice.
+     *
+     * <p>Both parts empty when sex and identity are unset.
      */
     public static ContactGender formGender(int index, String identity) {
         return ContactGender.from(
                 Replies.object(Native.formEntry("gender", index, identity, false)));
     }
 
-    /**
-     * One picked date on the model wire (the vCard {@code yyyy-mm-dd}
-     * form, 1-based month).
-     */
+    /** One picked date on the model wire, {@code yyyy-mm-dd}, 1-based month. */
     public static String formDate(int year, int month, int day) {
         return Json.string(
                 Replies.object(Native.formDate(year, month, day)), "value");
     }
 
-    /**
-     * Groups the replica pool into merged contacts, the groups sorted by
-     * primary display name.
-     */
+    /** Groups the replica pool into merged contacts, by display name. */
     public static List<ContactGroup> groupContacts(ReplicaPool pool) {
         JSONArray groups =
                 Replies.object(Native.groupContacts(pool.toJson().toString()))

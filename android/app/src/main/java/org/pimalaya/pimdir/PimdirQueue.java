@@ -11,41 +11,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The action queue: the write door for what the app wants done and the
- * store cannot do itself (pimdir STORAGE section 15).
+ * The action queue: what the app wants done beyond the store (STORAGE §15).
  *
- * <p>Every other write here mutates the store and is finished when the
- * transaction commits. A submission is not: what it wants is a message
- * handed to a server, which is somewhere else and may be refused, may
- * have to wait for a network, and cannot be rolled back once it has
- * happened. The queue is the shape the standard gives that: a row
- * carrying a kind, a versioned payload and the body the action needs,
- * pinned in the blob directory so nothing collects it while it waits.
- *
- * <p>Two halves, as the standard names them. <strong>Producing</strong>
- * ({@link #enqueue}) is one transaction: the collection ensured, the
- * body stored and pinned, the row appended. <strong>Applying</strong> is
- * the drain, and for a submission it is the one shape section 15.5
- * describes, an intent whose effect is not a store mutation: the row is
- * not claimed and deleted up front, because a claim that deleted it
- * before the message went would lose the message. It is carried out
- * first and acknowledged after ({@link #acknowledge}), which makes a
- * submission at-least-once. A drain interrupted between the handover and
- * the acknowledgement sends the message twice, and that is the trade
- * the standard names against losing it.
- *
- * <p>The statements are io-pimdir's, bound by name: nothing here spells
- * a column list of its own.
+ * <p>{@link #enqueue} is one transaction (collection, pinned body, row). A
+ * submission is carried out first and acknowledged after (§15.5), so it is
+ * at-least-once. Statements are io-pimdir's, bound by name.
  */
 public final class PimdirQueue {
     /**
-     * The app's own action kind: hand this message to the account's
-     * submission endpoint.
+     * The app's action kind: hand this message to the submission endpoint.
      *
-     * <p>An open string, which is what lets an application carry an
-     * intent of its own (section 15.3), with a mail submission as the
-     * standard's worked example. The store owes it append order, blob
-     * pinning and the skip rule, and nothing else.
+     * <p>An open string (§15.3); the store owes it append order, blob pinning
+     * and the skip rule, nothing else.
      */
     public static final String SUBMIT = "submit";
 
@@ -57,6 +34,7 @@ public final class PimdirQueue {
     private final PimdirBlobs blobs;
     private final PimdirAccount accounts;
 
+    /** The queue of {@code store}, namespacing through {@code accounts}. */
     public PimdirQueue(PimdirDb store, PimdirAccount accounts) {
         this.store = store;
         this.items = new PimdirItems(store);
@@ -68,18 +46,14 @@ public final class PimdirQueue {
      * One queued action, pending or parked.
      *
      * @param id the queue row
-     * @param collection the collection it is against, which is what scopes a
-     *     read
+     * @param collection the collection it is against, which scopes a read
      * @param kind the kind, an open string; this app writes {@link #SUBMIT}
      * @param payload the versioned payload, as it was written
-     * @param objectHash the body the action carries, or null when it carries
-     *     none
+     * @param objectHash the body the action carries, or null for none
      * @param createdAt when it was appended, as the statement stamped it
      * @param attempts how many attempts failed
-     * @param error what parked it, or null while it is still pending. The
-     *     column is the pending/parked switch itself: the drain reads the rows
-     *     whose error is null, so recording one takes the action out of the
-     *     drain until somebody looks at it.
+     * @param error what parked it, or null while pending: the drain reads only
+     *     null-error rows, so recording one parks the action
      */
     public record Action(
             long id,
@@ -103,7 +77,7 @@ public final class PimdirQueue {
      * @param accountEmail the account owning that collection
      * @param kind the kind, an open string
      * @param payload the versioned payload, kept as the text it is
-     * @param body the body it carries, or null when it carries none
+     * @param body the body it carries, or null for none
      */
     public record Enqueued(
             String collection, String accountEmail, String kind, String payload, byte[] body) {}
@@ -111,13 +85,9 @@ public final class PimdirQueue {
     /**
      * Appends one action, with the body it carries.
      *
-     * <p>The producer's transaction of section 15.1, in its order: the
-     * collection ensured so the foreign key has a target, the body
-     * written to the blob directory and indexed, the pin taken because
-     * the row about to name that body is a pointer like any other, and
-     * the row appended last. Without the pin the body sits at refcount
-     * zero and the next collector unlinks a message that has not been
-     * sent.
+     * <p>§15.1's order: collection ensured (foreign key), body stored and
+     * indexed, pin taken, row appended. Without the pin the next collector
+     * unlinks an unsent message.
      */
     public long enqueue(Enqueued action) {
         String collection = action.collection();
@@ -167,7 +137,7 @@ public final class PimdirQueue {
         return load("LOAD_PENDING_ACTIONS", values("collection", collection), collection, null);
     }
 
-    /** Every pending action in the store, in the append order a drain owes them. */
+    /** Every pending action in the store, in the append order a drain owes. */
     public List<Action> pending() {
         return load("LIST_PENDING_ACTIONS", values(), null, null);
     }
@@ -175,11 +145,8 @@ public final class PimdirQueue {
     /**
      * Every parked action, which is what a failed send became.
      *
-     * <p>The canonical listing is an operator's: it says what failed and
-     * why, and carries no {@code object_hash}, having no use for the body.
-     * This app does have one, a refused message still being a message
-     * somebody wrote and can still open, so the pin is read back beside
-     * it. It is the one column here that does not come from a statement.
+     * <p>The canonical listing has no {@code object_hash}; the pin is read
+     * back beside it so a refused message can still be opened.
      */
     public List<Action> parked() {
         List<Action> parked = load("LOAD_PARKED_ACTIONS", values(), null, "error");
@@ -229,13 +196,10 @@ public final class PimdirQueue {
     }
 
     /**
-     * Removes one row and releases the body it pinned.
+     * Removes one row and releases its body's pin, in one transaction.
      *
-     * <p>Section 15.5's cancel, which is both acknowledging an intent
-     * that was carried out and withdrawing one nobody wants any more:
-     * the row is gone either way, and the difference is only who asked.
-     * Returning the pin in the same transaction is the invariant, the
-     * body being unreferenced from the moment the row leaves.
+     * <p>§15.5's cancel: acknowledging an intent carried out, or withdrawing
+     * one nobody wants.
      */
     public void acknowledge(long id) {
         SQLiteDatabase db = store.getWritableDatabase();
@@ -260,13 +224,10 @@ public final class PimdirQueue {
     }
 
     /**
-     * Parks one action: the attempt counted, the reason recorded, the
-     * row taken out of the drain and left where somebody can see it.
+     * Parks one action: attempt counted, reason recorded, out of the drain.
      *
-     * <p>For a failure that is the store's or the server's final word.
-     * Nothing retries a parked row on its own, which is the whole point:
-     * a message the server refuses would otherwise be offered to it
-     * again on every sync, for ever.
+     * <p>For the store's or server's final word: nothing retries a parked
+     * row, or a refused message would be offered again on every sync.
      */
     public void park(long id, String reason) {
         SQLiteDatabase db = store.getWritableDatabase();
@@ -274,8 +235,9 @@ public final class PimdirQueue {
     }
 
     /**
-     * Counts one failed attempt and leaves the row pending, for a
-     * failure of the environment rather than of the message.
+     * Counts one failed attempt and leaves the row pending.
+     *
+     * <p>For a failure of the environment rather than of the message.
      */
     public void bumpAttempts(long id) {
         SQLiteDatabase db = store.getWritableDatabase();
@@ -289,12 +251,10 @@ public final class PimdirQueue {
     }
 
     /**
-     * Reads one canonical listing into actions.
+     * Reads one canonical listing into actions, its columns by name.
      *
-     * <p>The three listings differ in their columns, so each is read by
-     * name rather than by position: the store-wide drain carries the
-     * collection and the parked one carries the error, and neither is
-     * where the per-collection read would look for it.
+     * <p>The three listings differ in columns: the drain carries the
+     * collection, the parked one the error.
      */
     private List<Action> load(String name, java.util.Map<String, Object> values,
             String collection, String error) {

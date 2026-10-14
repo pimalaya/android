@@ -3,8 +3,9 @@ package org.pimalaya.client;
 import org.json.JSONObject;
 
 /**
- * The three-way merge of a conflicted push (rs/contact/merge.rs
- * {@code ConflictMerge} 54).
+ * The three-way merge of a conflicted push.
+ *
+ * <p>Mirrors rs/contact/merge.rs {@code ConflictMerge} 54.
  *
  * @param conflicts the number of same-field collisions the local side won
  * @param vcard the merged card

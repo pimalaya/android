@@ -6,14 +6,11 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * One calendar component read whole, for the page that shows it
- * (rs/calendar/read.rs {@code EventDetail} 30).
+ * One calendar component read whole, for the page that shows it.
  *
- * <p>A projection rather than the object: everything RFC 5545 lets a
- * VEVENT, VTODO or VJOURNAL carry that a reader would look for, in the
- * one shape all three share, with the properties only one of them has
- * left empty by the other two. One class and not three, because the page
- * differs by which sections it draws and not by what it can be handed.
+ * <p>Mirrors rs/calendar/read.rs {@code EventDetail} 30: what RFC 5545 lets a
+ * VEVENT, VTODO or VJOURNAL carry in one shared shape, the properties of one
+ * kind left empty by the other two, since the page differs only by sections.
  *
  * @param component which of the three this is
  * @param uid {@code UID}, the identity every replica of this shares
@@ -21,28 +18,22 @@ import org.json.JSONObject;
  * @param description its {@code DESCRIPTION}
  * @param location its {@code LOCATION}
  * @param url its {@code URL}
- * @param status {@code STATUS}, as written: the vocabulary differs per
- *     component
+ * @param status {@code STATUS} as written, its vocabulary per component
  * @param categories {@code CATEGORIES}, comma separated
- * @param start {@code DTSTART}, or the {@code DUE} placing a to-do
- *     carrying none; null when neither
+ * @param start {@code DTSTART}, or a to-do's placing {@code DUE}; else null
  * @param end {@code DTEND}, null when absent; only an event has one
  * @param due {@code DUE}, null when absent; only a to-do has one
- * @param completed {@code COMPLETED}, always UTC, null when absent; only a
- *     to-do has one
+ * @param completed {@code COMPLETED}, UTC, null when absent; to-do only
  * @param allDay whether the placing date is a DATE rather than a DATE-TIME
- * @param recurrence the series' {@code RRULE}, raw, empty when it does not
- *     repeat
+ * @param recurrence the series' {@code RRULE}, raw, empty when not repeating
  * @param priority its {@code PRIORITY}, as written
- * @param percentComplete {@code PERCENT-COMPLETE}, as written; only a
- *     to-do has one
+ * @param percentComplete {@code PERCENT-COMPLETE} as written; to-do only
  * @param organizer {@code ORGANIZER}, the address alone
- * @param attendees every {@code ATTENDEE}, in the order the object lists
- *     them
+ * @param attendees every {@code ATTENDEE}, in the object's order
  * @param created its {@code CREATED}, raw
  * @param lastModified its {@code LAST-MODIFIED}, raw
- * @param recurrenceId the {@code RECURRENCE-ID} of the override read, null
- *     when what was read is the series or an entry that does not recur
+ * @param recurrenceId the read override's {@code RECURRENCE-ID}; null for a
+ *     series or an entry that does not recur
  */
 public record EventDetail(
         String component,
@@ -107,8 +98,9 @@ public record EventDetail(
     }
 
     /**
-     * One attendee of a component: who, and where they stand
-     * (rs/calendar/read.rs {@code EventAttendee} 80).
+     * One attendee of a component: who, and where they stand.
+     *
+     * <p>Mirrors rs/calendar/read.rs {@code EventAttendee} 80.
      *
      * @param name the {@code CN} parameter, empty when there is none
      * @param address the calendar user address, {@code mailto:} stripped

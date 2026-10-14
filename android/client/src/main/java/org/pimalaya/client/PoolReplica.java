@@ -4,9 +4,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * One replica of a {@link ReplicaPool} (rs/contact/group.rs
- * {@code PoolReplica} 29). A null component is an absent key, read
- * bridge-side as empty.
+ * One replica of a {@link ReplicaPool}.
+ *
+ * <p>Mirrors rs/contact/group.rs {@code PoolReplica} 29. A null component is
+ * an absent key, read bridge-side as empty.
  *
  * @param ref the replica reference
  * @param uid the vCard UID

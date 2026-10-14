@@ -12,23 +12,25 @@ import java.util.function.Consumer;
 import org.pimalaya.R;
 
 /**
- * The activity the shared widgets draw in: its executors, theme helpers
- * and dialogs, and the chrome a list's scroll drives.
+ * The activity the shared widgets draw in: executors, theme and dialogs.
+ *
+ * <p>Also the chrome a list's scroll drives.
  */
 public abstract class Host extends Activity {
-    /** The single-thread io executor, the main-thread handler and the
-     *  theme helper. */
+    /** The single-thread io executor. */
     public final ExecutorService io = Executors.newSingleThreadExecutor();
 
+    /** The main thread's handler. */
     public final Handler main = new Handler(Looper.getMainLooper());
+    /** The theme and density helpers. */
     public final Ui ui = new Ui(this);
 
     /**
-     * The executor of what someone is waiting on, a message being opened:
-     * never queued behind a step of the background fill or of the body
-     * download, which run on {@link #io} and can hold it for seconds. What
-     * it writes to the store it writes under {@link Locks#store},
-     * the store keeping one writer.
+     * The executor of what someone waits on, such as a message being opened.
+     *
+     * <p>Never queued behind the background fill or body download on
+     * {@link #io}. Its store writes take {@code Locks.store}, the store keeping
+     * one writer.
      */
     public final ExecutorService interactive = Executors.newSingleThreadExecutor();
 
@@ -71,16 +73,18 @@ public abstract class Host extends Activity {
     /** Toggles an auth continue FAB between its arrow and an on-disc loader. */
     public abstract void setAuthLoading(int buttonId, int progressId, boolean loading);
 
-    /** Gates a conflict form's save FAB: the save once nothing awaits review. */
+    /** Gates a conflict form's save FAB: saves once nothing awaits review. */
     public abstract void gateSave(boolean ready, int icon, int description);
 
-    /** Titles the bar with a list domain's name, once its large title scrolled away. */
+    /**
+     * Titles the bar with a list domain's name once its title scrolled away.
+     */
     public abstract void showDomainTitle(int panel);
 
     /** Retitles the bar, for a page whose own edits change its title. */
     public abstract void updateBarTitle(String title);
 
-    /** A list's add button, inert while the list works (an import, an export). */
+    /** A list's add button, inert while the list works (import, export). */
     public abstract void setListBusy(boolean busy);
 
     /** The composer's send button, inert while the message is written out. */
@@ -105,20 +109,23 @@ public abstract class Host extends Activity {
         return ui.resolveColor(attr);
     }
 
+    /** An error's message, or the {@code fallback} string when it has none. */
     public String message(Exception error, int fallback) {
         String message = error.getMessage();
         return message == null || message.isEmpty() ? getString(fallback) : message;
     }
 
+    /** Shows a long toast. */
     public void toast(String message) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
     /**
-     * Posts a UI continuation that only runs while the activity is
-     * alive: the io executor's sync outcomes land here, and one
-     * arriving after a rotation or a finish would raise dialogs
-     * against a dead window (BadTokenException).
+     * Posts a UI continuation that only runs while the activity is alive.
+     *
+     * <p>Sync outcomes from the io executor land here; one arriving after a
+     * rotation or finish would raise dialogs on a dead window
+     * (BadTokenException).
      */
     public void postAlive(Runnable action) {
         main.post(
@@ -130,10 +137,10 @@ public abstract class Host extends Activity {
     }
 
     /**
-     * Runs work on {@code on} (the io executor, the interactive one, a
-     * list's reads), then hands its value to {@code done} or its failure to
-     * {@code failed} on the main thread, dropped once the activity is
-     * destroyed ({@link Background}).
+     * Runs work on {@code on}, handing its outcome back on the main thread.
+     *
+     * <p>{@code done} gets the value, {@code failed} the failure, both dropped
+     * once the activity is destroyed ({@link Background}).
      */
     public <T> void background(
             Executor on,
@@ -144,9 +151,10 @@ public abstract class Host extends Activity {
     }
 
     /**
-     * Shows an error in a dismissible dialog rather than a toast: the
-     * full (often long, e.g. a server body) message stays on screen and
-     * scrolls until acknowledged.
+     * Shows an error in a dismissible dialog rather than a toast.
+     *
+     * <p>The full message (often a long server body) stays and scrolls until
+     * acknowledged.
      */
     public void showError(Exception error, int fallback) {
         new AlertDialog.Builder(this)
@@ -156,6 +164,7 @@ public abstract class Host extends Activity {
                 .show();
     }
 
+    /** Converts dp to pixels. */
     public int dp(int value) {
         return ui.dp(value);
     }

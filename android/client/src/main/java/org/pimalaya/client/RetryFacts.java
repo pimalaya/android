@@ -5,12 +5,13 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * The facts a 412-rejected push's retry is decided over
- * (rs/contact/sync.rs {@code RetryFacts} 36). A null component is an
- * absent key.
+ * The facts a 412-rejected push's retry is decided over.
  *
- * @param listed the last enumerate's ETag per handle, a null ETag sent as
- *     JSON null; null when nothing was listed
+ * <p>Mirrors rs/contact/sync.rs {@code RetryFacts} 36. A null component is
+ * an absent key.
+ *
+ * @param listed the last enumerate's ETag per handle (a null ETag sent as
+ *     JSON null); null when nothing was listed
  * @param complete whether the last enumerate listed the whole collection
  * @param handle the handle of the rejected push
  * @param ifMatch the staged base revision the push was guarded with, or null

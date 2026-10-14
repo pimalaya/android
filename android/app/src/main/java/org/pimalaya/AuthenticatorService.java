@@ -10,9 +10,10 @@ import android.os.Bundle;
 import android.os.IBinder;
 
 /**
- * Stub authenticator for Pimalaya's account type. Accounts are created
- * by the app itself after the addressbook selection, never through the
- * system's "add account" flow, so every callback answers empty.
+ * Stub authenticator for Pimalaya's account type.
+ *
+ * <p>The app creates its accounts itself after the address book selection,
+ * never through the system's "add account" flow: every callback answers empty.
  */
 public class AuthenticatorService extends Service {
     private Authenticator authenticator;

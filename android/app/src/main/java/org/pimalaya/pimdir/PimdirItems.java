@@ -15,29 +15,11 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Item-level writes and reads the app performs on its own, outside a sync.
+ * Item writes and reads the app performs outside a sync.
  *
- * <p>{@link PimdirStorage} services what the io-pimdir engine asks for; this
- * is the other half, for everything the app does without the engine: staging an
- * edit the next sync will push, and refreshing the read-only mirrors that have
- * no engine at all (mail, calendar). Both write the same tables, so the object
- * bookkeeping lives here once rather than in each domain.
- *
- * <p>Three invariants are the whole reason this is not inline SQL:
- *
- * <ul>
- *   <li><strong>A body is content-addressed and refcounted.</strong> Writing one
- *       files a blob, inserts an {@code objects} row and moves the count by the
- *       difference this item made; releasing the last reference unlinks the
- *       blob. Counting wrong does not corrupt anything visibly, it loses bodies.
- *   <li><strong>One link id, one {@code seq}.</strong> The public id is
- *       store-global and shared by every placement of an item (SPEC.md §9.1), so
- *       a card added to a second address book must reuse the id it already has
- *       rather than draw a new one.
- *   <li><strong>A base is a reference too.</strong> {@code bindings.base_object}
- *       pins a body exactly as {@code items.object_hash} does, so a removal has
- *       to release both.
- * </ul>
+ * <p>Staged edits and the read-only mirrors, beside {@link PimdirStorage}'s
+ * engine yields. Owns the invariants: bodies content-addressed and refcounted
+ * (base pins included), one {@code seq} per link id store-wide (SPEC.md §9.1).
  */
 public final class PimdirItems {
     /** The detail ladder as the schema stores it: 0 probed, 1 meta, 2 full. */
@@ -49,6 +31,7 @@ public final class PimdirItems {
     private final PimdirDb store;
     private final PimdirBlobs blobs;
 
+    /** Item access over {@code store}. */
     public PimdirItems(PimdirDb store) {
         this.store = store;
         this.blobs = new PimdirBlobs(store.blobs());
@@ -59,23 +42,21 @@ public final class PimdirItems {
         final String linkId;
         final String body;
 
-        /**
-         * The typed summary row (STORAGE Annex A) as {@link PimdirSummary}
-         * spells it on the wire, or null to keep whatever is stored.
-         */
+        /** The typed summary row (Annex A), or null to keep the stored one. */
         final JSONObject summary;
 
         final String sortKey;
         final String flags;
 
         /**
-         * The revision this row was mirrored at, or null when the caller
-         * tracks none: a read-only mirror has no engine, so the validator its
-         * next write is guarded by is the base revision of its source binding
-         * and there is nowhere else for it to live.
+         * The revision this row was mirrored at, or null when untracked.
+         *
+         * <p>Stored as the source binding's base: a mirror's guarded write has
+         * nowhere else to keep its validator.
          */
         final String revision;
 
+        /** A row with flags and a mirrored revision (null when untracked). */
         public Row(String linkId, String body, JSONObject summary, String sortKey, String flags,
                 String revision) {
             this.linkId = linkId;
@@ -86,15 +67,18 @@ public final class PimdirItems {
             this.revision = revision;
         }
 
+        /** A row with no flags and no revision. */
         public Row(String linkId, String body, JSONObject summary, String sortKey) {
             this(linkId, body, summary, sortKey, "[]", null);
         }
     }
 
+    /** The store for reading. */
     public SQLiteDatabase readable() {
         return store.getReadableDatabase();
     }
 
+    /** The store for writing, deferred blobs unlinked first. */
     public SQLiteDatabase writable() {
         SQLiteDatabase db = store.getWritableDatabase();
         unlinkCollected(store, db, blobs);
@@ -122,10 +106,8 @@ public final class PimdirItems {
     /**
      * The bytes one item's body holds, or null when it holds none.
      *
-     * <p>Bytes rather than text, for the one kind that is not text: a
-     * message is what its sender encoded, and handing it back decoded as
-     * UTF-8 would mangle a body in a legacy charset before the parser that
-     * reads the header naming that charset ever saw it.
+     * <p>Bytes, not text: a message in a legacy charset would be mangled before
+     * its parser saw the header naming it.
      */
     public byte[] objectBytes(String collection, String linkId) {
         String hash = objectOf(readable(), collection, linkId);
@@ -145,14 +127,10 @@ public final class PimdirItems {
     }
 
     /**
-     * Files a body against an item the collection already holds, raising it
-     * to full and leaving the rest of its row alone.
+     * Files a body against a held item, raising it to full, the row untouched.
      *
-     * <p>For the mirrors, whose rows arrive as a spine and gain their bodies
-     * one open at a time: everything else writes the body with the row,
-     * having had both in hand from the start. An item the collection does
-     * not hold is not created, because a body with no row is a body no
-     * listing can reach.
+     * <p>For the mirrors' spines gaining bodies one open at a time. An item not
+     * held is not created: no listing could reach it.
      */
     public void putObject(String collection, String linkId, byte[] body) {
         String hash = PimdirHash.of(body);
@@ -181,10 +159,8 @@ public final class PimdirItems {
     /**
      * Writes one item's content, returning the hash it now carries.
      *
-     * <p>Everything the store owns and the caller does not is left alone: the
-     * bindings, so a staged edit keeps the base its push diffs against, and the
-     * retention stamps, which a write clears because writing an item is exactly
-     * how a retired one comes back.
+     * <p>Bindings stay (a staged edit keeps its base); retention stamps clear,
+     * a write reviving a retired item.
      */
     public String put(SQLiteDatabase db, String collection, Row row) {
         String hash = row.body == null || row.body.isEmpty() ? null : PimdirHash.of(row.body);
@@ -231,14 +207,10 @@ public final class PimdirItems {
     }
 
     /**
-     * Records the revision the mirror read the row at, as the base of its
-     * source binding.
+     * Records the revision the mirror read, as its source binding's base.
      *
-     * <p>A mirror has no engine, so this binding is not a merge base: it is
-     * where the one validator a guarded write needs belongs, and reading it
-     * back is how the write conditions itself on what the server held. The
-     * body is deliberately not pinned, since a mirror stages nothing to diff
-     * against it.
+     * <p>Not a merge base: the validator a guarded write reads back. The body
+     * is not pinned; a mirror stages nothing to diff.
      */
     private void bindRevision(
             SQLiteDatabase db, String collection, String linkId, String revision) {
@@ -253,10 +225,8 @@ public final class PimdirItems {
     /**
      * Drops one item outright, releasing every body it referenced.
      *
-     * <p>Outright rather than retained: retention (SPEC.md §11) exists so a
-     * store is never the last holder of a body a remote expunged, and it is the
-     * sync seam's job because only the sync knows a source dropped an item. A
-     * caller reaching this has decided the item goes.
+     * <p>Not retained (SPEC.md §11): only the sync knows a source dropped an
+     * item, and a caller here decided it goes.
      */
     public void remove(SQLiteDatabase db, String collection, String linkId) {
         String object = objectOf(db, collection, linkId);
@@ -288,7 +258,7 @@ public final class PimdirItems {
         }
     }
 
-    /** The item's current body hash, null when it has none or does not exist. */
+    /** The item's current body hash, or null for none or no item. */
     public String objectOf(SQLiteDatabase db, String collection, String linkId) {
         try (Cursor cursor =
                 db.rawQuery(
@@ -309,8 +279,9 @@ public final class PimdirItems {
     }
 
     /**
-     * The item's public id, drawn from the store-wide counter the first time a
-     * link id is seen and shared by every later placement of it.
+     * The item's public id, shared by every placement of its link id.
+     *
+     * <p>Drawn from the store-wide counter the first time a link id is seen.
      */
     public long seqFor(SQLiteDatabase db, String linkId) {
         try (Cursor cursor =
@@ -348,7 +319,7 @@ public final class PimdirItems {
                 new Object[] {hash, bytes.length});
     }
 
-    /** Files a file's bytes and indexes them, streamed, leaving the refcount to the caller. */
+    /** Files and indexes a file's bytes, streamed; refcount the caller's. */
     public void storeObject(SQLiteDatabase db, String hash, java.io.File source) {
         try {
             blobs.put(hash, source);
@@ -362,9 +333,9 @@ public final class PimdirItems {
     }
 
     /**
-     * Files a file the bridge wrote and indexes it, moved into the blob
-     * store rather than copied ({@link PimdirBlobs#adopt}), leaving the
-     * refcount to the caller; the file is gone after it.
+     * Files and indexes a file the bridge wrote, moved; refcount the caller's.
+     *
+     * <p>Moved by {@link PimdirBlobs#adopt}: the file is gone after it.
      */
     void adoptObject(SQLiteDatabase db, String hash, java.io.File source) {
         long size = source.length();
@@ -380,9 +351,9 @@ public final class PimdirItems {
     }
 
     /**
-     * {@link #putObject(String, String, byte[])} of a body the bridge wrote
-     * to a file and hashed ({@code hash}), moved into the blob store: the
-     * body never read on this side. The file is gone after it.
+     * {@link #putObject(String, String, byte[])} of a file the bridge hashed.
+     *
+     * <p>Moved into the blob store, never read here; the file is gone after.
      */
     public void putObject(String collection, String linkId, String hash, java.io.File source) {
         SQLiteDatabase db = writable();
@@ -408,7 +379,7 @@ public final class PimdirItems {
         }
     }
 
-    /** The file one body is stored in, null when the store holds no such blob. */
+    /** The file one body is stored in, null when no such blob is held. */
     public java.io.File blobFile(String hash) {
         if (hash == null) {
             return null;
@@ -422,7 +393,7 @@ public final class PimdirItems {
         return blobFile(objectOf(readable(), collection, linkId));
     }
 
-    /** Moves the refcount by the difference one reference made, never globally. */
+    /** Moves the refcount by the difference one reference made. */
     public void adjustRefcount(SQLiteDatabase db, String before, String after) {
         if (before == null ? after == null : before.equals(after)) {
             return;
@@ -440,8 +411,9 @@ public final class PimdirItems {
     }
 
     /**
-     * Drops unreferenced objects, their blobs left for after the commit
-     * ({@link #deferUnlink}).
+     * Drops unreferenced objects, their blobs left for after the commit.
+     *
+     * <p>See {@link #deferUnlink}.
      */
     public void collectGarbage(SQLiteDatabase db) {
         List<String> orphans = new ArrayList<>();
@@ -457,22 +429,21 @@ public final class PimdirItems {
     }
 
     /**
-     * Leaves the blobs of objects a transaction just deleted until it has
-     * committed ({@link #unlinkCollected}): a rollback restores the rows,
-     * and a row whose blob was already unlinked would be a body lost.
+     * Leaves deleted objects' blobs until the transaction commits.
+     *
+     * <p>A rollback restores the rows, which must still find their blobs
+     * ({@link #unlinkCollected}).
      */
     public static void deferUnlink(PimdirDb store, List<String> hashes) {
         store.collected.addAll(hashes);
     }
 
     /**
-     * Keeps a body's file from {@link #unlinkCollected} until {@link #unpin},
-     * for a body filed outside the transaction whose row names it (a
-     * download's message, moved in as it is fetched and indexed by the
-     * engine's write after): taken before the file is, released once that
-     * write has returned. Its object row may be collected meanwhile, by a
-     * writer dropping the last reference to the same hash; the file
-     * stays, and the write files the row again.
+     * Keeps a body's file from {@link #unlinkCollected} until {@link #unpin}.
+     *
+     * <p>For a body filed before the write naming it (a downloaded message):
+     * taken before the file, released after the write. Its row may be collected
+     * meanwhile; the file stays and the write refiles the row.
      */
     public static void pin(PimdirDb store, String hash) {
         synchronized (store.pinned) {
@@ -487,21 +458,17 @@ public final class PimdirItems {
         }
     }
 
-    /** {@link #unlinkCollected} over this store, for a collector just committed. */
+    /** {@link #unlinkCollected} over this store, after a collector commits. */
     public void unlinkCollected() {
         unlinkCollected(store, store.getWritableDatabase(), blobs);
     }
 
     /**
-     * Unlinks the blobs {@link #deferUnlink} left, once no transaction is
-     * open on this thread: those whose object row is still gone, so one
-     * rolled back or filed again keeps its file. Run before each write
-     * ({@link #writable}) and after a collector commits; a crash between
-     * leaves an orphan blob, never a row without its body.
+     * Unlinks deferred blobs whose rows are still gone, outside transactions.
      *
-     * <p>Inside a transaction of its own, so no writer is between filing
-     * a body and committing its row while the row is read and the file
-     * unlinked; a pinned body ({@link #pin}) is left for a later run.
+     * <p>Run before each write ({@link #writable}) and after collectors, in its
+     * own transaction; pinned bodies wait. A crash leaves an orphan blob, never
+     * a row without body.
      */
     static void unlinkCollected(PimdirDb store, SQLiteDatabase db, PimdirBlobs blobs) {
         if (store.collected.isEmpty() || db.inTransaction()) {
@@ -543,8 +510,9 @@ public final class PimdirItems {
     }
 
     /**
-     * Every body the item's bindings pin: the base each source last agreed on,
-     * and the diverging remote one a conflicted source is waiting to settle.
+     * Every body the item's bindings pin.
+     *
+     * <p>Each source's agreed base, and a conflicted source's diverging remote.
      */
     private static List<String> bindingObjectsOf(
             SQLiteDatabase db, String collection, String linkId) {

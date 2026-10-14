@@ -18,16 +18,11 @@ import org.pimalaya.phone.Accounts;
 import org.pimalaya.pimdir.PimdirDb;
 
 /**
- * Contacts sync adapter running the phone spoke's engine pass through
- * Android's sync scheduler: the book's raw contacts reconcile two-way
- * with the store, so a contacts-app edit converges into the hub without
- * opening Pimalaya (the next remote sync pushes it upstream).
- * Registering it also associates Pimalaya's account type with the
- * contacts authority, and its CONTACTS_STRUCTURE meta-data is what makes
- * contacts apps list the accounts and allow editing their raw contacts.
- * Serves only the syncs the OS schedules itself: the upload sync after
- * an edit on our raw contacts (the accounts sync automatically), and the
- * per-account "sync now"; the app runs the same pass directly.
+ * Contacts sync adapter: a book's phone pass, raw contacts two-way.
+ *
+ * <p>A contacts-app edit reaches the store without opening the app. Its
+ * CONTACTS_STRUCTURE meta-data makes contacts apps list and edit the accounts.
+ * Serves only OS syncs (upload after an edit, "sync now"); the app runs it too.
  */
 public class SyncService extends Service {
     private static final Object LOCK = new Object();
@@ -48,10 +43,10 @@ public class SyncService extends Service {
     }
 
     /**
-     * Whether a sync asked of the adapter is one it runs: a contacts sync of
-     * one of the app's own accounts. The service is exported for the
-     * system to bind, and on Android before the 2022 security patch any
-     * app could ask it for a sync of any account and authority.
+     * Whether the adapter runs a sync: a contacts sync of one of our accounts.
+     *
+     * <p>The service is exported, and before the 2022 security patch any app
+     * could ask it for any account and authority.
      */
     static boolean serves(Account account, String authority) {
         return account != null

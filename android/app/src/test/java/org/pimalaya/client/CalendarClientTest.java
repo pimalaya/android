@@ -31,17 +31,11 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Pins the calendar records on the real bridge: crafted objects expanded,
- * read, merged and split, each reply parsed to the values the hand parsers
- * the records replaced produced (literals captured on that code), every
- * enum value produced by the bridge, and every record mirroring its reply.
+ * Pins the calendar records on the real bridge, against captured literals.
  *
- * <p>The network verbs (listCalendars, syncEvents, multigetEvents,
- * createEvent, updateEvent, deleteEvent) cannot run here: the bridge
- * refuses to send credentials over the plain {@code http} a loopback
- * server speaks, and the transport takes TLS from the platform trust
- * store. Their records are pinned on literal replies shaped as the Rust
- * structs serialize them (rs/calendar.rs 77, 101, 117, 138).
+ * <p>Objects expanded, read, merged and split; every enum value and reply
+ * shape. Network verbs refuse a loopback's plain http: literal replies instead
+ * (rs/calendar.rs 77, 101, 117, 138).
  */
 @RunWith(RobolectricTestRunner.class)
 public class CalendarClientTest {

@@ -6,10 +6,11 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * The edit form's view support of one field model (rs/contact/form.rs
- * {@code FormView} 48): summaries, type spinner positions and picker
- * dates, computed bridge-side so the form only localizes labels. The
- * position lists run parallel to the model's lists.
+ * The edit form's view support of one field model.
+ *
+ * <p>Mirrors rs/contact/form.rs {@code FormView} 48: summaries, spinner
+ * positions and picker dates computed bridge-side, so the form only localizes
+ * labels. Position lists run parallel to the model's lists.
  *
  * @param addresses each address row's spinner position and summary
  * @param anniversary the anniversary as picker parts, null unless a full date

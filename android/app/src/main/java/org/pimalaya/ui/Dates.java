@@ -11,34 +11,21 @@ import java.util.Locale;
 import org.pimalaya.R;
 
 /**
- * How the app words a moment: which day it was, how far it is from now,
- * and the exact date when the exact date is what is wanted.
+ * How the app words a moment: its day, its distance from now, its date.
  *
- * <p>One vocabulary for the three domains, because they show the same
- * column: a mail row dates itself, an agenda row says how far off its
- * occurrence is, and a message header says both. Two wordings for one
- * idea would read as two apps.
- *
- * <p><strong>Written here rather than taken from a library</strong>, for
- * the reason the desktop client gives for the same dozen lines: what a
- * reader wants is calendar-relative and what the libraries offer is
- * duration-relative. A message that arrived at 23:00 last night is
- * <em>Yesterday</em>, not nine hours ago, and no amount of configuring a
- * duration formatter produces that.
+ * <p>One vocabulary for the three domains. Hand-written because readers want
+ * calendar-relative wording and libraries offer duration-relative: 23:00 last
+ * night is Yesterday, not nine hours ago.
  */
 public final class Dates {
     /** How close to now counts as now, in milliseconds. */
     private static final long JUST_NOW = 60 * 1000L;
 
     /**
-     * Which day a moment falls on, as a reader names it: Today,
-     * Yesterday, then the distance in the coarsest unit that is still
-     * true.
+     * Which day a moment falls on: Today, Yesterday, then the coarsest unit.
      *
-     * <p>Calendar days rather than elapsed hours, which is the whole
-     * point: the boundary is midnight, so a message from 23:00 reads
-     * Yesterday at 08:00 the next morning, and one from 00:30 reads
-     * Today however close to midnight it landed.
+     * <p>Calendar days, not elapsed hours: 23:00 reads Yesterday the next
+     * morning, 00:30 reads Today however close to midnight.
      */
     public static String day(Context context, long stamp) {
         if (stamp <= 0) {
@@ -59,11 +46,9 @@ public final class Dates {
     }
 
     /**
-     * How far a moment is from now, in either direction: {@code now},
-     * {@code in 20 minutes}, {@code 3 days ago}.
+     * How far a moment is from now: {@code now}, {@code in 20 minutes}.
      *
-     * <p>One unit and never two, because these label a column that is
-     * scanned rather than read, and "1 month, 3 days ago" is a sentence.
+     * <p>One unit, never two: the column is scanned, not read.
      */
     public static String relative(Context context, long stamp) {
         long span = stamp - System.currentTimeMillis();
@@ -85,11 +70,9 @@ public final class Dates {
     }
 
     /**
-     * The same, told in whole days from today rather than in hours from
-     * this minute, for a moment that has no time of its own.
+     * The same in whole days from today, for a moment with no time of its own.
      *
-     * <p>An all-day entry is on a day: reading a birthday as five hours
-     * ago because the day started this morning would be nonsense.
+     * <p>An all-day entry is on a day: a birthday is not five hours ago.
      */
     public static String relativeDays(Context context, long stamp) {
         long days = daysBetween(startOfDay(System.currentTimeMillis()), startOfDay(stamp));
@@ -157,10 +140,7 @@ public final class Dates {
         return DateFormat.format("yyyy", new Date(stamp));
     }
 
-    /**
-     * A count of days as the coarsest unit that stays honest: days
-     * inside a week, weeks inside a month, then months and years.
-     */
+    /** Days as the coarsest honest unit: days, weeks, then months and years. */
     private static String spanOfDays(Context context, long days) {
         if (days < 7) {
             return quantity(context, R.plurals.date_days, days);
@@ -189,9 +169,7 @@ public final class Dates {
     }
 
     /**
-     * Whole days from one midnight to another, rounded because a day a
-     * daylight-saving change made 23 or 25 hours long would otherwise
-     * land the count one off.
+     * Whole days between two midnights, rounded over 23 or 25-hour DST days.
      */
     private static long daysBetween(long from, long until) {
         return Math.round((double) (until - from) / (24 * 60 * 60 * 1000));

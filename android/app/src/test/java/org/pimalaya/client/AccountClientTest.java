@@ -16,16 +16,11 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Pins the account records on the real bridge: backend info for every
- * backend, discovered configs round-tripped through the bridge's merge,
- * and authorization URLs for fixed PKCE material, each equal to what the
- * hand parsers and builders the records replaced produced (literals
- * captured on that code).
+ * Pins the account records on the real bridge, against captured literals.
  *
- * <p>The token, metadata and registration verbs cannot run here: the
- * bridge requires https for every OAuth endpoint (rs/account/oauth.rs
- * {@code require_https}). Their records are pinned on literal replies
- * shaped as io-oauth and io-pim-discovery serialize them.
+ * <p>Backend info, merged configs, PKCE authorization URLs. OAuth endpoints
+ * need https (rs/account/oauth.rs {@code require_https}), so token, metadata
+ * and registration replies are literals shaped as io-oauth serializes them.
  */
 @RunWith(RobolectricTestRunner.class)
 public class AccountClientTest {

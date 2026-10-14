@@ -12,17 +12,17 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * Checks a record against the bridge reply it mirrors, and Java-built
- * inputs against literal JSON, on the raw text so neither depends on
- * which org.json re-prints them.
+ * Checks records against the replies they mirror, inputs against literals.
+ *
+ * <p>On the raw text, so neither depends on which org.json re-prints them.
  */
 final class ReplyShape {
     private ReplyShape() {}
 
     /**
-     * The record's component names equal the raw reply's top-level keys,
-     * in the order they appear in the text: a field added on the Rust
-     * side, or one renamed, fails here.
+     * The record's components equal the raw reply's top-level keys, in order.
+     *
+     * <p>A field added or renamed on the Rust side fails here.
      */
     static void assertMirrors(Class<? extends Record> record, String raw) {
         List<String> components = new ArrayList<>();
@@ -120,8 +120,10 @@ final class ReplyShape {
     }
 
     /**
-     * Two JSON texts are the same value: same keys (absent distinct from
-     * null), same values, key order ignored, array order kept.
+     * Two JSON texts are the same value.
+     *
+     * <p>Same keys (absent distinct from null), same values, key order ignored,
+     * array order kept.
      */
     static void assertSameJson(String expected, String actual) throws Exception {
         assertTrue(
@@ -134,7 +136,9 @@ final class ReplyShape {
         return trimmed.startsWith("[") ? new JSONArray(trimmed) : new JSONObject(trimmed);
     }
 
-    /** A value as plain Java collections, objects sorted by key, null as a marker. */
+    /**
+     * A value as plain collections, objects sorted by key, null as a marker.
+     */
     private static Object canonical(Object value) throws Exception {
         if (value instanceof JSONObject) {
             JSONObject object = (JSONObject) value;

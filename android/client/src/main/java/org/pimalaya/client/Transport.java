@@ -15,31 +15,11 @@ import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
 /**
- * URL-keyed pool of sockets for the Rust bridge. The native driver calls
- * {@link #read} / {@link #write} by name on every yield, passing the
- * endpoint URL it wants to talk to; the pool lazily opens one connection
- * per origin (scheme, host, port) and reuses it for as long as the
- * transport is held. A {@code tcp} (DNS resolver), {@code http} or
- * {@code smtp} URL gets a plain socket, an {@code https} one a TLS socket
- * validated by the platform trust store, and a plain one can be upgraded in
- * place ({@link #starttls}).
+ * URL-keyed socket pool the bridge calls by name (JNI), one per origin.
  *
- * <p>How long it is held is the whole of what it costs. A sync pass that
- * opened one per verb paid a connect, a TLS handshake and, over IMAP, an
- * authentication to carry each command; one held for the pass pays them
- * once. The sockets are the cheap half of that on IMAP, where the session
- * above them has to last too ({@link MailSession}); on the HTTP backends
- * they are the whole of it, a request carrying its own state.
- *
- * <p>A held connection is a hint, never a promise: Graph closes one idle
- * for about two minutes. One that fails, times out or ends is dropped,
- * and so is one whose last HTTP answer the bridge did not read to its
- * end ({@link #begin}), so no answer is ever read as another's.
- *
- * <p>Not thread-safe, and that is the whole of its contract: one
- * transport serves one caller at a time. It is held for as long as the
- * caller wants its sockets kept, which is a whole sync pass rather than
- * one call, and a fan-out gives each worker its own rather than sharing.
+ * <p>TLS schemes get a platform-validated socket, plain ones one that
+ * {@link #starttls} upgrades; a failed, ended or unsettled one is dropped.
+ * Not thread-safe: one caller at a time, a fan-out gives each worker its own.
  */
 public final class Transport implements AutoCloseable {
     private static final int CONNECT_TIMEOUT_MS = 10_000;
@@ -50,10 +30,7 @@ public final class Transport implements AutoCloseable {
         final BufferedInputStream input;
         final BufferedOutputStream output;
 
-        /**
-         * Whether the last HTTP answer on it was read to its end: false from
-         * a write until the bridge settles it ({@link #settle}).
-         */
+        /** Whether its last HTTP answer was read whole; false until settled. */
         boolean settled = true;
 
         Connection(Socket socket) throws IOException {
@@ -95,12 +72,11 @@ public final class Transport implements AutoCloseable {
     }
 
     /**
-     * Writes and flushes every byte to the URL's stream, dropping it on a
-     * failure.
+     * Writes and flushes every byte to the URL's stream, dropped on failure.
      *
-     * <p>Refused when the bytes carry a credential and the connection is not
-     * encrypted ({@link #cleartextCredential}): the bridge refuses it first,
-     * and this is the same rule where the socket is known for what it is.
+     * <p>Refused when the bytes carry a credential over an unencrypted socket
+     * ({@link #cleartextCredential}), the bridge's own rule where the socket
+     * is known.
      */
     public void write(String url, byte[] bytes) throws IOException {
         Connection connection = connect(url);
@@ -120,11 +96,11 @@ public final class Transport implements AutoCloseable {
     }
 
     /**
-     * Opens a new HTTP request on the URL's origin: drops its connection
-     * when the last answer on it was not read to its end (a coroutine that
-     * stopped half-way, a body with no framing, {@code Connection: close}),
-     * and answers whether the request goes out on a connection that served
-     * one before, which a server may have closed while it idled.
+     * Opens an HTTP request on the URL's origin: whether it reuses one.
+     *
+     * <p>An unsettled connection (a coroutine stopped half-way, an unframed
+     * body, {@code Connection: close}) is dropped first. A reused one may have
+     * been closed by the server while it idled.
      */
     public boolean begin(String url) {
         String origin = originOf(uri(url));
@@ -136,7 +112,7 @@ public final class Transport implements AutoCloseable {
         return connection != null;
     }
 
-    /** Marks the URL's last answer read to its end, so its connection serves the next request. */
+    /** Marks the URL's last answer read whole, so its connection is reused. */
     public void settle(String url) {
         Connection connection = connections.get(originOf(uri(url)));
         if (connection != null) {
@@ -150,9 +126,10 @@ public final class Transport implements AutoCloseable {
     }
 
     /**
-     * How many connections died under their caller (a failure, a timeout,
-     * the server's end of stream) since the transport was made: a verb
-     * that failed while this moved failed on its connection.
+     * How many connections died under their caller since the transport began.
+     *
+     * <p>A failure, timeout or end of stream: a verb that failed while this
+     * moved failed on its connection.
      */
     public int losses() {
         return losses;
@@ -178,12 +155,11 @@ public final class Transport implements AutoCloseable {
     }
 
     /**
-     * Upgrades the URL's plain socket to TLS in place, for a protocol that
-     * negotiates it on the connection it opened (RFC 3207).
+     * Upgrades the URL's plain socket to TLS in place (RFC 3207).
      *
-     * <p>Refused when the server already sent something past the reply that
-     * agreed to it: those bytes arrived in the clear, and reading them after
-     * the handshake is how a STARTTLS injection smuggles a response across.
+     * <p>Refused when the server sent bytes past the agreeing reply: they came
+     * in the clear, and reading them after the handshake is how a STARTTLS
+     * injection smuggles a response across.
      */
     public void starttls(String url) throws IOException {
         URI uri = uri(url);
@@ -264,8 +240,9 @@ public final class Transport implements AutoCloseable {
     }
 
     /**
-     * The URL as a URI with a scheme and a host, or a typed failure: a host
-     * {@link URI} cannot parse (an underscore in it, say) leaves it null.
+     * The URL as a URI with a scheme and a host, or a typed failure.
+     *
+     * <p>A host {@link URI} cannot parse (an underscore in it) leaves it null.
      */
     private static URI uri(String url) {
         URI uri;
@@ -285,10 +262,10 @@ public final class Transport implements AutoCloseable {
     }
 
     /**
-     * Whether bytes about to go out on a plain connection carry a credential:
-     * an HTTP {@code Authorization} header, an IMAP {@code AUTHENTICATE} or
-     * {@code LOGIN} command, an SMTP {@code AUTH} command (which only a
-     * STARTTLS upgrade, an encrypted socket, may carry).
+     * Whether bytes about to go out on a plain connection carry a credential.
+     *
+     * <p>An HTTP {@code Authorization} header, an IMAP {@code AUTHENTICATE} or
+     * {@code LOGIN}, an SMTP {@code AUTH}: only encrypted sockets carry those.
      */
     static boolean cleartextCredential(String scheme, byte[] bytes) {
         String text = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
@@ -327,13 +304,11 @@ public final class Transport implements AutoCloseable {
     }
 
     /**
-     * Wraps a connected socket in TLS to {@code host} and checks the
-     * certificate names that host.
+     * Wraps a socket in TLS to {@code host}, checking the certificate names it.
      *
-     * <p>The platform validates the chain during the handshake but not the
-     * name: an {@link SSLSocket} made from {@link SSLSocketFactory} checks no
-     * hostname, so a certificate any CA issued for any other domain would
-     * pass. The check is the platform's own HTTPS rule.
+     * <p>A factory {@link SSLSocket} validates the chain, not the hostname, so
+     * any CA's certificate for another domain would pass; the check is the
+     * platform's HTTPS rule.
      */
     private static Socket tls(Socket plain, String host, int port) throws IOException {
         SSLSocket socket =

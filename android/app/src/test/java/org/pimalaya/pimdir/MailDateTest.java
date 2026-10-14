@@ -6,9 +6,10 @@ import static org.junit.Assert.assertTrue;
 import org.junit.Test;
 
 /**
- * The merged mail list is ordered entirely by what this returns, so the
- * spellings mail actually arrives with have to parse, and the ones that
- * do not have to sink rather than throw.
+ * The merged mail list is ordered entirely by what this returns.
+ *
+ * <p>So the spellings mail arrives with have to parse, and the others sink
+ * rather than throw.
  */
 public class MailDateTest {
     /** 2026-01-05T09:00:00Z, the instant every fixture below names. */
@@ -43,9 +44,9 @@ public class MailDateTest {
 
     @Test
     public void ordersChronologicallyNotAlphabetically() {
-        // The reason the sort cannot run on the raw text: February
-        // sorts before January as a string, and the offset moves the
-        // instant regardless of how the text reads.
+        // NOTE: the reason the sort cannot run on the raw text: February sorts
+        // before January as a string, and the offset moves the instant
+        // regardless of how the text reads.
         long january = MailDate.toStamp("Mon, 5 Jan 2026 09:00:00 +0000");
         long february = MailDate.toStamp("Thu, 5 Feb 2026 09:00:00 +0000");
         assertTrue(january < february);

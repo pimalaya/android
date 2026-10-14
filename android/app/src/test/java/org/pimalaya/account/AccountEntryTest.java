@@ -12,14 +12,11 @@ import org.pimalaya.client.OauthGrant;
 import org.pimalaya.client.OauthTokens;
 
 /**
- * One account is one identity covering several domains, not several
- * accounts wearing one address.
+ * One account is one identity covering several domains.
  *
- * <p>These pin the consequences that argument was made for: connecting a
- * second domain must not evict the first, one consent renewed must renew
- * every domain that signed in with it while leaving a second consent
- * alone, and the domains an account covers must stay answerable without
- * reassembling it from a roster.
+ * <p>Connecting a second domain keeps the first; renewing one consent renews
+ * every domain that signed in with it and leaves a second consent alone; the
+ * covered domains stay answerable.
  */
 public class AccountEntryTest {
     private static AccountCredential password(String secret) {
@@ -65,9 +62,9 @@ public class AccountEntryTest {
 
     @Test
     public void oneConsentRenewedRenewsEveryDomainSigningInWithIt() {
-        // The reason a credential is stored once: a provider that issues
-        // a fresh refresh token on every use retires the old one, so a
-        // domain left holding a copy could never sign in again.
+        // NOTE: a credential is stored once because a provider rotating refresh
+        // tokens retires the old one, so a domain holding a copy could never
+        // sign in again.
         AccountCredential granted = oauth("one-consent");
         AccountEntry account =
                 AccountEntry.of(
@@ -90,9 +87,8 @@ public class AccountEntryTest {
 
     @Test
     public void renewingOneConsentLeavesAnotherAlone() {
-        // Two grants, two credentials: Google issues its restricted mail
-        // scopes separately from its contacts ones, and renewing either
-        // must not log the user out of the other.
+        // NOTE: Google issues its restricted mail scopes apart from contacts
+        // ones, and renewing either must not sign the other out.
         AccountEntry account =
                 AccountEntry.of(
                                 "jane@example.org",
@@ -162,8 +158,7 @@ public class AccountEntryTest {
                                 "https://people.example.org/",
                                 oauth("contacts-consent"));
 
-        // A secret nothing can present is one the app has no business
-        // keeping; a shared one stays while another domain names it.
+        // NOTE: a shared credential stays while another domain names it.
         AccountEntry withoutContacts = account.without(PimDomain.CONTACTS);
         assertEquals(1, withoutContacts.credentials().size());
 
@@ -182,8 +177,8 @@ public class AccountEntryTest {
                         "gmail://jane@example.org",
                         google("mail-consent", GMAIL));
 
-        // A later grant asks for what the account already holds beside
-        // its own, so it can replace it.
+        // NOTE: a later grant asks for what the account holds beside its own,
+        // so it can replace it.
         assertEquals(GMAIL, account.grantedScope(Oauth.GOOGLE_CLIENT_ID));
         assertEquals(
                 GMAIL + " " + CONTACTS,
@@ -210,10 +205,12 @@ public class AccountEntryTest {
                                 google("mail-consent", GMAIL))
                         .with(PimDomain.CALENDAR, "https://dav.example.org/", oauth("dav"));
 
-        // The user unticked Gmail on the consent screen: mail keeps its grant.
+        // NOTE: the user unticked Gmail on the consent screen: mail keeps its
+        // grant.
         assertTrue(account.regrantable(google("narrow", CALENDAR + " " + CONTACTS)).isEmpty());
 
-        // A grant whose scopes were never recorded is not assumed covered.
+        // NOTE: a grant whose scopes were never recorded is not assumed
+        // covered.
         AccountEntry unrecorded =
                 AccountEntry.of(
                         "jane@example.org",

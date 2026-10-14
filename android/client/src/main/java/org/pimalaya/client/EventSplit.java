@@ -3,13 +3,12 @@ package org.pimalaya.client;
 import org.json.JSONObject;
 
 /**
- * A series split at one occurrence: the series ended before it, and the
- * new series carrying the edit from it on (rs/ffi/calendar.rs
- * {@code SplitReply} 588).
+ * A series split at one occurrence: the old series ended, a new one begun.
+ *
+ * <p>Mirrors rs/ffi/calendar.rs {@code SplitReply} 588.
  *
  * @param master the series' object, ended before the occurrence
- * @param series the new series' object, or null when the occurrence was
- *     the first
+ * @param series the new series' object, null when the occurrence was first
  */
 public record EventSplit(String master, String series) {
     static EventSplit from(JSONObject reply) {

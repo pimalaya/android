@@ -4,17 +4,16 @@ import java.util.List;
 import org.json.JSONObject;
 
 /**
- * The floor of a mailbox's next chunk (a number of messages, never a span
- * of time), and the dates it was read from (rs/mail/listing.rs
- * {@code FloorReply} 257).
+ * The floor of a mailbox's next chunk, and the dates it was read from.
  *
- * @param floor the oldest {@code Date} among the {@code count} newest
- *     messages dated before the ceiling; null when fewer than {@code count}
- *     dated messages lie below it: the mailbox is whole below it
+ * <p>Mirrors rs/mail/listing.rs {@code FloorReply} 257. A chunk is a number
+ * of messages, never a span of time.
+ *
+ * @param floor the oldest {@code Date} among the {@code count} newest dated
+ *     before the ceiling; null when fewer lie below: the mailbox is whole
  * @param dated how many dated messages were taken
- * @param dates their {@code Date}s, newest first: the floor the last of
- *     them when there are {@code count}, fewer when the mailbox is whole
- *     below the ceiling
+ * @param dates their {@code Date}s, newest first, the floor last when there
+ *     are {@code count}; fewer when the mailbox is whole below the ceiling
  */
 public record FloorReply(String floor, int dated, List<String> dates) {
     static FloorReply from(JSONObject reply) {

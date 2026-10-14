@@ -16,9 +16,9 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
 /**
- * Every mutation the stager stages equals, as a JSON value, what it sent
- * before mutations were records: the literals below were captured on that
- * code, for the same inputs.
+ * Every staged mutation equals, as JSON, what the stager sent before.
+ *
+ * <p>The literals were captured on that code, for the same inputs.
  */
 @RunWith(RobolectricTestRunner.class)
 public class MutationTest {

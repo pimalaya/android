@@ -8,8 +8,9 @@ import android.Manifest;
 import org.junit.Test;
 
 /**
- * A denial sends the user to the system settings only when Android would
- * not ask again: no rationale for a permission still missing.
+ * A denial sends the user to the settings only when Android would not ask.
+ *
+ * <p>That is: no rationale for a permission still missing.
  */
 public class PermissionAnswerTest {
     private static final String READ = Manifest.permission.READ_CONTACTS;

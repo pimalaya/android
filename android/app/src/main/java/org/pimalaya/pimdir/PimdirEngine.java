@@ -13,49 +13,41 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The half of an engine driver that has nothing to do with a domain: the
- * storage yields, the staged mutations and the wire shapes both ends
- * agree on.
+ * An engine driver's domain-free half: storage yields, staged mutations, wire.
  *
- * <p>io-pimdir's coroutines run in Rust and yield JSON envelopes; three
- * of the six are answered by the store and are the same answer whether
- * the collection holds cards, messages or calendar objects, because the
- * store is one schema. The three that differ are the remote's:
- * {@code enumerate} lists a collection's members, {@code fetch} reads
- * some of them, and {@code push} carries the staged writes out. A domain
- * driver is those three and nothing else.
- *
- * <p>Everything blocks; callers run it off the main thread.
+ * <p>Of io-pimdir's six yields, the store's three are one answer for every
+ * kind; a domain driver adds the remote's ({@code enumerate}, {@code fetch},
+ * {@code push}). Everything blocks: run it off the main thread.
  */
 public abstract class PimdirEngine extends Stager {
     /**
-     * Observes a pass's coarse steps for a progress display; steps fire on
-     * the sync thread. Null when the pass runs headless.
+     * Observes a pass's coarse steps, on the sync thread; null when headless.
      *
-     * <p>The first three are every domain's, the last three the phone
-     * spokes': books and calendars are reconciled against the phone. Each step
-     * carries the domain of the engine that took it, which the dock names
-     * and weighs its counts by ({@link SyncSteps}).
+     * <p>The first three stages are every domain's, the last three the phone
+     * spokes'. A step carries its engine's domain, which the dock names and
+     * weighs its counts by ({@code SyncSteps}).
      */
     public interface Progress {
         /** Exchanging the spine with the server. */
         int STAGE_SERVER = 0;
-        /** Downloading `count` bodies from the server. */
+        /** Downloading {@code count} bodies from the server. */
         int STAGE_DOWNLOAD = 1;
-        /** Sending `count` changes to the server. */
+        /** Sending {@code count} changes to the server. */
         int STAGE_UPLOAD = 2;
         /** Reconciling with the phone's contacts or calendar. */
         int STAGE_PHONE = 3;
-        /** Writing `count` contacts or events to the phone. */
+        /** Writing {@code count} contacts or events to the phone. */
         int STAGE_PROJECT = 4;
-        /** Resolving `count` conflicts. */
+        /** Resolving {@code count} conflicts. */
         int STAGE_RESOLVE = 5;
 
+        /** A step began on {@code domain}, {@code count} items when counted. */
         void step(PimDomain domain, int stage, int count);
 
         /**
-         * How far a counted step is: {@code done} of its {@code total} items
-         * landed. Told only by the steps that move items batch by batch.
+         * How far a counted step is: {@code done} of its {@code total} landed.
+         *
+         * <p>Told only by the steps that move items batch by batch.
          */
         default void advance(PimDomain domain, int stage, int done, int total) {}
     }
@@ -63,6 +55,7 @@ public abstract class PimdirEngine extends Stager {
     /** The foreground pass's progress observer; null when headless. */
     public Progress progress;
 
+    /** Tells the observer a step started, when there is one. */
     protected void step(int stage, int count) {
         if (progress != null) {
             progress.step(domain(), stage, count);
@@ -77,10 +70,10 @@ public abstract class PimdirEngine extends Stager {
     }
 
     /**
-     * Whether {@code done} of {@code total} is worth telling the dock: the
-     * last item, or one crossing a percent. A projection of a thousand
-     * contacts moves the bar ten at a time rather than posting a thousand
-     * frames.
+     * Whether {@code done} of {@code total} is worth telling the dock.
+     *
+     * <p>The last item, or one crossing a percent: a thousand contacts move
+     * the bar ten at a time.
      */
     static boolean tells(int done, int total) {
         if (total <= 0 || done <= 0) {
@@ -92,20 +85,17 @@ public abstract class PimdirEngine extends Stager {
     /** The domain this driver syncs, which its progress steps are told in. */
     protected abstract PimDomain domain();
 
+    /** A driver over {@code pimdir}, its remotes through {@code clients}. */
     protected PimdirEngine(PimdirDb pimdir, Clients clients) {
         super(pimdir, clients);
     }
 
     /**
-     * Raises every bodiless or stale placement of one collection to its
-     * full body.
+     * Raises every bodiless or stale placement of a collection to full body.
      *
-     * <p>A pass of its own, and a required one wherever a reader needs the
-     * body: a sync that finds the remote content changed drops the object
-     * and leaves the placement below full, on purpose, because refetching
-     * inside the merge would tie the exchange to the download. Nothing
-     * else puts the body back, so a domain whose listing reads from the
-     * store by body has to run this or a remote edit empties it.
+     * <p>A sync seeing remote content change drops the object on purpose, and
+     * nothing else refetches it: a domain whose listing reads bodies from the
+     * store must run this or a remote edit empties it.
      */
     protected void hydrate(String collection) {
         List<String> pending = offline.handlesBelowFull(collection);
@@ -121,10 +111,7 @@ public abstract class PimdirEngine extends Stager {
                         + clients.offline().upgrade(this, collection, pending));
     }
 
-    /**
-     * Whether reading the bodies of {@code collection} is a download to
-     * tell, for a driver that reports one.
-     */
+    /** Whether reading {@code collection}'s bodies is a download to report. */
     protected boolean downloads(String collection) {
         return true;
     }
@@ -160,9 +147,10 @@ public abstract class PimdirEngine extends Stager {
     }
 
     /**
-     * Which of a mail step's listed handles the store holds, as the reply
-     * to the bridge's {@code held} yield ({@code {held}}); only a mail
-     * driver steps.
+     * Which listed handles of a mail step the store holds.
+     *
+     * <p>The reply to the bridge's {@code held} yield ({@code {held}}); only a
+     * mail driver steps.
      */
     protected JSONObject held(JSONObject yielded) throws JSONException {
         throw new UnsupportedOperationException("Only a mail driver steps");
@@ -172,26 +160,21 @@ public abstract class PimdirEngine extends Stager {
     protected abstract JSONObject enumerate(JSONObject yielded) throws JSONException;
 
     /**
-     * Whether this driver's listings already name every member they carry
-     * (SYNC §4), which a mail listing does off the headers it reads; a
-     * driver answering handles and revisions alone leaves the naming to
-     * {@link #named}.
+     * Whether this driver's listings already name every member (SYNC §4).
+     *
+     * <p>A mail listing does, off its headers; a driver answering handles and
+     * revisions alone leaves the naming to {@link #named}.
      */
     protected boolean listingsNamed() {
         return false;
     }
 
     /**
-     * A fetch reply whose members this source already binds keep the
-     * identity the store files them under, whatever identity their body
-     * states now.
+     * Keeps already-bound fetched members under the identity they are filed by.
      *
-     * <p>A bound handle whose body names another identity is the same
-     * resource rewritten, not a second one: Google rewrites a card's UID to
-     * its own on every PUT, and a calendar entry is named by its resource,
-     * which a create lands under the name the server chose. Read as a new
-     * identity, the store retires the bound item (STORAGE §10), and with it
-     * what was staged on it since: an edit is lost, a removal never pushed.
+     * <p>A bound handle naming another identity is the same resource rewritten
+     * (Google rewrites UIDs on PUT): read as new, the store would retire the
+     * item (STORAGE §10) and lose what was staged on it.
      */
     protected JSONObject keepBoundNames(String collection, JSONObject reply)
             throws JSONException {
@@ -223,22 +206,11 @@ public abstract class PimdirEngine extends Stager {
     private static final int NAMING_BATCH = 64;
 
     /**
-     * Names every member a page lists, so nothing reaches the store unnamed
-     * (SYNC §4): a member this source already binds under a revision that
-     * has not moved is named by the link id the store holds, and every
-     * other one, new or changed, carries its body, read through this
-     * driver's own {@link #fetch} 64 at a time, with the identity, summary
-     * and sort key derived from it, a changed one keeping the identity it is
-     * filed under ({@link #keepBoundNames}).
+     * Names every member a page lists, so nothing reaches the store unnamed.
      *
-     * <p>Where the meta of a DAV kind is its body, this is the read that
-     * names it; it replaces the probe the store used to keep and the
-     * upgrade that named it after the fact. A member whose body cannot be
-     * read any more (gone between the listing and the read) is left out.
-     *
-     * <p>A member the listing already carried whole (a body, read with the
-     * round) is named from it and not read again; one bound at its
-     * revision drops what the listing carried, as if it had carried nothing.
+     * <p>SYNC §4: a bound member at an unmoved revision by its stored link id;
+     * others from their body (carried, else {@link #fetch}ed 64 at a time, via
+     * {@link #keepBoundNames}). A member unreadable by now is left out.
      */
     private JSONObject named(JSONObject yielded, JSONObject page) throws JSONException {
         JSONArray items = page.optJSONArray("items");
@@ -331,20 +303,20 @@ public abstract class PimdirEngine extends Stager {
     /** The named members at the asked tier, as the reply to a fetch yield. */
     protected abstract JSONObject fetch(JSONObject yielded) throws JSONException;
 
-    /** The staged changes carried to the remote, as the reply to a push yield. */
+    /** The staged changes carried to the remote, replying to a push yield. */
     protected abstract JSONObject push(JSONObject yielded) throws JSONException;
 
     /**
-     * Refuses a phone collection's yield on a server pass: a collection's
-     * phone side is its {@link PhonePass}'s, never sent to the server.
+     * Refuses a phone collection's yield on a server pass.
+     *
+     * <p>A collection's phone side is its {@link PhonePass}'s, never the
+     * server's.
      */
     protected static void serverOnly(String collection) {
         if (PimdirStorage.isPhoneCollection(collection)) {
             throw new IllegalStateException("Phone collection on a server pass: " + collection);
         }
     }
-
-    // ---- the wire shapes --------------------------------------------------
 
     /** One push result on the engine wire. */
     public static JSONObject result(
@@ -371,10 +343,12 @@ public abstract class PimdirEngine extends Stager {
         return strings;
     }
 
+    /** Whether a failure is HTTP 412, a precondition the server refused. */
     protected static boolean isPreconditionFailure(Exception failure) {
         return Integer.valueOf(412).equals(status(failure));
     }
 
+    /** Whether a failure is HTTP 404, the resource gone. */
     protected static boolean isGone(Exception failure) {
         return Integer.valueOf(404).equals(status(failure));
     }

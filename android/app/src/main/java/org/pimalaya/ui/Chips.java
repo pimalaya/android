@@ -12,14 +12,14 @@ import java.util.function.IntConsumer;
 import org.pimalaya.R;
 
 /**
- * A filter chip: a tonal pill naming what it keeps, filled with the
- * accent and checked while on.
+ * A filter chip: a tonal pill naming what it keeps, accent-filled while on.
  *
- * <p>Hand-built on a TextView because the platform has no chip, and the
- * only thing one needs beyond a label is the two looks.
+ * <p>Hand-built on a TextView: the platform has no chip.
  */
 public final class Chips {
-    /** Adds one chip to {@code row}, calling {@code onToggle} with each new state. */
+    /**
+     * Adds one chip to {@code row}, telling {@code onToggle} each new state.
+     */
     public static void add(
             Host host, LinearLayout row, int label, int icon, Consumer<Boolean> onToggle) {
         TextView chip = chip(host, row, label, icon);
@@ -32,9 +32,10 @@ public final class Chips {
     }
 
     /**
-     * Adds a group of chips at most one of which is on: turning one on
-     * turns the others off, and {@code onPick} is told the index of the
-     * one on, -1 when none is.
+     * Adds a group of chips at most one of which is on.
+     *
+     * <p>Turning one on turns the others off; {@code onPick} gets the index of
+     * the one on, -1 for none.
      */
     public static void exclusive(
             Host host,

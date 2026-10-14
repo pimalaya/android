@@ -4,9 +4,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 /**
- * The N of the field model, each component's values space-joined
- * (rs/contact/fields.rs {@code ContactName} 172). A key the model leaves
- * out reads as empty.
+ * The N of the field model, each component's values space-joined.
+ *
+ * <p>Mirrors rs/contact/fields.rs {@code ContactName} 172. A key the model
+ * leaves out reads as empty.
  *
  * @param family the family names
  * @param given the given names

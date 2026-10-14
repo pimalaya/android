@@ -10,9 +10,10 @@ public final class Picker {
     private Picker() {}
 
     /**
-     * Opens {@code direct} when there is one, else says {@code none} when
-     * nothing is offered, else lets the user pick one of {@code offered},
-     * {@code preselected} checked, and opens it.
+     * Opens {@code direct}, else says {@code none}, else lets the user pick.
+     *
+     * <p>The pick is among {@code offered}, {@code preselected} checked, then
+     * opened.
      */
     public static <T> void choose(
             Host host,

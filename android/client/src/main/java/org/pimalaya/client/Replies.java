@@ -6,16 +6,15 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 /**
- * The bridge reply envelope: a reply read whole, its {@code error} field
- * thrown as a {@link PimalayaException}.
+ * The bridge reply envelope, its {@code error} thrown as a failure.
+ *
+ * <p>The failure is a {@link PimalayaException}.
  */
 final class Replies {
     private Replies() {}
 
     /**
-     * Parses an object reply, surfacing the bridge's {@code error}
-     * field along with the HTTP status riding it, when the failure
-     * was an HTTP round.
+     * Parses an object reply, throwing its {@code error} with any HTTP status.
      */
     static JSONObject object(String json) {
         JSONObject reply = read(json);
@@ -65,13 +64,11 @@ final class Replies {
     }
 
     /**
-     * The ETag an update answered: a bare JSON string, or null, an object
-     * being the bridge's error shape.
+     * The ETag an update answered, a bare JSON string or null; an object fails.
      *
-     * <p>Read as the JSON string it is, not with its quotes cut off: Google's
-     * and Graph's ETags carry quotes of their own, which the reply escapes,
-     * and an ETag kept escaped is a revision no listing names, so the next
-     * pass reads the entry as changed elsewhere.
+     * <p>Read as a JSON string, not with quotes cut: Google's and Graph's ETags
+     * carry escaped quotes of their own, and a still-escaped ETag matches no
+     * listing, so the next pass would read the entry as changed elsewhere.
      */
     static String etag(String reply) {
         String trimmed = reply.trim();
@@ -86,7 +83,7 @@ final class Replies {
         }
     }
 
-    /** Whether a bridge reply is a failure, read without parsing a large one. */
+    /** Whether a bridge reply is a failure, without parsing a large one. */
     static boolean failed(String reply) {
         return reply != null && reply.trim().startsWith("{\"error\"");
     }

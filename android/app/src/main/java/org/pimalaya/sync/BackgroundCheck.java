@@ -34,15 +34,11 @@ import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
 
 /**
- * How often each account syncs in the background and whether its new mail
- * notifies, as its settings say, and the periodic job that does it
- * (the one the application names, {@link Owner}), scheduled while any
- * account takes part.
+ * Each account's background interval and mail notifications, and their job.
  *
- * <p>One job for every account, at the shortest period Android allows: a
- * run takes the accounts whose own interval has passed since they last
- * synced, by any sync, so an account just pulled in the app waits its full
- * interval again.
+ * <p>One periodic job ({@link Owner} names it), scheduled while any account
+ * takes part. A run takes the accounts whose interval passed since any last
+ * sync, so one just pulled in the app waits a full interval again.
  */
 public final class BackgroundCheck {
     /** The application naming the job that runs the check. */
@@ -58,15 +54,17 @@ public final class BackgroundCheck {
     private static final int DEFAULT = 15;
 
     /**
-     * How early a run may take an account: the job's own period drifts by
-     * minutes, and a run landing just short of an account's interval would
-     * otherwise push it a whole period later.
+     * How early a run may take an account.
+     *
+     * <p>The job's period drifts by minutes: a run just short of an account's
+     * interval would otherwise push it a whole period later.
      */
     private static final long SLACK = 5 * 60 * 1000L;
 
     /** The accounts whose new mail notifies. */
     private static final String NOTIFY = "notify";
 
+    /** The background job's id with the scheduler. */
     public static final int JOB = 1;
 
     /** The period asked for; Android allows no less. */
@@ -83,6 +81,7 @@ public final class BackgroundCheck {
         return prefs(context).getInt("interval:" + email, DEFAULT);
     }
 
+    /** Sets the account's background interval in minutes, 0 for off. */
     public static void setInterval(Context context, String email, int minutes) {
         prefs(context).edit().putInt("interval:" + email, minutes).apply();
         schedule(context);
@@ -106,8 +105,9 @@ public final class BackgroundCheck {
     }
 
     /**
-     * Turns the account's new-mail notifications on or off. On, the account
-     * syncs in the background too, at the default interval when it was off:
+     * Turns the account's new-mail notifications on or off.
+     *
+     * <p>On also syncs it in the background (at the default interval when off):
      * the background run is what notifies.
      */
     public static void setNotifies(Context context, String email, boolean on) {
@@ -118,8 +118,9 @@ public final class BackgroundCheck {
     }
 
     /**
-     * The permissions notifying takes on the given SDK, those {@code has}
-     * holds left out: posting one is a runtime permission from Android 13.
+     * The notification permissions {@code sdk} wants that {@code has} lacks.
+     *
+     * <p>Posting a notification is a runtime permission from Android 13.
      */
     public static String[] missing(int sdk, Predicate<String> has) {
         String permission = Manifest.permission.POST_NOTIFICATIONS;
@@ -154,7 +155,8 @@ public final class BackgroundCheck {
 
     /**
      * Schedules the job while an account takes part, cancels it otherwise.
-     * Scheduling again keeps the job's place, its period unchanged.
+     *
+     * <p>Scheduling again keeps the job's place, its period unchanged.
      */
     public static void schedule(Context context) {
         JobScheduler jobs = context.getSystemService(JobScheduler.class);
@@ -186,10 +188,11 @@ public final class BackgroundCheck {
     }
 
     /**
-     * One background run, headless: syncs every account taking part, then
-     * hands {@code notify} each notifying account's new mail as soon as its
-     * mail pass ends. {@code stopped} is asked between domains, the job
-     * having been told to stop.
+     * One background run, headless, over every account taking part.
+     *
+     * <p>Hands {@code notify} each notifying account's new mail as soon as its
+     * mail pass ends. {@code stopped} is asked between domains, the job having
+     * been told to stop.
      */
     public static void run(
             Context context,
@@ -269,8 +272,9 @@ public final class BackgroundCheck {
     }
 
     /**
-     * The accounts a run takes for one domain: on, due, and past their first
-     * sync of it, which is the app's.
+     * The accounts a run takes for one domain: on, due, and past first sync.
+     *
+     * <p>The first sync of a domain is the app's, never a background run's.
      */
     private static SyncScope scope(Context context, PimDomain domain, Set<String> due) {
         List<String> owing = FirstSync.owing(context, domain);
@@ -292,12 +296,11 @@ public final class BackgroundCheck {
     }
 
     /**
-     * What a run notifies, newest first: the unread inbox messages present
-     * after its pass ({@code now}) and not before it, dated on or after
-     * their inbox's floor as it stood before the pass ({@code floors} by
-     * collection, null for none). A band of older mail an interrupted fill
-     * left for the pass to finish lies below that floor and never notifies;
-     * new mail, delayed or not, lies above it.
+     * What a run notifies, newest first: unread inbox mail new since the pass.
+     *
+     * <p>In {@code now} not {@code before}, dated on or after the inbox's floor
+     * before the pass ({@code floors}, null for none): an older band an
+     * interrupted fill left lies below it and never notifies.
      */
     static List<MailStore.StoredMessage> arrived(
             Map<String, MailStore.StoredMessage> before,
@@ -327,8 +330,9 @@ public final class BackgroundCheck {
     }
 
     /**
-     * An account's unread inbox messages within its window, newest first, by
-     * collection and id.
+     * An account's unread inbox messages in its window, newest first.
+     *
+     * <p>Keyed by collection and id.
      */
     private static Map<String, MailStore.StoredMessage> unreadInbox(
             MailStore mail, PimdirCollections collections, String email) {

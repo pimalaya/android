@@ -5,10 +5,9 @@ import android.content.Context;
 /**
  * What one sync takes: which accounts, and which of their collections.
  *
- * <p>The drawer's "Sync all" takes every account that is on, whatever the lists
- * hide ({@link #all}), of their mailboxes those the mail filter ticks
- * ({@link #mail}); a domain's pull takes what its filter shows, which is
- * never an account that is off ({@link MergedFilter}).
+ * <p>"Sync all" takes every account that is on ({@link #all}), with the
+ * mailboxes the mail filter ticks ({@link #mail}); a domain's pull takes what
+ * its filter shows, never an off account ({@link MergedFilter}).
  */
 public interface SyncScope {
     /** Whether the sync takes the account at all. */
@@ -33,9 +32,9 @@ public interface SyncScope {
     }
 
     /**
-     * Every account that is on, whatever the list hides, and of its
-     * mailboxes those the mail filter ticks: the drawer's mail, since a
-     * mailbox unticked neither shows nor syncs.
+     * Every account that is on, with the mailboxes the mail filter ticks.
+     *
+     * <p>The drawer's mail: an unticked mailbox neither shows nor syncs.
      */
     static SyncScope mail(Context context) {
         MergedFilter filter = MergedFilter.of(context, PimDomain.MAIL);

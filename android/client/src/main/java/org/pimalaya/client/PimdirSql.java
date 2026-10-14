@@ -16,17 +16,9 @@ import java.util.Map;
 /**
  * The canonical pimdir SQL, as the pimdir specification defines it.
  *
- * <p>The app runs the statements on the SQLite it bundles behind the platform's
- * own binding (the platform's engine is too old for them below Android 14), not
- * on a driver in the bridge: compiling a second engine into every ABI would
- * work against the smallest-binary goal the app is built around. So io-pimdir
- * is taken <em>without</em> its {@code client} feature, contributing the schema
- * and the statements while the execution stays on the Java side.
- *
- * <p>The statements cross the JNI boundary rather than being transcribed here.
- * Transcribing sixty of them would work exactly once: the next spec revision
- * would leave Java holding a stale copy with nothing to notice, and the whole
- * reason to depend on the crate is that it is the canonical copy.
+ * <p>io-pimdir comes without its {@code client} feature: schema and
+ * statements cross JNI, never transcribed, and run on the app's bundled
+ * SQLite (the platform's is too old below Android 14), not a second engine.
  */
 public final class PimdirSql {
     private static Map<String, String> statements;
@@ -38,12 +30,10 @@ public final class PimdirSql {
     }
 
     /**
-     * The statement registered under {@code name} (its Rust constant name, such
-     * as {@code LIST_ITEMS_PAGE}).
+     * The statement named by its Rust constant, e.g. {@code LIST_ITEMS_PAGE}.
      *
-     * @throws PimalayaException when no such statement exists, which means the
-     *     caller and the crate disagree about the spec rather than that a query
-     *     failed. Failing loudly here beats passing null into SQLite.
+     * @throws PimalayaException when there is none: the caller and the crate
+     *     disagree about the spec, which fails loudly rather than reach SQLite
      */
     public static synchronized String of(String name) {
         if (statements == null) {
@@ -77,9 +67,9 @@ public final class PimdirSql {
     }
 
     /**
-     * Every migration split into the individual statements {@code execSQL}
-     * takes, in order: Android compiles one statement per call, so a schema
-     * that is one script has to be cut into them ({@link #split}).
+     * Every migration split into single statements, in order ({@link #split}).
+     *
+     * <p>Android's {@code execSQL} compiles one statement per call.
      */
     public static String[] schema() {
         List<String> statements = new ArrayList<>();
@@ -98,20 +88,11 @@ public final class PimdirSql {
     }
 
     /**
-     * A canonical statement with its {@code :name} parameters rewritten to the
-     * positional ones Android takes, and the values bound in the order they
-     * occur, drawn from {@code values} by name.
+     * A canonical statement, its {@code :name} parameters made positional.
      *
-     * <p>Android's SQLite binding has no named parameters, so a caller either
-     * rewrites the statement or writes its own. Rewriting is what keeps the
-     * column lists in the crate: the caller names the values it has and never
-     * repeats the statement's own column order. A name the map does not carry
-     * binds NULL, and one it carries more than once in the statement binds the
-     * same value each time.
-     *
-     * <p>The statement is taken comment-free, since the canonical files
-     * document themselves and a parameter is spelled the way prose spells a
-     * colon.
+     * <p>Android binds no named parameters; rewriting keeps column lists in the
+     * crate. Values come from {@code values} by name: a missing one binds NULL,
+     * a repeated one the same value. Comments are stripped first.
      */
     public static Bound bind(String name, Map<String, Object> values) {
         Rewritten rewritten = rewritten(name);
@@ -122,7 +103,7 @@ public final class PimdirSql {
         return new Bound(rewritten.sql, args);
     }
 
-    /** A statement rewritten to positional parameters, and the name each one draws. */
+    /** A statement rewritten to positional parameters, and each one's name. */
     private static final class Rewritten {
         final String sql;
         final String[] names;
@@ -133,13 +114,13 @@ public final class PimdirSql {
         }
     }
 
-    /** The rewritten statements, by name: a sync binds the same few thousands of times. */
+    /** The rewritten statements, by name: a sync binds thousands of times. */
     private static final Map<String, Rewritten> rewrites = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
-     * One statement's rewrite, done once: its first statement taken
-     * comment-free, each {@code :name} outside a string literal turned into
-     * {@code ?}, in the order they occur.
+     * One statement's rewrite, done once: each {@code :name} becomes {@code ?}.
+     *
+     * <p>Its first statement, comment-free; names in string literals stay.
      */
     private static Rewritten rewritten(String name) {
         Rewritten held = rewrites.get(name);
@@ -177,7 +158,7 @@ public final class PimdirSql {
         return made;
     }
 
-    /** A statement with its arguments, as {@code execSQL} and friends take them. */
+    /** A statement with its arguments, as {@code execSQL} takes them. */
     public static final class Bound {
         /** The statement, its parameters positional. */
         public final String sql;
@@ -185,6 +166,7 @@ public final class PimdirSql {
         /** The values, in the order the statement's parameters occur. */
         public final Object[] args;
 
+        /** A statement and its positional values. */
         public Bound(String sql, Object[] args) {
             this.sql = sql;
             this.args = args;
@@ -196,15 +178,11 @@ public final class PimdirSql {
     }
 
     /**
-     * A multi-statement script split into the individual statements
-     * {@code execSQL} takes, comments removed.
+     * A multi-statement script split into single statements, comments removed.
      *
-     * <p>Splitting on {@code ';'} alone is wrong twice over. The canonical
-     * schema documents itself and its comments contain semicolons
-     * (<em>"handing out the next item `seq`; only ever increases"</em>), so
-     * comments go first, tracking string literals on the way. And a trigger
-     * body is statements: its own semicolons end nothing, so one ends at the
-     * {@code END} that closes it and nowhere earlier.
+     * <p>Not on {@code ';'} alone: the schema's comments hold semicolons, so
+     * they go first (string literals tracked), and a trigger's body
+     * semicolons end nothing before its {@code END}.
      */
     public static String[] split(String sql) {
         List<String> statements = new ArrayList<>();
@@ -262,10 +240,7 @@ public final class PimdirSql {
         return statements.toArray(new String[0]);
     }
 
-    /**
-     * Whether a semicolon ends what has been read: everything but a trigger
-     * that has not reached its closing {@code END} yet.
-     */
+    /** Whether a semicolon ends what was read: not inside a trigger's body. */
     private static boolean closed(StringBuilder statement) {
         String read = statement.toString().trim();
         return !read.toUpperCase(Locale.ROOT).startsWith("CREATE TRIGGER")

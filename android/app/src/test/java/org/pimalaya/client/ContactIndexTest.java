@@ -12,13 +12,14 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 
 /**
- * Pins the card index and the type-set vocabulary on the real bridge: each
- * corpus card indexed to the values the hand parser the record replaced
- * read (literals captured on that code), the record mirroring its reply.
+ * Pins the card index and the type-set vocabulary on the real bridge.
+ *
+ * <p>Each corpus card indexed to captured literals, the record mirroring its
+ * reply.
  */
 @RunWith(RobolectricTestRunner.class)
 public class ContactIndexTest {
-    /** Each corpus card's index, its summary apart as JSON text (null: none). */
+    /** Each corpus card's index, its summary as JSON text (null: none). */
     private static final Object[] INDEXES = {
             new CardIndex("", List.of(), "9d0945d61308edfc", "", "Only Name", "", "only name", null, "min"),
             "{\"contact\":{\"addresses\":[],\"fn\":\"Only Name\",\"uid\":\"min\"}}",

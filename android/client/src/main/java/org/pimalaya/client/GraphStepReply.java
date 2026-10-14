@@ -4,8 +4,9 @@ import java.util.List;
 import org.json.JSONObject;
 
 /**
- * What one Microsoft Graph step brought (rs/mail/session.rs
- * {@code MailStepReply::Graph} 299).
+ * What one Microsoft Graph step brought.
+ *
+ * <p>Mirrors rs/mail/session.rs {@code MailStepReply::Graph} 299.
  *
  * @param exhausted whether the step reached the end of the mailboxes
  * @param items the messages stepped

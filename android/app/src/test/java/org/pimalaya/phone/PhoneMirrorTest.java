@@ -12,10 +12,11 @@ import java.util.EnumSet;
 import java.util.Set;
 
 /**
- * A phone mirror is granted only whole: the prompt asks every permission of
- * a mirror not yet fully granted, and a mirror counts as granted once every
- * one of its permissions is, so a half answer leaves its switch off. Several
- * wanted are asked together, and each is granted on its own.
+ * A phone mirror is granted only whole.
+ *
+ * <p>The prompt asks every permission of a mirror not fully granted, so a half
+ * answer leaves its switch off. Several are asked together, each granted on its
+ * own.
  */
 public class PhoneMirrorTest {
     private static final Set<PhoneMirror> CONTACTS = EnumSet.of(PhoneMirror.CONTACTS);

@@ -23,13 +23,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * The pimdir store on the bundled SQLite: the schema, its invariants, and the
- * blob directory beside it.
+ * The pimdir store on the bundled SQLite: schema, invariants, blob directory.
  *
- * <p>What is worth testing here is not that SQLite works, but that the
- * specification's schema behaves the same way through the Java binding as it
- * does through rusqlite: the foreign keys cascade, the unique indexes bite, and
- * one store really does hold several accounts and several media types at once.
+ * <p>Not that SQLite works, but that the spec's schema behaves through the Java
+ * binding as through rusqlite: cascades, unique indexes biting, one store
+ * holding several accounts and media types.
  */
 @RunWith(RobolectricTestRunner.class)
 public class PimdirDbTest {
@@ -56,12 +54,11 @@ public class PimdirDbTest {
     }
 
     /**
-     * The store's opener runs on a SQLite new enough for the schema, whatever
-     * the device: Android ships 3.18 to 3.32 below Android 14, which parses
-     * none of the features below.
+     * The store's opener runs on a SQLite new enough for the schema.
      *
-     * <p>On the host this is the bundled binding over the host build of the
-     * same amalgamation (flake.nix), not the AAR's Android library itself.
+     * <p>Android below 14 ships 3.18 to 3.32, which parses none of the features
+     * below. On the host JVM this is the bundled binding over the same
+     * amalgamation (flake.nix).
      */
     @Test
     public void theStoreRunsOnASqliteNewEnoughForTheSchema() {
@@ -73,7 +70,7 @@ public class PimdirDbTest {
             assertTrue(cursor.getString(0), major > 3 || (major == 3 && minor >= 37));
         }
 
-        // STRICT (3.37) enforced, not merely parsed.
+        // NOTE: STRICT (3.37) enforced, not merely parsed.
         db.execSQL("CREATE TABLE probe(id INTEGER PRIMARY KEY, n INTEGER NOT NULL) STRICT");
         try {
             db.execSQL("INSERT INTO probe(n) VALUES('not a number')");
@@ -82,13 +79,13 @@ public class PimdirDbTest {
             // NOTE: SQLITE_CONSTRAINT_DATATYPE, the STRICT refusal.
         }
 
-        // RETURNING (3.35).
+        // NOTE: RETURNING (3.35).
         try (Cursor cursor = db.rawQuery("INSERT INTO probe(n) VALUES(1) RETURNING id", null)) {
             assertTrue(cursor.moveToFirst());
             assertEquals(1, cursor.getLong(0));
         }
 
-        // UPDATE ... FROM (3.33) over json_each (JSON1).
+        // NOTE: UPDATE ... FROM (3.33) over json_each (JSON1).
         db.execSQL(
                 "UPDATE probe SET n = j.value FROM json_each('[41]') AS j WHERE probe.id = 1");
         try (Cursor cursor = db.rawQuery("SELECT n FROM probe WHERE id = 1", null)) {
@@ -103,9 +100,9 @@ public class PimdirDbTest {
             assertTrue(cursor.moveToFirst());
             assertEquals("pimdir", cursor.getString(0));
             assertEquals(1, cursor.getInt(1));
-            // The recorded algorithm has to be the one that actually named the
-            // blobs: a store claiming blake3 while its objects are SHA-256
-            // would be unreadable to every other pimdir consumer.
+            // NOTE: the recorded algorithm has to be the one that actually
+            // named the blobs: a store claiming blake3 while its objects are
+            // SHA-256 would be unreadable to every other pimdir consumer.
             assertEquals(PimdirHash.ALGORITHM, cursor.getString(2));
         }
     }
@@ -151,8 +148,9 @@ public class PimdirDbTest {
                             + "VALUES('work/Contacts', 'uid-bob', 1, 2)");
             org.junit.Assert.fail("two items of one collection shared a seq");
         } catch (SQLiteConstraintException expected) {
-            // items_by_seq is UNIQUE(collection, seq): a client resolves an item
-            // by (collection, seq), so a clash would make that ambiguous.
+            // NOTE: items_by_seq is UNIQUE(collection, seq): a client resolves
+            // an item by (collection, seq), so a clash would make that
+            // ambiguous.
         }
     }
 
@@ -161,10 +159,10 @@ public class PimdirDbTest {
         seed("work/Contacts", "work", "text/vcard", "uid-alice", 7);
         seed("home/Contacts", "home", "text/vcard", "uid-alice", 7);
 
-        // The account groups and partitions nothing (pimdir SPEC.md §9.2): the
-        // same identity in two accounts is two rows sharing one public id, and
-        // whether that means one person is the interface's call, not the
-        // store's.
+        // NOTE: the account groups and partitions nothing (pimdir SPEC.md
+        // §9.2): the same identity in two accounts is two rows sharing one
+        // public id, and whether that means one person is the interface's call,
+        // not the store's.
         try (Cursor cursor =
                 db.rawQuery(
                         "SELECT i.collection, c.account, i.seq FROM items i"
@@ -192,17 +190,16 @@ public class PimdirDbTest {
         assertTrue(blobs.has(hash));
         assertEquals("BEGIN:VCARD\r\nEND:VCARD\r\n", blobs.getText(hash));
 
-        // Sharded two levels, so no directory grows unbounded.
+        // NOTE: sharded two levels, so no directory grows unbounded.
         File path = blobs.pathOf(hash);
         assertEquals(hash, path.getName());
         assertEquals("cd", path.getParentFile().getName());
         assertEquals("ab", path.getParentFile().getParentFile().getName());
 
-        // Re-filing the same hash is a no-op: the name is the content.
+        // NOTE: re-filing the same hash is a no-op: the name is the content.
         blobs.putText(hash, "BEGIN:VCARD\r\nEND:VCARD\r\n");
         assertEquals("BEGIN:VCARD\r\nEND:VCARD\r\n", blobs.getText(hash));
 
-        // No temp file survives a committed write.
         assertEquals(0, path.getParentFile().listFiles(
                 (dir, name) -> name.startsWith(".")).length);
 
@@ -222,7 +219,6 @@ public class PimdirDbTest {
                 new Object[] {hash});
         db.execSQL("UPDATE items SET object_hash = ?", new Object[] {hash});
 
-        // Two placements, one object row, one file on disk.
         try (Cursor cursor =
                 db.rawQuery("SELECT count(*), count(DISTINCT object_hash) FROM items", null)) {
             assertTrue(cursor.moveToFirst());
@@ -234,20 +230,20 @@ public class PimdirDbTest {
 
     @Test
     public void aStoreWrittenByAnEarlierDraftIsReconciledOnOpen() {
-        // While the spec is a draft, version 1 is edited in place, so such a
-        // store is not detectably out of date and onUpgrade never fires: the
-        // drift would surface as a query error instead. A draft folds a column
-        // both ways, so both directions are checked.
+        // NOTE: while the spec is a draft, version 1 is edited in place, so
+        // such a store is not detectably out of date and onUpgrade never fires:
+        // the drift would surface as a query error instead. A draft folds a
+        // column both ways, so both directions are checked.
         db.execSQL("ALTER TABLE bindings DROP COLUMN shared_object");
         db.execSQL("ALTER TABLE bindings ADD COLUMN ambiguous_handles TEXT");
         db.execSQL("DROP INDEX items_retained");
         db.execSQL("CREATE INDEX items_retained ON items(collection, link_id)"
                 + " WHERE retained_at IS NOT NULL");
         db.execSQL("DROP TABLE contact_summary");
-        // A column an index reads, dropped with the index that reads it: the
-        // reconcile has to widen the table before it creates what selects on
-        // it, or the store is refused a column the schema declares and it does
-        // not hold yet.
+        // NOTE: a column an index reads, dropped with the index that reads it:
+        // the reconcile has to widen the table before it creates what selects
+        // on it, or the store is refused a column the schema declares and it
+        // does not hold yet.
         db.execSQL("DROP INDEX collections_by_changed");
         db.execSQL("ALTER TABLE collections DROP COLUMN changed");
         db.execSQL("DROP TRIGGER items_count_purge");
@@ -262,18 +258,21 @@ public class PimdirDbTest {
                 hasColumn("bindings", "shared_object"));
         assertFalse("a column it no longer declares is dropped",
                 hasColumn("bindings", "ambiguous_handles"));
-        // An index whose columns moved keeps its name, so CREATE INDEX IF NOT
-        // EXISTS leaves the old plan in place and only a drop can repair it.
+        // NOTE: an index whose columns moved keeps its name, so CREATE INDEX IF
+        // NOT EXISTS leaves the old plan in place and only a drop can repair
+        // it.
         assertEquals("seq", indexColumns("items_retained"));
-        // A table the draft added is created rather than waited for: a store
-        // written before the summary tables were declared holds no summary,
-        // and every write into one would fail on a table that is not there.
+        // NOTE: a table the draft added is created rather than waited for: a
+        // store written before the summary tables were declared holds no
+        // summary, and every write into one would fail on a table that is not
+        // there.
         assertTrue("a table the schema declares is created",
                 hasColumn("contact_summary", "fn"));
         assertTrue("a column an index reads is added before the index is",
                 hasColumn("collections", "changed"));
         assertEquals("changed", indexColumns("collections_by_changed"));
-        // A trigger's body is not a column, so the shape check is its text.
+        // NOTE: a trigger's body is not a column, so the shape check is its
+        // text.
         assertTrue("a trigger whose body moved is rebuilt",
                 sqlOf("items_count_purge").contains("purges + 1"));
     }
@@ -307,9 +306,9 @@ public class PimdirDbTest {
 
     @Test
     public void aRoundOpenedBeforeTheBandColumnReadsAsAWholeScopeRound() {
-        // A store written before rounds recorded their kind (pimdir
-        // 00535c1), with a round open in it: the column is added under the
-        // open round, which then reads as one over its whole scope.
+        // NOTE: a store written before rounds recorded their kind (pimdir
+        // 00535c1), with a round open in it: the column is added under the open
+        // round, which then reads as one over its whole scope.
         db.execSQL("ALTER TABLE sources DROP COLUMN round_band");
         db.execSQL("INSERT INTO collections(id, account, kind, name)"
                 + " VALUES('acct/INBOX', 'acct', 'message/rfc822', 'INBOX')");
@@ -333,10 +332,10 @@ public class PimdirDbTest {
 
     @Test
     public void aMergedPageWalksTheGlobalOrderOnAnOlderStore() {
-        // A store written before pimdir 22f1f2c holds no global order: a page
-        // over several mailboxes read every item of the set and sorted it. The
-        // reconcile adds the index on open, and the canonical page statement,
-        // whose collection test is kept off items_by_seq, walks it.
+        // NOTE: a store written before pimdir 22f1f2c holds no global order: a
+        // page over several mailboxes read every item of the set and sorted it.
+        // The reconcile adds the index on open, and the canonical page
+        // statement, whose collection test is kept off items_by_seq, walks it.
         db.execSQL("DROP INDEX items_by_sort_global");
         seed("acct/INBOX", "acct", "message/rfc822", "<a@x>", 1);
         seed("acct/Archive", "acct", "message/rfc822", "<b@x>", 2);
