@@ -11,7 +11,7 @@ import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.AccountEntry;
-import org.pimalaya.sync.RemotePass;
+import org.pimalaya.sync.SyncPasses;
 import org.robolectric.ParameterizedRobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.shadows.ShadowLog;
@@ -243,7 +243,7 @@ public abstract class E2eCase {
 
     /** One pass over some collections of a device's account, which must not fail. */
     protected void pass(E2eDevice device, String... collections) {
-        RemotePass.MailPass pass = device.sync(address, List.of(collections));
+        SyncPasses.MailPass pass = device.sync(address, List.of(collections));
         if (pass.failure != null) {
             throw new AssertionError("the pass failed: " + pass.failure.getMessage(), pass.failure);
         }
@@ -290,7 +290,7 @@ public abstract class E2eCase {
     }
 
     /** Fails on a pass failure, naming it. */
-    protected static void assertNoFailure(RemotePass.MailPass pass) {
+    protected static void assertNoFailure(SyncPasses.MailPass pass) {
         assertNull(
                 "the pass failed: " + (pass.failure == null ? "" : pass.failure.getMessage()),
                 pass.failure);

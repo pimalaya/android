@@ -9,7 +9,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailSubmit;
-import org.pimalaya.sync.RemotePass;
+import org.pimalaya.sync.SyncPasses;
 import org.robolectric.RuntimeEnvironment;
 
 import java.nio.charset.StandardCharsets;
@@ -53,14 +53,14 @@ public class E2eMailSendTest extends E2eCase {
             // NOTE: a submission endpoint nobody answers stands for no
             // network: the drain counts an attempt and stops, the copy waits.
             phone.accounts.add(E2eTarget.unreachable(account));
-            RemotePass.MailPass failed = phone.sync(address, List.of(outbox, sent));
+            SyncPasses.MailPass failed = phone.sync(address, List.of(outbox, sent));
             assertNotNull("the drain failed", failed.failure);
             assertEquals("still queued", 1, phone.mail.outgoing(address).size());
             assertTrue("the copy still pending", phone.owes(sent, phone.message(sent, subject).id));
             phone.accounts.add(account);
         }
 
-        RemotePass.MailPass drained = phone.sync(address, List.of(outbox, sent, inbox));
+        SyncPasses.MailPass drained = phone.sync(address, List.of(outbox, sent, inbox));
         assertNoFailure(drained);
         assertEquals("handed over once", 1, drained.sent);
         assertTrue("the outbox drained", phone.mail.outgoing(address).isEmpty());
@@ -93,7 +93,7 @@ public class E2eMailSendTest extends E2eCase {
             // NOTE: Gmail files one message for a self-send, the sender's,
             // which keeps its Bcc; elsewhere the delivered copy is apart.
             MailStore.StoredMessage delivered = observer.message(seenInbox, subject);
-            observer.reader(address).read(delivered, () -> observer.remote.openMail(account));
+            observer.reader(address).read(delivered, () -> observer.passes.openMail(account));
             String source =
                     new String(
                             observer.mail.source(observer.message(seenInbox, subject)),
@@ -125,7 +125,7 @@ public class E2eMailSendTest extends E2eCase {
 
         String subject = subject("metered");
         phone.submitter(address).queue(draft(subject, address, ""));
-        RemotePass.MailPass metered = phone.sync(address, List.of(outbox, collection));
+        SyncPasses.MailPass metered = phone.sync(address, List.of(outbox, collection));
         assertNoFailure(metered);
         assertEquals("the outbox went out", 1, metered.sent);
         assertTrue("drained", phone.mail.outgoing(address).isEmpty());
@@ -138,7 +138,7 @@ public class E2eMailSendTest extends E2eCase {
         if (!phone.mail.holdsBody(before)) {
             assertNotNull(
                     "opened on mobile data",
-                    phone.reader(address).read(before, () -> phone.remote.openMail(account)).body);
+                    phone.reader(address).read(before, () -> phone.passes.openMail(account)).body);
         }
 
         E2eDevice.network(RuntimeEnvironment.getApplication(), E2eDevice.Network.WIFI);

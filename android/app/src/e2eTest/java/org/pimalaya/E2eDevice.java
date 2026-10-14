@@ -35,8 +35,7 @@ import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
-import org.pimalaya.sync.RemotePass;
-import org.pimalaya.sync.SyncRunner;
+import org.pimalaya.sync.SyncPasses;
 import org.robolectric.shadows.ShadowNetworkInfo;
 
 import java.io.File;
@@ -51,7 +50,7 @@ import java.util.Set;
 /**
  * One simulated phone: a store of its own (an isolated files directory, so its
  * own `pimdir.db` and blobs, and its own preferences), an in-memory account
- * roster, and a headless {@link RemotePass} wired as {@link BackgroundJob}
+ * roster, and a headless {@link SyncPasses} wired as {@link BackgroundJob}
  * wires one. Two devices in one test share nothing but the server and the
  * network the host JVM sees ({@link #network}).
  *
@@ -76,8 +75,7 @@ final class E2eDevice {
     final CardStore cards;
     final PimalayaClient client = new PimalayaClient();
     final Accounts accounts;
-    final SyncRunner runner;
-    final RemotePass remote;
+    final SyncPasses passes;
 
     /** The test's tag, whose scratch collections alone a pass takes among the suite's. */
     String tag;
@@ -90,17 +88,11 @@ final class E2eDevice {
         events = new EventStore(context, pimdir);
         cards = new CardStore(context, pimdir);
         accounts = new Accounts(context);
-        runner = new SyncRunner(context, cards, pimdir, accounts, client, null);
-        remote =
-                new RemotePass(
+        passes =
+                new SyncPasses(
                         context,
-                        pimdir,
-                        client,
-                        accounts,
-                        mail,
-                        events,
-                        runner,
-                        RemotePass.HEADLESS);
+                        new SyncPasses.Parts(pimdir, cards, accounts, mail, events, client),
+                        SyncPasses.HEADLESS);
     }
 
     /**
@@ -150,8 +142,8 @@ final class E2eDevice {
         if (!wifi()) {
             return new IllegalStateException("the first sync waits for Wi-Fi");
         }
-        try (MailSession session = remote.openMail(account)) {
-            return remote.stepMail(account, session, null, true);
+        try (MailSession session = passes.openMail(account)) {
+            return passes.stepMail(account, session, null, true);
         } catch (Exception opened) {
             return opened;
         }
@@ -166,8 +158,8 @@ final class E2eDevice {
             return new IllegalStateException("Load more waits for Wi-Fi");
         }
         AccountEntry account = account(email);
-        try (MailSession session = remote.openMail(account)) {
-            return remote.stepMail(account, session, only, false);
+        try (MailSession session = passes.openMail(account)) {
+            return passes.stepMail(account, session, only, false);
         } catch (Exception opened) {
             return opened;
         }
@@ -179,9 +171,9 @@ final class E2eDevice {
      * is listed whole, and only these are reconciled, on Wi-Fi; on a metered
      * network the outbox among them is drained and nothing listed.
      */
-    RemotePass.MailPass sync(String email, Collection<String> collections) {
+    SyncPasses.MailPass sync(String email, Collection<String> collections) {
         Set<String> scoped = new HashSet<>(collections);
-        return remote.mailPass(
+        return passes.mailPass(
                 new SyncScope() {
                     @Override
                     public boolean account(String candidate) {
@@ -201,7 +193,7 @@ final class E2eDevice {
      * it: its books listed on first sight, subscribed ones reconciled.
      */
     Exception syncContacts(String email) {
-        return runner.syncRemote(only(email)).failure;
+        return passes.syncRemote(only(email)).failure;
     }
 
     /**
@@ -212,7 +204,7 @@ final class E2eDevice {
      */
     Exception syncCalendars(String email) {
         Map<String, String> names = new java.util.HashMap<>();
-        return remote.calendarPass(
+        return passes.calendarPass(
                 new SyncScope() {
                     @Override
                     public boolean account(String candidate) {

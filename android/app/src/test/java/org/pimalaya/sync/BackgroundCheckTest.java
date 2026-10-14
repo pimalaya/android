@@ -1,4 +1,4 @@
-package org.pimalaya;
+package org.pimalaya.sync;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -12,7 +12,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.mail.MailStore;
-import org.pimalaya.sync.BackgroundCheck;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -110,7 +109,7 @@ public class BackgroundCheckTest {
         now.put("band", unread("band", "2025-03-01T08:00:00Z"));
 
         java.util.List<MailStore.StoredMessage> arrived =
-                BackgroundJob.arrived(
+                BackgroundCheck.arrived(
                         before, now, java.util.Map.of("inbox", "2026-09-01T00:00:00Z"));
         assertEquals("new mail, delayed or not, and nothing of a band below the floor", 2,
                 arrived.size());
@@ -119,6 +118,6 @@ public class BackgroundCheckTest {
         assertEquals(
                 "an inbox with no floor holds no band",
                 3,
-                BackgroundJob.arrived(before, now, java.util.Map.of()).size());
+                BackgroundCheck.arrived(before, now, java.util.Map.of()).size());
     }
 }

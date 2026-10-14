@@ -100,8 +100,7 @@ import org.pimalaya.setup.OnboardingFlow;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
 import org.pimalaya.pimdir.PimdirEngine;
-import org.pimalaya.sync.RemotePass;
-import org.pimalaya.sync.SyncRunner;
+import org.pimalaya.sync.SyncPasses;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.sync.SyncSteps;
 import org.pimalaya.sync.WorkerPool;
@@ -205,10 +204,9 @@ public class MainActivity extends Host {
 
     /** The contacts inside it. */
     public PimdirContacts contacts;
-    SyncRunner runner;
 
-    /** The mail and calendar passes, behind the sync dock. */
-    RemotePass remote;
+    /** Every remote and phone pass, behind the sync dock. */
+    SyncPasses passes;
     private ViewFlipper flipper;
     private ViewFlipper authFlipper;
     public ContactForm form;
@@ -380,38 +378,11 @@ public class MainActivity extends Host {
         eventView = new EventView(this);
         messageView = new MessageView(this);
         compose = new MessageCompose(this);
-        runner = new SyncRunner(this, base, pimdir, store, client, syncObserver());
-        remote =
-                new RemotePass(
+        passes =
+                new SyncPasses(
                         this,
-                        pimdir,
-                        client,
-                        store,
-                        mail,
-                        events,
-                        runner,
-                        new RemotePass.Progress() {
-                            @Override
-                            public void account(String email) {
-                                syncAccount(email);
-                            }
-
-                            @Override
-                            public void collections(PimDomain domain, int done, int total) {
-                                syncCollections(domain, done, total);
-                            }
-
-                            @Override
-                            public void step(PimDomain domain, int stage, int count) {
-                                syncStep(domain, stage, count);
-                            }
-
-                            @Override
-                            public void advance(
-                                    PimDomain domain, int stage, int done, int total) {
-                                syncAdvance(domain, stage, done, total);
-                            }
-                        });
+                        new SyncPasses.Parts(pimdir, base, store, mail, events, client),
+                        syncObserver());
         // NOTE: the two flows reference each other (grants land back in
         // the wizard), so one side binds late.
         oauth = new OauthFlow(this);
@@ -1400,13 +1371,13 @@ public class MainActivity extends Host {
     }
 
     /**
-     * The runner's hooks into this activity's presentation: the loader
+     * The passes' hooks into this activity's presentation: the loader
      * dialog's detail line, and the in-memory account cache a token
      * refresh must keep current (mutated on the main thread the drawer
      * reads it from).
      */
-    private SyncRunner.Observer syncObserver() {
-        return new SyncRunner.Observer() {
+    private SyncPasses.Progress syncObserver() {
+        return new SyncPasses.Progress() {
             @Override
             public void step(PimDomain domain, int stage, int count) {
                 syncStep(domain, stage, count);
@@ -1678,7 +1649,7 @@ public class MainActivity extends Host {
                 }
             }
         } else {
-            for (AccountEntry account : remote.accountsFor(domain)) {
+            for (AccountEntry account : passes.accountsFor(domain)) {
                 weights.put(account.email, 0);
             }
         }
@@ -1886,7 +1857,7 @@ public class MainActivity extends Host {
         io.execute(
                 () -> {
                     planSync(PimDomain.CONTACTS, SyncScope.all(this), null);
-                    SyncRunner.Outcome outcome = runner.syncRemote();
+                    SyncPasses.Outcome outcome = passes.syncRemote();
                     postAlive(
                             () -> {
                                 setSyncing(false);
@@ -1901,7 +1872,7 @@ public class MainActivity extends Host {
      * says nothing: the lists show what it brought, and a conflict marks
      * its own row.
      */
-    private void reportSync(SyncRunner.Outcome outcome) {
+    private void reportSync(SyncPasses.Outcome outcome) {
         if (outcome.failure != null) {
             // NOTE: the last sync's store keeps failing addressbooks usable.
             showError(outcome.failure, R.string.sync_failed);
@@ -1939,7 +1910,7 @@ public class MainActivity extends Host {
                 () -> {
                     SyncScope scope = MailList.narrowed(filter, role, mail.roles());
                     planSync(PimDomain.MAIL, scope, null);
-                    RemotePass.MailPass pass = remote.mailPass(scope, listing);
+                    SyncPasses.MailPass pass = passes.mailPass(scope, listing);
                     postAlive(
                             () -> {
                                 setSyncing(false);
@@ -1974,7 +1945,7 @@ public class MainActivity extends Host {
         io.execute(
                 () -> {
                     planSync(PimDomain.CALENDAR, filterOf(PimDomain.CALENDAR), null);
-                    Exception failure = remote.calendarPass(filterOf(PimDomain.CALENDAR));
+                    Exception failure = passes.calendarPass(filterOf(PimDomain.CALENDAR));
                     postAlive(
                             () -> {
                                 setSyncing(false);
@@ -1986,19 +1957,19 @@ public class MainActivity extends Host {
                 });
     }
 
-    /** Opens one account's mail connection ({@link RemotePass#openMail}). */
+    /** Opens one account's mail connection ({@link SyncPasses#openMail}). */
     public MailSession openMail(AccountEntry account) {
-        return remote.openMail(account);
+        return passes.openMail(account);
     }
 
     /** The stored accounts connected for one domain. */
     public List<AccountEntry> accountsFor(PimDomain domain) {
-        return remote.accountsFor(domain);
+        return passes.accountsFor(domain);
     }
 
     /** The store id one account's collections are namespaced under. */
     private String accountIdOf(String email) {
-        return remote.accountIdOf(email);
+        return passes.accountIdOf(email);
     }
 
     /**
@@ -2121,7 +2092,7 @@ public class MainActivity extends Host {
                     for (AccountEntry account : owing) {
                         Exception error;
                         try (MailSession session = openMail(account)) {
-                            error = remote.stepMail(account, session, null, true);
+                            error = passes.stepMail(account, session, null, true);
                         } catch (Exception opened) {
                             error = opened;
                         }
@@ -2156,7 +2127,7 @@ public class MainActivity extends Host {
         io.execute(
                 () -> {
                     planSync(PimDomain.CONTACTS, SyncScope.all(this), null);
-                    SyncRunner.Outcome outcome = runner.syncRemote();
+                    SyncPasses.Outcome outcome = passes.syncRemote();
                     if (outcome.failure == null) {
                         for (AccountEntry account : owing) {
                             FirstSync.paid(this, account.email, PimDomain.CONTACTS);
@@ -2183,7 +2154,7 @@ public class MainActivity extends Host {
                     syncAccount(null);
                     Exception failure = null;
                     for (AccountEntry account : owing) {
-                        Exception error = remote.fetchCalendars(account, SyncScope.all(this));
+                        Exception error = passes.fetchCalendars(account, SyncScope.all(this));
                         if (error == null) {
                             FirstSync.paid(this, account.email, PimDomain.CALENDAR);
                         } else if (failure == null) {
@@ -2782,7 +2753,7 @@ public class MainActivity extends Host {
                         }
                         try (MailSession session = openMail(account)) {
                             for (String only : asked.getValue()) {
-                                Exception error = remote.loadMore(account, session, only);
+                                Exception error = passes.loadMore(account, session, only);
                                 if (failure == null) {
                                     failure = error;
                                 }
@@ -2892,7 +2863,7 @@ public class MainActivity extends Host {
         io.execute(
                 () -> {
                     planSync(PimDomain.CONTACTS, filterOf(PimDomain.CONTACTS), null);
-                    SyncRunner.Outcome outcome = runner.syncRemote(filterOf(PimDomain.CONTACTS));
+                    SyncPasses.Outcome outcome = passes.syncRemote(filterOf(PimDomain.CONTACTS));
                     postAlive(
                             () -> {
                                 setSyncing(false);
@@ -2923,9 +2894,9 @@ public class MainActivity extends Host {
                     planSync(PimDomain.CONTACTS, SyncScope.all(this), null);
                     planSync(PimDomain.MAIL, SyncScope.mail(this), null);
                     planSync(PimDomain.CALENDAR, SyncScope.all(this), null);
-                    SyncRunner.Outcome outcome = runner.syncRemote();
-                    RemotePass.MailPass sent = remote.mailPass(SyncScope.mail(this), listing);
-                    Exception calendars = remote.calendarPass(SyncScope.all(this));
+                    SyncPasses.Outcome outcome = passes.syncRemote();
+                    SyncPasses.MailPass sent = passes.mailPass(SyncScope.mail(this), listing);
+                    Exception calendars = passes.calendarPass(SyncScope.all(this));
                     Exception other = sent.failure != null ? sent.failure : calendars;
                     postAlive(
                             () -> {
@@ -2948,7 +2919,7 @@ public class MainActivity extends Host {
 
     /** The subscribed addressbooks set to mirror into the phone. */
     public List<BookEntry> phoneSyncedBooks() {
-        return runner.phoneSyncedBooks();
+        return passes.phoneSyncedBooks();
     }
 
     /**
@@ -2961,7 +2932,7 @@ public class MainActivity extends Host {
         io.execute(
                 () -> {
                     try {
-                        Accounts.reconcile(this, BookEntry.accounts(runner.phoneSyncedBooks()));
+                        Accounts.reconcile(this, BookEntry.accounts(passes.phoneSyncedBooks()));
                     } catch (Exception error) {
                         Log.w("pimalaya", "phone accounts failed", error);
                     }
@@ -2997,7 +2968,7 @@ public class MainActivity extends Host {
         io.execute(
                 () -> {
                     ContactEngine.Report report = new ContactEngine.Report();
-                    Exception failure = runner.syncPhone(report);
+                    Exception failure = passes.syncPhone(report);
                     if (failure != null) {
                         Log.w("pimalaya", "phone pass on return failed", failure);
                     }
@@ -3011,7 +2982,7 @@ public class MainActivity extends Host {
                         postAlive(this::reloadContacts);
                     }
 
-                    boolean events = runner.syncPhoneCalendars();
+                    boolean events = passes.syncPhoneCalendars();
                     long calendarIngested = App.of(this).state.calendarsIngested;
                     if (events || calendarIngested != reloadedCalendarIngest) {
                         reloadedCalendarIngest = calendarIngested;
@@ -3030,7 +3001,7 @@ public class MainActivity extends Host {
         io.execute(
                 () -> {
                     try {
-                        Accounts.reconcile(this, BookEntry.accounts(runner.phoneSyncedBooks()));
+                        Accounts.reconcile(this, BookEntry.accounts(passes.phoneSyncedBooks()));
                         ContactPhonePass engine = new ContactPhonePass(pimdir, client);
                         engine.progress =
                                 new PimdirEngine.Progress() {
@@ -4084,7 +4055,7 @@ public class MainActivity extends Host {
                         }
                         try (MailSession session = openMail(account)) {
                             for (String collection : asked.getValue()) {
-                                Exception error = remote.firstOf(account, session, collection);
+                                Exception error = passes.firstOf(account, session, collection);
                                 if (failure == null) {
                                     failure = error;
                                 }
@@ -4116,31 +4087,9 @@ public class MainActivity extends Host {
         filesList.reload();
     }
 
-    /**
-     * One domain's collections as the store holds them, every account's:
-     * the mailboxes, the calendars, or the subscribed address books (the
-     * on-device one among them).
-     */
+    /** One domain's collections as the store holds them ({@link SyncPasses#collectionsOf}). */
     public List<PimdirCollections.Stored> collectionsOf(PimDomain domain) {
-        PimdirCollections collections = new PimdirCollections(pimdir, this);
-        switch (domain) {
-            case MAIL:
-                return collections.list(PimdirSummary.MAIL);
-            case CALENDAR:
-                return collections.list(PimdirSummary.CALENDAR);
-            default:
-                java.util.Set<String> subscribed = new java.util.HashSet<>();
-                for (BookEntry book : base.loadSubscribedAddressbooks()) {
-                    subscribed.add(book.book.url);
-                }
-                List<PimdirCollections.Stored> books = new ArrayList<>();
-                for (PimdirCollections.Stored book : collections.list(PimdirSummary.CONTACT)) {
-                    if (subscribed.contains(book.id)) {
-                        books.add(book);
-                    }
-                }
-                return books;
-        }
+        return passes.collectionsOf(domain);
     }
 
     /**

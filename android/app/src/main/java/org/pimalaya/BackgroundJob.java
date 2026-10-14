@@ -9,31 +9,15 @@ import android.app.job.JobService;
 import android.content.Context;
 import android.content.Intent;
 import android.util.Log;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import org.pimalaya.account.AccountActivation;
-import org.pimalaya.account.AccountEntry;
-import org.pimalaya.account.MergedFilter;
-import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
-import org.pimalaya.account.SyncScope;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.CardStore;
-import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.mail.MailStore;
-import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
-import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.sync.BackgroundCheck;
-import org.pimalaya.sync.FirstSync;
-import org.pimalaya.sync.RemotePass;
-import org.pimalaya.sync.SyncRunner;
+import org.pimalaya.sync.SyncPasses;
 
 /**
  * The background check ({@link BackgroundCheck}): syncs every account
@@ -101,158 +85,14 @@ public class BackgroundJob extends JobService {
         MailStore mail = new MailStore(context, pimdir);
         EventStore events = new EventStore(context, pimdir);
         PimalayaClient client = new PimalayaClient();
-        SyncRunner runner = new SyncRunner(context, base, pimdir, store, client, null);
-        RemotePass remote =
-                new RemotePass(
-                        context, pimdir, client, store, mail, events, runner, RemotePass.HEADLESS);
+        SyncPasses passes =
+                new SyncPasses(
+                        context,
+                        new SyncPasses.Parts(pimdir, base, store, mail, events, client),
+                        SyncPasses.HEADLESS);
 
-        // NOTE: which accounts are due, read once: a pass stamps its
-        // account, which would make it not due for the next domain.
-        Set<String> due = new HashSet<>();
-        for (AccountEntry account : store.loadAll()) {
-            if (BackgroundCheck.due(context, account.email)) {
-                due.add(account.email);
-            }
-        }
-        if (due.isEmpty()) {
-            return;
-        }
-
-        runner.syncRemote(scope(context, PimDomain.CONTACTS, due));
-        // NOTE: the last net under the phone's own triggers (a pass after
-        // each write, Android's upload sync, the app's return), for every
-        // mirrored book whether its account is due or not.
-        Exception failure = runner.syncPhone(new ContactEngine.Report());
-        if (failure != null) {
-            Log.w("pimalaya", "background phone sync failed", failure);
-        }
-        // NOTE: the same net for every calendar the phone shows, which is
-        // also what moves the window of a series listed instance by instance.
-        runner.syncPhoneCalendars();
-        if (stopped) {
-            return;
-        }
-
-        SyncScope mailScope = scope(context, PimDomain.MAIL, due);
-        PimdirCollections collections = new PimdirCollections(pimdir, context);
-        List<String> notified = new ArrayList<>();
-        for (AccountEntry account : remote.accountsFor(PimDomain.MAIL)) {
-            if (mailScope.account(account.email)
-                    && BackgroundCheck.notifies(context, account.email)) {
-                notified.add(account.email);
-            }
-        }
-        Map<String, Map<String, MailStore.StoredMessage>> before = new LinkedHashMap<>();
-        Map<String, String> floors = new HashMap<>();
-        for (String email : notified) {
-            before.put(email, unreadInbox(mail, collections, email));
-            for (String inbox : inboxes(collections, email)) {
-                floors.put(inbox, mail.coverage(inbox).since);
-            }
-        }
-        // NOTE: a run lists no mail on a metered network, the outbox going
-        // out all the same; the next run on Wi-Fi brings what arrived.
-        android.net.ConnectivityManager connectivity =
-                context.getSystemService(android.net.ConnectivityManager.class);
-        boolean listing = connectivity != null && !connectivity.isActiveNetworkMetered();
-        RemotePass.MailPass pass = remote.mailPass(mailScope, listing);
-        if (pass.failure != null) {
-            Log.w("pimalaya", "background mail sync failed", pass.failure);
-        }
-        for (String email : notified) {
-            notify(
-                    context,
-                    email,
-                    arrived(before.get(email), unreadInbox(mail, collections, email), floors));
-        }
-        if (stopped) {
-            return;
-        }
-
-        Exception calendars = remote.calendarPass(scope(context, PimDomain.CALENDAR, due));
-        if (calendars != null) {
-            Log.w("pimalaya", "background calendar sync failed", calendars);
-        }
-    }
-
-    /**
-     * The accounts a run takes for one domain: on, due, and past their first
-     * sync of it, which is the app's.
-     */
-    private static SyncScope scope(Context context, PimDomain domain, Set<String> due) {
-        List<String> owing = FirstSync.owing(context, domain);
-        // NOTE: a mailbox the mail filter unticks neither shows nor syncs.
-        MergedFilter mail = domain == PimDomain.MAIL ? MergedFilter.of(context, domain) : null;
-        return new SyncScope() {
-            @Override
-            public boolean account(String email) {
-                return AccountActivation.enabled(context, email)
-                        && due.contains(email)
-                        && !owing.contains(email);
-            }
-
-            @Override
-            public boolean collection(String email, String collection) {
-                return account(email) && (mail == null || mail.chosen(collection));
-            }
-        };
-    }
-
-    /**
-     * What a run notifies, newest first: the unread inbox messages present
-     * after its pass ({@code now}) and not before it, dated on or after
-     * their inbox's floor as it stood before the pass ({@code floors} by
-     * collection, null for none). A band of older mail an interrupted fill
-     * left for the pass to finish lies below that floor and never notifies;
-     * new mail, delayed or not, lies above it.
-     */
-    static List<MailStore.StoredMessage> arrived(
-            Map<String, MailStore.StoredMessage> before,
-            Map<String, MailStore.StoredMessage> now,
-            Map<String, String> floors) {
-        List<MailStore.StoredMessage> arrived = new ArrayList<>();
-        for (Map.Entry<String, MailStore.StoredMessage> entry : now.entrySet()) {
-            MailStore.StoredMessage message = entry.getValue();
-            String floor = floors.get(message.collection);
-            if (!before.containsKey(entry.getKey())
-                    && (floor == null || message.sortKey.compareTo(floor) >= 0)) {
-                arrived.add(message);
-            }
-        }
-        return arrived;
-    }
-
-    /** An account's inboxes, by collection id. */
-    private static List<String> inboxes(PimdirCollections collections, String email) {
-        List<String> inbox = new ArrayList<>();
-        for (PimdirCollections.Stored mailbox : collections.list(PimdirSummary.MAIL)) {
-            if (email.equals(mailbox.accountEmail) && "inbox".equals(mailbox.role)) {
-                inbox.add(mailbox.id);
-            }
-        }
-        return inbox;
-    }
-
-    /**
-     * An account's unread inbox messages within its window, newest first, by
-     * collection and id.
-     */
-    private static Map<String, MailStore.StoredMessage> unreadInbox(
-            MailStore mail, PimdirCollections collections, String email) {
-        List<String> inbox = inboxes(collections, email);
-        Map<String, MailStore.StoredMessage> unread = new LinkedHashMap<>();
-        if (inbox.isEmpty()) {
-            return unread;
-        }
-        for (MailStore.StoredMessage message :
-                mail.all(
-                        new MailStore.Query(inbox, 0, null, null, List.of())
-                                .since(mail.windowOf(email)))) {
-            if (!message.deleted) {
-                unread.put(message.collection + "/" + message.id, message);
-            }
-        }
-        return unread;
+        BackgroundCheck.run(
+                context, passes, () -> stopped, (email, arrived) -> notify(context, email, arrived));
     }
 
     /**

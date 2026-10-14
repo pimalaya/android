@@ -66,7 +66,7 @@ public class E2eMailListTest extends E2eCase {
         if (!target.service.equals("jmap") && !phone.mail.holdsBody(footer)) {
             assertTrue("a multipart/mixed message listed with a paperclip", footer.hasAttachment);
         }
-        phone.reader(address).read(footer, () -> phone.remote.openMail(account));
+        phone.reader(address).read(footer, () -> phone.passes.openMail(account));
         assertFalse(
                 "opened, it carries no attachment",
                 phone.message(collection, subject("mixed")).hasAttachment);
@@ -103,7 +103,7 @@ public class E2eMailListTest extends E2eCase {
         assertFalse("listed unread", listed.seen);
 
         MessageBody body =
-                phone.reader(address).read(listed, () -> phone.remote.openMail(account)).body;
+                phone.reader(address).read(listed, () -> phone.passes.openMail(account)).body;
         assertTrue("the body as sent: " + body.body, body.body.contains("The body of " + tag));
         assertTrue("stored", phone.mail.holdsBody(listed));
 
