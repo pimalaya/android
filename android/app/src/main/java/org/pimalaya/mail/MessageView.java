@@ -19,7 +19,6 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
@@ -33,6 +32,9 @@ import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.MailDate;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.Dates;
+import org.pimalaya.ui.Host;
+import org.pimalaya.ui.Linked;
+import org.pimalaya.ui.Panels;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -59,7 +61,24 @@ public final class MessageView {
     /** How wide a badge row may run: the reader's own inner width. */
     private static final int CARD_INSET = 32;
 
-    private final MainActivity host;
+    private final Host host;
+
+    private final MailParts parts;
+
+    /** The foreground sync, which opens a session for a fetch. */
+    private final MailSync sync;
+
+    /** What an attachment offers: open, share, save to a folder. */
+    private final FileActions fileActions;
+
+    /** The Linked card the reader's badge opens. */
+    private final Linked<ItemLinks.Endpoint> linked;
+
+    /** The list read again after a write; set by the list once built. */
+    MailList mailList;
+
+    /** The composer a reply and a forward open; set by the composer once built. */
+    MessageCompose compose;
 
     /** The row the reader opened, and what the header is drawn from. */
     private MailStore.StoredMessage current;
@@ -80,8 +99,17 @@ public final class MessageView {
     /** The open message as read, what a reply and a forward quote; null until it loads. */
     private MessageBody loaded;
 
-    public MessageView(MainActivity host) {
+    public MessageView(
+            Host host,
+            MailParts parts,
+            MailSync sync,
+            FileActions fileActions,
+            Linked<ItemLinks.Endpoint> linked) {
         this.host = host;
+        this.parts = parts;
+        this.sync = sync;
+        this.fileActions = fileActions;
+        this.linked = linked;
     }
 
     /** Opens the reader on one row, then fetches what it does not hold. */
@@ -96,7 +124,7 @@ public final class MessageView {
         host.findViewById(R.id.message_view_linked).setVisibility(View.GONE);
         actions();
         loading();
-        host.show(MainActivity.PANEL_MESSAGE);
+        host.show(Panels.MESSAGE);
 
         load(message);
     }
@@ -181,11 +209,11 @@ public final class MessageView {
                     List<FileStore.StoredFile> files =
                             message.pending
                                     ? new ArrayList<>()
-                                    : host.files.attachments(
-                                            host.mail.accountIdOf(message.accountEmail),
+                                    : parts.files().attachments(
+                                            parts.mail().accountIdOf(message.accountEmail),
                                             message.id);
                     ItemLinks.Endpoint self = MailStore.endpointOf(message);
-                    int links = self == null ? -1 : host.links.links(self).size();
+                    int links = self == null ? -1 : parts.links().links(self).size();
 
                     MessageBody outcome = loaded;
                     boolean stored = fetched;
@@ -195,7 +223,7 @@ public final class MessageView {
                                 // NOTE: its row is on the phone now, no
                                 // longer dimmed.
                                 if (stored) {
-                                    host.mailList.reload();
+                                    mailList.reload();
                                 }
                                 // NOTE: the reader may have left while the
                                 // fetch ran, and a second message may
@@ -221,10 +249,24 @@ public final class MessageView {
                 });
     }
 
-    /** The reader of one message's account ({@link MailReader}). */
+    /**
+     * The reader of one message's account ({@link MailReader}), on a mail
+     * driver that only stages: no account, so it services the storage yields
+     * a mutation makes and can reach no server.
+     *
+     * <p>Which is what every action in the reader and the composer needs.
+     * Staging is a disk write, and the push it derives is the next sync's.
+     */
     private MailReader reader(MailStore.StoredMessage message) {
         return new MailReader(
-                host.mail, host.files, host.client, host.mailEngine(message.accountEmail));
+                parts.mail(),
+                parts.files(),
+                parts.client(),
+                new MailEngine(
+                        parts.pimdir(),
+                        parts.client(),
+                        null,
+                        sync.accountIdOf(message.accountEmail)));
     }
 
     /**
@@ -233,12 +275,12 @@ public final class MessageView {
      * the body step brings it once back online, else an open does.
      */
     private MailSession openOnline(MailStore.StoredMessage message, AccountEntry account) {
-        if (!host.online()) {
+        if (!sync.online()) {
             boolean taken =
                     MailBodies.takes(
                             message.sortKey,
-                            host.mail.mailboxWindow(message.collection),
-                            host.mail.roles().get(message.collection),
+                            parts.mail().mailboxWindow(message.collection),
+                            parts.mail().roles().get(message.collection),
                             MailOffline.whole(host, message.collection));
             throw new IllegalStateException(
                     host.getString(
@@ -246,7 +288,7 @@ public final class MessageView {
                                     ? R.string.message_not_on_phone
                                     : R.string.message_not_on_phone_later));
         }
-        return host.openMail(account);
+        return sync.openMail(account);
     }
 
     /**
@@ -263,14 +305,14 @@ public final class MessageView {
                                 .getQuantityString(R.plurals.linked_count, count, count));
         badge.setOnClickListener(
                 view ->
-                        host.linked.dialog(
+                        linked.dialog(
                                 MailStore.endpointOf(message),
                                 message.subject,
                                 () ->
                                         host.io.execute(
                                                 () -> {
                                                     int links =
-                                                            host.links
+                                                            parts.links()
                                                                     .links(
                                                                             MailStore.endpointOf(
                                                                                     message))
@@ -293,16 +335,16 @@ public final class MessageView {
             host.getString(R.string.attachment_save)
         };
         new AlertDialog.Builder(host)
-                .setTitle(host.fileActions.label(attachment))
+                .setTitle(fileActions.label(attachment))
                 .setItems(
                         actions,
                         (dialog, which) -> {
                             if (which == 0) {
-                                host.fileActions.open(attachment, bytes);
+                                fileActions.open(attachment, bytes);
                             } else if (which == 1) {
-                                host.fileActions.share(attachment, bytes);
+                                fileActions.share(attachment, bytes);
                             } else {
-                                host.fileActions.saveToFolder(attachment, bytes);
+                                fileActions.saveToFolder(attachment, bytes);
                             }
                         })
                 .show();
@@ -319,29 +361,29 @@ public final class MessageView {
      * every backend reads today.
      */
     public java.io.File fileOf(MailStore.StoredMessage message, FileStore.StoredFile attachment) {
-        java.io.File saved = host.files.saved(attachment);
+        java.io.File saved = parts.files().saved(attachment);
         if (saved != null) {
             return saved;
         }
-        java.io.File source = host.mail.sourceFile(message);
+        java.io.File source = parts.mail().sourceFile(message);
         if (source == null) {
             AccountEntry account = accountOf(message.accountEmail);
             if (account == null) {
                 throw new IllegalStateException(host.getString(R.string.message_no_account));
             }
-            if (!host.online()) {
+            if (!sync.online()) {
                 throw new IllegalStateException(
                         host.getString(R.string.message_not_on_phone_later));
             }
-            reader(message).fetch(message, () -> host.openMail(account));
-            host.postAlive(host.mailList::reload);
-            source = host.mail.sourceFile(message);
+            reader(message).fetch(message, () -> sync.openMail(account));
+            host.postAlive(mailList::reload);
+            source = parts.mail().sourceFile(message);
             if (source == null) {
                 throw new IllegalStateException(host.getString(R.string.attachment_failed));
             }
         }
         java.io.File part = OpenedCopies.partFile(host, attachment.seq);
-        host.client.messagePart(source, attachment.part, part);
+        parts.client().messagePart(source, attachment.part, part);
         return part;
     }
 
@@ -354,7 +396,7 @@ public final class MessageView {
         MailStore.StoredMessage message =
                 origin == null
                         ? null
-                        : host.mail.message(origin.collection, origin.linkId);
+                        : parts.mail().message(origin.collection, origin.linkId);
         if (message == null || file.part == null) {
             throw new IllegalStateException(host.getString(R.string.files_no_message));
         }
@@ -366,7 +408,7 @@ public final class MessageView {
         host.io.execute(
                 () -> {
                     MailStore.StoredMessage message =
-                            host.mail.message(origin.collection, origin.linkId);
+                            parts.mail().message(origin.collection, origin.linkId);
                     host.postAlive(
                             () -> {
                                 if (message == null) {
@@ -419,12 +461,12 @@ public final class MessageView {
                     if (uncertain) {
                         sendAgain(current);
                     } else {
-                        host.compose.open(reply(current, loaded));
+                        compose.open(reply(current, loaded));
                     }
                 });
         View forward = host.findViewById(R.id.message_view_forward);
         forward.setVisibility(uncertain ? View.GONE : View.VISIBLE);
-        forward.setOnClickListener(view -> host.compose.open(forward(current, loaded)));
+        forward.setOnClickListener(view -> compose.open(forward(current, loaded)));
     }
 
     /**
@@ -436,7 +478,7 @@ public final class MessageView {
                 () -> {
                     Exception failure = null;
                     try {
-                        host.mail.resendOutgoing(message.queued);
+                        parts.mail().resendOutgoing(message.queued);
                     } catch (Exception error) {
                         Log.w("pimalaya", "send again failed", error);
                         failure = error;
@@ -449,9 +491,9 @@ public final class MessageView {
                                     return;
                                 }
                                 host.toast(host.getString(R.string.message_sent_again));
-                                host.mailList.reload();
+                                mailList.reload();
                                 if (current == message) {
-                                    host.showBack(MainActivity.PANEL_MAIL);
+                                    host.showBack(Panels.MAIL);
                                 }
                             });
                 });
@@ -465,36 +507,23 @@ public final class MessageView {
      * for the body; before it loads, the reply goes to the sender alone.
      */
     private MessageCompose.Prefill reply(MailStore.StoredMessage message, MessageBody body) {
-        String self = message.accountEmail.toLowerCase(java.util.Locale.ROOT);
-        java.util.Set<String> to = new java.util.LinkedHashSet<>();
-        java.util.Set<String> cc = new java.util.LinkedHashSet<>();
-        boolean own = message.fromAddress.equalsIgnoreCase(self);
-        if (!own && !message.fromAddress.isEmpty()) {
-            to.add(message.fromAddress);
-        }
-        if (body != null) {
-            for (String address : addressesOf(body.to)) {
-                if (!address.equalsIgnoreCase(self)) {
-                    to.add(address);
-                }
-            }
-            for (String address : addressesOf(body.cc)) {
-                if (!address.equalsIgnoreCase(self) && !to.contains(address)) {
-                    cc.add(address);
-                }
-            }
-        }
+        MailReply.People people =
+                MailReply.replyAll(
+                        message.accountEmail,
+                        message.fromAddress,
+                        body != null ? body.to : null,
+                        body != null ? body.cc : null);
 
         MessageCompose.Prefill prefill = new MessageCompose.Prefill();
         prefill.from = message.accountEmail;
-        prefill.to = String.join(", ", to);
-        prefill.cc = String.join(", ", cc);
-        prefill.subject = prefixed("Re:", message.subject);
+        prefill.to = people.to();
+        prefill.cc = people.cc();
+        prefill.subject = MailReply.prefixed("Re:", message.subject);
         prefill.parent = message;
-        List<String> thread = host.mail.threadOf(message.collection, message.id);
+        List<String> thread = parts.mail().threadOf(message.collection, message.id);
         if (!thread.isEmpty()) {
-            prefill.inReplyTo = thread.get(thread.size() - 1);
-            prefill.references = String.join(" ", thread);
+            prefill.inReplyTo = MailReply.inReplyTo(thread);
+            prefill.references = MailReply.references(thread);
         }
         if (body != null) {
             prefill.body =
@@ -502,7 +531,7 @@ public final class MessageView {
                             + host.getString(
                                     R.string.compose_quote_intro, when(message), sender(message))
                             + "\n"
-                            + quoted(plain(body));
+                            + MailReply.quoted(plain(body));
         }
         return prefill;
     }
@@ -515,7 +544,7 @@ public final class MessageView {
     private MessageCompose.Prefill forward(MailStore.StoredMessage message, MessageBody body) {
         MessageCompose.Prefill prefill = new MessageCompose.Prefill();
         prefill.from = message.accountEmail;
-        prefill.subject = prefixed("Fwd:", message.subject);
+        prefill.subject = MailReply.prefixed("Fwd:", message.subject);
         StringBuilder text = new StringBuilder("\n\n");
         text.append(host.getString(R.string.compose_forward_intro)).append('\n');
         text.append("From: ").append(sender(message)).append('\n');
@@ -532,24 +561,6 @@ public final class MessageView {
         return prefill;
     }
 
-    /** A subject carrying a prefix once, however many rounds it went. */
-    private static String prefixed(String prefix, String subject) {
-        return subject.regionMatches(true, 0, prefix, 0, prefix.length())
-                ? subject
-                : prefix + " " + subject;
-    }
-
-    /** The bare addresses a header value names, display names dropped. */
-    private static List<String> addressesOf(String header) {
-        List<String> addresses = new ArrayList<>();
-        java.util.regex.Matcher matcher =
-                java.util.regex.Pattern.compile("[^\\s<>,;\"]+@[^\\s<>,;\"]+").matcher(header);
-        while (matcher.find()) {
-            addresses.add(matcher.group());
-        }
-        return addresses;
-    }
-
     /** The message's text, an HTML body read down to what it says. */
     private static String plain(MessageBody body) {
         if (MessageBody.HTML.equals(body.kind)) {
@@ -558,15 +569,6 @@ public final class MessageView {
                     .trim();
         }
         return body.body.trim();
-    }
-
-    /** Every line marked as quoted, the way RFC 3676 section 4.5 reads it. */
-    private static String quoted(String text) {
-        StringBuilder quote = new StringBuilder();
-        for (String line : text.split("\n", -1)) {
-            quote.append(line.startsWith(">") ? ">" : "> ").append(line).append('\n');
-        }
-        return quote.toString();
     }
 
     /** When the message was sent, as a quote's intro says it. */
@@ -591,7 +593,7 @@ public final class MessageView {
                         flagged = add;
                     }
                     actions();
-                    host.mailList.reload();
+                    mailList.reload();
                 });
     }
 
@@ -619,7 +621,8 @@ public final class MessageView {
                             continue;
                         }
                         try {
-                            host.mailStager().stageFlag(message, flag, add);
+                            new MailStager(parts.pimdir(), parts.client())
+                                    .stageFlag(message, flag, add);
                         } catch (Exception error) {
                             Log.w("pimalaya", "message flag failed: " + message.id, error);
                             if (failure == null) {
@@ -641,7 +644,7 @@ public final class MessageView {
     }
 
     /** Draws a star toggle: filled in the star's yellow when on, outlined when off. */
-    static void starOf(MainActivity host, ImageView star, boolean on) {
+    static void starOf(Host host, ImageView star, boolean on) {
         star.setImageResource(on ? R.drawable.ic_star_filled : R.drawable.ic_star);
         star.setColorFilter(
                 on
@@ -656,7 +659,7 @@ public final class MessageView {
                 List.of(message),
                 () -> {
                     if (current == message) {
-                        host.showBack(MainActivity.PANEL_MAIL);
+                        host.showBack(Panels.MAIL);
                     }
                 });
     }
@@ -675,7 +678,7 @@ public final class MessageView {
                 () -> {
                     int lost = 0;
                     for (MailStore.StoredMessage message : messages) {
-                        if (host.mail.erases(message) && !host.mail.holdsBody(message)) {
+                        if (parts.mail().erases(message) && !parts.mail().holdsBody(message)) {
                             lost++;
                         }
                     }
@@ -733,7 +736,7 @@ public final class MessageView {
         boolean refused = false;
         for (MailStore.StoredMessage message : messages) {
             AccountEntry account = accountOf(message.accountEmail);
-            if (host.mail.trashOf(message.accountEmail).isEmpty()
+            if (parts.mail().trashOf(message.accountEmail).isEmpty()
                     && !message.pending
                     && account != null
                     && PimalayaClient.isJmap(account.server(PimDomain.MAIL))) {
@@ -756,7 +759,8 @@ public final class MessageView {
                     for (MailStore.StoredMessage message : staged) {
                         try {
                             MailStager.Deletion deletion =
-                                    host.mailStager().stageDelete(message);
+                                    new MailStager(parts.pimdir(), parts.client())
+                                            .stageDelete(message);
                             if (first == null) {
                                 first = deletion;
                             }
@@ -786,7 +790,7 @@ public final class MessageView {
                                 } else if (deletion != MailStager.Deletion.WITHDRAWN) {
                                     host.toast(deletedOf(staged.get(0), deletion));
                                 }
-                                host.mailList.reload();
+                                mailList.reload();
                                 done.run();
                             });
                 });
@@ -807,7 +811,7 @@ public final class MessageView {
 
     /** The account the message came from, null when it is gone. */
     private AccountEntry accountOf(String email) {
-        for (AccountEntry account : host.accountsFor(PimDomain.MAIL)) {
+        for (AccountEntry account : parts.store().accountsFor(PimDomain.MAIL)) {
             if (account.email.equals(email)) {
                 return account;
             }

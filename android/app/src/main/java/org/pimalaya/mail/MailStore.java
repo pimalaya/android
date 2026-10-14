@@ -1318,7 +1318,7 @@ public final class MailStore {
      * ({@link MailBodies}). Read a page of 500 at a time on
      * {@code list_mail_page_filtered}'s keyset.
      */
-    public List<MailBodies.Row> bodyRows(List<String> ids, String since) {
+    List<MailBodies.Row> bodyRows(List<String> ids, String since) {
         List<MailBodies.Row> rows = new ArrayList<>();
         if (ids.isEmpty()) {
             return rows;
@@ -1567,7 +1567,7 @@ public final class MailStore {
      * A mailbox's window today, null for all mail: the older of its own, a
      * step over it alone left, and its account's.
      */
-    public String mailboxWindow(String collection) {
+    String mailboxWindow(String collection) {
         return MailWindow.since(context, PimdirAccount.accountIdOf(collection), collection);
     }
 

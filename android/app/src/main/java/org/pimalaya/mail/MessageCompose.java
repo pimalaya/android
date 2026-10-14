@@ -6,14 +6,13 @@ import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
 
-import org.json.JSONException;
-import org.json.JSONObject;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.ui.Host;
+import org.pimalaya.ui.Panels;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,7 +42,15 @@ public final class MessageCompose {
         R.id.compose_to, R.id.compose_cc, R.id.compose_bcc
     };
 
-    private final MainActivity host;
+    private final Host host;
+
+    private final MailParts parts;
+
+    /** The reader, which stages the parent's answered marker. */
+    private final MessageView messageView;
+
+    /** The list read again once a message is queued. */
+    private final MailList mailList;
 
     /** Which account the message is sent from; null while none is open. */
     private AccountEntry account;
@@ -74,8 +81,12 @@ public final class MessageCompose {
         MailStore.StoredMessage parent;
     }
 
-    public MessageCompose(MainActivity host) {
+    public MessageCompose(Host host, MailParts parts, MessageView messageView, MailList mailList) {
         this.host = host;
+        this.parts = parts;
+        this.messageView = messageView;
+        this.mailList = mailList;
+        messageView.compose = this;
     }
 
     /** Opens the composer on a blank message. */
@@ -90,7 +101,7 @@ public final class MessageCompose {
      */
     void open(Prefill prefill) {
         List<AccountEntry> accounts = new ArrayList<>();
-        for (AccountEntry candidate : host.accountsFor(PimDomain.MAIL)) {
+        for (AccountEntry candidate : parts.store().accountsFor(PimDomain.MAIL)) {
             // NOTE: an account with nowhere to submit is not offered rather
             // than offered and refused at the send: one connected before
             // submission was discovered at all. JMAP, Graph and Gmail submit
@@ -147,7 +158,7 @@ public final class MessageCompose {
 
         copies(!prefill.cc.isEmpty());
         host.findViewById(R.id.compose_copies).setOnClickListener(view -> copies(true));
-        host.show(MainActivity.PANEL_COMPOSE);
+        host.show(Panels.COMPOSE);
     }
 
     /** Whether the two copy rows are showing, and their reveal with them. */
@@ -167,7 +178,7 @@ public final class MessageCompose {
      */
     public void close() {
         if (untouched()) {
-            host.showBack(MainActivity.PANEL_MAIL);
+            host.showBack(Panels.MAIL);
             return;
         }
 
@@ -175,7 +186,7 @@ public final class MessageCompose {
                 .setMessage(R.string.compose_discard_confirm)
                 .setPositiveButton(
                         R.string.compose_discard,
-                        (dialog, which) -> host.showBack(MainActivity.PANEL_MAIL))
+                        (dialog, which) -> host.showBack(Panels.MAIL))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
@@ -204,12 +215,6 @@ public final class MessageCompose {
     /**
      * Composes what is on screen and puts it in the outbox ({@link
      * MailSubmit}).
-     *
-     * <p>The two stamps are minted here rather than in the bridge, which
-     * keeps the composition a pure function of what it is handed: the
-     * date is this device's clock and the identifier is a fresh one under
-     * the sender's own domain, which is what RFC 5322 section 3.6.4 asks
-     * of whoever mints it.
      */
     public void send() {
         if (account == null) {
@@ -225,42 +230,31 @@ public final class MessageCompose {
         // NOTE: everything the fields say, read before the work moves off
         // this thread. A view is the main thread's, and the composition
         // that follows is not.
-        JSONObject draft;
-        try {
-            draft =
-                    new JSONObject()
-                            .put("from", account.email)
-                            .put("fromName", SenderName.of(host, account.email))
-                            .put("to", recipients(R.id.compose_to))
-                            .put("cc", recipients(R.id.compose_cc))
-                            .put("bcc", recipients(R.id.compose_bcc))
-                            .put("subject", value(R.id.compose_subject))
-                            .put("body", value(R.id.compose_body))
-                            .put("date", MailSubmit.now())
-                            .put("messageId", MailSubmit.messageId(account.email))
-                            .put("inReplyTo", opened != null ? opened.inReplyTo : "")
-                            .put("references", opened != null ? opened.references : "");
-        } catch (JSONException error) {
-            host.showError(error, R.string.compose_failed);
-            return;
-        }
+        MailSubmit.Draft draft =
+                new MailSubmit.Draft(
+                        account.email,
+                        SenderName.of(host, account.email),
+                        recipients(R.id.compose_to),
+                        recipients(R.id.compose_cc),
+                        recipients(R.id.compose_bcc),
+                        value(R.id.compose_subject),
+                        value(R.id.compose_body),
+                        opened != null ? opened.inReplyTo : "",
+                        opened != null ? opened.references : "");
 
         AccountEntry sender = account;
-        // NOTE: Graph and Gmail keep no answered marker, and one staged
-        // there would be refused on every sync.
         Account server = account.server(PimDomain.MAIL);
         MailStore.StoredMessage parent =
-                opened == null
-                                || PimalayaClient.isGraph(server)
-                                || PimalayaClient.isGoogle(server)
-                        ? null
-                        : opened.parent;
+                opened == null || !MailSubmit.marksAnswered(server) ? null : opened.parent;
         host.setSending(true);
         host.io.execute(
                 () -> {
                     Exception failure = null;
                     try {
-                        new MailSubmit(host.client, host.mail, host.mailStager())
+                        new MailSubmit(
+                                        parts.client(),
+                                        parts.mail(),
+                                        new MailStager(parts.pimdir(), parts.client()))
                                 .queue(draft);
                     } catch (Exception error) {
                         Log.w("pimalaya", "compose failed: " + AccountEntry.redacted(sender.email), error);
@@ -276,18 +270,18 @@ public final class MessageCompose {
                                     return;
                                 }
                                 host.toast(host.getString(R.string.compose_queued));
-                                host.showBack(MainActivity.PANEL_MAIL);
+                                host.showBack(Panels.MAIL);
                                 // The parent is answered once the reply is
                                 // queued, the way the reply counts as sent:
                                 // both go out on the next sync.
                                 if (parent != null && !parent.pending) {
-                                    host.messageView.stageFlag(
+                                    messageView.stageFlag(
                                             parent,
                                             MailEngine.ANSWERED,
                                             true,
-                                            host.mailList::reload);
+                                            mailList::reload);
                                 } else {
-                                    host.mailList.reload();
+                                    mailList.reload();
                                 }
                             });
                 });

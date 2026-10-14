@@ -3,6 +3,7 @@ package org.pimalaya.mail;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirSummary;
 
@@ -35,6 +36,48 @@ public final class MailSubmit {
         this.client = client;
         this.mail = mail;
         this.engine = engine;
+    }
+
+    /**
+     * What the composer's fields say, read on the main thread: the sender,
+     * the three address fields comma separated, the subject, the body and
+     * the reply's headers (empty outside a reply).
+     */
+    public record Draft(
+            String from,
+            String fromName,
+            String to,
+            String cc,
+            String bcc,
+            String subject,
+            String body,
+            String inReplyTo,
+            String references) {}
+
+    /**
+     * Queues a draft ({@link #queue(JSONObject)}), stamped now and under a
+     * fresh `Message-ID`.
+     *
+     * <p>The two stamps are minted here rather than in the bridge, which
+     * keeps the composition a pure function of what it is handed: the
+     * date is this device's clock and the identifier is a fresh one under
+     * the sender's own domain, which is what RFC 5322 section 3.6.4 asks
+     * of whoever mints it.
+     */
+    public void queue(Draft draft) throws JSONException {
+        queue(
+                new JSONObject()
+                        .put("from", draft.from())
+                        .put("fromName", draft.fromName())
+                        .put("to", draft.to())
+                        .put("cc", draft.cc())
+                        .put("bcc", draft.bcc())
+                        .put("subject", draft.subject())
+                        .put("body", draft.body())
+                        .put("date", now())
+                        .put("messageId", messageId(draft.from()))
+                        .put("inReplyTo", draft.inReplyTo())
+                        .put("references", draft.references()));
     }
 
     /**
@@ -96,6 +139,16 @@ public final class MailSubmit {
                         source.length,
                         false),
                 PimdirSummary.mailSortKey(date));
+    }
+
+    /**
+     * Whether a reply marks its parent answered once queued.
+     *
+     * <p>Graph and Gmail keep no answered marker, and one staged there
+     * would be refused on every sync.
+     */
+    static boolean marksAnswered(Account server) {
+        return !PimalayaClient.isGraph(server) && !PimalayaClient.isGoogle(server);
     }
 
     /** Now, as the date RFC 5322 section 3.3 writes. */

@@ -20,18 +20,17 @@ import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.contact.ContactPhonePass;
+import org.pimalaya.mail.BodyPlan;
 import org.pimalaya.mail.MailBodies;
 import org.pimalaya.mail.MailEngine;
 import org.pimalaya.mail.MailFill;
 import org.pimalaya.mail.MailList;
-import org.pimalaya.mail.MailOffline;
-import org.pimalaya.mail.MailOwed;
 import org.pimalaya.mail.MailState;
 import org.pimalaya.mail.MailStore;
+import org.pimalaya.mail.MailSync;
 import org.pimalaya.mail.MailTally;
 import org.pimalaya.mail.MailWindow;
 import org.pimalaya.phone.Accounts;
-import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirEngine;
 import org.pimalaya.ui.Host;
@@ -41,7 +40,7 @@ import org.pimalaya.ui.SyncDock;
  * The app's foreground sync: one pass at a time, run on the host's io
  * thread, its progress on the sync dock.
  */
-public final class SyncCoordinator {
+public final class SyncCoordinator implements MailSync {
     /** What only the activity does for a sync. */
     public interface Screens {
         /** The domain whose list is on screen, null for any other screen. */
@@ -162,6 +161,18 @@ public final class SyncCoordinator {
         return passes;
     }
 
+    /** Opens one account's mail connection ({@link SyncPasses#openMail}). */
+    @Override
+    public MailSession openMail(AccountEntry account) {
+        return passes.openMail(account);
+    }
+
+    /** The store id one account's collections are namespaced under. */
+    @Override
+    public String accountIdOf(String email) {
+        return passes.accountIdOf(email);
+    }
+
     /** Each domain's filter, the shared one the list shows. */
     private MergedFilter filterOf(PimDomain domain) {
         return MergedFilter.of(host, domain);
@@ -201,6 +212,7 @@ public final class SyncCoordinator {
      * Whether the sync is held, by a pass of the app's or a background run:
      * a step asked for now would do nothing.
      */
+    @Override
     public boolean syncHeld() {
         return syncing || screens.backgroundRunning();
     }
@@ -271,6 +283,7 @@ public final class SyncCoordinator {
      * role's mailboxes of the shown accounts alone, ticked or not, as the
      * list shows them ({@link MailList#narrowed}).
      */
+    @Override
     public void syncMail(String role) {
         if (syncing) {
             return;
@@ -744,7 +757,19 @@ public final class SyncCoordinator {
     private void fillStep() {
         if (bodies == null || replanBodies) {
             replanBodies = false;
-            bodies = planBodies();
+            BodyPlan.Plan plan =
+                    BodyPlan.of(host, mail, passes.accountsFor(PimDomain.MAIL), MailState.of(host));
+            for (Map.Entry<String, Integer> left : plan.left().entrySet()) {
+                if (left.getValue() == 0) {
+                    bodiesLeft.remove(left.getKey());
+                } else {
+                    bodiesLeft.put(left.getKey(), left.getValue());
+                }
+            }
+            // NOTE: a replan adds to what the loop landed, the bar carrying on.
+            bodiesTally.expect(plan.planned());
+            host.postAlive(screens::bodiesChanged);
+            bodies = plan.run();
         }
         MailBodies.Step body = MailBodies.step(bodies, bodyHost());
         Log.d("pimalaya", "mail bodies: " + body);
@@ -832,134 +857,6 @@ public final class SyncCoordinator {
                 }
             }
         };
-    }
-
-    /**
-     * What the body step downloads this run, by account: every account that
-     * is on, its mailboxes' messages dated from their frontier on but in the
-     * junk and the trash, every message of a mailbox kept whole, and what is
-     * owed below its frontier ({@link MailOwed}); the mailboxes the mail
-     * list shows first, each part newest first, the owed ones last; none
-     * failed or gone since its mailbox was last listed
-     * ({@link MailBodies.Run#plan}). Walked on the io thread.
-     */
-    private MailBodies.Run planBodies() {
-        MailBodies.Run run = new MailBodies.Run(MailState.of(host));
-        int planned = 0;
-        // NOTE: read afresh from what was kept, off the main thread.
-        MergedFilter shown = MergedFilter.of(host, PimDomain.MAIL);
-        for (AccountEntry account : passes.accountsFor(PimDomain.MAIL)) {
-            String email = account.email;
-            if (!AccountActivation.enabled(host, email)) {
-                continue;
-            }
-            List<String> windowedFirst = new ArrayList<>();
-            List<String> windowedThen = new ArrayList<>();
-            List<String> wholeFirst = new ArrayList<>();
-            List<String> wholeThen = new ArrayList<>();
-            List<String> skipped = new ArrayList<>();
-            for (PimdirCollections.Stored stored : mail.loadMailboxes(List.of(email))) {
-                boolean whole = MailOffline.whole(host, stored.id);
-                if (!MailBodies.downloads(stored.role, whole)) {
-                    skipped.add(stored.id);
-                    continue;
-                }
-                // NOTE: a mailbox the filter unticks syncs nothing more, its
-                // bodies included; what it owes waits for it to be ticked.
-                if (!shown.chosen(stored.id)) {
-                    continue;
-                }
-                boolean first = shown.accepts(email, stored.id);
-                List<String> into =
-                        whole
-                                ? (first ? wholeFirst : wholeThen)
-                                : (first ? windowedFirst : windowedThen);
-                into.add(stored.id);
-            }
-            List<MailBodies.Row> wanted =
-                    new ArrayList<>(
-                            MailBodies.merged(
-                                    windowedRows(windowedFirst),
-                                    MailBodies.wanted(mail.bodyRows(wholeFirst, null))));
-            wanted.addAll(
-                    MailBodies.merged(
-                            windowedRows(windowedThen),
-                            MailBodies.wanted(mail.bodyRows(wholeThen, null))));
-            List<String> windowed = new ArrayList<>(windowedFirst);
-            windowed.addAll(windowedThen);
-            wanted.addAll(owed(windowed, skipped));
-            int taken = run.plan(email, wanted);
-            planned += taken;
-            if (taken == 0) {
-                bodiesLeft.remove(email);
-            } else {
-                bodiesLeft.put(email, taken);
-            }
-        }
-        // NOTE: a replan adds to what the loop landed, the bar carrying on.
-        bodiesTally.expect(planned);
-        host.postAlive(screens::bodiesChanged);
-        return run;
-    }
-
-    /**
-     * The bodies some mailboxes want from their frontier on, newest first:
-     * a mailbox stepped alone keeps a frontier older than its account's
-     * ({@link MailWindow#since(android.content.Context, String, String)}).
-     */
-    private List<MailBodies.Row> windowedRows(List<String> collections) {
-        Map<String, List<String>> bySince = new HashMap<>();
-        for (String collection : collections) {
-            bySince.computeIfAbsent(mail.mailboxWindow(collection), since -> new ArrayList<>())
-                    .add(collection);
-        }
-        List<MailBodies.Row> rows = new ArrayList<>();
-        for (Map.Entry<String, List<String>> since : bySince.entrySet()) {
-            rows =
-                    MailBodies.merged(
-                            rows,
-                            MailBodies.wanted(mail.bodyRows(since.getValue(), since.getKey())));
-        }
-        return rows;
-    }
-
-    /**
-     * The owed bodies of some mailboxes dated below their frontier, which
-     * download all the same: one dated at or after it is in the plan
-     * already. What is owed in a mailbox that downloads nothing
-     * ({@code skipped}: the junk, the trash), or by a message gone or
-     * downloaded since, is owed no more.
-     */
-    private List<MailBodies.Row> owed(List<String> windowed, List<String> skipped) {
-        List<MailBodies.Row> rows = new ArrayList<>();
-        List<String> settled = new ArrayList<>();
-        for (String key : MailOwed.all(host)) {
-            String collection = MailOwed.collectionOf(key);
-            if (skipped.contains(collection)) {
-                settled.add(key);
-                continue;
-            }
-            if (!windowed.contains(collection)) {
-                continue;
-            }
-            MailStore.StoredMessage message = mail.message(collection, MailOwed.linkIdOf(key));
-            String window = mail.mailboxWindow(collection);
-            if (message == null || message.bodied) {
-                settled.add(key);
-            } else if (window != null && message.sortKey.compareTo(window) < 0) {
-                rows.add(
-                        new MailBodies.Row(
-                                collection,
-                                message.id,
-                                message.sortKey,
-                                false,
-                                message.size,
-                                message.attachment,
-                                true));
-            }
-        }
-        MailOwed.settle(host, settled);
-        return rows;
     }
 
     /** The body step's reach: the network rule, the pools, the progress. */
@@ -1147,6 +1044,7 @@ public final class SyncCoordinator {
     }
 
     /** Whether a network is there at all. */
+    @Override
     public boolean online() {
         android.net.ConnectivityManager connectivity =
                 host.getSystemService(android.net.ConnectivityManager.class);
@@ -1158,6 +1056,7 @@ public final class SyncCoordinator {
      * mail pass, step, fill or body download runs on. Opening one message
      * is an explicit act and fetches on any network ({@link #online}).
      */
+    @Override
     public boolean wifi() {
         return wifi(host);
     }
@@ -1244,6 +1143,7 @@ public final class SyncCoordinator {
      * alone, any other account's mailbox by mailbox. Then the list is read
      * again and the bodies the steps leave to download are planned.
      */
+    @Override
     public void loadMore(List<MailList.Step> steps) {
         if (isSyncing() || !wifi()) {
             return;
@@ -1303,6 +1203,7 @@ public final class SyncCoordinator {
      * down while a background run holds the sync lock. The list is read
      * again and {@code done} runs on the main thread.
      */
+    @Override
     public void releaseWindow(List<String> emails, String date, Runnable done) {
         host.io.execute(
                 () -> {

@@ -31,7 +31,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.MergedFilter;
@@ -40,7 +39,9 @@ import org.pimalaya.account.SyncScope;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.Chips;
 import org.pimalaya.ui.Dates;
+import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
+import org.pimalaya.ui.Panels;
 
 /**
  * The mail screen: one list merging every mailbox of every account,
@@ -136,8 +137,14 @@ public final class MailList {
         };
     }
 
-    private final MainActivity host;
+    private final Host host;
     private final MailStore store;
+
+    /** The foreground sync the pull and the footer's steps go through. */
+    private final MailSync sync;
+
+    /** The reader a row opens onto. */
+    private final MessageView messageView;
     private final Adapter adapter = new Adapter();
 
     /** One reader, so pages and counts never race each other. */
@@ -189,14 +196,17 @@ public final class MailList {
     /** A reload asked for by a sync write, held until the burst settles. */
     private final Runnable settled = this::reload;
 
-    public MailList(MainActivity host, MailStore store) {
+    public MailList(Host host, MailStore store, MailSync sync, MessageView messageView) {
         this.host = host;
         this.store = store;
+        this.sync = sync;
+        this.messageView = messageView;
+        messageView.mailList = this;
     }
 
     public void setUp() {
         ListView list = host.findViewById(R.id.mail_list);
-        header = new ListHeader(host, list, MainActivity.PANEL_MAIL);
+        header = new ListHeader(host, list, Panels.MAIL);
         header.empty(host.findViewById(R.id.mail_empty));
         header.search(
                 R.string.mail_search,
@@ -243,7 +253,7 @@ public final class MailList {
                     if (isSelectionMode()) {
                         toggle(message);
                     } else {
-                        host.messageView.open(message);
+                        messageView.open(message);
                     }
                 });
         list.setOnItemLongClickListener(
@@ -266,7 +276,7 @@ public final class MailList {
         refresh.setOnRefreshListener(
                 () -> {
                     refresh.setRefreshing(false);
-                    host.syncMail(role);
+                    sync.syncMail(role);
                 });
 
         // NOTE: a first pass lands its pages one write at a time, and the
@@ -301,7 +311,7 @@ public final class MailList {
         int asked = ++generation;
         ListView list = host.findViewById(R.id.mail_list);
         int around = Math.max(0, header.rowAt(list.getFirstVisiblePosition()));
-        MergedFilter filter = host.filterOf(PimDomain.MAIL);
+        MergedFilter filter = MergedFilter.of(host, PimDomain.MAIL);
         String narrowing = role;
         String words = query;
         boolean unread = unreadOnly;
@@ -598,14 +608,14 @@ public final class MailList {
             view = LayoutInflater.from(host).inflate(R.layout.item_mail_window, parent, false);
         }
         Footer footer = layout.footer;
-        boolean wifi = host.wifi();
-        FooterState state = footerState(wifi, host.syncHeld());
+        boolean wifi = sync.wifi();
+        FooterState state = footerState(wifi, sync.syncHeld());
         android.widget.Button load = view.findViewById(R.id.mail_window_load);
         load.setEnabled(state == FooterState.LOAD);
         load.setAlpha(state == FooterState.LOAD ? 1f : 0.6f);
         load.setText(
                 state == FooterState.LOADING ? R.string.mail_more_loading : R.string.mail_more_load);
-        load.setOnClickListener(tapped -> host.loadMore(footer.steps));
+        load.setOnClickListener(tapped -> sync.loadMore(footer.steps));
         ((TextView) view.findViewById(R.id.mail_window_info))
                 .setText(info(host, wifi, footer.perMailbox));
         return view;
@@ -737,7 +747,7 @@ public final class MailList {
          * consecutive days sharing a label (two weeks ago) sharing a card.
          */
         static Layout of(
-                MainActivity host,
+                Host host,
                 List<MailStore.StoredMessage> outbox,
                 String outboxLabel,
                 String undated,
@@ -840,7 +850,7 @@ public final class MailList {
         }
 
         /** A day of the store's count, labelled the way a row's day is. */
-        private static String labelOf(MainActivity host, String day, String undated) {
+        private static String labelOf(Host host, String day, String undated) {
             try {
                 long noon =
                         LocalDate.parse(day)
@@ -1267,7 +1277,7 @@ public final class MailList {
      * unread, star while any is not starred.
      */
     void updateSelectionUi() {
-        if (host.screen != MainActivity.PANEL_MAIL) {
+        if (host.screen != Panels.MAIL) {
             return;
         }
         boolean selecting = isSelectionMode();
@@ -1280,7 +1290,7 @@ public final class MailList {
                             (int) Math.min(Integer.MAX_VALUE, selectedCount())));
             title.setAlpha(1f);
         } else {
-            host.showDomainTitle(MainActivity.PANEL_MAIL);
+            host.showDomainTitle(Panels.MAIL);
         }
         host.findViewById(R.id.bar_menu).setVisibility(selecting ? View.GONE : View.VISIBLE);
         host.findViewById(R.id.bar_filter).setVisibility(selecting ? View.GONE : View.VISIBLE);
@@ -1324,7 +1334,7 @@ public final class MailList {
                     for (MailStore.StoredMessage message : messages) {
                         anyUnread |= !message.seen && !message.pending;
                     }
-                    host.messageView.stageFlag(messages, MailEngine.SEEN, anyUnread, this::reload);
+                    messageView.stageFlag(messages, MailEngine.SEEN, anyUnread, this::reload);
                 });
     }
 
@@ -1336,13 +1346,13 @@ public final class MailList {
                     for (MailStore.StoredMessage message : messages) {
                         anyPlain |= !message.flagged && !message.pending;
                     }
-                    host.messageView.stageFlag(
+                    messageView.stageFlag(
                             messages, MailEngine.FLAGGED, anyPlain, this::reload);
                 });
     }
 
     /** Asks, then stages the selection's deletion. */
     private void deleteSelected() {
-        withSelection(messages -> host.messageView.confirmDelete(messages, this::exitSelection));
+        withSelection(messages -> messageView.confirmDelete(messages, this::exitSelection));
     }
 }

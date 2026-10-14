@@ -16,8 +16,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.Executor;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
+import org.pimalaya.ui.Host;
 
 /**
  * Moving mail frontiers later ({@link MailWindow}): the date picker an
@@ -36,7 +36,9 @@ public final class WindowPicker {
      * {@code query}'s mailboxes hold below it read on {@code reads}.
      */
     public static void open(
-            MainActivity host,
+            Host host,
+            MailStore mail,
+            MailSync sync,
             Executor reads,
             MailStore.Query query,
             String until,
@@ -77,7 +79,7 @@ public final class WindowPicker {
                             () -> {
                                 // NOTE: a mailbox kept whole keeps its bodies.
                                 MailStore.Sum freed =
-                                        host.mail.sum(
+                                        mail.sum(
                                                 query.only(
                                                         collection ->
                                                                 !MailOffline.whole(
@@ -103,7 +105,7 @@ public final class WindowPicker {
                         (dialog, which) -> {
                             String date = dateOf(picker);
                             if (later(date, until)) {
-                                confirmRelease(host, emails, date, after);
+                                confirmRelease(host, sync, emails, date, after);
                             }
                         })
                 .setNegativeButton(android.R.string.cancel, null)
@@ -131,16 +133,16 @@ public final class WindowPicker {
     /**
      * Asks before moving the frontiers of {@code emails} later to
      * {@code date}, which frees the bodies below it, headers and search
-     * kept ({@link MainActivity#releaseWindow}).
+     * kept ({@link MailSync#releaseWindow}).
      */
     private static void confirmRelease(
-            MainActivity host, List<String> emails, String date, Runnable after) {
+            Host host, MailSync sync, List<String> emails, String date, Runnable after) {
         new AlertDialog.Builder(host)
                 .setTitle(R.string.mail_window_release_title)
                 .setMessage(host.getString(R.string.mail_window_release_message, label(host, date)))
                 .setPositiveButton(
                         R.string.mail_window_release,
-                        (dialog, which) -> host.releaseWindow(emails, date, after))
+                        (dialog, which) -> sync.releaseWindow(emails, date, after))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }

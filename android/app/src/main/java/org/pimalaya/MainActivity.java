@@ -38,7 +38,6 @@ import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.EventView;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
@@ -56,8 +55,8 @@ import org.pimalaya.file.FilesList;
 import org.pimalaya.file.OpenedCopies;
 import org.pimalaya.filter.FilterPage;
 import org.pimalaya.link.LinkedSection;
-import org.pimalaya.mail.MailEngine;
 import org.pimalaya.mail.MailList;
+import org.pimalaya.mail.MailParts;
 import org.pimalaya.mail.MailStager;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.mail.MailWindow;
@@ -146,8 +145,10 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** The contacts inside it. */
     public PimdirContacts contacts;
 
+    // NOTE: public for the account settings' window picker until they take
+    // the coordinator (phase 4 step 16 of java-domain-layout).
     /** The app's foreground sync, one pass at a time. */
-    private SyncCoordinator sync;
+    public SyncCoordinator sync;
 
     /** Every remote and phone pass, behind the sync dock. */
     SyncPasses passes;
@@ -253,33 +254,39 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         pimdir = App.of(this).pimdir();
         base = App.of(this).cards();
         contacts = new PimdirContacts(pimdir);
-        pool = new ContactPool(base, contacts, accounts);
-        ContactParts contactParts =
-                new ContactParts(pimdir, base, contacts, pool, client, accounts);
-        form = new ContactForm(this);
-        editor = new ContactEditor(this, contactParts, form, this::reloadContacts);
-        contactsList = new ContactsList(this, contactParts, editor, this::syncContacts);
         events = new EventStore(this, pimdir);
         mail = new MailStore(this, pimdir);
-        mailList = new MailList(this, mail);
         files = new FileStore(this, pimdir);
-        fileActions = new FileActions(this);
-        filesList = new FilesList(this);
         links = new ItemLinks(this, pimdir);
-        linked = new LinkedSection(this);
-        // NOTE: the entry page shows the Linked card, so it is built after
-        // it; the agenda binds itself into the page it opens rows onto.
-        CalendarParts calendarParts = new CalendarParts(pimdir, client, events);
-        eventView = new EventView(this, calendarParts, linked);
-        calendarList = new CalendarList(this, calendarParts, eventView, this::syncCalendars);
-        messageView = new MessageView(this);
-        compose = new MessageCompose(this);
+        // NOTE: the coordinator before the screens, which take it; it
+        // touches none of them while built (the dock is read later).
         sync =
                 new SyncCoordinator(
                         this,
                         new SyncPasses.Parts(pimdir, base, store, mail, events, client),
                         this);
         passes = sync.passes();
+        pool = new ContactPool(base, contacts, accounts);
+        ContactParts contactParts =
+                new ContactParts(pimdir, base, contacts, pool, client, accounts);
+        form = new ContactForm(this);
+        editor = new ContactEditor(this, contactParts, form, this::reloadContacts);
+        contactsList = new ContactsList(this, contactParts, editor, this::syncContacts);
+        fileActions = new FileActions(this);
+        filesList = new FilesList(this);
+        linked = new LinkedSection(this);
+        // NOTE: the entry page shows the Linked card, so it is built after
+        // it; the agenda binds itself into the page it opens rows onto.
+        CalendarParts calendarParts = new CalendarParts(pimdir, client, events);
+        eventView = new EventView(this, calendarParts, linked);
+        calendarList = new CalendarList(this, calendarParts, eventView, this::syncCalendars);
+        // NOTE: the reader shows the Linked card and offers the file
+        // actions, so it is built after both; the list and the composer
+        // bind themselves into it.
+        MailParts mailParts = new MailParts(pimdir, client, mail, files, links, store);
+        messageView = new MessageView(this, mailParts, sync, fileActions, linked);
+        mailList = new MailList(this, mail, sync, messageView);
+        compose = new MessageCompose(this, mailParts, messageView, mailList);
         // NOTE: the two flows reference each other (grants land back in
         // the wizard), so one side binds late.
         oauth = new OauthFlow(this);
@@ -1264,11 +1271,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         return sync.isSyncing();
     }
 
-    /** Whether the sync is held ({@link SyncCoordinator#syncHeld}). */
-    public boolean syncHeld() {
-        return sync.syncHeld();
-    }
-
     private void observeSync(java.util.function.Consumer<Boolean> observer) {
         sync.observe(observer);
     }
@@ -1278,40 +1280,14 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         sync.syncRemote();
     }
 
-    /** The mail list's pull ({@link SyncCoordinator#syncMail}). */
-    public void syncMail(String role) {
-        sync.syncMail(role);
-    }
-
     /** The agenda's pull ({@link SyncCoordinator#syncCalendars}). */
     void syncCalendars() {
         sync.syncCalendars();
     }
 
-    /** Opens one account's mail connection ({@link SyncPasses#openMail}). */
-    public MailSession openMail(AccountEntry account) {
-        return passes.openMail(account);
-    }
-
     /** The stored accounts connected for one domain. */
     public List<AccountEntry> accountsFor(PimDomain domain) {
         return passes.accountsFor(domain);
-    }
-
-    /** The store id one account's collections are namespaced under. */
-    private String accountIdOf(String email) {
-        return passes.accountIdOf(email);
-    }
-
-    /**
-     * A mail driver that only stages: no account, so it services the
-     * storage yields a mutation makes and can reach no server.
-     *
-     * <p>Which is what every action in the reader and the composer needs.
-     * Staging is a disk write, and the push it derives is the next sync's.
-     */
-    public MailEngine mailEngine(String email) {
-        return new MailEngine(pimdir, client, null, accountIdOf(email));
     }
 
     /** A mail driver that only stages, on the same terms. */
@@ -1354,26 +1330,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** Resumes the fill and the body step ({@link SyncCoordinator#fillMail}). */
     public void fillMail() {
         sync.fillMail();
-    }
-
-    /** Whether a network is there at all ({@link SyncCoordinator#online}). */
-    public boolean online() {
-        return sync.online();
-    }
-
-    /** Whether the network is not metered ({@link SyncCoordinator#wifi()}). */
-    public boolean wifi() {
-        return sync.wifi();
-    }
-
-    /** The footer's steps ({@link SyncCoordinator#loadMore}). */
-    public void loadMore(List<MailList.Step> steps) {
-        sync.loadMore(steps);
-    }
-
-    /** Moves windows later ({@link SyncCoordinator#releaseWindow}). */
-    public void releaseWindow(List<String> emails, String date, Runnable done) {
-        sync.releaseWindow(emails, date, done);
     }
 
     /** Runs a store-wide write while no sync runs ({@link SyncCoordinator#underSyncLock}). */

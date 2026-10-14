@@ -35,12 +35,12 @@ public final class MailOwed {
     }
 
     /** The collection a key names. */
-    public static String collectionOf(String key) {
+    static String collectionOf(String key) {
         return key.substring(0, key.indexOf('\n'));
     }
 
     /** The link id a key names. */
-    public static String linkIdOf(String key) {
+    static String linkIdOf(String key) {
         return key.substring(key.indexOf('\n') + 1);
     }
 
@@ -50,7 +50,7 @@ public final class MailOwed {
     }
 
     /** Every key owed. */
-    public static List<String> all(Context context) {
+    static List<String> all(Context context) {
         return new ArrayList<>(prefs(context).getStringSet(KEY, Set.of()));
     }
 
@@ -69,7 +69,7 @@ public final class MailOwed {
     }
 
     /** Forgets some keys: their bodies landed, or they are owed no more. */
-    public static void settle(Context context, Collection<String> keys) {
+    static void settle(Context context, Collection<String> keys) {
         if (keys.isEmpty()) {
             return;
         }

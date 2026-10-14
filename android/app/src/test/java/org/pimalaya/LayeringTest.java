@@ -60,11 +60,10 @@ public class LayeringTest {
             // NOTE: the six contact screens left in phase 4 steps 8 and 9:
             // they reach the ContactEditor, ContactParts and Host, not the
             // activity. The two calendar screens left in step 10: they reach
-            // CalendarParts, each other, the Linked card and Host.
-            Map.entry("mail/MailList.java", Set.of(ROOT)),
-            Map.entry("mail/MessageCompose.java", Set.of(ROOT)),
-            Map.entry("mail/MessageView.java", Set.of(ROOT)),
-            Map.entry("mail/WindowPicker.java", Set.of(ROOT)),
+            // CalendarParts, each other, the Linked card and Host. The four
+            // mail screens left in step 13: they reach MailParts, MailSync
+            // (the coordinator), each other, FileActions, the Linked card
+            // and Host.
             Map.entry("file/FileActions.java", Set.of(ROOT)),
             Map.entry("file/FilesList.java", Set.of(ROOT)),
             Map.entry("setup/AccountSettings.java", Set.of(ROOT)),

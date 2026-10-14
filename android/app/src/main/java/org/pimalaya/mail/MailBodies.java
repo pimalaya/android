@@ -65,7 +65,7 @@ public final class MailBodies {
             this(collection, linkId, sortKey, bodied, size, attachment, false);
         }
 
-        public Row(
+        Row(
                 String collection,
                 String linkId,
                 String sortKey,
@@ -105,7 +105,7 @@ public final class MailBodies {
     }
 
     /** The rows of {@code newestFirst} whose body is not held yet. */
-    public static List<Row> wanted(List<Row> newestFirst) {
+    static List<Row> wanted(List<Row> newestFirst) {
         List<Row> wanted = new ArrayList<>();
         for (Row row : newestFirst) {
             if (!row.bodied) {
@@ -116,7 +116,7 @@ public final class MailBodies {
     }
 
     /** Two newest-first lists as one, newest first. */
-    public static List<Row> merged(List<Row> left, List<Row> right) {
+    static List<Row> merged(List<Row> left, List<Row> right) {
         List<Row> merged = new ArrayList<>(left.size() + right.size());
         int l = 0;
         int r = 0;

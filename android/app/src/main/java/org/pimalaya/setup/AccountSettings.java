@@ -268,6 +268,8 @@ public final class AccountSettings {
                         () ->
                                 WindowPicker.open(
                                         host,
+                                        host.mail,
+                                        host.sync,
                                         host.mailList.reads(),
                                         host.mail.query(
                                                 (owner, collection) -> owner.equals(email),
