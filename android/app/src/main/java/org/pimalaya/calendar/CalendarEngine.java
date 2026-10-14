@@ -120,11 +120,11 @@ public final class CalendarEngine extends PimdirEngine {
             Log.d(
                     "pimalaya",
                     "calendar sync " + collection + ": "
-                            + clients.offline().offlineSync(this, collection, false));
+                            + clients.offline().sync(this, collection, false));
             hydrate(collection);
 
             if (triage(collection) > 0) {
-                clients.offline().offlineSync(this, collection, false);
+                clients.offline().sync(this, collection, false);
                 hydrate(collection);
             }
             phoneSide(collection);

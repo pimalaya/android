@@ -244,7 +244,7 @@ public class MailClient {
      * whichever backend answers.
      */
     public void setMessageFlag(
-            MailSession session, String mailbox, String id, String flag, boolean add) {
+            MailSession session, String mailbox, String id, Flags.Marker flag, boolean add) {
         Replies.object(
                 on(
                         session,
@@ -254,7 +254,7 @@ public class MailClient {
                                         open.handle(),
                                         mailbox,
                                         id,
-                                        flag,
+                                        flag.wire(),
                                         add)));
     }
 
@@ -355,10 +355,14 @@ public class MailClient {
      * Appends one message to {@code mailbox} with {@code flags}. Run once,
      * as a copy is. IMAP only.
      */
-    public void appendMessage(MailSession session, String mailbox, byte[] source, JSONArray flags) {
+    public void append(MailSession session, String mailbox, byte[] source, Flags flags) {
         Replies.object(
                 Native.appendMessage(
-                        session.transport(), session.handle(), mailbox, source, flags.toString()));
+                        session.transport(),
+                        session.handle(),
+                        mailbox,
+                        source,
+                        flags.toJson().toString()));
     }
 
     /**

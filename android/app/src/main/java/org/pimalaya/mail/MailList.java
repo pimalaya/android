@@ -34,6 +34,7 @@ import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SyncScope;
+import org.pimalaya.client.Flags;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.Chips;
 import org.pimalaya.ui.Dates;
@@ -1332,7 +1333,7 @@ public final class MailList {
                     for (MailStore.StoredMessage message : messages) {
                         anyUnread |= !message.seen && !message.pending;
                     }
-                    messageView.stageFlag(messages, MailEngine.SEEN, anyUnread, this::reload);
+                    messageView.stageFlag(messages, Flags.Marker.SEEN, anyUnread, this::reload);
                 });
     }
 
@@ -1345,7 +1346,7 @@ public final class MailList {
                         anyPlain |= !message.flagged && !message.pending;
                     }
                     messageView.stageFlag(
-                            messages, MailEngine.FLAGGED, anyPlain, this::reload);
+                            messages, Flags.Marker.FLAGGED, anyPlain, this::reload);
                 });
     }
 

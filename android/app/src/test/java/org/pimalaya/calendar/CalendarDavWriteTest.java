@@ -5,7 +5,6 @@ import static org.junit.Assert.assertTrue;
 
 import android.content.Context;
 
-import org.json.JSONArray;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -18,6 +17,7 @@ import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Event;
 import org.pimalaya.client.EventDelta;
 import org.pimalaya.client.EventRef;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.PimalayaException;
@@ -158,7 +158,7 @@ public class CalendarDavWriteTest {
     @Test
     public void anEntryCreatedEditedThenDeletedIsDeletedOnAServerAnsweringNoEtag()
             throws Exception {
-        engine.mutateAdd(calendar, "e-1.ics", ical("Created"), new JSONArray(), null, "");
+        engine.mutateAdd(calendar, "e-1.ics", ical("Created"), Flags.none(), null, "");
         engine.sync(calendar);
         assertEquals(List.of("e-1.ics"), new ArrayList<>(dav.entries.keySet()));
 

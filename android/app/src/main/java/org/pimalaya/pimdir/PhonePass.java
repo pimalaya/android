@@ -61,11 +61,11 @@ public abstract class PhonePass extends PimdirEngine {
                     "phone sync "
                             + hub
                             + ": "
-                            + clients.offline().offlineSync(this, collection, false));
+                            + clients.offline().sync(this, collection, false));
             hydrate(collection);
 
             if (settle(collection)) {
-                clients.offline().offlineSync(this, collection, false);
+                clients.offline().sync(this, collection, false);
                 hydrate(collection);
             }
         } finally {

@@ -7,7 +7,8 @@ import android.util.Log;
 import io.requery.android.database.sqlite.SQLiteDatabase;
 import org.json.JSONArray;
 import org.json.JSONException;
-import org.json.JSONObject;
+import org.pimalaya.client.Derived;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.PimdirSql;
 
 import java.text.SimpleDateFormat;
@@ -292,22 +293,22 @@ public final class DeletedItems {
             throw new RefusedException(Refusal.NOT_STORED);
         }
 
-        JSONObject derived = PimdirSql.derive(row.kind, body);
+        Derived derived = PimdirSql.derive(row.kind, body);
         boolean home = target.equals(row.collection.id);
         String linkId =
                 home || !PimdirSummary.MAIL.equals(row.kind)
                         ? row.linkId
-                        : derived.getString("linkId");
+                        : derived.linkId();
         if (live(target, linkId)) {
             throw new RefusedException(Refusal.PRESENT);
         }
-        String sortKey = derived.optString("sortKey", "");
+        String sortKey = derived.sortKey();
         engine.mutateAdd(
                 target,
                 linkId,
                 body,
-                PimdirEngine.withFlag(flagsOf(row), PimdirEngine.DELETED, false),
-                derived.optJSONObject("summary"),
+                flagsOf(row).with(Flags.Marker.DELETED, false),
+                derived.summary(),
                 sortKey.isEmpty() ? row.sortKey : sortKey);
     }
 
@@ -321,15 +322,12 @@ public final class DeletedItems {
         }
     }
 
-    private static JSONArray flagsOf(Row row) {
-        if (row.flags == null || row.flags.isEmpty()) {
-            return new JSONArray();
-        }
+    private static Flags flagsOf(Row row) {
         try {
-            return new JSONArray(row.flags);
+            return Flags.parse(row.flags);
         } catch (JSONException error) {
             Log.w("pimalaya", "unreadable flags of " + row.linkId, error);
-            return new JSONArray();
+            return Flags.none();
         }
     }
 

@@ -6,8 +6,8 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.MessageBody;
-import org.pimalaya.mail.MailEngine;
 import org.pimalaya.mail.MailStore;
 
 import java.nio.charset.StandardCharsets;
@@ -118,7 +118,7 @@ public class E2eMailListTest extends E2eCase {
         assertEquals("read back from the store", body.body, again.body);
 
         // NOTE: the reader marks it read once the body arrived, a store write.
-        phone.stager(address).stageFlag(listed, MailEngine.SEEN, true);
+        phone.stager(address).stageFlag(listed, Flags.Marker.SEEN, true);
         MailStore.StoredMessage staged = phone.message(collection, subject("unread"));
         assertTrue("read at once", staged.seen);
         assertTrue("pending until a sync", phone.owes(collection, staged.id));

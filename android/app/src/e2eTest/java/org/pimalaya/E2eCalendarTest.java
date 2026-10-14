@@ -4,12 +4,12 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.Zones;
 import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.Flags;
 import org.robolectric.ParameterizedRobolectricTestRunner;
 
 import java.time.ZoneOffset;
@@ -58,7 +58,7 @@ public class E2eCalendarTest extends E2eCase {
         String ical = ical(uid, subject("created"));
         // NOTE: as the event page stages a new one, under `<uid>.ics`.
         phone.calendarStager(address)
-                .mutateAdd(calendar.id, uid + ".ics", ical, new JSONArray(), null, "");
+                .mutateAdd(calendar.id, uid + ".ics", ical, Flags.none(), null, "");
         List<EventStore.StoredEvent> staged = phone.events(calendar.id, subject("created"));
         assertEquals("shown at once", 1, staged.size());
         assertTrue("pending", phone.owes(calendar.id, staged.get(0).id));
@@ -161,7 +161,7 @@ public class E2eCalendarTest extends E2eCase {
         EventStore.StoredCalendar calendar = calendarOf(phone, name);
         String uid = UUID.randomUUID().toString();
         phone.calendarStager(address)
-                .mutateAdd(calendar.id, uid + ".ics", ical(uid, subject("created")), new JSONArray(), null, "");
+                .mutateAdd(calendar.id, uid + ".ics", ical(uid, subject("created")), Flags.none(), null, "");
         settles(
                 "the server holds the created event",
                 () -> {

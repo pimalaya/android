@@ -423,7 +423,7 @@ public final class PimdirDb extends SQLiteOpenHelper {
                 return;
             }
             org.json.JSONObject summary =
-                    PimdirSql.derive(PimdirSummary.MAIL, body).optJSONObject("summary");
+                    PimdirSql.derive(PimdirSummary.MAIL, body).summary();
             org.json.JSONObject mail = summary == null ? null : summary.optJSONObject("mail");
             if (mail != null && mail.has("invitation")) {
                 PimdirSummary.write(db, collection, linkId, summary);

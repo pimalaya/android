@@ -1,8 +1,8 @@
 package org.pimalaya.calendar;
 
-import org.json.JSONArray;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventSplit;
+import org.pimalaya.client.Flags;
 
 import java.util.Map;
 
@@ -75,7 +75,7 @@ final class EventWrites {
                         collection.id,
                         uid + ".ics",
                         split.series,
-                        new JSONArray(),
+                        Flags.none(),
                         null,
                         "");
             }
@@ -90,7 +90,7 @@ final class EventWrites {
                         collection.id,
                         target.id,
                         written,
-                        new JSONArray(),
+                        Flags.none(),
                         null,
                         "");
             } else {

@@ -13,6 +13,7 @@ import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.file.FileStore;
@@ -629,9 +630,9 @@ public final class MailStore {
             // key is what the row was ordered by: a label disagreeing with
             // the order it appears in reads as a bug.
             this.stamp = PimdirSummary.stampOf(this.sortKey);
-            this.seen = has(flags, MailEngine.SEEN);
-            this.answered = has(flags, MailEngine.ANSWERED);
-            this.flagged = has(flags, MailEngine.FLAGGED);
+            this.seen = has(flags, Flags.Marker.SEEN);
+            this.answered = has(flags, Flags.Marker.ANSWERED);
+            this.flagged = has(flags, Flags.Marker.FLAGGED);
             this.hasAttachment = attachment != null && attachment == 1;
             this.attachment = attachment;
             this.size = size;
@@ -641,7 +642,7 @@ public final class MailStore {
             this.failed = false;
             this.uncertain = false;
             this.pending = false;
-            this.deleted = has(flags, MailEngine.DELETED);
+            this.deleted = has(flags, Flags.Marker.DELETED);
         }
 
         /** The sender as a row shows them: the name, else the address. */
@@ -1912,21 +1913,21 @@ public final class MailStore {
      * over: the row carries the three the app renders, and the set carries
      * whatever else the server marked. A toggle has to leave those alone.
      */
-    JSONArray flagsOf(String collection, String id) {
+    Flags flagsOf(String collection, String id) {
         try (Cursor cursor =
                 items.readable()
                         .rawQuery(
                                 "SELECT flags FROM items WHERE collection = ? AND link_id = ?",
                                 new String[] {collection, id})) {
             if (!cursor.moveToFirst() || cursor.isNull(0)) {
-                return new JSONArray();
+                return Flags.none();
             }
             try {
-                return new JSONArray(cursor.getString(0));
+                return Flags.parse(cursor.getString(0));
             } catch (JSONException error) {
                 // An unreadable marker set says nothing, so there is nothing
                 // in it to keep: the staged set replaces it whole.
-                return new JSONArray();
+                return Flags.none();
             }
         }
     }
@@ -2134,12 +2135,9 @@ public final class MailStore {
     }
 
     /** Whether the stored flag set carries one flag. */
-    private static boolean has(String flags, String flag) {
-        if (flags == null || flags.isEmpty()) {
-            return false;
-        }
+    private static boolean has(String flags, Flags.Marker flag) {
         try {
-            return MailEngine.has(new JSONArray(flags), flag);
+            return Flags.parse(flags).has(flag);
         } catch (JSONException error) {
             // An unreadable flag set is an unknown one, and unknown reads as
             // unset: an unread message shows rather than hides, and no icon

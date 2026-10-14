@@ -9,10 +9,10 @@ import android.content.Context;
 import android.database.Cursor;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
-import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.Derived;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimdirSql;
@@ -113,18 +113,10 @@ public class AutomaticReferencesTest {
     }
 
     private void derived(String collection, String kind, String body) {
-        JSONObject derived = PimdirSql.derive(kind, body.getBytes(StandardCharsets.UTF_8));
-        try {
-            put(
-                    collection,
-                    new PimdirItems.Row(
-                            derived.getString("linkId"),
-                            body,
-                            derived.getJSONObject("summary"),
-                            derived.getString("sortKey")));
-        } catch (org.json.JSONException error) {
-            throw new IllegalStateException(error);
-        }
+        Derived derived = PimdirSql.derive(kind, body.getBytes(StandardCharsets.UTF_8));
+        put(
+                collection,
+                new PimdirItems.Row(derived.linkId(), body, derived.summary(), derived.sortKey()));
     }
 
     private void put(String collection, PimdirItems.Row row) {
@@ -143,7 +135,7 @@ public class AutomaticReferencesTest {
         byte[] body = INVITATION.getBytes(StandardCharsets.UTF_8);
         mail.saveSource(inbox, linkId, body);
         mail.restateFromBody(
-                inbox, linkId, PimdirSql.derive(PimdirSummary.MAIL, body).optJSONObject("summary"));
+                inbox, linkId, PimdirSql.derive(PimdirSummary.MAIL, body).summary());
         files.recordAttachments(
                 mail.accountIdOf(ONE), linkId, new MailClient().parseMessage(body).attachments);
     }

@@ -20,10 +20,10 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.contact.ContactStager;
 import org.pimalaya.contact.PimdirContacts;
-import org.pimalaya.mail.MailEngine;
 import org.pimalaya.mail.MailStager;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.DeletedItems;
@@ -298,7 +298,7 @@ public class DeletedItemsTest {
     @Test
     public void anOpenedMailRestoredIntoItsMailboxRevivesUnderItsHandle() throws Exception {
         String inbox = inbox();
-        retainedMail(inbox, "42", new JSONArray().put(MailEngine.SEEN).put(MailEngine.DELETED));
+        retainedMail(inbox, "42", new JSONArray().put(Flags.Marker.SEEN.wire()).put(Flags.Marker.DELETED.wire()));
         new MailStore(context, pimdir)
                 .saveSource(
                         inbox,

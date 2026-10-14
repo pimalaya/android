@@ -26,6 +26,14 @@ final class Json {
         }
     }
 
+    static int integer(JSONObject object, String key) {
+        try {
+            return object.getInt(key);
+        } catch (JSONException error) {
+            throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
+        }
+    }
+
     static String optString(JSONObject object, String key) {
         return object.isNull(key) ? null : object.optString(key);
     }
@@ -37,5 +45,14 @@ final class Json {
             strings.add(values.optString(index));
         }
         return strings;
+    }
+
+    /** The integers of a JSON array, empty when there is none. */
+    static List<Integer> integers(JSONArray values) {
+        List<Integer> integers = new ArrayList<>(values == null ? 0 : values.length());
+        for (int index = 0; values != null && index < values.length(); index++) {
+            integers.add(values.optInt(index));
+        }
+        return integers;
     }
 }

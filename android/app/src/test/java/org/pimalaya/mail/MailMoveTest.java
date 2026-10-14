@@ -17,9 +17,11 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.PimalayaException;
+import org.pimalaya.client.SyncReport;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -96,7 +98,7 @@ public class MailMoveTest {
         }
 
         @Override
-        protected void append(String mailbox, byte[] source, JSONArray flags) {
+        protected void append(String mailbox, byte[] source, Flags flags) {
             calls.add("append " + mailbox);
         }
 
@@ -178,8 +180,8 @@ public class MailMoveTest {
         }
     }
 
-    private String sync(Server server, String collection) {
-        return String.valueOf(new OfflineClient().offlineSyncImmutable(server, collection, null, false));
+    private SyncReport sync(Server server, String collection) {
+        return new OfflineClient().syncImmutable(server, collection, null, false);
     }
 
     @Test
@@ -239,9 +241,9 @@ public class MailMoveTest {
         stager().mutateMove(inbox, "42", trash);
 
         Server server = new Server();
-        String report = sync(server, trash);
+        SyncReport report = sync(server, trash);
 
-        assertTrue("derived and rejected: " + report, report.contains("\"rejected\":1"));
+        assertTrue("derived and rejected: " + report, report.rejected() == 1);
         assertTrue("no copy, no append: the source's removal delivers it", server.calls.isEmpty());
         assertEquals("still pending", "0",
                 scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '42'", trash));
@@ -303,7 +305,7 @@ public class MailMoveTest {
                 sent,
                 "m2@example.com",
                 body,
-                new JSONArray().put(MailEngine.SEEN),
+                Flags.of(Flags.Marker.SEEN),
                 PimdirSummary.mail("m2@example.com", "Hi", null, EMAIL, "bob@example.org",
                         date, body.length(), false),
                 PimdirSummary.mailSortKey(date));
@@ -332,9 +334,9 @@ public class MailMoveTest {
         stager().mutateCopy(inbox, "42", trash);
 
         Server server = new Server();
-        String report = sync(server, trash);
+        SyncReport report = sync(server, trash);
 
-        assertEquals(report, List.of("copy INBOX 42 Trash"), server.calls);
+        assertEquals(String.valueOf(report), List.of("copy INBOX 42 Trash"), server.calls);
         assertNull("accepted with no handle, the arrival brings it",
                 scalar("SELECT link_id FROM items WHERE collection = ?", trash));
         assertEquals("the source stays", "0",
@@ -351,10 +353,10 @@ public class MailMoveTest {
         Server server = new Server();
         server.gone.add("7");
         server.listed = new JSONArray().put(named("7", "Old")).put(named("8", "New"));
-        String report = sync(server, trash);
+        SyncReport report = sync(server, trash);
 
-        assertFalse("no failure: " + report, report.contains("error"));
-        assertTrue("accepted: " + report, report.contains("\"pushed\":1"));
+        assertFalse("no failure: " + report, String.valueOf(report).contains("error"));
+        assertTrue("accepted: " + report, report.pushed() == 1);
         assertEquals("the page landed", "0",
                 scalar("SELECT deleted FROM items WHERE collection = ? AND link_id = '8'", trash));
         assertNull("the removal converged",
@@ -369,9 +371,9 @@ public class MailMoveTest {
         Server server = new Server();
         server.gone.add("42");
         server.listed = new JSONArray().put(named("42", "Hello"));
-        String report = sync(server, inbox);
+        SyncReport report = sync(server, inbox);
 
-        assertTrue("accepted: " + report, report.contains("\"pushed\":1"));
+        assertTrue("accepted: " + report, report.pushed() == 1);
         assertNull("nothing moves into the target",
                 scalar("SELECT link_id FROM items WHERE collection = ?", trash));
     }
@@ -382,9 +384,9 @@ public class MailMoveTest {
 
         Server server = new Server();
         server.gone.add("42");
-        String report = sync(server, trash);
+        SyncReport report = sync(server, trash);
 
-        assertTrue("rejected: " + report, report.contains("\"rejected\":1"));
+        assertTrue("rejected: " + report, report.rejected() == 1);
     }
 
     @Test
@@ -395,7 +397,7 @@ public class MailMoveTest {
                 sent,
                 "m1@example.com",
                 body,
-                new JSONArray().put(MailEngine.SEEN),
+                Flags.of(Flags.Marker.SEEN),
                 PimdirSummary.mail("m1@example.com", "Hi", null, EMAIL, "bob@example.org",
                         date, body.length(), false),
                 PimdirSummary.mailSortKey(date));
@@ -404,7 +406,7 @@ public class MailMoveTest {
         JSONObject arrival =
                 new JSONObject()
                         .put("handle", "900")
-                        .put("flags", new JSONArray().put(MailEngine.SEEN))
+                        .put("flags", new JSONArray().put(Flags.Marker.SEEN.wire()))
                         .put("linkId", "900")
                         .put(
                                 "summary",

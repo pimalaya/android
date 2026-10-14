@@ -14,6 +14,7 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.pimdir.PimdirBlobs;
 import org.pimalaya.pimdir.PimdirDb;
@@ -115,7 +116,7 @@ public class BodyLossRacesTest {
 
         // The pass writes what it merged from the placement it loaded:
         // no body, at meta, its new markers.
-        JSONArray seen = new JSONArray().put(MailEngine.SEEN);
+        JSONArray seen = new JSONArray().put(Flags.Marker.SEEN.wire());
         storage.applyWrites(new JSONArray().put(listed("m1", seen, flagsBase(seen))));
 
         assertEquals("still full", "2", item("level", "m1"));

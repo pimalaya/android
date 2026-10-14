@@ -2,7 +2,6 @@ package org.pimalaya.client;
 
 import java.util.List;
 import org.json.JSONArray;
-import org.json.JSONObject;
 
 /**
  * The io-offline engine verbs of the bridge (rs/ffi/offline.rs): a sync,
@@ -14,11 +13,11 @@ public class OfflineClient {
      * Reconciles a collection with its remote through the io-offline
      * engine, the driver servicing every storage and remote yield;
      * with {@code full} the checkpoint is ignored and the whole remote
-     * is enumerated. Returns the sync report
-     * {@code {pulled, pushed, conflicts, rejected, refreshed}}.
+     * is enumerated. Returns the sync report.
      */
-    public JSONObject offlineSync(OfflineDriver driver, String collection, boolean full) {
-        return Replies.object(Native.offlineSync(driver, collection, full, true, "", true));
+    public SyncReport sync(OfflineDriver driver, String collection, boolean full) {
+        return SyncReport.from(
+                Replies.object(Native.offlineSync(driver, collection, full, true, "", true)));
     }
 
     /**
@@ -32,29 +31,37 @@ public class OfflineClient {
      * scope it was made under (a Graph delta link is, an IMAP modseq, a
      * Gmail history id and a JMAP state are not).
      */
-    public JSONObject offlineSyncImmutable(
+    public SyncReport syncImmutable(
             OfflineDriver driver, String collection, String since, boolean scopeBound) {
-        return Replies.object(
-                Native.offlineSync(
-                        driver, collection, false, false, since == null ? "" : since, scopeBound));
+        return SyncReport.from(
+                Replies.object(
+                        Native.offlineSync(
+                                driver,
+                                collection,
+                                false,
+                                false,
+                                since == null ? "" : since,
+                                scopeBound)));
     }
 
     /**
      * Raises the given handles to the full detail tier through the
      * io-offline engine (bodies deduped by link id against the store).
-     * Returns the upgrade report {@code {upgraded, fetched, deduped}}.
+     * Returns the upgrade report.
      */
-    public JSONObject offlineUpgrade(OfflineDriver driver, String collection, List<String> handles) {
-        return Replies.object(
-                Native.offlineUpgrade(driver, collection, new JSONArray(handles).toString(), true));
+    public UpgradeReport upgrade(OfflineDriver driver, String collection, List<String> handles) {
+        return UpgradeReport.from(
+                Replies.object(
+                        Native.offlineUpgrade(
+                                driver, collection, new JSONArray(handles).toString(), true)));
     }
 
     /**
      * Stages a local mutation through the io-offline engine (storage
      * yields only, the remote is never touched).
      */
-    public void offlineMutate(OfflineDriver driver, String collection, JSONObject mutation) {
-        Replies.object(Native.offlineMutate(driver, collection, mutation.toString()));
+    public void mutate(OfflineDriver driver, String collection, Mutation mutation) {
+        Replies.object(Native.offlineMutate(driver, collection, mutation.toJson().toString()));
     }
 
     /**
@@ -62,21 +69,22 @@ public class OfflineClient {
      * enumerate proving the handle unchanged (the CardDAV If-Match
      * quirk).
      */
-    public static boolean offlineRetryUnguarded(JSONObject facts) {
-        return Replies.object(Native.offlineRetryUnguarded(facts.toString()))
+    public static boolean retryUnguarded(RetryFacts facts) {
+        return Replies.object(Native.offlineRetryUnguarded(facts.toJson().toString()))
                 .optBoolean("retry");
     }
 
     /**
      * Projects an account-wide delta (JMAP, Google) onto one book's
-     * enumerate ({@code {members, vanished}}).
+     * enumerate.
      */
-    public static JSONObject offlineAccountSnapshot(JSONObject facts) {
-        return Replies.object(Native.offlineAccountSnapshot(facts.toString()));
+    public static AccountSnapshot accountSnapshot(AccountSnapshotFacts facts) {
+        return AccountSnapshot.from(
+                Replies.object(Native.offlineAccountSnapshot(facts.toJson().toString())));
     }
 
-    /** Plans one push change ({@code {action, postCreateBooks?}}). */
-    public static JSONObject offlinePushPlan(JSONObject facts) {
-        return Replies.object(Native.offlinePushPlan(facts.toString()));
+    /** Plans one push change. */
+    public static PushPlan pushPlan(PushPlanFacts facts) {
+        return PushPlan.from(Replies.object(Native.offlinePushPlan(facts.toJson().toString())));
     }
 }

@@ -1,10 +1,10 @@
 package org.pimalaya.mail;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.pimdir.PimdirSummary;
 
@@ -129,7 +129,7 @@ public final class MailSubmit {
                 // NOTE: the composition is 7-bit (RFC 2047 words, a
                 // quoted-printable body), so its text is its bytes.
                 new String(source, StandardCharsets.UTF_8),
-                new JSONArray().put(MailEngine.SEEN),
+                Flags.of(Flags.Marker.SEEN),
                 PimdirSummary.mail(
                         messageId,
                         subject,

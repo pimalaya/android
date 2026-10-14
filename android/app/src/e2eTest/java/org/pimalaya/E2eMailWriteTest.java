@@ -7,7 +7,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
-import org.pimalaya.mail.MailEngine;
+import org.pimalaya.client.Flags;
 import org.pimalaya.mail.MailStager;
 import org.pimalaya.mail.MailStore;
 
@@ -42,9 +42,9 @@ public class E2eMailWriteTest extends E2eCase {
         assertFalse("unread", listed.seen);
         assertFalse("not starred", listed.flagged);
 
-        phone.stager(address).stageFlag(listed, MailEngine.FLAGGED, true);
+        phone.stager(address).stageFlag(listed, Flags.Marker.FLAGGED, true);
         phone.stager(address)
-                .stageFlag(phone.message(collection, subject("junk")), MailEngine.SEEN, true);
+                .stageFlag(phone.message(collection, subject("junk")), Flags.Marker.SEEN, true);
         MailStore.StoredMessage staged = phone.message(collection, subject("junk"));
         assertTrue("starred at once", staged.flagged);
         assertTrue("read at once", staged.seen);
@@ -69,7 +69,7 @@ public class E2eMailWriteTest extends E2eCase {
         }
 
         phone.stager(address)
-                .stageFlag(phone.message(collection, subject("junk")), MailEngine.FLAGGED, false);
+                .stageFlag(phone.message(collection, subject("junk")), Flags.Marker.FLAGGED, false);
         pass(phone, collection);
         eventually(
                 "another device reads it unstarred",

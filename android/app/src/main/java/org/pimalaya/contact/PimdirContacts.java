@@ -4,12 +4,12 @@ import android.database.Cursor;
 import android.util.Log;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.Flags;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
@@ -175,7 +175,7 @@ public final class PimdirContacts {
                         collection,
                         card.id,
                         card.vcard,
-                        new JSONArray(),
+                        Flags.none(),
                         index.optJSONObject("summary"),
                         index.optString("sortKey"));
             }

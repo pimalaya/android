@@ -14,6 +14,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
@@ -290,7 +291,7 @@ public class MailChunksTest {
         Server server = new Server(60, 1);
         server.sync(inbox);
 
-        server.mutateFlags(inbox, "60", new JSONArray().put(MailEngine.FLAGGED));
+        server.mutateFlags(inbox, "60", Flags.of(Flags.Marker.FLAGGED));
         server.sync(inbox);
 
         MailStore.Query query = store.query((account, name) -> true, false, false, "");

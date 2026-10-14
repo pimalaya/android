@@ -15,7 +15,9 @@ import org.pimalaya.client.Calendar;
 import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Clients;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
+import org.pimalaya.client.Mutation;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.pimdir.PimdirDb;
@@ -27,6 +29,7 @@ import org.robolectric.RuntimeEnvironment;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * What the entry page's save and delete stage, on the real bridge and
@@ -53,11 +56,11 @@ public class EventWritesTest {
         final List<String> bodies = new ArrayList<>();
 
         @Override
-        public void offlineMutate(OfflineDriver driver, String collection, JSONObject mutation) {
-            String key = mutation.has("linkId") ? "linkId" : "handle";
-            staged.add(mutation.optString("op") + " " + collection + " " + mutation.optString(key));
-            bodies.add(mutation.optString("body"));
-            super.offlineMutate(driver, collection, mutation);
+        public void mutate(OfflineDriver driver, String collection, Mutation mutation) {
+            String key = mutation.linkId() != null ? mutation.linkId() : mutation.handle();
+            staged.add(mutation.op().wire() + " " + collection + " " + key);
+            bodies.add(Objects.toString(mutation.body(), ""));
+            super.mutate(driver, collection, mutation);
         }
     }
 
@@ -98,7 +101,7 @@ public class EventWritesTest {
 
     /** The series staged as a create, the recording cleared after it. */
     private EventStore.StoredEvent series() throws Exception {
-        stager.mutateAdd(calendar.id, "s.ics", SERIES, new JSONArray(), null, "");
+        stager.mutateAdd(calendar.id, "s.ics", SERIES, Flags.none(), null, "");
         client.staged.clear();
         client.bodies.clear();
         return stored("s.ics");

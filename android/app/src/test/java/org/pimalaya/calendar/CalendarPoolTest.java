@@ -196,7 +196,7 @@ public class CalendarPoolTest {
         }
 
         void sync(String collection) {
-            clients.offline().offlineSync(this, collection, false);
+            clients.offline().sync(this, collection, false);
             hydrate(collection);
         }
 

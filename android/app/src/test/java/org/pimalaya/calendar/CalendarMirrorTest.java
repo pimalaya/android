@@ -98,7 +98,7 @@ public class CalendarMirrorTest {
         }
 
         void sync() {
-            clients.offline().offlineSync(this, COLLECTION, false);
+            clients.offline().sync(this, COLLECTION, false);
             hydrate(COLLECTION);
         }
 

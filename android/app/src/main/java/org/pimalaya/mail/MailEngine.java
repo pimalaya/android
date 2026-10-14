@@ -10,6 +10,7 @@ import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
@@ -74,7 +75,9 @@ public class MailEngine extends PimdirEngine {
      * would have to decide what to do with them; diffing inside it means
      * it never sees them.
      */
-    private static final String[] WRITABLE = {SEEN, ANSWERED, FLAGGED, DELETED};
+    private static final Flags.Marker[] WRITABLE = {
+        Flags.Marker.SEEN, Flags.Marker.ANSWERED, Flags.Marker.FLAGGED, Flags.Marker.DELETED
+    };
 
     /**
      * Messages a mailbox's first pass lists, the chunk an account's window
@@ -368,7 +371,7 @@ public class MailEngine extends PimdirEngine {
         Log.d(
                 "pimalaya",
                 "mail sync " + collection + " since " + since + ": "
-                        + clients.offline().offlineSyncImmutable(this, collection, since, false)
+                        + clients.offline().syncImmutable(this, collection, since, false)
                         + ", the pass so far " + clock);
         MailState.of(pimdir.context()).relisted(collection);
     }
@@ -549,7 +552,7 @@ public class MailEngine extends PimdirEngine {
             Log.d(
                     "pimalaya",
                     "mail step " + collection + " (" + items.length() + "): "
-                            + clients.offline().offlineSyncImmutable(this, collection, since, false));
+                            + clients.offline().syncImmutable(this, collection, since, false));
             MailState.of(pimdir.context()).relisted(collection);
         } finally {
             landing = null;
@@ -974,7 +977,7 @@ public class MailEngine extends PimdirEngine {
             Log.d(
                     "pimalaya",
                     "mail bodies " + collection + " (" + handles.size() + "): "
-                            + clients.offline().offlineUpgrade(this, collection, handles));
+                            + clients.offline().upgrade(this, collection, handles));
         } finally {
             // NOTE: every write naming them has returned, committed or not:
             // one no row names (the write failed) is an orphan to unlink.
@@ -1390,8 +1393,7 @@ public class MailEngine extends PimdirEngine {
         if (source == null) {
             return result(handle, false, null, null);
         }
-        JSONArray flags = change.optJSONArray("flags");
-        append(mailbox, source, flags == null ? new JSONArray() : flags);
+        append(mailbox, source, Flags.read(change.optJSONArray("flags")));
         return result(handle, true, null, null);
     }
 
@@ -1416,8 +1418,8 @@ public class MailEngine extends PimdirEngine {
     }
 
     /** Appends one message to {@code mailbox} on the server. */
-    protected void append(String mailbox, byte[] source, JSONArray flags) {
-        clients.mail().appendMessage(session, mailbox, source, flags);
+    protected void append(String mailbox, byte[] source, Flags flags) {
+        clients.mail().append(session, mailbox, source, flags);
     }
 
     /**
@@ -1432,12 +1434,12 @@ public class MailEngine extends PimdirEngine {
     private JSONObject pushFlags(
             String collection, String mailbox, String handle, JSONObject change)
             throws JSONException {
-        JSONArray staged = change.optJSONArray("flags");
-        JSONArray base = offline.baseFlags(collection, handle);
+        Flags staged = Flags.read(change.optJSONArray("flags"));
+        Flags base = offline.baseFlags(collection, handle);
 
-        for (String flag : WRITABLE) {
-            boolean wanted = has(staged, flag);
-            if (base != null && wanted == has(base, flag)) {
+        for (Flags.Marker flag : WRITABLE) {
+            boolean wanted = staged.has(flag);
+            if (base != null && wanted == base.has(flag)) {
                 continue;
             }
             try {

@@ -3,6 +3,7 @@ package org.pimalaya.mail;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Flags;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.Stager;
@@ -43,12 +44,12 @@ public final class MailStager extends Stager {
      * Stages one marker on one stored message, added or removed, the others
      * it carries kept; the next sync pushes the difference.
      */
-    public void stageFlag(MailStore.StoredMessage message, String flag, boolean add)
+    public void stageFlag(MailStore.StoredMessage message, Flags.Marker flag, boolean add)
             throws JSONException {
         mutateFlags(
                 message.collection,
                 offline.handleFor(message.collection, message.id),
-                withFlag(mail().flagsOf(message.collection, message.id), flag, add));
+                mail().flagsOf(message.collection, message.id).with(flag, add));
     }
 
     /** What deleting one message staged, which its row and toast say. */
@@ -97,7 +98,7 @@ public final class MailStager extends Stager {
         mutateFlags(
                 message.collection,
                 handle,
-                withFlag(mail().flagsOf(message.collection, message.id), DELETED, true));
+                mail().flagsOf(message.collection, message.id).with(Flags.Marker.DELETED, true));
         return Deletion.MARKED;
     }
 }

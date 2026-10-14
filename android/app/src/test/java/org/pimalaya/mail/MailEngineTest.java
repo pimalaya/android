@@ -16,6 +16,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.OfflineClient;
 import org.pimalaya.pimdir.PimdirDb;
@@ -99,20 +100,19 @@ public class MailEngineTest {
 
     @Test
     public void aStagedMarkerMovesTheItemAndLeavesTheBaseAlone() throws Exception {
-        JSONArray staged =
-                MailEngine.withFlag(store.flagsOf(collection, "42"), MailEngine.SEEN, true);
+        Flags staged = store.flagsOf(collection, "42").with(Flags.Marker.SEEN, true);
         engine.mutateFlags(collection, "42", staged);
 
-        JSONArray held = store.flagsOf(collection, "42");
-        assertTrue("the marker the reader moved", MailEngine.has(held, MailEngine.SEEN));
-        assertTrue("and the keyword this app never models", MailEngine.has(held, "$junk"));
+        Flags held = store.flagsOf(collection, "42");
+        assertTrue("the marker the reader moved", held.has(Flags.Marker.SEEN));
+        assertTrue("and the keyword this app never models", held.markers().contains("$junk"));
 
         // The base is what the source last agreed on. If the stage moved it
         // too, the next sync would diff nothing out and the marker would
         // never reach the server.
-        JSONArray base = engine.offline.baseFlags(collection, "42");
-        assertFalse(MailEngine.has(base, MailEngine.SEEN));
-        assertTrue(MailEngine.has(base, "$junk"));
+        Flags base = engine.offline.baseFlags(collection, "42");
+        assertFalse(base.has(Flags.Marker.SEEN));
+        assertTrue(base.markers().contains("$junk"));
     }
 
     /**
@@ -125,7 +125,7 @@ public class MailEngineTest {
         engine.mutateFlags(
                 collection,
                 "42",
-                MailEngine.withFlag(store.flagsOf(collection, "42"), MailEngine.SEEN, true));
+                store.flagsOf(collection, "42").with(Flags.Marker.SEEN, true));
 
         JSONObject load = new JSONObject();
         load.put("op", "load");
@@ -167,7 +167,7 @@ public class MailEngineTest {
         engine.mutateFlags(
                 collection,
                 "42",
-                MailEngine.withFlag(store.flagsOf(collection, "42"), MailEngine.FLAGGED, true));
+                store.flagsOf(collection, "42").with(Flags.Marker.FLAGGED, true));
 
         List<String> pushed = new ArrayList<>();
         PimdirEngine remote =
@@ -205,7 +205,7 @@ public class MailEngineTest {
                                                 .put(result(change.getString("handle"), true, null, null)));
                     }
                 };
-        new OfflineClient().offlineSyncImmutable(remote, collection, null, false);
+        new OfflineClient().syncImmutable(remote, collection, null, false);
 
         assertEquals(List.of("setFlags"), pushed);
     }
@@ -330,7 +330,7 @@ public class MailEngineTest {
                 };
 
         try {
-            new OfflineClient().offlineSyncImmutable(remote, collection, since, false);
+            new OfflineClient().syncImmutable(remote, collection, since, false);
             throw new AssertionError("the pass reports the cut");
         } catch (org.pimalaya.client.PimalayaException cut2) {
             assertTrue(cut2.getMessage().contains("dropped"));
@@ -342,7 +342,7 @@ public class MailEngineTest {
         assertTrue("a first pass is filling in", store.coverage(collection).filling);
         assertNull("and covers nothing yet", store.coverage(collection).at);
 
-        new OfflineClient().offlineSyncImmutable(remote, collection, since, false);
+        new OfflineClient().syncImmutable(remote, collection, since, false);
         JSONObject resumed = asked.get(asked.size() - 1).getJSONObject("listing");
         assertEquals("resumed, not restarted", "7:100", resumed.getString("cursor"));
         assertEquals("1", scalar("SELECT count(*) FROM items WHERE link_id = '99'"));
@@ -350,7 +350,7 @@ public class MailEngineTest {
         // page of the round, so its close retires it.
         assertEquals("1", scalar("SELECT deleted FROM items WHERE link_id = '42'"));
 
-        new OfflineClient().offlineSyncImmutable(remote, collection, since, false);
+        new OfflineClient().syncImmutable(remote, collection, since, false);
         JSONObject delta = asked.get(asked.size() - 1).getJSONObject("listing");
         assertEquals("a closed round leaves a delta", "delta", delta.getString("kind"));
         assertEquals("the checkpoint taken up front", "cp-1", delta.getString("checkpoint"));

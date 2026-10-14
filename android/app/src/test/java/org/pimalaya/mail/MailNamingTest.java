@@ -13,6 +13,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
@@ -119,7 +120,7 @@ public class MailNamingTest {
     private static JSONObject unnamed(String handle) throws JSONException {
         return new JSONObject()
                 .put("handle", handle)
-                .put("flags", new JSONArray().put(MailEngine.SEEN))
+                .put("flags", new JSONArray().put(Flags.Marker.SEEN.wire()))
                 .put("linkId", handle);
     }
 
@@ -145,7 +146,7 @@ public class MailNamingTest {
         JSONObject bound = items.getJSONObject(0);
         assertEquals("1", bound.getString("handle"));
         assertFalse("the store keeps its summary", bound.has("summary"));
-        assertEquals(MailEngine.SEEN, bound.getJSONArray("flags").getString(0));
+        assertEquals(Flags.Marker.SEEN.wire(), bound.getJSONArray("flags").getString(0));
 
         JSONObject read = items.getJSONObject(1);
         assertEquals("2", read.getString("handle"));

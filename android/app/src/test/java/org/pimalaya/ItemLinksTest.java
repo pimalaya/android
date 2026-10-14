@@ -8,10 +8,10 @@ import static org.junit.Assert.assertTrue;
 import android.content.Context;
 
 import io.requery.android.database.sqlite.SQLiteDatabase;
-import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.Derived;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimdirSql;
@@ -77,7 +77,7 @@ public class ItemLinksTest {
         inbox = mail.collectionOf(ONE, "INBOX");
         new PimdirCollections(pimdir, context).ensure(BOOK, ONE, PimdirSummary.CONTACT, "Contacts");
 
-        JSONObject card = PimdirSql.derive(PimdirSummary.CONTACT, VCARD.getBytes(StandardCharsets.UTF_8));
+        Derived card = PimdirSql.derive(PimdirSummary.CONTACT, VCARD.getBytes(StandardCharsets.UTF_8));
         SQLiteDatabase db = items.writable();
         db.beginTransaction();
         try {
@@ -97,8 +97,8 @@ public class ItemLinksTest {
                     new PimdirItems.Row(
                             "alice",
                             VCARD,
-                            card.getJSONObject("summary"),
-                            card.getString("sortKey")));
+                            card.summary(),
+                            card.sortKey()));
             db.setTransactionSuccessful();
         } finally {
             db.endTransaction();

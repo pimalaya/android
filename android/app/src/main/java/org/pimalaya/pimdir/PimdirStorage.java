@@ -10,6 +10,7 @@ import io.requery.android.database.sqlite.SQLiteStatement;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.PimdirSql;
 
@@ -1229,7 +1230,7 @@ public final class PimdirStorage {
      * replacing it would strip every keyword this app does not model, and
      * the base is what says which of them the user actually moved.
      */
-    public JSONArray baseFlags(String engineCollection, String handle) throws JSONException {
+    public Flags baseFlags(String engineCollection, String handle) throws JSONException {
         SQLiteDatabase db = store.getReadableDatabase();
         String collection = collectionOf(engineCollection);
         String source = sourceOf(engineCollection);
@@ -1246,7 +1247,7 @@ public final class PimdirStorage {
             if (!cursor.moveToFirst() || cursor.isNull(0)) {
                 return null;
             }
-            return arrayOf(cursor.getString(0));
+            return Flags.parse(cursor.getString(0));
         }
     }
 

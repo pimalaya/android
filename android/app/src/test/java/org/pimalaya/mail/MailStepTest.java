@@ -18,6 +18,7 @@ import org.junit.runner.RunWith;
 import org.pimalaya.R;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -131,7 +132,7 @@ public class MailStepTest {
                     items.put(
                             new JSONObject()
                                     .put("handle", mail.id)
-                                    .put("flags", new JSONArray().put(MailEngine.SEEN))
+                                    .put("flags", new JSONArray().put(Flags.Marker.SEEN.wire()))
                                     .put("linkId", mail.id)
                                     .put(
                                             "summary",

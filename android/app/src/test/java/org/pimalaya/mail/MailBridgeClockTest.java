@@ -127,7 +127,7 @@ public class MailBridgeClockTest {
                 };
 
         long started = System.nanoTime();
-        new OfflineClient().offlineSyncImmutable(remote, collection, null, false);
+        new OfflineClient().syncImmutable(remote, collection, null, false);
         long total = (System.nanoTime() - started) / 1_000_000;
 
         System.out.println("first round of " + PAGES * PAGE + " in " + total + " ms: " + remote.clock);

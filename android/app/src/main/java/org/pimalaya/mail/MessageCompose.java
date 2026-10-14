@@ -11,6 +11,7 @@ import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.Flags;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
 
@@ -277,7 +278,7 @@ public final class MessageCompose {
                                 if (parent != null && !parent.pending) {
                                     messageView.stageFlag(
                                             parent,
-                                            MailEngine.ANSWERED,
+                                            Flags.Marker.ANSWERED,
                                             true,
                                             mailList::reload);
                                 } else {

@@ -14,6 +14,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -168,8 +169,8 @@ public class MailStoreTest {
     public void aRowCarriesEveryFlagItRendersOn() {
         mailboxes(ONE, "INBOX");
         envelope(
-                ONE, "INBOX", "7", "Read", DATE, MailEngine.SEEN, MailEngine.ANSWERED,
-                MailEngine.FLAGGED);
+                ONE, "INBOX", "7", "Read", DATE, Flags.Marker.SEEN.wire(),
+                Flags.Marker.ANSWERED.wire(), Flags.Marker.FLAGGED.wire());
 
         // Three of the four are what the row's trailing icons read, and they
         // travel by two different routes: answered and flagged are IMAP flags
@@ -188,16 +189,16 @@ public class MailStoreTest {
         mailboxes(ONE, "INBOX");
         // A keyword this app does not model, which a toggle has to leave alone:
         // it is read back so the staged set can carry it through unchanged.
-        envelope(ONE, "INBOX", "7", "Read", DATE, MailEngine.SEEN, "$junk");
+        envelope(ONE, "INBOX", "7", "Read", DATE, Flags.Marker.SEEN.wire(), "$junk");
 
-        JSONArray flags = store.flagsOf(store.collectionOf(ONE, "INBOX"), "7");
-        assertEquals(2, flags.length());
-        assertTrue(MailEngine.has(flags, MailEngine.SEEN));
-        assertTrue(MailEngine.has(flags, "$junk"));
+        Flags flags = store.flagsOf(store.collectionOf(ONE, "INBOX"), "7");
+        assertEquals(2, flags.markers().size());
+        assertTrue(flags.has(Flags.Marker.SEEN));
+        assertTrue(flags.markers().contains("$junk"));
 
-        JSONArray moved = MailEngine.withFlag(flags, MailEngine.FLAGGED, true);
-        assertTrue("the marker the reader moved", MailEngine.has(moved, MailEngine.FLAGGED));
-        assertTrue("and the one it never modelled", MailEngine.has(moved, "$junk"));
+        Flags moved = flags.with(Flags.Marker.FLAGGED, true);
+        assertTrue("the marker the reader moved", moved.has(Flags.Marker.FLAGGED));
+        assertTrue("and the one it never modelled", moved.markers().contains("$junk"));
     }
 
     @Test
@@ -498,7 +499,7 @@ public class MailStoreTest {
                             + (index % 2 == 0 ? "T09:00:00Z" : "T15:00:00Z");
             listed(
                     ONE, String.valueOf(index), "Message " + index, date, index % 4 == 0,
-                    index % 3 == 0 ? new String[0] : new String[] {MailEngine.SEEN});
+                    index % 3 == 0 ? new String[0] : new String[] {Flags.Marker.SEEN.wire()});
         }
 
         MailStore.Query query = all(false, false, "");
@@ -598,7 +599,7 @@ public class MailStoreTest {
         // so a collection leaves it.
         MailStager engine = new MailStager(pimdir, Clients.real());
         String collection = store.collectionOf(ONE, "INBOX");
-        engine.mutateFlags(collection, "kept", new JSONArray().put(MailEngine.FLAGGED));
+        engine.mutateFlags(collection, "kept", Flags.of(Flags.Marker.FLAGGED));
 
         assertEquals(1, store.bound(ONE, 6));
         assertEquals(6, store.monthsOf(ONE));

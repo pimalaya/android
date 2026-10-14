@@ -23,6 +23,7 @@ import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
 import org.pimalaya.file.FileActions;
@@ -244,7 +245,7 @@ public final class MessageView implements FilesList.Origins {
                                 // failed leaves the message unread, which is
                                 // the honest answer: nothing was read.
                                 if (!seen) {
-                                    write(MailEngine.SEEN, true);
+                                    write(Flags.Marker.SEEN, true);
                                 }
                             });
                 });
@@ -438,14 +439,14 @@ public final class MessageView implements FilesList.Origins {
         unread.setContentDescription(
                 host.getString(seen ? R.string.message_mark_unread : R.string.message_mark_read));
         unread.setImageResource(seen ? R.drawable.ic_visibility_off : R.drawable.ic_check);
-        unread.setOnClickListener(view -> write(MailEngine.SEEN, !seen));
+        unread.setOnClickListener(view -> write(Flags.Marker.SEEN, !seen));
 
         ImageButton flag = host.findViewById(R.id.message_view_flag);
         flag.setVisibility(pending ? View.GONE : View.VISIBLE);
         flag.setContentDescription(
                 host.getString(flagged ? R.string.message_unflag : R.string.message_flag));
         starOf(host, flag, flagged);
-        flag.setOnClickListener(view -> write(MailEngine.FLAGGED, !flagged));
+        flag.setOnClickListener(view -> write(Flags.Marker.FLAGGED, !flagged));
 
         host.findViewById(R.id.message_view_delete).setOnClickListener(view -> confirmDelete());
 
@@ -580,7 +581,7 @@ public final class MessageView implements FilesList.Origins {
     }
 
     /** Stages one marker on the open message, then redraws the buttons. */
-    private void write(String flag, boolean add) {
+    private void write(Flags.Marker flag, boolean add) {
         MailStore.StoredMessage message = current;
         stageFlag(
                 message,
@@ -590,9 +591,9 @@ public final class MessageView implements FilesList.Origins {
                     if (current != message) {
                         return;
                     }
-                    if (MailEngine.SEEN.equals(flag)) {
+                    if (flag == Flags.Marker.SEEN) {
                         seen = add;
-                    } else if (MailEngine.FLAGGED.equals(flag)) {
+                    } else if (flag == Flags.Marker.FLAGGED) {
                         flagged = add;
                     }
                     actions();
@@ -609,13 +610,14 @@ public final class MessageView implements FilesList.Origins {
      * marker written with the radio off is a marker written, and the only
      * thing either waits for is a disk write.
      */
-    void stageFlag(MailStore.StoredMessage message, String flag, boolean add, Runnable done) {
+    void stageFlag(
+            MailStore.StoredMessage message, Flags.Marker flag, boolean add, Runnable done) {
         stageFlag(List.of(message), flag, add, done);
     }
 
     /** Stages one marker on every message, the list's selection's toggles. */
     void stageFlag(
-            List<MailStore.StoredMessage> messages, String flag, boolean add, Runnable done) {
+            List<MailStore.StoredMessage> messages, Flags.Marker flag, boolean add, Runnable done) {
         host.io.execute(
                 () -> {
                     Exception failure = null;

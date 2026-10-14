@@ -6,11 +6,10 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Flags;
+import org.pimalaya.client.Mutation;
 import org.pimalaya.client.OfflineDriver;
 import org.pimalaya.client.PimalayaException;
-
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 
 /** The storage half of a driver: load/lookup/write yields and staged mutations. */
 public abstract class Stager implements OfflineDriver {
@@ -178,32 +177,12 @@ public abstract class Stager implements OfflineDriver {
 
     // ---- staged mutations -------------------------------------------------
 
-    /** The IMAP {@code \Seen} flag, as the store's JSON array spells it. */
-    public static final String SEEN = "\\Seen";
-
-    /** The IMAP {@code \Answered} flag: the message was replied to. */
-    public static final String ANSWERED = "\\Answered";
-
-    /** The IMAP {@code \Flagged} flag: the message was marked important. */
-    public static final String FLAGGED = "\\Flagged";
-
-    /**
-     * The IMAP {@code \Deleted} flag: the message is marked for removal by
-     * a later expunge, which is what deleting means on an account naming
-     * no trash to move it into.
-     */
-    public static final String DELETED = "\\Deleted";
-
     /**
      * Stages a flag set on one placement; the next sync pushes the
      * difference between it and the set the source last agreed on.
      */
-    public void mutateFlags(String collection, String handle, JSONArray flags) throws JSONException {
-        JSONObject mutation = new JSONObject();
-        mutation.put("op", "setFlags");
-        mutation.put("handle", handle);
-        mutation.put("flags", flags);
-        mutate(collection, mutation);
+    public void mutateFlags(String collection, String handle, Flags flags) throws JSONException {
+        mutate(collection, Mutation.setFlags(handle, flags));
     }
 
     /**
@@ -211,10 +190,7 @@ public abstract class Stager implements OfflineDriver {
      * pushes, and a create that was never pushed is withdrawn instead.
      */
     public void mutateRemove(String collection, String handle) throws JSONException {
-        JSONObject mutation = new JSONObject();
-        mutation.put("op", "remove");
-        mutation.put("handle", handle);
-        mutate(collection, mutation);
+        mutate(collection, Mutation.remove(handle));
     }
 
     /**
@@ -223,11 +199,7 @@ public abstract class Stager implements OfflineDriver {
      * either collection carries it out as a server move.
      */
     public void mutateMove(String collection, String handle, String target) throws JSONException {
-        JSONObject mutation = new JSONObject();
-        mutation.put("op", "move");
-        mutation.put("handle", handle);
-        mutation.put("target", target);
-        mutate(collection, mutation);
+        mutate(collection, Mutation.move(handle, target));
         staged(target);
     }
 
@@ -236,11 +208,7 @@ public abstract class Stager implements OfflineDriver {
      * create there the next sync pushes as a server-side copy.
      */
     public void mutateCopy(String collection, String handle, String target) throws JSONException {
-        JSONObject mutation = new JSONObject();
-        mutation.put("op", "copy");
-        mutation.put("handle", handle);
-        mutation.put("target", target);
-        mutate(collection, mutation);
+        mutate(collection, Mutation.copy(handle, target));
         staged(target);
     }
 
@@ -250,83 +218,35 @@ public abstract class Stager implements OfflineDriver {
      */
     public void mutateEdit(String collection, String handle, String body, JSONObject summary,
             String sortKey) throws JSONException {
-        JSONObject mutation = new JSONObject();
-        mutation.put("op", "edit");
-        mutation.put("handle", handle);
-        mutation.put("hash", PimdirHash.of(body));
-        mutation.put("size", body.getBytes(StandardCharsets.UTF_8).length);
-        mutation.put("body", body);
-        mutation.put("summary", summary);
-        // NOTE: an edit that changes what the key is derived from has to say
-        // so, or the item keeps the position its old one gave it.
-        mutation.put("sortKey", sortKey);
-        mutate(collection, mutation);
+        mutate(collection, Mutation.edit(handle, PimdirHash.of(body), body, summary, sortKey));
     }
 
     /**
      * Stages a locally authored item the remote has never seen; the next
      * sync pushes it as an append.
      */
-    public void mutateAdd(String collection, String linkId, String body, JSONArray flags,
+    public void mutateAdd(String collection, String linkId, String body, Flags flags,
             JSONObject summary, String sortKey) throws JSONException {
-        JSONObject mutation = new JSONObject();
-        mutation.put("op", "add");
-        mutation.put("linkId", linkId);
-        mutation.put("flags", flags);
-        mutation.put("hash", PimdirHash.of(body));
-        mutation.put("size", body.getBytes(StandardCharsets.UTF_8).length);
-        mutation.put("body", body);
-        mutation.put("summary", summary);
-        mutation.put("sortKey", sortKey);
-        mutate(collection, mutation);
+        mutate(
+                collection,
+                Mutation.add(linkId, flags, PimdirHash.of(body), body, summary, sortKey));
     }
 
     /**
-     * {@link #mutateAdd(String, String, String, JSONArray, JSONObject, String)}
+     * {@link #mutateAdd(String, String, String, Flags, JSONObject, String)}
      * for a body that may not be UTF-8 text (a message's 8-bit parts), which
      * crosses in base64 so it is stored as the bytes it is.
      */
-    public void mutateAdd(String collection, String linkId, byte[] body, JSONArray flags,
+    public void mutateAdd(String collection, String linkId, byte[] body, Flags flags,
             JSONObject summary, String sortKey) throws JSONException {
-        JSONObject mutation = new JSONObject();
-        mutation.put("op", "add");
-        mutation.put("linkId", linkId);
-        mutation.put("flags", flags);
-        mutation.put("hash", PimdirHash.of(body));
-        mutation.put("size", body.length);
-        mutation.put("bodyBase64", Base64.getEncoder().encodeToString(body));
-        mutation.put("summary", summary);
-        mutation.put("sortKey", sortKey);
-        mutate(collection, mutation);
-    }
-
-    /** Whether a marker set names one marker. */
-    public static boolean has(JSONArray flags, String flag) {
-        for (int index = 0; flags != null && index < flags.length(); index++) {
-            if (flag.equals(flags.optString(index))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** The marker set with one marker added or removed. */
-    public static JSONArray withFlag(JSONArray flags, String flag, boolean add) {
-        JSONArray kept = new JSONArray();
-        for (int index = 0; flags != null && index < flags.length(); index++) {
-            if (!flag.equals(flags.optString(index))) {
-                kept.put(flags.optString(index));
-            }
-        }
-        if (add) {
-            kept.put(flag);
-        }
-        return kept;
+        mutate(
+                collection,
+                Mutation.add(linkId, flags, PimdirHash.of(body), body, summary, sortKey));
     }
 
     /** Stages one mutation through the engine, then tells the driver. */
-    private void mutate(String collection, JSONObject mutation) {
-        clients.offline().offlineMutate(this, collection, mutation);
+    private void mutate(String collection, Mutation mutation) {
+        clients.offline().mutate(this, collection, mutation);
         staged(collection);
     }
 

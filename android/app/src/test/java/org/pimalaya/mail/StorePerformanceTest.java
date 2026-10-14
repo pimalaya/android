@@ -15,6 +15,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Clients;
+import org.pimalaya.client.Flags;
 import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimdirSql;
@@ -77,14 +78,14 @@ public class StorePerformanceTest {
         placement.put("linkId", handle);
         placement.put("level", "meta");
         placement.put("status", "clean");
-        placement.put("flags", new JSONArray().put(MailEngine.SEEN));
+        placement.put("flags", new JSONArray().put(Flags.Marker.SEEN.wire()));
         placement.put(
                 "summary",
                 PimdirSummary.mail(
                         null, "Message " + handle, "Sender", "sender@example.org", null, date, 10,
                         false));
         placement.put("sortKey", PimdirSummary.mailSortKey(date));
-        placement.put("base", new JSONObject().put("flags", new JSONArray().put(MailEngine.SEEN)));
+        placement.put("base", new JSONObject().put("flags", new JSONArray().put(Flags.Marker.SEEN.wire())));
         return new JSONObject().put("op", "upsert").put("placement", placement);
     }
 
