@@ -16,6 +16,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.calendar.CalendarEngine;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
@@ -60,7 +61,7 @@ public class MailMoveTest {
         final Set<String> gone = new HashSet<>();
 
         Server() {
-            super(pimdir, new PimalayaClient(), null, accountId);
+            super(pimdir, Clients.real(), null, accountId);
         }
 
         @Override
@@ -168,7 +169,7 @@ public class MailMoveTest {
     }
 
     private MailStager stager() {
-        return new MailStager(pimdir, new PimalayaClient());
+        return new MailStager(pimdir, Clients.real());
     }
 
     private String scalar(String sql, String... args) {
@@ -426,7 +427,7 @@ public class MailMoveTest {
     public void aCalendarRefusesARelocation() throws Exception {
         String calendar = PimdirAccount.collectionId(accountId, "https://dav.example.org/cal/");
         CalendarEngine engine =
-                new CalendarEngine(pimdir, new PimalayaClient(), null, null, accountId, null);
+                new CalendarEngine(pimdir, Clients.real(), null, null, accountId, null);
         JSONObject change =
                 new JSONObject()
                         .put("op", "remove")

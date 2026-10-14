@@ -2,9 +2,9 @@ package org.pimalaya.mail;
 
 import org.json.JSONObject;
 import org.pimalaya.R;
+import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.MessageBody;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.PimdirAccount;
 
@@ -33,12 +33,12 @@ public final class MailReader {
 
     private final MailStore mail;
     private final FileStore files;
-    private final PimalayaClient client;
+    private final MailClient client;
 
     /** The message's account's driver, staging nothing: what names a pending move. */
     private final MailEngine engine;
 
-    public MailReader(MailStore mail, FileStore files, PimalayaClient client, MailEngine engine) {
+    public MailReader(MailStore mail, FileStore files, MailClient client, MailEngine engine) {
         this.mail = mail;
         this.files = files;
         this.client = client;
@@ -96,7 +96,7 @@ public final class MailReader {
      *
      * <p>Read as a body step reads one ({@link MailEngine#sources}): streamed
      * by the bridge into a file of its own, described there ({@link
-     * PimalayaClient#describeMessage}) and moved into the blob store, so a
+     * MailClient#describeMessage}) and moved into the blob store, so a
      * message of any size opens with no copy of it on the Java heap and none
      * across the boundary.
      */

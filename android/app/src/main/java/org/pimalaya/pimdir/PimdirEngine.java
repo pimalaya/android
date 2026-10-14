@@ -6,7 +6,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.account.PimDomain;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.PimalayaException;
 
 import java.util.ArrayList;
@@ -92,8 +92,8 @@ public abstract class PimdirEngine extends Stager {
     /** The domain this driver syncs, which its progress steps are told in. */
     protected abstract PimDomain domain();
 
-    protected PimdirEngine(PimdirDb pimdir, PimalayaClient client) {
-        super(pimdir, client);
+    protected PimdirEngine(PimdirDb pimdir, Clients clients) {
+        super(pimdir, clients);
     }
 
     /**
@@ -118,7 +118,7 @@ public abstract class PimdirEngine extends Stager {
         Log.d(
                 "pimalaya",
                 "hydrate " + collection + " (" + pending.size() + " below full): "
-                        + client.offlineUpgrade(this, collection, pending));
+                        + clients.offline().offlineUpgrade(this, collection, pending));
     }
 
     /**

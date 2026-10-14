@@ -7,10 +7,10 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.Event;
 import org.pimalaya.client.EventDelta;
 import org.pimalaya.client.EventRef;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
@@ -79,18 +79,18 @@ public final class CalendarEngine extends PimdirEngine {
 
     public CalendarEngine(
             PimdirDb pimdir,
-            PimalayaClient client,
+            Clients clients,
             Transport transport,
             Account account,
             String accountId,
             String address) {
-        super(pimdir, client);
+        super(pimdir, clients);
         this.transport = transport;
         this.pimdir = pimdir;
         this.account = account;
         this.accountId = accountId;
         this.address = address;
-        this.phone = new CalendarPhonePass(pimdir, client);
+        this.phone = new CalendarPhonePass(pimdir, clients);
     }
 
     /**
@@ -120,11 +120,11 @@ public final class CalendarEngine extends PimdirEngine {
             Log.d(
                     "pimalaya",
                     "calendar sync " + collection + ": "
-                            + client.offlineSync(this, collection, false));
+                            + clients.offline().offlineSync(this, collection, false));
             hydrate(collection);
 
             if (triage(collection) > 0) {
-                client.offlineSync(this, collection, false);
+                clients.offline().offlineSync(this, collection, false);
                 hydrate(collection);
             }
             phoneSide(collection);
@@ -156,7 +156,7 @@ public final class CalendarEngine extends PimdirEngine {
      */
     int triage(String collection) {
         return CalendarPhonePass.triage(
-                this, client, count -> step(Progress.STAGE_RESOLVE, count), collection);
+                this, count -> step(Progress.STAGE_RESOLVE, count), collection);
     }
 
     /** The calendar's process-wide sync lock, keyed by its collection id. */
@@ -192,7 +192,7 @@ public final class CalendarEngine extends PimdirEngine {
         serverOnly(collection);
         String cursor = yielded.isNull("cursor") ? null : yielded.getString("cursor");
         long asked = System.nanoTime();
-        EventDelta delta = client.syncEvents(transport, account, urlOf(collection), cursor);
+        EventDelta delta = clients.calendar().syncEvents(transport, account, urlOf(collection), cursor);
         remote(System.nanoTime() - asked);
         listed(delta.changed.size());
 
@@ -236,7 +236,8 @@ public final class CalendarEngine extends PimdirEngine {
         List<String> handles = stringsOf(yielded.getJSONArray("handles"));
 
         long asked = System.nanoTime();
-        List<Event> read = client.multigetEvents(transport, account, urlOf(collection), handles);
+        List<Event> read =
+                clients.calendar().multigetEvents(transport, account, urlOf(collection), handles);
         remote(System.nanoTime() - asked);
 
         JSONArray items = new JSONArray();
@@ -317,7 +318,7 @@ public final class CalendarEngine extends PimdirEngine {
                 String name = PimdirStorage.nameOf(handle);
                 try {
                     EventRef created =
-                            client.createEvent(
+                            clients.calendar().createEvent(
                                     transport,
                                     account,
                                     url,
@@ -346,7 +347,7 @@ public final class CalendarEngine extends PimdirEngine {
                 }
                 try {
                     String etag =
-                            client.updateEvent(
+                            clients.calendar().updateEvent(
                                     transport,
                                     account,
                                     url,
@@ -375,7 +376,7 @@ public final class CalendarEngine extends PimdirEngine {
                     return result(handle, false, null, null);
                 }
                 try {
-                    client.deleteEvent(transport, account, url, handle, ifMatch, address);
+                    clients.calendar().deleteEvent(transport, account, url, handle, ifMatch, address);
                 } catch (RuntimeException failure) {
                     if (isGone(failure)) {
                         // Already gone upstream: the removal converged.
@@ -411,7 +412,7 @@ public final class CalendarEngine extends PimdirEngine {
             return answered;
         }
         try {
-            List<Event> read = client.multigetEvents(transport, account, url, List.of(id));
+            List<Event> read = clients.calendar().multigetEvents(transport, account, url, List.of(id));
             return read.isEmpty() ? null : read.get(0).etag;
         } catch (RuntimeException failure) {
             Log.w("pimalaya", "revision of " + id + " not read back", failure);

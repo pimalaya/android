@@ -11,7 +11,7 @@ import java.util.List;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.R;
-import org.pimalaya.client.Cards;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
 
@@ -46,7 +46,7 @@ final class AdvancedEditor {
                     editor.edit().advancedVcard != null
                             ? editor.edit().advancedVcard
                             : editor.edit().vcard;
-            editor.edit().advancedVcard = Cards.applyCard(working, editor.form().collect());
+            editor.edit().advancedVcard = ContactClient.applyCard(working, editor.form().collect());
             render();
         } catch (Exception error) {
             host.showError(error, R.string.contact_open_failed);
@@ -58,7 +58,7 @@ final class AdvancedEditor {
     /** Back to the form, rebuilt from the edited document. */
     void close() {
         try {
-            editor.form().load(Cards.projectCard(editor.edit().advancedVcard), null, null);
+            editor.form().load(ContactClient.projectCard(editor.edit().advancedVcard), null, null);
         } catch (Exception error) {
             host.showError(error, R.string.contact_open_failed);
         }
@@ -70,7 +70,7 @@ final class AdvancedEditor {
         LinearLayout container = host.findViewById(R.id.advanced_container);
         container.removeAllViews();
 
-        org.json.JSONArray props = Cards.cardProps(editor.edit().advancedVcard);
+        org.json.JSONArray props = ContactClient.cardProps(editor.edit().advancedVcard);
         for (int index = 0; props != null && index < props.length(); index++) {
             int at = index;
             JSONObject prop = props.optJSONObject(index);
@@ -368,7 +368,7 @@ final class AdvancedEditor {
     private void buildValueArea(LinearLayout area, String propName, JSONObject prop) {
         List<String> labels = new ArrayList<>();
         try {
-            org.json.JSONArray found = Cards.cardPropLabels(propName.trim());
+            org.json.JSONArray found = ContactClient.cardPropLabels(propName.trim());
             for (int index = 0; found != null && index < found.length(); index++) {
                 labels.add(found.optString(index));
             }
@@ -461,7 +461,7 @@ final class AdvancedEditor {
     private void applyAdvancedParts(int index, JSONObject prop) {
         try {
             editor.edit().advancedVcard =
-                    Cards.cardSetPropParts(editor.edit().advancedVcard, index, prop);
+                    ContactClient.cardSetPropParts(editor.edit().advancedVcard, index, prop);
             editor.edit().advancedDirty = true;
             render();
         } catch (Exception error) {
@@ -473,7 +473,7 @@ final class AdvancedEditor {
     private void applyAdvancedRaw(int index, String line) {
         try {
             editor.edit().advancedVcard =
-                    Cards.cardSetProp(editor.edit().advancedVcard, index, line);
+                    ContactClient.cardSetProp(editor.edit().advancedVcard, index, line);
             editor.edit().advancedDirty = true;
             render();
         } catch (Exception error) {
@@ -491,7 +491,7 @@ final class AdvancedEditor {
     void applySource() {
         try {
             editor.edit().advancedVcard =
-                    Cards.cardSource(
+                    ContactClient.cardSource(
                             ((EditText) host.findViewById(R.id.source_input))
                                     .getText()
                                     .toString());

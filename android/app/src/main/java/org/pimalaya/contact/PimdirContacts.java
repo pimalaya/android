@@ -8,8 +8,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Card;
-import org.pimalaya.client.Cards;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirItems;
@@ -64,7 +64,7 @@ public final class PimdirContacts {
     public PimdirContacts(PimdirDb store) {
         this.store = store;
         this.items = new PimdirItems(store);
-        this.stager = new ContactStager(store, new PimalayaClient());
+        this.stager = new ContactStager(store, Clients.real());
     }
 
     /** One displayable replica: the card plus its summary. */
@@ -427,7 +427,7 @@ public final class PimdirContacts {
     /** The card index, empty on a parse failure rather than a lost save. */
     private static JSONObject indexOf(String vcard) {
         try {
-            return Cards.indexCard(vcard);
+            return ContactClient.indexCard(vcard);
         } catch (Exception error) {
             Log.w("pimalaya", "card index failed", error);
             return new JSONObject();

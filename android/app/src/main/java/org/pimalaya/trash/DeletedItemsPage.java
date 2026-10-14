@@ -277,13 +277,13 @@ public final class DeletedItemsPage {
                         Stager engine;
                         switch (row.kind) {
                             case PimdirSummary.MAIL:
-                                engine = new MailStager(parts.pimdir(), parts.client());
+                                engine = new MailStager(parts.pimdir(), parts.clients());
                                 break;
                             case PimdirSummary.CONTACT:
-                                engine = new ContactStager(parts.pimdir(), parts.client());
+                                engine = new ContactStager(parts.pimdir(), parts.clients());
                                 break;
                             default:
-                                engine = new CalendarStager(parts.pimdir(), parts.client());
+                                engine = new CalendarStager(parts.pimdir(), parts.clients());
                         }
                         store().restore(engine, row, target);
                     } catch (DeletedItems.RefusedException refused) {

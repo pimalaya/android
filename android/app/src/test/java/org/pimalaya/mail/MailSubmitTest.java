@@ -10,8 +10,9 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirDb;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
@@ -37,8 +38,7 @@ public class MailSubmitTest {
         PimdirDb pimdir = new PimdirDb(context);
         store = new MailStore(context, pimdir);
         store.replaceMailboxes(EMAIL, List.of(new Mailbox("INBOX", "")));
-        PimalayaClient client = new PimalayaClient();
-        submit = new MailSubmit(client, store, new MailStager(pimdir, client));
+        submit = new MailSubmit(new MailClient(), store, new MailStager(pimdir, Clients.real()));
     }
 
     @Test

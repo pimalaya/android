@@ -22,11 +22,12 @@ import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventDetail;
 import org.pimalaya.client.EventMerge;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -335,7 +336,7 @@ public final class EventView {
         String ical;
         try {
             ical =
-                    parts.client().newEvent(
+                    CalendarClient.newEvent(
                             EVENT,
                             uid,
                             now(),
@@ -368,7 +369,7 @@ public final class EventView {
         boolean readOnlyBackend = false;
         for (EventStore.StoredCalendar calendar : parts.events().loadCalendars()) {
             byId.put(calendar.id, calendar);
-            readOnlyBackend |= !PimalayaClient.writesEvents(calendar.url);
+            readOnlyBackend |= !AccountClient.writesEvents(calendar.url);
         }
         List<PimdirCollections.Stored> collections =
                 new PimdirCollections(parts.pimdir(), host).list(PimdirSummary.CALENDAR);
@@ -464,7 +465,7 @@ public final class EventView {
             merged =
                     found == null
                             ? null
-                            : parts.client().mergeEvent(found.base, found.local, found.remote);
+                            : CalendarClient.mergeEvent(found.base, found.local, found.remote);
         } catch (Exception error) {
             Log.w("pimalaya", "event merge failed: " + event.id, error);
             host.showError(error, R.string.event_unreadable);
@@ -482,7 +483,7 @@ public final class EventView {
                     () -> {
                         Exception failure = null;
                         try {
-                            new CalendarStager(parts.pimdir(), parts.client())
+                            new CalendarStager(parts.pimdir(), parts.clients())
                                     .mutateEdit(settled.collection, settled.handle, ical, null, "");
                         } catch (Exception error) {
                             Log.w("pimalaya", "event merge failed: " + event.id, error);
@@ -601,7 +602,7 @@ public final class EventView {
 
     /** Whether the calendar's backend takes event writes at all. */
     private boolean writes() {
-        return PimalayaClient.writesEvents(calendar.url);
+        return AccountClient.writesEvents(calendar.url);
     }
 
     /** The component on the page, an event when nothing was read. */
@@ -1423,7 +1424,7 @@ public final class EventView {
      */
     private EventDetail detailOf(EventStore.StoredEvent event) {
         try {
-            return parts.client().readEvent(
+            return CalendarClient.readEvent(
                     event.ical, series() ? occurrence.recurrenceId.time : null);
         } catch (Exception error) {
             Log.w("pimalaya", "event read failed: " + event.id, error);
@@ -1524,7 +1525,7 @@ public final class EventView {
         }
         scope(
                 R.string.event_scope_save,
-                PimalayaClient.writesOverrides(calendar.url),
+                AccountClient.writesOverrides(calendar.url),
                 this::save);
     }
 
@@ -1602,9 +1603,7 @@ public final class EventView {
                 () -> {
                     Exception failure = null;
                     try {
-                        new EventWrites(
-                                        parts.client(),
-                                        new CalendarStager(parts.pimdir(), parts.client()))
+                        new EventWrites(new CalendarStager(parts.pimdir(), parts.clients()))
                                 .save(
                                         new EventWrites.Save(
                                                 scope,
@@ -1665,7 +1664,7 @@ public final class EventView {
         if (!creating && series()) {
             scope(
                     R.string.event_scope_delete,
-                    PimalayaClient.writesExdates(calendar.url),
+                    AccountClient.writesExdates(calendar.url),
                     scope -> {
                         if ("all".equals(scope) && merge != null) {
                             confirmWhole();
@@ -1742,9 +1741,7 @@ public final class EventView {
                 () -> {
                     Exception failure = null;
                     try {
-                        new EventWrites(
-                                        parts.client(),
-                                        new CalendarStager(parts.pimdir(), parts.client()))
+                        new EventWrites(new CalendarStager(parts.pimdir(), parts.clients()))
                                 .delete(scope, edit, target, collection, settling, chosen);
                     } catch (Exception error) {
                         Log.w("pimalaya", "event delete failed: " + target.id, error);

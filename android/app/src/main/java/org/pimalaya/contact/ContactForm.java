@@ -23,7 +23,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.R;
-import org.pimalaya.client.Cards;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.ui.Sections;
 import org.pimalaya.ui.Ui;
 
@@ -451,7 +451,7 @@ public final class ContactForm {
 
     /** Rebuilds the whole page from the working model. */
     private void render() {
-        view = Cards.formView(model);
+        view = ContactClient.formView(model);
         container.removeAllViews();
         pending.clear();
 

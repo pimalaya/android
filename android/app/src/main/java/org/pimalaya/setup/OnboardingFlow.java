@@ -401,7 +401,10 @@ public final class OnboardingFlow {
                         try {
                             List<ServiceConfig> hits;
                             try (Transport transport = new Transport()) {
-                                hits = parts.client().searchProvider(transport, pendingEmail, null);
+                                hits =
+                                        parts.clients()
+                                                .account()
+                                                .searchProvider(transport, pendingEmail, null);
                             }
                             provider = hits.isEmpty() ? null : hits.get(0).source;
                         } catch (Exception error) {
@@ -418,7 +421,7 @@ public final class OnboardingFlow {
                     List<ServiceConfig> configs = new ArrayList<>();
                     Exception failure = null;
                     try {
-                        configs = parts.client().searchAll(pendingEmail, null);
+                        configs = parts.clients().account().searchAll(pendingEmail, null);
                     } catch (Exception error) {
                         // NOTE: individual failing mechanisms are skipped
                         // inside the search; this is the whole search
@@ -2153,7 +2156,7 @@ public final class OnboardingFlow {
                     try (Transport transport = new Transport()) {
                         served =
                                 PimDomain.servedByJmap(
-                                        parts.client().jmapCapabilities(transport, session));
+                                        parts.clients().contact().jmapCapabilities(transport, session));
                     } catch (Exception error) {
                         // NOTE: unread rather than refused: the grant stands,
                         // and the first sync says what the session cannot do.
@@ -2305,7 +2308,7 @@ public final class OnboardingFlow {
             if (PimalayaClient.isJmap(account)) {
                 Set<String> capabilities;
                 try (Transport transport = new Transport()) {
-                    capabilities = parts.client().jmapCapabilities(transport, account);
+                    capabilities = parts.clients().contact().jmapCapabilities(transport, account);
                 }
                 if (!PimDomain.servedByJmap(capabilities).contains(domain)) {
                     return new NotServed(notServed(List.of(domain)));
@@ -2319,12 +2322,12 @@ public final class OnboardingFlow {
                     }
                 case CONTACTS:
                     try (Transport transport = new Transport()) {
-                        parts.client().listAddressbooks(transport, account);
+                        parts.clients().contact().listAddressbooks(transport, account);
                     }
                     return null;
                 default:
                     try (Transport transport = new Transport()) {
-                        parts.client().listCalendars(transport, account);
+                        parts.clients().calendar().listCalendars(transport, account);
                     }
                     return null;
             }
@@ -2548,7 +2551,8 @@ public final class OnboardingFlow {
                         List<Addressbook> fetched = null;
                         if (contacts != null) {
                             try (Transport transport = new Transport()) {
-                                fetched = parts.client().listAddressbooks(transport, contacts);
+                                fetched =
+                                        parts.clients().contact().listAddressbooks(transport, contacts);
                             }
                         }
                         // NOTE: one provider query each, the permissions

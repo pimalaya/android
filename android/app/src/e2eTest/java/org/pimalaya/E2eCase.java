@@ -144,7 +144,7 @@ public abstract class E2eCase {
         E2eDevice.network(RuntimeEnvironment.getApplication(), E2eDevice.Network.WIFI);
         phone = new E2eDevice(RuntimeEnvironment.getApplication(), "phone");
         phone.tag = tag;
-        account = target.account(phone.client);
+        account = target.account(phone.clients.account());
     }
 
     @After
@@ -224,7 +224,7 @@ public abstract class E2eCase {
         if (observer == null) {
             observer = new E2eDevice(RuntimeEnvironment.getApplication(), "observer");
             observer.tag = tag;
-            Exception failure = observer.connect(target.account(observer.client));
+            Exception failure = observer.connect(target.account(observer.clients.account()));
             if (failure != null) {
                 throw new AssertionError(
                         "the observer's first sync failed: " + failure.getMessage(), failure);

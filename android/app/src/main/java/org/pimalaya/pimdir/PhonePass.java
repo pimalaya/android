@@ -5,7 +5,7 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -26,8 +26,8 @@ public abstract class PhonePass extends PimdirEngine {
     /** Whether a phone pass of this driver wrote anything into the store. */
     private boolean ingested;
 
-    protected PhonePass(PimdirDb pimdir, PimalayaClient client, PhoneSpoke spoke, String kind) {
-        super(pimdir, client);
+    protected PhonePass(PimdirDb pimdir, Clients clients, PhoneSpoke spoke, String kind) {
+        super(pimdir, clients);
         this.spoke = spoke;
         this.kind = kind;
     }
@@ -58,11 +58,14 @@ public abstract class PhonePass extends PimdirEngine {
             step(Progress.STAGE_PHONE, 0);
             Log.d(
                     "pimalaya",
-                    "phone sync " + hub + ": " + client.offlineSync(this, collection, false));
+                    "phone sync "
+                            + hub
+                            + ": "
+                            + clients.offline().offlineSync(this, collection, false));
             hydrate(collection);
 
             if (settle(collection)) {
-                client.offlineSync(this, collection, false);
+                clients.offline().offlineSync(this, collection, false);
                 hydrate(collection);
             }
         } finally {

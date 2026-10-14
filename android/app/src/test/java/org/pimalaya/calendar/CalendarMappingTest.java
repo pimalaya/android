@@ -23,7 +23,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.calendar.CalendarMapping.Row;
 import org.pimalaya.calendar.CalendarMapping.Write;
-import org.pimalaya.client.EventViews;
+import org.pimalaya.client.CalendarClient;
 import org.robolectric.RobolectricTestRunner;
 
 /**
@@ -49,7 +49,7 @@ public class CalendarMappingTest {
     }
 
     private static JSONObject view(String ical) {
-        return EventViews.projectEvent(ical, NOW);
+        return CalendarClient.projectEvent(ical, NOW);
     }
 
     private static List<Row> rows(String ical) throws Exception {
@@ -90,7 +90,7 @@ public class CalendarMappingTest {
             zones.put(zone);
         }
         edit.put("vtimezones", zones);
-        return EventViews.applyEvent(ical, edit);
+        return CalendarClient.applyEvent(ical, edit);
     }
 
     private static long at(String local, ZoneId zone) {

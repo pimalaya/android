@@ -16,8 +16,8 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -103,7 +103,7 @@ public class GraphStepTest {
         final List<Set<String>> heldOf = new ArrayList<>();
 
         Server() {
-            super(pimdir, new PimalayaClient(), null, accountId);
+            super(pimdir, Clients.real(), null, accountId);
         }
 
         @Override

@@ -9,6 +9,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.Zones;
+import org.pimalaya.client.CalendarClient;
 import org.robolectric.ParameterizedRobolectricTestRunner;
 
 import java.time.ZoneOffset;
@@ -72,7 +73,7 @@ public class E2eCalendarTest extends E2eCase {
 
         EventStore.StoredEvent created = phone.events(calendar.id, subject("created")).get(0);
         String edited =
-                phone.client.writeEvent(
+                CalendarClient.writeEvent(
                         created.ical,
                         new JSONObject()
                                 .put("summary", subject("edited"))

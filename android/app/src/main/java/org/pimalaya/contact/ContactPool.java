@@ -9,9 +9,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
-import org.pimalaya.client.Cards;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.ContactClient;
 
 /**
  * The merged contacts pool behind the list (docs/merged-view.md): the
@@ -73,7 +73,7 @@ public final class ContactPool {
         } catch (JSONException error) {
             throw new IllegalStateException(error);
         }
-        JSONArray grouped = Cards.groupContacts(pool).optJSONArray("groups");
+        JSONArray grouped = ContactClient.groupContacts(pool).optJSONArray("groups");
 
         List<Group> groups = new ArrayList<>();
         for (int at = 0; grouped != null && at < grouped.length(); at++) {
@@ -108,7 +108,7 @@ public final class ContactPool {
      * per-collection ones.
      */
     private static String cardKey(Account account, String bookUrl, String id) {
-        return PimalayaClient.isAccountLevel(account) ? id : CardStore.key(bookUrl, id);
+        return AccountClient.isAccountLevel(account) ? id : CardStore.key(bookUrl, id);
     }
 
     private static String replicaRef(Entry entry, List<AccountEntry> accounts) {

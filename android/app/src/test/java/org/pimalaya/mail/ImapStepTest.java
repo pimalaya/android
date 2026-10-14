@@ -19,9 +19,9 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaException;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -94,7 +94,7 @@ public class ImapStepTest {
         final Map<String, Integer> refused = new HashMap<>();
 
         Server() {
-            super(pimdir, new PimalayaClient(), null, accountId);
+            super(pimdir, Clients.real(), null, accountId);
         }
 
         Server mailbox(String collection, int size, int spacing) {

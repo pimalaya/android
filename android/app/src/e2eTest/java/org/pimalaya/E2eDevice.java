@@ -18,8 +18,8 @@ import org.pimalaya.account.SecureStore;
 import org.pimalaya.account.SyncScope;
 import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.calendar.EventStore;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.MailSession;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.PimdirContacts;
@@ -74,7 +74,7 @@ final class E2eDevice {
     final FileStore files;
     final EventStore events;
     final CardStore cards;
-    final PimalayaClient client = new PimalayaClient();
+    final Clients clients = Clients.real();
     final Accounts accounts;
     final SyncPasses passes;
 
@@ -92,7 +92,7 @@ final class E2eDevice {
         passes =
                 new SyncPasses(
                         context,
-                        new SyncPasses.Parts(pimdir, cards, accounts, mail, events, client),
+                        new SyncPasses.Parts(pimdir, cards, accounts, mail, events, clients),
                         SyncPasses.HEADLESS);
     }
 
@@ -289,7 +289,7 @@ final class E2eDevice {
 
     /** A calendar driver that only stages, as the event editor's is. */
     CalendarStager calendarStager(String email) {
-        return new CalendarStager(pimdir, client);
+        return new CalendarStager(pimdir, clients);
     }
 
     /** A scope taking one account whole. */
@@ -404,16 +404,19 @@ final class E2eDevice {
 
     /** A driver that only stages, as the reader's and the composer's are. */
     MailStager stager(String email) {
-        return new MailStager(pimdir, client);
+        return new MailStager(pimdir, clients);
     }
 
     MailReader reader(String email) {
         return new MailReader(
-                mail, files, client, new MailEngine(pimdir, client, null, mail.accountIdOf(email)));
+                mail,
+                files,
+                clients.mail(),
+                new MailEngine(pimdir, clients, null, mail.accountIdOf(email)));
     }
 
     MailSubmit submitter(String email) {
-        return new MailSubmit(client, mail, stager(email));
+        return new MailSubmit(clients.mail(), mail, stager(email));
     }
 
     /** The account as the roster holds it now. */

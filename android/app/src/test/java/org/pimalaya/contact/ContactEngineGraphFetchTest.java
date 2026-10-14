@@ -13,10 +13,15 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Addressbook;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardDelta;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -40,7 +45,7 @@ public class ContactEngineGraphFetchTest {
     private PimdirDb pimdir;
 
     /** A Graph folder, counting how its bodies were asked for. */
-    private static final class Graph extends PimalayaClient {
+    private static final class Graph extends ContactClient {
         /** What each batched read asked for, in order. */
         final List<List<String>> batched = new ArrayList<>();
 
@@ -111,7 +116,14 @@ public class ContactEngineGraphFetchTest {
     }
 
     private ContactEngine engine(Graph graph) {
-        return new ContactEngine(store, pimdir, graph, null, account);
+        return new ContactEngine(
+                store,
+                pimdir,
+                new Clients(
+                        new AccountClient(), graph, new CalendarClient(), new MailClient(),
+                        new OfflineClient()),
+                null,
+                account);
     }
 
     private static List<String> handles(JSONArray items) throws Exception {

@@ -1,6 +1,6 @@
 package org.pimalaya.calendar;
 
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -11,8 +11,8 @@ public final class CalendarStager extends Stager {
     /** The store, for the phone queue its writes reach. */
     private final PimdirDb pimdir;
 
-    public CalendarStager(PimdirDb pimdir, PimalayaClient client) {
-        super(pimdir, client);
+    public CalendarStager(PimdirDb pimdir, Clients clients) {
+        super(pimdir, clients);
         this.pimdir = pimdir;
     }
 

@@ -15,8 +15,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.R;
-import org.pimalaya.client.Cards;
 import org.pimalaya.client.Card;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.ui.Host;
 
 /**
@@ -66,7 +66,7 @@ final class DuplicateReview {
                     List<Entry> first = null;
                     Exception failure = null;
                     try {
-                        JSONArray found = Cards.findDuplicates(cards);
+                        JSONArray found = ContactClient.findDuplicates(cards);
                         for (int index = 0; found != null && index < found.length(); index++) {
                             JSONArray refs = found.optJSONObject(index).optJSONArray("refs");
                             List<Entry> members = new ArrayList<>();
@@ -205,7 +205,7 @@ final class DuplicateReview {
         } catch (JSONException error) {
             throw new IllegalStateException(error);
         }
-        return Cards.duplicateGroup(refs);
+        return ContactClient.duplicateGroup(refs);
     }
 
     /**
@@ -230,7 +230,7 @@ final class DuplicateReview {
                 if (!staged.add(parts.pool().replicaRef(entry)) || uid.equals(entry.uid)) {
                     continue;
                 }
-                String vcard = Cards.setCardUid(entry.card.vcard, uid);
+                String vcard = ContactClient.setCardUid(entry.card.vcard, uid);
                 parts.contacts().save(
                         entry.book.url,
                         new Card(entry.card.id, entry.card.uri, entry.card.etag, vcard));

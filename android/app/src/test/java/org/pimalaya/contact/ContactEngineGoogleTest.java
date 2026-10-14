@@ -13,10 +13,15 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Addressbook;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardDelta;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -43,7 +48,7 @@ public class ContactEngineGoogleTest {
     private PimdirDb pimdir;
 
     /** A People account, counting how it was asked. */
-    private static final class People extends PimalayaClient {
+    private static final class People extends ContactClient {
         /** The cursor of each People round, in order. */
         final List<String> rounds = new ArrayList<>();
 
@@ -109,7 +114,14 @@ public class ContactEngineGoogleTest {
     }
 
     private ContactEngine engine(People people) {
-        return new ContactEngine(store, pimdir, people, null, account);
+        return new ContactEngine(
+                store,
+                pimdir,
+                new Clients(
+                        new AccountClient(), people, new CalendarClient(), new MailClient(),
+                        new OfflineClient()),
+                null,
+                account);
     }
 
     private static JSONObject enumerate(ContactEngine engine, String book, String cursor)

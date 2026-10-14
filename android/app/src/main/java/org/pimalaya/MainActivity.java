@@ -35,7 +35,7 @@ import org.pimalaya.calendar.CalendarList;
 import org.pimalaya.calendar.CalendarParts;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.EventView;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.ContactEditor;
 import org.pimalaya.contact.ContactForm;
@@ -117,8 +117,8 @@ public class MainActivity extends Host
     private static final int REQUEST_MIRRORS = 1;
     private static final int REQUEST_NOTIFICATIONS = 4;
 
-    /** The shared backend client. */
-    public final PimalayaClient client = new PimalayaClient();
+    /** The shared backend clients. */
+    public final Clients clients = Clients.real();
 
     SecureStore store;
     CardStore base;
@@ -237,12 +237,12 @@ public class MainActivity extends Host
         // NOTE: the coordinator before the screens, which take it; it
         // touches none of them while built (the dock is read later).
         SyncPasses.Parts syncParts =
-                new SyncPasses.Parts(pimdir, base, store, mail, events, client);
+                new SyncPasses.Parts(pimdir, base, store, mail, events, clients);
         sync = new SyncCoordinator(this, syncParts, this);
         passes = sync.passes();
         pool = new ContactPool(base, contacts, accounts);
         ContactParts contactParts =
-                new ContactParts(pimdir, base, contacts, pool, client, accounts);
+                new ContactParts(pimdir, base, contacts, pool, clients, accounts);
         form = new ContactForm(this);
         editor = new ContactEditor(this, contactParts, form, this::reloadContacts);
         contactsList = new ContactsList(this, contactParts, editor, this::syncContacts);
@@ -252,13 +252,13 @@ public class MainActivity extends Host
         linked = new LinkedSection(this, links, mail, this);
         // NOTE: the entry page shows the Linked card, so it is built after
         // it; the agenda binds itself into the page it opens rows onto.
-        CalendarParts calendarParts = new CalendarParts(pimdir, client, events);
+        CalendarParts calendarParts = new CalendarParts(pimdir, clients, events);
         eventView = new EventView(this, calendarParts, linked);
         calendarList = new CalendarList(this, calendarParts, eventView, this::syncCalendars);
         // NOTE: the reader shows the Linked card and offers the file
         // actions, so it is built after both; the list and the composer
         // bind themselves into it.
-        MailParts mailParts = new MailParts(pimdir, client, mail, files, links, store);
+        MailParts mailParts = new MailParts(pimdir, clients, mail, files, links, store);
         messageView = new MessageView(this, mailParts, sync, fileActions, linked);
         mailList = new MailList(this, mail, sync, messageView);
         compose = new MessageCompose(this, mailParts, messageView, mailList);
@@ -280,7 +280,7 @@ public class MainActivity extends Host
         deletedPage = new DeletedItemsPage(this, syncParts, passes, accounts, this::reload);
         // NOTE: the two flows reference each other (grants land back in
         // the wizard), so one side binds late.
-        oauth = new OauthFlow(this, client, this);
+        oauth = new OauthFlow(this, clients.account(), this);
         onboarding = new OnboardingFlow(this, syncParts, accounts, sync, this, oauth);
         oauth.onConnected = onboarding::connect;
         oauth.onAborted = onboarding::grantAborted;

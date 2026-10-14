@@ -7,9 +7,9 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
-import org.pimalaya.client.PimalayaClient;
 import org.robolectric.RobolectricTestRunner;
 
 import java.time.Duration;
@@ -176,7 +176,6 @@ public class ZonesTest {
         // it an hour and a day either side of each of its changes over two
         // years, and at noon each month, are placed at the offset java.time
         // gives, so a rule landing a day or an hour off shows.
-        PimalayaClient client = new PimalayaClient();
         Instant since = Instant.parse("2026-01-01T00:00:00Z");
         Instant until = Instant.parse("2028-01-01T00:00:00Z");
 
@@ -202,7 +201,7 @@ public class ZonesTest {
             }
 
             String ical =
-                    client.newEvent(
+                    CalendarClient.newEvent(
                             "VEVENT",
                             "z",
                             "20260101T000000Z",
@@ -216,7 +215,7 @@ public class ZonesTest {
                                     + dates + "\r\n");
 
             List<Occurrence> found =
-                    client.expandEvent(series, "20250101T000000", "20290101T000000");
+                    CalendarClient.expandEvent(series, "20250101T000000", "20290101T000000");
             assertTrue(id, found.size() > samples.size() / 2);
             for (Occurrence occurrence : found) {
                 LocalDateTime local = Zones.civil(occurrence.start.time);

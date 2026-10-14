@@ -13,6 +13,7 @@ import org.json.JSONArray;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -595,7 +596,7 @@ public class MailStoreTest {
 
         // A flag change staged and not pushed yet owes the server something,
         // so a collection leaves it.
-        MailStager engine = new MailStager(pimdir, new org.pimalaya.client.PimalayaClient());
+        MailStager engine = new MailStager(pimdir, Clients.real());
         String collection = store.collectionOf(ONE, "INBOX");
         engine.mutateFlags(collection, "kept", new JSONArray().put(MailEngine.FLAGGED));
 

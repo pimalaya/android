@@ -11,9 +11,9 @@ import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.account.Oauth;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.OauthSession;
 import org.pimalaya.client.OauthTokens;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.Transport;
 import org.pimalaya.client.ServerMetadata;
 import org.pimalaya.ui.Host;
@@ -44,7 +44,7 @@ public final class OauthFlow {
     }
 
     private final Host host;
-    private final PimalayaClient client;
+    private final AccountClient client;
     private final SetupShell shell;
 
     /** The in-flight grant as persisted, sealed across the browser hop. */
@@ -91,7 +91,7 @@ public final class OauthFlow {
     /** The loopback redirect listener, closed with the activity. */
     private java.net.ServerSocket loopbackServer;
 
-    public OauthFlow(Host host, PimalayaClient client, SetupShell shell) {
+    public OauthFlow(Host host, AccountClient client, SetupShell shell) {
         this.host = host;
         this.client = client;
         this.shell = shell;

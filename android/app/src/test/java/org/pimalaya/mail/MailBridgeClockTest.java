@@ -11,6 +11,7 @@ import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirDb;
@@ -94,7 +95,7 @@ public class MailBridgeClockTest {
         }
 
         PimdirEngine remote =
-                new PimdirEngine(pimdir, new PimalayaClient()) {
+                new PimdirEngine(pimdir, Clients.real()) {
                     @Override
                     protected PimDomain domain() {
                         return PimDomain.MAIL;

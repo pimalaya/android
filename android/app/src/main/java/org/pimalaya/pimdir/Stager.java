@@ -5,8 +5,8 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.OfflineDriver;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimalayaException;
 
 import java.nio.charset.StandardCharsets;
@@ -17,14 +17,14 @@ public abstract class Stager implements OfflineDriver {
     /** The pimdir store's engine seam (placements, writes, conflicts). */
     public final PimdirStorage offline;
 
-    protected final PimalayaClient client;
+    protected final Clients clients;
 
     /** The store's locks ({@link PimdirDb#locks}): its one writer guards every storage yield. */
     public final Locks locks;
 
-    protected Stager(PimdirDb pimdir, PimalayaClient client) {
+    protected Stager(PimdirDb pimdir, Clients clients) {
         this.offline = new PimdirStorage(pimdir);
-        this.client = client;
+        this.clients = clients;
         this.locks = pimdir.locks();
     }
 
@@ -326,7 +326,7 @@ public abstract class Stager implements OfflineDriver {
 
     /** Stages one mutation through the engine, then tells the driver. */
     private void mutate(String collection, JSONObject mutation) {
-        client.offlineMutate(this, collection, mutation);
+        clients.offline().offlineMutate(this, collection, mutation);
         staged(collection);
     }
 

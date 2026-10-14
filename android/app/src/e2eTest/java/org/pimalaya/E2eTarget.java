@@ -5,7 +5,7 @@ import org.pimalaya.account.AccountCredential;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.Endpoints;
 import org.pimalaya.account.PimDomain;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.ServiceConfig;
 
 import java.util.ArrayList;
@@ -251,7 +251,7 @@ final class E2eTarget {
      * the domain's endpoint (and mail's submission) derived by the flow's own
      * rules, the user put in a mail URL for a token, a fresh credential.
      */
-    AccountEntry account(PimalayaClient client) throws Exception {
+    AccountEntry account(AccountClient client) throws Exception {
         List<ServiceConfig> configs;
         synchronized (DISCOVERED) {
             configs = DISCOVERED.get(address);

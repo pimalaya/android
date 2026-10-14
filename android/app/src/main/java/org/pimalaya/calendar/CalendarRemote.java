@@ -36,8 +36,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.calendar.CalendarMapping.Row;
 import org.pimalaya.calendar.CalendarMapping.Write;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventTime;
-import org.pimalaya.client.EventViews;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
@@ -462,12 +462,12 @@ final class CalendarRemote implements PhoneSpoke {
 
         String base = phoneBase(collection, handle);
         JSONObject view =
-                base.isEmpty() ? new JSONObject() : EventViews.projectEvent(base, now());
+                base.isEmpty() ? new JSONObject() : CalendarClient.projectEvent(base, now());
         CalendarMapping.Phone phone = phone(target, handle);
 
         boolean revert = !target.writable || CalendarMapping.reverts(view, live, phone);
         JSONObject merged = target.writable ? CalendarMapping.merge(view, live, phone) : null;
-        String body = merged == null ? base : EventViews.applyEvent(base, edit(merged, target));
+        String body = merged == null ? base : CalendarClient.applyEvent(base, edit(merged, target));
         if (merged != null) {
             Log.d("pimalaya", "phone edit on " + handle);
         }
@@ -652,7 +652,7 @@ final class CalendarRemote implements PhoneSpoke {
      */
     private boolean write(Target target, String handle, String body, List<Row> observed)
             throws JSONException {
-        JSONObject view = EventViews.projectEvent(body, now());
+        JSONObject view = CalendarClient.projectEvent(body, now());
         List<Row> desired = CalendarMapping.rows(view, phone(target, handle));
         String token = PimdirHash.of(body);
         String projected = projected(body);
@@ -973,7 +973,7 @@ final class CalendarRemote implements PhoneSpoke {
         if (body.isEmpty()) {
             return null;
         }
-        JSONObject view = EventViews.projectEvent(body, now());
+        JSONObject view = CalendarClient.projectEvent(body, now());
         StringBuilder out = new StringBuilder();
         if (view.toString().contains("\"kind\":\"" + EventTime.FLOATING + "\"")) {
             out.append("zone=").append(ZoneId.systemDefault().getId());

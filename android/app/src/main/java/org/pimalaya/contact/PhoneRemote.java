@@ -24,7 +24,7 @@ import java.util.function.IntConsumer;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.client.Cards;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PhoneSpoke;
@@ -265,14 +265,14 @@ final class PhoneRemote implements PhoneSpoke {
         }
 
         String baseVcard = phoneBase(collection, handle);
-        JSONObject baseModel = Cards.projectCard(baseVcard);
+        JSONObject baseModel = ContactClient.projectCard(baseVcard);
         JSONObject phoneModel = Mapping.model(dataRows(resolver, account, rawId));
         JSONObject merged = Mapping.merge(baseModel, phoneModel);
 
         // NOTE: no field taken means no edit, so ride the base back byte
         // for byte; re-encoding a no-op canonicalizes bytes and the
         // hash-diffing engine would read it as a phone edit and cascade.
-        String body = merged == null ? baseVcard : Cards.applyCard(baseVcard, merged);
+        String body = merged == null ? baseVcard : ContactClient.applyCard(baseVcard, merged);
         if (merged != null) {
             // NOTE: log which fields the phone won, to explain a phone-won
             // hub change when hunting phantom edits.
@@ -300,7 +300,7 @@ final class PhoneRemote implements PhoneSpoke {
             revision = revisionOf(heldToken, dirty, version);
         }
 
-        JSONObject index = Cards.indexCard(body);
+        JSONObject index = ContactClient.indexCard(body);
         String uid = index.optString("uid");
 
         JSONObject item = new JSONObject();
@@ -374,7 +374,7 @@ final class PhoneRemote implements PhoneSpoke {
             return result(handle, false, null, null);
         }
         String vcard = row.getString("vcard");
-        JSONObject model = Cards.projectCard(vcard);
+        JSONObject model = ContactClient.projectCard(vcard);
 
         // The phone's handle namespace is this app's own: it writes the
         // sourceid. So a staged create lands under the name behind its
@@ -414,7 +414,7 @@ final class PhoneRemote implements PhoneSpoke {
         }
 
         String vcard = row.getString("vcard");
-        rewrite(resolver, account, rawId, Cards.projectCard(vcard));
+        rewrite(resolver, account, rawId, ContactClient.projectCard(vcard));
         return result(handle, true, null, stampRevision(resolver, account, rawId, vcard));
     }
 

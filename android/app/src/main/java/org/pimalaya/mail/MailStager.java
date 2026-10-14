@@ -2,7 +2,7 @@ package org.pimalaya.mail;
 
 import org.json.JSONArray;
 import org.json.JSONException;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.Stager;
@@ -12,8 +12,8 @@ public final class MailStager extends Stager {
     /** The store, for the messages a staging reads and the list a write is told to. */
     private final PimdirDb pimdir;
 
-    public MailStager(PimdirDb pimdir, PimalayaClient client) {
-        super(pimdir, client);
+    public MailStager(PimdirDb pimdir, Clients clients) {
+        super(pimdir, clients);
         this.pimdir = pimdir;
     }
 

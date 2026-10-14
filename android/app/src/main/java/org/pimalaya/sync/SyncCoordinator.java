@@ -15,8 +15,8 @@ import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SyncScope;
 import org.pimalaya.calendar.CalendarRows;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.MailSession;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.contact.ContactPhonePass;
@@ -82,7 +82,7 @@ public final class SyncCoordinator implements MailSync {
 
     private final MailStore mail;
 
-    private final PimalayaClient client;
+    private final Clients clients;
 
     /** The dock's model of a pass, which the passes report into. */
     private final SyncProgress progress;
@@ -138,7 +138,7 @@ public final class SyncCoordinator implements MailSync {
         this.screens = screens;
         this.pimdir = parts.pimdir();
         this.mail = parts.mail();
-        this.client = parts.client();
+        this.clients = parts.clients();
         progress =
                 new SyncProgress(
                         host,
@@ -935,7 +935,7 @@ public final class SyncCoordinator implements MailSync {
                         "mail pass bodies " + account.email,
                         keys,
                         (session, key, remote) -> {
-                            MailEngine engine = new MailEngine(pimdir, client, session, accountId);
+                            MailEngine engine = new MailEngine(pimdir, clients, session, accountId);
                             engine.tally = bodiesTally;
                             try {
                                 List<MailBodies.Row> job = jobs.get(key);
@@ -986,7 +986,7 @@ public final class SyncCoordinator implements MailSync {
                                     entry.getValue(),
                                     (session, collection, remote) -> {
                                         MailEngine engine =
-                                                new MailEngine(pimdir, client, session, accountId);
+                                                new MailEngine(pimdir, clients, session, accountId);
                                         try {
                                             step.run(engine, collection);
                                         } finally {
@@ -1348,7 +1348,7 @@ public final class SyncCoordinator implements MailSync {
                 () -> {
                     try {
                         Accounts.reconcile(host, BookEntry.accounts(passes.phoneSyncedBooks()));
-                        ContactPhonePass engine = new ContactPhonePass(pimdir, client);
+                        ContactPhonePass engine = new ContactPhonePass(pimdir, clients);
                         engine.progress =
                                 new PimdirEngine.Progress() {
                                     @Override
@@ -1406,7 +1406,7 @@ public final class SyncCoordinator implements MailSync {
         host.io.execute(
                 () -> {
                     try {
-                        new ContactPhonePass(pimdir, client)
+                        new ContactPhonePass(pimdir, clients)
                                 .sync(url, new ContactEngine.Report());
                     } catch (Exception error) {
                         Log.w("pimalaya", "last phone pass failed for " + url, error);

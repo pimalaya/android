@@ -13,7 +13,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -51,12 +51,12 @@ public class PimdirEngineTest {
         /** Every handle the merge asked to read, in order, across rounds. */
         final List<String> fetched = new ArrayList<>();
 
-        Remote(PimdirDb pimdir, PimalayaClient client) {
-            super(pimdir, client);
+        Remote(PimdirDb pimdir, Clients clients) {
+            super(pimdir, clients);
         }
 
         void sync(String collection) {
-            client.offlineSync(this, collection, false);
+            clients.offline().offlineSync(this, collection, false);
             hydrate(collection);
         }
 
@@ -130,7 +130,7 @@ public class PimdirEngineTest {
                         "INSERT INTO collections(id, account, kind, name)"
                                 + " VALUES('acct/Work', 'acct', 'text/calendar', 'Work')");
 
-        engine = new Remote(pimdir, new PimalayaClient());
+        engine = new Remote(pimdir, Clients.real());
         engine.members.put("ev-1.ics", new String[] {"etag-1", BODY});
         engine.sync(COLLECTION);
     }

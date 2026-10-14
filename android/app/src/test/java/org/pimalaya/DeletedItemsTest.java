@@ -19,8 +19,8 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Card;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.ContactStager;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.mail.MailEngine;
@@ -72,7 +72,7 @@ public class DeletedItemsTest {
     }
 
     private ContactStager engine() {
-        return new ContactStager(pimdir, new PimalayaClient());
+        return new ContactStager(pimdir, Clients.real());
     }
 
     private static String vcard(String uid, String name) {
@@ -232,7 +232,7 @@ public class DeletedItemsTest {
     }
 
     private MailStager mailEngine() {
-        return new MailStager(pimdir, new PimalayaClient());
+        return new MailStager(pimdir, Clients.real());
     }
 
     /** Files one message bound and agreed, then has its server delete it. */

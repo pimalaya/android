@@ -13,7 +13,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Calendar;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
@@ -55,7 +55,7 @@ public class CalendarTriageTest {
         engine =
                 new CalendarEngine(
                         pimdir,
-                        new PimalayaClient(),
+                        Clients.real(),
                         null,
                         null,
                         new PimdirAccount(context).idOf(EMAIL),

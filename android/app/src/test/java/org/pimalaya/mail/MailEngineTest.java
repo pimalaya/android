@@ -15,6 +15,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirDb;
@@ -56,7 +57,7 @@ public class MailEngineTest {
 
         // No account: the shape a driver that only stages runs with, which
         // is every action in the reader and the composer.
-        engine = new MailStager(pimdir, new PimalayaClient());
+        engine = new MailStager(pimdir, Clients.real());
 
         // One message the sync has already reconciled: bound, and agreed at
         // a flag set the server also holds.
@@ -170,7 +171,7 @@ public class MailEngineTest {
 
         List<String> pushed = new ArrayList<>();
         PimdirEngine remote =
-                new PimdirEngine(pimdir, new PimalayaClient()) {
+                new PimdirEngine(pimdir, Clients.real()) {
                     @Override
                     protected PimDomain domain() {
                         return PimDomain.MAIL;
@@ -269,7 +270,7 @@ public class MailEngineTest {
         List<JSONObject> asked = new ArrayList<>();
         boolean[] cut = {true};
         PimdirEngine remote =
-                new PimdirEngine(pimdir, new PimalayaClient()) {
+                new PimdirEngine(pimdir, Clients.real()) {
                     @Override
                     protected PimDomain domain() {
                         return PimDomain.MAIL;

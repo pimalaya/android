@@ -24,7 +24,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.R;
-import org.pimalaya.client.Cards;
+import org.pimalaya.client.ContactClient;
 
 /**
  * The per-property edit dialogs behind the contact form: one label-free
@@ -178,7 +178,7 @@ final class ContactFieldDialogs {
                                 phones,
                                 index,
                                 host.text(number),
-                                Cards.formEntry(
+                                ContactClient.formEntry(
                                         "phone",
                                         type.getSelectedItemPosition(),
                                         host.text(number),
@@ -207,7 +207,7 @@ final class ContactFieldDialogs {
                                 emails,
                                 index,
                                 host.text(address),
-                                Cards.formEntry(
+                                ContactClient.formEntry(
                                         "email",
                                         type.getSelectedItemPosition(),
                                         host.text(address),
@@ -264,7 +264,7 @@ final class ContactFieldDialogs {
                                         .put("pref", safe.optBoolean("pref"))
                                         .put(
                                                 "types",
-                                                Cards.formEntry(
+                                                ContactClient.formEntry(
                                                                 "address",
                                                                 type.getCheckedRadioButtonId() - 1,
                                                                 "",
@@ -361,7 +361,7 @@ final class ContactFieldDialogs {
                                 relations,
                                 index,
                                 host.text(value),
-                                Cards.formEntry(
+                                ContactClient.formEntry(
                                         "relation",
                                         type.getSelectedItemPosition(),
                                         host.text(value),
@@ -400,7 +400,7 @@ final class ContactFieldDialogs {
                             host.model.put(
                                     "gender",
                                     position > 0
-                                            ? Cards.formEntry("gender", position, "", false)
+                                            ? ContactClient.formEntry("gender", position, "", false)
                                             : new JSONObject().put("sex", "").put("identity", value));
                             host.revealed.add("gender");
                         }
@@ -455,7 +455,7 @@ final class ContactFieldDialogs {
                         host.activity,
                         (picker, year, month, day) -> {
                             try {
-                                host.model.put(field, Cards.formDate(year, month + 1, day));
+                                host.model.put(field, ContactClient.formDate(year, month + 1, day));
                                 host.revealed.add(field);
                             } catch (JSONException error) {
                                 throw new IllegalStateException(error);

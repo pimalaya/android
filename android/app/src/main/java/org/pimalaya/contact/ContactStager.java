@@ -2,8 +2,8 @@ package org.pimalaya.contact;
 
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.client.Cards;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.Stager;
@@ -13,8 +13,8 @@ public final class ContactStager extends Stager {
     /** The store, for the phone queue its writes reach. */
     private final PimdirDb pimdir;
 
-    public ContactStager(PimdirDb pimdir, PimalayaClient client) {
-        super(pimdir, client);
+    public ContactStager(PimdirDb pimdir, Clients clients) {
+        super(pimdir, clients);
         this.pimdir = pimdir;
     }
 
@@ -32,7 +32,7 @@ public final class ContactStager extends Stager {
 
     /** {@link #edit} on any driver: a pass stages its own conflict resolutions. */
     static void edit(Stager on, String url, String handle, String vcard) throws JSONException {
-        JSONObject index = Cards.indexCard(vcard);
+        JSONObject index = ContactClient.indexCard(vcard);
         on.mutateEdit(
                 url,
                 handle,

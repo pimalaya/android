@@ -14,11 +14,16 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Calendar;
+import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Event;
 import org.pimalaya.client.EventDelta;
 import org.pimalaya.client.EventRef;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
@@ -108,7 +113,7 @@ public class CalendarPoolTest {
     }
 
     /** A calendar server whose requests each take {@link #LATENCY_MS}. */
-    private final class Server extends PimalayaClient {
+    private final class Server extends CalendarClient {
         /** Each calendar's events by id, as (revision, body). */
         final Map<String, Map<String, String[]>> calendars = new LinkedHashMap<>();
 
@@ -182,12 +187,16 @@ public class CalendarPoolTest {
         final CalendarEngine inner;
 
         Watched(Server server, Transport transport) {
-            super(pimdir, server);
-            inner = new CalendarEngine(pimdir, server, transport, account, accountId, null);
+            super(
+                    pimdir,
+                    new Clients(
+                            new AccountClient(), new ContactClient(), server, new MailClient(),
+                            new OfflineClient()));
+            inner = new CalendarEngine(pimdir, clients, transport, account, accountId, null);
         }
 
         void sync(String collection) {
-            client.offlineSync(this, collection, false);
+            clients.offline().offlineSync(this, collection, false);
             hydrate(collection);
         }
 

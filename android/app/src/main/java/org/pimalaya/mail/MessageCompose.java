@@ -252,9 +252,9 @@ public final class MessageCompose {
                     Exception failure = null;
                     try {
                         new MailSubmit(
-                                        parts.client(),
+                                        parts.clients().mail(),
                                         parts.mail(),
-                                        new MailStager(parts.pimdir(), parts.client()))
+                                        new MailStager(parts.pimdir(), parts.clients()))
                                 .queue(draft);
                     } catch (Exception error) {
                         Log.w("pimalaya", "compose failed: " + AccountEntry.redacted(sender.email), error);

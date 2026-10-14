@@ -14,7 +14,7 @@ import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Card;
-import org.pimalaya.client.Cards;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -121,7 +121,7 @@ public final class ContactEditor {
                 return;
             }
             resolution =
-                    Cards.mergeConflictForm(
+                    ContactClient.mergeConflictForm(
                             bodies.optString("base"),
                             bodies.optString("local"),
                             bodies.optString("remote"));
@@ -135,7 +135,7 @@ public final class ContactEditor {
             // conflict. The toast is the tap's only visible outcome, so
             // without it the vanishing flag reads as a bug.
             try {
-                new ContactStager(parts.pimdir(), parts.client())
+                new ContactStager(parts.pimdir(), parts.clients())
                         .edit(replica.book.url, handle, resolution.optString("vcard"));
             } catch (Exception error) {
                 host.showError(error, R.string.save_failed);
@@ -325,9 +325,9 @@ public final class ContactEditor {
         try {
             if (docs.size() == 1) {
                 edit.vcard = primary.card.vcard;
-                model = Cards.projectCard(primary.card);
+                model = ContactClient.projectCard(primary.card);
             } else {
-                JSONObject merged = Cards.mergeCards(docs);
+                JSONObject merged = ContactClient.mergeCards(docs);
                 edit.vcard = merged.optString("vcard");
                 model = merged.optJSONObject("model");
                 alternatives = merged.optJSONObject("alternatives");
@@ -436,7 +436,7 @@ public final class ContactEditor {
      */
     JSONObject cardIndex(String vcard) {
         try {
-            return Cards.indexCard(vcard);
+            return ContactClient.indexCard(vcard);
         } catch (Exception error) {
             Log.w("pimalaya", "card index failed", error);
             return new JSONObject();

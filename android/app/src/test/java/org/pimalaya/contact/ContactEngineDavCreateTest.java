@@ -13,10 +13,15 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Addressbook;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.CardDelta;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -43,7 +48,7 @@ public class ContactEngineDavCreateTest {
     private PimdirDb pimdir;
 
     /** A CardDAV book listed whole on every round, as Google lists it. */
-    private static final class Dav extends PimalayaClient {
+    private static final class Dav extends ContactClient {
         /** The cards by resource name, as (ETag, body). */
         final Map<String, String[]> cards = new LinkedHashMap<>();
         final List<String> deleted = new ArrayList<>();
@@ -138,7 +143,15 @@ public class ContactEngineDavCreateTest {
     }
 
     private void sync(Dav dav) throws Exception {
-        new ContactEngine(store, pimdir, dav, null, account).syncBook(BOOK, true);
+        new ContactEngine(
+                        store,
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), dav, new CalendarClient(), new MailClient(),
+                                new OfflineClient()),
+                        null,
+                        account)
+                .syncBook(BOOK, true);
     }
 
     private PimdirContacts contacts() {

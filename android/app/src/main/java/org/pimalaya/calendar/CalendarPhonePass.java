@@ -4,8 +4,9 @@ import android.util.Log;
 
 import org.json.JSONException;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.EventMerge;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PhonePass;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -26,8 +27,8 @@ import java.util.function.IntConsumer;
  * the provider holds events alone ({@link CalendarRemote}).
  */
 public final class CalendarPhonePass extends PhonePass {
-    public CalendarPhonePass(PimdirDb pimdir, PimalayaClient client) {
-        super(pimdir, client, new CalendarRemote(pimdir.context(), pimdir), PimdirSummary.CALENDAR);
+    public CalendarPhonePass(PimdirDb pimdir, Clients clients) {
+        super(pimdir, clients, new CalendarRemote(pimdir.context(), pimdir), PimdirSummary.CALENDAR);
     }
 
     /**
@@ -37,7 +38,7 @@ public final class CalendarPhonePass extends PhonePass {
      * Answers whether it wrote anything into the store.
      */
     public static boolean pass(PimdirDb pimdir, String collection) {
-        return new CalendarPhonePass(pimdir, new PimalayaClient()).side(collection);
+        return new CalendarPhonePass(pimdir, Clients.real()).side(collection);
     }
 
     /**
@@ -59,7 +60,7 @@ public final class CalendarPhonePass extends PhonePass {
         // NOTE: a phone binding both sides changed goes through the same
         // triage as the server's: what the merge settles is pushed to
         // the phone at once, a collision is left to the form.
-        return triage(this, client, count -> step(Progress.STAGE_RESOLVE, count), spoke) > 0;
+        return triage(this, count -> step(Progress.STAGE_RESOLVE, count), spoke) > 0;
     }
 
     /**
@@ -67,8 +68,7 @@ public final class CalendarPhonePass extends PhonePass {
      * the merge settles, {@code resolving} is told how many conflicts it
      * looks at.
      */
-    static int triage(
-            Stager on, PimalayaClient client, IntConsumer resolving, String collection) {
+    static int triage(Stager on, IntConsumer resolving, String collection) {
         List<EventStore.StoredConflict> conflicts;
         synchronized (on.locks.store) {
             conflicts = EventStore.conflictsOf(on.offline, collection);
@@ -82,7 +82,7 @@ public final class CalendarPhonePass extends PhonePass {
         for (EventStore.StoredConflict conflict : conflicts) {
             try {
                 EventMerge merge =
-                        client.mergeEvent(conflict.base, conflict.local, conflict.remote);
+                        CalendarClient.mergeEvent(conflict.base, conflict.local, conflict.remote);
                 if (merge.resolved) {
                     on.mutateEdit(collection, conflict.handle, merge.ical, null, "");
                     settled += 1;

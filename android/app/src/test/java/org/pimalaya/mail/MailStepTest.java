@@ -17,8 +17,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.R;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
@@ -107,7 +107,7 @@ public class MailStepTest {
         Set<String> missing = Set.of();
 
         Server() {
-            super(pimdir, new PimalayaClient(), null, accountId);
+            super(pimdir, Clients.real(), null, accountId);
         }
 
         @Override

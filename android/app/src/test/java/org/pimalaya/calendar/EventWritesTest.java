@@ -10,9 +10,14 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Calendar;
+import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.OfflineDriver;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
 import org.pimalaya.pimdir.PimdirStorage;
@@ -43,7 +48,7 @@ public class EventWritesTest {
     private static final String BASE = entry("Standup", "20260101T000000Z");
 
     /** The bridge, every staged mutation recorded before it goes through. */
-    private static final class Recording extends PimalayaClient {
+    private static final class Recording extends OfflineClient {
         final List<String> staged = new ArrayList<>();
         final List<String> bodies = new ArrayList<>();
 
@@ -74,8 +79,13 @@ public class EventWritesTest {
                 EMAIL,
                 List.of(new Calendar("work", "Work", "https://dav.example.org/cal/", "", null)));
         calendar = events.loadCalendars().get(0);
-        stager = new CalendarStager(pimdir, client);
-        writes = new EventWrites(client, stager);
+        stager =
+                new CalendarStager(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                new MailClient(), client));
+        writes = new EventWrites(stager);
     }
 
     /** One entry under UID {@code e}, as a side writes it at {@code stamp}. */
@@ -214,8 +224,7 @@ public class EventWritesTest {
                         entry("Planning", "20260201T100000Z"),
                         entry("Retro", "20260201T110000Z"));
         String resolved =
-                new PimalayaClient()
-                        .resolveEvent(settling.base, settling.local, settling.remote, Map.of());
+                CalendarClient.resolveEvent(settling.base, settling.local, settling.remote, Map.of());
         String edited = new JSONObject().put("scope", "all").put("stamp", STAMP).toString();
 
         writes.save(

@@ -12,7 +12,7 @@ import android.util.Log;
 import java.util.List;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.calendar.EventStore;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.mail.MailStore;
 import org.pimalaya.pimdir.PimdirDb;
@@ -84,11 +84,11 @@ public class BackgroundJob extends JobService {
         SecureStore store = new SecureStore(context);
         MailStore mail = new MailStore(context, pimdir);
         EventStore events = new EventStore(context, pimdir);
-        PimalayaClient client = new PimalayaClient();
+        Clients clients = Clients.real();
         SyncPasses passes =
                 new SyncPasses(
                         context,
-                        new SyncPasses.Parts(pimdir, base, store, mail, events, client),
+                        new SyncPasses.Parts(pimdir, base, store, mail, events, clients),
                         SyncPasses.HEADLESS);
 
         BackgroundCheck.run(

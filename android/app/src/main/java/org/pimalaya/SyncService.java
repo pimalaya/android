@@ -11,7 +11,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.provider.ContactsContract;
 import android.util.Log;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.contact.ContactPhonePass;
 import org.pimalaya.phone.Accounts;
@@ -84,7 +84,7 @@ public class SyncService extends Service {
 
             try {
                 PimdirDb pimdir = App.of(context).pimdir();
-                ContactPhonePass engine = new ContactPhonePass(pimdir, new PimalayaClient());
+                ContactPhonePass engine = new ContactPhonePass(pimdir, Clients.real());
                 ContactEngine.Report report = new ContactEngine.Report();
                 engine.sync(url, report);
                 Log.d(

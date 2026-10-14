@@ -33,7 +33,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.PimDomain;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
@@ -94,11 +94,11 @@ public class CalendarMirrorTest {
         private int revision;
 
         Server(PimdirDb pimdir) {
-            super(pimdir, new PimalayaClient());
+            super(pimdir, Clients.real());
         }
 
         void sync() {
-            client.offlineSync(this, COLLECTION, false);
+            clients.offline().offlineSync(this, COLLECTION, false);
             hydrate(COLLECTION);
         }
 
@@ -208,7 +208,7 @@ public class CalendarMirrorTest {
 
     private void phonePass() {
         try {
-            new CalendarPhonePass(pimdir, new PimalayaClient()).sync(COLLECTION);
+            new CalendarPhonePass(pimdir, Clients.real()).sync(COLLECTION);
         } catch (JSONException failure) {
             throw new IllegalStateException(failure);
         }

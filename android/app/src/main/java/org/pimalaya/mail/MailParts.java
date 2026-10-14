@@ -1,7 +1,7 @@
 package org.pimalaya.mail;
 
 import org.pimalaya.account.SecureStore;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirDb;
@@ -12,7 +12,7 @@ import org.pimalaya.pimdir.PimdirDb;
  */
 public record MailParts(
         PimdirDb pimdir,
-        PimalayaClient client,
+        Clients clients,
         MailStore mail,
         FileStore files,
         ItemLinks links,

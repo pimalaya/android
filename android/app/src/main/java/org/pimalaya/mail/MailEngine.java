@@ -8,6 +8,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.MessageBody;
@@ -142,8 +143,8 @@ public class MailEngine extends PimdirEngine {
      */
     public MailTally tally;
 
-    public MailEngine(PimdirDb pimdir, PimalayaClient client, MailSession session, String accountId) {
-        super(pimdir, client);
+    public MailEngine(PimdirDb pimdir, Clients clients, MailSession session, String accountId) {
+        super(pimdir, clients);
         this.pimdir = pimdir;
         this.session = session;
         this.accountId = accountId;
@@ -158,7 +159,7 @@ public class MailEngine extends PimdirEngine {
      * ({@link MailStore#repairLinks}).
      */
     public List<Mailbox> mailboxes() {
-        List<Mailbox> mailboxes = client.listMailboxes(session);
+        List<Mailbox> mailboxes = clients.mail().listMailboxes(session);
         Account server = session.account();
         boolean accountWide = PimalayaClient.isGoogle(server) || PimalayaClient.isJmap(server);
         MailStore.markAccountWide(pimdir.context(), accountId, accountWide);
@@ -310,7 +311,7 @@ public class MailEngine extends PimdirEngine {
      * ceiling), null when fewer lie below it and the mailbox is whole there.
      */
     String floor(String collection, String before, int count) {
-        return client.mailFloor(session, mailboxOf(collection), before, count);
+        return clients.mail().mailFloor(session, mailboxOf(collection), before, count);
     }
 
     /**
@@ -319,7 +320,7 @@ public class MailEngine extends PimdirEngine {
      * fewer.
      */
     List<String> newest(String collection, int count) {
-        return client.mailNewest(session, mailboxOf(collection), null, count);
+        return clients.mail().mailNewest(session, mailboxOf(collection), null, count);
     }
 
     /**
@@ -366,7 +367,7 @@ public class MailEngine extends PimdirEngine {
         Log.d(
                 "pimalaya",
                 "mail sync " + collection + " since " + since + ": "
-                        + client.offlineSyncImmutable(this, collection, since, false)
+                        + clients.offline().offlineSyncImmutable(this, collection, since, false)
                         + ", the pass so far " + clock);
         MailState.of(pimdir.context()).relisted(collection);
     }
@@ -547,7 +548,7 @@ public class MailEngine extends PimdirEngine {
             Log.d(
                     "pimalaya",
                     "mail step " + collection + " (" + items.length() + "): "
-                            + client.offlineSyncImmutable(this, collection, since, false));
+                            + clients.offline().offlineSyncImmutable(this, collection, since, false));
             MailState.of(pimdir.context()).relisted(collection);
         } finally {
             landing = null;
@@ -582,7 +583,7 @@ public class MailEngine extends PimdirEngine {
         }
 
         long started = System.nanoTime();
-        String raw = client.enumerateMailboxRaw(session, mailboxOf(collection), request);
+        String raw = clients.mail().enumerateMailboxRaw(session, mailboxOf(collection), request);
         JSONObject page = PimalayaClient.reply(raw);
         nameUnnamed(collection, listing, page);
         nameByMessageId(collection, page);
@@ -841,7 +842,7 @@ public class MailEngine extends PimdirEngine {
 
     /** The messages of a mailbox read by id with their summary, as listed. */
     protected JSONArray read(String collection, List<String> handles) {
-        return client.nameMessages(session, mailboxOf(collection), handles);
+        return clients.mail().nameMessages(session, mailboxOf(collection), handles);
     }
 
     @Override
@@ -973,7 +974,7 @@ public class MailEngine extends PimdirEngine {
             Log.d(
                     "pimalaya",
                     "mail bodies " + collection + " (" + handles.size() + "): "
-                            + client.offlineUpgrade(this, collection, handles));
+                            + clients.offline().offlineUpgrade(this, collection, handles));
         } finally {
             // NOTE: every write naming them has returned, committed or not:
             // one no row names (the write failed) is an orphan to unlink.
@@ -1115,7 +1116,7 @@ public class MailEngine extends PimdirEngine {
         }
         JSONObject described;
         try {
-            described = client.describeMessage(file);
+            described = clients.mail().describeMessage(file);
         } catch (RuntimeException unreadable) {
             Log.w("pimalaya", "body not stored: " + collection + " " + handle, unreadable);
             file.delete();
@@ -1218,7 +1219,7 @@ public class MailEngine extends PimdirEngine {
      * holds ({@link #held}).
      */
     protected JSONObject stepped(String mailbox, JSONObject request, File dir) {
-        return client.mailStep(session, mailbox, request, dir, this);
+        return clients.mail().mailStep(session, mailbox, request, dir, this);
     }
 
     /**
@@ -1242,7 +1243,7 @@ public class MailEngine extends PimdirEngine {
      */
     protected Map<String, File> sources(
             MailSession on, String mailbox, List<String> handles, File dir) {
-        JSONObject reply = client.fetchMessageSources(on, mailbox, handles, dir);
+        JSONObject reply = clients.mail().fetchMessageSources(on, mailbox, handles, dir);
         Map<String, File> files = new HashMap<>();
         JSONArray read = reply.optJSONArray("items");
         for (int index = 0; read != null && index < read.length(); index++) {
@@ -1401,22 +1402,22 @@ public class MailEngine extends PimdirEngine {
 
     /** Moves one message from {@code mailbox} into {@code target} on the server. */
     protected void relocate(String mailbox, String handle, String target) {
-        client.relocateMessage(session, mailbox, handle, target);
+        clients.mail().relocateMessage(session, mailbox, handle, target);
     }
 
     /** Copies one message from {@code mailbox} into {@code target} on the server. */
     protected void copy(String mailbox, String handle, String target) {
-        client.copyMessage(session, mailbox, handle, target);
+        clients.mail().copyMessage(session, mailbox, handle, target);
     }
 
     /** Deletes one message for good on the server. */
     protected void destroy(String mailbox, String handle) {
-        client.destroyMessage(session, mailbox, handle);
+        clients.mail().destroyMessage(session, mailbox, handle);
     }
 
     /** Appends one message to {@code mailbox} on the server. */
     protected void append(String mailbox, byte[] source, JSONArray flags) {
-        client.appendMessage(session, mailbox, source, flags);
+        clients.mail().appendMessage(session, mailbox, source, flags);
     }
 
     /**
@@ -1440,7 +1441,7 @@ public class MailEngine extends PimdirEngine {
                 continue;
             }
             try {
-                client.setMessageFlag(session, mailbox, handle, flag, wanted);
+                clients.mail().setMessageFlag(session, mailbox, handle, flag, wanted);
             } catch (RuntimeException failure) {
                 gone(mailbox, handle, failure);
                 break;

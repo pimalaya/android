@@ -1,8 +1,8 @@
 package org.pimalaya.calendar;
 
 import org.json.JSONArray;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventSplit;
-import org.pimalaya.client.PimalayaClient;
 
 import java.util.Map;
 
@@ -12,11 +12,9 @@ import java.util.Map;
  * page's (they read its state).
  */
 final class EventWrites {
-    private final PimalayaClient client;
     private final CalendarStager engine;
 
-    EventWrites(PimalayaClient client, CalendarStager engine) {
-        this.client = client;
+    EventWrites(CalendarStager engine) {
         this.engine = engine;
     }
 
@@ -60,7 +58,7 @@ final class EventWrites {
         String handle = target.handle;
         if (settling != null) {
             source =
-                    client.resolveEvent(
+                    CalendarClient.resolveEvent(
                             settling.base, settling.local, settling.remote, chosen);
             into = settling.collection;
             handle = settling.handle;
@@ -71,7 +69,7 @@ final class EventWrites {
         // happens at render time against the window being
         // shown, so there is nothing to write here.
         if ("following".equals(scope)) {
-            EventSplit split = client.splitEvent(source, edited);
+            EventSplit split = CalendarClient.splitEvent(source, edited);
             if (split.series != null) {
                 engine.mutateAdd(
                         collection.id,
@@ -86,7 +84,7 @@ final class EventWrites {
             String written =
                     settling != null && !rewritten
                             ? source
-                            : client.writeEvent(source, edited);
+                            : CalendarClient.writeEvent(source, edited);
             if (isNew) {
                 engine.mutateAdd(
                         collection.id,
@@ -119,12 +117,12 @@ final class EventWrites {
             String source =
                     settling == null
                             ? target.ical
-                            : client.resolveEvent(
+                            : CalendarClient.resolveEvent(
                                     settling.base,
                                     settling.local,
                                     settling.remote,
                                     chosen);
-            left = client.removeEvent(source, edit);
+            left = CalendarClient.removeEvent(source, edit);
         }
         // NOTE: a removal staged on the binding that
         // conflicted is the decision on it: the engine

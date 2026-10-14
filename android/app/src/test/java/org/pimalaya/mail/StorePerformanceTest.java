@@ -14,8 +14,9 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.PimdirSql;
 import org.pimalaya.file.FileStore;
 import org.pimalaya.pimdir.DeletedItems;
@@ -381,7 +382,7 @@ public class StorePerformanceTest {
         assertTrue(storage.bindsAny(inbox));
 
         MailEngine engine =
-                new MailEngine(pimdir, new PimalayaClient(), null, store.accountIdOf(EMAIL));
+                new MailEngine(pimdir, Clients.real(), null, store.accountIdOf(EMAIL));
         assertEquals(
                 Set.of("i1", "a4"),
                 storage.heldOf(List.of(inbox, archive), List.of("i1", "a4", "new", "i9")));
@@ -389,7 +390,7 @@ public class StorePerformanceTest {
 
         // The bridge asks through the driver's serve, a page at a time.
         JSONObject[] answered = new JSONObject[1];
-        new MailEngine(pimdir, new PimalayaClient(), null, store.accountIdOf(EMAIL)) {
+        new MailEngine(pimdir, Clients.real(), null, store.accountIdOf(EMAIL)) {
             @Override
             protected JSONObject stepped(String mailbox, JSONObject request, java.io.File dir) {
                 assertFalse("no held list rides the request", request.has("held"));
@@ -430,7 +431,7 @@ public class StorePerformanceTest {
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8);
         List<java.io.File> dirs = new ArrayList<>();
         MailEngine engine =
-                new MailEngine(pimdir, new PimalayaClient(), null, store.accountIdOf(EMAIL)) {
+                new MailEngine(pimdir, Clients.real(), null, store.accountIdOf(EMAIL)) {
                     @Override
                     protected Map<String, java.io.File> sources(
                             org.pimalaya.client.MailSession on,
@@ -448,7 +449,7 @@ public class StorePerformanceTest {
                     }
                 };
         MailReader reader =
-                new MailReader(store, new FileStore(context, pimdir), new PimalayaClient(), engine);
+                new MailReader(store, new FileStore(context, pimdir), new MailClient(), engine);
 
         MailStore.StoredMessage message = store.message(inbox, "42");
         MailReader.Read read = reader.read(message, () -> null);

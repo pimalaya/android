@@ -262,10 +262,10 @@ public final class MessageView implements FilesList.Origins {
         return new MailReader(
                 parts.mail(),
                 parts.files(),
-                parts.client(),
+                parts.clients().mail(),
                 new MailEngine(
                         parts.pimdir(),
-                        parts.client(),
+                        parts.clients(),
                         null,
                         sync.accountIdOf(message.accountEmail)));
     }
@@ -384,7 +384,7 @@ public final class MessageView implements FilesList.Origins {
             }
         }
         java.io.File part = OpenedCopies.partFile(host, attachment.seq);
-        parts.client().messagePart(source, attachment.part, part);
+        parts.clients().mail().messagePart(source, attachment.part, part);
         return part;
     }
 
@@ -624,7 +624,7 @@ public final class MessageView implements FilesList.Origins {
                             continue;
                         }
                         try {
-                            new MailStager(parts.pimdir(), parts.client())
+                            new MailStager(parts.pimdir(), parts.clients())
                                     .stageFlag(message, flag, add);
                         } catch (Exception error) {
                             Log.w("pimalaya", "message flag failed: " + message.id, error);
@@ -762,7 +762,7 @@ public final class MessageView implements FilesList.Origins {
                     for (MailStore.StoredMessage message : staged) {
                         try {
                             MailStager.Deletion deletion =
-                                    new MailStager(parts.pimdir(), parts.client())
+                                    new MailStager(parts.pimdir(), parts.clients())
                                             .stageDelete(message);
                             if (first == null) {
                                 first = deletion;

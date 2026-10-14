@@ -10,8 +10,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Addressbook;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirHash;
@@ -503,11 +503,11 @@ public class CardStore extends SQLiteOpenHelper {
 
     /** True for the backends whose cards are account-level (JMAP, Google). */
     static boolean isAccountLevelUrl(String url) {
-        return PimalayaClient.isAccountLevel(url);
+        return AccountClient.isAccountLevel(url);
     }
 
     /** True for plain CardDAV collections. */
     static boolean isCarddavUrl(String url) {
-        return PimalayaClient.isCarddav(url);
+        return AccountClient.isCarddav(url);
     }
 }

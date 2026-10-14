@@ -4,6 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.MailClient;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirSummary;
 
@@ -26,13 +27,13 @@ public final class MailSubmit {
     /** The pattern an RFC 5322 date is written in (section 3.3). */
     private static final String DATE_FORMAT = "EEE, d MMM yyyy HH:mm:ss Z";
 
-    private final PimalayaClient client;
+    private final MailClient client;
     private final MailStore mail;
 
     /** The sender's driver, staging the sent copy. */
     private final MailStager engine;
 
-    public MailSubmit(PimalayaClient client, MailStore mail, MailStager engine) {
+    public MailSubmit(MailClient client, MailStore mail, MailStager engine) {
         this.client = client;
         this.mail = mail;
         this.engine = engine;

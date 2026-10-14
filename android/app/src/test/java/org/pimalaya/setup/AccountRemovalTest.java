@@ -21,8 +21,8 @@ import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.Addressbook;
 import org.pimalaya.client.Calendar;
 import org.pimalaya.client.Card;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.mail.MailStore;
@@ -123,7 +123,7 @@ public class AccountRemovalTest {
                 new AccountRemoval(
                                 context,
                                 new SyncPasses.Parts(
-                                        pimdir, cards, store, mail, events, new PimalayaClient()),
+                                        pimdir, cards, store, mail, events, Clients.real()),
                                 contacts)
                         .remove(EMAIL);
 

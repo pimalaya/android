@@ -14,8 +14,13 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.AccountClient;
+import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.MailClient;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -82,7 +87,7 @@ public class MailBodiesTest {
 
 
         Server() {
-            super(pimdir, new PimalayaClient(), null, accountId);
+            super(pimdir, Clients.real(), null, accountId);
         }
 
         @Override
@@ -447,8 +452,8 @@ public class MailBodiesTest {
                         .put("complete", false)
                         .put("last", true)
                         .put("checkpoint", "cp2");
-        PimalayaClient listing =
-                new PimalayaClient() {
+        MailClient listing =
+                new MailClient() {
                     @Override
                     public String enumerateMailboxRaw(
                             org.pimalaya.client.MailSession session,
@@ -457,7 +462,14 @@ public class MailBodiesTest {
                         return delta.toString();
                     }
                 };
-        new MailEngine(pimdir, listing, null, accountId).sync(inbox);
+        new MailEngine(
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), new CalendarClient(),
+                                listing, new OfflineClient()),
+                        null,
+                        accountId)
+                .sync(inbox);
         assertTrue("a delta's new member is owed", MailOwed.owed(context, inbox, "5"));
         assertFalse("one already held is not", MailOwed.owed(context, inbox, "4"));
         assertEquals(List.of(MailOwed.key(inbox, "5")), MailOwed.all(context));

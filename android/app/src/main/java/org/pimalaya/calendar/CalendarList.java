@@ -15,6 +15,7 @@ import android.widget.TextView;
 import org.pimalaya.R;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.CalendarClient;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
 import org.pimalaya.pimdir.DefaultCollection;
@@ -269,7 +270,7 @@ public final class CalendarList {
                     known =
                             new Expanded(
                                     event.ical,
-                                    parts.client().expandEvent(event.ical, from, until));
+                                    CalendarClient.expandEvent(event.ical, from, until));
                 } catch (Exception error) {
                     // NOTE: one unparseable object must not empty the whole
                     // agenda, so it is dropped with a log and the rest render.

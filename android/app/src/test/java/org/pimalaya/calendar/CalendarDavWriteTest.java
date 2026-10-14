@@ -10,11 +10,16 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Calendar;
+import org.pimalaya.client.CalendarClient;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.client.Event;
 import org.pimalaya.client.EventDelta;
 import org.pimalaya.client.EventRef;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.MailClient;
+import org.pimalaya.client.OfflineClient;
 import org.pimalaya.client.PimalayaException;
 import org.pimalaya.client.Transport;
 import org.pimalaya.pimdir.PimdirAccount;
@@ -45,7 +50,7 @@ public class CalendarDavWriteTest {
     private final Dav dav = new Dav();
 
     /** A CalDAV calendar listed whole on every round, answering no ETag to a PUT. */
-    private static final class Dav extends PimalayaClient {
+    private static final class Dav extends CalendarClient {
         /** The entries by resource name, as (ETag, body). */
         final Map<String, String[]> entries = new LinkedHashMap<>();
         final List<String> deleted = new ArrayList<>();
@@ -115,7 +120,14 @@ public class CalendarDavWriteTest {
         calendar = events.loadCalendars().get(0).id;
         engine =
                 new CalendarEngine(
-                        pimdir, dav, null, account, new PimdirAccount(context).idOf(EMAIL), null);
+                        pimdir,
+                        new Clients(
+                                new AccountClient(), new ContactClient(), dav, new MailClient(),
+                                new OfflineClient()),
+                        null,
+                        account,
+                        new PimdirAccount(context).idOf(EMAIL),
+                        null);
     }
 
     private static String ical(String summary) {

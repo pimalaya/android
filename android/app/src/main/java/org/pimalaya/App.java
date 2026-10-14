@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.calendar.CalendarPhonePass;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.contact.CardStore;
 import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.contact.ContactPhonePass;
@@ -105,7 +105,7 @@ public final class App extends Application
                         Executors.newSingleThreadExecutor(),
                         url -> {
                             try {
-                                new ContactPhonePass(pimdir, new PimalayaClient())
+                                new ContactPhonePass(pimdir, Clients.real())
                                         .sync(url, new ContactEngine.Report());
                             } catch (Exception error) {
                                 Log.w("pimalaya", "phone pass failed for " + url, error);

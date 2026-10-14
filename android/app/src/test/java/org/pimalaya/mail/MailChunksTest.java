@@ -13,8 +13,8 @@ import org.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.pimalaya.client.Clients;
 import org.pimalaya.client.Mailbox;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirAccount;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -74,7 +74,7 @@ public class MailChunksTest {
         final List<JSONObject> asked = new ArrayList<>();
 
         Server(int size, int spacing) {
-            super(pimdir, new PimalayaClient(), null, new PimdirAccount(context).idOf(EMAIL));
+            super(pimdir, Clients.real(), null, new PimdirAccount(context).idOf(EMAIL));
             this.size = size;
             this.spacing = spacing;
         }

@@ -8,9 +8,9 @@ import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Card;
-import org.pimalaya.client.Cards;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
@@ -71,7 +71,7 @@ final class ContactWriter {
                         editor.edit().advancedVcard != null
                                 ? editor.edit().advancedVcard
                                 : editor.edit().vcard;
-                String vcard = Cards.applyCard(source, model);
+                String vcard = ContactClient.applyCard(source, model);
                 String uid = editor.cardIndex(vcard).optString("uid");
                 String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
                 parts.contacts().save(editor.edit().book.url, new Card(id, null, null, vcard));
@@ -85,7 +85,7 @@ final class ContactWriter {
 
             // The copies carry the just-saved content.
             if (editor.edit().card != null && editor.edit().pendingBookState != null) {
-                applyBookState(Cards.applyCard(editor.edit().card.vcard, model));
+                applyBookState(ContactClient.applyCard(editor.edit().card.vcard, model));
             }
         } catch (Exception error) {
             host.showError(error, R.string.save_failed);
@@ -102,7 +102,7 @@ final class ContactWriter {
      * replica resolves it).
      */
     private void saveFanOut(JSONObject model) throws JSONException {
-        ContactStager engine = new ContactStager(parts.pimdir(), parts.client());
+        ContactStager engine = new ContactStager(parts.pimdir(), parts.clients());
         java.util.Set<String> staged = new java.util.HashSet<>();
 
         for (Entry entry : editor.edit().replicas) {
@@ -117,7 +117,7 @@ final class ContactWriter {
                     editor.edit().advancedVcard != null
                             ? editor.edit().advancedVcard
                             : entry.card.vcard;
-            String vcard = Cards.applyCard(source, model);
+            String vcard = ContactClient.applyCard(source, model);
             if (!editor.edit().advancedDirty
                     && editor.cardIndex(vcard).optString("hash").equals(entry.hash)) {
                 continue;
@@ -138,8 +138,8 @@ final class ContactWriter {
      */
     private void saveConflictResolution(JSONObject model) throws JSONException {
         Entry replica = editor.edit().replicas.get(0);
-        String resolved = Cards.applyCard(editor.edit().vcard, model);
-        new ContactStager(parts.pimdir(), parts.client())
+        String resolved = ContactClient.applyCard(editor.edit().vcard, model);
+        new ContactStager(parts.pimdir(), parts.clients())
                 .edit(
                         replica.book.url,
                         PimdirStorage.rowHandle(replica.card.uri, replica.card.id),
@@ -154,9 +154,9 @@ final class ContactWriter {
         Entry survivor = editor.edit().mergeSurvivor;
         editor.edit().mergeSurvivor = null;
 
-        String vcard = Cards.applyCard(survivor.card.vcard, model);
+        String vcard = ContactClient.applyCard(survivor.card.vcard, model);
         if (!editor.cardIndex(vcard).optString("hash").equals(survivor.hash)) {
-            new ContactStager(parts.pimdir(), parts.client())
+            new ContactStager(parts.pimdir(), parts.clients())
                     .edit(
                             survivor.book.url,
                             PimdirStorage.rowHandle(survivor.card.uri, survivor.card.id),
@@ -220,7 +220,7 @@ final class ContactWriter {
      * copied card sharing the vCard UID anywhere else.
      */
     private void addToBook(BookEntry target, AccountEntry account, String vcard) {
-        if (PimalayaClient.isAccountLevel(account.server(PimDomain.CONTACTS))) {
+        if (AccountClient.isAccountLevel(account.server(PimDomain.CONTACTS))) {
             for (Entry entry : editor.edit().replicas) {
                 if (entry.accountEmail.equals(target.accountEmail)) {
                     parts.contacts().stageMembership(
@@ -255,7 +255,7 @@ final class ContactWriter {
         // else the book is the only place it exists, so the card goes with it.
         // Both are the same staged delete, on the placement rather than on the
         // card: what differs is only whether another placement survives it.
-        if (PimalayaClient.isAccountLevel(owner.server(PimDomain.CONTACTS))
+        if (AccountClient.isAccountLevel(owner.server(PimDomain.CONTACTS))
                 && parts.contacts().collectionsOf(replica.card.id).size() > 1) {
             parts.contacts().stageMembership(
                     replica.book.url, target.book.url, replica.card.id, false);

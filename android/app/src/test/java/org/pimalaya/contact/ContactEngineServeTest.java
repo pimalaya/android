@@ -12,7 +12,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.client.Addressbook;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -46,7 +46,7 @@ public class ContactEngineServeTest {
 
         // No account (storage yields only) and no context (no phone
         // spoke): the shape the mutate driver runs with.
-        engine = new ContactStager(pimdir, new PimalayaClient());
+        engine = new ContactStager(pimdir, Clients.real());
     }
 
     @Test

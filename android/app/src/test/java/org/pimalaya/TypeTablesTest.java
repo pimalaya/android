@@ -8,7 +8,7 @@ import java.util.List;
 import org.json.JSONArray;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.pimalaya.client.Cards;
+import org.pimalaya.client.ContactClient;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 
@@ -97,7 +97,7 @@ public class TypeTablesTest {
     private static void assertAligned(int arrayId, String kind, Pair... expected) {
         Resources resources = RuntimeEnvironment.getApplication().getResources();
         String[] labels = resources.getStringArray(arrayId);
-        JSONArray order = Cards.cardTypeOrder(kind);
+        JSONArray order = ContactClient.cardTypeOrder(kind);
 
         assertEquals(kind + " label count", expected.length, labels.length);
         assertEquals(kind + " Rust order length", expected.length, order.length());

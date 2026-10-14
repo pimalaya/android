@@ -5,8 +5,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.account.PimDomain;
-import org.pimalaya.client.Cards;
-import org.pimalaya.client.PimalayaClient;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.ContactClient;
 import org.pimalaya.pimdir.PhonePass;
 import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
@@ -30,12 +30,12 @@ public final class ContactPhonePass extends PhonePass {
      */
     private ContactEngine.Report tally;
 
-    public ContactPhonePass(PimdirDb pimdir, PimalayaClient client) {
-        this(pimdir, client, new PhoneRemote(pimdir.context(), pimdir));
+    public ContactPhonePass(PimdirDb pimdir, Clients clients) {
+        this(pimdir, clients, new PhoneRemote(pimdir.context(), pimdir));
     }
 
-    private ContactPhonePass(PimdirDb pimdir, PimalayaClient client, PhoneRemote phone) {
-        super(pimdir, client, phone, PimdirSummary.CONTACT);
+    private ContactPhonePass(PimdirDb pimdir, Clients clients, PhoneRemote phone) {
+        super(pimdir, clients, phone, PimdirSummary.CONTACT);
         this.phone = phone;
     }
 
@@ -83,7 +83,7 @@ public final class ContactPhonePass extends PhonePass {
         }
 
         String merged =
-                Cards.mergeCardChanges(
+                ContactClient.mergeCardChanges(
                         conflict.isNull("baseVcard") ? "" : conflict.getString("baseVcard"),
                         conflict.getString("vcard"),
                         remote.getString("body"));

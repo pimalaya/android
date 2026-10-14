@@ -21,11 +21,13 @@ import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.calendar.CalendarRows;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.Account;
+import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Addressbook;
+import org.pimalaya.client.Clients;
+import org.pimalaya.client.MailClient;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.OauthTokens;
-import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.client.SubmissionRefused;
 import org.pimalaya.client.SubmissionUncertain;
 import org.pimalaya.client.Transport;
@@ -91,7 +93,7 @@ public final class SyncPasses {
             SecureStore accounts,
             MailStore mail,
             EventStore events,
-            PimalayaClient client) {}
+            Clients clients) {}
 
     /**
      * Outcome of a remote run: what was pulled from the server, pushed
@@ -126,7 +128,7 @@ public final class SyncPasses {
     private final CardStore base;
     private final PimdirDb pimdir;
     private final SecureStore store;
-    private final PimalayaClient client;
+    private final Clients clients;
     private final MailStore mail;
     private final EventStore events;
     private final Progress progress;
@@ -140,7 +142,7 @@ public final class SyncPasses {
         this.base = parts.cards();
         this.pimdir = parts.pimdir();
         this.store = parts.accounts();
-        this.client = parts.client();
+        this.clients = parts.clients();
         this.mail = parts.mail();
         this.events = parts.events();
         this.progress = progress;
@@ -187,7 +189,7 @@ public final class SyncPasses {
                 List<Addressbook> books;
                 try (Transport transport = new Transport()) {
                     books =
-                            client.listAddressbooks(
+                            clients.contact().listAddressbooks(
                                     transport, account.server(PimDomain.CONTACTS));
                 }
                 base.replaceAddressbooks(account.email, books);
@@ -257,7 +259,7 @@ public final class SyncPasses {
      */
     public Exception syncPhone(ContactEngine.Report report) {
         try {
-            ContactPhonePass engine = new ContactPhonePass(pimdir, client);
+            ContactPhonePass engine = new ContactPhonePass(pimdir, clients);
             for (BookEntry entry : phoneSyncedBooks()) {
                 engine.sync(entry.book.url, report);
             }
@@ -316,7 +318,7 @@ public final class SyncPasses {
                 new PimdirCollections(pimdir, context)
                         .restate(
                                 PimdirCollections.of(
-                                        email, client.listAddressbooks(primary, account)));
+                                        email, clients.contact().listAddressbooks(primary, account)));
             } catch (Exception error) {
                 // NOTE: a 401 is the pass's to refresh on, anything else
                 // leaves the books as last stated.
@@ -343,7 +345,7 @@ public final class SyncPasses {
 
     /** An engine wired to the pass's progress display, steps and counts. */
     private ContactEngine engine(Transport primary, Account account) {
-        ContactEngine engine = new ContactEngine(base, pimdir, client, primary, account);
+        ContactEngine engine = new ContactEngine(base, pimdir, clients, primary, account);
         if (progress != null) {
             engine.progress = progress;
         }
@@ -379,7 +381,7 @@ public final class SyncPasses {
                         credential -> {
                             try (Transport transport = new Transport()) {
                                 OauthTokens tokens =
-                                        client.oauthRefresh(
+                                        clients.account().oauthRefresh(
                                                 transport,
                                                 credential.tokenEndpoint,
                                                 credential.clientId,
@@ -553,7 +555,7 @@ public final class SyncPasses {
         for (MailStore.Outgoing waiting : mail.outgoing(account.email)) {
             String filed;
             try {
-                filed = client.submitMessage(session, waiting.source);
+                filed = clients.mail().submitMessage(session, waiting.source);
             } catch (SubmissionRefused refused) {
                 Log.w("pimalaya", "submission refused: " + AccountEntry.redacted(account.email), refused);
                 mail.parkOutgoing(waiting.id, refused.getMessage());
@@ -589,7 +591,7 @@ public final class SyncPasses {
      */
     public MailSession openMail(AccountEntry account) {
         try {
-            return PimalayaClient.openMail(account.server(PimDomain.MAIL));
+            return MailClient.openMail(account.server(PimDomain.MAIL));
         } catch (Exception refused) {
             AccountCredential credential = account.credential(PimDomain.MAIL);
             if (!PimdirEngine.expiredToken(refused) || !credential.renewable()) {
@@ -597,7 +599,7 @@ public final class SyncPasses {
                         ? (RuntimeException) refused
                         : new IllegalStateException(refused);
             }
-            return PimalayaClient.openMail(
+            return MailClient.openMail(
                     refreshed(account, PimDomain.MAIL).server(PimDomain.MAIL));
         }
     }
@@ -658,7 +660,7 @@ public final class SyncPasses {
             progress.step(PimDomain.MAIL, PimdirEngine.Progress.STAGE_SERVER, 0);
 
             List<Mailbox> mailboxes =
-                    new MailEngine(pimdir, client, session, accountId).mailboxes();
+                    new MailEngine(pimdir, clients, session, accountId).mailboxes();
             mail.replaceMailboxes(account.email, mailboxes);
 
             // NOTE: the inbox first, then the sent mail, rather than in the
@@ -695,7 +697,7 @@ public final class SyncPasses {
                             collections,
                             (worker, collection, remote) -> {
                                 MailEngine engine =
-                                        new MailEngine(pimdir, client, worker, accountId);
+                                        new MailEngine(pimdir, clients, worker, accountId);
                                 try {
                                     engine.sync(collection);
                                 } finally {
@@ -741,7 +743,7 @@ public final class SyncPasses {
         try {
             progress.step(PimDomain.MAIL, PimdirEngine.Progress.STAGE_SERVER, 0);
             progress.collections(PimDomain.MAIL, 0, 1);
-            new MailEngine(pimdir, client, session, accountIdOf(account.email))
+            new MailEngine(pimdir, clients, session, accountIdOf(account.email))
                     .widen(collection, MailStep.COUNT);
             MailWindow.moveBackMailbox(context, collection, mail.coverage(collection).since);
             progress.collections(PimDomain.MAIL, 1, 1);
@@ -763,14 +765,14 @@ public final class SyncPasses {
     public Exception loadMore(AccountEntry account, MailSession session, String only) {
         if (only == null
                 || MailBodies.downloads(mail.roles().get(only), false)
-                || PimalayaClient.isGoogle(account.server(PimDomain.MAIL))) {
+                || AccountClient.isGoogle(account.server(PimDomain.MAIL))) {
             return stepMail(account, session, only, false);
         }
         progress.account(account.email);
         try {
             progress.step(PimDomain.MAIL, PimdirEngine.Progress.STAGE_SERVER, 0);
             progress.collections(PimDomain.MAIL, 0, 1);
-            new MailEngine(pimdir, client, session, accountIdOf(account.email))
+            new MailEngine(pimdir, clients, session, accountIdOf(account.email))
                     .widen(only, MailStep.COUNT);
             progress.collections(PimDomain.MAIL, 1, 1);
             return null;
@@ -795,7 +797,7 @@ public final class SyncPasses {
         String accountId = accountIdOf(account.email);
         try {
             progress.step(PimDomain.MAIL, PimdirEngine.Progress.STAGE_SERVER, 0);
-            MailEngine engine = new MailEngine(pimdir, client, session, accountId);
+            MailEngine engine = new MailEngine(pimdir, clients, session, accountId);
             // NOTE: the step's bodies are its download, counted as their
             // files land: nothing before its listing ends, the bar then
             // indeterminate on the first account.
@@ -840,7 +842,7 @@ public final class SyncPasses {
             String allMail = MailStore.allMailOf(accountId);
             if (only != null && !MailBodies.downloads(mail.roles().get(only), false)) {
                 collections = new ArrayList<>(List.of(only));
-            } else if (PimalayaClient.isGoogle(account.server(PimDomain.MAIL))) {
+            } else if (AccountClient.isGoogle(account.server(PimDomain.MAIL))) {
                 mail.ensureAllMail(account.email);
                 collections.add(allMail);
             }
@@ -883,7 +885,7 @@ public final class SyncPasses {
                 progress.step(PimDomain.CALENDAR, PimdirEngine.Progress.STAGE_SERVER, 0);
                 events.replaceCalendars(
                         account.email,
-                        session.call(server -> client.listCalendars(transport, server)));
+                        session.call(server -> clients.calendar().listCalendars(transport, server)));
             } catch (Exception error) {
                 Log.w("pimalaya", "calendar list failed: " + AccountEntry.redacted(account.email), error);
                 return error;
@@ -930,7 +932,7 @@ public final class SyncPasses {
                                                     CalendarEngine engine =
                                                             new CalendarEngine(
                                                                     pimdir,
-                                                                    client,
+                                                                    clients,
                                                                     worker,
                                                                     server,
                                                                     accountId,

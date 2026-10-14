@@ -120,7 +120,7 @@ public class PendingGrantTest {
 
     /** A grant flow over an activity that is attached but never created. */
     private OauthFlow flow(MainActivity host) {
-        OauthFlow flow = new OauthFlow(host, host.client, host);
+        OauthFlow flow = new OauthFlow(host, host.clients.account(), host);
         flow.onBusy = () -> {};
         flow.onAborted = () -> {};
         return flow;
