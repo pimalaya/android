@@ -6,9 +6,9 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Locale;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.client.Cards;
+import org.pimalaya.ui.Host;
 
 /**
  * The next-birthday peek behind the app bar's cake icon: one sentence
@@ -16,9 +16,9 @@ import org.pimalaya.client.Cards;
  * main thread from the merged rows' projected BDAY (full dates only).
  */
 final class Birthdays {
-    private final MainActivity host;
+    private final Host host;
 
-    Birthdays(MainActivity host) {
+    Birthdays(Host host) {
         this.host = host;
     }
 

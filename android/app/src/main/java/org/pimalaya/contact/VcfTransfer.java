@@ -1,15 +1,16 @@
 package org.pimalaya.contact;
 
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.net.Uri;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.client.Card;
+import org.pimalaya.ui.Host;
 
 /**
  * The vCard file import and export behind the contacts list: it reads a
@@ -27,10 +28,38 @@ public final class VcfTransfer {
 
     public static final int REQUEST_EXPORT = 3;
 
-    private final MainActivity host;
+    private final Host host;
+    private final ContactParts parts;
+    private final ContactEditor editor;
+    private final ContactsList list;
 
-    public VcfTransfer(MainActivity host) {
+    VcfTransfer(Host host, ContactParts parts, ContactEditor editor, ContactsList list) {
         this.host = host;
+        this.parts = parts;
+        this.editor = editor;
+        this.list = list;
+    }
+
+    /** Prompts for a vCard file to import. */
+    void importContacts() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        host.startActivityForResult(intent, REQUEST_IMPORT);
+    }
+
+    /** Prompts for a destination file, then exports the active view as a
+     *  single vCard file. */
+    void exportContacts() {
+        if (list.visibleGroups().isEmpty()) {
+            host.toast(host.getString(R.string.export_empty));
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("text/vcard");
+        intent.putExtra(Intent.EXTRA_TITLE, "contacts.vcf");
+        host.startActivityForResult(intent, REQUEST_EXPORT);
     }
 
     /**
@@ -41,7 +70,7 @@ public final class VcfTransfer {
     public void importFile(Uri uri) {
         List<BookEntry> books = new ArrayList<>();
         BookEntry local = null;
-        for (BookEntry entry : host.base.loadSubscribedAddressbooks()) {
+        for (BookEntry entry : parts.cards().loadSubscribedAddressbooks()) {
             if (LocalBook.is(entry.accountEmail)) {
                 local = entry;
             } else {
@@ -64,7 +93,7 @@ public final class VcfTransfer {
         new AlertDialog.Builder(host)
                 .setTitle(R.string.import_target_title)
                 .setItems(
-                        host.bookLabels(targets),
+                        editor.bookLabels(targets),
                         (dialog, which) -> importInto(uri, targets.get(which)))
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
@@ -95,7 +124,7 @@ public final class VcfTransfer {
                                 if (error != null) {
                                     host.showError(error, R.string.import_failed);
                                 } else {
-                                    host.reloadContacts();
+                                    list.reload();
                                     host.toast(host.getString(R.string.import_done, imported));
                                 }
                             });
@@ -104,12 +133,12 @@ public final class VcfTransfer {
 
     /** Splits the text into vCards and stores each in the target book. */
     private int importCards(String text, BookEntry target) {
-        AccountEntry account = host.accountFor(target.accountEmail);
+        AccountEntry account = parts.accountFor(target.accountEmail);
         int count = 0;
         for (String vcard : Vcf.split(text)) {
-            String uid = host.cardIndex(vcard).optString("uid");
+            String uid = editor.cardIndex(vcard).optString("uid");
             String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
-            host.contacts.save(target.book.url, new Card(id, null, null, vcard));
+            parts.contacts().save(target.book.url, new Card(id, null, null, vcard));
             count++;
         }
         return count;
@@ -134,7 +163,7 @@ public final class VcfTransfer {
      * document appended verbatim, off the main thread with the add button inert.
      */
     public void exportFile(Uri uri) {
-        List<Group> snapshot = new ArrayList<>(host.visibleGroups());
+        List<Group> snapshot = new ArrayList<>(list.visibleGroups());
         host.setListBusy(true);
         host.io.execute(
                 () -> {

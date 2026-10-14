@@ -57,12 +57,9 @@ public class LayeringTest {
      * java-domain-layout gives screens their collaborators, then this goes.
      */
     private static final Map<String, Set<String>> TOLERATED = Map.ofEntries(
-            Map.entry("contact/AdvancedEditor.java", Set.of(ROOT)),
-            Map.entry("contact/Birthdays.java", Set.of(ROOT)),
-            Map.entry("contact/ContactsList.java", Set.of(ROOT)),
-            Map.entry("contact/ContactWriter.java", Set.of(ROOT)),
-            Map.entry("contact/DuplicateReview.java", Set.of(ROOT)),
-            Map.entry("contact/VcfTransfer.java", Set.of(ROOT)),
+            // NOTE: the six contact screens left in phase 4 steps 8 and 9:
+            // they reach the ContactEditor, ContactParts and Host, not the
+            // activity.
             Map.entry("calendar/CalendarList.java", Set.of(ROOT)),
             Map.entry("calendar/EventView.java", Set.of(ROOT)),
             Map.entry("mail/MailList.java", Set.of(ROOT)),

@@ -5,7 +5,6 @@ import java.util.Map;
 import java.util.UUID;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
@@ -13,6 +12,8 @@ import org.pimalaya.client.Card;
 import org.pimalaya.client.Cards;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.pimdir.PimdirStorage;
+import org.pimalaya.ui.Host;
+import org.pimalaya.ui.Panels;
 
 /**
  * The contact save fan-out behind the edit form: it reads the form
@@ -23,11 +24,17 @@ import org.pimalaya.pimdir.PimdirStorage;
  * accounts through the host; the host keeps the navigation and calls in
  * through {@link #save}.
  */
-public final class ContactWriter {
-    private final MainActivity host;
+final class ContactWriter {
+    private final Host host;
+    private final ContactParts parts;
+    private final ContactEditor editor;
+    private final Runnable reloadList;
 
-    public ContactWriter(MainActivity host) {
+    ContactWriter(Host host, ContactParts parts, ContactEditor editor, Runnable reloadList) {
         this.host = host;
+        this.parts = parts;
+        this.editor = editor;
+        this.reloadList = reloadList;
     }
 
     /**
@@ -38,55 +45,55 @@ public final class ContactWriter {
      * properties while the managed content converges; replicas already
      * carrying the resulting content are skipped.
      */
-    public void save() {
-        String birthday = host.form.birthday();
+    void save() {
+        String birthday = editor.form().birthday();
         if (!birthday.isEmpty() && !birthday.matches("\\d{4}-\\d{2}-\\d{2}")) {
             host.toast(host.getString(R.string.invalid_birthday));
             return;
         }
-        String anniversary = host.form.anniversary();
+        String anniversary = editor.form().anniversary();
         if (!anniversary.isEmpty() && !anniversary.matches("\\d{4}-\\d{2}-\\d{2}")) {
             host.toast(host.getString(R.string.invalid_anniversary));
             return;
         }
 
         try {
-            JSONObject model = host.form.collect();
+            JSONObject model = editor.form().collect();
 
-            if (host.edit.card == null) {
-                AccountEntry account = host.accountFor(host.edit.accountEmail);
+            if (editor.edit().card == null) {
+                AccountEntry account = parts.accountFor(editor.edit().accountEmail);
                 if (account == null) {
                     // The account was deleted while the editor was open.
                     host.toast(host.getString(R.string.save_failed));
                     return;
                 }
                 String source =
-                        host.edit.advancedVcard != null
-                                ? host.edit.advancedVcard
-                                : host.edit.vcard;
+                        editor.edit().advancedVcard != null
+                                ? editor.edit().advancedVcard
+                                : editor.edit().vcard;
                 String vcard = Cards.applyCard(source, model);
-                String uid = host.cardIndex(vcard).optString("uid");
+                String uid = editor.cardIndex(vcard).optString("uid");
                 String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
-                host.contacts.save(host.edit.book.url, new Card(id, null, null, vcard));
-            } else if (host.edit.resolvingConflict) {
+                parts.contacts().save(editor.edit().book.url, new Card(id, null, null, vcard));
+            } else if (editor.edit().resolvingConflict) {
                 saveConflictResolution(model);
-            } else if (host.edit.mergeSurvivor != null) {
+            } else if (editor.edit().mergeSurvivor != null) {
                 saveMerge(model);
             } else {
                 saveFanOut(model);
             }
 
             // The copies carry the just-saved content.
-            if (host.edit.card != null && host.edit.pendingBookState != null) {
-                applyBookState(Cards.applyCard(host.edit.card.vcard, model));
+            if (editor.edit().card != null && editor.edit().pendingBookState != null) {
+                applyBookState(Cards.applyCard(editor.edit().card.vcard, model));
             }
         } catch (Exception error) {
             host.showError(error, R.string.save_failed);
             return;
         }
 
-        host.reloadContacts();
-        host.showBack(MainActivity.PANEL_CONTACTS);
+        reloadList.run();
+        host.showBack(Panels.CONTACTS);
     }
 
     /**
@@ -95,22 +102,24 @@ public final class ContactWriter {
      * replica resolves it).
      */
     private void saveFanOut(JSONObject model) throws JSONException {
-        ContactStager engine = new ContactStager(host.pimdir, host.client);
+        ContactStager engine = new ContactStager(parts.pimdir(), parts.client());
         java.util.Set<String> staged = new java.util.HashSet<>();
 
-        for (Entry entry : host.edit.replicas) {
+        for (Entry entry : editor.edit().replicas) {
             // NOTE: an m:n replica appears once per book; stage it once.
-            if (!staged.add(host.pool.replicaRef(entry))) {
+            if (!staged.add(parts.pool().replicaRef(entry))) {
                 continue;
             }
 
             // NOTE: a raw edit must stage even when the managed-content
             // hash is unchanged, so the advanced document stands in.
             String source =
-                    host.edit.advancedVcard != null ? host.edit.advancedVcard : entry.card.vcard;
+                    editor.edit().advancedVcard != null
+                            ? editor.edit().advancedVcard
+                            : entry.card.vcard;
             String vcard = Cards.applyCard(source, model);
-            if (!host.edit.advancedDirty
-                    && host.cardIndex(vcard).optString("hash").equals(entry.hash)) {
+            if (!editor.edit().advancedDirty
+                    && editor.cardIndex(vcard).optString("hash").equals(entry.hash)) {
                 continue;
             }
             engine.edit(
@@ -128,9 +137,9 @@ public final class ContactWriter {
      * next sync pushes it guarded on the observed remote revision.
      */
     private void saveConflictResolution(JSONObject model) throws JSONException {
-        Entry replica = host.edit.replicas.get(0);
-        String resolved = Cards.applyCard(host.edit.vcard, model);
-        new ContactStager(host.pimdir, host.client)
+        Entry replica = editor.edit().replicas.get(0);
+        String resolved = Cards.applyCard(editor.edit().vcard, model);
+        new ContactStager(parts.pimdir(), parts.client())
                 .edit(
                         replica.book.url,
                         PimdirStorage.rowHandle(replica.card.uri, replica.card.id),
@@ -142,30 +151,30 @@ public final class ContactWriter {
      * every other card behind the form stages a delete.
      */
     private void saveMerge(JSONObject model) throws JSONException {
-        Entry survivor = host.edit.mergeSurvivor;
-        host.edit.mergeSurvivor = null;
+        Entry survivor = editor.edit().mergeSurvivor;
+        editor.edit().mergeSurvivor = null;
 
         String vcard = Cards.applyCard(survivor.card.vcard, model);
-        if (!host.cardIndex(vcard).optString("hash").equals(survivor.hash)) {
-            new ContactStager(host.pimdir, host.client)
+        if (!editor.cardIndex(vcard).optString("hash").equals(survivor.hash)) {
+            new ContactStager(parts.pimdir(), parts.client())
                     .edit(
                             survivor.book.url,
                             PimdirStorage.rowHandle(survivor.card.uri, survivor.card.id),
                             vcard);
         }
 
-        String survivorRef = host.pool.replicaRef(survivor);
+        String survivorRef = parts.pool().replicaRef(survivor);
         java.util.Set<String> removed = new java.util.HashSet<>();
-        for (Entry entry : host.edit.replicas) {
-            String ref = host.pool.replicaRef(entry);
+        for (Entry entry : editor.edit().replicas) {
+            String ref = parts.pool().replicaRef(entry);
             if (ref.equals(survivorRef) || !removed.add(ref)) {
                 continue;
             }
-            AccountEntry owner = host.accountFor(entry.accountEmail);
+            AccountEntry owner = parts.accountFor(entry.accountEmail);
             if (owner == null) {
                 continue;
             }
-            host.contacts.stageDelete(entry.book.url, entry.card.id);
+            parts.contacts().stageDelete(entry.book.url, entry.card.id);
         }
 
         host.toast(host.getString(R.string.merge_done));
@@ -176,23 +185,23 @@ public final class ContactWriter {
      * memberships, copies (carrying the just-saved content), removals.
      */
     private void applyBookState(String vcard) {
-        Map<String, Boolean> desired = host.edit.pendingBookState;
-        host.edit.pendingBookState = null;
+        Map<String, Boolean> desired = editor.edit().pendingBookState;
+        editor.edit().pendingBookState = null;
         if (desired == null) {
             return;
         }
 
         Map<String, Entry> replicaByBook = new HashMap<>();
-        for (Entry entry : host.edit.replicas) {
+        for (Entry entry : editor.edit().replicas) {
             replicaByBook.put(entry.book.url, entry);
         }
 
-        for (BookEntry target : host.base.loadSubscribedAddressbooks()) {
+        for (BookEntry target : parts.cards().loadSubscribedAddressbooks()) {
             Boolean wanted = desired.get(target.book.url);
             if (wanted == null || wanted == replicaByBook.containsKey(target.book.url)) {
                 continue;
             }
-            AccountEntry account = host.accountFor(target.accountEmail);
+            AccountEntry account = parts.accountFor(target.accountEmail);
             if (account == null) {
                 continue;
             }
@@ -212,18 +221,18 @@ public final class ContactWriter {
      */
     private void addToBook(BookEntry target, AccountEntry account, String vcard) {
         if (PimalayaClient.isAccountLevel(account.server(PimDomain.CONTACTS))) {
-            for (Entry entry : host.edit.replicas) {
+            for (Entry entry : editor.edit().replicas) {
                 if (entry.accountEmail.equals(target.accountEmail)) {
-                    host.contacts.stageMembership(
+                    parts.contacts().stageMembership(
                             entry.book.url, target.book.url, entry.card.id, true);
                     return;
                 }
             }
         }
 
-        String uid = host.cardIndex(vcard).optString("uid");
+        String uid = editor.cardIndex(vcard).optString("uid");
         String id = uid.isEmpty() ? UUID.randomUUID().toString() : uid;
-        host.createCopy(target, account, id, vcard);
+        editor.createCopy(target, account, id, vcard);
     }
 
     /**
@@ -236,7 +245,7 @@ public final class ContactWriter {
         if (replica == null) {
             return;
         }
-        AccountEntry owner = host.accountFor(replica.accountEmail);
+        AccountEntry owner = parts.accountFor(replica.accountEmail);
         if (owner == null) {
             return;
         }
@@ -247,11 +256,11 @@ public final class ContactWriter {
         // Both are the same staged delete, on the placement rather than on the
         // card: what differs is only whether another placement survives it.
         if (PimalayaClient.isAccountLevel(owner.server(PimDomain.CONTACTS))
-                && host.contacts.collectionsOf(replica.card.id).size() > 1) {
-            host.contacts.stageMembership(
+                && parts.contacts().collectionsOf(replica.card.id).size() > 1) {
+            parts.contacts().stageMembership(
                     replica.book.url, target.book.url, replica.card.id, false);
         } else {
-            host.contacts.stageDelete(replica.book.url, replica.card.id);
+            parts.contacts().stageDelete(replica.book.url, replica.card.id);
         }
     }
 }

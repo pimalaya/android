@@ -7,16 +7,20 @@ import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
+import org.pimalaya.pimdir.DefaultCollection;
+import org.pimalaya.pimdir.PimdirCollections;
+import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.Chips;
+import org.pimalaya.ui.Host;
 import org.pimalaya.ui.ListHeader;
+import org.pimalaya.ui.Panels;
 import org.pimalaya.ui.Ui;
 
 /**
@@ -31,7 +35,15 @@ import org.pimalaya.ui.Ui;
  * merging, importing, syncing).
  */
 public final class ContactsList {
-    private final MainActivity host;
+    private final Host host;
+    private final ContactParts parts;
+    private final ContactEditor editor;
+
+    /** The pull-down's sync of the contacts. */
+    private final Runnable pull;
+
+    /** The vCard file import and export over this list. */
+    private final VcfTransfer transfer;
 
     /** The replica pool: every subscribed book's cards, unmerged. */
     private List<Entry> contacts = new ArrayList<>();
@@ -58,8 +70,13 @@ public final class ContactsList {
     /** Whether the Default chip narrows the list to the shown accounts' default books. */
     private boolean defaultOnly;
 
-    public ContactsList(MainActivity host) {
+    public ContactsList(Host host, ContactParts parts, ContactEditor editor, Runnable pull) {
         this.host = host;
+        this.parts = parts;
+        this.editor = editor;
+        this.pull = pull;
+        this.transfer = new VcfTransfer(host, parts, editor, this);
+        editor.list = this;
     }
 
     /** Wires the list, its bar buttons, the header search and the pull-down. */
@@ -72,7 +89,7 @@ public final class ContactsList {
         refresh.setOnRefreshListener(
                 () -> {
                     refresh.setRefreshing(false);
-                    host.syncContacts();
+                    pull.run();
                 });
 
         host.findViewById(R.id.contacts_birthdays)
@@ -80,14 +97,16 @@ public final class ContactsList {
                         view -> new Birthdays(host).show(new ArrayList<>(sortedContacts)));
         host.findViewById(R.id.contacts_duplicates)
                 .setOnClickListener(
-                        view -> new DuplicateReview(host).find(new ArrayList<>(contacts)));
+                        view ->
+                                new DuplicateReview(host, parts, editor, this::reload)
+                                        .find(new ArrayList<>(contacts)));
         host.findViewById(R.id.contacts_transfer).setOnClickListener(this::showTransferMenu);
         host.findViewById(R.id.contacts_merge).setOnClickListener(view -> mergeSelected());
         host.findViewById(R.id.contacts_delete)
                 .setOnClickListener(view -> confirmDeleteSelected());
 
         ListView list = host.findViewById(R.id.contacts_list);
-        header = new ListHeader(host, list, MainActivity.PANEL_CONTACTS);
+        header = new ListHeader(host, list, Panels.CONTACTS);
         header.empty(host.findViewById(R.id.contacts_empty));
         header.search(
                 R.string.contacts_search,
@@ -120,7 +139,7 @@ public final class ContactsList {
                     if (selectionMode) {
                         toggleSelection(group.key);
                     } else {
-                        host.openGroup(group);
+                        editor.openGroup(group);
                     }
                 });
         list.setOnItemLongClickListener(
@@ -139,6 +158,11 @@ public final class ContactsList {
         return header;
     }
 
+    /** The vCard file import and export, which the host's document pickers answer. */
+    public VcfTransfer transfer() {
+        return transfer;
+    }
+
     /**
      * Rebuilds the contacts list from the base (staged edits included):
      * the full table scan and the bridge grouping run on the io
@@ -148,11 +172,11 @@ public final class ContactsList {
      * main-thread cache.
      */
     public void reload() {
-        List<AccountEntry> snapshot = new ArrayList<>(host.accounts);
+        List<AccountEntry> snapshot = new ArrayList<>(parts.accounts());
         host.io.execute(
                 () -> {
-                    List<Entry> entries = host.pool.loadEntries();
-                    List<Group> groups = host.pool.group(entries, snapshot);
+                    List<Entry> entries = parts.pool().loadEntries();
+                    List<Group> groups = parts.pool().group(entries, snapshot);
                     host.postAlive(
                             () -> {
                                 contacts = entries;
@@ -164,7 +188,7 @@ public final class ContactsList {
 
     /** The rows currently on screen (search-filtered), for export and
      *  the birthday peek. */
-    public List<Group> visibleGroups() {
+    List<Group> visibleGroups() {
         return sortedContacts;
     }
 
@@ -202,8 +226,16 @@ public final class ContactsList {
         updateSelectionUi();
 
         sortedContacts = new ArrayList<>();
-        MergedFilter filter = host.filterOf(PimDomain.CONTACTS);
-        Set<String> defaults = defaultOnly ? host.shownDefaults(PimDomain.CONTACTS) : null;
+        MergedFilter filter = MergedFilter.of(host, PimDomain.CONTACTS);
+        Set<String> defaults =
+                defaultOnly
+                        ? DefaultCollection.shown(
+                                host,
+                                PimdirSummary.CONTACT,
+                                parts.cards()
+                                        .subscribedBooks(
+                                                new PimdirCollections(parts.pimdir(), host)))
+                        : null;
         for (Group group : groupedContacts) {
             // A merged row survives when any replica of it passes both
             // the filter axes and the query: hiding an account thins a
@@ -324,7 +356,7 @@ public final class ContactsList {
 
             // The link glyph and card count, only for a contact backed
             // by several physical cards.
-            int cards = host.pool.distinctRefs(group.replicas).size();
+            int cards = parts.pool().distinctRefs(group.replicas).size();
             row.findViewById(R.id.contact_link_icon)
                     .setVisibility(cards > 1 ? View.VISIBLE : View.GONE);
             TextView links = row.findViewById(R.id.contact_links);
@@ -393,7 +425,7 @@ public final class ContactsList {
      * form (the host owns the survivor choice and the fan-out).
      */
     private void mergeSelected() {
-        host.mergeReplicas(selectedReplicas());
+        editor.mergeReplicas(selectedReplicas());
     }
 
     /** Toggles a contact's selection and refreshes the list and app bar. */
@@ -511,7 +543,7 @@ public final class ContactsList {
      * return).
      */
     public void updateSelectionUi() {
-        if (!host.onContactsScreen()) {
+        if (host.screen != Panels.CONTACTS) {
             return;
         }
 
@@ -521,7 +553,7 @@ public final class ContactsList {
         TextView title = host.findViewById(R.id.bar_title);
         boolean navigating = !selectionMode;
         if (navigating) {
-            host.showDomainTitle(MainActivity.PANEL_CONTACTS);
+            host.showDomainTitle(Panels.CONTACTS);
         } else {
             title.setText(host.getString(R.string.selected_count, selectedKeys.size()));
             title.setAlpha(1f);
@@ -535,7 +567,7 @@ public final class ContactsList {
         // Merging needs at least two physical cards.
         host.findViewById(R.id.contacts_merge)
                 .setVisibility(
-                        selectionMode && host.pool.distinctRefs(selectedReplicas()).size() > 1
+                        selectionMode && parts.pool().distinctRefs(selectedReplicas()).size() > 1
                                 ? View.VISIBLE
                                 : View.GONE);
         host.findViewById(R.id.contacts_delete)
@@ -564,7 +596,7 @@ public final class ContactsList {
         for (Group group : sortedContacts) {
             if (selectedKeys.contains(group.key)) {
                 for (Entry entry : group.replicas) {
-                    host.contacts.stageDelete(entry.book.url, entry.card.id);
+                    parts.contacts().stageDelete(entry.book.url, entry.card.id);
                 }
             }
         }
@@ -597,8 +629,8 @@ public final class ContactsList {
     /** The import/export button's menu: the two directions it covers. */
     private void showTransferMenu(View anchor) {
         android.widget.PopupMenu menu = new android.widget.PopupMenu(host, anchor);
-        Ui.item(menu, R.string.import_contacts, host::importContacts);
-        Ui.item(menu, R.string.export_contacts, host::exportContacts);
+        Ui.item(menu, R.string.import_contacts, transfer::importContacts);
+        Ui.item(menu, R.string.export_contacts, transfer::exportContacts);
         menu.show();
     }
 }

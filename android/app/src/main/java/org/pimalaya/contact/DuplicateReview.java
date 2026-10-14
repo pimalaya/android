@@ -14,10 +14,10 @@ import java.util.UUID;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.client.Cards;
 import org.pimalaya.client.Card;
+import org.pimalaya.ui.Host;
 
 /**
  * The semi-automatic duplicate remover behind its app-bar icon: the
@@ -30,10 +30,16 @@ import org.pimalaya.client.Card;
  * staging a shared UID. Tap the icon again for the next group.
  */
 final class DuplicateReview {
-    private final MainActivity host;
+    private final Host host;
+    private final ContactParts parts;
+    private final ContactEditor editor;
+    private final Runnable reloadList;
 
-    DuplicateReview(MainActivity host) {
+    DuplicateReview(Host host, ContactParts parts, ContactEditor editor, Runnable reloadList) {
         this.host = host;
+        this.parts = parts;
+        this.editor = editor;
+        this.reloadList = reloadList;
     }
 
     /**
@@ -46,7 +52,7 @@ final class DuplicateReview {
         JSONArray cards = new JSONArray();
         try {
             for (Entry entry : replicas) {
-                String ref = host.pool.replicaRef(entry);
+                String ref = parts.pool().replicaRef(entry);
                 if (byRef.putIfAbsent(ref, entry) == null) {
                     cards.put(new JSONObject().put("ref", ref).put("vcard", entry.card.vcard));
                 }
@@ -71,7 +77,7 @@ final class DuplicateReview {
                                 }
                             }
                             if (members.size() >= 2
-                                    && !host.base.isDuplicateDismissed(
+                                    && !parts.cards().isDuplicateDismissed(
                                             group(members).optString("key"))) {
                                 first = members;
                                 break;
@@ -115,7 +121,7 @@ final class DuplicateReview {
         AlertDialog[] shown = new AlertDialog[1];
         Set<String> seen = new HashSet<>();
         for (Entry entry : members) {
-            if (!seen.add(host.pool.replicaRef(entry))) {
+            if (!seen.add(parts.pool().replicaRef(entry))) {
                 continue;
             }
 
@@ -145,7 +151,7 @@ final class DuplicateReview {
             row.setOnClickListener(
                     view -> {
                         shown[0].dismiss();
-                        host.openMerged(java.util.Collections.singletonList(entry));
+                        editor.openMerged(java.util.Collections.singletonList(entry));
                     });
             content.addView(row);
         }
@@ -174,11 +180,11 @@ final class DuplicateReview {
                         .setView(content)
                         .setPositiveButton(
                                 R.string.dup_merge,
-                                (dialog, which) -> host.mergeReplicas(members))
+                                (dialog, which) -> editor.mergeReplicas(members))
                         .setNeutralButton(
                                 R.string.dup_ignore,
                                 (dialog, which) ->
-                                        host.base.dismissDuplicate(dup.optString("key")))
+                                        parts.cards().dismissDuplicate(dup.optString("key")))
                         .setNegativeButton(android.R.string.cancel, null)
                         .show();
     }
@@ -193,7 +199,7 @@ final class DuplicateReview {
             for (Entry entry : members) {
                 refs.put(
                         new JSONObject()
-                                .put("ref", host.pool.replicaRef(entry))
+                                .put("ref", parts.pool().replicaRef(entry))
                                 .put("book", entry.book.url));
             }
         } catch (JSONException error) {
@@ -221,17 +227,17 @@ final class DuplicateReview {
         try {
             Set<String> staged = new HashSet<>();
             for (Entry entry : members) {
-                if (!staged.add(host.pool.replicaRef(entry)) || uid.equals(entry.uid)) {
+                if (!staged.add(parts.pool().replicaRef(entry)) || uid.equals(entry.uid)) {
                     continue;
                 }
                 String vcard = Cards.setCardUid(entry.card.vcard, uid);
-                host.contacts.save(
+                parts.contacts().save(
                         entry.book.url,
                         new Card(entry.card.id, entry.card.uri, entry.card.etag, vcard));
             }
         } catch (Exception error) {
             host.showError(error, R.string.save_failed);
         }
-        host.reloadContacts();
+        reloadList.run();
     }
 }

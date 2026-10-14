@@ -18,19 +18,14 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.ViewFlipper;
-import java.net.URL;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
-import org.json.JSONObject;
 import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.LocalBook;
@@ -41,23 +36,17 @@ import org.pimalaya.calendar.CalendarList;
 import org.pimalaya.calendar.CalendarStager;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.calendar.EventView;
-import org.pimalaya.client.Cards;
 import org.pimalaya.client.Account;
-import org.pimalaya.client.Addressbook;
-import org.pimalaya.client.Card;
 import org.pimalaya.client.MailSession;
 import org.pimalaya.client.PimalayaClient;
-import org.pimalaya.contact.AdvancedEditor;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
+import org.pimalaya.contact.ContactEditor;
 import org.pimalaya.contact.ContactForm;
+import org.pimalaya.contact.ContactParts;
 import org.pimalaya.contact.ContactPool;
-import org.pimalaya.contact.ContactWriter;
 import org.pimalaya.contact.ContactsList;
-import org.pimalaya.contact.EditSession;
-import org.pimalaya.contact.Entry;
 import org.pimalaya.contact.Group;
-import org.pimalaya.contact.ContactStager;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.contact.VcfTransfer;
 import org.pimalaya.file.FileActions;
@@ -79,7 +68,6 @@ import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.ItemLinks;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirDb;
-import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.setup.AccountSettings;
 import org.pimalaya.setup.OauthFlow;
@@ -166,7 +154,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     SyncPasses passes;
     private ViewFlipper flipper;
     private ViewFlipper authFlipper;
-    public ContactForm form;
+    ContactForm form;
 
     /** Every connected account (multi-account). */
     public final List<AccountEntry> accounts = new ArrayList<>();
@@ -223,15 +211,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
 
     private OauthFlow oauth;
 
-    /** The advanced raw-vCard sub-editor over the working document. */
-    private final AdvancedEditor advancedEditor = new AdvancedEditor(this);
-
-    /** The contact save fan-out over the working edit session. */
-    private final ContactWriter writer = new ContactWriter(this);
-
-    /** The vCard file import and export over the contacts list. */
-    private final VcfTransfer vcfTransfer = new VcfTransfer(this);
-
     /** The full-screen account settings controller over the drawer. */
     private final AccountSettings accountSettings = new AccountSettings(this);
 
@@ -242,7 +221,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     private SyncDock dock;
 
     /** The pool's loader and bridge grouping (built in onCreate). */
-    public ContactPool pool;
+    ContactPool pool;
 
     /** The contacts screen: list, adapter, search and selection. */
     private ContactsList contactsList;
@@ -255,8 +234,8 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
     /** Who takes the answer of a notifications prompt that is up. */
     private Consumer<Boolean> afterNotifications;
 
-    /** The editor's working state, replaced blank when it leaves. */
-    public EditSession edit = new EditSession();
+    /** The contact editor over the form (built in onCreate). */
+    private ContactEditor editor;
 
     {
         screen = PANEL_ROOT;
@@ -276,7 +255,11 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         base = App.of(this).cards();
         contacts = new PimdirContacts(pimdir);
         pool = new ContactPool(base, contacts, accounts);
-        contactsList = new ContactsList(this);
+        ContactParts contactParts =
+                new ContactParts(pimdir, base, contacts, pool, client, accounts);
+        form = new ContactForm(this);
+        editor = new ContactEditor(this, contactParts, form, this::reloadContacts);
+        contactsList = new ContactsList(this, contactParts, editor, this::syncContacts);
         events = new EventStore(this, pimdir);
         calendarList = new CalendarList(this, events);
         mail = new MailStore(this, pimdir);
@@ -304,7 +287,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         oauth.onBusy = onboarding::busy;
         flipper = findViewById(R.id.flipper);
         authFlipper = findViewById(R.id.auth_flipper);
-        form = new ContactForm(this);
         form.setOnRender(this::updateSaveEnabled);
         // NOTE: a card being composed or a conflict being resolved has no
         // links to show: the one is no item yet, the other not settled.
@@ -312,9 +294,11 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                 sections ->
                         linked.section(
                                 sections,
-                                edit == null || edit.card == null || edit.resolvingConflict
+                                editor.edit() == null
+                                                || editor.edit().card == null
+                                                || editor.edit().resolvingConflict
                                         ? null
-                                        : ItemLinks.ofContact(edit.card.id),
+                                        : ItemLinks.ofContact(editor.edit().card.id),
                                 form::refresh));
 
         setUpScreens();
@@ -1205,12 +1189,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         return checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
     }
 
-    /** True while the merged contacts list is the shown screen (the
-     *  shared bar is the contacts list's only when this holds). */
-    public boolean onContactsScreen() {
-        return screen == PANEL_CONTACTS;
-    }
-
     @Override
     public PimDomain shown() {
         return domainOf(screen);
@@ -1446,12 +1424,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         return App.of(this).state.calendarsIngested;
     }
 
-    /**
-     * Opens a merged row in the editor: one form for the whole contact
-     * (docs/merged-view.md), the union of the replicas' documents with
-     * per-field alternative chips when they diverge. Saving fans the
-     * form out onto every replica.
-     */
     /** The merged contact row holding a card of this key, null for none. */
     public Group contactGroupOf(String linkId) {
         return contactsList.groupOf(linkId);
@@ -1493,97 +1465,9 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                 });
     }
 
+    /** Opens a merged row in the editor ({@link ContactEditor#openGroup}). */
     public void openGroup(Group group) {
-        if (group.conflicted()) {
-            openConflict(group);
-        } else {
-            openMerged(group.replicas);
-        }
-    }
-
-    /**
-     * Opens the resolution form on a both-sides-edited conflict: the
-     * bridge three-way merges the stored base, the local edit and the
-     * captured remote (the newer side by REV pre-filled, both offered as
-     * chips), and the editor loads it in conflict mode. A conflict with
-     * nothing genuinely colliding (only list edits, which merge cleanly)
-     * resolves straight away without a prompt.
-     */
-    private void openConflict(Group group) {
-        Entry replica = null;
-        for (Entry entry : group.replicas) {
-            if (entry.conflicted) {
-                replica = entry;
-                break;
-            }
-        }
-        if (replica == null) {
-            openMerged(group.replicas);
-            return;
-        }
-
-        String handle =
-                PimdirStorage.rowHandle(replica.card.uri, replica.card.id);
-        JSONObject bodies;
-        JSONObject resolution;
-        try {
-            bodies = new PimdirStorage(pimdir).loadConflict(replica.book.url, handle);
-            if (bodies == null) {
-                // NOTE: flagged but its remote is not captured yet (the
-                // capturing sync has not run); edit it plainly.
-                openMerged(group.replicas);
-                return;
-            }
-            resolution =
-                    Cards.mergeConflictForm(
-                            bodies.optString("base"),
-                            bodies.optString("local"),
-                            bodies.optString("remote"));
-        } catch (Exception error) {
-            showError(error, R.string.contact_open_failed);
-            return;
-        }
-
-        if (resolution.optBoolean("resolved")) {
-            // Nothing needs the user: stage the clean merge and clear the
-            // conflict. The toast is the tap's only visible outcome, so
-            // without it the vanishing flag reads as a bug.
-            try {
-                new ContactStager(pimdir, client)
-                        .edit(replica.book.url, handle, resolution.optString("vcard"));
-            } catch (Exception error) {
-                showError(error, R.string.save_failed);
-                return;
-            }
-            toast(getString(R.string.conflict_auto_resolved));
-            reloadContacts();
-            return;
-        }
-
-        JSONObject alternatives = resolution.optJSONObject("alternatives");
-        edit = new EditSession();
-        edit.book = replica.book;
-        edit.accountEmail = replica.accountEmail;
-        edit.card = replica.card;
-        edit.replicas = new ArrayList<>(java.util.Collections.singletonList(replica));
-        edit.resolvingConflict = true;
-        edit.vcard = resolution.optString("vcard");
-        edit.title = replica.displayName();
-
-        org.json.JSONArray changed = resolution.optJSONArray("changed");
-        if (changed == null) {
-            changed = new org.json.JSONArray();
-        }
-        form.load(resolution.optJSONObject("model"), alternatives, changed);
-        show(PANEL_CONTACT);
-    }
-
-    /** Prompts for a vCard file to import. */
-    public void importContacts() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("*/*");
-        startActivityForResult(intent, VcfTransfer.REQUEST_IMPORT);
+        editor.openGroup(group);
     }
 
     @Override
@@ -1593,74 +1477,14 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
             return;
         }
         if (request == VcfTransfer.REQUEST_IMPORT) {
-            vcfTransfer.importFile(data.getData());
+            contactsList.transfer().importFile(data.getData());
         } else if (request == VcfTransfer.REQUEST_EXPORT) {
-            vcfTransfer.exportFile(data.getData());
+            contactsList.transfer().exportFile(data.getData());
         } else if (request == FilesList.REQUEST_IMPORT) {
             filesList.imported(data.getData());
         } else if (request == FileActions.REQUEST_EXPORT) {
             fileActions.exported(data.getData());
         }
-    }
-
-    /** Prompts for a destination file, then exports the active view as a
-     *  single vCard file. */
-    public void exportContacts() {
-        if (contactsList.visibleGroups().isEmpty()) {
-            toast(getString(R.string.export_empty));
-            return;
-        }
-        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("text/vcard");
-        intent.putExtra(Intent.EXTRA_TITLE, "contacts.vcf");
-        startActivityForResult(intent, VcfTransfer.REQUEST_EXPORT);
-    }
-
-    /** The active contacts view, for the vCard export snapshot. */
-    public List<Group> visibleGroups() {
-        return contactsList.visibleGroups();
-    }
-
-    /**
-     * Starts a new contact in the default address book of the account in
-     * view, asking only when there is none ({@link DefaultCollection}). With
-     * no account the contact is created unattached (the hidden local book);
-     * the local book is never offered as an explicit target.
-     */
-    private void addContact() {
-        Map<String, BookEntry> byUrl = new HashMap<>();
-        BookEntry local = null;
-        for (BookEntry entry : base.loadSubscribedAddressbooks()) {
-            if (LocalBook.is(entry.accountEmail)) {
-                local = entry;
-            } else {
-                byUrl.put(entry.book.url, entry);
-            }
-        }
-
-        // With no real account the contact is born unattached, in the
-        // hidden local book.
-        if (byUrl.isEmpty()) {
-            if (local != null) {
-                openNewContact(local.book, local.accountEmail);
-            }
-            return;
-        }
-
-        List<PimdirCollections.Stored> books = new ArrayList<>();
-        for (PimdirCollections.Stored book : collectionsOf(PimDomain.CONTACTS)) {
-            if (byUrl.containsKey(book.id)) {
-                books.add(book);
-            }
-        }
-        target(
-                PimDomain.CONTACTS,
-                PimdirSummary.CONTACT,
-                R.string.save_target_title,
-                R.string.contacts_no_book,
-                books,
-                book -> openNewContact(byUrl.get(book.id).book, book.accountEmail));
     }
 
     /**
@@ -1716,192 +1540,8 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                 open);
     }
 
-    /** The subscribed addressbooks the group does not already live in. */
-    private List<BookEntry> booksOutside(Group group) {
-        java.util.Set<String> current = new java.util.HashSet<>();
-        for (Entry entry : group.replicas) {
-            current.add(entry.book.url);
-        }
-
-        List<BookEntry> books = new ArrayList<>();
-        for (BookEntry entry : base.loadSubscribedAddressbooks()) {
-            if (!current.contains(entry.book.url)) {
-                books.add(entry);
-            }
-        }
-        return books;
-    }
-
-    /** One two-line label per addressbook of a picker dialog. */
-    public CharSequence[] bookLabels(List<BookEntry> books) {
-        CharSequence[] labels = new CharSequence[books.size()];
-        for (int index = 0; index < books.size(); index++) {
-            BookEntry entry = books.get(index);
-            // NOTE: the local book has no account email, so it shows on
-            // one line.
-            labels[index] =
-                    LocalBook.is(entry.accountEmail)
-                            ? getString(R.string.local_book)
-                            : ui.twoLine(entry.book.name, entry.accountEmail);
-        }
-        return labels;
-    }
-
-    /** Stages a copied card into the target addressbook. */
-    public void createCopy(BookEntry target, AccountEntry account, String id, String vcard) {
-        contacts.save(target.book.url, new Card(id, null, null, vcard));
-    }
-
-    /** The survivor chooser over any replica list, then the merge. */
-    public void mergeReplicas(List<Entry> replicas) {
-        if (pool.distinctRefs(replicas).size() < 2) {
-            return;
-        }
-
-        // The first replica of each addressbook is its candidate survivor.
-        Map<String, Entry> byBook = new java.util.LinkedHashMap<>();
-        for (Entry entry : replicas) {
-            byBook.putIfAbsent(entry.book.url, entry);
-        }
-
-        List<Entry> candidates = new ArrayList<>(byBook.values());
-        if (candidates.size() == 1) {
-            performMerge(replicas, candidates.get(0));
-            return;
-        }
-
-        CharSequence[] labels = new CharSequence[candidates.size()];
-        for (int index = 0; index < candidates.size(); index++) {
-            Entry entry = candidates.get(index);
-            labels[index] = ui.twoLine(entry.book.name, entry.accountEmail);
-        }
-
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.merge_target_title)
-                .setItems(
-                        labels,
-                        (dialog, which) -> performMerge(replicas, candidates.get(which)))
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
-    }
-
-    /**
-     * Merges into the survivor: a straight absorb when every card
-     * already carries the same content (the cards of one merged
-     * contact, nothing to reconcile), the merge form otherwise.
-     */
-    private void performMerge(List<Entry> replicas, Entry survivor) {
-        java.util.Set<String> hashes = new java.util.HashSet<>();
-        for (Entry entry : replicas) {
-            hashes.add(entry.hash);
-        }
-
-        if (hashes.size() == 1) {
-            mergeDirect(replicas, survivor);
-        } else {
-            openMergeForm(replicas, survivor);
-        }
-    }
-
-    /** Absorbs identical cards into the survivor, no form needed. */
-    private void mergeDirect(List<Entry> replicas, Entry survivor) {
-        contactsList.exitSelection();
-
-        String survivorRef = pool.replicaRef(survivor);
-        java.util.Set<String> removed = new java.util.HashSet<>();
-        for (Entry entry : replicas) {
-            String ref = pool.replicaRef(entry);
-            if (ref.equals(survivorRef) || !removed.add(ref)) {
-                continue;
-            }
-            contacts.stageDelete(entry.book.url, entry.card.id);
-        }
-
-        toast(getString(R.string.merge_done));
-        reloadContacts();
-    }
-
-    /** Opens the merge form with a surviving replica armed. */
-    private void openMergeForm(List<Entry> replicas, Entry survivor) {
-        contactsList.exitSelection();
-        if (openMerged(replicas)) {
-            edit.mergeSurvivor = survivor;
-        }
-    }
-
-    /** Opens the edit form on a fresh card in the target addressbook. */
-    private void openNewContact(Addressbook book, String accountEmail) {
-        edit = new EditSession();
-        edit.book = book;
-        edit.accountEmail = accountEmail;
-        edit.vcard = newVcard();
-        edit.title = getString(R.string.contact_new);
-        edit.advancedAvailable = true;
-
-        form.load(null, null, null);
-        show(PANEL_CONTACT);
-    }
-
-    /**
-     * Opens the edit form on a merged contact: the single document when
-     * the replicas agree, their union with per-field alternative chips
-     * when they diverge. Saving stages the form onto every replica.
-     * Returns false when the documents could not be read.
-     */
-    public boolean openMerged(List<Entry> replicas) {
-        Entry primary = replicas.get(0);
-        edit = new EditSession();
-        edit.book = primary.book;
-        edit.accountEmail = primary.accountEmail;
-        edit.card = primary.card;
-        edit.replicas = new ArrayList<>(replicas);
-
-        // The distinct documents behind the group, one per normalized
-        // hash: one means a plain edit, several go through the union merge.
-        List<String> docs = new ArrayList<>();
-        java.util.Set<String> hashes = new java.util.HashSet<>();
-        for (Entry entry : replicas) {
-            if (hashes.add(entry.hash)) {
-                docs.add(entry.card.vcard);
-            }
-        }
-
-        JSONObject model;
-        JSONObject alternatives = null;
-        org.json.JSONArray changed = null;
-        try {
-            if (docs.size() == 1) {
-                edit.vcard = primary.card.vcard;
-                model = Cards.projectCard(primary.card);
-            } else {
-                JSONObject merged = Cards.mergeCards(docs);
-                edit.vcard = merged.optString("vcard");
-                model = merged.optJSONObject("model");
-                alternatives = merged.optJSONObject("alternatives");
-                // NOTE: a non-null changed set turns on the form's
-                // conflict mode: only the disagreeing fields show.
-                changed = merged.optJSONArray("changed");
-                if (changed == null) {
-                    changed = new org.json.JSONArray();
-                }
-            }
-        } catch (Exception error) {
-            showError(error, R.string.contact_open_failed);
-            return false;
-        }
-
-        edit.title = primary.displayName();
-        // NOTE: raw lines cannot fan out to several documents, so the
-        // advanced editor only opens on single-card contacts.
-        edit.advancedAvailable = pool.distinctRefs(replicas).size() == 1;
-
-        form.load(model, alternatives, changed);
-        show(PANEL_CONTACT);
-        return true;
-    }
-
     private void setUpContactPanel() {
-        findViewById(R.id.contact_books).setOnClickListener(view -> manageBooks());
+        findViewById(R.id.contact_books).setOnClickListener(view -> editor.manageBooks());
         // NOTE: the add-field button is the bar's, not the contact
         // editor's: the calendar entry page raises the same one, since
         // both are the same page with the same gesture. Which one it
@@ -1918,117 +1558,9 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         findViewById(R.id.bar_delete).setOnClickListener(view -> eventView.confirmDelete());
     }
 
-    /**
-     * Leaves the editor without saving. The list still reloads: the
-     * addressbooks dialog stages copies and removals it must reflect.
-     * An unsaved Merge is abandoned.
-     */
-    private void closeContact() {
-        edit = new EditSession();
-        reloadContacts();
-        showBack(PANEL_CONTACTS);
-    }
-
-    /**
-     * Opens the raw-property editor on the working document (delegated to
-     * {@link AdvancedEditor}). Only offered on single-card contacts (and
-     * new ones): raw lines cannot fan out to several physical documents.
-     */
-    private void openAdvanced() {
-        advancedEditor.open();
-    }
-
-    /**
-     * The addressbooks dialog of the open contact, the one placement
-     * gesture: checked means the contact exists there, through any of
-     * its cards. Only real addressbooks are listed; unchecking every one
-     * is allowed and leaves the contact unattached, living in the hidden
-     * local book (it shows muted in the list, Delete is still the way to
-     * remove it). The dialog only records the desired state (reopening
-     * shows it); everything applies on SAVE: a staged membership when the
-     * contact already has a card on that account-level backend, a copied
-     * card sharing the vCard UID anywhere else, a membership removal or
-     * the card's staged delete on uncheck.
-     */
-    private void manageBooks() {
-        if (edit.replicas.isEmpty()) {
-            return;
-        }
-
-        Map<String, Entry> replicaByBook = new HashMap<>();
-        for (Entry entry : edit.replicas) {
-            replicaByBook.put(entry.book.url, entry);
-        }
-
-        // NOTE: the hidden local book is not listed; it is the fallback
-        // home when nothing is checked.
-        List<BookEntry> books = new ArrayList<>();
-        for (BookEntry entry : base.loadSubscribedAddressbooks()) {
-            if (!LocalBook.is(entry.accountEmail)) {
-                books.add(entry);
-            }
-        }
-        boolean[] checked = new boolean[books.size()];
-        for (int index = 0; index < books.size(); index++) {
-            String url = books.get(index).book.url;
-            Boolean pending = edit.pendingBookState == null ? null : edit.pendingBookState.get(url);
-            checked[index] = pending != null ? pending : replicaByBook.containsKey(url);
-        }
-
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.manage_books_title)
-                .setMultiChoiceItems(
-                        bookLabels(books),
-                        checked,
-                        (dialog, which, isChecked) -> checked[which] = isChecked)
-                .setPositiveButton(
-                        android.R.string.ok,
-                        (dialog, which) -> {
-                            edit.pendingBookState = new HashMap<>();
-                            boolean anyChecked = false;
-                            for (int index = 0; index < books.size(); index++) {
-                                edit.pendingBookState.put(books.get(index).book.url, checked[index]);
-                                anyChecked |= checked[index];
-                            }
-                            // Nothing checked leaves the contact unattached,
-                            // kept only in the hidden local book.
-                            edit.pendingBookState.put(LocalBook.URL, !anyChecked);
-                        })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
-    }
-
-    /**
-     * Stages the edited contact in the base and returns to the list
-     * (delegated to {@link ContactWriter}). The form model applies to
-     * every replica's own document (docs/merged-view.md), fanning out
-     * onto every replica, conflict and merge branches included.
-     */
-    private void saveContact() {
-        writer.save();
-    }
-
     /** Rebuilds the contacts list from the base (staged edits included). */
     public void reloadContacts() {
         contactsList.reload();
-    }
-
-    private static String newVcard() {
-        return "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:" + UUID.randomUUID() + "\r\nEND:VCARD\r\n";
-    }
-
-    /**
-     * The bridge's index of a vCard for one-off lookups (name, uid);
-     * the hot paths read the same index from the store's columns
-     * instead. Empty on a parse failure.
-     */
-    public JSONObject cardIndex(String vcard) {
-        try {
-            return Cards.indexCard(vcard);
-        } catch (Exception error) {
-            Log.w("pimalaya", "card index failed", error);
-            return new JSONObject();
-        }
     }
 
     /**
@@ -2572,7 +2104,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                     // selection then takes over.
                     contactsList.updateSelectionUi();
                 };
-        contacts.fab = this::addContact;
+        contacts.fab = () -> editor.addContact(filterOf(PimDomain.CONTACTS));
         contacts.systemBack =
                 () -> {
                     if (contactsList.isSearchOpen()) {
@@ -2671,15 +2203,15 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         Screen contact = new Screen();
         contact.chrome =
                 () -> {
-                    ((TextView) findViewById(R.id.bar_title)).setText(edit.title);
+                    ((TextView) findViewById(R.id.bar_title)).setText(editor.edit().title);
                     findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
                     // Placing needs a real account to target, so with only
                     // the local book or while resolving a conflict it hides.
                     findViewById(R.id.contact_books)
                             .setVisibility(
-                                    edit.card != null
+                                    editor.edit().card != null
                                                     && hasRealAccount()
-                                                    && !edit.resolvingConflict
+                                                    && !editor.edit().resolvingConflict
                                             ? View.VISIBLE
                                             : View.GONE);
                     findViewById(R.id.contact_add_field).setVisibility(View.VISIBLE);
@@ -2691,9 +2223,9 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                     fab.setVisibility(View.VISIBLE);
                     updateSaveEnabled();
                 };
-        contact.fab = this::saveContact;
-        contact.barBack = this::closeContact;
-        contact.systemBack = this::closeContact;
+        contact.fab = editor::save;
+        contact.barBack = editor::close;
+        contact.systemBack = editor::close;
         screens.put(PANEL_CONTACT, contact);
 
         Screen advanced = new Screen();
@@ -2703,8 +2235,8 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                     findViewById(R.id.bar_back).setVisibility(View.VISIBLE);
                     findViewById(R.id.fab).setVisibility(View.GONE);
                 };
-        advanced.barBack = advancedEditor::close;
-        advanced.systemBack = advancedEditor::close;
+        advanced.barBack = editor::closeAdvanced;
+        advanced.systemBack = editor::closeAdvanced;
         screens.put(PANEL_ADVANCED, advanced);
 
         Screen source = new Screen();
@@ -2717,7 +2249,7 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
                     fab.setContentDescription(getString(R.string.contact_save));
                     fab.setVisibility(View.VISIBLE);
                 };
-        source.fab = advancedEditor::applySource;
+        source.fab = editor::applySource;
         source.barBack = () -> showBack(PANEL_ADVANCED);
         source.systemBack = () -> showBack(PANEL_ADVANCED);
         screens.put(PANEL_SOURCE, source);
@@ -2846,14 +2378,6 @@ public class MainActivity extends Host implements SyncCoordinator.Screens {
         imm.hideSoftInputFromWindow(anchor.getWindowToken(), 0);
         if (focus != null) {
             focus.clearFocus();
-        }
-    }
-
-    private static String hostOf(String url) {
-        try {
-            return new URL(url).getHost();
-        } catch (Exception error) {
-            return url;
         }
     }
 

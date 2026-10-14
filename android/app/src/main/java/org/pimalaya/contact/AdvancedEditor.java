@@ -10,9 +10,10 @@ import java.util.ArrayList;
 import java.util.List;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.client.Cards;
+import org.pimalaya.ui.Host;
+import org.pimalaya.ui.Panels;
 
 /**
  * The advanced raw-vCard sub-editor behind the edit form: a
@@ -24,11 +25,13 @@ import org.pimalaya.client.Cards;
  * navigation and calls in through {@link #open}, {@link #close},
  * {@link #openSource} and {@link #applySource}.
  */
-public final class AdvancedEditor {
-    private final MainActivity host;
+final class AdvancedEditor {
+    private final Host host;
+    private final ContactEditor editor;
 
-    public AdvancedEditor(MainActivity host) {
+    AdvancedEditor(Host host, ContactEditor editor) {
         this.host = host;
+        this.editor = editor;
     }
 
     /**
@@ -37,27 +40,29 @@ public final class AdvancedEditor {
      * single-card contacts (and new ones): raw lines cannot fan out to
      * several physical documents.
      */
-    public void open() {
+    void open() {
         try {
             String working =
-                    host.edit.advancedVcard != null ? host.edit.advancedVcard : host.edit.vcard;
-            host.edit.advancedVcard = Cards.applyCard(working, host.form.collect());
+                    editor.edit().advancedVcard != null
+                            ? editor.edit().advancedVcard
+                            : editor.edit().vcard;
+            editor.edit().advancedVcard = Cards.applyCard(working, editor.form().collect());
             render();
         } catch (Exception error) {
             host.showError(error, R.string.contact_open_failed);
             return;
         }
-        host.show(MainActivity.PANEL_ADVANCED);
+        host.show(Panels.ADVANCED);
     }
 
     /** Back to the form, rebuilt from the edited document. */
-    public void close() {
+    void close() {
         try {
-            host.form.load(Cards.projectCard(host.edit.advancedVcard), null, null);
+            editor.form().load(Cards.projectCard(editor.edit().advancedVcard), null, null);
         } catch (Exception error) {
             host.showError(error, R.string.contact_open_failed);
         }
-        host.showBack(MainActivity.PANEL_CONTACT);
+        host.showBack(Panels.CONTACT);
     }
 
     /** Rebuilds the property rows and the closing source block. */
@@ -65,7 +70,7 @@ public final class AdvancedEditor {
         LinearLayout container = host.findViewById(R.id.advanced_container);
         container.removeAllViews();
 
-        org.json.JSONArray props = Cards.cardProps(host.edit.advancedVcard);
+        org.json.JSONArray props = Cards.cardProps(editor.edit().advancedVcard);
         for (int index = 0; props != null && index < props.length(); index++) {
             int at = index;
             JSONObject prop = props.optJSONObject(index);
@@ -110,7 +115,7 @@ public final class AdvancedEditor {
         container.addView(header);
 
         TextView source = new TextView(host);
-        source.setText(host.edit.advancedVcard);
+        source.setText(editor.edit().advancedVcard);
         source.setTextColor(host.ui.resolveColor(android.R.attr.textColorSecondary));
         source.setTypeface(android.graphics.Typeface.MONOSPACE);
         source.setTextSize(12);
@@ -455,8 +460,9 @@ public final class AdvancedEditor {
 
     private void applyAdvancedParts(int index, JSONObject prop) {
         try {
-            host.edit.advancedVcard = Cards.cardSetPropParts(host.edit.advancedVcard, index, prop);
-            host.edit.advancedDirty = true;
+            editor.edit().advancedVcard =
+                    Cards.cardSetPropParts(editor.edit().advancedVcard, index, prop);
+            editor.edit().advancedDirty = true;
             render();
         } catch (Exception error) {
             host.showError(error, R.string.advanced_invalid);
@@ -466,8 +472,9 @@ public final class AdvancedEditor {
     /** A raw rewrite: only removal uses it (a blank line drops). */
     private void applyAdvancedRaw(int index, String line) {
         try {
-            host.edit.advancedVcard = Cards.cardSetProp(host.edit.advancedVcard, index, line);
-            host.edit.advancedDirty = true;
+            editor.edit().advancedVcard =
+                    Cards.cardSetProp(editor.edit().advancedVcard, index, line);
+            editor.edit().advancedDirty = true;
             render();
         } catch (Exception error) {
             host.showError(error, R.string.advanced_invalid);
@@ -476,24 +483,24 @@ public final class AdvancedEditor {
 
     /** The advanced editor's second level: the free-hand source. */
     void openSource() {
-        ((EditText) host.findViewById(R.id.source_input)).setText(host.edit.advancedVcard);
-        host.show(MainActivity.PANEL_SOURCE);
+        ((EditText) host.findViewById(R.id.source_input)).setText(editor.edit().advancedVcard);
+        host.show(Panels.SOURCE);
     }
 
     /** Applies the hand-edited source (it must reparse) and returns. */
-    public void applySource() {
+    void applySource() {
         try {
-            host.edit.advancedVcard =
+            editor.edit().advancedVcard =
                     Cards.cardSource(
                             ((EditText) host.findViewById(R.id.source_input))
                                     .getText()
                                     .toString());
-            host.edit.advancedDirty = true;
+            editor.edit().advancedDirty = true;
             render();
         } catch (Exception error) {
             host.showError(error, R.string.advanced_invalid);
             return;
         }
-        host.showBack(MainActivity.PANEL_ADVANCED);
+        host.showBack(Panels.ADVANCED);
     }
 }
