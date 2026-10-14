@@ -1,19 +1,11 @@
 package org.pimalaya.client;
 
 import java.io.File;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONArray;
-import org.json.JSONException;
 import org.json.JSONObject;
-import org.json.JSONTokener;
 
 /**
  * The only surface the app needs: config search (endpoints plus
@@ -23,1160 +15,342 @@ import org.json.JSONTokener;
  * Owns the TLS sockets and the Rust bridge; the app sees neither.
  * Every call blocks, so callers must run it off the main thread.
  *
- * <p>Four backends hide behind the same operations: CardDAV, Microsoft
- * Graph, JMAP for Contacts (RFC 9610) and the Google People API. The
- * Rust bridge tells them apart by the account's base URL (the
- * non-CardDAV backends carry a sentinel scheme there) and dispatches
- * every operation; the base URL is opaque here, built by the
- * {@code *Base} helpers and threaded back verbatim. Graph and Google
- * accounts authenticate with their OAuth access token in
- * {@link Account#password}. Graph and JMAP updates carry no If-Match
- * guard (last-write-wins); CardDAV and Google updates are guarded by
- * the ETag.
+ * <p>Forwards to the domain clients ({@link Clients}) until the app
+ * calls them itself.
  */
 public class PimalayaClient {
+    /** The domain clients this one forwards to. */
+    private final Clients clients = Clients.real();
+
     /**
      * Discovers the CardDAV context root for the email through the
      * given DNS resolver (null for the default DNS-over-HTTPS one).
      * Throws when none is found.
      */
     public String discover(Transport transport, String email, String resolver) {
-        JSONObject reply = object(Native.discover(transport, email, resolver));
-        return string(reply, "url");
+        JSONObject reply = Replies.object(Native.discover(transport, email, resolver));
+        return Json.string(reply, "url");
     }
 
-    /**
-     * Runs the MX provider probe: one DNS lookup matching the mail
-     * exchanges against the fixed provider rules, catching every
-     * domain whose mail lives at Google or Microsoft (gmail.com and
-     * outlook.com included, their own exchanges match too). Meant to
-     * run in parallel with {@link #searchAll} so the caller decides
-     * what to take. Returns the raw provider configs (their source
-     * naming the provider), empty when no rule matched. Resolver as
-     * in {@link #discover}.
-     */
+    /** Forwards to {@link AccountClient#searchProvider}. */
     public List<ServiceConfig> searchProvider(Transport transport, String email, String resolver) {
-        return configs(Native.searchProvider(transport, email, resolver));
+        return clients.account().searchProvider(transport, email, resolver);
     }
 
-    /**
-     * Searches every discovery mechanism for service configs of every
-     * domain the app covers: the fixed provider rules, PACC, RFC 6764
-     * CardDAV and CalDAV resolve, Mozilla autoconfig (IMAP and SMTP)
-     * and RFC 8620 JMAP resolve, each carrying its endpoint and
-     * authentication methods, so the connection screen can list what
-     * the address actually offers. The input is an email address or a
-     * bare domain (every mechanism is domain-driven; a domain just
-     * skips the username hints). The mechanisms run in parallel, each
-     * on its own transport; a failing mechanism is skipped. Their
-     * outputs merge in mechanism-priority order, and the merged
-     * configs' endpoints are probed in parallel for the authentication
-     * schemes they actually advertise, a provider rule's excepted: what
-     * it says is the provider's own word. Resolver as in
-     * {@link #discover}.
-     *
-     * <p>The provider rules rank first, as io-pim-discovery's own sweep
-     * ranks them: they name Google's and Microsoft's endpoints and sign-ins
-     * for a custom domain as much as for their own, which nothing the
-     * domain publishes does.
-     */
+    /** Forwards to {@link AccountClient#searchAll}. */
     public List<ServiceConfig> searchAll(String email, String resolver) {
-        String[] outputs = new String[6];
-        Thread[] mechanisms = new Thread[outputs.length];
-        for (int index = 0; index < mechanisms.length; index++) {
-            final int mechanism = index;
-            mechanisms[index] =
-                    new Thread(
-                            () -> {
-                                Transport transport = new Transport();
-                                try {
-                                    outputs[mechanism] =
-                                            searchMechanism(mechanism, transport, email, resolver);
-                                } finally {
-                                    transport.close();
-                                }
-                            });
-            mechanisms[index].start();
-        }
-        joinAll(mechanisms);
-
-        JSONArray lists = new JSONArray();
-        for (String output : outputs) {
-            lists.put(configLists(output));
-        }
-        JSONArray merged = array(Native.searchMerge(lists.toString()));
-
-        String[] probed = new String[merged.length()];
-        Thread[] probes = new Thread[probed.length];
-        for (int index = 0; index < probes.length; index++) {
-            final int at = index;
-            final JSONObject found = object(merged, at);
-            final String config = found.toString();
-            if ("provider".equals(found.optString("source"))) {
-                probed[at] = config;
-                continue;
-            }
-            probes[index] =
-                    new Thread(
-                            () -> {
-                                Transport transport = new Transport();
-                                try {
-                                    probed[at] = Native.searchProbe(transport, config);
-                                } finally {
-                                    transport.close();
-                                }
-                                try {
-                                    object(probed[at]);
-                                } catch (RuntimeException error) {
-                                    // NOTE: a failed probe keeps the
-                                    // config as discovered.
-                                    probed[at] = config;
-                                }
-                            });
-            probes[index].start();
-        }
-        joinAll(probes);
-
-        JSONArray result = new JSONArray();
-        for (String config : probed) {
-            result.put(object(config));
-        }
-        return configs(result.toString());
+        return clients.account().searchAll(email, resolver);
     }
 
-    /** One discovery mechanism run, by priority rank. */
-    private static String searchMechanism(
-            int mechanism, Transport transport, String email, String resolver) {
-        switch (mechanism) {
-            case 0:
-                return Native.searchProvider(transport, email, resolver);
-            case 1:
-                return Native.searchPacc(transport, email, resolver);
-            case 2:
-                return Native.searchCarddav(transport, email, resolver);
-            case 3:
-                return Native.searchCaldav(transport, email, resolver);
-            case 4:
-                return Native.searchAutoconfig(transport, email, resolver);
-            default:
-                return Native.searchJmap(transport, email, resolver);
-        }
-    }
-
-    /**
-     * Parses one mechanism's output into a config array; a failed
-     * mechanism (error reply, or none at all) is skipped as an empty
-     * list, like the serial search chain did.
-     */
-    private static JSONArray configLists(String output) {
-        if (output == null) {
-            return new JSONArray();
-        }
-        try {
-            return array(output);
-        } catch (RuntimeException error) {
-            return new JSONArray();
-        }
-    }
-
-    /** Joins every thread started, restoring the interrupt flag if raised. */
-    private static void joinAll(Thread[] threads) {
-        for (Thread thread : threads) {
-            if (thread == null) {
-                continue;
-            }
-            try {
-                thread.join();
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt();
-            }
-        }
-    }
-
-    /**
-     * Refreshes OAuth 2.0 tokens; {@code scope} is the space-separated
-     * scope list of the original grant (null keeps the server default)
-     * and {@code clientSecret} rides along when the registration
-     * issued one (null for none). The code-exchange side lives on
-     * {@link OauthSession}.
-     */
-    public OauthTokens oauthRefresh(Transport transport, String tokenEndpoint,
+    /** Forwards to {@link AccountClient#oauthRefresh}. */
+    public OauthTokens oauthRefresh(
+            Transport transport,
+            String tokenEndpoint,
             String clientId,
             String clientSecret,
             String refreshToken,
             String scope) {
-        JSONObject reply =
-                object(
-                        Native.oauthRefreshAccessToken(
-                                transport,
-                                tokenEndpoint,
-                                clientId,
-                                clientSecret == null ? "" : clientSecret,
-                                refreshToken,
-                                scope == null ? "" : scope));
-        return OauthTokens.from(reply);
+        return clients.account().oauthRefresh(
+                transport,
+                tokenEndpoint,
+                clientId,
+                clientSecret,
+                refreshToken,
+                scope);
     }
 
-    /**
-     * Fetches an authorization server's RFC 8414 metadata from its
-     * issuer, so onboarding can drive the code grant and tell whether
-     * the server lets a public client register itself (RFC 7591).
-     */
+    /** Forwards to {@link AccountClient#oauthServerMetadata}. */
     public ServerMetadata oauthServerMetadata(Transport transport, String issuer) {
-        return new ServerMetadata(object(Native.oauthServerMetadata(transport, issuer)));
+        return clients.account().oauthServerMetadata(transport, issuer);
     }
 
-    /**
-     * Registers a public client at the given RFC 7591 registration
-     * endpoint (no secret, the loopback redirect URI, code + refresh
-     * grants), returning the server-issued client id. The client
-     * secret rides in {@link OauthTokens}-style JSON but a public
-     * client gets none.
-     */
-    public String oauthRegisterClient(Transport transport, String registrationEndpoint, String redirectUri, String clientName, String scope) {
-        JSONObject reply =
-                object(
-                        Native.oauthRegisterClient(
-                                transport,
-                                registrationEndpoint,
-                                redirectUri,
-                                clientName == null ? "" : clientName,
-                                scope == null ? "" : scope));
-        return string(reply, "client_id");
+    /** Forwards to {@link AccountClient#oauthRegisterClient}. */
+    public String oauthRegisterClient(
+            Transport transport,
+            String registrationEndpoint,
+            String redirectUri,
+            String clientName,
+            String scope) {
+        return clients.account().oauthRegisterClient(
+                transport,
+                registrationEndpoint,
+                redirectUri,
+                clientName,
+                scope);
     }
 
-    /**
-     * Google's CardDAV principal root for the email; the standard
-     * PROPFIND discovery runs from there.
-     */
+    /** Forwards to {@link AccountClient#googleCarddavBase}. */
     public static String googleCarddavBase(String email) {
-        return base("googleCarddav", email);
+        return AccountClient.googleCarddavBase(email);
     }
 
-    /** A Google API account's base URL for the email: People, Gmail or Calendar. */
+    /** Forwards to {@link AccountClient#googleBase}. */
     public static String googleBase(String email) {
-        return base("google", email);
+        return AccountClient.googleBase(email);
     }
 
-    /** A Microsoft Graph account's base URL for the email. */
+    /** Forwards to {@link AccountClient#msgraphBase}. */
     public static String msgraphBase(String email) {
-        return base("msgraph", email);
+        return AccountClient.msgraphBase(email);
     }
 
-    /**
-     * A JMAP account's base URL wrapping the HTTPS session URL (a bare
-     * host triggers {@code /.well-known/jmap} discovery).
-     */
+    /** Forwards to {@link AccountClient#jmapBase}. */
     public static String jmapBase(String sessionUrl) {
-        return base("jmap", sessionUrl);
+        return AccountClient.jmapBase(sessionUrl);
     }
 
-    /**
-     * What was typed for a submission server, as the endpoint it opens:
-     * STARTTLS on the submission port (587, RFC 6409) and on 25, implicit
-     * TLS on any other, 465 (RFC 8314 section 3.3) when none was typed. A
-     * URL passes through.
-     */
+    /** Forwards to {@link AccountClient#submitUrl}. */
     public static String submitUrl(String entered) {
-        if (entered.contains("://")) {
-            return entered;
-        }
-        if (!entered.contains(":")) {
-            return "smtps://" + entered + ":465";
-        }
-        String port = entered.substring(entered.lastIndexOf(':') + 1);
-        return (port.equals("587") || port.equals("25") ? "smtp://" : "smtps://") + entered;
+        return AccountClient.submitUrl(entered);
     }
 
-    /**
-     * The endpoint with a user in its userinfo, the way RFC 5092 section
-     * 3.2 names who an IMAP URL signs in as: what SASL XOAUTH2 presents
-     * beside a token, which carries no login of its own.
-     */
+    /** Forwards to {@link AccountClient#withUser}. */
     public static String withUser(String url, String user) {
-        try {
-            URI uri = URI.create(url);
-            return new URI(
-                            uri.getScheme(),
-                            user,
-                            uri.getHost(),
-                            uri.getPort(),
-                            uri.getPath(),
-                            uri.getQuery(),
-                            uri.getFragment())
-                    .toASCIIString();
-        } catch (URISyntaxException error) {
-            throw new PimalayaException("Invalid endpoint '" + url + "': " + error.getMessage());
-        }
+        return AccountClient.withUser(url, user);
     }
 
-    /** Builds one account base URL through the bridge. */
-    private static String base(String kind, String value) {
-        return string(object(Native.accountBase(kind, value)), "url");
-    }
-
-    /**
-     * True when the account's cards are account-level resources with
-     * m:n addressbook memberships (JMAP, Google): they list once per
-     * account through {@link #listAccountCards}, not per addressbook.
-     * CardDAV and Graph cards live in the one collection they were
-     * listed from and go through {@link #listCards}.
-     */
+    /** Forwards to {@link AccountClient#isAccountLevel}. */
     public static boolean isAccountLevel(Account account) {
-        return account != null && isAccountLevel(account.baseUrl);
+        return AccountClient.isAccountLevel(account);
     }
 
-    /**
-     * True when the URL (an account base URL, or a collection URL
-     * derived from one) belongs to an account-level backend.
-     */
+    /** Forwards to {@link AccountClient#isAccountLevel}. */
     public static boolean isAccountLevel(String url) {
-        return info(url).optBoolean("accountLevel");
+        return AccountClient.isAccountLevel(url);
     }
 
-    /**
-     * True when a write to the calendar behind the URL carries an override
-     * of one occurrence to the server: CalDAV's in the object, Graph's and
-     * Google's through the occurrence's instance, JMAP's inside the event's
-     * {@code recurrenceOverrides}.
-     */
+    /** Forwards to {@link AccountClient#writesOverrides}. */
     public static boolean writesOverrides(String url) {
-        return info(url).optBoolean("writesOverrides");
+        return AccountClient.writesOverrides(url);
     }
 
-    /** True when a write to the calendar behind the URL carries an {@code EXDATE}. */
+    /** Forwards to {@link AccountClient#writesExdates}. */
     public static boolean writesExdates(String url) {
-        return info(url).optBoolean("writesExdates");
+        return AccountClient.writesExdates(url);
     }
 
-    /**
-     * True when the calendar behind the URL takes event writes at all: every backend's does, the
-     * local account's none.
-     */
+    /** Forwards to {@link AccountClient#writesEvents}. */
     public static boolean writesEvents(String url) {
-        return info(url).optBoolean("writesEvents");
+        return AccountClient.writesEvents(url);
     }
 
-    /**
-     * True when the account's mail submits through the session it reads from (JMAP, Graph,
-     * Gmail), needing no submit endpoint of its own.
-     */
+    /** Forwards to {@link AccountClient#submitsOverSession}. */
     public static boolean submitsOverSession(Account account) {
-        return account != null && info(account.baseUrl).optBoolean("submitsOverSession");
+        return AccountClient.submitsOverSession(account);
     }
 
-    /** True when the URL belongs to a plain CardDAV backend. */
+    /** Forwards to {@link AccountClient#isCarddav}. */
     public static boolean isCarddav(String url) {
-        return "carddav".equals(info(url).optString("backend"));
+        return AccountClient.isCarddav(url);
     }
 
-    /** True when the account's backend is Microsoft Graph. */
+    /** Forwards to {@link AccountClient#isGraph}. */
     public static boolean isGraph(Account account) {
-        return account != null && "graph".equals(info(account.baseUrl).optString("backend"));
+        return AccountClient.isGraph(account);
     }
 
-    /** True when the account's backend is the Google People API. */
+    /** Forwards to {@link AccountClient#isGoogle}. */
     public static boolean isGoogle(Account account) {
-        return account != null && "google".equals(info(account.baseUrl).optString("backend"));
+        return AccountClient.isGoogle(account);
     }
 
-    /** True when the account's backend speaks JMAP (RFC 8620). */
+    /** Forwards to {@link AccountClient#isJmap}. */
     public static boolean isJmap(Account account) {
-        return account != null && "jmap".equals(info(account.baseUrl).optString("backend"));
+        return AccountClient.isJmap(account);
     }
 
-    /** Parsed backend info by URL, cached (pure computation). */
-    private static final Map<String, JSONObject> infos = new ConcurrentHashMap<>();
-
-    /** The URL's {@code {backend, accountLevel}} info. */
-    private static JSONObject info(String url) {
-        return infos.computeIfAbsent(
-                url == null ? "" : url, key -> object(Native.accountInfo(key)));
-    }
-
-    /**
-     * Lists the account's addressbooks: the CardDAV discovery walk,
-     * the Graph contact folders (default Contacts folder first), the
-     * JMAP AddressBooks, or the Google contact groups.
-     */
+    /** Forwards to {@link ContactClient#listAddressbooks}. */
     public List<Addressbook> listAddressbooks(Transport transport, Account account) {
-        JSONArray reply =
-                array(
-                        Native.listAddressbooks(
-                                transport, account.baseUrl, account.login, account.password));
-
-        List<Addressbook> books = new ArrayList<>(reply.length());
-        for (int index = 0; index < reply.length(); index++) {
-            JSONObject book = object(reply, index);
-            books.add(
-                    new Addressbook(
-                            string(book, "id"),
-                            string(book, "name"),
-                            string(book, "url"),
-                            optString(book, "description"),
-                            optString(book, "color"),
-                            book.optString("role"),
-                            book.optBoolean("writable", true)));
-        }
-        return books;
+        return clients.contact().listAddressbooks(transport, account);
     }
 
-    /**
-     * The account's mailboxes with the roles their RFC 6154 attributes
-     * mark, in one round.
-     */
+    /** Forwards to {@link MailClient#listMailboxes}. */
     public List<Mailbox> listMailboxes(MailSession session) {
-        JSONArray reply =
-                array(on(session, open -> Native.listMailboxes(open.transport(), open.handle())));
-
-        List<Mailbox> mailboxes = new ArrayList<>(reply.length());
-        for (int index = 0; index < reply.length(); index++) {
-            JSONObject mailbox = object(reply, index);
-            mailboxes.add(new Mailbox(string(mailbox, "name"), mailbox.optString("role")));
-        }
-        return mailboxes;
+        return clients.mail().listMailboxes(session);
     }
 
-    /**
-     * One page of a mailbox's listing, the engine's {@code enumerate}
-     * yield answered: the reply as the engine reads it, every member
-     * named by the summary the listing read (pimdir SYNC section 4).
-     *
-     * <p>Passed through rather than parsed into a model of its own: the
-     * shape is the engine's wire, the driver hands it straight back, and
-     * a Java copy of it would be the duplicated schema the boundary
-     * notes warn about.
-     */
+    /** Forwards to {@link MailClient#enumerateMailbox}. */
     public JSONObject enumerateMailbox(MailSession session, String mailbox, JSONObject request) {
-        return object(enumerateMailboxRaw(session, mailbox, request));
+        return clients.mail().enumerateMailbox(session, mailbox, request);
     }
 
-    /**
-     * The same page as the string the bridge answered, for a caller timing
-     * the network apart from reading the reply.
-     */
+    /** Forwards to {@link MailClient#enumerateMailboxRaw}. */
     public String enumerateMailboxRaw(MailSession session, String mailbox, JSONObject request) {
-        String asked = request.toString();
-        return on(
-                session,
-                open -> Native.enumerateMailbox(open.transport(), open.handle(), mailbox, asked));
+        return clients.mail().enumerateMailboxRaw(session, mailbox, request);
     }
 
-    /**
-     * The messages a listing named by id and markers alone (a Graph delta),
-     * each read with its summary: the items as a listing names them, a
-     * message gone since it was listed left out.
-     */
+    /** Forwards to {@link MailClient#nameMessages}. */
     public JSONArray nameMessages(MailSession session, String mailbox, List<String> handles) {
-        String asked = new JSONArray(handles).toString();
-        JSONObject reply =
-                object(
-                        on(
-                                session,
-                                open ->
-                                        Native.nameMessages(
-                                                open.transport(), open.handle(), mailbox, asked)));
-        JSONArray items = reply.optJSONArray("items");
-        return items == null ? new JSONArray() : items;
+        return clients.mail().nameMessages(session, mailbox, handles);
     }
 
-    /**
-     * The floor of a mailbox's next chunk (a number of messages, never a
-     * span of time): the oldest {@code Date} among its {@code count} newest
-     * messages dated before {@code before}, null for no ceiling. Null when
-     * fewer than {@code count} dated messages lie below the ceiling: the
-     * mailbox is whole below it.
-     */
+    /** Forwards to {@link MailClient#mailFloor}. */
     public String mailFloor(MailSession session, String mailbox, String before, int count) {
-        JSONObject reply = floorReply(session, mailbox, before, count);
-        return reply.isNull("floor") ? null : reply.optString("floor", null);
+        return clients.mail().mailFloor(session, mailbox, before, count);
     }
 
-    /**
-     * The {@code Date}s of a mailbox's {@code count} newest messages by
-     * {@code Date} dated before {@code before} (null for no ceiling),
-     * newest first: the {@link #mailFloor} read, its floor the last of them
-     * when there are {@code count}, fewer when the mailbox is whole below
-     * the ceiling.
-     */
+    /** Forwards to {@link MailClient#mailNewest}. */
     public List<String> mailNewest(MailSession session, String mailbox, String before, int count) {
-        JSONArray dates = floorReply(session, mailbox, before, count).optJSONArray("dates");
-        List<String> newest = new ArrayList<>();
-        for (int index = 0; dates != null && index < dates.length(); index++) {
-            newest.add(dates.optString(index));
-        }
-        return newest;
+        return clients.mail().mailNewest(session, mailbox, before, count);
     }
 
-    private JSONObject floorReply(MailSession session, String mailbox, String before, int count) {
-        return object(
-                on(
-                        session,
-                        open ->
-                                Native.mailFloor(
-                                        open.transport(),
-                                        open.handle(),
-                                        mailbox,
-                                        before == null ? "" : before,
-                                        count)));
-    }
-
-    /**
-     * One step of an account's mail, read whole into files of {@code dir};
-     * {@code mailbox} the one mailbox a view filtered to it steps, null for
-     * the account. {@code request} is {@code {count, frontier, bound,
-     * anchors, mailboxes}}, each backend reading what it needs, and asking
-     * {@code store} which of each page it lists the store holds ({@link
-     * Native#mailStep}); the reply as the bridge wrote it.
-     */
+    /** Forwards to {@link MailClient#mailStep}. */
     public JSONObject mailStep(
             MailSession session,
             String mailbox,
             JSONObject request,
             File dir,
             OfflineDriver store) {
-        String asked = request.toString();
-        return object(
-                on(
-                        session,
-                        open ->
-                                Native.mailStep(
-                                        open.transport(),
-                                        open.handle(),
-                                        mailbox == null ? "" : mailbox,
-                                        asked,
-                                        dir.getAbsolutePath(),
-                                        store)));
+        return clients.mail().mailStep(session, mailbox, request, dir, store);
     }
 
-    /**
-     * Reads some messages of a mailbox whole into files of {@code dir}, one
-     * per message, as the bytes the server holds: {@code {items, gone}},
-     * each item {@code {id, path, size}}, a message gone (deleted since it
-     * was listed) left out of the items and named by its id in
-     * {@code gone}, one not handed over left out of both. Gmail, Graph and
-     * IMAP read them in batches, JMAP names their blobs in one
-     * {@code Email/get} and downloads them one after another.
-     */
+    /** Forwards to {@link MailClient#fetchMessageSources}. */
     public JSONObject fetchMessageSources(
-            MailSession session, String mailbox, List<String> ids, File dir) {
-        String asked = new JSONArray(ids).toString();
-        return object(
-                on(
-                        session,
-                        open ->
-                                Native.fetchMessageSources(
-                                        open.transport(),
-                                        open.handle(),
-                                        mailbox,
-                                        asked,
-                                        dir.getAbsolutePath())));
+            MailSession session,
+            String mailbox,
+            List<String> ids,
+            File dir) {
+        return clients.mail().fetchMessageSources(session, mailbox, ids, dir);
     }
 
-    /**
-     * Writes the decoded bytes of one attachment of the message stored at
-     * {@code source}, by the section {@link MessageBody.Attachment#part}
-     * names, to {@code target}, answering its size. Files on both sides, so
-     * a large part never sits on the heap twice. No network.
-     */
+    /** Forwards to {@link MailClient#messagePart}. */
     public long messagePart(File source, String part, File target) {
-        return object(
-                        Native.messagePart(
-                                source.getAbsolutePath(), part, target.getAbsolutePath()))
-                .optLong("size");
+        return clients.mail().messagePart(source, part, target);
     }
 
-    /**
-     * Resolves one message's MIME tree into what a reader draws: the
-     * headers, the one body it shows, and what it carries beside it.
-     *
-     * <p>No network, whatever the message: this is the whole read path
-     * of a message the store already holds.
-     */
+    /** Forwards to {@link MailClient#parseMessage}. */
     public MessageBody parseMessage(byte[] source) {
-        return message(object(Native.parseMessage(source)));
+        return clients.mail().parseMessage(source);
     }
 
-    /**
-     * {@link #parseMessage(byte[])} of the message stored in {@code source},
-     * read by the bridge: the message never crosses onto the Java heap.
-     */
+    /** Forwards to {@link MailClient#parseMessage}. */
     public MessageBody parseMessage(File source) {
-        return message(object(Native.parseMessageFile(source.getAbsolutePath())));
+        return clients.mail().parseMessage(source);
     }
 
-    /**
-     * What the store files of one message read into {@code source}, read
-     * once by the bridge: {@code {hash, size, summary, attachments}}, the
-     * content hash the object store names it by ({@code sha256-128}), the
-     * summary io-pimdir derives from it (null where it yields none) and its
-     * attachments as {@link #attachmentsOf} reads them (null when the
-     * parser cannot read it). No body crosses the boundary.
-     */
+    /** Forwards to {@link MailClient#describeMessage}. */
     public JSONObject describeMessage(File source) {
-        return object(Native.describeMessage(source.getAbsolutePath()));
+        return clients.mail().describeMessage(source);
     }
 
-    /** A {@code parseMessage} reply as what a reader draws. */
-    private static MessageBody message(JSONObject reply) {
-        // NOTE: optString and not the null-returning helper beside it:
-        // every one of these fields is always serialised, and a reader
-        // must never be handed a null to render.
-        return new MessageBody(
-                reply.optString("subject"),
-                reply.optString("from"),
-                reply.optString("fromAddress"),
-                reply.optString("to"),
-                reply.optString("cc"),
-                reply.optString("date"),
-                reply.optString("kind"),
-                reply.optString("body"),
-                attachmentsOf(reply.optJSONArray("attachments")),
-                reply.optBoolean("attachmentMark"));
-    }
-
-    /** The attachments a parse or a description lists, each {@code {name, mime, size, part}}. */
+    /** Forwards to {@link MailClient#attachmentsOf}. */
     public static List<MessageBody.Attachment> attachmentsOf(JSONArray listed) {
-        List<MessageBody.Attachment> attachments =
-                new ArrayList<>(listed == null ? 0 : listed.length());
-        for (int index = 0; listed != null && index < listed.length(); index++) {
-            JSONObject attachment = object(listed, index);
-            attachments.add(
-                    new MessageBody.Attachment(
-                            attachment.optString("name"),
-                            attachment.optString("mime"),
-                            attachment.optLong("size"),
-                            attachment.optString("part")));
-        }
-        return attachments;
+        return MailClient.attachmentsOf(listed);
     }
 
-    /**
-     * Adds or removes one marker on one message, named the IMAP way
-     * whichever backend answers.
-     */
+    /** Forwards to {@link MailClient#setMessageFlag}. */
     public void setMessageFlag(
-            MailSession session, String mailbox, String id, String flag, boolean add) {
-        object(
-                on(
-                        session,
-                        open ->
-                                Native.setMessageFlag(
-                                        open.transport(),
-                                        open.handle(),
-                                        mailbox,
-                                        id,
-                                        flag,
-                                        add)));
+            MailSession session,
+            String mailbox,
+            String id,
+            String flag,
+            boolean add) {
+        clients.mail().setMessageFlag(session, mailbox, id, flag, add);
     }
 
-    /**
-     * Composes one draft into the RFC 5322 message an outbox holds.
-     *
-     * <p>{@code draft} is a JSON object of {@code from}, {@code fromName},
-     * {@code to}, {@code cc}, {@code bcc}, {@code subject}, {@code body},
-     * {@code date} and {@code messageId}: the composer's fields plus the
-     * two stamps, which are the caller's so the bridge stays a pure
-     * function of what it is handed.
-     *
-     * <p>No network, which is the point: a message is written and queued
-     * with the radio off, and {@link #submitMessage} is what needs one.
-     * The bytes carry a {@code Bcc} header, as RFC 5322 §3.6.3 provides
-     * for a message prepared for sending; the submission takes it out.
-     */
+    /** Forwards to {@link MailClient#composeMessage}. */
     public byte[] composeMessage(String draft) {
-        JSONObject reply = object(Native.composeMessage(draft));
-        return Base64.getDecoder().decode(reply.optString("source"));
+        return clients.mail().composeMessage(draft);
     }
 
-    /**
-     * Hands one stored message over, answering the {@code Message-ID} the
-     * provider filed its sent copy under when it stamped one of its own
-     * (Gmail), else null.
-     *
-     * <p>The submission alone: the copy the sender keeps is a create staged
-     * in the sent mailbox when the message was queued, and the sync carries
-     * it out.
-     *
-     * @throws SubmissionRefused when the server refused the message for
-     *     good, which is what parks it rather than queueing it again.
-     * @throws SubmissionUncertain when the whole message went over and no
-     *     verdict came back, which parks it for the user to confirm.
-     */
+    /** Forwards to {@link MailClient#submitMessage}. */
     public String submitMessage(MailSession session, byte[] source) {
-        String submitUrl = session.account().submitUrl;
-        // NOTE: run once, never retried, unlike every other verb on a
-        // session. Sending is the one thing here that is not idempotent:
-        // a submission that was accepted and then lost its answer looks
-        // exactly like one that never went, and running it again would
-        // send the message twice. A failure leaves it queued instead,
-        // which is what the outbox is for.
-        String json =
-                Native.submitMessage(
-                        session.transport(),
-                        session.handle(),
-                        submitUrl == null ? "" : submitUrl,
-                        source);
-
-        JSONObject reply = read(json);
-        String error = reply.optString("error");
-        if (!error.isEmpty()) {
-            if (reply.optBoolean("permanent")) {
-                throw new SubmissionRefused(error);
-            }
-            throw reply.optBoolean("uncertain")
-                    ? new SubmissionUncertain(error)
-                    : new PimalayaException(error);
-        }
-        return reply.isNull("messageId") ? null : reply.optString("messageId", null);
+        return clients.mail().submitMessage(session, source);
     }
 
-    /** Moves one message from {@code mailbox} into {@code target}. */
+    /** Forwards to {@link MailClient#relocateMessage}. */
     public void relocateMessage(MailSession session, String mailbox, String id, String target) {
-        object(
-                on(
-                        session,
-                        open ->
-                                Native.relocateMessage(
-                                        open.transport(), open.handle(), mailbox, id, target)));
+        clients.mail().relocateMessage(session, mailbox, id, target);
     }
 
-    /**
-     * Copies one message from {@code mailbox} into {@code target} on the
-     * server. Run once: a copy that lost its answer and ran again would
-     * file a second one.
-     */
+    /** Forwards to {@link MailClient#copyMessage}. */
     public void copyMessage(MailSession session, String mailbox, String id, String target) {
-        object(
-                Native.copyMessage(
-                        session.transport(), session.handle(), mailbox, id, target));
+        clients.mail().copyMessage(session, mailbox, id, target);
     }
 
-    /**
-     * Deletes one message for good: on IMAP {@code \Deleted} then
-     * {@code UID EXPUNGE} with UIDPLUS, the marker alone otherwise.
-     */
+    /** Forwards to {@link MailClient#destroyMessage}. */
     public void destroyMessage(MailSession session, String mailbox, String id) {
-        object(
-                on(
-                        session,
-                        open -> Native.destroyMessage(open.transport(), open.handle(), mailbox, id)));
+        clients.mail().destroyMessage(session, mailbox, id);
     }
 
-    /**
-     * Appends one message to {@code mailbox} with {@code flags}. Run once,
-     * as a copy is. IMAP only.
-     */
+    /** Forwards to {@link MailClient#appendMessage}. */
     public void appendMessage(MailSession session, String mailbox, byte[] source, JSONArray flags) {
-        object(
-                Native.appendMessage(
-                        session.transport(), session.handle(), mailbox, source, flags.toString()));
+        clients.mail().appendMessage(session, mailbox, source, flags);
     }
 
-    /**
-     * Opens one account's mail connection, greeted and authenticated, for
-     * a caller that will run several verbs on it and close it.
-     *
-     * <p>The unit is the account and not the mailbox, which is what both
-     * backends are shaped for: IMAP is one session over every mailbox and
-     * JMAP one session resource over the whole account.
-     */
+    /** Forwards to {@link MailClient#openMail}. */
     public static MailSession openMail(Account account) {
-        Transport transport = new Transport();
-        try {
-            JSONObject reply =
-                    object(
-                            Native.openMailSession(
-                                    transport,
-                                    account.baseUrl,
-                                    account.login,
-                                    account.password));
-            return new MailSession(
-                    account,
-                    transport,
-                    MailSession.handleOf(reply),
-                    reply.optBoolean("expungesOne", true));
-        } catch (RuntimeException failure) {
-            transport.close();
-            throw failure;
-        }
+        return MailClient.openMail(account);
     }
 
-    /** One verb against an open session. */
-    private interface OnSession {
-        String run(MailSession session);
-    }
-
-    /**
-     * Runs one idempotent verb on a held session, reopening it once if it
-     * has died.
-     *
-     * <p>A held connection is a hint and never a promise: a server's idle
-     * timeout (Graph's is about two minutes), a rebound NAT and a walk from
-     * wifi to cellular all end one under the app, and none of them announce
-     * it. The bridge answers a failure as an error reply rather than
-     * throwing, so a failure is read as the connection's when the transport
-     * lost one since a verb last answered ({@link Transport#losses}), in this
-     * call or in one run once outside it (a copy, an append): the verb is
-     * then given one honest attempt on a fresh session, an IMAP one greeted
-     * and authenticated again, before its failure is reported as its own. A
-     * refusal from a live server is reported at once.
-     *
-     * <p>Idempotent is the condition and not a description: a verb that
-     * lost its connection may have been carried out before it did.
-     * Re-reading a message, re-storing a marker and re-moving a message that
-     * has already moved all cost a round trip and change nothing. Submitting
-     * a message does not, which is why it does not come through here.
-     */
-    private static String on(MailSession session, OnSession verb) {
-        String reply;
-        boolean reopened = false;
-        try {
-            reply = verb.run(session);
-        } catch (RuntimeException failure) {
-            session.reopen();
-            reopened = true;
-            reply = verb.run(session);
-        }
-        if (!reopened && failed(reply) && session.lostSinceAnswered()) {
-            session.reopen();
-            reply = verb.run(session);
-        }
-        if (!failed(reply)) {
-            session.answered();
-        }
-        return reply;
-    }
-
-    /** Whether a bridge reply is a failure, read without parsing a large one. */
-    static boolean failed(String reply) {
-        return reply != null && reply.trim().startsWith("{\"error\"");
-    }
-
-    /**
-     * The capability URNs a JMAP account's session serves an account for, read afresh: what
-     * the connection flow connects a domain over JMAP by.
-     */
+    /** Forwards to {@link ContactClient#jmapCapabilities}. */
     public Set<String> jmapCapabilities(Transport transport, Account account) {
-        JSONArray reply =
-                array(
-                        Native.jmapCapabilities(
-                                transport, account.baseUrl, account.login, account.password));
-
-        Set<String> urns = new LinkedHashSet<>();
-        for (int index = 0; index < reply.length(); index++) {
-            urns.add(reply.optString(index));
-        }
-        return urns;
+        return clients.contact().jmapCapabilities(transport, account);
     }
 
-    /** Lists the account's calendars: the CalDAV discovery walk. */
+    /** Forwards to {@link CalendarClient#listCalendars}. */
     public List<Calendar> listCalendars(Transport transport, Account account) {
-        JSONArray reply =
-                array(
-                        Native.listCalendars(
-                                transport, account.baseUrl, account.login, account.password));
-
-        List<Calendar> calendars = new ArrayList<>(reply.length());
-        for (int index = 0; index < reply.length(); index++) {
-            JSONObject calendar = object(reply, index);
-            calendars.add(
-                    new Calendar(
-                            string(calendar, "id"),
-                            string(calendar, "name"),
-                            string(calendar, "url"),
-                            optString(calendar, "description"),
-                            optString(calendar, "color"),
-                            calendar.optString("role"),
-                            calendar.optBoolean("writable", true)));
-        }
-        return calendars;
+        return clients.calendar().listCalendars(transport, account);
     }
 
-    /**
-     * Enumerates a calendar collection from the cursor the last pass
-     * stored: which events moved and which went, and no bodies.
-     *
-     * <p>The bodies are {@link #multigetEvents}, for the events the merge
-     * asks about. A round that carried them would be re-reading a whole
-     * calendar to find out that nothing in it changed, which is what this
-     * replaced; only a round that lists every event whole anyway (Google,
-     * JMAP) hands them over, in {@link EventDelta#bodies}.
-     */
+    /** Forwards to {@link CalendarClient#syncEvents}. */
     public EventDelta syncEvents(
-            Transport transport, Account account, String calendarUrl, String cursor) {
-        JSONObject reply =
-                object(
-                        Native.syncEvents(
-                                transport,
-                                account.baseUrl,
-                                calendarUrl,
-                                account.login,
-                                account.password,
-                                cursor == null ? "" : cursor));
-
-        JSONArray listed = reply.optJSONArray("changed");
-        List<EventRef> changed = new ArrayList<>(listed == null ? 0 : listed.length());
-        for (int index = 0; listed != null && index < listed.length(); index++) {
-            JSONObject event = object(listed, index);
-            changed.add(new EventRef(string(event, "id"), optString(event, "etag")));
-        }
-
-        return new EventDelta(
-                changed,
-                events(reply.optJSONArray("bodies")),
-                strings(reply.optJSONArray("vanished")),
-                optString(reply, "token"),
-                reply.optBoolean("complete"));
+            Transport transport,
+            Account account,
+            String calendarUrl,
+            String cursor) {
+        return clients.calendar().syncEvents(transport, account, calendarUrl, cursor);
     }
 
-    /** The iCalendar text of the named events, in one round. */
+    /** Forwards to {@link CalendarClient#multigetEvents}. */
     public List<Event> multigetEvents(
-            Transport transport, Account account, String calendarUrl, List<String> ids) {
-        if (ids.isEmpty()) {
-            return List.of();
-        }
-        return events(
-                array(
-                        Native.multigetEvents(
-                                transport,
-                                account.baseUrl,
-                                calendarUrl,
-                                account.login,
-                                account.password,
-                                new JSONArray(ids).toString())));
+            Transport transport,
+            Account account,
+            String calendarUrl,
+            List<String> ids) {
+        return clients.calendar().multigetEvents(transport, account, calendarUrl, ids);
     }
 
-    /** The events of a reply's array, none for a missing one. */
-    private static List<Event> events(JSONArray reply) {
-        if (reply == null) {
-            return List.of();
-        }
-        List<Event> events = new ArrayList<>(reply.length());
-        for (int index = 0; index < reply.length(); index++) {
-            JSONObject event = object(reply, index);
-            events.add(
-                    new Event(
-                            string(event, "id"),
-                            optString(event, "etag"),
-                            string(event, "ical")));
-        }
-        return events;
-    }
-
-    /**
-     * Expands one calendar object into the occurrences starting inside
-     * {@code [windowStart, windowEnd)}, both civil stamps compared with
-     * each start as written. Its recurrence set is RFC 5545 complete
-     * (ical-rs): exceptions out, overrides in their instance's place. A
-     * non-recurring event yields at most one occurrence.
-     */
+    /** Forwards to {@link CalendarClient#expandEvent}. */
     public List<Occurrence> expandEvent(String ical, String windowStart, String windowEnd) {
-        JSONArray reply = array(Native.expandEvent(ical, windowStart, windowEnd));
-
-        List<Occurrence> occurrences = new ArrayList<>(reply.length());
-        for (int index = 0; index < reply.length(); index++) {
-            JSONObject occurrence = object(reply, index);
-            occurrences.add(
-                    new Occurrence(
-                            string(occurrence, "component"),
-                            eventTime(occurrence.optJSONObject("start")),
-                            eventTime(occurrence.optJSONObject("end")),
-                            eventTime(occurrence.optJSONObject("recurrenceId")),
-                            string(occurrence, "summary"),
-                            string(occurrence, "location"),
-                            occurrence.optBoolean("allDay")));
-        }
-        return occurrences;
+        return CalendarClient.expandEvent(ical, windowStart, windowEnd);
     }
 
-    /** One time of a reply, null for a missing one. */
-    private static EventTime eventTime(JSONObject time) {
-        if (time == null) {
-            return null;
-        }
-        return new EventTime(
-                time.optString("time"),
-                time.optString("kind"),
-                time.optString("tzid"),
-                time.isNull("offset") ? null : time.optInt("offset"));
-    }
-
-    /**
-     * Reads one calendar object whole, for the page that shows it: the
-     * series, or the override of the occurrence {@code recurrenceId}
-     * names when the object holds one (null or empty for the series).
-     * Pure computation, like the expansion beside it: no transport, no
-     * account.
-     */
+    /** Forwards to {@link CalendarClient#readEvent}. */
     public EventDetail readEvent(String ical, String recurrenceId) {
-        JSONObject reply =
-                object(Native.readEvent(ical, recurrenceId == null ? "" : recurrenceId));
-
-        JSONArray listed = reply.optJSONArray("attendees");
-        List<EventDetail.Attendee> attendees = new ArrayList<>(listed == null ? 0 : listed.length());
-        for (int index = 0; listed != null && index < listed.length(); index++) {
-            JSONObject attendee = object(listed, index);
-            attendees.add(
-                    new EventDetail.Attendee(
-                            attendee.optString("name"),
-                            attendee.optString("address"),
-                            attendee.optString("status")));
-        }
-
-        return new EventDetail(
-                reply.optString("component"),
-                reply.optString("uid"),
-                reply.optString("summary"),
-                reply.optString("description"),
-                reply.optString("location"),
-                reply.optString("url"),
-                reply.optString("status"),
-                reply.optString("categories"),
-                eventTime(reply.optJSONObject("start")),
-                eventTime(reply.optJSONObject("end")),
-                eventTime(reply.optJSONObject("due")),
-                eventTime(reply.optJSONObject("completed")),
-                reply.optBoolean("allDay"),
-                reply.optString("recurrence"),
-                reply.optString("priority"),
-                reply.optString("percentComplete"),
-                reply.optString("organizer"),
-                attendees,
-                reply.optString("created"),
-                reply.optString("lastModified"),
-                eventTime(reply.optJSONObject("recurrenceId")));
+        return CalendarClient.readEvent(ical, recurrenceId);
     }
 
-    /**
-     * Applies one edit to a calendar object, returning the new
-     * iCalendar text. A patch through the object's concrete syntax
-     * tree, so everything the edit does not name survives untouched.
-     *
-     * <p>{@code edit} is a JSON object of the properties to set; an
-     * absent key is left alone and a present empty one removes its
-     * property. Pure computation, no transport.
-     */
+    /** Forwards to {@link CalendarClient#writeEvent}. */
     public String writeEvent(String ical, String edit) {
-        String written = Native.writeEvent(ical, edit).trim();
-
-        // NOTE: the reply is the object itself, so an error has to be
-        // told apart from a body. It is: no calendar object opens with
-        // a brace, so a brace is the bridge's error shape.
-        if (written.startsWith("{")) {
-            object(written);
-            throw new PimalayaException("Unreadable bridge reply: expected an object");
-        }
-        return written;
+        return CalendarClient.writeEvent(ical, edit);
     }
 
-    /**
-     * Three-way merges a conflicted calendar object: the body staged here
-     * and the one its source holds, against their base (null or empty
-     * when none was agreed). Pure computation, no transport.
-     */
+    /** Forwards to {@link CalendarClient#mergeEvent}. */
     public EventMerge mergeEvent(String base, String local, String remote) {
-        JSONObject reply = object(Native.mergeEvent(base == null ? "" : base, local, remote));
-
-        JSONArray listed = reply.optJSONArray("conflicts");
-        List<EventMerge.Conflict> conflicts =
-                new ArrayList<>(listed == null ? 0 : listed.length());
-        for (int index = 0; listed != null && index < listed.length(); index++) {
-            JSONObject conflict = object(listed, index);
-            JSONArray offered = conflict.optJSONArray("choices");
-            List<EventMerge.Choice> choices =
-                    new ArrayList<>(offered == null ? 0 : offered.length());
-            for (int at = 0; offered != null && at < offered.length(); at++) {
-                JSONObject choice = object(offered, at);
-                choices.add(
-                        new EventMerge.Choice(
-                                choice.optString("side"),
-                                choice.optString("value"),
-                                eventTime(choice.optJSONObject("time")),
-                                eventTime(choice.optJSONObject("end"))));
-            }
-            conflicts.add(
-                    new EventMerge.Conflict(
-                            conflict.optInt("id"),
-                            conflict.optString("kind"),
-                            conflict.optString("component"),
-                            eventTime(conflict.optJSONObject("recurrenceId")),
-                            conflict.optString("field"),
-                            optString(conflict, "series"),
-                            choices));
-        }
-
-        return new EventMerge(string(reply, "ical"), reply.optBoolean("resolved"), conflicts);
+        return CalendarClient.mergeEvent(base, local, remote);
     }
 
-    /**
-     * The resolution of a conflicted calendar object: its merge, each
-     * conflict {@code picks} names by its id taking that side
-     * ({@link EventMerge#LOCAL} or {@link EventMerge#REMOTE}), every other
-     * the side it was pre-filled with. Pure computation, no transport.
-     */
+    /** Forwards to {@link CalendarClient#resolveEvent}. */
     public String resolveEvent(
-            String base, String local, String remote, Map<Integer, String> picks) {
-        JSONObject sides = new JSONObject();
-        try {
-            for (Map.Entry<Integer, String> pick : picks.entrySet()) {
-                sides.put(String.valueOf(pick.getKey()), pick.getValue());
-            }
-        } catch (JSONException error) {
-            throw new PimalayaException("Unwritable picks: " + error.getMessage());
-        }
-
-        String resolved =
-                Native.resolveEvent(base == null ? "" : base, local, remote, sides.toString())
-                        .trim();
-        // NOTE: an object is the bridge's error shape here, as in writeEvent.
-        if (resolved.startsWith("{")) {
-            object(resolved);
-            throw new PimalayaException("Unreadable bridge reply: expected an object");
-        }
-        return resolved;
+            String base,
+            String local,
+            String remote,
+            Map<Integer, String> picks) {
+        return CalendarClient.resolveEvent(base, local, remote, picks);
     }
 
-    /**
-     * Splits a series at the occurrence {@code edit} names, its scope
-     * {@code following}: the series ended before it, and a new one under
-     * the edit's {@code uid} carrying the edit from it on. Pure
-     * computation, no transport.
-     */
+    /** Forwards to {@link CalendarClient#splitEvent}. */
     public EventSplit splitEvent(String ical, String edit) {
-        JSONObject reply = object(Native.splitEvent(ical, edit));
-        return new EventSplit(string(reply, "master"), optString(reply, "series"));
+        return CalendarClient.splitEvent(ical, edit);
     }
 
-    /**
-     * Removes the occurrences {@code edit}'s scope names from a series:
-     * one becomes an {@code EXDATE}, this and following ends the series
-     * before it. Returns the object left, or null when nothing is and the
-     * entry itself goes. Pure computation, no transport.
-     */
+    /** Forwards to {@link CalendarClient#removeEvent}. */
     public String removeEvent(String ical, String edit) {
-        String left = Native.removeEvent(ical, edit).trim();
-
-        // NOTE: an object is the bridge's error shape here too, for the
-        // same reason it is in writeEvent.
-        if (left.startsWith("{")) {
-            object(left);
-            throw new PimalayaException("Unreadable bridge reply: expected an object");
-        }
-        return left.isEmpty() ? null : left;
+        return CalendarClient.removeEvent(ical, edit);
     }
 
-    /**
-     * Pushes an edited object back to the calendar it came from,
-     * guarded by the ETag it was read with, and returns the new one.
-     *
-     * <p>Guarded on purpose: a calendar is shared, and an unguarded PUT
-     * is how one client silently overwrites another's edit.
-     *
-     * <p>{@code address} is the account's: a backend that announces a
-     * write to the attendees only when asked (Google, JMAP) asks for a
-     * meeting it names the organizer of.
-     */
+    /** Forwards to {@link CalendarClient#updateEvent}. */
     public String updateEvent(
             Transport transport,
             Account account,
@@ -1185,50 +359,17 @@ public class PimalayaClient {
             String ical,
             String etag,
             String address) {
-        String reply =
-                Native.updateEvent(
-                        transport,
-                        account.baseUrl,
-                        calendarUrl,
-                        account.login,
-                        account.password,
-                        id,
-                        ical,
-                        etag == null ? "" : etag,
-                        address == null ? "" : address);
-
-        return etag(reply);
+        return clients.calendar().updateEvent(
+                transport,
+                account,
+                calendarUrl,
+                id,
+                ical,
+                etag,
+                address);
     }
 
-    /**
-     * The ETag an update answered: a bare JSON string, or null, an object
-     * being the bridge's error shape.
-     *
-     * <p>Read as the JSON string it is, not with its quotes cut off: Google's
-     * and Graph's ETags carry quotes of their own, which the reply escapes,
-     * and an ETag kept escaped is a revision no listing names, so the next
-     * pass reads the entry as changed elsewhere.
-     */
-    static String etag(String reply) {
-        String trimmed = reply.trim();
-        if (trimmed.startsWith("{")) {
-            object(trimmed);
-        }
-        try {
-            Object etag = new JSONTokener(trimmed).nextValue();
-            return etag instanceof String ? (String) etag : null;
-        } catch (JSONException error) {
-            throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
-        }
-    }
-
-    /**
-     * The object a new calendar entry starts from: one component
-     * carrying the identity, the composition stamp and its start, in the
-     * zone {@code tzid} names with that zone's {@code vtimezone} (both
-     * empty for a date or a floating start). Pure computation, no
-     * transport.
-     */
+    /** Forwards to {@link CalendarClient#newEvent}. */
     public String newEvent(
             String component,
             String uid,
@@ -1236,24 +377,10 @@ public class PimalayaClient {
             String start,
             String tzid,
             String vtimezone) {
-        String created = Native.newEvent(component, uid, stamp, start, tzid, vtimezone).trim();
-
-        // NOTE: an object is the bridge's error shape here too, for the
-        // same reason it is in writeEvent.
-        if (created.startsWith("{")) {
-            object(created);
-            throw new PimalayaException("Unreadable bridge reply: expected an object");
-        }
-        return created;
+        return CalendarClient.newEvent(component, uid, stamp, start, tzid, vtimezone);
     }
 
-    /**
-     * Files a new object in a calendar, guarded on the resource not
-     * existing, and returns where it landed: the name asked for, or the
-     * one a backend that names its own resources (Graph) gave it, with
-     * its ETag. {@code address} is the account's, as
-     * {@link #updateEvent} takes it.
-     */
+    /** Forwards to {@link CalendarClient#createEvent}. */
     public EventRef createEvent(
             Transport transport,
             Account account,
@@ -1261,31 +388,10 @@ public class PimalayaClient {
             String id,
             String ical,
             String address) {
-        JSONObject created =
-                object(
-                        Native.createEvent(
-                                transport,
-                                account.baseUrl,
-                                calendarUrl,
-                                account.login,
-                                account.password,
-                                id,
-                                ical,
-                                address == null ? "" : address));
-        try {
-            return new EventRef(
-                    created.getString("id"),
-                    created.isNull("etag") ? null : created.getString("etag"));
-        } catch (JSONException error) {
-            throw new PimalayaException("Unreadable created event: " + error.getMessage());
-        }
+        return clients.calendar().createEvent(transport, account, calendarUrl, id, ical, address);
     }
 
-    /**
-     * Removes one object from its calendar, guarded by the ETag it was
-     * read with, for the same reason the update is. {@code address} is the
-     * account's, as {@link #updateEvent} takes it.
-     */
+    /** Forwards to {@link CalendarClient#deleteEvent}. */
     public void deleteEvent(
             Transport transport,
             Account account,
@@ -1293,16 +399,7 @@ public class PimalayaClient {
             String id,
             String etag,
             String address) {
-        object(
-                Native.deleteEvent(
-                        transport,
-                        account.baseUrl,
-                        calendarUrl,
-                        account.login,
-                        account.password,
-                        id,
-                        etag == null ? "" : etag,
-                        address == null ? "" : address));
+        clients.calendar().deleteEvent(transport, account, calendarUrl, id, etag, address);
     }
 
     /**
@@ -1311,402 +408,132 @@ public class PimalayaClient {
      * ({@link Card#books}).
      */
     public List<Card> listAccountCards(Transport transport, Account account) {
-        return cards(
+        return ContactClient.cards(
                 Native.listAccountCards(
                         transport, account.baseUrl, account.login, account.password));
     }
 
-    /** Lists the cards of the addressbook collection at the given URL. */
+    /** Forwards to {@link ContactClient#listCards}. */
     public List<Card> listCards(Transport transport, Account account, String addressbookUrl) {
-        return cards(
-                Native.listCards(
-                        transport,
-                        account.baseUrl,
-                        addressbookUrl,
-                        account.login,
-                        account.password));
+        return clients.contact().listCards(transport, account, addressbookUrl);
     }
 
-    /**
-     * Lists a collection's changes since the given cursor, on every
-     * backend: a CardDAV sync-collection REPORT (RFC 6578), a Graph
-     * contacts delta round (id and changeKey only), a JMAP
-     * ContactCard/changes round (changed cards in full), or a People
-     * connections sync (changed contacts in full, account-wide with
-     * memberships). A null cursor runs the initial round: the complete
-     * member set plus the cursor to delta from next time. A cursor the
-     * server no longer accepts re-runs an initial round bridge-side,
-     * flagged {@link CardDelta#complete}.
-     */
-    public CardDelta syncCards(Transport transport, Account account, String addressbookUrl, String syncToken) {
-        String reply =
-                Native.syncCards(
-                        transport,
-                        account.baseUrl,
-                        addressbookUrl,
-                        account.login,
-                        account.password,
-                        syncToken == null ? "" : syncToken);
-
-        JSONObject parsed = object(reply);
-        JSONArray rows = parsed.optJSONArray("changed");
-        List<Card> changed = new ArrayList<>(rows == null ? 0 : rows.length());
-        for (int index = 0; rows != null && index < rows.length(); index++) {
-            changed.add(card(object(rows, index)));
-        }
-
-        JSONArray gone = parsed.optJSONArray("vanished");
-        List<String> vanished = new ArrayList<>(gone == null ? 0 : gone.length());
-        for (int index = 0; gone != null && index < gone.length(); index++) {
-            vanished.add(gone.optString(index));
-        }
-
-        return new CardDelta(
-                changed,
-                vanished,
-                optString(parsed, "token"),
-                parsed.optBoolean("complete"));
+    /** Forwards to {@link ContactClient#syncCards}. */
+    public CardDelta syncCards(
+            Transport transport,
+            Account account,
+            String addressbookUrl,
+            String syncToken) {
+        return clients.contact().syncCards(transport, account, addressbookUrl, syncToken);
     }
 
-    /**
-     * Batch-fetches the cards at the given resource names inside a
-     * CardDAV addressbook via REPORT addressbook-multiget.
-     */
-    public List<Card> multigetCards(Transport transport, Account account, String addressbookUrl, List<String> uris) {
-        return cards(
-                Native.multigetCards(
-                        transport,
-                        addressbookUrl,
-                        account.login,
-                        account.password,
-                        new JSONArray(uris).toString()));
+    /** Forwards to {@link ContactClient#multigetCards}. */
+    public List<Card> multigetCards(
+            Transport transport,
+            Account account,
+            String addressbookUrl,
+            List<String> uris) {
+        return clients.contact().multigetCards(transport, account, addressbookUrl, uris);
     }
 
-    /**
-     * Reads the named Graph contacts, 20 to a {@code $batch}: one request
-     * where {@link #readCard} sent one a contact. A contact Graph no
-     * longer holds is left out of the list, as a multiget leaves out a
-     * resource it no longer finds. Graph only.
-     */
+    /** Forwards to {@link ContactClient#readGraphCards}. */
     public List<Card> readGraphCards(Transport transport, Account account, List<String> ids) {
-        return cards(
-                Native.readGraphCards(transport, account.password, new JSONArray(ids).toString()));
+        return clients.contact().readGraphCards(transport, account, ids);
     }
 
-    /**
-     * Reads the named People contacts, 200 to a {@code people:batchGet}:
-     * one request where {@link #readCard} sent one a contact. A contact
-     * Google no longer holds is left out of the list, as a multiget
-     * leaves out a resource it no longer finds. Google only.
-     */
+    /** Forwards to {@link ContactClient#readGoogleCards}. */
     public List<Card> readGoogleCards(Transport transport, Account account, List<String> ids) {
-        return cards(
-                Native.readGoogleCards(
-                        transport, account.password, new JSONArray(ids).toString()));
+        return clients.contact().readGoogleCards(transport, account, ids);
     }
 
-    /**
-     * Reconciles a collection with its remote through the io-offline
-     * engine, the driver servicing every storage and remote yield;
-     * with {@code full} the checkpoint is ignored and the whole remote
-     * is enumerated. Returns the sync report
-     * {@code {pulled, pushed, conflicts, rejected, refreshed}}.
-     */
+    /** Forwards to {@link OfflineClient#offlineSync}. */
     public JSONObject offlineSync(OfflineDriver driver, String collection, boolean full) {
-        return object(Native.offlineSync(driver, collection, full, true, "", true));
+        return clients.offline().offlineSync(driver, collection, full);
     }
 
-    /**
-     * The same for a collection whose bodies never change, mail: only
-     * flags and membership are pushed, so a body a read stored is never
-     * mistaken for an edit.
-     *
-     * <p>{@code since} is the account's bound, the floor of the scope on
-     * the {@code Date} header (RFC 3339 {@code Z}), null for all mail;
-     * {@code scopeBound} whether the backend's checkpoint is bound to the
-     * scope it was made under (a Graph delta link is, an IMAP modseq, a
-     * Gmail history id and a JMAP state are not).
-     */
+    /** Forwards to {@link OfflineClient#offlineSyncImmutable}. */
     public JSONObject offlineSyncImmutable(
-            OfflineDriver driver, String collection, String since, boolean scopeBound) {
-        return object(
-                Native.offlineSync(
-                        driver, collection, false, false, since == null ? "" : since, scopeBound));
+            OfflineDriver driver,
+            String collection,
+            String since,
+            boolean scopeBound) {
+        return clients.offline().offlineSyncImmutable(driver, collection, since, scopeBound);
     }
 
-    /**
-     * Raises the given handles to the full detail tier through the
-     * io-offline engine (bodies deduped by link id against the store).
-     * Returns the upgrade report {@code {upgraded, fetched, deduped}}.
-     */
-    public JSONObject offlineUpgrade(OfflineDriver driver, String collection, List<String> handles) {
-        return object(
-                Native.offlineUpgrade(driver, collection, new JSONArray(handles).toString(), true));
+    /** Forwards to {@link OfflineClient#offlineUpgrade}. */
+    public JSONObject offlineUpgrade(
+            OfflineDriver driver,
+            String collection,
+            List<String> handles) {
+        return clients.offline().offlineUpgrade(driver, collection, handles);
     }
 
-    /**
-     * Stages a local mutation through the io-offline engine (storage
-     * yields only, the remote is never touched).
-     */
+    /** Forwards to {@link OfflineClient#offlineMutate}. */
     public void offlineMutate(OfflineDriver driver, String collection, JSONObject mutation) {
-        object(Native.offlineMutate(driver, collection, mutation.toString()));
+        clients.offline().offlineMutate(driver, collection, mutation);
     }
 
-    /**
-     * Adds and removes the card's addressbook memberships on an
-     * account-level backend, by book id: JMAP patches addressBookIds,
-     * Google modifies group members.
-     */
-    public void updateCardBooks(Transport transport, Account account, String cardId, List<String> add, List<String> remove) {
-        object(
-                Native.updateCardBooks(
-                        transport,
-                        account.baseUrl,
-                        account.login,
-                        account.password,
-                        cardId,
-                        books(add),
-                        books(remove)));
+    /** Forwards to {@link ContactClient#updateCardBooks}. */
+    public void updateCardBooks(
+            Transport transport,
+            Account account,
+            String cardId,
+            List<String> add,
+            List<String> remove) {
+        clients.contact().updateCardBooks(transport, account, cardId, add, remove);
     }
 
-    /**
-     * Creates the card in the addressbook collection, returning it
-     * with its ETag. The backends naming the resource themselves
-     * return the server-assigned id instead of the given one.
-     */
-    public Card createCard(Transport transport, Account account, String addressbookUrl, String id, String vcard) {
-        return card(
-                object(
-                        Native.createCard(
-                                transport,
-                                account.baseUrl,
-                                addressbookUrl,
-                                account.login,
-                                account.password,
-                                id,
-                                vcard)));
+    /** Forwards to {@link ContactClient#createCard}. */
+    public Card createCard(
+            Transport transport,
+            Account account,
+            String addressbookUrl,
+            String id,
+            String vcard) {
+        return clients.contact().createCard(transport, account, addressbookUrl, id, vcard);
     }
 
-    /** Reads the card at the given resource name from the addressbook collection. */
+    /** Forwards to {@link ContactClient#readCard}. */
     public Card readCard(Transport transport, Account account, String addressbookUrl, String uri) {
-        return card(
-                object(
-                        Native.readCard(
-                                transport,
-                                account.baseUrl,
-                                addressbookUrl,
-                                account.login,
-                                account.password,
-                                uri)));
+        return clients.contact().readCard(transport, account, addressbookUrl, uri);
     }
 
-    /**
-     * Updates the card in the addressbook collection, returning it with
-     * its new ETag. The base vCard (the state last synced with the
-     * server, null when unknown) trims the Graph, JMAP and Google
-     * patches to the fields the edit changed; CardDAV PUTs the full
-     * vCard and ignores it.
-     */
-    public Card updateCard(Transport transport, Account account, String addressbookUrl, Card card, String baseVcard) {
-        return card(
-                object(
-                        Native.updateCard(
-                                transport,
-                                account.baseUrl,
-                                addressbookUrl,
-                                account.login,
-                                account.password,
-                                card.id,
-                                card.uri == null ? "" : card.uri,
-                                card.vcard,
-                                baseVcard == null ? "" : baseVcard,
-                                card.etag == null ? "" : card.etag)));
+    /** Forwards to {@link ContactClient#updateCard}. */
+    public Card updateCard(
+            Transport transport,
+            Account account,
+            String addressbookUrl,
+            Card card,
+            String baseVcard) {
+        return clients.contact().updateCard(transport, account, addressbookUrl, card, baseVcard);
     }
 
-    /** Deletes the card from the addressbook collection. */
+    /** Forwards to {@link ContactClient#deleteCard}. */
     public void deleteCard(Transport transport, Account account, String addressbookUrl, Card card) {
-        object(
-                Native.deleteCard(
-                        transport,
-                        account.baseUrl,
-                        addressbookUrl,
-                        account.login,
-                        account.password,
-                        card.id,
-                        card.uri == null ? "" : card.uri,
-                        card.etag == null ? "" : card.etag));
+        clients.contact().deleteCard(transport, account, addressbookUrl, card);
     }
 
-    /**
-     * Creates a batch of cards (Google-only: the one backend with a
-     * batch create verb), returning the created cards in input order
-     * with their server-assigned ids.
-     */
+    /** Forwards to {@link ContactClient#createCards}. */
     public List<Card> createCards(Transport transport, Account account, List<String> vcards) {
-        return cards(
-                Native.createCards(
-                        transport,
-                        account.baseUrl,
-                        account.login,
-                        account.password,
-                        new JSONArray(vcards).toString()));
+        return clients.contact().createCards(transport, account, vcards);
     }
 
-    /** Deletes a batch of cards by id (Google-only, like createCards). */
+    /** Forwards to {@link ContactClient#deleteCards}. */
     public void deleteCards(Transport transport, Account account, List<String> ids) {
-        object(
-                Native.deleteCards(
-                        transport,
-                        account.baseUrl,
-                        account.login,
-                        account.password,
-                        new JSONArray(ids).toString()));
+        clients.contact().deleteCards(transport, account, ids);
     }
 
-    /**
-     * Pushes a round of changes as batch calls (JMAP ContactCard/set,
-     * Graph $batch), returning one {@code {ref, accepted, id?, etag?,
-     * error?}} outcome per change: a rejected change reports rejected
-     * instead of failing the round.
-     */
-    public JSONArray pushCards(Transport transport, Account account, String addressbookUrl, JSONArray changes) {
-        return array(
-                Native.pushCards(
-                        transport,
-                        account.baseUrl,
-                        addressbookUrl,
-                        account.login,
-                        account.password,
-                        changes.toString()));
+    /** Forwards to {@link ContactClient#pushCards}. */
+    public JSONArray pushCards(
+            Transport transport,
+            Account account,
+            String addressbookUrl,
+            JSONArray changes) {
+        return clients.contact().pushCards(transport, account, addressbookUrl, changes);
     }
 
-    /** Serializes a book id list for the bridge. */
-    private static String books(List<String> ids) {
-        return new JSONArray(ids).toString();
-    }
-
-    /** Parses a card-array reply. */
-    private static List<Card> cards(String reply) {
-        JSONArray parsed = array(reply);
-        List<Card> cards = new ArrayList<>(parsed.length());
-        for (int index = 0; index < parsed.length(); index++) {
-            cards.add(card(object(parsed, index)));
-        }
-        return cards;
-    }
-
-    /** Parses a `{id, uri, etag, vcard, books?}` reply into a card. */
-    private static Card card(JSONObject reply) {
-        List<String> books = new ArrayList<>();
-        JSONArray parsed = reply.optJSONArray("books");
-        if (parsed != null) {
-            for (int index = 0; index < parsed.length(); index++) {
-                books.add(parsed.optString(index));
-            }
-        }
-
-        return new Card(
-                string(reply, "id"),
-                string(reply, "uri"),
-                optString(reply, "etag"),
-                string(reply, "vcard"),
-                books);
-    }
-
-    /** Parses a search reply into service configs. */
-    private static List<ServiceConfig> configs(String json) {
-        JSONArray reply = array(json);
-
-        List<ServiceConfig> configs = new ArrayList<>(reply.length());
-        for (int index = 0; index < reply.length(); index++) {
-            configs.add(ServiceConfig.from(object(reply, index)));
-        }
-        return configs;
-    }
-
-    /**
-     * Parses an object reply, surfacing the bridge's {@code error}
-     * field along with the HTTP status riding it, when the failure
-     * was an HTTP round.
-     */
     /** A bridge reply read whole, a failure it carries thrown. */
     public static JSONObject reply(String json) {
-        return object(json);
-    }
-
-    static JSONObject object(String json) {
-        JSONObject reply = read(json);
-        String error = reply.optString("error");
-        if (!error.isEmpty()) {
-            throw new PimalayaException(error, reply.has("status") ? reply.optInt("status") : null);
-        }
-        return reply;
-    }
-
-    /**
-     * Parses an object reply and hands it back whole, failure included.
-     *
-     * <p>For the one caller that reads more of a failure than its
-     * message: a submission says whether it was refused, and
-     * {@link #object} would have thrown before anything could look.
-     */
-    private static JSONObject read(String json) {
-        if (json == null) {
-            throw new PimalayaException("Internal error: no bridge reply");
-        }
-        try {
-            return new JSONObject(json.trim());
-        } catch (JSONException error) {
-            throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
-        }
-    }
-
-    /** Parses an array reply, surfacing the bridge's {@code error} field. */
-    /** The strings of a JSON array, empty when there is none. */
-    private static List<String> strings(JSONArray values) {
-        List<String> strings = new ArrayList<>(values == null ? 0 : values.length());
-        for (int index = 0; values != null && index < values.length(); index++) {
-            strings.add(values.optString(index));
-        }
-        return strings;
-    }
-
-    private static JSONArray array(String json) {
-        if (json == null) {
-            throw new PimalayaException("Internal error: no bridge reply");
-        }
-        String trimmed = json.trim();
-
-        if (trimmed.startsWith("{")) {
-            // NOTE: an object where an array is expected is always an error.
-            object(trimmed);
-            throw new PimalayaException("Unreadable bridge reply: expected an array");
-        }
-
-        try {
-            return new JSONArray(trimmed);
-        } catch (JSONException error) {
-            throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
-        }
-    }
-
-    private static JSONObject object(JSONArray array, int index) {
-        try {
-            return array.getJSONObject(index);
-        } catch (JSONException error) {
-            throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
-        }
-    }
-
-    static String string(JSONObject object, String key) {
-        try {
-            return object.getString(key);
-        } catch (JSONException error) {
-            throw new PimalayaException("Unreadable bridge reply: " + error.getMessage());
-        }
-    }
-
-    private static String optString(JSONObject object, String key) {
-        return object.isNull(key) ? null : object.optString(key);
+        return Replies.object(json);
     }
 }

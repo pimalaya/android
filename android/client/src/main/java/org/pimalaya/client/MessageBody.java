@@ -76,7 +76,7 @@ public final class MessageBody {
 
     /**
      * One attachment, named and measured but not carried: its bytes stay
-     * in the message, read by section ({@link PimalayaClient#messagePart}).
+     * in the message, read by section ({@link MailClient#messagePart}).
      */
     public static final class Attachment {
         /** The file name, empty when the part names none. */

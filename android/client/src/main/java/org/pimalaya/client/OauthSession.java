@@ -34,7 +34,7 @@ public final class OauthSession {
                 clientSecret,
                 redirectUri,
                 scope,
-                PimalayaClient.object(Native.oauthSessionParams()));
+                Replies.object(Native.oauthSessionParams()));
     }
 
     private OauthSession(
@@ -48,8 +48,8 @@ public final class OauthSession {
                 clientSecret,
                 redirectUri,
                 scope,
-                PimalayaClient.string(params, "state"),
-                PimalayaClient.string(params, "verifier"));
+                Json.string(params, "state"),
+                Json.string(params, "verifier"));
     }
 
     /**
@@ -96,7 +96,7 @@ public final class OauthSession {
      */
     public String authorizeUrl(String authorizationEndpoint, JSONObject extras) {
         JSONObject reply =
-                PimalayaClient.object(
+                Replies.object(
                         Native.oauthAuthorizeUrl(
                                 authorizationEndpoint,
                                 clientId,
@@ -105,7 +105,7 @@ public final class OauthSession {
                                 state,
                                 pkceVerifier,
                                 extras == null ? "" : extras.toString()));
-        return PimalayaClient.string(reply, "url");
+        return Json.string(reply, "url");
     }
 
     /**
@@ -125,15 +125,15 @@ public final class OauthSession {
      */
     public OauthTokens redeem(String tokenEndpoint, String redirectUrl, String issuer) {
         JSONObject validated =
-                PimalayaClient.object(
+                Replies.object(
                         Native.oauthValidateRedirect(
                                 redirectUrl, state, issuer == null ? "" : issuer));
-        String code = PimalayaClient.string(validated, "code");
+        String code = Json.string(validated, "code");
 
         Transport transport = new Transport();
         try {
             JSONObject reply =
-                    PimalayaClient.object(
+                    Replies.object(
                             Native.oauthRequestAccessToken(
                                     transport,
                                     tokenEndpoint,

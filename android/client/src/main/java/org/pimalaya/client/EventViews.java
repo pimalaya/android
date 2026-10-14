@@ -11,30 +11,13 @@ import org.json.JSONObject;
 public final class EventViews {
     private EventViews() {}
 
-    /**
-     * The view of a calendar object, {@code now} a UTC
-     * {@code YYYYMMDDTHHMMSSZ} stamp: {@code {uid, master, overrides,
-     * listed}}, each time a {@code {time, kind, tzid, offset}}.
-     */
+    /** Forwards to {@link CalendarClient#projectEvent}. */
     public static JSONObject projectEvent(String ical, String now) {
-        return PimalayaClient.object(Native.projectEvent(ical, now));
+        return CalendarClient.projectEvent(ical, now);
     }
 
-    /**
-     * The object with an edited view patched onto it: {@code edit} is
-     * {@code {event, stamp, addresses, vtimezones}}, and the fields its
-     * event carries that differ from what the object projects are all
-     * that change. An empty object becomes a new one.
-     */
+    /** Forwards to {@link CalendarClient#applyEvent}. */
     public static String applyEvent(String ical, JSONObject edit) {
-        String written = Native.applyEvent(ical, edit.toString());
-
-        // NOTE: the object itself, byte for byte, so not trimmed; a brace
-        // is the bridge's error shape, since no calendar object opens on one.
-        if (written.startsWith("{")) {
-            PimalayaClient.object(written);
-            throw new PimalayaException("Unreadable bridge reply: expected an object");
-        }
-        return written;
+        return CalendarClient.applyEvent(ical, edit);
     }
 }

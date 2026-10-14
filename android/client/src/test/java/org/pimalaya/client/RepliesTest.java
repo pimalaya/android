@@ -12,11 +12,11 @@ import org.junit.Test;
  * HTTP round, the status the callers branch on (412 retries unguarded,
  * 404 converges a removal, 401 refreshes the token).
  */
-public class PimalayaClientTest {
+public class RepliesTest {
     @Test
     public void errorReplyCarriesTheHttpStatus() {
         try {
-            PimalayaClient.object("{\"error\": \"WebDAV server returned HTTP 412\", \"status\": 412}");
+            Replies.object("{\"error\": \"WebDAV server returned HTTP 412\", \"status\": 412}");
             fail("an error reply must throw");
         } catch (PimalayaException error) {
             assertEquals("WebDAV server returned HTTP 412", error.getMessage());
@@ -27,7 +27,7 @@ public class PimalayaClientTest {
     @Test
     public void nonHttpErrorReplyCarriesNoStatus() {
         try {
-            PimalayaClient.object("{\"error\": \"Invalid URL\"}");
+            Replies.object("{\"error\": \"Invalid URL\"}");
             fail("an error reply must throw");
         } catch (PimalayaException error) {
             assertEquals("Invalid URL", error.getMessage());
@@ -38,9 +38,9 @@ public class PimalayaClientTest {
     /** What a held session reopens on: a failure, told without parsing a page. */
     @Test
     public void aFailedReplyIsToldByItsErrorField() {
-        assertEquals(true, PimalayaClient.failed(" {\"error\":\"Transport read failed\"}"));
-        assertEquals(false, PimalayaClient.failed("{\"items\":[{\"error\":\"x\"}]}"));
-        assertEquals(false, PimalayaClient.failed(null));
+        assertEquals(true, Replies.failed(" {\"error\":\"Transport read failed\"}"));
+        assertEquals(false, Replies.failed("{\"items\":[{\"error\":\"x\"}]}"));
+        assertEquals(false, Replies.failed(null));
     }
 
     /**
@@ -50,14 +50,14 @@ public class PimalayaClientTest {
     @Test
     public void anUpdatedEtagIsReadAsTheStringTheReplyEncodes() {
         assertEquals(
-                "\"3583433504310878\"", PimalayaClient.etag("\"\\\"3583433504310878\\\"\""));
-        assertEquals("W/\"abc\"", PimalayaClient.etag(" \"W/\\\"abc\\\"\" "));
-        assertEquals("e-1", PimalayaClient.etag("\"e-1\""));
-        assertNull(PimalayaClient.etag("null"));
+                "\"3583433504310878\"", Replies.etag("\"\\\"3583433504310878\\\"\""));
+        assertEquals("W/\"abc\"", Replies.etag(" \"W/\\\"abc\\\"\" "));
+        assertEquals("e-1", Replies.etag("\"e-1\""));
+        assertNull(Replies.etag("null"));
     }
 
     @Test
     public void successReplyPassesThrough() throws Exception {
-        assertEquals("ok", PimalayaClient.object("{\"value\": \"ok\"}").getString("value"));
+        assertEquals("ok", Replies.object("{\"value\": \"ok\"}").getString("value"));
     }
 }

@@ -21,7 +21,7 @@ import org.json.JSONObject;
  * <p>A held connection is a hint and never a promise: a server's idle
  * timeout, a rebound NAT and a walk from wifi to cellular all end one
  * under the app. {@link #reopen} is what a caller runs when a verb fails
- * on a session it was holding, and {@link PimalayaClient} does it once
+ * on a session it was holding, and {@link MailClient} does it once
  * before reporting the failure.
  */
 public final class MailSession implements AutoCloseable {
@@ -103,7 +103,7 @@ public final class MailSession implements AutoCloseable {
      */
     void reopen() {
         release();
-        MailSession opened = PimalayaClient.openMail(account);
+        MailSession opened = MailClient.openMail(account);
         this.transport = opened.transport;
         this.handle = opened.handle;
         this.expungesOne = opened.expungesOne;

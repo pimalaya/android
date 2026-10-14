@@ -15,211 +15,118 @@ import org.json.JSONObject;
 public final class Cards {
     private Cards() {}
 
-    /**
-     * Whether a 412-rejected push may retry unguarded, the last
-     * enumerate proving the handle unchanged (the CardDAV If-Match
-     * quirk).
-     */
+    /** Forwards to {@link OfflineClient#offlineRetryUnguarded}. */
     public static boolean offlineRetryUnguarded(JSONObject facts) {
-        return PimalayaClient.object(Native.offlineRetryUnguarded(facts.toString()))
-                .optBoolean("retry");
+        return OfflineClient.offlineRetryUnguarded(facts);
     }
 
-    /**
-     * Projects an account-wide delta (JMAP, Google) onto one book's
-     * enumerate ({@code {members, vanished}}).
-     */
+    /** Forwards to {@link OfflineClient#offlineAccountSnapshot}. */
     public static JSONObject offlineAccountSnapshot(JSONObject facts) {
-        return PimalayaClient.object(Native.offlineAccountSnapshot(facts.toString()));
+        return OfflineClient.offlineAccountSnapshot(facts);
     }
 
-    /** Plans one push change ({@code {action, postCreateBooks?}}). */
+    /** Forwards to {@link OfflineClient#offlinePushPlan}. */
     public static JSONObject offlinePushPlan(JSONObject facts) {
-        return PimalayaClient.object(Native.offlinePushPlan(facts.toString()));
+        return OfflineClient.offlinePushPlan(facts);
     }
 
-    /**
-     * Projects the card's vCard onto the neutral field model the app
-     * maps to ContactsContract rows (docs/contacts-mapping.md).
-     */
+    /** Forwards to {@link ContactClient#projectCard}. */
     public static JSONObject projectCard(Card card) {
-        return PimalayaClient.object(Native.projectCard(card.vcard));
+        return ContactClient.projectCard(card);
     }
 
-    /** Projects a raw vCard document onto the neutral field model. */
+    /** Forwards to {@link ContactClient#projectCard}. */
     public static JSONObject projectCard(String vcard) {
-        return PimalayaClient.object(Native.projectCard(vcard));
+        return ContactClient.projectCard(vcard);
     }
 
-    /**
-     * Indexes a vCard for the store: the display fields the contacts
-     * list renders (name, first email and phone, UID) and a normalized
-     * content hash for the divergence flag of linked replicas.
-     */
+    /** Forwards to {@link ContactClient#indexCard}. */
     public static JSONObject indexCard(String vcard) {
-        return PimalayaClient.object(Native.indexCard(vcard));
+        return ContactClient.indexCard(vcard);
     }
 
-    /**
-     * Patches an edited field model back onto the vCard, preserving
-     * every property the model does not manage.
-     */
+    /** Forwards to {@link ContactClient#applyCard}. */
     public static String applyCard(String vcard, JSONObject model) {
-        return PimalayaClient.string(
-                PimalayaClient.object(Native.applyCard(vcard, model.toString())), "vcard");
+        return ContactClient.applyCard(vcard, model);
     }
 
-    /**
-     * Merges several vCard documents into one union: the merged
-     * document, its field model (the merge form prefill) and the
-     * per-field alternative values.
-     */
+    /** Forwards to {@link ContactClient#mergeCards}. */
     public static JSONObject mergeCards(List<String> vcards) {
-        JSONArray cards = new JSONArray();
-        for (String vcard : vcards) {
-            cards.put(vcard);
-        }
-        return PimalayaClient.object(Native.mergeCards(cards.toString()));
+        return ContactClient.mergeCards(vcards);
     }
 
-    /**
-     * Three-way merges a conflicted push: the staged local edit and
-     * the fetched remote card against their common base (empty means
-     * unknown; the local side stands in). The local side wins
-     * same-field collisions; every other remote change flows in.
-     */
+    /** Forwards to {@link ContactClient#mergeCardChanges}. */
     public static String mergeCardChanges(String base, String local, String remote) {
-        return PimalayaClient.string(
-                PimalayaClient.object(Native.mergeCardChanges(base, local, remote)), "vcard");
+        return ContactClient.mergeCardChanges(base, local, remote);
     }
 
-    /**
-     * Builds the conflict form's inputs for a both-sides-edited row: the
-     * merged document with the newer side (by REV) winning collisions as
-     * the pre-filled default, its field model, the two candidate values of
-     * every genuinely conflicted field, and an (always empty, non-null)
-     * changed list. An empty {@code alternatives} means nothing needs the
-     * user.
-     */
+    /** Forwards to {@link ContactClient#mergeConflictForm}. */
     public static JSONObject mergeConflictForm(String base, String local, String remote) {
-        return PimalayaClient.object(Native.mergeConflictForm(base, local, remote));
+        return ContactClient.mergeConflictForm(base, local, remote);
     }
 
-    /**
-     * Rewrites the card's UID, preserving every other byte (a plain
-     * copy is a new identity).
-     */
+    /** Forwards to {@link ContactClient#setCardUid}. */
     public static String setCardUid(String vcard, String uid) {
-        return PimalayaClient.string(
-                PimalayaClient.object(Native.setCardUid(vcard, uid)), "vcard");
+        return ContactClient.setCardUid(vcard, uid);
     }
 
-    /**
-     * Finds groups of likely-duplicate cards among {@code {ref,
-     * vcard}} pairs: exact normalized email, phone or full-name
-     * matches, conservative on purpose.
-     */
+    /** Forwards to {@link ContactClient#findDuplicates}. */
     public static JSONArray findDuplicates(JSONArray cards) {
-        return PimalayaClient.object(Native.findDuplicates(cards.toString()))
-                .optJSONArray("groups");
+        return ContactClient.findDuplicates(cards);
     }
 
-    /**
-     * Lists the card's raw property lines for the advanced editor, in
-     * source order, unfolded.
-     */
+    /** Forwards to {@link ContactClient#cardProps}. */
     public static JSONArray cardProps(String vcard) {
-        return PimalayaClient.object(Native.cardProps(vcard)).optJSONArray("props");
+        return ContactClient.cardProps(vcard);
     }
 
-    /**
-     * Rewrites one raw property line for the advanced editor: the line
-     * replaces the property at the index (a blank line removes it),
-     * index -1 appends.
-     */
+    /** Forwards to {@link ContactClient#cardSetProp}. */
     public static String cardSetProp(String vcard, int index, String line) {
-        return PimalayaClient.string(
-                PimalayaClient.object(Native.cardSetProp(vcard, index, line)), "vcard");
+        return ContactClient.cardSetProp(vcard, index, line);
     }
 
-    /**
-     * Recomposes one property from its structured parts ({@code {name,
-     * params: [{name, values}], value}}) and rewrites it (index -1
-     * appends).
-     */
+    /** Forwards to {@link ContactClient#cardSetPropParts}. */
     public static String cardSetPropParts(String vcard, int index, JSONObject prop) {
-        return PimalayaClient.string(
-                PimalayaClient.object(Native.cardSetPropParts(vcard, index, prop.toString())),
-                "vcard");
+        return ContactClient.cardSetPropParts(vcard, index, prop);
     }
 
-    /**
-     * The component labels of a structured property name (N, ADR,
-     * GENDER), empty for plain values: the advanced editor shapes its
-     * value form from them.
-     */
+    /** Forwards to {@link ContactClient#cardPropLabels}. */
     public static JSONArray cardPropLabels(String name) {
-        return PimalayaClient.object(Native.cardPropLabels(name)).optJSONArray("labels");
+        return ContactClient.cardPropLabels(name);
     }
 
-    /**
-     * The ordered type-set vocabulary the edit form's spinners address
-     * for the kind ({@code phone}, {@code email}, {@code address},
-     * {@code relation}, {@code gender}): each position's vCard TYPE set
-     * (a one-element list of the sex code for {@code gender}), in the
-     * order the Android string-arrays mirror. The Rust side owns the
-     * order; a test pins the arrays to it.
-     */
+    /** Forwards to {@link ContactClient#cardTypeOrder}. */
     public static JSONArray cardTypeOrder(String kind) {
-        return PimalayaClient.object(Native.cardTypeOrder(kind)).optJSONArray("order");
+        return ContactClient.cardTypeOrder(kind);
     }
 
-    /**
-     * Validates a hand-edited vCard source (it must reparse) and
-     * returns it re-serialized.
-     */
+    /** Forwards to {@link ContactClient#cardSource}. */
     public static String cardSource(String vcard) {
-        return PimalayaClient.string(PimalayaClient.object(Native.cardSource(vcard)), "vcard");
+        return ContactClient.cardSource(vcard);
     }
 
-    /**
-     * The edit form's view support computed from the field model:
-     * summaries, type spinner positions and picker dates.
-     */
+    /** Forwards to {@link ContactClient#formView}. */
     public static JSONObject formView(JSONObject model) {
-        return PimalayaClient.object(Native.formView(model.toString()));
+        return ContactClient.formView(model);
     }
 
-    /**
-     * One typed entry saved from an edit dialog, its TYPE set drawn
-     * from the spinner position.
-     */
+    /** Forwards to {@link ContactClient#formEntry}. */
     public static JSONObject formEntry(String kind, int index, String value, boolean pref) {
-        return PimalayaClient.object(Native.formEntry(kind, index, value, pref));
+        return ContactClient.formEntry(kind, index, value, pref);
     }
 
-    /**
-     * One picked date on the model wire (the vCard {@code yyyy-mm-dd}
-     * form, 1-based month).
-     */
+    /** Forwards to {@link ContactClient#formDate}. */
     public static String formDate(int year, int month, int day) {
-        return PimalayaClient.string(
-                PimalayaClient.object(Native.formDate(year, month, day)), "value");
+        return ContactClient.formDate(year, month, day);
     }
 
-    /**
-     * Groups the replica pool ({@code {replicas, links, detached}})
-     * into merged contacts, the groups sorted by primary display name.
-     */
+    /** Forwards to {@link ContactClient#groupContacts}. */
     public static JSONObject groupContacts(JSONObject input) {
-        return PimalayaClient.object(Native.groupContacts(input.toString()));
+        return ContactClient.groupContacts(input);
     }
 
-    /**
-     * The duplicate review's group facts ({@code {key, linkable}})
-     * from its {@code {ref, book}} members.
-     */
+    /** Forwards to {@link ContactClient#duplicateGroup}. */
     public static JSONObject duplicateGroup(JSONArray members) {
-        return PimalayaClient.object(Native.duplicateGroup(members.toString()));
+        return ContactClient.duplicateGroup(members);
     }
 }

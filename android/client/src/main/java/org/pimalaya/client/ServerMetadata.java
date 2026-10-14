@@ -61,7 +61,7 @@ public final class ServerMetadata {
      * thing on the consent screen.
      */
     public String domainScope(String domains) {
-        return PimalayaClient.string(
-                PimalayaClient.object(Native.oauthDomainScope(scopesSupported, domains)), "scope");
+        return Json.string(
+                Replies.object(Native.oauthDomainScope(scopesSupported, domains)), "scope");
     }
 }

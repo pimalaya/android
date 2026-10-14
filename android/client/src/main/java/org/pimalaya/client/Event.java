@@ -5,7 +5,7 @@ package org.pimalaya.client;
  *
  * <p>Deliberately unparsed: what a recurring event renders as depends on
  * the window being shown, so decoding happens at
- * {@link PimalayaClient#expandEvent} where that window is known.
+ * {@link CalendarClient#expandEvent} where that window is known.
  */
 public final class Event {
     /** Resource name with any {@code .ics} stripped. */

@@ -67,7 +67,7 @@ public final class PimdirSql {
      * @throws PimalayaException when the kind has no derivation.
      */
     public static JSONObject derive(String kind, byte[] body) {
-        return PimalayaClient.object(Native.pimdirDerive(kind, body));
+        return Replies.object(Native.pimdirDerive(kind, body));
     }
 
     /** Every statement, by name; unmodifiable. */
