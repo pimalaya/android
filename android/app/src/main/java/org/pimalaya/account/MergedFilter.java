@@ -1,4 +1,4 @@
-package org.pimalaya.sync;
+package org.pimalaya.account;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -9,8 +9,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
-import org.pimalaya.account.AccountActivation;
-import org.pimalaya.account.PimDomain;
 
 /**
  * One list's filter: which accounts and which of their collections it

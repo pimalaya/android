@@ -1,12 +1,8 @@
-package org.pimalaya.sync;
+package org.pimalaya.account;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-import org.pimalaya.account.AccountCredential;
-import org.pimalaya.account.AccountEntry;
-import org.pimalaya.account.PimDomain;
-import org.pimalaya.account.SecureStore;
 
 /**
  * One OAuth credential renewed at a time, process-wide.
@@ -21,20 +17,20 @@ import org.pimalaya.account.SecureStore;
  * instead of spending the retired token. The renewed tokens are written onto
  * the stored account ({@link SecureStore#renew}), never a stale snapshot.
  */
-final class TokenRenewal {
+public final class TokenRenewal {
     /** The tokens a refresh returned; a null refresh token keeps the old one. */
-    static final class Renewed {
+    public static final class Renewed {
         final String accessToken;
         final String refreshToken;
 
-        Renewed(String accessToken, String refreshToken) {
+        public Renewed(String accessToken, String refreshToken) {
             this.accessToken = accessToken;
             this.refreshToken = refreshToken;
         }
     }
 
     /** The token request itself, against the credential's token endpoint. */
-    interface Refresh {
+    public interface Refresh {
         Renewed run(AccountCredential credential);
     }
 
@@ -46,7 +42,7 @@ final class TokenRenewal {
      * Renews the credential {@code domain} signs in with, or reuses the
      * renewal another caller stored meanwhile, and returns the stored account.
      */
-    static AccountEntry renew(
+    public static AccountEntry renew(
             SecureStore store, AccountEntry entry, PimDomain domain, Refresh refresh) {
         AccountCredential held = entry.credential(domain);
         synchronized (lock(entry.email + "\n" + held.id)) {

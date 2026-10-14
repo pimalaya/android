@@ -10,9 +10,11 @@ import java.util.Map;
 import java.util.Set;
 import org.pimalaya.account.AccountCredential;
 import org.pimalaya.account.AccountEntry;
-import org.pimalaya.account.Accounts;
+import org.pimalaya.account.LocalBook;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
+import org.pimalaya.account.SyncScope;
+import org.pimalaya.account.TokenRenewal;
 import org.pimalaya.calendar.CalendarRows;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.Addressbook;
@@ -22,7 +24,6 @@ import org.pimalaya.client.Transport;
 import org.pimalaya.client.OauthTokens;
 import org.pimalaya.contact.BookEntry;
 import org.pimalaya.contact.CardStore;
-import org.pimalaya.contact.LocalBook;
 import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirCollections;
@@ -276,7 +277,7 @@ public final class SyncRunner {
                 if (expiredToken(error)) {
                     throw error;
                 }
-                Log.w("pimalaya", "addressbook roles failed for " + Accounts.redacted(email), error);
+                Log.w("pimalaya", "addressbook roles failed for " + AccountEntry.redacted(email), error);
             }
 
             ContactEngine engine = engine(primary, account);

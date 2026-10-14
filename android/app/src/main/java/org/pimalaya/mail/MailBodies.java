@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import org.pimalaya.account.Accounts;
+import org.pimalaya.account.AccountEntry;
 
 /**
  * Which bodies download without being opened, and the step that downloads
@@ -257,7 +257,7 @@ public final class MailBodies {
                 failed = host.download(email, chunk);
                 run.broken.remove(email);
             } catch (Exception failure) {
-                android.util.Log.w("pimalaya", "mail bodies failed for " + Accounts.redacted(email), failure);
+                android.util.Log.w("pimalaya", "mail bodies failed for " + AccountEntry.redacted(email), failure);
                 if (run.broken.merge(email, 1, Integer::sum) >= 2) {
                     // NOTE: twice in a row (no session, the server down): the
                     // account leaves the run, the next run plans it again.

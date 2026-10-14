@@ -1,4 +1,4 @@
-package org.pimalaya.account;
+package org.pimalaya.phone;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -63,7 +63,7 @@ public class AccountsTest {
 
     @Test
     public void aNewAccountSyncsAutomatically() {
-        Accounts.reconcile(context, books);
+        Accounts.reconcile(context, BookEntry.accounts(books));
 
         Account account = Accounts.findByUrl(context, URL);
         assertTrue(automatic(account));
@@ -78,18 +78,18 @@ public class AccountsTest {
         manager.addAccountExplicitly(account, null, data);
         ContentResolver.setSyncAutomatically(account, ContactsContract.AUTHORITY, false);
 
-        Accounts.reconcile(context, books);
+        Accounts.reconcile(context, BookEntry.accounts(books));
 
         assertTrue(automatic(account));
     }
 
     @Test
     public void aChoiceMadeInTheSystemSettingsStands() {
-        Accounts.reconcile(context, books);
+        Accounts.reconcile(context, BookEntry.accounts(books));
         Account account = Accounts.findByUrl(context, URL);
         ContentResolver.setSyncAutomatically(account, ContactsContract.AUTHORITY, false);
 
-        Accounts.reconcile(context, books);
+        Accounts.reconcile(context, BookEntry.accounts(books));
 
         assertFalse(automatic(account));
     }
@@ -108,7 +108,7 @@ public class AccountsTest {
 
     @Test
     public void aBookAccountNeverSyncsCalendars() {
-        Accounts.reconcile(context, books);
+        Accounts.reconcile(context, BookEntry.accounts(books));
 
         Account account = Accounts.findByUrl(context, URL);
         assertNull(Accounts.calendarAddress(context, account));
@@ -117,14 +117,14 @@ public class AccountsTest {
 
     @Test
     public void eachKindsReconcileLeavesTheOthersAccounts() {
-        Accounts.reconcile(context, books);
+        Accounts.reconcile(context, BookEntry.accounts(books));
         Accounts.reconcileCalendars(context, Set.of(EMAIL));
 
-        Accounts.reconcile(context, List.of());
+        Accounts.reconcile(context, BookEntry.accounts(List.of()));
         assertNull(Accounts.findByUrl(context, URL));
         assertNotNull(Accounts.findCalendars(context, EMAIL));
 
-        Accounts.reconcile(context, books);
+        Accounts.reconcile(context, BookEntry.accounts(books));
         Accounts.reconcileCalendars(context, Set.of());
         assertNull(Accounts.findCalendars(context, EMAIL));
         assertNotNull(Accounts.findByUrl(context, URL));

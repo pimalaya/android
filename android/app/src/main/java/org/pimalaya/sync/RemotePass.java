@@ -7,9 +7,10 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.pimalaya.account.AccountCredential;
 import org.pimalaya.account.AccountEntry;
-import org.pimalaya.account.Accounts;
+import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
+import org.pimalaya.account.SyncScope;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.calendar.CalendarPool;
 import org.pimalaya.calendar.CalendarRows;
@@ -126,7 +127,7 @@ public final class RemotePass {
                         pass.sent += drainOutbox(account, session);
                     }
                 } catch (Exception error) {
-                    Log.w("pimalaya", "outbox drain failed: " + Accounts.redacted(account.email), error);
+                    Log.w("pimalaya", "outbox drain failed: " + AccountEntry.redacted(account.email), error);
                     if (pass.failure == null) {
                         pass.failure = error;
                     }
@@ -137,7 +138,7 @@ public final class RemotePass {
                     pass.failure = error;
                 }
             } catch (Exception error) {
-                Log.w("pimalaya", "mail sync failed: " + Accounts.redacted(account.email), error);
+                Log.w("pimalaya", "mail sync failed: " + AccountEntry.redacted(account.email), error);
                 if (pass.failure == null) {
                     pass.failure = error;
                 }
@@ -175,14 +176,14 @@ public final class RemotePass {
             try {
                 filed = client.submitMessage(session, waiting.source);
             } catch (SubmissionRefused refused) {
-                Log.w("pimalaya", "submission refused: " + Accounts.redacted(account.email), refused);
+                Log.w("pimalaya", "submission refused: " + AccountEntry.redacted(account.email), refused);
                 mail.parkOutgoing(waiting.id, refused.getMessage());
                 continue;
             } catch (SubmissionUncertain uncertain) {
                 // NOTE: the message may have gone: parked, never handed
                 // over again unasked, and the drain stops here as for any
                 // failure of the connection.
-                Log.w("pimalaya", "submission uncertain: " + Accounts.redacted(account.email), uncertain);
+                Log.w("pimalaya", "submission uncertain: " + AccountEntry.redacted(account.email), uncertain);
                 mail.parkUncertain(waiting.id, uncertain.getMessage());
                 throw uncertain;
             } catch (Exception error) {
@@ -300,7 +301,7 @@ public final class RemotePass {
                 collections.add(collection);
             }
         } catch (Exception error) {
-            Log.w("pimalaya", "mail sync failed: " + Accounts.redacted(account.email), error);
+            Log.w("pimalaya", "mail sync failed: " + AccountEntry.redacted(account.email), error);
             return error;
         }
 
@@ -473,7 +474,7 @@ public final class RemotePass {
             SyncStamps.mark(context, account.email);
             return null;
         } catch (Exception error) {
-            Log.w("pimalaya", "mail step failed: " + Accounts.redacted(account.email), error);
+            Log.w("pimalaya", "mail step failed: " + AccountEntry.redacted(account.email), error);
             return error;
         }
     }
@@ -500,7 +501,7 @@ public final class RemotePass {
                         account.email,
                         session.call(server -> client.listCalendars(transport, server)));
             } catch (Exception error) {
-                Log.w("pimalaya", "calendar list failed: " + Accounts.redacted(account.email), error);
+                Log.w("pimalaya", "calendar list failed: " + AccountEntry.redacted(account.email), error);
                 return error;
             }
             // NOTE: the roster the phone's calendars hang off, its first
@@ -508,7 +509,7 @@ public final class RemotePass {
             try {
                 CalendarRows.reconcile(context, pimdir);
             } catch (Exception error) {
-                Log.w("pimalaya", "phone calendars failed: " + Accounts.redacted(account.email), error);
+                Log.w("pimalaya", "phone calendars failed: " + AccountEntry.redacted(account.email), error);
             }
 
             List<String> calendars = new ArrayList<>();

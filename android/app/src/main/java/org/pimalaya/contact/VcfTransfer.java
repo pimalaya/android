@@ -8,6 +8,7 @@ import java.util.UUID;
 import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.LocalBook;
 import org.pimalaya.client.Card;
 
 /**

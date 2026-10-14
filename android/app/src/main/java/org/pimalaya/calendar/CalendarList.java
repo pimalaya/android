@@ -16,10 +16,10 @@ import android.widget.TextView;
 
 import org.pimalaya.MainActivity;
 import org.pimalaya.R;
+import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.EventTime;
 import org.pimalaya.client.Occurrence;
-import org.pimalaya.sync.MergedFilter;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.CardSections;
 import org.pimalaya.ui.Chips;

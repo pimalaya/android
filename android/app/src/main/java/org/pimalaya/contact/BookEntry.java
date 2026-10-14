@@ -1,5 +1,8 @@
 package org.pimalaya.contact;
 
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.pimalaya.client.Addressbook;
 
 /**
@@ -28,5 +31,17 @@ public final class BookEntry {
         this.subscribed = subscribed;
         this.remoteSynced = remoteSynced;
         this.phoneSynced = phoneSynced;
+    }
+
+    /**
+     * Each entry's addressbook with its account's email, in the entries'
+     * order: what the phone's book accounts are reconciled against.
+     */
+    public static Map<Addressbook, String> accounts(List<BookEntry> entries) {
+        Map<Addressbook, String> accounts = new LinkedHashMap<>();
+        for (BookEntry entry : entries) {
+            accounts.put(entry.book, entry.accountEmail);
+        }
+        return accounts;
     }
 }

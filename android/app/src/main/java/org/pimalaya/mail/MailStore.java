@@ -14,6 +14,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.R;
+import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Mailbox;
 import org.pimalaya.client.PimdirSql;
@@ -25,7 +26,6 @@ import org.pimalaya.pimdir.PimdirItems;
 import org.pimalaya.pimdir.PimdirQueue;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.pimdir.PimdirSummary;
-import org.pimalaya.sync.MergedFilter;
 
 import java.util.ArrayList;
 import java.util.HashMap;

@@ -54,6 +54,18 @@ public final class AccountEntry {
         return empty(email).with(domain, baseUrl, credential);
     }
 
+    /**
+     * An address as a release log may name it: its domain alone, which
+     * tells the provider without telling the person.
+     */
+    public static String redacted(String address) {
+        if (address == null) {
+            return "?";
+        }
+        int at = address.lastIndexOf('@');
+        return at < 0 ? "*" : "*" + address.substring(at);
+    }
+
     /** Where a domain lives, or null when the account covers none. */
     public AccountConnection connection(PimDomain domain) {
         return connections.get(domain);
@@ -181,7 +193,7 @@ public final class AccountEntry {
      * renewed with it. That is the property the split exists for: there
      * is no second copy to update, and therefore none to forget.
      */
-    public AccountEntry refreshed(PimDomain domain, String accessToken, String refreshToken) {
+    AccountEntry refreshed(PimDomain domain, String accessToken, String refreshToken) {
         AccountCredential credential = credential(domain);
         if (credential == null) {
             return this;

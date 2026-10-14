@@ -25,22 +25,22 @@ import org.pimalaya.R;
 import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.AccountCredential;
 import org.pimalaya.account.AccountEntry;
-import org.pimalaya.account.Accounts;
 import org.pimalaya.account.Endpoints;
+import org.pimalaya.account.LocalBook;
+import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.calendar.PhoneCalendars;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.BookEntry;
-import org.pimalaya.contact.LocalBook;
 import org.pimalaya.mail.MailScope;
 import org.pimalaya.mail.SenderName;
 import org.pimalaya.mail.WindowPicker;
+import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
-import org.pimalaya.sync.MergedFilter;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.ui.Avatar;
 import org.pimalaya.ui.PillField;
@@ -942,9 +942,9 @@ public final class AccountSettings {
                 for (String url : urls) {
                     Accounts.remove(host, url);
                 }
-                Accounts.reconcile(host, phoneBooks);
+                Accounts.reconcile(host, BookEntry.accounts(phoneBooks));
             } catch (Exception error) {
-                Log.w("pimalaya", "account purge failed for " + Accounts.redacted(email) + ": " + error);
+                Log.w("pimalaya", "account purge failed for " + AccountEntry.redacted(email) + ": " + error);
             }
         });
         // NOTE: its calendar account goes the same way, the store having

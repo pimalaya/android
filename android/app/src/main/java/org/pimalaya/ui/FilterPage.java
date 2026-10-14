@@ -12,12 +12,12 @@ import java.util.ArrayList;
 import java.util.List;
 import org.pimalaya.MainActivity;
 import org.pimalaya.R;
+import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.mail.MailOffline;
 import org.pimalaya.pimdir.DefaultCollection;
 import org.pimalaya.pimdir.PimdirCollections;
 import org.pimalaya.pimdir.PimdirSummary;
-import org.pimalaya.sync.MergedFilter;
 
 /**
  * A list's filter page: each account with a checkbox, its collections

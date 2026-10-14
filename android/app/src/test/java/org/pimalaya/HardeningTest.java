@@ -20,7 +20,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.account.AccountEntry;
-import org.pimalaya.account.Accounts;
 import org.pimalaya.account.SecureStore;
 import org.pimalaya.file.FilesList;
 import org.pimalaya.mail.MailBodies;
@@ -28,6 +27,7 @@ import org.pimalaya.mail.MailEngine;
 import org.pimalaya.mail.MailOwed;
 import org.pimalaya.mail.MailPoison;
 import org.pimalaya.mail.MessageView;
+import org.pimalaya.phone.Accounts;
 import org.pimalaya.pimdir.CacheSweep;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
@@ -187,8 +187,8 @@ public class HardeningTest {
 
     @Test
     public void aReleaseLogNamesTheDomainAlone() {
-        assertEquals("*@example.org", Accounts.redacted("bob@example.org"));
-        assertEquals("*", Accounts.redacted("bob"));
-        assertEquals("?", Accounts.redacted(null));
+        assertEquals("*@example.org", AccountEntry.redacted("bob@example.org"));
+        assertEquals("*", AccountEntry.redacted("bob"));
+        assertEquals("?", AccountEntry.redacted(null));
     }
 }

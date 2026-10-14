@@ -11,7 +11,6 @@ import org.json.JSONObject;
 import org.pimalaya.MainActivity;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
-import org.pimalaya.account.Accounts;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;
@@ -264,7 +263,7 @@ public final class MessageCompose {
                         new MailSubmit(host.client, host.mail, host.mailEngine(sender.email))
                                 .queue(draft);
                     } catch (Exception error) {
-                        Log.w("pimalaya", "compose failed: " + Accounts.redacted(sender.email), error);
+                        Log.w("pimalaya", "compose failed: " + AccountEntry.redacted(sender.email), error);
                         failure = error;
                     }
 

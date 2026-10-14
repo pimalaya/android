@@ -1,4 +1,4 @@
-package org.pimalaya.account;
+package org.pimalaya.phone;
 
 import android.accounts.Account;
 import android.accounts.AccountManager;
@@ -15,11 +15,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.LocalBook;
 import org.pimalaya.client.Addressbook;
-import org.pimalaya.contact.BookEntry;
-import org.pimalaya.contact.LocalBook;
-import org.pimalaya.phone.PhoneMirror;
 
 /**
  * AccountManager plumbing, for the two kinds of Android account Pimalaya
@@ -42,18 +42,6 @@ public final class Accounts {
     /** Matches android:accountType in res/xml/authenticator.xml. */
     public static final String TYPE = "org.pimalaya";
 
-    /**
-     * An address as a release log may name it: its domain alone, which
-     * tells the provider without telling the person.
-     */
-    public static String redacted(String address) {
-        if (address == null) {
-            return "?";
-        }
-        int at = address.lastIndexOf('@');
-        return at < 0 ? "*" : "*" + address.substring(at);
-    }
-
     private static final String DATA_URL = "url";
 
     /** A calendar account's address; never set on a book's account. */
@@ -70,7 +58,7 @@ public final class Accounts {
      * The full subscribed set must be passed at once: accounts absent from
      * it are purged. Calendar accounts are left alone.
      */
-    public static void reconcile(Context context, List<BookEntry> books) {
+    public static void reconcile(Context context, Map<Addressbook, String> accountByBook) {
         AccountManager manager = AccountManager.get(context);
 
         for (Account account : manager.getAccountsByType(TYPE)) {
@@ -79,20 +67,21 @@ public final class Accounts {
             }
             String url = manager.getUserData(account, DATA_URL);
             boolean wanted = false;
-            for (BookEntry book : books) {
-                wanted |= book.book.url.equals(url);
+            for (Addressbook book : accountByBook.keySet()) {
+                wanted |= book.url.equals(url);
             }
             if (!wanted) {
                 manager.removeAccountExplicitly(account);
             }
         }
 
-        for (BookEntry book : books) {
-            Account account = find(context, book.book);
+        for (Map.Entry<Addressbook, String> entry : accountByBook.entrySet()) {
+            Addressbook book = entry.getKey();
+            Account account = find(context, book);
             if (account == null) {
-                account = new Account(name(book.accountEmail, book.book), TYPE);
+                account = new Account(name(entry.getValue(), book), TYPE);
                 Bundle data = new Bundle();
-                data.putString(DATA_URL, book.book.url);
+                data.putString(DATA_URL, book.url);
                 manager.addAccountExplicitly(account, null, data);
             }
 
@@ -139,7 +128,7 @@ public final class Accounts {
                 Bundle data = new Bundle();
                 data.putString(DATA_CALENDARS, address);
                 if (!manager.addAccountExplicitly(account, null, data)) {
-                    Log.w("pimalaya", "calendar account refused for " + redacted(address));
+                    Log.w("pimalaya", "calendar account refused for " + AccountEntry.redacted(address));
                     continue;
                 }
             }

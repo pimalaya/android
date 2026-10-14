@@ -136,7 +136,7 @@ public class SecureStore {
      * the account as stored rather than on a caller's copy, then persists;
      * returns the renewed account, or null when the address is gone.
      */
-    public AccountEntry renew(String email, PimDomain domain, String accessToken, String refreshToken) {
+    AccountEntry renew(String email, PimDomain domain, String accessToken, String refreshToken) {
         synchronized (LOCK) {
             List<AccountEntry> entries = loadAll();
             for (int at = 0; at < entries.size(); at++) {
@@ -399,7 +399,7 @@ public class SecureStore {
         JSONObject credentials = object.optJSONObject("credentials");
 
         if (connections == null || credentials == null) {
-            Log.w("pimalaya", "dropping an account stored in an older shape: " + Accounts.redacted(email));
+            Log.w("pimalaya", "dropping an account stored in an older shape: " + AccountEntry.redacted(email));
             return null;
         }
 

@@ -1,8 +1,6 @@
-package org.pimalaya.sync;
+package org.pimalaya.account;
 
 import android.content.Context;
-import org.pimalaya.account.AccountActivation;
-import org.pimalaya.account.PimDomain;
 
 /**
  * What one sync takes: which accounts, and which of their collections.

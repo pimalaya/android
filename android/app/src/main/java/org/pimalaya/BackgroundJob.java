@@ -18,8 +18,10 @@ import java.util.Map;
 import java.util.Set;
 import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
+import org.pimalaya.account.SyncScope;
 import org.pimalaya.calendar.EventStore;
 import org.pimalaya.client.PimalayaClient;
 import org.pimalaya.contact.CardStore;
@@ -30,11 +32,9 @@ import org.pimalaya.pimdir.PimdirDb;
 import org.pimalaya.pimdir.PimdirSummary;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
-import org.pimalaya.sync.MergedFilter;
 import org.pimalaya.sync.RemotePass;
 import org.pimalaya.sync.SyncLock;
 import org.pimalaya.sync.SyncRunner;
-import org.pimalaya.sync.SyncScope;
 
 /**
  * The background check ({@link BackgroundCheck}): syncs every account

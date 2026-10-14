@@ -40,9 +40,11 @@ import java.util.function.Supplier;
 import org.json.JSONObject;
 import org.pimalaya.account.AccountActivation;
 import org.pimalaya.account.AccountEntry;
-import org.pimalaya.account.Accounts;
+import org.pimalaya.account.LocalBook;
+import org.pimalaya.account.MergedFilter;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.account.SecureStore;
+import org.pimalaya.account.SyncScope;
 import org.pimalaya.calendar.CalendarEngine;
 import org.pimalaya.calendar.CalendarList;
 import org.pimalaya.calendar.CalendarRows;
@@ -65,7 +67,6 @@ import org.pimalaya.contact.ContactsList;
 import org.pimalaya.contact.EditSession;
 import org.pimalaya.contact.Entry;
 import org.pimalaya.contact.Group;
-import org.pimalaya.contact.LocalBook;
 import org.pimalaya.contact.ContactEngine;
 import org.pimalaya.contact.PimdirContacts;
 import org.pimalaya.contact.VcfTransfer;
@@ -84,6 +85,7 @@ import org.pimalaya.mail.MailTally;
 import org.pimalaya.mail.MailWindow;
 import org.pimalaya.mail.MessageCompose;
 import org.pimalaya.mail.MessageView;
+import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.phone.PhoneQueue;
 import org.pimalaya.pimdir.CacheSweep;
@@ -98,12 +100,10 @@ import org.pimalaya.setup.OauthFlow;
 import org.pimalaya.setup.OnboardingFlow;
 import org.pimalaya.sync.BackgroundCheck;
 import org.pimalaya.sync.FirstSync;
-import org.pimalaya.sync.MergedFilter;
 import org.pimalaya.sync.PimdirEngine;
 import org.pimalaya.sync.RemotePass;
 import org.pimalaya.sync.SyncLock;
 import org.pimalaya.sync.SyncRunner;
-import org.pimalaya.sync.SyncScope;
 import org.pimalaya.sync.SyncStamps;
 import org.pimalaya.sync.SyncSteps;
 import org.pimalaya.ui.Avatar;
@@ -2958,7 +2958,7 @@ public class MainActivity extends Activity {
         io.execute(
                 () -> {
                     try {
-                        Accounts.reconcile(this, runner.phoneSyncedBooks());
+                        Accounts.reconcile(this, BookEntry.accounts(runner.phoneSyncedBooks()));
                     } catch (Exception error) {
                         Log.w("pimalaya", "phone accounts failed", error);
                     }
@@ -3027,7 +3027,7 @@ public class MainActivity extends Activity {
         io.execute(
                 () -> {
                     try {
-                        Accounts.reconcile(this, runner.phoneSyncedBooks());
+                        Accounts.reconcile(this, BookEntry.accounts(runner.phoneSyncedBooks()));
                         ContactEngine engine =
                                 new ContactEngine(base, pimdir, client, null, null, this);
                         engine.progress =
