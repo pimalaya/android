@@ -30,7 +30,7 @@ public final class AccountConnection {
     final String credentialId;
 
     /** Where mail is submitted, or null when there is nowhere separate. */
-    final String submitUrl;
+    public final String submitUrl;
 
     AccountConnection(String baseUrl, String credentialId) {
         this(baseUrl, credentialId, null);

@@ -17,7 +17,7 @@ import org.pimalaya.client.PimalayaClient;
  * The internal account markers ({@code google://}, {@code msgraph://},
  * {@code jmap://}) stand for https endpoints the bridge builds itself.
  */
-final class Endpoints {
+public final class Endpoints {
     private static final Set<String> TLS = Set.of("https", "imaps", "smtps", "smtp");
 
     private static final Set<String> MARKERS = Set.of("google", "msgraph", "jmap");
@@ -36,7 +36,7 @@ final class Endpoints {
      * the typed URL names a scheme the domain cannot sign in over safely
      * ({@code imap://}, {@code http://}, anything else).
      */
-    static String manualUrl(PimDomain domain, String entered) {
+    public static String manualUrl(PimDomain domain, String entered) {
         entered = entered.trim();
         if (domain != PimDomain.MAIL) {
             String url = entered.contains("://") ? entered : "https://" + entered;
@@ -53,7 +53,7 @@ final class Endpoints {
      * What was typed for a submission server, as the endpoint it opens, or
      * null when it names neither {@code smtps} nor {@code smtp}.
      */
-    static String submitUrl(String entered) {
+    public static String submitUrl(String entered) {
         String url = PimalayaClient.submitUrl(entered.trim());
         String scheme = scheme(url);
         boolean smtp = "smtps".equals(scheme) || "smtp".equals(scheme);
@@ -61,7 +61,7 @@ final class Endpoints {
     }
 
     /** The scheme of an endpoint, lowercased; null when it has none. */
-    static String scheme(String url) {
+    public static String scheme(String url) {
         if (url == null) {
             return null;
         }
@@ -99,7 +99,7 @@ final class Endpoints {
      * and any port, without userinfo or path; null for the {@code google://}
      * and {@code msgraph://} markers, which no password signs in to.
      */
-    static String destination(String url) {
+    public static String destination(String url) {
         String host = host(url);
         if (host == null) {
             return null;
@@ -123,7 +123,7 @@ final class Endpoints {
      * is shown it before a password goes there, a host the address does not
      * name being the one a forged configuration would point at.
      */
-    static boolean otherDomain(String url, String email) {
+    public static boolean otherDomain(String url, String email) {
         String host = host(url);
         int at = email == null ? -1 : email.lastIndexOf('@');
         if (host == null || at < 0) {

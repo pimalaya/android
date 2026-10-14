@@ -32,7 +32,7 @@ public final class AccountCredential {
     public final String id;
 
     /** The login presented with the secret; empty for a bearer token. */
-    final String login;
+    public final String login;
 
     /** The password, API token or OAuth access token itself. */
     public final String secret;

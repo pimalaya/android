@@ -1,9 +1,10 @@
-package org.pimalaya.account;
+package org.pimalaya.setup;
 
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 import org.json.JSONObject;
+import org.pimalaya.account.SecureStore;
 
 /**
  * Keeps the in-flight OAuth grant across the browser hop, which routinely

@@ -1,4 +1,4 @@
-package org.pimalaya.account;
+package org.pimalaya.setup;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -17,6 +17,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.pimalaya.FakeAndroidKeyStore;
 import org.pimalaya.MainActivity;
+import org.pimalaya.account.Oauth;
 import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;

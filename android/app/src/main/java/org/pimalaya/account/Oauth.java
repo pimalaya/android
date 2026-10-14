@@ -14,31 +14,31 @@ package org.pimalaya.account;
  * the reversed-client-id custom scheme the OS routes back via the
  * manifest intent-filter.
  */
-final class Oauth {
-    static final String GOOGLE_CLIENT_ID =
+public final class Oauth {
+    public static final String GOOGLE_CLIENT_ID =
             "991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1.apps.googleusercontent.com";
 
     /** Reversed-client-id scheme, mirrored by the manifest intent-filter. */
-    static final String GOOGLE_REDIRECT_URI =
+    public static final String GOOGLE_REDIRECT_URI =
             "com.googleusercontent.apps.991810147220-4f2s8id0pksdj5vtj1ivgpadnoibl4g1:/oauth2redirect";
 
-    static final String GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
-    static final String GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+    public static final String GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
+    public static final String GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 
     /** CardDAV scope (the one DAVx5 uses); reuses the WebDAV transport. */
-    static final String GOOGLE_SCOPE = "https://www.googleapis.com/auth/carddav";
+    public static final String GOOGLE_SCOPE = "https://www.googleapis.com/auth/carddav";
 
     /** People API scope, for the Google Contacts API backend. */
-    static final String GOOGLE_PEOPLE_SCOPE = "https://www.googleapis.com/auth/contacts";
+    public static final String GOOGLE_PEOPLE_SCOPE = "https://www.googleapis.com/auth/contacts";
 
     /**
      * The Pimalaya Entra app registration (a public client: no secret,
      * PKCE only, like the Google one).
      */
-    static final String MICROSOFT_CLIENT_ID = "ba9b19e1-973e-4d7c-aed9-848bd2fee385";
+    public static final String MICROSOFT_CLIENT_ID = "ba9b19e1-973e-4d7c-aed9-848bd2fee385";
 
     /** Custom scheme, mirrored by the manifest intent-filter. */
-    static final String MICROSOFT_REDIRECT_URI = "pimalaya://oauth2redirect";
+    public static final String MICROSOFT_REDIRECT_URI = "pimalaya://oauth2redirect";
 
     /**
      * The redirect of the dynamic-registration issuer flow: a
@@ -49,17 +49,17 @@ final class Oauth {
      * slash per RFC 8252 §7.1: a private-use scheme has no naming
      * authority, so no {@code //} component.
      */
-    static final String REDIRECT_URI = "org.pimalaya:/oauth2redirect";
+    public static final String REDIRECT_URI = "org.pimalaya:/oauth2redirect";
 
     /** The `common` tenant serves both personal (MSA) and Entra accounts. */
-    static final String MICROSOFT_AUTH_ENDPOINT =
+    public static final String MICROSOFT_AUTH_ENDPOINT =
             "https://login.microsoftonline.com/common/oauth2/v2.0/authorize";
 
-    static final String MICROSOFT_TOKEN_ENDPOINT =
+    public static final String MICROSOFT_TOKEN_ENDPOINT =
             "https://login.microsoftonline.com/common/oauth2/v2.0/token";
 
     /** Graph contacts scope; offline_access makes Entra issue a refresh token. */
-    static final String MICROSOFT_SCOPE =
+    public static final String MICROSOFT_SCOPE =
             "https://graph.microsoft.com/Contacts.ReadWrite offline_access";
 
     /** OpenID Connect scopes, which address no API. */
@@ -109,7 +109,7 @@ final class Oauth {
                     "https://graph.microsoft.com/Contacts.ReadWrite");
 
     /** Which of the app's own clients a grant runs with. */
-    enum Shipped {
+    public enum Shipped {
         GOOGLE,
         MICROSOFT
     }
@@ -130,7 +130,7 @@ final class Oauth {
      * So the shipped client signs in only when every endpoint the token will
      * be presented to is the provider's own ({@link Endpoints#allOn}).
      */
-    static Shipped shipped(String authorizationEndpoint, java.util.Collection<String> endpoints) {
+    public static Shipped shipped(String authorizationEndpoint, java.util.Collection<String> endpoints) {
         if (isGoogle(authorizationEndpoint)
                 && Endpoints.allOn(endpoints, "google", GOOGLE_HOSTS)) {
             return Shipped.GOOGLE;
@@ -146,7 +146,7 @@ final class Oauth {
      * The scope a shipped client asks for: the requested one kept to the
      * provider's fixed set, whatever else a discovered configuration added.
      */
-    static String fixedScope(Shipped client, String scope) {
+    public static String fixedScope(Shipped client, String scope) {
         java.util.Set<String> allowed =
                 client == Shipped.GOOGLE ? GOOGLE_SCOPES : MICROSOFT_SCOPES;
         java.util.Set<String> kept = new java.util.LinkedHashSet<>();
@@ -172,7 +172,7 @@ final class Oauth {
      * one audience and an address ticking mail, calendars and contacts is
      * one consent.
      */
-    static String audience(String authorizationEndpoint, String resource, String scope) {
+    public static String audience(String authorizationEndpoint, String resource, String scope) {
         if (isGoogle(authorizationEndpoint)) {
             return GOOGLE_AUTH_ENDPOINT;
         }
@@ -214,7 +214,7 @@ final class Oauth {
     }
 
     /** The union of space-separated scope lists, in order; null when empty. */
-    static String union(String... lists) {
+    public static String union(String... lists) {
         java.util.Set<String> union = new java.util.LinkedHashSet<>();
         for (String list : lists) {
             union.addAll(scopes(list));

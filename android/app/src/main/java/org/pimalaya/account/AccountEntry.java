@@ -66,7 +66,7 @@ public final class AccountEntry {
     }
 
     /** Every credential this account holds, by id. */
-    Map<String, AccountCredential> credentials() {
+    public Map<String, AccountCredential> credentials() {
         return Collections.unmodifiableMap(credentials);
     }
 
@@ -91,7 +91,7 @@ public final class AccountEntry {
     }
 
     /** The domains this account covers, in the enum's order. */
-    Set<PimDomain> domains() {
+    public Set<PimDomain> domains() {
         return Collections.unmodifiableSet(connections.keySet());
     }
 
@@ -100,7 +100,7 @@ public final class AccountEntry {
      * space-separated list, or null when none is recorded: what a new grant
      * from that client asks for beside its own, so it can replace them.
      */
-    String grantedScope(String clientId) {
+    public String grantedScope(String clientId) {
         java.util.List<String> scopes = new java.util.ArrayList<>();
         for (AccountConnection connection : connections.values()) {
             AccountCredential held = credentials.get(connection.credentialId);
@@ -117,7 +117,7 @@ public final class AccountEntry {
      * which the new one holds. A domain whose grant's scopes were never
      * recorded stays on it, since nothing says the new one covers it.
      */
-    java.util.List<PimDomain> regrantable(AccountCredential granted) {
+    public java.util.List<PimDomain> regrantable(AccountCredential granted) {
         java.util.List<PimDomain> domains = new java.util.ArrayList<>();
         if (!granted.renewable()) {
             return domains;

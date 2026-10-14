@@ -171,7 +171,7 @@ public final class Accounts {
      * <p>Our own accounts never match: they are named by the book, not by
      * the address.
      */
-    static boolean elsewhere(Context context, String address) {
+    public static boolean elsewhere(Context context, String address) {
         if (!PhoneMirror.CONTACTS.granted(context)) {
             return false;
         }
@@ -201,7 +201,7 @@ public final class Accounts {
      * calendars of other types, a handful on any phone; false without the
      * calendar permission.
      */
-    static boolean calendarsElsewhere(Context context, String address) {
+    public static boolean calendarsElsewhere(Context context, String address) {
         if (!PhoneMirror.CALENDAR.granted(context)) {
             return false;
         }

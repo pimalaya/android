@@ -34,17 +34,48 @@ public class LayeringTest {
     /** The packages each package may reference; the root may reference all. */
     private static final Map<String, Set<String>> ALLOWED = Map.ofEntries(
             Map.entry(CLIENT, Set.of()),
-            Map.entry("pimdir", Set.of(CLIENT)),
-            Map.entry("sync", Set.of("pimdir", CLIENT)),
-            Map.entry("phone", Set.of("sync", "pimdir", CLIENT)),
-            Map.entry("ui", Set.of("sync", "pimdir", CLIENT)),
-            Map.entry("file", Set.of("ui", "phone", "sync", "pimdir", CLIENT)),
-            Map.entry("contact", Set.of("ui", "phone", "sync", "pimdir", CLIENT)),
-            Map.entry("calendar",
-                    Set.of("contact", "ui", "phone", "sync", "pimdir", CLIENT)),
-            Map.entry("mail", Set.of("file", "ui", "phone", "sync", "pimdir", CLIENT)),
-            Map.entry("account", Set.of("mail", "contact", "calendar", "file", "ui",
-                    "phone", "sync", "pimdir", CLIENT)));
+            Map.entry("account", Set.of(CLIENT)),
+            Map.entry("phone", Set.of("account", CLIENT)),
+            Map.entry("pimdir", Set.of("account", CLIENT)),
+            Map.entry("ui", Set.of()),
+            Map.entry("file", Set.of("ui", "pimdir", "account", CLIENT)),
+            Map.entry("contact", Set.of("ui", "phone", "pimdir", "account", CLIENT)),
+            Map.entry("calendar", Set.of("ui", "phone", "pimdir", "account", CLIENT)),
+            Map.entry("mail", Set.of("file", "ui", "pimdir", "account", CLIENT)),
+            Map.entry("sync", Set.of("mail", "calendar", "contact", "phone", "pimdir",
+                    "account", CLIENT)),
+            Map.entry("setup", Set.of("sync", "mail", "calendar", "contact", "phone",
+                    "pimdir", "ui", "account", CLIENT)),
+            Map.entry("filter", Set.of("mail", "pimdir", "account")),
+            Map.entry("trash", Set.of("contact", "pimdir", "account", CLIENT)),
+            Map.entry("link", Set.of("mail", "contact", "ui", "pimdir")));
+
+    /**
+     * Screens that may also reference the root, checked before
+     * {@link #ALLOWED}: a screen reaches its host activity until phase 4 of
+     * java-domain-layout gives screens their collaborators, then this goes.
+     */
+    private static final Map<String, Set<String>> TOLERATED = Map.ofEntries(
+            Map.entry("contact/AdvancedEditor.java", Set.of(ROOT)),
+            Map.entry("contact/Birthdays.java", Set.of(ROOT)),
+            Map.entry("contact/ContactsList.java", Set.of(ROOT)),
+            Map.entry("contact/ContactWriter.java", Set.of(ROOT)),
+            Map.entry("contact/DuplicateReview.java", Set.of(ROOT)),
+            Map.entry("contact/VcfTransfer.java", Set.of(ROOT)),
+            Map.entry("calendar/CalendarList.java", Set.of(ROOT)),
+            Map.entry("calendar/EventView.java", Set.of(ROOT)),
+            Map.entry("mail/MailList.java", Set.of(ROOT)),
+            Map.entry("mail/MessageCompose.java", Set.of(ROOT)),
+            Map.entry("mail/MessageView.java", Set.of(ROOT)),
+            Map.entry("mail/WindowPicker.java", Set.of(ROOT)),
+            Map.entry("file/FileActions.java", Set.of(ROOT)),
+            Map.entry("file/FilesList.java", Set.of(ROOT)),
+            Map.entry("setup/AccountSettings.java", Set.of(ROOT)),
+            Map.entry("setup/OauthFlow.java", Set.of(ROOT)),
+            Map.entry("setup/OnboardingFlow.java", Set.of(ROOT)),
+            Map.entry("filter/FilterPage.java", Set.of(ROOT)),
+            Map.entry("trash/DeletedItemsPage.java", Set.of(ROOT)),
+            Map.entry("link/LinkedSection.java", Set.of(ROOT)));
 
     private static final Pattern REFERENCE =
             Pattern.compile("\\borg\\.pimalaya\\.(?:([a-z]+)\\.|([A-Z]\\w*))");
@@ -61,6 +92,8 @@ public class LayeringTest {
             Iterable<Path> sources = files.filter(p -> p.toString().endsWith(".java"))::iterator;
             for (Path file : sources) {
                 String from = packageOf(main.relativize(file.getParent()));
+                Set<String> tolerated =
+                        TOLERATED.getOrDefault(main.relativize(file).toString(), Set.of());
                 String source = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
                 Set<String> seen = new TreeSet<>();
                 Matcher m = REFERENCE.matcher(source);
@@ -69,7 +102,8 @@ public class LayeringTest {
                         continue;
                     }
                     String to = m.group(1) == null ? ROOT : m.group(1);
-                    if (!to.equals(from) && !allowed(from, to) && seen.add(to)) {
+                    if (!to.equals(from) && !tolerated.contains(to) && !allowed(from, to)
+                            && seen.add(to)) {
                         violations.add(main.relativize(file) + " -> " + label(to));
                     }
                 }

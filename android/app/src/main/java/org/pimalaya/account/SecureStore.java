@@ -263,7 +263,7 @@ public class SecureStore {
      * then its Base64 IV. Shared with the other secrets kept on disk, so
      * the app holds one key and one scheme.
      */
-    static String[] seal(String plaintext) throws Exception {
+    public static String[] seal(String plaintext) throws Exception {
         Cipher cipher = Cipher.getInstance(TRANSFORMATION);
         cipher.init(Cipher.ENCRYPT_MODE, secretKey());
 
@@ -275,7 +275,7 @@ public class SecureStore {
     }
 
     /** Decrypts what {@link #seal} returned, failing on any tampering. */
-    static String open(String payload, String iv) throws Exception {
+    public static String open(String payload, String iv) throws Exception {
         Cipher cipher = Cipher.getInstance(TRANSFORMATION);
         GCMParameterSpec spec =
                 new GCMParameterSpec(GCM_TAG_BITS, Base64.decode(iv, Base64.NO_WRAP));

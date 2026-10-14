@@ -1,4 +1,4 @@
-package org.pimalaya.account;
+package org.pimalaya.setup;
 
 import android.app.AlertDialog;
 import android.text.InputType;
@@ -22,6 +22,12 @@ import java.util.Set;
 import java.util.function.IntConsumer;
 import org.pimalaya.MainActivity;
 import org.pimalaya.R;
+import org.pimalaya.account.AccountActivation;
+import org.pimalaya.account.AccountCredential;
+import org.pimalaya.account.AccountEntry;
+import org.pimalaya.account.Accounts;
+import org.pimalaya.account.Endpoints;
+import org.pimalaya.account.PimDomain;
 import org.pimalaya.calendar.PhoneCalendars;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.PimalayaClient;

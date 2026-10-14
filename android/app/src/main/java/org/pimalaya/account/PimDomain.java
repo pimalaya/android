@@ -52,7 +52,7 @@ public enum PimDomain {
     public final int label;
 
     /** The glyph beside that label, the one the domain bar draws. */
-    final int icon;
+    public final int icon;
 
     /** The JMAP capability URN the domain is read with. */
     final String jmapCapability;
@@ -133,7 +133,7 @@ public enum PimDomain {
      * since a mail account that cannot answer is not what connecting mail
      * asks for.
      */
-    static Set<PimDomain> servedByJmap(Set<String> capabilities) {
+    public static Set<PimDomain> servedByJmap(Set<String> capabilities) {
         Set<PimDomain> served = new LinkedHashSet<>();
         for (PimDomain domain : servedBy("jmap")) {
             if (capabilities.contains(domain.jmapCapability)
@@ -152,7 +152,7 @@ public enum PimDomain {
      * probe then drops the domain rather than falling back to CalDAV; the DAVs
      * over the rest.
      */
-    int rank(String service) {
+    public int rank(String service) {
         if (service == null) {
             return 2;
         }
@@ -168,7 +168,7 @@ public enum PimDomain {
     }
 
     /** The discovered configs that can serve this domain, in discovery order. */
-    static List<ServiceConfig> configsFor(PimDomain domain, List<ServiceConfig> configs) {
+    public static List<ServiceConfig> configsFor(PimDomain domain, List<ServiceConfig> configs) {
         List<ServiceConfig> serving = new ArrayList<>();
         for (ServiceConfig config : configs) {
             if (servedBy(config).contains(domain)) {

@@ -1,4 +1,4 @@
-package org.pimalaya.account;
+package org.pimalaya.setup;
 
 import android.net.Uri;
 import java.io.ByteArrayOutputStream;

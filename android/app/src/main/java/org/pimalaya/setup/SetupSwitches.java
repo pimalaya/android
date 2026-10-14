@@ -1,4 +1,4 @@
-package org.pimalaya.account;
+package org.pimalaya.setup;
 
 import java.util.EnumSet;
 import java.util.Set;

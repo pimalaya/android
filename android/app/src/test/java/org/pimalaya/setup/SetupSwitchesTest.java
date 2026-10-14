@@ -1,4 +1,4 @@
-package org.pimalaya.account;
+package org.pimalaya.setup;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;

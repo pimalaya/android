@@ -1,4 +1,4 @@
-package org.pimalaya.account;
+package org.pimalaya.setup;
 
 import android.content.Intent;
 import android.net.Uri;
@@ -10,6 +10,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.MainActivity;
 import org.pimalaya.R;
+import org.pimalaya.account.Oauth;
 import org.pimalaya.client.Account;
 import org.pimalaya.client.OauthSession;
 import org.pimalaya.client.OauthTokens;
