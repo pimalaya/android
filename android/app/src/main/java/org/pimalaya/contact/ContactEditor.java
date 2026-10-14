@@ -320,7 +320,7 @@ public final class ContactEditor {
         try {
             if (docs.size() == 1) {
                 edit.vcard = primary.card.vcard();
-                model = ContactClient.projectCard(primary.card);
+                model = ContactClient.projectCardJson(primary.card.vcard());
             } else {
                 JSONObject merged = ContactClient.mergeCards(docs);
                 edit.vcard = merged.optString("vcard");

@@ -12,14 +12,19 @@ import android.provider.ContactsContract.CommonDataKinds.Website;
 import android.provider.ContactsContract.Data;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
+import org.pimalaya.client.ContactAddress;
+import org.pimalaya.client.ContactEmail;
+import org.pimalaya.client.ContactFields;
+import org.pimalaya.client.ContactName;
+import org.pimalaya.client.ContactOrganization;
+import org.pimalaya.client.ContactPhone;
 
 /**
  * The pure half of the phone spoke, both directions: neutral field
@@ -38,23 +43,55 @@ final class Mapping {
      * returns and what a fetched phone contact overwrites in the base
      * card's model (everything else is Pimalaya-only and rides along).
      */
-    static final String[] FIELDS = {
-        "displayName",
-        "name",
-        "nicknames",
-        "phones",
-        "emails",
-        "addresses",
-        "organization",
-        "title",
-        "role",
-        "websites",
-        "birthday",
-        "notes",
-    };
+    enum Field {
+        DISPLAY_NAME("displayName", ContactFields::displayName, (into, from) ->
+                into.displayName = from.displayName()),
+        NAME("name", ContactFields::name, (into, from) -> into.name = from.name()),
+        NICKNAMES("nicknames", ContactFields::nicknames, (into, from) ->
+                into.nicknames = from.nicknames()),
+        PHONES("phones", ContactFields::phones, (into, from) -> into.phones = from.phones()),
+        EMAILS("emails", ContactFields::emails, (into, from) -> into.emails = from.emails()),
+        ADDRESSES("addresses", ContactFields::addresses, (into, from) ->
+                into.addresses = from.addresses()),
+        ORGANIZATION("organization", ContactFields::organization, (into, from) ->
+                into.organization = from.organization()),
+        TITLE("title", ContactFields::title, (into, from) -> into.title = from.title()),
+        ROLE("role", ContactFields::role, (into, from) -> into.role = from.role()),
+        WEBSITES("websites", ContactFields::websites, (into, from) ->
+                into.websites = from.websites()),
+        BIRTHDAY("birthday", ContactFields::birthday, (into, from) ->
+                into.birthday = from.birthday()),
+        NOTES("notes", ContactFields::notes, (into, from) -> into.notes = from.notes());
+
+        /** The model key, as the field crosses the bridge. */
+        final String key;
+
+        private final Function<ContactFields, Object> getter;
+
+        private final BiConsumer<ContactFields.Builder, ContactFields> setter;
+
+        Field(
+                String key,
+                Function<ContactFields, Object> getter,
+                BiConsumer<ContactFields.Builder, ContactFields> setter) {
+            this.key = key;
+            this.getter = getter;
+            this.setter = setter;
+        }
+
+        /** The field's value in {@code model}. */
+        Object of(ContactFields model) {
+            return getter.apply(model);
+        }
+
+        /** Sets the field of {@code into} to its value in {@code from}. */
+        void take(ContactFields.Builder into, ContactFields from) {
+            setter.accept(into, from);
+        }
+    }
 
     /** Maps the neutral field model onto ContactsContract data rows. */
-    static List<Map<String, Object>> rows(JSONObject model) {
+    static List<Map<String, Object>> rows(ContactFields model) {
         List<Map<String, Object>> rows = new ArrayList<>();
 
         // NOTE: the display name (FN) is hub-only and never reaches the
@@ -63,61 +100,54 @@ final class Mapping {
         // on-device), so a written FN either vanishes or gets re-split
         // into the wrong parts. Only the structured parts project.
         Map<String, Object> name = row(StructuredName.CONTENT_ITEM_TYPE);
-        JSONObject n = model.optJSONObject("name");
+        ContactName n = model.name();
         if (n != null) {
-            name.put(StructuredName.FAMILY_NAME, n.optString("family"));
-            name.put(StructuredName.GIVEN_NAME, n.optString("given"));
-            name.put(StructuredName.MIDDLE_NAME, n.optString("middle"));
-            name.put(StructuredName.PREFIX, n.optString("prefix"));
-            name.put(StructuredName.SUFFIX, n.optString("suffix"));
+            name.put(StructuredName.FAMILY_NAME, n.family());
+            name.put(StructuredName.GIVEN_NAME, n.given());
+            name.put(StructuredName.MIDDLE_NAME, n.middle());
+            name.put(StructuredName.PREFIX, n.prefix());
+            name.put(StructuredName.SUFFIX, n.suffix());
         }
         rows.add(name);
 
-        JSONArray nicknames = model.optJSONArray("nicknames");
-        for (int index = 0; nicknames != null && index < nicknames.length(); index++) {
+        for (String nickname : model.nicknames()) {
             Map<String, Object> row = row(Nickname.CONTENT_ITEM_TYPE);
-            row.put(Nickname.NAME, nicknames.optString(index));
+            row.put(Nickname.NAME, nickname);
             row.put(Nickname.TYPE, Nickname.TYPE_DEFAULT);
             rows.add(row);
         }
 
-        JSONArray phones = model.optJSONArray("phones");
-        for (int index = 0; phones != null && index < phones.length(); index++) {
-            JSONObject phone = phones.optJSONObject(index);
+        for (ContactPhone phone : model.phones()) {
             Map<String, Object> row = row(Phone.CONTENT_ITEM_TYPE);
-            row.put(Phone.NUMBER, phone.optString("number"));
-            row.put(Phone.TYPE, phoneType(types(phone)));
-            row.put(Phone.IS_PRIMARY, phone.optBoolean("pref") ? 1 : 0);
+            row.put(Phone.NUMBER, phone.number());
+            row.put(Phone.TYPE, phoneType(new HashSet<>(phone.types())));
+            row.put(Phone.IS_PRIMARY, phone.pref() ? 1 : 0);
             rows.add(row);
         }
 
-        JSONArray emails = model.optJSONArray("emails");
-        for (int index = 0; emails != null && index < emails.length(); index++) {
-            JSONObject email = emails.optJSONObject(index);
-            Set<String> types = types(email);
+        for (ContactEmail email : model.emails()) {
+            Set<String> types = new HashSet<>(email.types());
             Map<String, Object> row = row(Email.CONTENT_ITEM_TYPE);
-            row.put(Email.ADDRESS, email.optString("address"));
+            row.put(Email.ADDRESS, email.address());
             row.put(
                     Email.TYPE,
                     types.contains("home")
                             ? Email.TYPE_HOME
                             : types.contains("work") ? Email.TYPE_WORK : Email.TYPE_OTHER);
-            row.put(Email.IS_PRIMARY, email.optBoolean("pref") ? 1 : 0);
+            row.put(Email.IS_PRIMARY, email.pref() ? 1 : 0);
             rows.add(row);
         }
 
-        JSONArray addresses = model.optJSONArray("addresses");
-        for (int index = 0; addresses != null && index < addresses.length(); index++) {
-            JSONObject adr = addresses.optJSONObject(index);
-            Set<String> types = types(adr);
+        for (ContactAddress adr : model.addresses()) {
+            Set<String> types = new HashSet<>(adr.types());
             Map<String, Object> row = row(StructuredPostal.CONTENT_ITEM_TYPE);
-            row.put(StructuredPostal.STREET, adr.optString("street"));
-            row.put(StructuredPostal.POBOX, adr.optString("pobox"));
-            row.put(StructuredPostal.NEIGHBORHOOD, adr.optString("ext"));
-            row.put(StructuredPostal.CITY, adr.optString("city"));
-            row.put(StructuredPostal.REGION, adr.optString("region"));
-            row.put(StructuredPostal.POSTCODE, adr.optString("postcode"));
-            row.put(StructuredPostal.COUNTRY, adr.optString("country"));
+            row.put(StructuredPostal.STREET, adr.street());
+            row.put(StructuredPostal.POBOX, adr.pobox());
+            row.put(StructuredPostal.NEIGHBORHOOD, adr.ext());
+            row.put(StructuredPostal.CITY, adr.city());
+            row.put(StructuredPostal.REGION, adr.region());
+            row.put(StructuredPostal.POSTCODE, adr.postcode());
+            row.put(StructuredPostal.COUNTRY, adr.country());
             row.put(StructuredPostal.FORMATTED_ADDRESS, formatted(adr));
             row.put(
                     StructuredPostal.TYPE,
@@ -129,14 +159,14 @@ final class Mapping {
             rows.add(row);
         }
 
-        JSONObject organization = model.optJSONObject("organization");
-        String title = model.optString("title");
-        String role = model.optString("role");
+        ContactOrganization organization = model.organization();
+        String title = Objects.toString(model.title(), "");
+        String role = Objects.toString(model.role(), "");
         if (organization != null || !title.isEmpty() || !role.isEmpty()) {
             Map<String, Object> row = row(Organization.CONTENT_ITEM_TYPE);
             if (organization != null) {
-                row.put(Organization.COMPANY, organization.optString("company"));
-                row.put(Organization.DEPARTMENT, organization.optString("department"));
+                row.put(Organization.COMPANY, organization.company());
+                row.put(Organization.DEPARTMENT, organization.department());
             }
             row.put(Organization.TITLE, title);
             row.put(Organization.JOB_DESCRIPTION, role);
@@ -144,15 +174,14 @@ final class Mapping {
             rows.add(row);
         }
 
-        JSONArray websites = model.optJSONArray("websites");
-        for (int index = 0; websites != null && index < websites.length(); index++) {
+        for (String website : model.websites()) {
             Map<String, Object> row = row(Website.CONTENT_ITEM_TYPE);
-            row.put(Website.URL, websites.optString(index));
+            row.put(Website.URL, website);
             row.put(Website.TYPE, Website.TYPE_OTHER);
             rows.add(row);
         }
 
-        String birthday = model.optString("birthday");
+        String birthday = Objects.toString(model.birthday(), "");
         if (!birthday.isEmpty()) {
             Map<String, Object> row = row(Event.CONTENT_ITEM_TYPE);
             row.put(Event.START_DATE, birthday);
@@ -160,10 +189,9 @@ final class Mapping {
             rows.add(row);
         }
 
-        JSONArray notes = model.optJSONArray("notes");
-        for (int index = 0; notes != null && index < notes.length(); index++) {
+        for (String note : model.notes()) {
             Map<String, Object> row = row(Note.CONTENT_ITEM_TYPE);
-            row.put(Note.NOTE, notes.optString(index));
+            row.put(Note.NOTE, note);
             rows.add(row);
         }
 
@@ -173,38 +201,27 @@ final class Mapping {
     /**
      * Maps ContactsContract data rows back onto the neutral field
      * model, the inverse of {@link #rows}. Every field of
-     * {@link #FIELDS} is present in the result, empty when the rows
+     * {@link Field} is present in the result, empty when the rows
      * carry nothing, so a phone-side clear reads as a clear.
      */
-    static JSONObject model(List<Map<String, Object>> rows) throws JSONException {
-        JSONObject model = new JSONObject();
-        model.put("displayName", "");
-        model.put("name", emptyName());
-        model.put("nicknames", new JSONArray());
-        model.put("phones", new JSONArray());
-        model.put("emails", new JSONArray());
-        model.put("addresses", new JSONArray());
-        model.put("organization", new JSONObject());
-        model.put("title", "");
-        model.put("role", "");
-        model.put("websites", new JSONArray());
-        model.put("birthday", "");
-        model.put("notes", new JSONArray());
+    static ContactFields model(List<Map<String, Object>> rows) {
+        ContactFields.Builder model = new ContactFields.Builder();
+        model.displayName = "";
+        model.name = emptyName();
+        model.organization = new ContactOrganization("", "");
+        model.title = "";
+        model.role = "";
+        model.birthday = "";
 
         for (Map<String, Object> row : rows) {
             switch (string(row, Data.MIMETYPE)) {
                 case StructuredName.CONTENT_ITEM_TYPE:
-                    JSONObject name = model.getJSONObject("name");
                     String prefix = string(row, StructuredName.PREFIX);
                     String given = string(row, StructuredName.GIVEN_NAME);
                     String middle = string(row, StructuredName.MIDDLE_NAME);
                     String family = string(row, StructuredName.FAMILY_NAME);
                     String suffix = string(row, StructuredName.SUFFIX);
-                    name.put("prefix", prefix);
-                    name.put("given", given);
-                    name.put("middle", middle);
-                    name.put("family", family);
-                    name.put("suffix", suffix);
+                    model.name = new ContactName(family, given, middle, prefix, suffix);
                     // NOTE: the provider auto-composes DISPLAY_NAME from
                     // the parts, so reading it back off a structured row
                     // would mint it into FN. Only a parts-free row's
@@ -216,49 +233,45 @@ final class Mapping {
                                     || !middle.isEmpty()
                                     || !family.isEmpty()
                                     || !suffix.isEmpty();
-                    model.put(
-                            "displayName",
-                            hasParts ? "" : string(row, StructuredName.DISPLAY_NAME));
+                    model.displayName = hasParts ? "" : string(row, StructuredName.DISPLAY_NAME);
                     break;
 
                 case Nickname.CONTENT_ITEM_TYPE:
                     String nickname = string(row, Nickname.NAME);
                     if (!nickname.isEmpty()) {
-                        model.getJSONArray("nicknames").put(nickname);
+                        model.nicknames.add(nickname);
                     }
                     break;
 
                 case Phone.CONTENT_ITEM_TYPE:
                     String phoneNumber = string(row, Phone.NUMBER);
                     if (!phoneNumber.isEmpty()) {
-                        JSONObject phone = new JSONObject();
-                        phone.put("number", phoneNumber);
-                        phone.put("types", phoneTypes(number(row, Phone.TYPE)));
-                        phone.put("pref", number(row, Phone.IS_PRIMARY) != 0);
-                        model.getJSONArray("phones").put(phone);
+                        model.phones.add(
+                                new ContactPhone(
+                                        phoneNumber,
+                                        number(row, Phone.IS_PRIMARY) != 0,
+                                        phoneTypes(number(row, Phone.TYPE))));
                     }
                     break;
 
                 case Email.CONTENT_ITEM_TYPE:
                     String address = string(row, Email.ADDRESS);
                     if (!address.isEmpty()) {
-                        JSONObject email = new JSONObject();
-                        email.put("address", address);
-                        email.put(
-                                "types",
-                                homeWorkTypes(
-                                        number(row, Email.TYPE),
-                                        Email.TYPE_HOME,
-                                        Email.TYPE_WORK));
-                        email.put("pref", number(row, Email.IS_PRIMARY) != 0);
-                        model.getJSONArray("emails").put(email);
+                        model.emails.add(
+                                new ContactEmail(
+                                        address,
+                                        number(row, Email.IS_PRIMARY) != 0,
+                                        homeWorkTypes(
+                                                number(row, Email.TYPE),
+                                                Email.TYPE_HOME,
+                                                Email.TYPE_WORK)));
                     }
                     break;
 
                 case StructuredPostal.CONTENT_ITEM_TYPE:
-                    JSONObject adr = readAddress(row);
+                    ContactAddress adr = readAddress(row);
                     if (adr != null) {
-                        model.getJSONArray("addresses").put(adr);
+                        model.addresses.add(adr);
                     }
                     break;
 
@@ -266,32 +279,29 @@ final class Mapping {
                     String company = string(row, Organization.COMPANY);
                     String department = string(row, Organization.DEPARTMENT);
                     if (!company.isEmpty() || !department.isEmpty()) {
-                        JSONObject organization = new JSONObject();
-                        organization.put("company", company);
-                        organization.put("department", department);
-                        model.put("organization", organization);
+                        model.organization = new ContactOrganization(company, department);
                     }
-                    model.put("title", string(row, Organization.TITLE));
-                    model.put("role", string(row, Organization.JOB_DESCRIPTION));
+                    model.title = string(row, Organization.TITLE);
+                    model.role = string(row, Organization.JOB_DESCRIPTION);
                     break;
 
                 case Website.CONTENT_ITEM_TYPE:
                     String url = string(row, Website.URL);
                     if (!url.isEmpty()) {
-                        model.getJSONArray("websites").put(url);
+                        model.websites.add(url);
                     }
                     break;
 
                 case Event.CONTENT_ITEM_TYPE:
                     if (number(row, Event.TYPE) == Event.TYPE_BIRTHDAY) {
-                        model.put("birthday", string(row, Event.START_DATE));
+                        model.birthday = string(row, Event.START_DATE);
                     }
                     break;
 
                 case Note.CONTENT_ITEM_TYPE:
                     String note = string(row, Note.NOTE);
                     if (!note.isEmpty()) {
-                        model.getJSONArray("notes").put(note);
+                        model.notes.add(note);
                     }
                     break;
 
@@ -302,41 +312,36 @@ final class Mapping {
             }
         }
 
-        return model;
+        return model.build();
     }
 
     /**
      * Overlays the phone's field model onto the base card's model: a
      * field is taken from the phone only when it differs from what the
      * base itself projects onto the phone, so mapping lossiness never
-     * reads as a phone edit, and every field outside {@link #FIELDS}
+     * reads as a phone edit, and every field outside {@link Field}
      * rides along from the base untouched. Returns null when no field
      * is taken: the phone carries no edit, and the caller must keep
      * the base card's exact bytes rather than re-encode them (the
      * engine diffs content by hash, so a re-encoded no-op would read
      * as a phone edit and cascade to the server).
      */
-    static JSONObject merge(JSONObject base, JSONObject phone) throws JSONException {
-        JSONObject baseView = model(rows(base));
+    static ContactFields merge(ContactFields base, ContactFields phone) {
+        ContactFields baseView = model(rows(base));
 
-        JSONObject merged = new JSONObject();
-        for (Iterator<String> keys = base.keys(); keys.hasNext(); ) {
-            String key = keys.next();
-            merged.put(key, base.get(key));
-        }
+        ContactFields.Builder merged = new ContactFields.Builder(base);
 
         boolean edited = false;
-        for (String field : FIELDS) {
+        for (Field field : Field.values()) {
             // NOTE: both sides come out of model(), so equal content
-            // prints equal (same construction order on either side).
-            String phoneValue = String.valueOf(phone.opt(field));
-            if (!phoneValue.equals(String.valueOf(baseView.opt(field)))) {
-                merged.put(field, phone.get(field));
+            // compares equal (same construction on either side).
+            if (!Objects.equals(field.of(phone), field.of(baseView))) {
+                field.take(merged, phone);
                 edited = true;
             }
         }
 
-        return edited ? merged : null;
+        return edited ? merged.build() : null;
     }
 
     /** vCard TYPE set to the Android phone type, per docs/contacts-mapping.md. */
@@ -372,7 +377,7 @@ final class Mapping {
      * {@link #phoneType}; exotic types map to the empty set (a bare
      * TEL), per docs/contacts-mapping.md.
      */
-    static JSONArray phoneTypes(int type) {
+    static List<String> phoneTypes(int type) {
         switch (type) {
             case Phone.TYPE_HOME:
                 return typeArray("home");
@@ -397,35 +402,34 @@ final class Mapping {
             case Phone.TYPE_ISDN:
                 return typeArray("isdn");
             default:
-                return new JSONArray();
+                return List.of();
         }
     }
 
     /** HOME/WORK-style Android type back to the vCard TYPE set. */
-    static JSONArray homeWorkTypes(int type, int home, int work) {
+    static List<String> homeWorkTypes(int type, int home, int work) {
         if (type == home) {
             return typeArray("home");
         }
         if (type == work) {
             return typeArray("work");
         }
-        return new JSONArray();
+        return List.of();
     }
 
     /** One postal row back to a model address, null when empty. */
-    private static JSONObject readAddress(Map<String, Object> row) throws JSONException {
-        JSONObject adr = new JSONObject();
-        adr.put("street", string(row, StructuredPostal.STREET));
-        adr.put("pobox", string(row, StructuredPostal.POBOX));
-        adr.put("ext", string(row, StructuredPostal.NEIGHBORHOOD));
-        adr.put("city", string(row, StructuredPostal.CITY));
-        adr.put("region", string(row, StructuredPostal.REGION));
-        adr.put("postcode", string(row, StructuredPostal.POSTCODE));
-        adr.put("country", string(row, StructuredPostal.COUNTRY));
+    private static ContactAddress readAddress(Map<String, Object> row) {
+        String street = string(row, StructuredPostal.STREET);
+        String pobox = string(row, StructuredPostal.POBOX);
+        String ext = string(row, StructuredPostal.NEIGHBORHOOD);
+        String city = string(row, StructuredPostal.CITY);
+        String region = string(row, StructuredPostal.REGION);
+        String postcode = string(row, StructuredPostal.POSTCODE);
+        String country = string(row, StructuredPostal.COUNTRY);
 
         boolean empty = true;
-        for (Iterator<String> keys = adr.keys(); keys.hasNext(); ) {
-            empty &= adr.getString(keys.next()).isEmpty();
+        for (String part : List.of(street, pobox, ext, city, region, postcode, country)) {
+            empty &= part.isEmpty();
         }
         if (empty) {
             // NOTE: a free-form-only address (phone apps allow it) rides
@@ -434,36 +438,31 @@ final class Mapping {
             if (formatted.isEmpty()) {
                 return null;
             }
-            adr.put("street", formatted);
+            street = formatted;
         }
 
-        adr.put(
-                "types",
+        return new ContactAddress(
+                city,
+                country,
+                ext,
+                pobox,
+                postcode,
+                number(row, StructuredPostal.IS_PRIMARY) != 0,
+                region,
+                street,
                 homeWorkTypes(
                         number(row, StructuredPostal.TYPE),
                         StructuredPostal.TYPE_HOME,
                         StructuredPostal.TYPE_WORK));
-        adr.put("pref", number(row, StructuredPostal.IS_PRIMARY) != 0);
-        return adr;
     }
 
     /** The all-empty structured name every inverse model starts from. */
-    private static JSONObject emptyName() throws JSONException {
-        JSONObject name = new JSONObject();
-        name.put("prefix", "");
-        name.put("given", "");
-        name.put("middle", "");
-        name.put("family", "");
-        name.put("suffix", "");
-        return name;
+    private static ContactName emptyName() {
+        return new ContactName("", "", "", "", "");
     }
 
-    private static JSONArray typeArray(String... types) {
-        JSONArray array = new JSONArray();
-        for (String type : types) {
-            array.put(type);
-        }
-        return array;
+    private static List<String> typeArray(String... types) {
+        return List.of(types);
     }
 
     /** A row's column as text, empty when absent. */
@@ -491,22 +490,13 @@ final class Mapping {
         return row;
     }
 
-    private static Set<String> types(JSONObject entry) {
-        Set<String> types = new HashSet<>();
-        JSONArray array = entry == null ? null : entry.optJSONArray("types");
-        for (int index = 0; array != null && index < array.length(); index++) {
-            types.add(array.optString(index));
-        }
-        return types;
-    }
-
     /** Composes the display form contact apps show for an address. */
-    private static String formatted(JSONObject adr) {
+    private static String formatted(ContactAddress adr) {
         StringBuilder out = new StringBuilder();
-        appendLine(out, adr.optString("street"));
-        appendLine(out, join(adr.optString("postcode"), adr.optString("city")));
-        appendLine(out, adr.optString("region"));
-        appendLine(out, adr.optString("country"));
+        appendLine(out, adr.street());
+        appendLine(out, join(adr.postcode(), adr.city()));
+        appendLine(out, adr.region());
+        appendLine(out, adr.country());
         return out.toString();
     }
 

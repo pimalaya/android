@@ -4,13 +4,13 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.json.JSONException;
-import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.account.AccountEntry;
 import org.pimalaya.account.PimDomain;
 import org.pimalaya.client.AccountClient;
 import org.pimalaya.client.Card;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.ContactFields;
 import org.pimalaya.pimdir.PimdirStorage;
 import org.pimalaya.ui.Host;
 import org.pimalaya.ui.Panels;
@@ -58,7 +58,7 @@ final class ContactWriter {
         }
 
         try {
-            JSONObject model = editor.form().collect();
+            ContactFields model = editor.form().collect();
 
             if (editor.edit().card == null) {
                 AccountEntry account = parts.accountFor(editor.edit().accountEmail);
@@ -97,7 +97,7 @@ final class ContactWriter {
      * document, each staged through the engine (editing a conflicted
      * replica resolves it).
      */
-    private void saveFanOut(JSONObject model) throws JSONException {
+    private void saveFanOut(ContactFields model) throws JSONException {
         ContactStager engine = new ContactStager(parts.pimdir(), parts.clients());
         java.util.Set<String> staged = new java.util.HashSet<>();
 
@@ -125,7 +125,7 @@ final class ContactWriter {
      * Editing the conflicted placement resolves it in the engine, and the
      * next sync pushes it guarded on the observed remote revision.
      */
-    private void saveConflictResolution(JSONObject model) throws JSONException {
+    private void saveConflictResolution(ContactFields model) throws JSONException {
         Entry replica = editor.edit().replicas.get(0);
         String resolved = ContactClient.applyCard(editor.edit().vcard, model);
         new ContactStager(parts.pimdir(), parts.clients())
@@ -139,7 +139,7 @@ final class ContactWriter {
      * The merge save: the form model applies to the surviving card and
      * every other card behind the form stages a delete.
      */
-    private void saveMerge(JSONObject model) throws JSONException {
+    private void saveMerge(ContactFields model) throws JSONException {
         Entry survivor = editor.edit().mergeSurvivor;
         editor.edit().mergeSurvivor = null;
 

@@ -4,6 +4,7 @@ import android.app.AlertDialog;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
+import java.util.Objects;
 import org.pimalaya.R;
 import org.pimalaya.client.ContactClient;
 import org.pimalaya.ui.Dates;
@@ -41,7 +42,10 @@ final class Birthdays {
                         for (Entry entry : group.replicas) {
                             try {
                                 String projected =
-                                        ContactClient.projectCard(entry.card).optString("birthday");
+                                        Objects.toString(
+                                                ContactClient.projectCard(entry.card.vcard())
+                                                        .birthday(),
+                                                "");
                                 if (projected.matches("\\d{4}-\\d{2}-\\d{2}")) {
                                     birthday = projected;
                                     break;

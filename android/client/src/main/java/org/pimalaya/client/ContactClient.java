@@ -280,16 +280,27 @@ public class ContactClient {
     }
 
     /**
-     * Projects the card's vCard onto the neutral field model the app
-     * maps to ContactsContract rows (docs/contacts-mapping.md).
+     * Projects a vCard onto the neutral field model the app maps to
+     * ContactsContract rows (docs/contacts-mapping.md).
      */
-    public static JSONObject projectCard(Card card) {
-        return Replies.object(Native.projectCard(card.vcard()));
+    public static ContactFields projectCard(String vcard) {
+        return ContactFields.from(Replies.object(Native.projectCard(vcard)));
     }
 
-    /** Projects a raw vCard document onto the neutral field model. */
-    public static JSONObject projectCard(String vcard) {
+    /**
+     * The projection as the edit form still holds it, a JSON working model
+     * (temporary: goes once the form edits a {@link ContactFields}).
+     */
+    public static JSONObject projectCardJson(String vcard) {
         return Replies.object(Native.projectCard(vcard));
+    }
+
+    /**
+     * The edit form's JSON working model as a field model (temporary: goes
+     * once the form edits a {@link ContactFields}).
+     */
+    public static ContactFields formFields(JSONObject model) {
+        return ContactFields.from(model);
     }
 
     /**
@@ -305,9 +316,9 @@ public class ContactClient {
      * Patches an edited field model back onto the vCard, preserving
      * every property the model does not manage.
      */
-    public static String applyCard(String vcard, JSONObject model) {
+    public static String applyCard(String vcard, ContactFields model) {
         return Json.string(
-                Replies.object(Native.applyCard(vcard, model.toString())), "vcard");
+                Replies.object(Native.applyCard(vcard, model.toJson().toString())), "vcard");
     }
 
     /**
@@ -329,9 +340,8 @@ public class ContactClient {
      * unknown; the local side stands in). The local side wins
      * same-field collisions; every other remote change flows in.
      */
-    public static String mergeCardChanges(String base, String local, String remote) {
-        return Json.string(
-                Replies.object(Native.mergeCardChanges(base, local, remote)), "vcard");
+    public static ConflictMerge mergeCardChanges(String base, String local, String remote) {
+        return ConflictMerge.from(Replies.object(Native.mergeCardChanges(base, local, remote)));
     }
 
     /**

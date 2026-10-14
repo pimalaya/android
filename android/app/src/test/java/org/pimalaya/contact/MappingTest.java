@@ -10,9 +10,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import org.json.JSONArray;
-import org.json.JSONObject;
 import org.junit.Test;
+import org.pimalaya.client.ContactAddress;
+import org.pimalaya.client.ContactEmail;
+import org.pimalaya.client.ContactFields;
+import org.pimalaya.client.ContactName;
+import org.pimalaya.client.ContactOrganization;
+import org.pimalaya.client.ContactPhone;
 
 /**
  * Pins the neutral-field-model to ContactsContract wire mapping
@@ -28,19 +32,11 @@ public class MappingTest {
         // alongside the parts the provider rewrote it as their join,
         // which then read back as a phone edit clearing FN. The phone
         // gets the structured parts, nothing else.
-        JSONObject model =
-                new JSONObject()
-                        .put("displayName", "Jane Doe Yo")
-                        .put(
-                                "name",
-                                new JSONObject()
-                                        .put("prefix", "")
-                                        .put("given", "Jane")
-                                        .put("middle", "Q.")
-                                        .put("family", "Doe")
-                                        .put("suffix", "Jr."));
+        ContactFields.Builder model = new ContactFields.Builder();
+        model.displayName = "Jane Doe Yo";
+        model.name = new ContactName("Doe", "Jane", "Q.", "", "Jr.");
 
-        Map<String, Object> name = firstOfType(model, "vnd.android.cursor.item/name");
+        Map<String, Object> name = firstOfType(model.build(), "vnd.android.cursor.item/name");
         assertNull(name.get("data1"));
         assertEquals("Jane", name.get("data2"));
         assertEquals("Doe", name.get("data3"));
@@ -50,12 +46,11 @@ public class MappingTest {
 
     @Test
     public void emptyDisplayNameStillProjectsComponents() throws Exception {
-        JSONObject model =
-                new JSONObject()
-                        .put("displayName", "")
-                        .put("name", new JSONObject().put("given", "Jane"));
+        ContactFields.Builder model = new ContactFields.Builder();
+        model.displayName = "";
+        model.name = new ContactName("", "Jane", "", "", "");
 
-        Map<String, Object> name = firstOfType(model, "vnd.android.cursor.item/name");
+        Map<String, Object> name = firstOfType(model.build(), "vnd.android.cursor.item/name");
         assertEquals("Jane", name.get("data2"));
     }
 
@@ -78,20 +73,11 @@ public class MappingTest {
 
     @Test
     public void phoneRowCarriesNumberTypeAndPref() throws Exception {
-        JSONObject model =
-                new JSONObject()
-                        .put(
-                                "phones",
-                                new JSONArray()
-                                        .put(
-                                                new JSONObject()
-                                                        .put("number", "+331111")
-                                                        .put(
-                                                                "types",
-                                                                new JSONArray().put("cell"))
-                                                        .put("pref", true)));
+        ContactFields.Builder model = new ContactFields.Builder();
+        model.phones.add(new ContactPhone("+331111", true, List.of("cell")));
 
-        Map<String, Object> phone = firstOfType(model, "vnd.android.cursor.item/phone_v2");
+        Map<String, Object> phone =
+                firstOfType(model.build(), "vnd.android.cursor.item/phone_v2");
         assertEquals("+331111", phone.get("data1"));
         assertEquals(2, phone.get("data2"));
         assertEquals(1, phone.get("is_primary"));
@@ -106,23 +92,14 @@ public class MappingTest {
 
     @Test
     public void addressRowIsStructuredWithComposedFormatted() throws Exception {
-        JSONObject model =
-                new JSONObject()
-                        .put(
-                                "addresses",
-                                new JSONArray()
-                                        .put(
-                                                new JSONObject()
-                                                        .put("street", "12 Main St")
-                                                        .put("city", "Paris")
-                                                        .put("postcode", "75000")
-                                                        .put("country", "France")
-                                                        .put(
-                                                                "types",
-                                                                new JSONArray().put("home"))));
+        ContactFields.Builder model = new ContactFields.Builder();
+        model.addresses.add(
+                new ContactAddress(
+                        "Paris", "France", "", "", "75000", false, "", "12 Main St",
+                        List.of("home")));
 
         Map<String, Object> adr =
-                firstOfType(model, "vnd.android.cursor.item/postal-address_v2");
+                firstOfType(model.build(), "vnd.android.cursor.item/postal-address_v2");
         assertEquals("12 Main St", adr.get("data4"));
         assertEquals("Paris", adr.get("data7"));
         assertEquals("75000", adr.get("data9"));
@@ -133,19 +110,18 @@ public class MappingTest {
 
     @Test
     public void organizationRowOnlyWhenAnyFieldSet() throws Exception {
-        JSONObject empty = new JSONObject().put("displayName", "X");
-        for (Map<String, Object> row : Mapping.rows(empty)) {
+        ContactFields.Builder empty = new ContactFields.Builder();
+        empty.displayName = "X";
+        for (Map<String, Object> row : Mapping.rows(empty.build())) {
             assertFalse("vnd.android.cursor.item/organization".equals(row.get("mimetype")));
         }
 
-        JSONObject model =
-                new JSONObject()
-                        .put(
-                                "organization",
-                                new JSONObject().put("company", "ACME").put("department", "R&D"))
-                        .put("title", "Boss")
-                        .put("role", "CTO");
-        Map<String, Object> org = firstOfType(model, "vnd.android.cursor.item/organization");
+        ContactFields.Builder model = new ContactFields.Builder();
+        model.organization = new ContactOrganization("ACME", "R&D");
+        model.title = "Boss";
+        model.role = "CTO";
+        Map<String, Object> org =
+                firstOfType(model.build(), "vnd.android.cursor.item/organization");
         assertEquals("ACME", org.get("data1"));
         assertEquals("R&D", org.get("data5"));
         assertEquals("Boss", org.get("data4"));
@@ -155,12 +131,12 @@ public class MappingTest {
 
     @Test
     public void birthdayNicknameWebsiteAndNoteRows() throws Exception {
-        JSONObject model =
-                new JSONObject()
-                        .put("birthday", "1985-04-12")
-                        .put("nicknames", new JSONArray().put("JD"))
-                        .put("websites", new JSONArray().put("https://doe.org"))
-                        .put("notes", new JSONArray().put("a note"));
+        ContactFields.Builder fields = new ContactFields.Builder();
+        fields.birthday = "1985-04-12";
+        fields.nicknames.add("JD");
+        fields.websites.add("https://doe.org");
+        fields.notes.add("a note");
+        ContactFields model = fields.build();
 
         Map<String, Object> event = firstOfType(model, "vnd.android.cursor.item/contact_event");
         assertEquals("1985-04-12", event.get("data1"));
@@ -179,8 +155,10 @@ public class MappingTest {
 
     @Test
     public void noBirthdayRowWhenEmpty() throws Exception {
-        JSONObject model = new JSONObject().put("displayName", "X").put("birthday", "");
-        for (Map<String, Object> row : Mapping.rows(model)) {
+        ContactFields.Builder model = new ContactFields.Builder();
+        model.displayName = "X";
+        model.birthday = "";
+        for (Map<String, Object> row : Mapping.rows(model.build())) {
             assertFalse("vnd.android.cursor.item/contact_event".equals(row.get("mimetype")));
         }
     }
@@ -191,69 +169,27 @@ public class MappingTest {
     public void richModelRoundTripsThroughRows() throws Exception {
         // NOTE: the display name stays empty: FN is hub-only, never
         // projected to the phone, so it cannot round-trip through rows.
-        JSONObject model =
-                new JSONObject()
-                        .put("displayName", "")
-                        .put(
-                                "name",
-                                new JSONObject()
-                                        .put("prefix", "")
-                                        .put("given", "Jane")
-                                        .put("middle", "Q.")
-                                        .put("family", "Doe")
-                                        .put("suffix", "Jr."))
-                        .put("nicknames", new JSONArray().put("JD"))
-                        .put(
-                                "phones",
-                                new JSONArray()
-                                        .put(
-                                                new JSONObject()
-                                                        .put("number", "+331111")
-                                                        .put(
-                                                                "types",
-                                                                new JSONArray().put("cell"))
-                                                        .put("pref", true)))
-                        .put(
-                                "emails",
-                                new JSONArray()
-                                        .put(
-                                                new JSONObject()
-                                                        .put("address", "a@b.c")
-                                                        .put(
-                                                                "types",
-                                                                new JSONArray().put("home"))
-                                                        .put("pref", false)))
-                        .put(
-                                "addresses",
-                                new JSONArray()
-                                        .put(
-                                                new JSONObject()
-                                                        .put("street", "12 Main St")
-                                                        .put("pobox", "")
-                                                        .put("ext", "")
-                                                        .put("city", "Paris")
-                                                        .put("region", "")
-                                                        .put("postcode", "75000")
-                                                        .put("country", "France")
-                                                        .put(
-                                                                "types",
-                                                                new JSONArray().put("home"))
-                                                        .put("pref", false)))
-                        .put(
-                                "organization",
-                                new JSONObject().put("company", "ACME").put("department", "R&D"))
-                        .put("title", "Boss")
-                        .put("role", "CTO")
-                        .put("websites", new JSONArray().put("https://doe.org"))
-                        .put("birthday", "1985-04-12")
-                        .put("notes", new JSONArray().put("a note"));
+        ContactFields.Builder fields = new ContactFields.Builder();
+        fields.displayName = "";
+        fields.name = new ContactName("Doe", "Jane", "Q.", "", "Jr.");
+        fields.nicknames.add("JD");
+        fields.phones.add(new ContactPhone("+331111", true, List.of("cell")));
+        fields.emails.add(new ContactEmail("a@b.c", false, List.of("home")));
+        fields.addresses.add(
+                new ContactAddress(
+                        "Paris", "France", "", "", "75000", false, "", "12 Main St",
+                        List.of("home")));
+        fields.organization = new ContactOrganization("ACME", "R&D");
+        fields.title = "Boss";
+        fields.role = "CTO";
+        fields.websites.add("https://doe.org");
+        fields.birthday = "1985-04-12";
+        fields.notes.add("a note");
+        ContactFields model = fields.build();
 
-        JSONObject round = Mapping.model(Mapping.rows(model));
-        for (String field : Mapping.FIELDS) {
-            assertEquals(
-                    field,
-                    String.valueOf(model.opt(field)),
-                    String.valueOf(round.opt(field)));
+        ContactFields round = Mapping.model(Mapping.rows(model));
+        for (Mapping.Field field : Mapping.Field.values()) {
+            assertEquals(field.key, field.of(model), field.of(round));
         }
     }
 
@@ -262,14 +198,14 @@ public class MappingTest {
         int[] table = {1, 2, 3, 4, 5, 13, 6, 18, 17, 9, 11};
         for (int type : table) {
             Set<String> set = new HashSet<>();
-            JSONArray types = Mapping.phoneTypes(type);
-            for (int index = 0; index < types.length(); index++) {
-                set.add(types.optString(index));
+            List<String> types = Mapping.phoneTypes(type);
+            for (int index = 0; index < types.size(); index++) {
+                set.add(types.get(index));
             }
             assertEquals(type, Mapping.phoneType(set));
         }
-        assertEquals(0, Mapping.phoneTypes(7).length());
-        assertEquals(0, Mapping.phoneTypes(0).length());
+        assertEquals(0, Mapping.phoneTypes(7).size());
+        assertEquals(0, Mapping.phoneTypes(0).size());
     }
 
     @Test
@@ -279,10 +215,10 @@ public class MappingTest {
         row.put("mimetype", "vnd.android.cursor.item/name");
         row.put("data1", "Jane Doe");
 
-        JSONObject model = Mapping.model(List.of(row));
-        assertEquals("Jane Doe", model.getString("displayName"));
-        assertEquals("", model.getJSONObject("name").getString("given"));
-        assertEquals("", model.getJSONObject("name").getString("family"));
+        ContactFields model = Mapping.model(List.of(row));
+        assertEquals("Jane Doe", model.displayName());
+        assertEquals("", model.name().given());
+        assertEquals("", model.name().family());
     }
 
     @Test
@@ -293,9 +229,9 @@ public class MappingTest {
         row.put("data2", 0);
         row.put("data3", "Batphone");
 
-        JSONObject phone = Mapping.model(List.of(row)).getJSONArray("phones").getJSONObject(0);
-        assertEquals("0611", phone.getString("number"));
-        assertEquals(0, phone.getJSONArray("types").length());
+        ContactPhone phone = Mapping.model(List.of(row)).phones().get(0);
+        assertEquals("0611", phone.number());
+        assertEquals(0, phone.types().size());
     }
 
     @Test
@@ -305,34 +241,33 @@ public class MappingTest {
         row.put("data1", "12 Main St, Paris");
         row.put("data2", 1);
 
-        JSONObject adr = Mapping.model(List.of(row)).getJSONArray("addresses").getJSONObject(0);
-        assertEquals("12 Main St, Paris", adr.getString("street"));
-        assertEquals("home", adr.getJSONArray("types").getString(0));
+        ContactAddress adr = Mapping.model(List.of(row)).addresses().get(0);
+        assertEquals("12 Main St, Paris", adr.street());
+        assertEquals("home", adr.types().get(0));
     }
 
     // ---- Field-space merge ------------------------------------------------------
 
     @Test
     public void mergeTakesOnlyThePhoneEditedFields() throws Exception {
-        JSONObject base = divergentBase();
-        JSONObject phone = Mapping.model(Mapping.rows(base));
-        phone.getJSONArray("phones").getJSONObject(0).put("number", "+332222");
+        ContactFields base = divergentBase();
+        ContactFields.Builder phone = new ContactFields.Builder(Mapping.model(Mapping.rows(base)));
+        ContactPhone first = phone.phones.get(0);
+        phone.phones.set(0, new ContactPhone("+332222", first.pref(), first.types()));
 
-        JSONObject merged = Mapping.merge(base, phone);
-        assertEquals(
-                "+332222",
-                merged.getJSONArray("phones").getJSONObject(0).getString("number"));
+        ContactFields merged = Mapping.merge(base, phone.build());
+        assertEquals("+332222", merged.phones().get(0).number());
         // FN never reaches the phone rows, so an untouched phone must
         // not read as a name clear.
-        assertEquals("Doe", merged.getJSONObject("name").getString("family"));
+        assertEquals("Doe", merged.name().family());
         // Fields outside the phone mapping ride along from the base.
-        assertEquals("friends", merged.getJSONArray("categories").getString(0));
+        assertEquals("friends", merged.categories().get(0));
     }
 
     @Test
     public void mergeOfAnUntouchedPhoneIsNull() throws Exception {
-        JSONObject base = divergentBase();
-        JSONObject phone = Mapping.model(Mapping.rows(base));
+        ContactFields base = divergentBase();
+        ContactFields phone = Mapping.model(Mapping.rows(base));
 
         // No field taken means no phone edit: the caller keeps the base
         // card's exact bytes instead of re-encoding a no-op.
@@ -340,24 +275,18 @@ public class MappingTest {
     }
 
     /** A base model whose FN diverges from N (lossy on the phone). */
-    private static JSONObject divergentBase() throws Exception {
-        return new JSONObject()
-                .put("displayName", "Jane Doe Yo")
-                .put("name", new JSONObject().put("given", "Jane").put("family", "Doe"))
-                .put(
-                        "phones",
-                        new JSONArray()
-                                .put(
-                                        new JSONObject()
-                                                .put("number", "+331111")
-                                                .put("types", new JSONArray().put("cell"))
-                                                .put("pref", false)))
-                .put("categories", new JSONArray().put("friends"));
+    private static ContactFields divergentBase() {
+        ContactFields.Builder base = new ContactFields.Builder();
+        base.displayName = "Jane Doe Yo";
+        base.name = new ContactName("Doe", "Jane", "", "", "");
+        base.phones.add(new ContactPhone("+331111", false, List.of("cell")));
+        base.categories.add("friends");
+        return base.build();
     }
 
     // ---- Helpers --------------------------------------------------------------
 
-    private static Map<String, Object> firstOfType(JSONObject model, String mimetype) {
+    private static Map<String, Object> firstOfType(ContactFields model, String mimetype) {
         List<Map<String, Object>> rows = Mapping.rows(model);
         for (Map<String, Object> row : rows) {
             if (mimetype.equals(row.get("mimetype"))) {
@@ -368,19 +297,10 @@ public class MappingTest {
     }
 
     private static int emailType(String type) throws Exception {
-        JSONObject model =
-                new JSONObject()
-                        .put(
-                                "emails",
-                                new JSONArray()
-                                        .put(
-                                                new JSONObject()
-                                                        .put("address", "a@b.c")
-                                                        .put(
-                                                                "types",
-                                                                new JSONArray().put(type))));
+        ContactFields.Builder model = new ContactFields.Builder();
+        model.emails.add(new ContactEmail("a@b.c", false, List.of(type)));
         return (int)
-                firstOfType(model, "vnd.android.cursor.item/email_v2").get("data2");
+                firstOfType(model.build(), "vnd.android.cursor.item/email_v2").get("data2");
     }
 
     private static Set<String> types(String... values) {

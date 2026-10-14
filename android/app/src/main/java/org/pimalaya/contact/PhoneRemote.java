@@ -19,12 +19,14 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.IntConsumer;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.ContactFields;
 import org.pimalaya.phone.Accounts;
 import org.pimalaya.phone.PhoneMirror;
 import org.pimalaya.pimdir.PhoneSpoke;
@@ -265,9 +267,9 @@ final class PhoneRemote implements PhoneSpoke {
         }
 
         String baseVcard = phoneBase(collection, handle);
-        JSONObject baseModel = ContactClient.projectCard(baseVcard);
-        JSONObject phoneModel = Mapping.model(dataRows(resolver, account, rawId));
-        JSONObject merged = Mapping.merge(baseModel, phoneModel);
+        ContactFields baseModel = ContactClient.projectCard(baseVcard);
+        ContactFields phoneModel = Mapping.model(dataRows(resolver, account, rawId));
+        ContactFields merged = Mapping.merge(baseModel, phoneModel);
 
         // NOTE: no field taken means no edit, so ride the base back byte
         // for byte; re-encoding a no-op canonicalizes bytes and the
@@ -277,10 +279,9 @@ final class PhoneRemote implements PhoneSpoke {
             // NOTE: log which fields the phone won, to explain a phone-won
             // hub change when hunting phantom edits.
             StringBuilder taken = new StringBuilder();
-            for (String field : Mapping.FIELDS) {
-                if (!String.valueOf(merged.opt(field))
-                        .equals(String.valueOf(baseModel.opt(field)))) {
-                    taken.append(taken.length() == 0 ? "" : ", ").append(field);
+            for (Mapping.Field field : Mapping.Field.values()) {
+                if (!Objects.equals(field.of(merged), field.of(baseModel))) {
+                    taken.append(taken.length() == 0 ? "" : ", ").append(field.key);
                 }
             }
             Log.d("pimalaya", "phone edit on " + handle + " (fields: " + taken + ")");
@@ -374,7 +375,7 @@ final class PhoneRemote implements PhoneSpoke {
             return result(handle, false, null, null);
         }
         String vcard = row.getString("vcard");
-        JSONObject model = ContactClient.projectCard(vcard);
+        ContactFields model = ContactClient.projectCard(vcard);
 
         // The phone's handle namespace is this app's own: it writes the
         // sourceid. So a staged create lands under the name behind its
@@ -442,14 +443,14 @@ final class PhoneRemote implements PhoneSpoke {
 
     /** Inserts a raw contact with its data rows, returning its row id. */
     private long insert(ContentResolver resolver, Account account, String handle,
-            JSONObject model) throws Exception {
+            ContactFields model) throws Exception {
         ArrayList<ContentProviderOperation> ops = new ArrayList<>();
         ops.add(
                 ContentProviderOperation.newInsert(rawContactsUri(account))
                         .withValue(RawContacts.ACCOUNT_TYPE, account.type)
                         .withValue(RawContacts.ACCOUNT_NAME, account.name)
                         .withValue(RawContacts.SOURCE_ID, handle)
-                        .withValue(RawContacts.SYNC2, model.optString("uid"))
+                        .withValue(RawContacts.SYNC2, Objects.toString(model.uid(), ""))
                         .build());
         for (ContentValues row : contentValues(model)) {
             ops.add(
@@ -466,7 +467,7 @@ final class PhoneRemote implements PhoneSpoke {
 
     /** Rewrites a raw contact's data rows wholesale from the model. */
     private void rewrite(ContentResolver resolver, Account account, long rawId,
-            JSONObject model) throws Exception {
+            ContactFields model) throws Exception {
         ArrayList<ContentProviderOperation> ops = new ArrayList<>();
         ops.add(
                 ContentProviderOperation.newDelete(dataUri(account))
@@ -483,7 +484,7 @@ final class PhoneRemote implements PhoneSpoke {
         }
         ops.add(
                 ContentProviderOperation.newUpdate(rawContactUri(account, rawId))
-                        .withValue(RawContacts.SYNC2, model.optString("uid"))
+                        .withValue(RawContacts.SYNC2, Objects.toString(model.uid(), ""))
                         .build());
 
         resolver.applyBatch(ContactsContract.AUTHORITY, ops);
@@ -532,7 +533,7 @@ final class PhoneRemote implements PhoneSpoke {
     }
 
     /** The model's data rows (built by the pure Mapping), as ContentValues. */
-    private static List<ContentValues> contentValues(JSONObject model) throws JSONException {
+    private static List<ContentValues> contentValues(ContactFields model) {
         List<ContentValues> rows = new ArrayList<>();
         for (Map<String, Object> row : Mapping.rows(model)) {
             ContentValues values = new ContentValues();

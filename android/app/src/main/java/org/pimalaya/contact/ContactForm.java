@@ -24,6 +24,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 import org.pimalaya.R;
 import org.pimalaya.client.ContactClient;
+import org.pimalaya.client.ContactFields;
 import org.pimalaya.ui.Sections;
 import org.pimalaya.ui.Ui;
 
@@ -173,8 +174,8 @@ public final class ContactForm {
     }
 
     /** The edited field model. */
-    JSONObject collect() {
-        return model;
+    ContactFields collect() {
+        return ContactClient.formFields(model);
     }
 
     /** Sets the post-render hook (the host's save-gate refresh). */

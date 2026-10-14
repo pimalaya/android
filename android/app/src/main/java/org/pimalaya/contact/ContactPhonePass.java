@@ -86,7 +86,7 @@ public final class ContactPhonePass extends PhonePass {
                 ContactClient.mergeCardChanges(
                         conflict.isNull("baseVcard") ? "" : conflict.getString("baseVcard"),
                         conflict.getString("vcard"),
-                        remote.getString("body"));
+                        remote.getString("body")).vcard();
 
         if (!remote.isNull("revision")) {
             offline.setConflictRevision(collection, handle, remote.getString("revision"));
