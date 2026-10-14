@@ -107,27 +107,17 @@ public final class VcfTransfer {
     private void importInto(Uri uri, BookEntry target) {
         // The add button goes inert while the file reads.
         host.setListBusy(true);
-        host.io.execute(
-                () -> {
-                    int count = 0;
-                    Exception failure = null;
-                    try {
-                        count = importCards(readText(uri), target);
-                    } catch (Exception error) {
-                        failure = error;
-                    }
-                    int imported = count;
-                    Exception error = failure;
-                    host.postAlive(
-                            () -> {
-                                host.setListBusy(false);
-                                if (error != null) {
-                                    host.showError(error, R.string.import_failed);
-                                } else {
-                                    list.reload();
-                                    host.toast(host.getString(R.string.import_done, imported));
-                                }
-                            });
+        host.background(
+                host.io,
+                () -> importCards(readText(uri), target),
+                imported -> {
+                    host.setListBusy(false);
+                    list.reload();
+                    host.toast(host.getString(R.string.import_done, imported));
+                },
+                error -> {
+                    host.setListBusy(false);
+                    host.showError(error, R.string.import_failed);
                 });
     }
 
@@ -165,25 +155,19 @@ public final class VcfTransfer {
     public void exportFile(Uri uri) {
         List<Group> snapshot = new ArrayList<>(list.visibleGroups());
         host.setListBusy(true);
-        host.io.execute(
+        host.background(
+                host.io,
                 () -> {
-                    Exception failure = null;
-                    try {
-                        writeText(uri, buildVcf(snapshot));
-                    } catch (Exception error) {
-                        failure = error;
-                    }
-                    Exception error = failure;
-                    host.postAlive(
-                            () -> {
-                                host.setListBusy(false);
-                                if (error != null) {
-                                    host.showError(error, R.string.export_failed);
-                                } else {
-                                    host.toast(
-                                            host.getString(R.string.export_done, snapshot.size()));
-                                }
-                            });
+                    writeText(uri, buildVcf(snapshot));
+                    return null;
+                },
+                written -> {
+                    host.setListBusy(false);
+                    host.toast(host.getString(R.string.export_done, snapshot.size()));
+                },
+                error -> {
+                    host.setListBusy(false);
+                    host.showError(error, R.string.export_failed);
                 });
     }
 
